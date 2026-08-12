@@ -3,7 +3,7 @@
 > **Executor instructions**: Follow every step and verification gate in order.
 > Preserve unrelated changes. Stop on any condition listed below instead of
 > inventing a migration or weakening backend equivalence. Update
-> `plans/README.md` when complete.
+> `docs/plans/README.md` when complete.
 >
 > **Drift check (run first)**:
 > `git diff --stat 43bceb6e..HEAD -- crates/compass-model crates/compass-graph/src/snapshot.rs crates/compass-query/src/{text.rs,index.rs,code_query.rs,graph_engine.rs,lib.rs} crates/compass-query/tests docs/implementation/query-engine.md COMPATIBILITY.md MIGRATION.md`
@@ -13,7 +13,7 @@
 - **Priority**: P1
 - **Effort**: L
 - **Risk**: HIGH
-- **Depends on**: `plans/001-query-relevance-qualification.md`
+- **Depends on**: `docs/plans/001-query-relevance-qualification.md`
 - **Category**: correctness / performance / tech-debt / migration
 - **Planned at**: commit `43bceb6e`, 2026-08-06
 

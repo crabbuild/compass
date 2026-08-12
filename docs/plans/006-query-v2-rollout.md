@@ -4,7 +4,7 @@
 > qualification reports are green. This plan changes public machine and human
 > query behavior; follow compatibility, migration, documentation, security, and
 > baseline verification exactly. Do not remove v1 adapters. Update
-> `plans/README.md` when complete.
+> `docs/plans/README.md` when complete.
 >
 > **Drift check (run first)**:
 > `git diff --stat 43bceb6e..HEAD -- crates/compass-model/src/query_contract.rs crates/compass-query crates/compass-cli crates/compass-mcp fixtures/contracts docs README.md COMPATIBILITY.md MIGRATION.md CHANGELOG.md PERFORMANCE.md SECURITY.md scripts`
@@ -316,7 +316,7 @@ and qualified separately.
 ### Step 6: Run final relevance and performance qualification
 
 Run all query judgments on JSON and store engines, repeated cold/warm where
-defined. Enforce the cross-plan targets from `plans/README.md`; publish corpus
+defined. Enforce the cross-plan targets from `docs/plans/README.md`; publish corpus
 version, graph digests, profile versions, hardware context for wall time, work
 counts, p50/p95, peak RSS/index size if the existing harness supports them, and
 all waivers. Add CI gates that are deterministic and keep hardware-sensitive
@@ -374,7 +374,7 @@ and why; do not claim completion if a changed-surface required gate is skipped.
 - [ ] Compatibility, migration, release, performance, security, reference, and
   assistant docs are updated accurately.
 - [ ] Repository baseline and all changed-surface gates pass.
-- [ ] Only in-scope files and `plans/README.md` status are modified.
+- [ ] Only in-scope files and `docs/plans/README.md` status are modified.
 
 ## STOP conditions
 

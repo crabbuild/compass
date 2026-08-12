@@ -3,7 +3,7 @@
 > **Executor instructions**: Implement only after Plans 001–003 are DONE. The
 > planner must be inspectable, bounded, deterministic, and credential-free.
 > Never execute raw model text or silently select an ambiguous entity. Run each
-> gate and update `plans/README.md` when complete.
+> gate and update `docs/plans/README.md` when complete.
 >
 > **Drift check (run first)**:
 > `git diff --stat 43bceb6e..HEAD -- crates/compass-model/src/{query_contract.rs,code_graph.rs} crates/compass-query/src/{text.rs,traversal.rs,code_query.rs,lib.rs} crates/compass-query/tests crates/compass-mcp crates/compass-cli docs`

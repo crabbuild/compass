@@ -3,7 +3,7 @@
 > **Executor instructions**: Follow this plan step by step. Run every
 > verification command and confirm the expected result before moving to the
 > next step. If anything in the STOP conditions occurs, stop and report; do
-> not improvise. When done, update this plan's status in `plans/README.md`.
+> not improvise. When done, update this plan's status in `docs/plans/README.md`.
 >
 > **Drift check (run first)**:
 > `git diff --stat 64dcbf60..HEAD -- crates/compass-query crates/compass-cli benchmarks/performance scripts docs PERFORMANCE.md`
@@ -295,7 +295,7 @@ its runtime is suitable for CI.
 - [ ] Targeted test, Clippy, fixture qualification, product-boundary, format,
   and `git diff --check` commands pass.
 - [ ] No files outside the in-scope list are modified, except
-  `plans/README.md` status.
+  `docs/plans/README.md` status.
 
 ## STOP conditions
 

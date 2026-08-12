@@ -3,7 +3,7 @@
 > **Executor instructions**: Implement this plan only after Plans 001 and 002
 > are DONE. Run each verification gate before continuing. Exact identity and
 > backend equivalence are hard invariants; stop rather than tuning around a
-> failing relevance fixture. Update `plans/README.md` when complete.
+> failing relevance fixture. Update `docs/plans/README.md` when complete.
 >
 > **Drift check (run first)**:
 > `git diff --stat 43bceb6e..HEAD -- crates/compass-model/src/search.rs crates/compass-graph/src/snapshot.rs crates/compass-query/src/{retrieval.rs,ranking.rs,score.rs,code_query.rs,index.rs,lib.rs} crates/compass-query/tests PERFORMANCE.md`

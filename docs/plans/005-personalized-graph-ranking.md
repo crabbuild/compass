@@ -3,7 +3,7 @@
 > **Executor instructions**: Implement only after Plans 001, 003, and 004 are
 > DONE. Graph authority is a reranking feature, never a replacement for exact
 > or topical evidence. Preserve direction, multiplicity, provenance, and every
-> declared work bound. Update `plans/README.md` when complete.
+> declared work bound. Update `docs/plans/README.md` when complete.
 >
 > **Drift check (run first)**:
 > `git diff --stat 43bceb6e..HEAD -- crates/compass-graph/src/{analyze.rs,cluster.rs,snapshot.rs} crates/compass-query/src/{ranking.rs,traversal.rs,code_query.rs,intent.rs,lib.rs} crates/compass-query/tests PERFORMANCE.md`

@@ -101,6 +101,8 @@ They are not evidence that an uncompleted design has shipped.
 | [Universal evidence implementation](implementation/universal-evidence.md) | Current universal evidence pipeline, resolution order, and failure classes |
 | [Evidence resolution framework technical design](implementation/evidence-resolution-framework-technical-design.md) | Target ownership, components, interfaces, and invariants for rearchitecting the resolver |
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
+| [Query recall and accuracy design](implementation/query-recall-accuracy/query-performance-accuracy-recall-phased-technical-design.md) | Phased query-quality architecture, evidence, and rollout boundaries |
+| [Query implementation plans](plans/README.md) | Ordered, independently executable query-quality work plans |
 
 ## How these documents are written
 

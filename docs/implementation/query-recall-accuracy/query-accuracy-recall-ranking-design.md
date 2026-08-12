@@ -153,7 +153,8 @@ New module: `crates/compass-query/src/intent.rs`
 ### Deliverables
 
 - Baseline report with stable metrics
-- Comparison script/process documented in `PERFORMANCE.md` and/or `docs/implementation/query-accuracy-recall-ranking-design.md`
+- Comparison script/process documented in `PERFORMANCE.md` and/or
+  `docs/implementation/query-recall-accuracy/query-accuracy-recall-ranking-design.md`
 
 ### Exit criteria
 
