@@ -36,7 +36,9 @@ is found first on `PATH`, Compass stops before running a workflow and offers
   **Overview** to go back, and double-click a detail node with an exact file and
   line/byte location to open source. Hover a relationship to see its direction,
   extraction confidence, evidence, and recorded source line; double-click a
-  located relationship to open the call or wiring site.
+  located relationship to open the call or wiring site. The graph exploration
+  panel isolates bounded directed neighborhoods, adjusts layout spacing, and
+  controls the shared minimap; press `?` to reveal its keyboard shortcuts.
 - Start a caller/callee graph from the function under the cursor in any
   call-capable language already represented in the Compass graph. Expand it by
   depth while retaining resolved, inferred, ambiguous, and unresolved calls.

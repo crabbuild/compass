@@ -83,4 +83,53 @@ describe("graphReducer", () => {
       communityIds: []
     }).hiddenCommunities.size).toBe(0);
   });
+
+  it("toggles relationship labels independently from node labels", () => {
+    const withNodeLabels = graphReducer(initialGraphState, {
+      type: "setLabels",
+      visible: true
+    });
+    const withBoth = graphReducer(withNodeLabels, {
+      type: "setEdgeLabels",
+      visible: true
+    });
+
+    expect(withBoth.forceLabels).toBe(true);
+    expect(withBoth.showEdgeLabels).toBe(true);
+    expect(graphReducer(withBoth, {
+      type: "setEdgeLabels",
+      visible: false
+    }).forceLabels).toBe(true);
+  });
+
+  it("keeps bounded exploration controls in graph state", () => {
+    const isolated = graphReducer(initialGraphState, {
+      type: "setIsolation",
+      isolated: true
+    });
+    const deep = graphReducer(isolated, {
+      type: "setNeighborhoodDepth",
+      depth: 99
+    });
+    const directed = graphReducer(deep, {
+      type: "setEdgeDirection",
+      direction: "outgoing"
+    });
+    const spaced = graphReducer(directed, {
+      type: "setLayoutSpacing",
+      spacing: 1.5
+    });
+    const hiddenMap = graphReducer(spaced, {
+      type: "setMinimap",
+      visible: false
+    });
+
+    expect(hiddenMap).toMatchObject({
+      isolateSelection: true,
+      neighborhoodDepth: 4,
+      edgeDirection: "outgoing",
+      layoutSpacing: 1.5,
+      showMinimap: false
+    });
+  });
 });

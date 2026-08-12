@@ -96,7 +96,68 @@ test("graph layout styles can be selected without enabling physics", async ({ pa
 
   await layout.selectOption("automatic");
   await expect(graph).toHaveAttribute("data-layout-style", "automatic");
-  await expect(page.locator(".compass-tool-button").filter({ hasText: /layout/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Resume layout" })).toBeEnabled();
+});
+
+test("graph toolbar exposes camera, neighborhood, and label controls", async ({ page }) => {
+  await page.goto("/graph.html");
+
+  await expect(page.getByRole("group", { name: "Zoom controls" })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  await page.getByRole("button", { name: "Reset zoom to 100%" }).click();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+
+  const fitSelection = page.getByRole("button", {
+    name: "Fit selected neighborhood"
+  });
+  await expect(fitSelection).toBeDisabled();
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
+  await page.getByRole("option", { name: /Store/i }).click();
+  await expect(fitSelection).toBeEnabled();
+  await fitSelection.click();
+
+  await page.getByRole("button", { name: "Show relationship labels" }).click();
+  await expect(page.getByRole("button", {
+    name: "Hide relationship labels"
+  })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("graph exploration controls isolate directed neighborhoods and expose shortcuts", async ({ page }) => {
+  await page.goto("/graph.html");
+  const graph = page.getByRole("region", { name: "Interactive Compass code graph" });
+
+  await expect(page.getByRole("complementary", { name: "Graph overview" })).toBeVisible();
+  await page.getByRole("button", { name: "Explore graph" }).click();
+  const exploration = page.getByRole("region", { name: "Graph exploration controls" });
+  await expect(exploration).toBeVisible();
+  await expect(page.getByLabel("Graph keyboard shortcuts")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Isolate selection" })).toBeDisabled();
+
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
+  await page.getByRole("option", { name: /Store/i }).click();
+  await page.getByRole("button", { name: "Explore graph" }).click();
+  await page.getByRole("button", { name: "2 hops" }).click();
+  await page.getByRole("button", { name: "Outgoing edges" }).click();
+  await page.getByRole("button", { name: "Isolate selection" }).click();
+  await expect(graph).toHaveAttribute("data-isolated", "true");
+  await expect(page.getByRole("status")).toContainText("2 hops");
+
+  await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("1.25");
+  await expect(graph).toHaveAttribute("data-layout-spacing", "1.25");
+  await page.getByRole("button", { name: "Explore graph" }).click();
+  await page.keyboard.press("]");
+  await page.getByRole("button", { name: "Explore graph" }).click();
+  await expect(page.getByRole("button", { name: "3 hops" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.keyboard.press("d");
+  await expect(page.getByRole("button", { name: "Incoming edges" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.keyboard.press("m");
+  await expect(page.getByRole("complementary", { name: "Graph overview" })).toHaveCount(0);
 });
 
 test("single-click inspects and double-click opens the selected node's exact range", async ({
