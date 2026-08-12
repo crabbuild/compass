@@ -25,7 +25,11 @@ import type { GraphChangeType } from "./state";
 
 export type GraphCanvasHandle = {
   fit(): void;
+  fitSelection(nodeId: string): void;
   reset(): void;
+  resetZoom(): void;
+  zoomIn(): void;
+  zoomOut(): void;
 };
 
 export type GraphCanvasPosition = {
@@ -40,6 +44,7 @@ type Props = {
   layoutStyle?: GraphLayoutStyle;
   initialPositions?: ReadonlyMap<string, GraphCanvasPosition>;
   forceLabels: boolean;
+  showEdgeLabels?: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
@@ -65,6 +70,14 @@ const fallbackComparisonPalette: ComparisonPalette = {
   unchanged: { background: "#29313b", border: "#8b949e" }
 };
 const STATIC_VISIBLE_LABEL_LIMIT = 200;
+const MIN_VIEW_SCALE = 0.1;
+const MAX_VIEW_SCALE = 3;
+
+function cameraAnimation(duration: number) {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? false
+    : { duration, easingFunction: "easeInOutQuad" as const };
+}
 
 const defaultOptions: Options = {
   autoResize: true,
@@ -350,6 +363,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     layoutStyle = "automatic",
     initialPositions,
     forceLabels,
+    showEdgeLabels = false,
     hiddenCommunities,
     hiddenChanges,
     onFocus,
@@ -412,6 +426,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => cssColor(
         "--vscode-descriptionForeground",
         cssColor("--muted-foreground", "#60728b")
+      ),
+      [themeRevision]
+    );
+    const edgeLabelColor = useMemo(
+      () => cssColor(
+        "--vscode-editor-foreground",
+        cssColor("--foreground", "#d8e4f2")
       ),
       [themeRevision]
     );
@@ -773,12 +794,40 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       renderingProfile
     ]);
 
+    useEffect(() => {
+      edgeData.update(renderedEdges.map((edge) => ({
+        id: edge.id,
+        label: showEdgeLabels ? edge.relation : "",
+        font: {
+          align: "middle",
+          color: edgeLabelColor,
+          face: "system-ui",
+          size: 10,
+          strokeWidth: 3,
+          strokeColor: cssColor(
+            "--vscode-editor-background",
+            cssColor("--background", "#08111f")
+          )
+        }
+      })));
+    }, [edgeData, edgeLabelColor, renderedEdges, showEdgeLabels]);
+
     useImperativeHandle(ref, () => ({
       fit() {
         networkRef.current?.fit({
-          animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? false
-            : { duration: 280, easingFunction: "easeInOutQuad" }
+          animation: cameraAnimation(280)
+        });
+      },
+      fitSelection(nodeId) {
+        const network = networkRef.current;
+        if (!network) return;
+        const nodes = [
+          nodeId,
+          ...network.getConnectedNodes(nodeId).map(String)
+        ];
+        network.fit({
+          nodes: [...new Set(nodes)],
+          animation: cameraAnimation(240)
         });
       },
       reset() {
@@ -793,6 +842,28 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           position: initial.position,
           scale: initial.scale,
           animation: false
+        });
+      },
+      resetZoom() {
+        networkRef.current?.moveTo({
+          scale: 1,
+          animation: cameraAnimation(180)
+        });
+      },
+      zoomIn() {
+        const network = networkRef.current;
+        if (!network) return;
+        network.moveTo({
+          scale: Math.min(MAX_VIEW_SCALE, network.getScale() * 1.25),
+          animation: cameraAnimation(160)
+        });
+      },
+      zoomOut() {
+        const network = networkRef.current;
+        if (!network) return;
+        network.moveTo({
+          scale: Math.max(MIN_VIEW_SCALE, network.getScale() / 1.25),
+          animation: cameraAnimation(160)
         });
       }
     }), []);

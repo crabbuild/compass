@@ -83,4 +83,22 @@ describe("graphReducer", () => {
       communityIds: []
     }).hiddenCommunities.size).toBe(0);
   });
+
+  it("toggles relationship labels independently from node labels", () => {
+    const withNodeLabels = graphReducer(initialGraphState, {
+      type: "setLabels",
+      visible: true
+    });
+    const withBoth = graphReducer(withNodeLabels, {
+      type: "setEdgeLabels",
+      visible: true
+    });
+
+    expect(withBoth.forceLabels).toBe(true);
+    expect(withBoth.showEdgeLabels).toBe(true);
+    expect(graphReducer(withBoth, {
+      type: "setEdgeLabels",
+      visible: false
+    }).forceLabels).toBe(true);
+  });
 });

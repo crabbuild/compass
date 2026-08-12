@@ -96,7 +96,30 @@ test("graph layout styles can be selected without enabling physics", async ({ pa
 
   await layout.selectOption("automatic");
   await expect(graph).toHaveAttribute("data-layout-style", "automatic");
-  await expect(page.locator(".compass-tool-button").filter({ hasText: /layout/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Resume layout" })).toBeEnabled();
+});
+
+test("graph toolbar exposes camera, neighborhood, and label controls", async ({ page }) => {
+  await page.goto("/graph.html");
+
+  await expect(page.getByRole("group", { name: "Zoom controls" })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  await page.getByRole("button", { name: "Reset zoom to 100%" }).click();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+
+  const fitSelection = page.getByRole("button", {
+    name: "Fit selected neighborhood"
+  });
+  await expect(fitSelection).toBeDisabled();
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
+  await page.getByRole("option", { name: /Store/i }).click();
+  await expect(fitSelection).toBeEnabled();
+  await fitSelection.click();
+
+  await page.getByRole("button", { name: "Show relationship labels" }).click();
+  await expect(page.getByRole("button", {
+    name: "Hide relationship labels"
+  })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("single-click inspects and double-click opens the selected node's exact range", async ({

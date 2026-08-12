@@ -1,11 +1,15 @@
 import {
   ArrowLeftIcon,
+  FocusIcon,
   LayoutGridIcon,
   Maximize2Icon,
   PauseIcon,
   PlayIcon,
   RotateCcwIcon,
-  TagsIcon
+  RouteIcon,
+  TagsIcon,
+  ZoomInIcon,
+  ZoomOutIcon
 } from "lucide-react";
 import type { GraphLayoutStyle } from "./renderingProfile";
 
@@ -14,22 +18,36 @@ export function GraphToolbar({
   physicsRunning,
   layoutStyle,
   forceLabels,
+  showEdgeLabels,
+  hasSelection,
   onTogglePhysics,
   onLayoutChange,
+  onZoomOut,
+  onResetZoom,
+  onZoomIn,
   onFit,
+  onFitSelection,
   onReset,
   onToggleLabels,
+  onToggleEdgeLabels,
   onBack
 }: {
   status: string;
   physicsRunning: boolean;
   layoutStyle: GraphLayoutStyle;
   forceLabels: boolean;
+  showEdgeLabels: boolean;
+  hasSelection: boolean;
   onTogglePhysics(): void;
   onLayoutChange(layout: GraphLayoutStyle): void;
+  onZoomOut(): void;
+  onResetZoom(): void;
+  onZoomIn(): void;
   onFit(): void;
+  onFitSelection(): void;
   onReset(): void;
   onToggleLabels(): void;
+  onToggleEdgeLabels(): void;
   onBack?: (() => void) | undefined;
 }) {
   return (
@@ -76,7 +94,7 @@ export function GraphToolbar({
           </select>
         </label>
         <button
-          className="compass-tool-button"
+          className="compass-tool-button compass-tool-icon-button"
           type="button"
           aria-label={physicsRunning
             ? "Pause layout"
@@ -84,44 +102,97 @@ export function GraphToolbar({
           aria-pressed={physicsRunning}
           disabled={layoutStyle !== "automatic"}
           title={layoutStyle === "automatic"
-            ? undefined
+            ? physicsRunning ? "Pause layout" : "Resume layout"
             : "Physics is available in Automatic layout"}
           onClick={onTogglePhysics}
         >
           {physicsRunning
             ? <PauseIcon />
             : layoutStyle === "automatic" ? <PlayIcon /> : <PauseIcon />}
-          <span>{physicsRunning
-            ? "Pause layout"
-            : layoutStyle === "automatic" ? "Resume layout" : "Fixed layout"}</span>
         </button>
+        <span className="compass-toolbar-separator" aria-hidden="true" />
+        <div className="compass-zoom-controls" role="group" aria-label="Zoom controls">
+          <button
+            className="compass-tool-button compass-tool-icon-button"
+            type="button"
+            aria-label="Zoom out"
+            title="Zoom out"
+            onClick={onZoomOut}
+          >
+            <ZoomOutIcon />
+          </button>
+          <button
+            className="compass-tool-button compass-zoom-reset"
+            type="button"
+            aria-label="Reset zoom to 100%"
+            title="Reset zoom to 100%"
+            onClick={onResetZoom}
+          >
+            100%
+          </button>
+          <button
+            className="compass-tool-button compass-tool-icon-button"
+            type="button"
+            aria-label="Zoom in"
+            title="Zoom in"
+            onClick={onZoomIn}
+          >
+            <ZoomInIcon />
+          </button>
+        </div>
         <button
-          className="compass-tool-button"
+          className="compass-tool-button compass-tool-icon-button"
           type="button"
           aria-label="Fit graph in view"
+          title="Fit graph in view"
           onClick={onFit}
         >
           <Maximize2Icon />
-          <span>Fit graph</span>
         </button>
         <button
-          className="compass-tool-button"
+          className="compass-tool-button compass-tool-icon-button"
+          type="button"
+          aria-label="Fit selected neighborhood"
+          title={hasSelection
+            ? "Fit the selected node and its immediate neighbors"
+            : "Select a node to fit its neighborhood"}
+          disabled={!hasSelection}
+          onClick={onFitSelection}
+        >
+          <FocusIcon />
+        </button>
+        <button
+          className="compass-tool-button compass-tool-icon-button"
           type="button"
           aria-label="Reset graph view"
+          title="Reset graph view"
           onClick={onReset}
         >
           <RotateCcwIcon />
-          <span>Reset view</span>
         </button>
         <button
-          className="compass-tool-button"
+          className="compass-tool-button compass-tool-icon-button"
           type="button"
           aria-label={forceLabels ? "Hide labels" : "Show labels"}
           aria-pressed={forceLabels}
+          title={forceLabels ? "Hide node labels" : "Show all node labels"}
           onClick={onToggleLabels}
         >
           <TagsIcon />
-          <span>{forceLabels ? "Hide labels" : "Show labels"}</span>
+        </button>
+        <button
+          className="compass-tool-button compass-tool-icon-button"
+          type="button"
+          aria-label={showEdgeLabels
+            ? "Hide relationship labels"
+            : "Show relationship labels"}
+          aria-pressed={showEdgeLabels}
+          title={showEdgeLabels
+            ? "Hide relationship labels"
+            : "Show relationship labels"}
+          onClick={onToggleEdgeLabels}
+        >
+          <RouteIcon />
         </button>
       </div>
     </div>

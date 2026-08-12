@@ -12,6 +12,7 @@ export type GraphState = {
   layoutStyle: GraphLayoutStyle;
   initialLayoutPending: boolean;
   forceLabels: boolean;
+  showEdgeLabels: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
   query: string;
@@ -25,6 +26,7 @@ export type GraphAction =
   | { type: "setPhysics"; running: boolean }
   | { type: "setLayout"; layout: GraphLayoutStyle; runPhysics: boolean }
   | { type: "setLabels"; visible: boolean }
+  | { type: "setEdgeLabels"; visible: boolean }
   | { type: "toggleCommunity"; communityId: number }
   | { type: "setHiddenCommunities"; communityIds: number[] }
   | { type: "toggleChange"; change: GraphChangeType }
@@ -36,6 +38,7 @@ export const initialGraphState: GraphState = {
   layoutStyle: "automatic",
   initialLayoutPending: true,
   forceLabels: false,
+  showEdgeLabels: false,
   hiddenCommunities: new Set<number>(),
   hiddenChanges: new Set<GraphChangeType>(),
   query: ""
@@ -92,6 +95,8 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
       };
     case "setLabels":
       return { ...state, forceLabels: action.visible };
+    case "setEdgeLabels":
+      return { ...state, showEdgeLabels: action.visible };
     case "search":
       return { ...state, query: action.query };
     case "toggleCommunity": {

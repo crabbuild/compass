@@ -334,6 +334,7 @@ function CompassGraphView({
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
+            showEdgeLabels={state.showEdgeLabels}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
@@ -349,6 +350,8 @@ function CompassGraphView({
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
+            showEdgeLabels={state.showEdgeLabels}
+            hasSelection={selected !== undefined}
             onTogglePhysics={() => dispatch({
               type: "setPhysics",
               running: !state.physicsRunning
@@ -359,7 +362,13 @@ function CompassGraphView({
               runPhysics: layout === "automatic"
                 && graphRenderingProfile(model) === "interactive"
             })}
+            onZoomOut={() => canvasRef.current?.zoomOut()}
+            onResetZoom={() => canvasRef.current?.resetZoom()}
+            onZoomIn={() => canvasRef.current?.zoomIn()}
             onFit={() => canvasRef.current?.fit()}
+            onFitSelection={() => {
+              if (selected) canvasRef.current?.fitSelection(selected.id);
+            }}
             onReset={() => {
               clear();
               canvasRef.current?.reset();
@@ -367,6 +376,10 @@ function CompassGraphView({
             onToggleLabels={() => dispatch({
               type: "setLabels",
               visible: !state.forceLabels
+            })}
+            onToggleEdgeLabels={() => dispatch({
+              type: "setEdgeLabels",
+              visible: !state.showEdgeLabels
             })}
             onBack={onBackToOverview}
           />

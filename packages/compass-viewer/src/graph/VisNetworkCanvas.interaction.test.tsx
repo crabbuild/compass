@@ -1,13 +1,17 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphViewModel } from "../contracts/graph";
-import { VisNetworkCanvas } from "./VisNetworkCanvas";
+import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 
 const mock = vi.hoisted(() => ({
   dataSets: [] as Array<Array<Record<string, unknown>>>,
-  networks: 0
+  networks: 0,
+  fits: [] as Array<Record<string, unknown> | undefined>,
+  moves: [] as Array<Record<string, unknown>>,
+  connectedNodeRequests: [] as string[]
 }));
 
 vi.mock("vis-network/standalone", () => ({
@@ -38,16 +42,20 @@ vi.mock("vis-network/standalone", () => ({
     setOptions() {}
     stopSimulation() {}
     startSimulation() {}
-    fit() {}
+    fit(options?: Record<string, unknown>) { mock.fits.push(options); }
     destroy() {}
     on() {}
     once() {}
-    getConnectedNodes() { return []; }
+    getConnectedNodes(id: string) {
+      mock.connectedNodeRequests.push(id);
+      return id === "caller" ? ["callee"] : [];
+    }
     getViewPosition() { return { x: 0, y: 0 }; }
     getScale() { return 1; }
     unselectAll() {}
     selectNodes() {}
     focus() {}
+    moveTo(options: Record<string, unknown>) { mock.moves.push(options); }
   }
 }));
 
@@ -74,6 +82,9 @@ describe("VisNetworkCanvas hover lifecycle", () => {
   beforeEach(() => {
     mock.dataSets.length = 0;
     mock.networks = 0;
+    mock.fits.length = 0;
+    mock.moves.length = 0;
+    mock.connectedNodeRequests.length = 0;
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -202,5 +213,35 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       x: -40,
       y: 12
     });
+  });
+
+  it("exposes bounded zoom and selected-neighborhood camera controls", () => {
+    const ref = createRef<GraphCanvasHandle>();
+    render(<VisNetworkCanvas
+      ref={ref}
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    ref.current?.zoomOut();
+    ref.current?.resetZoom();
+    ref.current?.zoomIn();
+    ref.current?.fitSelection("caller");
+
+    expect(mock.moves.map((move) => move.scale)).toEqual([0.8, 1, 1.25]);
+    expect(mock.connectedNodeRequests).toEqual(["caller"]);
+    expect(mock.fits.at(-1)?.nodes).toEqual(["caller", "callee"]);
   });
 });

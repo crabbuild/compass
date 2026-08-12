@@ -8,7 +8,9 @@
   artifact lenses in one self-contained page; strict parsing rejects unknown
   or format-incompatible options. Add relationship, evidence, node-kind, and
   language filters, explicit coverage state, deterministic depth layouts, and
-  the `workbench-json` machine export while preserving plain
+  convenient graph-camera controls for bounded zoom, 100% reset, whole-graph
+  and selected-neighborhood fitting, plus independent node and relationship
+  labels. Add the `workbench-json` machine export while preserving plain
   `compass.viewer.graph/1` JSON compatibility.
 
 - Make PHP extraction and type resolution fail closed for colliding exact or

@@ -1351,8 +1351,42 @@ button:not(:disabled),
 
 .compass-toolbar-actions {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.compass-toolbar-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.compass-toolbar-separator {
+  width: 1px;
+  height: 18px;
+  flex: 0 0 auto;
+  background: var(--compass-line);
+}
+
+.compass-zoom-controls {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, transparent);
+}
+
+.compass-zoom-controls .compass-tool-button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 0;
+}
+
+.compass-zoom-controls .compass-tool-button + .compass-tool-button {
+  border-left: 1px solid var(--compass-line);
 }
 
 .compass-layout-picker {
@@ -1410,6 +1444,22 @@ button:not(:disabled),
 .compass-tool-button svg {
   width: 15px;
   height: 15px;
+}
+
+.compass-tool-icon-button {
+  width: 30px;
+  flex: 0 0 30px;
+  justify-content: center;
+  padding: 0;
+}
+
+.compass-zoom-reset {
+  min-width: 42px;
+  justify-content: center;
+  padding: 0 7px;
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.02em;
 }
 
 .compass-tool-button:hover,
