@@ -266,10 +266,14 @@ structural-only profile. Program inspection commands remain read-only and
 require an existing canonical Program IR artifact.
 
 Structural build commands accept the additive
-`--inference-level low|medium|high|max` profile input. `max` remains the
-default and preserves complete publication behavior. Non-default levels are
-part of the build profile and configuration digest; changing the level
-republishes a coherent graph without changing `compass.graph/1`.
+`--inference-level low|medium|high|max` profile input. `low` is the default and
+publishes exact relationships only. `medium`, `high`, and `max` remain explicit
+opt-ins; `max` preserves the former complete-inference behavior. The selected
+level is part of the build profile and configuration digest, so the default
+cutover republishes a coherent graph without changing `compass.graph/1`.
+Schema-1 build profiles that omit the field still deserialize as historical
+`max`; new default-low profiles serialize `"inference_level":"low"`
+explicitly. There is no environment switch or automatic breadth fallback.
 
 ## Pull-request intelligence contract
 

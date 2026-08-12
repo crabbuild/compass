@@ -7247,11 +7247,15 @@ mod tests {
     }
 
     #[test]
-    fn inference_level_changes_profile_identity_without_changing_the_default_profile() {
+    fn default_low_inference_is_explicit_in_profile_identity() {
         let default = BuildOptions::new(".");
+        assert_eq!(default.inference_level, InferenceLevel::Low);
         let default_profile = build_profile(&default);
         let default_json = serde_json::to_value(&default_profile).unwrap_or_default();
-        assert!(default_json.get("inference_level").is_none());
+        assert_eq!(
+            default_json.get("inference_level"),
+            Some(&Value::String("low".to_owned()))
+        );
 
         let mut medium = default;
         medium.inference_level = InferenceLevel::Medium;
@@ -8234,6 +8238,7 @@ mod tests {
             "pub fn documented() {}\n",
         )?;
         let mut options = BuildOptions::new(directory.path());
+        options.inference_level = InferenceLevel::Max;
         options.no_cluster = true;
         options.no_viz = true;
         options.force = true;

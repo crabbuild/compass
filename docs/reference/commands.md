@@ -75,9 +75,10 @@ projected. `--no-program` conflicts with `--program-artifact`.
 Graph storage defaults to `sqlite`; `--store json` opts out of the validated
 local store sidecar without replacing `graph.json`. JSON remains the portable
 authority, while the sidecar keeps large graphs queryable under bounded memory.
-Inference defaults to `max`. Use `low` for exact-only automation, `medium` for
-source-backed inferred resolution, or `high` to additionally retain explicitly
-qualified external references without deferred-receiver expansion.
+Inference defaults to `low` and publishes exact relationships only. Use
+`medium` for source-backed inferred resolution, `high` to additionally retain
+explicitly qualified external references, or explicit `max` to retain all
+inferred relationships including deferred receivers.
 
 ### `extract`
 

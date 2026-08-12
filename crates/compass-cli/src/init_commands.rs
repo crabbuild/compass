@@ -345,12 +345,7 @@ fn run_init_with_builder(
     if options.graph_storage == GraphStorage::Sqlite {
         build_arguments.extend(["--store".to_owned(), "sqlite".to_owned()]);
     }
-    if options.inference_level != InferenceLevel::Max {
-        build_arguments.extend([
-            "--inference-level".to_owned(),
-            options.inference_level.as_str().to_owned(),
-        ]);
-    }
+    append_inference_level_argument(&mut build_arguments, options.inference_level);
     let outcome = build(&root, &build_arguments, detection, operation_started);
     if outcome.code != 0 {
         let _ = writeln!(
@@ -362,6 +357,12 @@ fn run_init_with_builder(
         let _ = writeln!(stderr, "Fix the reported issue, then run `compass update`.");
     }
     write_outcome(&outcome, stdout, stderr)
+}
+
+fn append_inference_level_argument(arguments: &mut Vec<String>, level: InferenceLevel) {
+    if level != InferenceLevel::default() {
+        arguments.extend(["--inference-level".to_owned(), level.as_str().to_owned()]);
+    }
 }
 
 fn collect_interactive(
@@ -512,6 +513,8 @@ mod tests {
 
     #[test]
     fn init_accepts_inference_level_value_forms() -> Result<(), String> {
+        assert_eq!(parse(&[])?.inference_level, InferenceLevel::Low);
+
         let split = parse(&[
             ".".to_owned(),
             "--inference-level".to_owned(),
@@ -524,5 +527,22 @@ mod tests {
         assert!(parse(&["--inference-level=automatic".to_owned()]).is_err());
         assert!(parse(&["--inference-level".to_owned()]).is_err());
         Ok(())
+    }
+
+    #[test]
+    fn init_forwards_every_non_default_inference_level() {
+        for level in [
+            InferenceLevel::Medium,
+            InferenceLevel::High,
+            InferenceLevel::Max,
+        ] {
+            let mut arguments = Vec::new();
+            append_inference_level_argument(&mut arguments, level);
+            assert_eq!(arguments, ["--inference-level", level.as_str()]);
+        }
+
+        let mut default_arguments = Vec::new();
+        append_inference_level_argument(&mut default_arguments, InferenceLevel::Low);
+        assert!(default_arguments.is_empty());
     }
 }

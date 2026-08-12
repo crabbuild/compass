@@ -471,9 +471,11 @@ low-only tuning does not address.
    dropping provenance, direction, or parallel-edge meaning. Graphify's JSON
    was less than half the bytes even though node and relationship counts were
    similar.
-7. **Qualify every inference level on the complete corpus suite.** Keep `max`
-   as the compatibility default until low, medium, and high have deterministic
-   build, incremental, query, and source-oracle evidence across languages.
+7. **Qualify every inference level on the complete corpus suite.** The product
+   now hard-cuts the default to `low`; continue qualifying low, medium, high,
+   and max for deterministic build, incremental, query, and source-oracle
+   evidence across languages. Consumers that require the former breadth must
+   request `max` explicitly.
 
 This run is diagnostic evidence from one mixed Rust/Python/SQL repository. It
 is not a promoted performance baseline, a broad language-quality claim, or a

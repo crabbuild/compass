@@ -32,9 +32,13 @@
 - Add deterministic `--inference-level low|medium|high|max` controls to
   structural graph builds. Lower levels retain exact or source-backed evidence
   and can admit explicitly qualified external relationships without the full
-  deferred-receiver expansion; `max` remains the compatibility-preserving
-  default. Filtered builds prune unreferenced inferred placeholders and bind
-  the selected level into build-profile/cache identity.
+  deferred-receiver expansion. Hard-cut the build default to evidence-first
+  `low`; users can opt into the former complete behavior with
+  `--inference-level max`. Filtered builds prune unreferenced inferred
+  placeholders and bind the selected level into build-profile/cache identity.
+  Historical schema-1 build profiles that omitted the field remain readable
+  as `max`, while new low profiles record the level explicitly and trigger a
+  coherent rebuild.
 
 - Make the performance harness select and record an inference level, and use
   symmetric community clustering for explicit Compass/Graphify comparisons.

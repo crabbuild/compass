@@ -5073,9 +5073,9 @@ mod mcp_option_tests {
     }
 
     #[test]
-    fn inference_level_parser_is_closed_and_defaults_to_max()
+    fn inference_level_parser_is_closed_and_defaults_to_low()
     -> Result<(), Box<dyn std::error::Error>> {
-        assert_eq!(InferenceLevel::default(), InferenceLevel::Max);
+        assert_eq!(InferenceLevel::default(), InferenceLevel::Low);
         assert_eq!(parse_inference_level("low")?, InferenceLevel::Low);
         assert_eq!(parse_inference_level("medium")?, InferenceLevel::Medium);
         assert_eq!(parse_inference_level("high")?, InferenceLevel::High);

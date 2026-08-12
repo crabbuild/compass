@@ -103,11 +103,12 @@ Select graph breadth per build with:
 compass update . --inference-level medium
 ```
 
-Supported values are `low`, `medium`, `high`, and `max`; the default is `max`
-for backward compatibility. The option is available on `init`, `update`,
-`extract`, and `watch`. It is a build-profile input, so changing it causes a
-coherent republish even when source files are unchanged. Extraction caches keep
-the complete normalized evidence and can be reused across levels.
+Supported values are `low`, `medium`, `high`, and `max`; the default is `low`.
+The option is available on `init`, `update`, `extract`, and `watch`. Use
+explicit `max` when the former complete-inference breadth is required. It is a
+build-profile input, so changing it causes a coherent republish even when
+source files are unchanged. Extraction caches keep the complete normalized
+evidence and can be reused across levels.
 
 Compass writes:
 

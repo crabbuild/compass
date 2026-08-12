@@ -163,12 +163,13 @@ levels are deterministic and nested:
 | `high` | `medium`, plus explicitly qualified external relationships anchored in source syntax |
 | `max` | all retained inference, including deferred-receiver relationships |
 
-`max` is the default and preserves the complete graph behavior. Lower levels
-filter after evidence normalization, prune unreferenced inferred placeholder
-nodes, and keep every retained edge endpoint valid. The selected level is part
-of the build profile and configuration digest, so an output built at one level
-is not reused as though it represented another. This policy is intentional
-selection, not a publication omission.
+`low` is the default. `max` remains an explicit opt-in that preserves the
+former complete graph behavior. Lower levels filter after evidence
+normalization, prune unreferenced inferred placeholder nodes, and keep every
+retained edge endpoint valid. The selected level is part of the build profile
+and configuration digest, so an output built at one level is not reused as
+though it represented another. This policy is intentional selection, not a
+publication omission.
 
 Inference controls graph breadth, not source anchoring. An inferred edge may
 still have an exact relationship site while its target identity remains
