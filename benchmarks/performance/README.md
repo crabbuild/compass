@@ -81,7 +81,7 @@ Both tools use the same corpus commits. Build comparisons use the same
 publishable structural profile: Compass `--code-only --no-viz --store json`
 and Graphify's native `--code-only` profile, both with community clustering.
 `--inference-level` selects Compass's `low`, `medium`, `high`, or `max`
-profile and is recorded in tool metadata; it defaults to `max`. Every cold,
+profile and is recorded in tool metadata; it defaults to `low`. Every cold,
 warm, incremental, and fresh natural-language query row must independently reach
 `graphify p50 / compass p50 >= 5.00`; averages cannot hide a failed row.
 Compass build peak RSS must not exceed Graphify, and Graphify's shared graph

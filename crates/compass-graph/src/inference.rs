@@ -7,18 +7,19 @@ use serde_json::{Map, Value};
 /// Maximum inference admitted to a published structural graph.
 ///
 /// Levels are nested: every relationship admitted by a lower level is also
-/// admitted by each higher level. `Max` preserves the complete publication
-/// behavior used before inference controls were introduced.
+/// admitted by each higher level. `Low` is the evidence-first default. `Max`
+/// preserves the complete publication behavior used before inference controls
+/// were introduced and remains available as an explicit opt-in.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum InferenceLevel {
     /// Publish exact relationships only.
+    #[default]
     Low,
     /// Also publish inferred relationships between source-backed nodes.
     Medium,
     /// Also publish explicitly qualified external relationships.
     High,
     /// Also publish deferred-receiver and all other inferred relationships.
-    #[default]
     Max,
 }
 
@@ -497,7 +498,7 @@ mod tests {
 
     #[test]
     fn inference_level_names_are_stable() {
-        assert_eq!(InferenceLevel::default(), InferenceLevel::Max);
+        assert_eq!(InferenceLevel::default(), InferenceLevel::Low);
         assert_eq!(InferenceLevel::Low.as_str(), "low");
         assert_eq!(InferenceLevel::Medium.as_str(), "medium");
         assert_eq!(InferenceLevel::High.as_str(), "high");

@@ -71,6 +71,26 @@ the exact `graph.json` digest. Agent-facing orientation/report exports fail
 explicitly for older, missing, detached, or stale sidecars instead of pairing
 evidence by filename alone.
 
+## Select inference breadth explicitly when upgrading
+
+Structural `init`, `update`, `extract`, and `watch` builds now default to
+`--inference-level low`, which publishes exact relationships only. This is a
+hard cutover from the former `max` default. If an automation or downstream
+consumer requires deferred-receiver and all other retained inferred
+relationships, add the former behavior explicitly:
+
+```bash
+compass update . --inference-level max
+compass extract . --code-only --inference-level max
+```
+
+`medium` adds source-backed inferred relationships and `high` additionally
+adds explicitly qualified external relationships. Existing schema-1 build
+state that omitted the inference field is still interpreted as historical
+`max`. Because new low profiles record the level explicitly, the first command
+run without an override rebuilds and republishes the graph coherently instead
+of reusing the wider graph.
+
 ## Opt into Program IR generation
 
 Structural graph builds now omit the optional `program.json` artifact by

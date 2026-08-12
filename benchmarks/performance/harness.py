@@ -661,8 +661,8 @@ def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None
         parser.add_argument(
             "--inference-level",
             choices=("low", "medium", "high", "max"),
-            default="max",
-            help="select the Compass inference profile (default: max)",
+            default="low",
+            help="select the Compass inference profile (default: low)",
         )
         parser.add_argument("--baseline", type=Path)
         parser.add_argument("--reuse-corpora-root", type=Path)

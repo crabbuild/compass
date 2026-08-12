@@ -172,7 +172,8 @@ fn installation_managed_commands_have_compass_native_help() -> Result<(), Box<dy
 }
 
 #[test]
-fn inference_level_controls_published_graph_breadth() -> Result<(), Box<dyn Error>> {
+fn inference_level_defaults_to_low_and_controls_published_graph_breadth()
+-> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let source = directory.path().join("source");
     std::fs::create_dir(&source)?;
@@ -188,6 +189,7 @@ fn run(value: ExternalType) {
     )?;
 
     let mut counts = Vec::new();
+    let mut level_graphs = Vec::new();
     for level in ["low", "medium", "high", "max"] {
         let destination = directory.path().join(format!("{level}-artifacts"));
         let run = |force: bool| -> Result<Vec<u8>, Box<dyn Error>> {
@@ -240,7 +242,35 @@ fn run(value: ExternalType) {
             })
             .count();
         counts.push((nodes, links.len(), inferred));
+        level_graphs.push(graph_bytes);
     }
+
+    let default_destination = directory.path().join("default-artifacts");
+    let default = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "update",
+            ".",
+            "--code-only",
+            "--no-viz",
+            "--no-cluster",
+            "--store",
+            "json",
+            "--out",
+        ])
+        .arg(&default_destination)
+        .current_dir(&source)
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        default.status.success(),
+        "compass update with the default inference level failed: {}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    let default_graph_path =
+        BuildGuard::resolve_artifact(&default_destination.join("compass-out"), "graph.json")?;
+    let default_graph = std::fs::read(default_graph_path)?;
+    let low_graph = level_graphs.first().ok_or("missing low inference graph")?;
+    assert_eq!(default_graph.as_slice(), low_graph.as_slice());
 
     let low = counts[0];
     let max = counts[3];

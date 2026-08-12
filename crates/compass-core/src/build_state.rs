@@ -96,19 +96,23 @@ pub(crate) struct BuildProfile {
     pub program_analysis: bool,
     pub graph_storage: String,
     #[serde(
-        default = "default_inference_level",
-        skip_serializing_if = "inference_level_is_max"
+        default = "legacy_default_inference_level",
+        skip_serializing_if = "inference_level_is_legacy_max"
     )]
     pub inference_level: String,
     #[serde(default = "default_max_source_bytes")]
     pub max_source_bytes: u64,
 }
 
-fn default_inference_level() -> String {
+// Build-state schema 1 omitted the historical max profile. Keep interpreting
+// an absent field as max even though new builds default to low. New low
+// profiles serialize the field explicitly, so the first build after the
+// cutover cannot reuse a max graph as though it were low.
+fn legacy_default_inference_level() -> String {
     compass_graph::InferenceLevel::Max.as_str().to_owned()
 }
 
-fn inference_level_is_max(level: &str) -> bool {
+fn inference_level_is_legacy_max(level: &str) -> bool {
     level == compass_graph::InferenceLevel::Max.as_str()
 }
 
@@ -291,7 +295,7 @@ mod tests {
             code_only: true,
             program_analysis: false,
             graph_storage: "json".to_owned(),
-            inference_level: default_inference_level(),
+            inference_level: legacy_default_inference_level(),
             max_source_bytes: default_max_source_bytes(),
         };
         let document = serde_json::to_value(&profile)?;
@@ -325,7 +329,7 @@ mod tests {
             code_only: false,
             program_analysis: true,
             graph_storage: "json".to_owned(),
-            inference_level: default_inference_level(),
+            inference_level: legacy_default_inference_level(),
             max_source_bytes: default_max_source_bytes(),
         };
         let state = BuildState::capture(
