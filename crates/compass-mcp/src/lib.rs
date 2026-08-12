@@ -25,8 +25,8 @@ use compass_model::query_contract::{
 };
 use compass_model::{Graph, GraphDocument, NodeIndex};
 use compass_output::{
-    AgentOrientation, render_agent_report_markdown, render_orientation_json,
-    validate_orientation_graph_identity,
+    AgentOrientation, ORIENTATION_JSON_MAX_BYTES, render_agent_report_markdown,
+    render_orientation_json, validate_orientation_graph_identity,
 };
 use compass_prs::{
     ChangeRequestSource, LocalGitChangeRequestSource, ProcessRunner, SystemRunner,
@@ -52,7 +52,7 @@ const MAX_QUERY_LOG_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_QUERY_LOG_RECORD_BYTES: usize = 128 * 1024;
 const MAX_LOGGED_QUESTION_BYTES: usize = 4_096;
 const MAX_MCP_STRUCTURED_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_MCP_RESOURCE_BYTES: usize = 1024 * 1024;
+const MAX_MCP_RESOURCE_BYTES: usize = ORIENTATION_JSON_MAX_BYTES;
 const MCP_TOOL_RESULT_SCHEMA: &str = "compass.mcp.tool-result/1";
 const MCP_TRANSPORT_TRUNCATION_SCHEMA: &str = "compass.mcp.transport-truncation/1";
 

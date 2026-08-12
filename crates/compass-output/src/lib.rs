@@ -52,15 +52,16 @@ pub use lenses::{
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
 pub use report::{
     AgentOrientation, BoundedCoverage, DetectionSummary, FreshnessBasis, FreshnessStatus,
-    ORIENTATION_MARKDOWN_MAX_CHARS, ORIENTATION_SCHEMA, OrientationAmbiguousEdge,
-    OrientationCommunity, OrientationCommunityLink, OrientationConnection, OrientationCycle,
-    OrientationDetails, OrientationEvidenceStatus, OrientationGraphSummary, OrientationHealth,
-    OrientationHub, OrientationHyperedge, OrientationLearnedQuestion, OrientationNodeReference,
-    OrientationOmissions, OrientationPublicationDiagnostic, OrientationQuery, OrientationRisk,
-    OrientationSourceAnchor, OrientationWorkMemory, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS,
-    ReportOptions, SectionOmission, TokenCost, WorkingTreeState, agent_orientation,
-    generate_report, graph_artifact_identity, render_agent_report_markdown,
-    render_orientation_json, render_orientation_markdown, validate_orientation_graph_identity,
+    ORIENTATION_JSON_MAX_BYTES, ORIENTATION_MARKDOWN_MAX_CHARS, ORIENTATION_SCHEMA,
+    OrientationAmbiguousEdge, OrientationCommunity, OrientationCommunityLink,
+    OrientationConnection, OrientationCycle, OrientationDetails, OrientationEvidenceStatus,
+    OrientationGraphSummary, OrientationHealth, OrientationHub, OrientationHyperedge,
+    OrientationLearnedQuestion, OrientationNodeReference, OrientationOmissions,
+    OrientationPublicationDiagnostic, OrientationQuery, OrientationRisk, OrientationSourceAnchor,
+    OrientationWorkMemory, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS, ReportOptions,
+    SectionOmission, TokenCost, WorkingTreeState, agent_orientation, generate_report,
+    graph_artifact_identity, render_agent_report_markdown, render_orientation_json,
+    render_orientation_markdown, validate_orientation_graph_identity,
 };
 pub use review::{
     MAX_REVIEW_RENDER_BYTES, RenderedReview, render_readiness_json, render_readiness_markdown,

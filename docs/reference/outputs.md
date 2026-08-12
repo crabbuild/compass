@@ -241,14 +241,16 @@ validates the graph generation and exact streamed `graph.json` digest before
 `compass://orientation` returns it. `compass://report` renders the human report
 from that validated model; it never trusts an adjacent Markdown file by name.
 
-The Architecture Map highlights up to six leading communities. The later
+The Architecture Map highlights up to twelve leading communities. The later
 Community Directory is the broader navigation index: it ranks every non-empty
 community, including thin communities, by member count and connectivity, shows
-as many as fit within the explicit report bound (up to 128), and lists up to
-eight high-connectivity entry points with source anchors for each. Every bounded
-list reports exact shown and omitted counts. Headings and boundary links prefer
-evidence labels; graph-local numeric IDs remain visible as `community:<id>`
-query scopes where an agent needs an exact follow-up command.
+as many as fit within the 256,000-character report bound (up to 256), and lists
+up to twelve high-connectivity entry points with source anchors for each. The
+compact orientation remains bounded to 16,000 characters, while its JSON and
+the MCP resource transport share a 4 MiB envelope. Every bounded list reports
+exact shown and omitted counts. Headings and boundary links prefer evidence
+labels; graph-local numeric IDs remain visible as `community:<id>` query scopes
+where an agent needs an exact follow-up command.
 
 ## `graph.html`
 

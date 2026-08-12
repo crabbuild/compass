@@ -14,23 +14,29 @@ use sha2::{Digest, Sha256};
 use crate::OutputError;
 
 pub const ORIENTATION_SCHEMA: &str = "compass.orientation/1";
-pub const ORIENTATION_MARKDOWN_MAX_CHARS: usize = 8_000;
-pub const REPORT_MARKDOWN_MAX_CHARS: usize = 64_000;
-const ORIENTATION_JSON_MAX_BYTES: usize = 1024 * 1024 - 1;
+pub const ORIENTATION_MARKDOWN_MAX_CHARS: usize = 16_000;
+pub const REPORT_MARKDOWN_MAX_CHARS: usize = 256_000;
+pub const ORIENTATION_JSON_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+const PUBLICATION_IDENTITY_RESERVE: usize = 1024;
+const ORIENTATION_MARKDOWN_FIT_CHARS: usize =
+    ORIENTATION_MARKDOWN_MAX_CHARS - PUBLICATION_IDENTITY_RESERVE;
+const REPORT_MARKDOWN_FIT_CHARS: usize = REPORT_MARKDOWN_MAX_CHARS - PUBLICATION_IDENTITY_RESERVE;
+const ORIENTATION_JSON_FIT_BYTES: usize = ORIENTATION_JSON_MAX_BYTES - PUBLICATION_IDENTITY_RESERVE;
 
 // The compact Agent Orientation shows only the leading communities, while the
 // full report keeps a substantially wider directory for repository navigation.
 // Both limits are explicit so an adversarial graph cannot grow output without
 // bound.
-const ORIENTATION_COMMUNITY_LIMIT: usize = 6;
-const COMMUNITY_LIMIT: usize = 128;
-const HUB_LIMIT: usize = 8;
+const ORIENTATION_COMMUNITY_LIMIT: usize = 12;
+const COMMUNITY_LIMIT: usize = 256;
+const HUB_LIMIT: usize = 16;
 const RISK_LIMIT: usize = 8;
-const QUERY_LIMIT: usize = 8;
+const QUERY_LIMIT: usize = 16;
 const DETAIL_LIMIT: usize = 12;
-const ORIENTATION_REPRESENTATIVE_LIMIT: usize = 3;
-const REPRESENTATIVE_LIMIT: usize = 8;
-const COMMUNITY_LINK_LIMIT: usize = 2;
+const ORIENTATION_REPRESENTATIVE_LIMIT: usize = 4;
+const REPRESENTATIVE_LIMIT: usize = 12;
+const COMMUNITY_LINK_LIMIT: usize = 4;
 const MIX_LIMIT: usize = 8;
 const ARGV_LIMIT: usize = 8;
 const NESTED_ID_LIMIT: usize = 8;
@@ -1811,7 +1817,7 @@ fn fit_orientation_budget(model: &mut AgentOrientation) {
     while char_count(&render_orientation_markdown_with_community_limit(
         model,
         ORIENTATION_COMMUNITY_LIMIT,
-    )) > ORIENTATION_MARKDOWN_MAX_CHARS
+    )) > ORIENTATION_MARKDOWN_FIT_CHARS
     {
         if model.suggested_queries.pop().is_some() {
             model
@@ -1838,13 +1844,13 @@ fn fit_orientation_json_budget(model: &mut AgentOrientation) {
         let Ok(rendered) = serde_json::to_vec_pretty(model) else {
             break;
         };
-        if rendered.len() <= ORIENTATION_JSON_MAX_BYTES || model.communities.is_empty() {
+        if rendered.len() <= ORIENTATION_JSON_FIT_BYTES || model.communities.is_empty() {
             break;
         }
         let scaled = model
             .communities
             .len()
-            .saturating_mul(ORIENTATION_JSON_MAX_BYTES)
+            .saturating_mul(ORIENTATION_JSON_FIT_BYTES)
             / rendered.len();
         let next = scaled.min(model.communities.len().saturating_sub(1));
         model.communities.truncate(next);
@@ -1856,7 +1862,7 @@ fn fit_orientation_json_budget(model: &mut AgentOrientation) {
 }
 
 fn fit_report_budget(model: &mut AgentOrientation, obsidian: bool) {
-    while char_count(&render_report_markdown(model, obsidian)) > REPORT_MARKDOWN_MAX_CHARS {
+    while char_count(&render_report_markdown(model, obsidian)) > REPORT_MARKDOWN_FIT_CHARS {
         if model.details.publication_diagnostics.pop().is_some() {
             model
                 .omissions
