@@ -1,6 +1,7 @@
 import {
   useCallback,
   useDeferredValue,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
@@ -23,6 +24,12 @@ import { EdgeHoverCard, type GraphEdgeHover } from "./EdgeHoverCard";
 import { navigableRelationshipSource } from "./sourceNavigation";
 import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
+import {
+  graphNeighborhood,
+  MAX_NEIGHBORHOOD_DEPTH,
+  MIN_NEIGHBORHOOD_DEPTH,
+  type GraphEdgeDirection
+} from "./neighborhood";
 import {
   graphRenderingProfile,
   visibleGraphEdges,
@@ -51,6 +58,16 @@ const FIXED_LAYOUT_STATUS: Record<Exclude<GraphLayoutStyle, "automatic">, string
   spiral: "Spiral layout",
   grid: "Square grid layout"
 };
+
+const EDGE_DIRECTIONS: readonly GraphEdgeDirection[] = ["both", "outgoing", "incoming"];
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable
+      || target.tagName === "INPUT"
+      || target.tagName === "TEXTAREA"
+      || target.tagName === "SELECT");
+}
 
 export type GraphHost = {
   openSource(source: SourceLocation, revision?: string): void;
@@ -202,6 +219,22 @@ function CompassGraphView({
   const selected = state.focusedNodeId
     ? nodeById.get(state.focusedNodeId)
     : undefined;
+  const selectedNeighborhood = useMemo(
+    () => selected
+      ? graphNeighborhood(
+        model,
+        selected.id,
+        state.neighborhoodDepth,
+        state.edgeDirection
+      )
+      : null,
+    [
+      model,
+      selected,
+      state.edgeDirection,
+      state.neighborhoodDepth
+    ]
+  );
   const hovered = hover ? nodeById.get(hover.nodeId) : undefined;
   const hoveredActivation = hovered
     ? graphNodeActivation(model, hovered, detailCommunityId)
@@ -257,6 +290,65 @@ function CompassGraphView({
     setEdgeHover(null);
     dispatch({ type: "clearFocus" });
   }, []);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.metaKey
+        || event.ctrlKey
+        || event.altKey
+        || isEditableKeyboardTarget(event.target)
+      ) return;
+      const key = event.key.toLocaleLowerCase();
+      let handled = true;
+      if (key === "f") {
+        if (event.shiftKey && selectedNeighborhood) {
+          canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+        } else if (!event.shiftKey) {
+          canvasRef.current?.fit();
+        } else {
+          handled = false;
+        }
+      } else if (key === "+" || key === "=") {
+        canvasRef.current?.zoomIn();
+      } else if (key === "-" || key === "_") {
+        canvasRef.current?.zoomOut();
+      } else if (key === "0") {
+        canvasRef.current?.resetZoom();
+      } else if (key === "i" && selected) {
+        dispatch({ type: "setIsolation", isolated: !state.isolateSelection });
+      } else if (key === "[") {
+        dispatch({
+          type: "setNeighborhoodDepth",
+          depth: Math.max(MIN_NEIGHBORHOOD_DEPTH, state.neighborhoodDepth - 1)
+        });
+      } else if (key === "]") {
+        dispatch({
+          type: "setNeighborhoodDepth",
+          depth: Math.min(MAX_NEIGHBORHOOD_DEPTH, state.neighborhoodDepth + 1)
+        });
+      } else if (key === "d") {
+        const index = EDGE_DIRECTIONS.indexOf(state.edgeDirection);
+        dispatch({
+          type: "setEdgeDirection",
+          direction: EDGE_DIRECTIONS[(index + 1) % EDGE_DIRECTIONS.length] ?? "both"
+        });
+      } else if (key === "m") {
+        dispatch({ type: "setMinimap", visible: !state.showMinimap });
+      } else {
+        handled = false;
+      }
+      if (handled) event.preventDefault();
+    };
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => document.removeEventListener("keydown", handleKeyDown, { capture: true });
+  }, [
+    selected,
+    selectedNeighborhood,
+    state.edgeDirection,
+    state.isolateSelection,
+    state.neighborhoodDepth,
+    state.showMinimap
+  ]);
   const handleStabilized = useCallback(() => {
     dispatch({ type: "stabilized" });
   }, []);
@@ -293,7 +385,9 @@ function CompassGraphView({
       edge.change === "removed" ? sourceRevisions?.before : sourceRevisions?.after
     );
   }, [edgeById, sourceRevisions?.after, sourceRevisions?.before]);
-  const status = selected
+  const status = selected && state.isolateSelection && selectedNeighborhood
+    ? `Isolated ${selectedNeighborhood.nodeIds.size} nodes · ${state.neighborhoodDepth} hop${state.neighborhoodDepth === 1 ? "" : "s"}`
+    : selected
     ? `Inspecting ${selected.label}`
     : state.layoutStyle !== "automatic"
       ? FIXED_LAYOUT_STATUS[state.layoutStyle]
@@ -335,6 +429,14 @@ function CompassGraphView({
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
             showEdgeLabels={state.showEdgeLabels}
+            isolatedNodeIds={state.isolateSelection
+              ? selectedNeighborhood?.nodeIds
+              : undefined}
+            isolatedEdgeIds={state.isolateSelection
+              ? selectedNeighborhood?.edgeIds
+              : undefined}
+            layoutSpacing={state.layoutSpacing}
+            showMinimap={state.showMinimap}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
@@ -352,6 +454,11 @@ function CompassGraphView({
             forceLabels={state.forceLabels}
             showEdgeLabels={state.showEdgeLabels}
             hasSelection={selected !== undefined}
+            isolateSelection={state.isolateSelection}
+            neighborhoodDepth={state.neighborhoodDepth}
+            edgeDirection={state.edgeDirection}
+            layoutSpacing={state.layoutSpacing}
+            showMinimap={state.showMinimap}
             onTogglePhysics={() => dispatch({
               type: "setPhysics",
               running: !state.physicsRunning
@@ -367,10 +474,13 @@ function CompassGraphView({
             onZoomIn={() => canvasRef.current?.zoomIn()}
             onFit={() => canvasRef.current?.fit()}
             onFitSelection={() => {
-              if (selected) canvasRef.current?.fitSelection(selected.id);
+              if (selectedNeighborhood) {
+                canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+              }
             }}
             onReset={() => {
               clear();
+              dispatch({ type: "setIsolation", isolated: false });
               canvasRef.current?.reset();
             }}
             onToggleLabels={() => dispatch({
@@ -380,6 +490,26 @@ function CompassGraphView({
             onToggleEdgeLabels={() => dispatch({
               type: "setEdgeLabels",
               visible: !state.showEdgeLabels
+            })}
+            onToggleIsolation={() => dispatch({
+              type: "setIsolation",
+              isolated: !state.isolateSelection
+            })}
+            onNeighborhoodDepthChange={(depth) => dispatch({
+              type: "setNeighborhoodDepth",
+              depth
+            })}
+            onEdgeDirectionChange={(direction) => dispatch({
+              type: "setEdgeDirection",
+              direction
+            })}
+            onLayoutSpacingChange={(spacing) => dispatch({
+              type: "setLayoutSpacing",
+              spacing
+            })}
+            onToggleMinimap={() => dispatch({
+              type: "setMinimap",
+              visible: !state.showMinimap
             })}
             onBack={onBackToOverview}
           />

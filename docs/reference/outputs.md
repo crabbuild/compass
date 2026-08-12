@@ -266,6 +266,12 @@ call, impact, and affected views start in a deterministic depth-layer layout.
 Architecture views use subsystem routes, while history views overlay added,
 removed, and changed graph evidence.
 
+Node-link graph views provide bounded 1–4-hop selection isolation with exact
+incoming, outgoing, or bidirectional traversal, adjustable layout spacing, and
+a navigable minimap based on the rendered graph coordinates. The exploration
+panel documents keyboard controls; press `?` while focus is outside a text or
+selection control to open it.
+
 The machine form is available from `compass export workbench-json`, or from
 `compass export json` when at least one view is requested. Unknown major
 workbench schemas must be rejected. Plain `compass export json` remains

@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -22,10 +23,15 @@ import {
   type GraphLayoutStyle
 } from "./renderingProfile";
 import type { GraphChangeType } from "./state";
+import type { GraphLayoutSpacing } from "./state";
+import {
+  GraphMinimap,
+  type GraphMinimapSnapshot
+} from "./GraphMinimap";
 
 export type GraphCanvasHandle = {
   fit(): void;
-  fitSelection(nodeId: string): void;
+  fitSelection(nodeIds: readonly string[]): void;
   reset(): void;
   resetZoom(): void;
   zoomIn(): void;
@@ -45,6 +51,10 @@ type Props = {
   initialPositions?: ReadonlyMap<string, GraphCanvasPosition>;
   forceLabels: boolean;
   showEdgeLabels?: boolean;
+  isolatedNodeIds?: ReadonlySet<string> | undefined;
+  isolatedEdgeIds?: ReadonlySet<string> | undefined;
+  layoutSpacing?: GraphLayoutSpacing;
+  showMinimap?: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
@@ -70,6 +80,7 @@ const fallbackComparisonPalette: ComparisonPalette = {
   unchanged: { background: "#29313b", border: "#8b949e" }
 };
 const STATIC_VISIBLE_LABEL_LIMIT = 200;
+const MINIMAP_POSITION_LIMIT = 1_500;
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 3;
 
@@ -364,6 +375,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     initialPositions,
     forceLabels,
     showEdgeLabels = false,
+    isolatedNodeIds,
+    isolatedEdgeIds,
+    layoutSpacing = 1,
+    showMinimap = false,
     hiddenCommunities,
     hiddenChanges,
     onFocus,
@@ -376,6 +391,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
   }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const networkRef = useRef<Network | null>(null);
+    const [minimapSnapshot, setMinimapSnapshot] = useState<GraphMinimapSnapshot | null>(null);
     const physicsRunningRef = useRef(physicsRunning);
     physicsRunningRef.current = physicsRunning;
     const eventHandlersRef = useRef<GraphNetworkHandlers>({
@@ -397,6 +413,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const onStabilizedRef = useRef(onStabilized);
     onStabilizedRef.current = onStabilized;
     const initialViewRef = useRef<{ position: { x: number; y: number }; scale: number } | null>(null);
+    const previousLayoutSpacingRef = useRef(layoutSpacing);
     const themeRevision = useThemeRevision();
     const renderingProfile = useMemo(
       () => graphRenderingProfile(model),
@@ -406,6 +423,44 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => visibleGraphEdges(model),
       [model]
     );
+    const visibleNodeIds = useMemo(() => new Set(model.nodes
+      .filter((node) => !hiddenCommunities.has(node.community)
+        && !hiddenChanges.has(node.change ?? "unchanged")
+        && (!isolatedNodeIds || isolatedNodeIds.has(node.id)))
+      .map((node) => node.id)), [
+      hiddenChanges,
+      hiddenCommunities,
+      isolatedNodeIds,
+      model.nodes
+    ]);
+    const visibleEdgeIds = useMemo(() => new Set(renderedEdges
+      .filter((edge) => visibleNodeIds.has(edge.source)
+        && visibleNodeIds.has(edge.target)
+        && (!isolatedEdgeIds || isolatedEdgeIds.has(edge.id)))
+      .map((edge) => edge.id)), [isolatedEdgeIds, renderedEdges, visibleNodeIds]);
+    const visibleNodeIdsRef = useRef(visibleNodeIds);
+    visibleNodeIdsRef.current = visibleNodeIds;
+    const refreshMinimap = useCallback(() => {
+      const network = networkRef.current;
+      const container = containerRef.current;
+      if (!network || !container) return;
+      const positions = network.getPositions(
+        [...visibleNodeIdsRef.current].sort().slice(0, MINIMAP_POSITION_LIMIT)
+      );
+      const center = network.getViewPosition();
+      const scale = Math.max(MIN_VIEW_SCALE, network.getScale());
+      const width = Math.max(1, container.clientWidth) / scale;
+      const height = Math.max(1, container.clientHeight) / scale;
+      setMinimapSnapshot({
+        positions: new Map(Object.entries(positions)),
+        viewport: {
+          left: center.x - width / 2,
+          top: center.y - height / 2,
+          width,
+          height
+        }
+      });
+    }, []);
     const maxDegree = useMemo(() => {
       let maximum = 1;
       for (const node of model.nodes) maximum = Math.max(maximum, node.degree ?? 1);
@@ -507,6 +562,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => comparisonMode ? seedComparisonPositions(model.nodes) : new Map(),
       [comparisonMode, model.nodes]
     );
+    const fixedLayoutSpacing = layoutStyle === "automatic" ? 1 : layoutSpacing;
     const selectedLayoutPositions = useMemo(
       () => layoutStyle === "automatic"
         ? new Map<string, { x: number; y: number }>()
@@ -539,6 +595,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           ?? comparisonPositions.get(node.id)
           ?? initialPositions?.get(node.id)
           ?? staticPositions.get(node.id);
+        const spacedPosition = position
+          ? { x: position.x * fixedLayoutSpacing, y: position.y * fixedLayoutSpacing }
+          : undefined;
         return {
           id: node.id,
           label: node.label,
@@ -550,7 +609,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             communityColors
           ),
           size,
-          ...(position ?? {}),
+          ...(spacedPosition ?? {}),
           opacity: node.change === "unchanged" ? 0.58 : 1,
           font: {
             color: "#eef5ff",
@@ -571,6 +630,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       comparisonPositions,
       communityColors,
       initialPositions,
+      fixedLayoutSpacing,
       maxDegree,
       model,
       renderingProfile,
@@ -625,7 +685,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           scale: network.getScale()
         };
         onStabilizedRef.current();
+        refreshMinimap();
       });
+      network.on("stabilized", refreshMinimap);
+      network.on("dragEnd", refreshMinimap);
+      network.on("zoom", refreshMinimap);
+      network.on("resize", refreshMinimap);
+      network.on("animationFinished", refreshMinimap);
       const hasSeededPositions = comparisonPositions.size > 0
         || selectedLayoutPositions.size > 0
         || (initialPositions?.size ?? 0) > 0
@@ -638,7 +704,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           scale: network.getScale()
         };
       }
+      const minimapTimer = window.setTimeout(refreshMinimap, 0);
       return () => {
+        window.clearTimeout(minimapTimer);
         network.destroy();
         networkRef.current = null;
       };
@@ -650,7 +718,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       initialPositions,
       renderingProfile,
       selectedLayoutPositions,
-      staticPositions
+      staticPositions,
+      refreshMinimap
     ]);
 
     useEffect(() => {
@@ -662,28 +731,54 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }, [edgeData, nodeData, physicsRunning]);
 
     useEffect(() => {
-      const hiddenNodes = new Set(
-        model.nodes
-          .filter((node) =>
-            hiddenCommunities.has(node.community)
-            || hiddenChanges.has(node.change ?? "unchanged"))
-          .map((node) => node.id)
-      );
+      const network = networkRef.current;
+      if (!network || layoutStyle !== "automatic" || renderingProfile === "static") return;
+      const previousSpacing = previousLayoutSpacingRef.current;
+      previousLayoutSpacingRef.current = layoutSpacing;
+      network.setOptions({
+        physics: comparisonMode
+          ? { barnesHut: { springLength: 180 * layoutSpacing } }
+          : { forceAtlas2Based: { springLength: 120 * layoutSpacing } }
+      });
+      if (!physicsRunning && previousSpacing !== layoutSpacing) {
+        const ratio = layoutSpacing / previousSpacing;
+        const positions = network.getPositions();
+        nodeData.update(Object.entries(positions).map(([id, position]) => ({
+          id,
+          x: position.x * ratio,
+          y: position.y * ratio
+        })));
+        network.redraw();
+        refreshMinimap();
+      }
+    }, [
+      comparisonMode,
+      layoutSpacing,
+      layoutStyle,
+      nodeData,
+      physicsRunning,
+      refreshMinimap,
+      renderingProfile
+    ]);
+
+    useEffect(() => {
       nodeData.update(model.nodes.map((node) => ({
         id: node.id,
-        hidden: hiddenNodes.has(node.id)
+        hidden: !visibleNodeIds.has(node.id)
       })));
       edgeData.update(renderedEdges.map((edge) => ({
         id: edge.id,
-        hidden: hiddenNodes.has(edge.source) || hiddenNodes.has(edge.target)
+        hidden: !visibleEdgeIds.has(edge.id)
       })));
+      refreshMinimap();
     }, [
       edgeData,
-      hiddenChanges,
-      hiddenCommunities,
+      refreshMinimap,
       renderedEdges,
       model.nodes,
-      nodeData
+      nodeData,
+      visibleEdgeIds,
+      visibleNodeIds
     ]);
 
     useEffect(() => {
@@ -818,15 +913,11 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           animation: cameraAnimation(280)
         });
       },
-      fitSelection(nodeId) {
+      fitSelection(nodeIds) {
         const network = networkRef.current;
-        if (!network) return;
-        const nodes = [
-          nodeId,
-          ...network.getConnectedNodes(nodeId).map(String)
-        ];
+        if (!network || nodeIds.length === 0) return;
         network.fit({
-          nodes: [...new Set(nodes)],
+          nodes: [...new Set(nodeIds)],
           animation: cameraAnimation(240)
         });
       },
@@ -869,18 +960,35 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     }), []);
 
     return (
-      <div
-        ref={containerRef}
-        className="compass-canvas"
-        data-rendering-profile={renderingProfile}
-        data-layout-style={layoutStyle}
-        role="region"
-        aria-label="Interactive Compass code graph"
-        onMouseLeave={() => {
-          onHover(null);
-          onHoverEdge(null);
-        }}
-      />
+      <>
+        <div
+          ref={containerRef}
+          className="compass-canvas"
+          data-rendering-profile={renderingProfile}
+          data-layout-style={layoutStyle}
+          data-isolated={isolatedNodeIds ? "true" : "false"}
+          data-layout-spacing={layoutSpacing}
+          role="region"
+          aria-label="Interactive Compass code graph"
+          onMouseLeave={() => {
+            onHover(null);
+            onHoverEdge(null);
+          }}
+        />
+        {showMinimap && minimapSnapshot ? (
+          <GraphMinimap
+            model={model}
+            snapshot={minimapSnapshot}
+            visibleNodeIds={visibleNodeIds}
+            visibleEdgeIds={visibleEdgeIds}
+            focusedNodeId={focusedNodeId}
+            onNavigate={(position) => networkRef.current?.moveTo({
+              position,
+              animation: cameraAnimation(180)
+            })}
+          />
+        ) : null}
+      </>
     );
   }
 );

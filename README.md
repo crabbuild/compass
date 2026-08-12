@@ -86,6 +86,11 @@ sidebar:
 3. Open the source card, or double-click a located node, to jump to the exact code.
 4. Filter communities or change the layout when you need a different level of detail.
 
+The graph toolbar includes an exploration panel for isolating a selected
+1–4-hop neighborhood, following incoming, outgoing, or both edge directions,
+adjusting layout spacing, and showing a navigable minimap. Press `?` in the
+graph to see camera and exploration keyboard shortcuts.
+
 Right-click inside a function in VS Code to open callers, callees, impact, related symbols, or a path.
 
 ## What Compass gives you
