@@ -16,13 +16,20 @@ use crate::OutputError;
 pub const ORIENTATION_SCHEMA: &str = "compass.orientation/1";
 pub const ORIENTATION_MARKDOWN_MAX_CHARS: usize = 8_000;
 pub const REPORT_MARKDOWN_MAX_CHARS: usize = 64_000;
+const ORIENTATION_JSON_MAX_BYTES: usize = 1024 * 1024 - 1;
 
-const COMMUNITY_LIMIT: usize = 6;
+// The compact Agent Orientation shows only the leading communities, while the
+// full report keeps a substantially wider directory for repository navigation.
+// Both limits are explicit so an adversarial graph cannot grow output without
+// bound.
+const ORIENTATION_COMMUNITY_LIMIT: usize = 6;
+const COMMUNITY_LIMIT: usize = 128;
 const HUB_LIMIT: usize = 8;
 const RISK_LIMIT: usize = 8;
 const QUERY_LIMIT: usize = 8;
 const DETAIL_LIMIT: usize = 12;
-const REPRESENTATIVE_LIMIT: usize = 3;
+const ORIENTATION_REPRESENTATIVE_LIMIT: usize = 3;
+const REPRESENTATIVE_LIMIT: usize = 8;
 const COMMUNITY_LINK_LIMIT: usize = 2;
 const MIX_LIMIT: usize = 8;
 const ARGV_LIMIT: usize = 8;
@@ -422,13 +429,8 @@ pub fn agent_orientation(
     let node_communities = invert_communities(communities);
     let graph = ReportGraph::new(document, &node_communities);
     let cycle_probe = find_import_cycles(document, 5, DETAIL_LIMIT.saturating_add(1));
-    let (community_models, community_total) = build_communities(
-        &graph,
-        communities,
-        cohesion_scores,
-        community_labels,
-        options.min_community_size,
-    );
+    let (community_models, community_total) =
+        build_communities(&graph, communities, cohesion_scores, community_labels);
     let hub_total = god_node_list.len();
     let hubs = god_node_list
         .iter()
@@ -547,6 +549,7 @@ pub fn agent_orientation(
         details,
     };
     sanitize_orientation_model(&mut model);
+    fit_orientation_json_budget(&mut model);
     fit_orientation_budget(&mut model);
     fit_report_budget(&mut model, options.obsidian);
     model
@@ -886,28 +889,49 @@ fn build_communities(
     communities: &Communities,
     cohesion_scores: &BTreeMap<usize, f64>,
     labels: &BTreeMap<usize, String>,
-    min_size: usize,
 ) -> (Vec<OrientationCommunity>, usize) {
-    let eligible = communities
+    let mut eligible = communities
         .iter()
         .filter_map(|(community, members)| {
             let real = members
                 .iter()
                 .filter(|member| !graph.is_file_node_id(member))
                 .collect::<Vec<_>>();
-            (real.len() >= min_size).then_some((*community, real))
+            (!real.is_empty()).then_some((*community, real))
         })
         .collect::<Vec<_>>();
     let total = eligible.len();
+    eligible.sort_by(|(left_id, left_members), (right_id, right_members)| {
+        right_members
+            .len()
+            .cmp(&left_members.len())
+            .then_with(|| {
+                let left_edges = graph
+                    .community_connectivity
+                    .get(left_id)
+                    .map_or(0, |value| value.incident_edge_count);
+                let right_edges = graph
+                    .community_connectivity
+                    .get(right_id)
+                    .map_or(0, |value| value.incident_edge_count);
+                right_edges.cmp(&left_edges)
+            })
+            .then_with(|| labels.get(left_id).cmp(&labels.get(right_id)))
+            .then_with(|| left_id.cmp(right_id))
+    });
     let models = eligible
         .into_iter()
         .take(COMMUNITY_LIMIT)
         .map(|(community, members)| {
-            let representatives = members
+            let mut representatives = members
                 .iter()
                 .filter_map(|member| graph.node_reference(member))
-                .take(REPRESENTATIVE_LIMIT)
                 .collect::<Vec<_>>();
+            // Stable sorting preserves the deterministic community-member order
+            // when two candidates have equal connectivity.
+            representatives
+                .sort_by(|left, right| graph.degree(&right.id).cmp(&graph.degree(&left.id)));
+            representatives.truncate(REPRESENTATIVE_LIMIT);
             let representative_coverage =
                 SectionOmission::from_total_shown(members.len(), representatives.len());
             let connectivity = graph.community_connectivity.get(&community);
@@ -1784,7 +1808,10 @@ fn orientation_strings_are_bounded(model: &AgentOrientation) -> bool {
 }
 
 fn fit_orientation_budget(model: &mut AgentOrientation) {
-    while char_count(&render_orientation_markdown_unchecked(model)) > ORIENTATION_MARKDOWN_MAX_CHARS
+    while char_count(&render_orientation_markdown_with_community_limit(
+        model,
+        ORIENTATION_COMMUNITY_LIMIT,
+    )) > ORIENTATION_MARKDOWN_MAX_CHARS
     {
         if model.suggested_queries.pop().is_some() {
             model
@@ -1798,16 +1825,33 @@ fn fit_orientation_budget(model: &mut AgentOrientation) {
                 .set_shown(model.learned_questions.len());
         } else if model.risks.pop().is_some() {
             model.omissions.risks.set_shown(model.risks.len());
-        } else if model.communities.pop().is_some() {
-            model
-                .omissions
-                .communities
-                .set_shown(model.communities.len());
         } else if model.hubs.pop().is_some() {
             model.omissions.hubs.set_shown(model.hubs.len());
         } else {
             break;
         }
+    }
+}
+
+fn fit_orientation_json_budget(model: &mut AgentOrientation) {
+    loop {
+        let Ok(rendered) = serde_json::to_vec_pretty(model) else {
+            break;
+        };
+        if rendered.len() <= ORIENTATION_JSON_MAX_BYTES || model.communities.is_empty() {
+            break;
+        }
+        let scaled = model
+            .communities
+            .len()
+            .saturating_mul(ORIENTATION_JSON_MAX_BYTES)
+            / rendered.len();
+        let next = scaled.min(model.communities.len().saturating_sub(1));
+        model.communities.truncate(next);
+        model
+            .omissions
+            .communities
+            .set_shown(model.communities.len());
     }
 }
 
@@ -1843,6 +1887,11 @@ fn fit_report_budget(model: &mut AgentOrientation, obsidian: bool) {
                 .omissions
                 .surprising_connections
                 .set_shown(model.details.surprising_connections.len());
+        } else if model.communities.pop().is_some() {
+            model
+                .omissions
+                .communities
+                .set_shown(model.communities.len());
         } else {
             break;
         }
@@ -1850,8 +1899,33 @@ fn fit_report_budget(model: &mut AgentOrientation, obsidian: bool) {
 }
 
 fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
+    let mut community_limit = ORIENTATION_COMMUNITY_LIMIT.min(model.communities.len());
+    loop {
+        let rendered = render_orientation_markdown_with_community_limit(model, community_limit);
+        if char_count(&rendered) <= ORIENTATION_MARKDOWN_MAX_CHARS || community_limit == 0 {
+            return rendered;
+        }
+        community_limit = community_limit.saturating_sub(1);
+    }
+}
+
+fn render_orientation_markdown_with_community_limit(
+    model: &AgentOrientation,
+    community_limit: usize,
+) -> String {
     let evidence = &model.evidence_status;
     let summary = &model.graph_summary;
+    let community_labels = community_label_index(model);
+    let shown_communities = community_limit.min(model.communities.len());
+    let mut hub_label_counts = BTreeMap::<&str, usize>::new();
+    for hub in &model.hubs {
+        let label = if hub.label.is_empty() {
+            hub.id.as_str()
+        } else {
+            hub.label.as_str()
+        };
+        *hub_label_counts.entry(label).or_default() += 1;
+    }
     let mut lines = vec![
         "# Agent Orientation".to_owned(),
         String::new(),
@@ -1905,22 +1979,35 @@ fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
         ),
         String::new(),
         "## Architecture Map".to_owned(),
-        disclosure(model.omissions.communities),
+        "- Leading communities are ranked by member count, connectivity, label, and stable ID. See the complete bounded directory later in this report."
+            .to_owned(),
+        disclosure(SectionOmission::from_total_shown(
+            model.omissions.communities.total,
+            shown_communities,
+        )),
     ];
-    for community in &model.communities {
-        lines.push(format!("### Community {}", community.id));
+    for community in model.communities.iter().take(shown_communities) {
         lines.push(format!(
-            "- Evidence label: {} · members: {} · cohesion: {}",
-            markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS),
+            "### {}",
+            markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS)
+        ));
+        lines.push(format!(
+            "- Query scope: community:{} · members: {} · cohesion: {}",
+            community.id,
             community.member_count,
             community
                 .cohesion
                 .map_or_else(|| "unknown".to_owned(), |value| format!("{value:.2}")),
         ));
+        let representative_count =
+            ORIENTATION_REPRESENTATIVE_LIMIT.min(community.representatives.len());
         lines.push(format!(
-            "- Representatives ({}): {}",
-            inline_disclosure(community.representative_coverage),
-            node_references(&community.representatives)
+            "- Entry points ({}): {}",
+            inline_disclosure(SectionOmission::from_total_shown(
+                community.member_count,
+                representative_count,
+            )),
+            node_references(&community.representatives[..representative_count])
         ));
         lines.push(format!(
             "- Incident edges: {} · adjacent communities: {} · strongest adjacent ({}): {}",
@@ -1930,7 +2017,7 @@ fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
                 community.adjacent_community_count,
                 community.strongest_adjacent.len(),
             )),
-            community_link_list(&community.strongest_adjacent),
+            community_link_list(&community.strongest_adjacent, &community_labels),
         ));
         if let (Some(incoming_total), Some(outgoing_total), Some(incoming), Some(outgoing)) = (
             community.incoming_community_count,
@@ -1944,12 +2031,12 @@ fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
                     incoming_total,
                     incoming.len(),
                 )),
-                community_link_list(incoming),
+                community_link_list(incoming, &community_labels),
                 inline_disclosure(SectionOmission::from_total_shown(
                     outgoing_total,
                     outgoing.len(),
                 )),
-                community_link_list(outgoing),
+                community_link_list(outgoing, &community_labels),
             ));
         }
     }
@@ -1964,13 +2051,27 @@ fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
         disclosure(model.omissions.hubs),
     ]);
     for hub in &model.hubs {
+        let label = if hub.label.is_empty() {
+            hub.id.as_str()
+        } else {
+            hub.label.as_str()
+        };
+        let mut identity = markdown_value(label, MARKDOWN_VALUE_MAX_CHARS);
+        if hub_label_counts.get(label).copied().unwrap_or_default() > 1 && hub.id.as_str() != label
+        {
+            identity.push_str(&format!(
+                " [id: {}]",
+                markdown_value(&hub.id, MARKDOWN_VALUE_MAX_CHARS)
+            ));
+        }
         let mut evidence = format!(
-            "- ID: {} · label: {} · anchor: {} · community: {} · incident edges: {}",
-            markdown_value(&hub.id, MARKDOWN_VALUE_MAX_CHARS),
-            markdown_value(&hub.label, MARKDOWN_VALUE_MAX_CHARS),
+            "- Hub: {} · anchor: {} · community: {} · incident edges: {}",
+            identity,
             optional_anchor(hub.anchor.as_ref()),
-            hub.community_id
-                .map_or_else(|| "unknown".to_owned(), |value| value.to_string()),
+            hub.community_id.map_or_else(
+                || "unknown".to_owned(),
+                |value| community_label_or_scope(value, &community_labels),
+            ),
             hub.incident_edge_count,
         );
         if let (Some(incoming), Some(outgoing)) = (hub.incoming, hub.outgoing) {
@@ -2037,6 +2138,7 @@ fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
 }
 
 fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
+    let community_labels = community_label_index(model);
     let mut lines = vec![
         render_orientation_markdown_unchecked(model),
         String::new(),
@@ -2059,6 +2161,7 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
             markdown_value(warning, MARKDOWN_VALUE_MAX_CHARS)
         ));
     }
+    append_community_directory(&mut lines, model, obsidian, &community_labels);
     lines.extend([
         String::new(),
         "## Surprising Connections".to_owned(),
@@ -2101,32 +2204,6 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
             inline_disclosure(hyperedge.member_coverage),
             value_list(&hyperedge.members),
             markdown_value(&hyperedge.confidence, MARKDOWN_VALUE_MAX_CHARS),
-        ));
-    }
-    lines.extend([
-        String::new(),
-        "## Community Details".to_owned(),
-        disclosure(model.omissions.communities),
-    ]);
-    for community in &model.communities {
-        lines.push(format!("### Community {}", community.id));
-        lines.push(format!(
-            "- Evidence label: {}",
-            markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS)
-        ));
-        if obsidian {
-            lines.push(format!(
-                "- Obsidian note: {}",
-                markdown_value(
-                    &safe_community_name(&community.label),
-                    MARKDOWN_VALUE_MAX_CHARS
-                )
-            ));
-        }
-        lines.push(format!(
-            "- Representatives ({}): {}",
-            inline_disclosure(community.representative_coverage),
-            node_references(&community.representatives)
         ));
     }
     lines.extend([
@@ -2195,6 +2272,79 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
         ));
     }
     lines.join("\n")
+}
+
+fn append_community_directory(
+    lines: &mut Vec<String>,
+    model: &AgentOrientation,
+    obsidian: bool,
+    community_labels: &BTreeMap<usize, &str>,
+) {
+    lines.extend([
+        String::new(),
+        "## Community Directory".to_owned(),
+        "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Communities are ranked by member count and connectivity."
+            .to_owned(),
+        disclosure(model.omissions.communities),
+    ]);
+    for community in &model.communities {
+        lines.push(format!(
+            "### {}",
+            markdown_value(&community.label, MARKDOWN_VALUE_MAX_CHARS)
+        ));
+        lines.push(format!(
+            "- Query scope: community:{} · members: {} · cohesion: {} · incident edges: {} · adjacent communities: {}",
+            community.id,
+            community.member_count,
+            community
+                .cohesion
+                .map_or_else(|| "unknown".to_owned(), |value| format!("{value:.2}")),
+            community.incident_edge_count,
+            community.adjacent_community_count,
+        ));
+        if obsidian {
+            lines.push(format!(
+                "- Obsidian note: {}",
+                markdown_value(
+                    &safe_community_name(&community.label),
+                    MARKDOWN_VALUE_MAX_CHARS
+                )
+            ));
+        }
+        lines.push(format!(
+            "- Entry points ({}): {}",
+            inline_disclosure(community.representative_coverage),
+            node_references(&community.representatives)
+        ));
+        lines.push(format!(
+            "- Strongest adjacent ({}): {}",
+            inline_disclosure(SectionOmission::from_total_shown(
+                community.adjacent_community_count,
+                community.strongest_adjacent.len(),
+            )),
+            community_link_list(&community.strongest_adjacent, &community_labels),
+        ));
+        if let (Some(incoming_total), Some(outgoing_total), Some(incoming), Some(outgoing)) = (
+            community.incoming_community_count,
+            community.outgoing_community_count,
+            community.strongest_incoming.as_ref(),
+            community.strongest_outgoing.as_ref(),
+        ) {
+            lines.push(format!(
+                "- Strongest incoming ({}): {} · outgoing ({}): {}",
+                inline_disclosure(SectionOmission::from_total_shown(
+                    incoming_total,
+                    incoming.len(),
+                )),
+                community_link_list(incoming, &community_labels),
+                inline_disclosure(SectionOmission::from_total_shown(
+                    outgoing_total,
+                    outgoing.len(),
+                )),
+                community_link_list(outgoing, &community_labels),
+            ));
+        }
+    }
 }
 
 struct ReportGraph<'a> {
@@ -2797,21 +2947,61 @@ fn node_references(values: &[OrientationNodeReference]) -> String {
     if values.is_empty() {
         return "none".to_owned();
     }
+    let mut label_counts = BTreeMap::<&str, usize>::new();
+    for value in values {
+        let label = if value.label.is_empty() {
+            value.id.as_str()
+        } else {
+            value.label.as_str()
+        };
+        *label_counts.entry(label).or_default() += 1;
+    }
     values
         .iter()
         .map(|value| {
-            format!(
-                "id={} label={} anchor={}",
-                markdown_value(&value.id, MARKDOWN_VALUE_MAX_CHARS),
-                markdown_value(&value.label, MARKDOWN_VALUE_MAX_CHARS),
-                optional_anchor(value.anchor.as_ref()),
-            )
+            let label = if value.label.is_empty() {
+                value.id.as_str()
+            } else {
+                value.label.as_str()
+            };
+            let mut rendered = markdown_value(label, MARKDOWN_VALUE_MAX_CHARS);
+            if label_counts.get(label).copied().unwrap_or_default() > 1
+                && value.id.as_str() != label
+            {
+                rendered.push_str(&format!(
+                    " [id: {}]",
+                    markdown_value(&value.id, MARKDOWN_VALUE_MAX_CHARS)
+                ));
+            }
+            if let Some(anchor) = value.anchor.as_ref() {
+                rendered.push_str(" — ");
+                rendered.push_str(&optional_anchor(Some(anchor)));
+            }
+            rendered
         })
         .collect::<Vec<_>>()
         .join("; ")
 }
 
-fn community_link_list(values: &[OrientationCommunityLink]) -> String {
+fn community_label_index(model: &AgentOrientation) -> BTreeMap<usize, &str> {
+    model
+        .communities
+        .iter()
+        .map(|community| (community.id, community.label.as_str()))
+        .collect()
+}
+
+fn community_label_or_scope(community: usize, labels: &BTreeMap<usize, &str>) -> String {
+    labels.get(&community).map_or_else(
+        || format!("community:{community}"),
+        |label| markdown_value(label, MARKDOWN_VALUE_MAX_CHARS),
+    )
+}
+
+fn community_link_list(
+    values: &[OrientationCommunityLink],
+    labels: &BTreeMap<usize, &str>,
+) -> String {
     if values.is_empty() {
         return "none".to_owned();
     }
@@ -2819,8 +3009,11 @@ fn community_link_list(values: &[OrientationCommunityLink]) -> String {
         .iter()
         .map(|value| {
             format!(
-                "community {} ({}; {})",
-                value.community_id,
+                "{} ({} edges; {})",
+                labels.get(&value.community_id).map_or_else(
+                    || format!("community:{}", value.community_id),
+                    |label| markdown_value(label, MARKDOWN_VALUE_MAX_CHARS),
+                ),
                 value.count,
                 mix(&value.relation_mix, value.relation_mix_coverage)
             )

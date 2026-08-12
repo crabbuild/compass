@@ -6,8 +6,8 @@ use compass_model::GraphDocument;
 use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, ORIENTATION_MARKDOWN_MAX_CHARS,
     OrientationHealth, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS, ReportOptions, TokenCost,
-    WorkingTreeState, agent_orientation, generate_report, render_orientation_json,
-    render_orientation_markdown,
+    WorkingTreeState, agent_orientation, generate_report, render_agent_report_markdown,
+    render_orientation_json, render_orientation_markdown,
 };
 use serde_json::{Value, json};
 
@@ -220,13 +220,13 @@ fn orientation_is_bounded_deterministic_and_markdown_safe() -> Result<(), Box<dy
                         | "## Surprising Connections"
                         | "## Import Cycles"
                         | "## Hyperedges"
-                        | "## Community Details"
+                        | "## Community Directory"
                         | "## Ambiguous Edge Evidence"
                         | "## Work-Memory Observations"
                         | "## Publication Diagnostic Evidence"
                 ) || line
-                    .strip_prefix("### Community ")
-                    .is_some_and(|id| id.chars().all(|value| value.is_ascii_digit()))
+                    .strip_prefix("### ")
+                    .is_some_and(|label| !label.is_empty())
             })
     );
     for (section, shown) in [
@@ -278,6 +278,78 @@ fn orientation_is_bounded_deterministic_and_markdown_safe() -> Result<(), Box<dy
     assert!(json.contains("<script>x</script>"));
     let restored: compass_output::AgentOrientation = serde_json::from_str(&json)?;
     assert_eq!(restored, model);
+    Ok(())
+}
+
+#[test]
+fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), Box<dyn Error>> {
+    let nodes = (0..101)
+        .map(|index| {
+            json!({
+                "id": format!("internal::node::{index}"),
+                "label": format!("Entry {index:03}"),
+                "source_file": format!("src/module_{index}.rs"),
+                "file_type": "code"
+            })
+        })
+        .collect::<Vec<_>>();
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": true,
+        "graph": {},
+        "nodes": nodes,
+        "links": []
+    }))?;
+    let mut communities = (0..10)
+        .map(|community| {
+            (
+                community,
+                (0..10)
+                    .map(|offset| format!("internal::node::{}", community * 10 + offset))
+                    .collect(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    communities.insert(10, vec!["internal::node::100".to_owned()]);
+    let labels = (0..11)
+        .map(|community| (community, format!("Subsystem {community}")))
+        .collect::<BTreeMap<_, _>>();
+    let mut options = ReportOptions::new("community-directory");
+    options.min_community_size = 1;
+    options.today = Some("2026-08-12");
+    let model = agent_orientation(
+        &document,
+        &communities,
+        &BTreeMap::new(),
+        &labels,
+        &[],
+        &[],
+        &DetectionSummary::default(),
+        TokenCost::default(),
+        None,
+        None,
+        &options,
+    );
+
+    assert_eq!(model.communities.len(), 11);
+    assert!(
+        model
+            .communities
+            .iter()
+            .filter(|community| community.member_count == 10)
+            .all(|community| community.representatives.len() == 8)
+    );
+    let orientation = render_orientation_markdown(&model)?;
+    assert!(orientation.contains("Coverage: total=11 · shown=6 · omitted=5"));
+    assert!(!orientation.contains("### Community 0"));
+
+    let report = render_agent_report_markdown(&model, false)?;
+    assert!(report.contains("## Community Directory"));
+    for community in 0..11 {
+        assert!(report.contains(&format!("### Subsystem {community}")));
+        assert!(report.contains(&format!("Query scope: community:{community}")));
+    }
+    assert!(report.contains("Entry points (total=10 shown=8 omitted=2)"));
+    assert!(!report.contains("id=internal::node::"));
     Ok(())
 }
 
@@ -363,7 +435,7 @@ fn nonportable_argv_preserves_exact_punctuation_without_markdown_structure()
                         | "## Important Diagnostics"
                         | "## Suggested Compass Queries"
                         | "## Learned Graph Questions"
-                        | "### Community 0"
+                        | "### Exact O'Reilly ∗ ［node］ C:＼path ‹tag› ʼʼʼ $HOME ｜ ＃ ！ &"
                 )
             })
     );

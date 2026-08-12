@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Make `GRAPH_REPORT.md` a more complete, label-first architecture entry map.
+  The compact Agent Orientation still highlights the leading communities, while
+  the bounded Community Directory now retains up to 128 ranked non-empty
+  communities, including thin communities, and eight high-connectivity entry
+  points per community, with exact omission counts. Numeric community scopes
+  remain only where they are useful for copyable
+  `compass query --scope community:<id>` follow-up.
+
 - Add bounded `compass.task-context/1` packets through `compass context` and
   MCP `task_context`, with exact target resolution, digest-verified source,
   provenance, linked reflection memory, deterministic omissions, work
