@@ -65,16 +65,31 @@ Human graph exploration is optional. Run `compass export html`, or choose **Open
 
 ```bash
 compass export html
+
+# Put several perspectives in one self-contained page.
+compass export html \
+  --code-graph \
+  --architecture-graph \
+  --call-graph checkout \
+  --impact-graph checkout
 ```
 
 Refresh the browser after a build, or reopen the graph in VS Code.
 
-Use the graph from the right sidebar:
+The exported page and VS Code graph use the same workbench shell. Switch among
+requested code, call, impact, affected, architecture, history, and artifact
+lenses without losing the snapshot context. Use the graph from the right
+sidebar:
 
 1. Search for a symbol or file.
 2. Select a node to inspect its source, signature, community, evidence, and relationships.
 3. Open the source card, or double-click a located node, to jump to the exact code.
 4. Filter communities or change the layout when you need a different level of detail.
+
+The graph toolbar includes an exploration panel for isolating a selected
+1–4-hop neighborhood, following incoming, outgoing, or both edge directions,
+adjusting layout spacing, and showing a navigable minimap. Press `?` in the
+graph to see camera and exploration keyboard shortcuts.
 
 Right-click inside a function in VS Code to open callers, callees, impact, related symbols, or a path.
 

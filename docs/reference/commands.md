@@ -494,6 +494,8 @@ Formats include:
 
 ```text
 html
+json
+workbench-json
 callflow-html
 obsidian
 wiki
@@ -513,6 +515,32 @@ compass export callflow-html --help
 
 Common inputs include `--graph PATH`, labels/report/sections, output directory,
 node/diagram limits, and database connection arguments.
+
+`html`, `json`, and `workbench-json` accept repeatable graph views. Compass
+preserves their command-line order and puts them in one navigable workbench:
+
+```bash
+compass export html --code-graph --architecture-graph
+compass export html --call-graph checkout --impact-graph checkout
+compass export html --affected-graph checkout --relation calls --relation imports
+compass export html --artifact-lens routes --artifact-lens data
+compass export html --history-graph main~10..main
+```
+
+The equivalent generic syntax is repeatable `--view` with `code`,
+`architecture`, `call:SYMBOL`, `impact:SYMBOL`, `affected:NODE`,
+`history:OLD..NEW`, or `artifact:LENS`. Call, impact, and affected views share
+bounded `--depth`, `--max-nodes`, and `--max-edges` controls. `--direction`
+applies to call views, `--include-heuristic` to impact views, repeatable
+`--relation` to affected views, and `--program PATH` enriches call views with
+Program IR evidence. Unsupported, misspelled, and format-incompatible options
+fail instead of being ignored.
+
+With no requested view, `html` contains a code-graph workbench and plain
+`json` retains the existing `compass.viewer.graph/1` response. Any requested
+view makes `json` return `compass.viewer.workbench/1`; `workbench-json` always
+returns that contract. `--community` remains a graph-only JSON operation and
+cannot be combined with workbench views. `--output PATH` selects the HTML file.
 
 For `html` and `callflow-html`, an interactive terminal asks before opening the
 generated page in the default browser. Non-interactive commands never prompt or
@@ -812,6 +840,8 @@ the detailed operational workflow is in the
 ```text
 compass capabilities --format json
 compass export json [--community ID]
+compass export workbench-json [VIEW ...]
+compass export html [VIEW ...]
 compass export callflow-json --output PATH
 compass program call-graph (--symbol SYMBOL | --source FILE --byte BYTE)
   [--direction callers|callees|both] [--depth N] --format json

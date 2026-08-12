@@ -16,8 +16,8 @@ import { CoverageNotice } from "./CoverageNotice";
 
 export type CallGraphHost = {
   openSource(source: SourceLocation): void;
-  expand(symbol: string, direction: CallDirection, depth: number): void;
-  changeDirection(direction: CallDirection): void;
+  expand?(symbol: string, direction: CallDirection, depth: number): void;
+  changeDirection?(direction: CallDirection): void;
 };
 
 export function CallGraph({
@@ -37,10 +37,10 @@ export function CallGraph({
       ? "No callees found"
       : "No calls found";
   return (
-    <div className="relative h-screen">
+    <div className="call-graph-view relative h-screen">
       <CallCanvas graph={graph} host={host} />
       <div
-        className="absolute top-2 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-md border bg-popover/95 p-1 shadow-lg backdrop-blur"
+        className="call-graph-direction absolute top-2 left-1/2 z-20 flex -translate-x-1/2 gap-1 rounded-md border bg-popover/95 p-1 shadow-lg backdrop-blur"
         role="group"
         aria-label="Call graph direction"
       >
@@ -54,15 +54,16 @@ export function CallGraph({
             size="sm"
             variant={graph.direction === direction ? "secondary" : "ghost"}
             aria-pressed={graph.direction === direction}
+            disabled={!host.changeDirection}
             onClick={() => {
-              if (graph.direction !== direction) host.changeDirection(direction);
+              if (graph.direction !== direction) host.changeDirection?.(direction);
             }}
           >
             {label}
           </Button>
         ))}
       </div>
-      <section className="absolute bottom-3 left-3 z-20 flex max-w-[min(44rem,calc(100%-1.5rem))] flex-col gap-2 rounded-md border bg-popover/95 p-3 text-popover-foreground shadow-xl backdrop-blur">
+      <section className="call-graph-summary absolute bottom-3 left-3 z-20 flex max-w-[min(44rem,calc(100%-1.5rem))] flex-col gap-2 rounded-md border bg-popover/95 p-3 text-popover-foreground shadow-xl backdrop-blur">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline"><GitForkIcon /> depth {graph.depth}</Badge>
           <Badge variant="outline">
@@ -105,7 +106,8 @@ export function CallGraph({
                   key={`${continuation.symbol}:${continuation.direction}:${continuation.nextDepth}`}
                   size="xs"
                   variant="outline"
-                  onClick={() => host.expand(
+                  disabled={!host.expand}
+                  onClick={() => host.expand?.(
                     continuation.symbol,
                     continuation.direction,
                     continuation.nextDepth

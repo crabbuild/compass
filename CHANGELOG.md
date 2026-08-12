@@ -11,6 +11,19 @@
   summarizing signature/body changes, impact, static test evidence, advisory
   documentation drift, and bounded local ownership.
 
+- Add the versioned `compass.viewer.workbench/1` export contract and a shared
+  navigation shell for offline HTML and VS Code. `compass export html` now
+  accepts repeatable code, call, impact, affected, architecture, history, and
+  artifact lenses in one self-contained page; strict parsing rejects unknown
+  or format-incompatible options. Add relationship, evidence, node-kind, and
+  language filters, explicit coverage state, deterministic depth layouts, and
+  convenient graph-camera controls for bounded zoom, 100% reset, whole-graph
+  and selected-neighborhood fitting, plus independent node and relationship
+  labels. Add bounded 1–4-hop selection isolation with incoming/outgoing edge
+  filtering, layout spacing, a navigable minimap, and discoverable keyboard
+  shortcuts. Add the `workbench-json` machine export while preserving plain
+  `compass.viewer.graph/1` JSON compatibility.
+
 - Make PHP extraction and type resolution fail closed for colliding exact or
   case-folded symbols instead of selecting a hash-iteration winner. Qualified
   duplicate types now prefer one unique same-file declaration and otherwise
@@ -172,6 +185,43 @@
   preserved through cached and rebuilt graphs. Preserve the pipeline's exact
   repository-relative identity for universal framework facts so shallow source
   paths are published instead of being mistaken for temporary-directory paths.
+
+## 0.3.9 - 2026-08-12
+
+- Add the versioned `compass.viewer.workbench/1` export contract and a shared
+  navigation shell for offline HTML and VS Code. `compass export html` now
+  supports repeatable code, call, impact, affected, architecture, history, and
+  artifact lenses, relationship/evidence/node-kind/language filters,
+  deterministic depth layouts, bounded camera controls, 1–4-hop selection
+  isolation, minimap navigation, keyboard shortcuts, and the `workbench-json`
+  machine export while preserving `compass.viewer.graph/1` compatibility.
+
+## 0.3.8 - 2026-08-11
+
+- Make evidence-first structural inference the default, with explicit
+  `--inference-level low|medium|high|max` controls. Low builds preserve
+  exact/source-backed relationships, bind the level into cache/build identity,
+  and remain deterministic.
+
+- Improve natural and agent discovery with indexed identifier/subword and
+  relationship-term recall, bounded caller/operation-role discovery,
+  capacity-aware traversal, focused default neighborhoods, and constant-work
+  proven no-answer behavior while preserving ambiguity, direction, provenance,
+  and bounded contracts.
+
+- Reduce resolver/query memory and latency with compact deterministic
+  fact/occurrence tables, bounded AST-cache publication, shared readers/object
+  caching, targeted index release, and pinned discovery/delta/performance
+  qualification.
+
+- Add typed pull-request risk review over immutable target, PR-head, and
+  synthetic-merge realizations, with deterministic cmpprv1 findings,
+  completeness/advisory risk projections, CLI/MCP surfaces, a fork-safe
+  read-only GitHub Action, and cycle-aware dependency topology.
+
+- Harden PHP symbol resolution and graph publication determinism, preserve
+  wildcard/import source anchors and directed multigraph evidence, and improve
+  community labels/report references.
 
 ## 0.3.7 - 2026-08-08
 

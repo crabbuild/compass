@@ -98,7 +98,7 @@ describe("seedGraphLayoutPositions", () => {
     { id: "beta", label: "Beta", community: 1 }
   ];
 
-  it.each(["circle", "concentric", "spiral", "grid"] as const)(
+  it.each(["circle", "concentric", "spiral", "grid", "hierarchical"] as const)(
     "produces a deterministic %s layout",
     (style) => {
       expect([...seedGraphLayoutPositions(nodes, style)]).toEqual([
@@ -106,6 +106,17 @@ describe("seedGraphLayoutPositions", () => {
       ]);
     }
   );
+
+  it("places lower hierarchical depths above higher depths", () => {
+    const layered: GraphNode[] = [
+      { id: "root", label: "Root", community: 0, depth: 0, root: true },
+      { id: "one", label: "One", community: 0, depth: 1 },
+      { id: "two", label: "Two", community: 0, depth: 2 }
+    ];
+    const positions = seedGraphLayoutPositions(layered, "hierarchical");
+    expect(positions.get("root")!.y).toBeLessThan(positions.get("one")!.y);
+    expect(positions.get("one")!.y).toBeLessThan(positions.get("two")!.y);
+  });
 
   it("centers the highest-degree node and expands through concentric rings", () => {
     const hubs: GraphNode[] = Array.from({ length: 24 }, (_, index) => ({

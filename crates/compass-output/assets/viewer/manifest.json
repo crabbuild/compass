@@ -3,12 +3,12 @@
   "viewerSchema": "compass.viewer.graph/1",
   "files": {
     "graph.js": {
-      "bytes": 954743,
-      "sha256": "df9c8430f0059f4e64c6793ded1e9f737a3bc69c92b6c9ea64b37c11610c8a76"
+      "bytes": 1061054,
+      "sha256": "8fca646bcfdf0a81e9c72a5e3e2103864d6264c98a42bac0ae842c118317542f"
     },
     "viewer.css": {
-      "bytes": 211233,
-      "sha256": "3d43bdc15efdcd1db01ac7c1c104086486c69608a4911277ee78ebf3f0b5126b"
+      "bytes": 227748,
+      "sha256": "1079b0e7cea199e93f704f85bf7f9e4a2ac87459ace118c8076156252071b8ca"
     }
   }
 }
