@@ -289,6 +289,173 @@ fn canonical_json_exports_one_complete_community() -> Result<(), Box<dyn Error>>
 }
 
 #[test]
+fn workbench_json_preserves_requested_view_order_and_contract() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    std::fs::write(
+        &graph,
+        serde_json::to_vec(&json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {"schema":"compass.graph/1"},
+            "nodes": [
+                {"id":"caller","label":"caller","name":"caller","qualified_name":"caller","kind":"function","community":0,"source_file":"src/lib.rs","line_start":1},
+                {"id":"target","label":"target","name":"target","qualified_name":"target","kind":"function","community":0,"source_file":"src/lib.rs","line_start":2},
+                {"id":"test","label":"test","name":"test","qualified_name":"test","kind":"function","community":1,"source_file":"tests/test.rs","line_start":1}
+            ],
+            "links": [
+                {"source":"caller","target":"target","relation":"calls","kind":"calls","confidence":"extracted"},
+                {"source":"test","target":"target","relation":"tests","kind":"tests","confidence":"extracted"}
+            ]
+        }))?,
+    )?;
+    let output = support::compass_command()
+        .args([
+            "export",
+            "workbench-json",
+            "--graph",
+            graph.to_string_lossy().as_ref(),
+            "--code-graph",
+            "--call-graph",
+            "target",
+            "--affected-graph",
+            "target",
+            "--relation",
+            "calls",
+            "--artifact-lens",
+            "tests",
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(value["schema"], "compass.viewer.workbench/1");
+    let kinds = value["views"]
+        .as_array()
+        .ok_or("missing workbench views")?
+        .iter()
+        .map(|view| view["kind"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(kinds, ["code", "call", "affected", "artifact"]);
+    assert_eq!(value["defaultView"], "code");
+    assert!(value["views"][0]["communityDetails"].is_object());
+    assert!(value["views"][0].get("community_details").is_none());
+    assert_eq!(value["views"][2]["model"]["nodes"][0]["depth"], 1);
+
+    Ok(())
+}
+
+#[test]
+fn impact_graph_export_uses_the_typed_query_contract() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    std::fs::create_dir_all(directory.path().join("src"))?;
+    std::fs::write(
+        directory.path().join("src/lib.rs"),
+        "pub fn caller() { target(); }\npub fn target() {}\n",
+    )?;
+    let build = support::compass_command()
+        .args(["update", ".", "--code-only", "--no-viz"])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let impact = support::compass_command()
+        .args([
+            "export",
+            "workbench-json",
+            "--impact-graph",
+            "target",
+            "--include-heuristic",
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        impact.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&impact.stderr)
+    );
+    let impact: Value = serde_json::from_slice(&impact.stdout)?;
+    assert_eq!(impact["views"][0]["kind"], "impact");
+    assert_eq!(impact["views"][0]["result"]["operation"], "impact");
+    Ok(())
+}
+
+#[test]
+fn html_export_embeds_one_workbench_for_multiple_views() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    let html = directory.path().join("review.html");
+    std::fs::write(
+        &graph,
+        serde_json::to_vec(&json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {"schema":"compass.graph/1"},
+            "nodes": [
+                {"id":"caller","label":"caller","kind":"function","community":0,"source_file":"src/lib.rs","line_start":1},
+                {"id":"target","label":"target","kind":"function","community":0,"source_file":"src/lib.rs","line_start":2}
+            ],
+            "links": [
+                {"source":"caller","target":"target","relation":"calls","kind":"calls","confidence":"extracted"}
+            ]
+        }))?,
+    )?;
+    let output = support::compass_command()
+        .args([
+            "export",
+            "html",
+            "--graph",
+            graph.to_string_lossy().as_ref(),
+            "--output",
+            html.to_string_lossy().as_ref(),
+            "--code-graph",
+            "--call-graph",
+            "target",
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = std::fs::read_to_string(html)?;
+    assert_eq!(document.matches("id=\"compass-viewer-model\"").count(), 1);
+    assert!(document.contains("compass.viewer.workbench/1"));
+    assert!(document.contains("\"kind\":\"call\""));
+    Ok(())
+}
+
+#[test]
+fn export_rejects_unknown_and_view_incompatible_options_before_io() -> Result<(), Box<dyn Error>> {
+    let unknown = support::compass_command()
+        .args(["export", "html", "--typo"])
+        .output()?;
+    assert!(!unknown.status.success());
+    assert!(
+        String::from_utf8_lossy(&unknown.stderr).contains("unexpected export html argument --typo")
+    );
+
+    let incompatible = support::compass_command()
+        .args(["export", "html", "--direction", "callers"])
+        .output()?;
+    assert!(!incompatible.status.success());
+    assert!(String::from_utf8_lossy(&incompatible.stderr).contains("requires a call graph view"));
+    Ok(())
+}
+
+#[test]
 fn callflow_json_exposes_the_shared_architecture_model() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = directory.path().join("graph.json");

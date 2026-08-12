@@ -17,6 +17,7 @@ export function CallCanvas({
   host: GraphHost;
 }) {
   const nodeResolution = new Map<string, keyof typeof resolutionCommunity>();
+  const depths = callDepths(graph);
   for (const edge of graph.edges) {
     const current = nodeResolution.get(edge.target);
     if (!current || resolutionCommunity[edge.resolution] > resolutionCommunity[current]) {
@@ -38,6 +39,8 @@ export function CallCanvas({
       kind: node.unresolved ? "Unresolved call" : "Function",
       community: resolutionCommunity[nodeResolution.get(node.id) ?? "resolved"],
       communityName: nodeResolution.get(node.id) ?? "resolved",
+      depth: depths.get(node.id),
+      root: node.id === graph.rootSymbol,
       source: sourceLocation(node)
     })),
     edges: graph.edges.map((edge) => ({
@@ -56,7 +59,32 @@ export function CallCanvas({
     ],
     hyperedges: []
   };
-  return <CompassGraph model={model} host={host} />;
+  return <CompassGraph model={model} host={host} preferredLayout="hierarchical" />;
+}
+
+function callDepths(graph: CallGraphResponse): Map<string, number> {
+  const neighbors = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const source = neighbors.get(edge.source) ?? [];
+    source.push(edge.target);
+    neighbors.set(edge.source, source);
+    const target = neighbors.get(edge.target) ?? [];
+    target.push(edge.source);
+    neighbors.set(edge.target, target);
+  }
+  const depths = new Map([[graph.rootSymbol, 0]]);
+  const queue = [graph.rootSymbol];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current === undefined) break;
+    const depth = depths.get(current) ?? 0;
+    for (const neighbor of neighbors.get(current) ?? []) {
+      if (depths.has(neighbor)) continue;
+      depths.set(neighbor, depth + 1);
+      queue.push(neighbor);
+    }
+  }
+  return depths;
 }
 
 function sourceLocation(

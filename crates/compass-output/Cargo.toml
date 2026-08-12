@@ -21,6 +21,7 @@ sha2.workspace = true
 thiserror.workspace = true
 time.workspace = true
 compass-files = { path = "../compass-files", version = "0.3.8" }
+compass-analysis = { path = "../compass-analysis", version = "0.3.8" }
 compass-cypher = { path = "../compass-cypher", version = "0.3.8" }
 compass-graph = { path = "../compass-graph", version = "0.3.8" }
 compass-history = { path = "../compass-history", version = "0.3.8" }

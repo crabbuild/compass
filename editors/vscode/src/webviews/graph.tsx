@@ -1,9 +1,13 @@
 import { createRoot, type Root } from "react-dom/client";
 import {
-  CompassGraph,
+  VisualizationWorkbench,
+  WORKBENCH_SCHEMA,
+  codeQueryGraphViewModel,
   type CodeQueryResponse,
   type GraphViewModel,
-  type InspectorLayout
+  type InspectorLayout,
+  type WorkbenchModel,
+  type WorkbenchView
 } from "@compass/viewer";
 import { HostToGraphMessageSchema } from "../transport/messages";
 import {
@@ -71,13 +75,13 @@ function renderError(message: string): void {
 
 function renderGraph(): void {
   if (!overview) return;
+  const workbench = workbenchModel(overview, queryResult, repositoryId);
   root.render(
-    <CompassGraph
-      model={overview}
+    <VisualizationWorkbench
+      workbench={workbench}
       communityDetail={communityDetail}
       communityLoading={communityLoading}
       communityError={communityError}
-      queryResult={queryResult}
       onBackToOverview={() => {
         communityDetail = undefined;
         communityLoading = null;
@@ -118,6 +122,93 @@ function renderGraph(): void {
       }}
     />
   );
+}
+
+function workbenchModel(
+  code: GraphViewModel,
+  query: CodeQueryResponse | undefined,
+  identity: string
+): WorkbenchModel {
+  const views: WorkbenchView[] = [{
+    id: "code",
+    title: "Code graph",
+    description: "Repository structure, ownership, and relationships",
+    coverage: graphCoverage(code),
+    kind: "code",
+    model: code,
+    communityDetails: {}
+  }];
+  if (query) {
+    const root = query.nodes[0]?.name ?? query.nodes[0]?.id ?? "query";
+    const title = queryTitle(query, root);
+    if (query.operation === "impact") {
+      views.push({
+        id: "impact",
+        title,
+        description: "Inbound code paths that can be affected by a change",
+        coverage: queryCoverage(query),
+        kind: "impact",
+        root,
+        result: query
+      });
+    } else {
+      views.push({
+        id: `query-${query.operation}`,
+        title,
+        description: "A focused projection returned by the typed code-query engine",
+        coverage: queryCoverage(query),
+        kind: "affected",
+        root,
+        relations: [...new Set(query.edges.map((edge) => edge.kind))].sort(),
+        depth: query.limits.maxDepth,
+        model: codeQueryGraphViewModel(query, title)
+      });
+    }
+  }
+  return {
+    schema: WORKBENCH_SCHEMA,
+    title: code.title,
+    graphIdentity: `repository:${identity}`,
+    defaultView: query ? views[1]!.id : "code",
+    views
+  };
+}
+
+function graphCoverage(model: GraphViewModel) {
+  return {
+    status: model.stats.aggregated ? "summary" as const : "complete" as const,
+    truncated: false,
+    nodes: model.stats.nodes,
+    edges: model.stats.edges,
+    limitations: model.stats.aggregated
+      ? ["The repository overview is aggregated by community."]
+      : []
+  };
+}
+
+function queryCoverage(query: CodeQueryResponse) {
+  return {
+    status: query.truncated ? "partial" as const : "complete" as const,
+    truncated: query.truncated,
+    nodes: query.nodes.length,
+    edges: query.edges.length,
+    limitations: query.truncated
+      ? ["The query reached its configured node or edge bound."]
+      : []
+  };
+}
+
+function queryTitle(query: CodeQueryResponse, root: string): string {
+  const label = query.operation === "impact"
+    ? "Impact"
+    : query.operation === "callers"
+      ? "Callers"
+      : query.operation === "callees" ? "Callees" : humanize(query.operation);
+  return `${label} · ${root}`;
+}
+
+function humanize(value: string): string {
+  return value.replaceAll("_", " ").replace(/^./, (character) => character.toUpperCase());
 }
 
 window.addEventListener("message", (event) => {

@@ -45,6 +45,7 @@ const CHANGE_TYPES: Array<{
 ];
 
 const FIXED_LAYOUT_STATUS: Record<Exclude<GraphLayoutStyle, "automatic">, string> = {
+  hierarchical: "Depth-layer layout",
   circle: "Circle layout",
   concentric: "Concentric layout",
   spiral: "Spiral layout",
@@ -78,6 +79,7 @@ export type CompassGraphProps = {
   queryResult?: CodeQueryResponse | undefined;
   initialInspectorLayout?: Partial<InspectorLayout> | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
+  preferredLayout?: GraphLayoutStyle | undefined;
 };
 
 export function CompassGraph({
@@ -90,7 +92,8 @@ export function CompassGraph({
   sourceRevisions,
   queryResult,
   initialInspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  preferredLayout = "automatic"
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -116,6 +119,7 @@ export function CompassGraph({
       queryResult={queryResult}
       inspectorLayout={inspectorLayout}
       onInspectorLayoutChange={updateInspectorLayout}
+      preferredLayout={preferredLayout}
     />
   );
 }
@@ -131,7 +135,8 @@ function CompassGraphView({
   sourceRevisions,
   queryResult,
   inspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  preferredLayout
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -144,8 +149,13 @@ function CompassGraphView({
   queryResult?: CodeQueryResponse | undefined;
   inspectorLayout: InspectorLayout;
   onInspectorLayoutChange(layout: InspectorLayout): void;
+  preferredLayout: GraphLayoutStyle;
 }) {
-  const [state, dispatch] = useReducer(graphReducer, model, initialGraphStateForModel);
+  const [state, dispatch] = useReducer(
+    graphReducer,
+    model,
+    (initial) => initialGraphStateForModel(initial, preferredLayout)
+  );
   const [hover, setHover] = useState<GraphHover | null>(null);
   const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);

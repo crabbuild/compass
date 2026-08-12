@@ -41,7 +41,18 @@ export const initialGraphState: GraphState = {
   query: ""
 };
 
-export function initialGraphStateForModel(model: GraphViewModel): GraphState {
+export function initialGraphStateForModel(
+  model: GraphViewModel,
+  preferredLayout: GraphLayoutStyle = "automatic"
+): GraphState {
+  if (preferredLayout !== "automatic") {
+    return {
+      ...initialGraphState,
+      layoutStyle: preferredLayout,
+      physicsRunning: false,
+      initialLayoutPending: false
+    };
+  }
   if (graphRenderingProfile(model) === "interactive") return initialGraphState;
   return {
     ...initialGraphState,

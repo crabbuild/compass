@@ -256,6 +256,21 @@ the VS Code extension. It performs no runtime network requests, follows the
 operating system's light or dark color scheme, and retains keyboard, reduced
 motion, narrow-screen, and high-contrast behavior from the shared viewer.
 
+The embedded `compass.viewer.workbench/1` model contains an ordered list of
+independently bounded views with explicit `complete`, `summary`, or `partial`
+coverage. One HTML file can contain code, call, impact, affected, architecture,
+history-comparison, and artifact-specific lenses. Its navigation rail keeps
+the current graph identity and exposes hash links such as `#view=impact-run`.
+Graph lenses share relationship, evidence, node-kind, and language filters;
+call, impact, and affected views start in a deterministic depth-layer layout.
+Architecture views use subsystem routes, while history views overlay added,
+removed, and changed graph evidence.
+
+The machine form is available from `compass export workbench-json`, or from
+`compass export json` when at least one view is requested. Unknown major
+workbench schemas must be rejected. Plain `compass export json` remains
+`compass.viewer.graph/1` for existing consumers.
+
 When the node limit selects a community overview, the standalone document
 embeds a deterministic bounded set of complete community details: at most
 5,000 detail nodes and 40,000 internal detail edges across the export. Details

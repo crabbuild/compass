@@ -37,6 +37,8 @@ export const GraphNodeSchema = z.object({
   detailAvailable: z.boolean().optional(),
   learningStatus: z.string().optional(),
   learningStale: z.boolean().optional(),
+  depth: z.number().int().nonnegative().optional(),
+  root: z.boolean().optional(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
   evidence: GraphRecordEvidenceSchema.optional(),
   codeEvidence: z.array(CodeEvidenceSchema).optional(),

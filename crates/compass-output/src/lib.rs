@@ -11,6 +11,7 @@ mod history_bundle;
 mod history_viewer;
 mod html;
 mod json;
+mod lenses;
 mod obsidian;
 mod report;
 mod review;
@@ -18,6 +19,7 @@ mod svg;
 mod tree;
 mod viewer_model;
 mod wiki;
+mod workbench;
 
 pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
@@ -39,10 +41,14 @@ pub use history_bundle::{
 };
 pub use history_viewer::{HistoricalViewError, historical_graph_document, historical_view_model};
 pub use html::{
-    HtmlOptions, HtmlRender, graph_community_view_model_document, graph_view_model_document,
-    html_document, write_html,
+    GraphViewBundle, HtmlOptions, HtmlRender, graph_community_view_model_document,
+    graph_view_model_bundle_document, graph_view_model_document, html_document, write_html,
 };
 pub use json::{JsonExportOptions, export_json_value, write_json};
+pub use lenses::{
+    AffectedLensOptions, ArtifactLens, LensProjection, affected_lens_view_model,
+    artifact_lens_view_model,
+};
 pub use obsidian::{ObsidianExport, ObsidianOptions, export_obsidian, node_filenames};
 pub use report::{
     AgentOrientation, BoundedCoverage, DetectionSummary, FreshnessBasis, FreshnessStatus,
@@ -68,6 +74,10 @@ pub use viewer_model::{
     shared_viewer_html_with_communities,
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
+pub use workbench::{
+    WORKBENCH_SCHEMA, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
+    WorkbenchViewContent, workbench_html_document, write_workbench_html,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {
@@ -111,6 +121,8 @@ pub enum OutputError {
         nodes: usize,
         limit: isize,
     },
+    #[error("no unique graph node matches affected root {0}")]
+    AffectedRoot(String),
     #[error("graph.json contains 0 nodes")]
     EmptyCallflowGraph,
     #[error("no sections defined")]

@@ -144,6 +144,470 @@ body.vscode-high-contrast {
   color-scheme: dark;
 }
 
+/* Multi-lens visualization workbench */
+.visualization-workbench {
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  grid-template-columns: minmax(220px, 268px) minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--background);
+}
+
+.visualization-rail {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-right: 1px solid var(--compass-line);
+  background:
+    linear-gradient(180deg, var(--compass-focus-soft), transparent 180px),
+    var(--compass-panel);
+}
+
+.visualization-rail > header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 18px 16px 16px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.visualization-bearing {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 48%, var(--border));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--compass-focus) 12%, transparent);
+  color: var(--compass-focus);
+  box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--compass-focus) 5%, transparent);
+}
+
+.visualization-bearing svg {
+  width: 18px;
+  height: 18px;
+}
+
+.visualization-rail header > span:last-child,
+.visualization-rail nav button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.visualization-rail header strong {
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.visualization-rail header small,
+.visualization-rail nav small {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visualization-rail nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 8px;
+  overflow: auto;
+}
+
+.visualization-rail nav button {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.visualization-rail nav button:hover {
+  background: var(--workbench-hover);
+}
+
+.visualization-rail nav button[aria-current="page"] {
+  border-color: color-mix(in srgb, var(--compass-focus) 28%, var(--border));
+  background: color-mix(in srgb, var(--compass-focus) 13%, var(--compass-panel));
+  box-shadow: inset 2px 0 var(--compass-focus);
+}
+
+.visualization-rail nav svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+
+.visualization-rail nav button[aria-current="page"] svg {
+  color: var(--compass-focus);
+}
+
+.visualization-rail nav strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visualization-rail nav i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--compass-success);
+}
+
+.visualization-rail nav i[data-status="summary"] {
+  background: var(--compass-warning);
+}
+
+.visualization-rail nav i[data-status="partial"] {
+  background: var(--destructive);
+}
+
+.visualization-rail > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--compass-line);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.visualization-rail > footer code {
+  color: var(--foreground);
+  font-family: var(--compass-font-mono);
+}
+
+.visualization-main {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 49px minmax(0, 1fr);
+}
+
+.visualization-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 7px 14px 7px 16px;
+  border-bottom: 1px solid var(--compass-line);
+  background: color-mix(in srgb, var(--background) 92%, var(--compass-panel));
+}
+
+.visualization-context > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.visualization-context > div:first-child span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.visualization-context > div:first-child strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visualization-coverage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.visualization-coverage strong {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--compass-success) 36%, var(--border));
+  border-radius: 999px;
+  color: var(--compass-success);
+  font-weight: 600;
+}
+
+.visualization-coverage[data-status="summary"] strong {
+  border-color: color-mix(in srgb, var(--compass-warning) 42%, var(--border));
+  color: var(--compass-warning);
+}
+
+.visualization-coverage[data-status="partial"] strong {
+  border-color: color-mix(in srgb, var(--destructive) 42%, var(--border));
+  color: var(--destructive);
+}
+
+.visualization-stage,
+.workbench-graph-lens,
+.workbench-history-view,
+.workbench-architecture {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.workbench-graph-lens,
+.workbench-architecture {
+  display: grid;
+  grid-template-rows: 39px minmax(0, 1fr);
+}
+
+.workbench-graph-lens > .compass-workspace,
+.workbench-history-view .compass-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.visualization-stage .call-graph-view {
+  height: 100%;
+}
+
+.visualization-stage .call-graph-direction {
+  top: 58px;
+}
+
+.visualization-stage .call-graph-summary {
+  max-height: min(42%, 360px);
+  overflow: auto;
+}
+
+.workbench-filter-strip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--compass-line);
+  overflow-x: auto;
+  background: var(--compass-panel);
+}
+
+.workbench-filter-strip label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.workbench-filter-strip select {
+  height: 27px;
+  max-width: 160px;
+  padding: 2px 22px 2px 7px;
+  border: 1px solid var(--input);
+  border-radius: 3px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 10px;
+}
+
+.workbench-filter-strip > span {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.workbench-history-view {
+  position: relative;
+}
+
+.workbench-history-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 5px;
+  transform: translateX(-50%);
+  background: var(--compass-panel-raised);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.workbench-history-banner svg {
+  width: 17px;
+  color: var(--compass-focus);
+}
+
+.workbench-history-banner span {
+  display: grid;
+  gap: 1px;
+}
+
+.workbench-history-banner strong {
+  font-size: 11px;
+}
+
+.workbench-history-banner small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.workbench-architecture-body {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 310px);
+}
+
+.workbench-architecture-body > .architecture-map-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.workbench-architecture-body > aside {
+  min-width: 0;
+  padding: 16px;
+  border-left: 1px solid var(--compass-line);
+  overflow: auto;
+  background: var(--compass-panel);
+}
+
+.workbench-architecture-body > aside > span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.workbench-architecture-body > aside h2 {
+  margin: 5px 0;
+  font-size: 15px;
+}
+
+.workbench-architecture-body > aside p {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.workbench-symbol-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.workbench-symbol-list button {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.workbench-symbol-list button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--workbench-hover);
+}
+
+.workbench-symbol-list button:disabled {
+  cursor: default;
+}
+
+.workbench-symbol-list strong,
+.workbench-symbol-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-symbol-list strong {
+  font-size: 10px;
+}
+
+.workbench-symbol-list small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.visualization-workbench button:focus-visible,
+.visualization-workbench select:focus-visible {
+  outline: 1px solid var(--compass-focus);
+  outline-offset: 1px;
+}
+
+@media (max-width: 760px) {
+  .visualization-workbench {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .visualization-rail > header {
+    justify-content: center;
+    padding-inline: 8px;
+  }
+
+  .visualization-rail header > span:last-child,
+  .visualization-rail nav button > span,
+  .visualization-rail nav i,
+  .visualization-rail > footer {
+    display: none;
+  }
+
+  .visualization-rail nav button {
+    display: grid;
+    grid-template-columns: 1fr;
+    place-items: center;
+  }
+
+  .visualization-coverage > span {
+    display: none;
+  }
+
+  .workbench-architecture-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workbench-architecture-body > aside {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .visualization-rail nav button[aria-current="page"] {
+    animation: compass-bearing 180ms ease-out;
+  }
+}
+
+@keyframes compass-bearing {
+  from { transform: translateX(-3px); opacity: 0.7; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 * {
   border-color: var(--border);
 }

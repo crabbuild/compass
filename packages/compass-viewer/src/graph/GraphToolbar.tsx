@@ -68,6 +68,7 @@ export function GraphToolbar({
             onChange={(event) => onLayoutChange(event.target.value as GraphLayoutStyle)}
           >
             <option value="automatic">Automatic</option>
+            <option value="hierarchical">Depth layers</option>
             <option value="circle">Circle</option>
             <option value="concentric">Concentric</option>
             <option value="spiral">Spiral</option>

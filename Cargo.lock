@@ -1257,6 +1257,7 @@ name = "compass-output"
 version = "0.3.8"
 dependencies = [
  "ahash",
+ "compass-analysis",
  "compass-cypher",
  "compass-files",
  "compass-graph",
