@@ -32,7 +32,6 @@ import {
   type GraphEdgeDirection
 } from "./neighborhood";
 import {
-  graphRenderingProfile,
   visibleGraphEdges,
   type GraphLayoutStyle
 } from "./renderingProfile";
@@ -420,7 +419,7 @@ function CompassGraphView({
     ? `Inspecting ${selected.label}`
     : state.layoutStyle !== "automatic"
       ? FIXED_LAYOUT_STATUS[state.layoutStyle]
-      : state.physicsRunning ? "Layout running" : "Layout paused";
+      : state.physicsRunning ? "Layout running" : "Layout static";
   const loadingCommunity = communityLoading !== undefined && communityLoading !== null
     ? model.communities.find((community) => community.id === communityLoading)
     : undefined;
@@ -500,8 +499,7 @@ function CompassGraphView({
             onLayoutChange={(layout: GraphLayoutStyle) => dispatch({
               type: "setLayout",
               layout,
-              runPhysics: layout === "automatic"
-                && graphRenderingProfile(model) === "interactive"
+              runPhysics: false
             })}
             onZoomOut={() => canvasRef.current?.zoomOut()}
             onResetZoom={() => canvasRef.current?.resetZoom()}

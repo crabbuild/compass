@@ -40,6 +40,13 @@ test("workbench graph panels stay exclusive, bounded, and recover from empty fil
 
   const filters = page.getByRole("button", { name: "Graph filters" });
   const settings = page.getByRole("button", { name: "Graph settings" });
+  await expect(settings.locator(".lucide-settings")).toHaveCount(1);
+  await expect(filters.locator(".lucide-sliders-horizontal")).toHaveCount(1);
+  expect(await settings.evaluate((element) => {
+    const filter = document.querySelector('[aria-label="Graph filters"]');
+    return filter !== null
+      && Boolean(element.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING);
+  })).toBe(true);
   await settings.click();
   await expect(settings).toHaveAttribute("aria-expanded", "true");
   await filters.click();

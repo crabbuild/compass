@@ -4,6 +4,33 @@ import { STATIC_LAYOUT_NODE_THRESHOLD } from "./renderingProfile";
 import { graphReducer, initialGraphState, initialGraphStateForModel } from "./state";
 
 describe("graphReducer", () => {
+  it("starts every automatic graph with a static selectable layout", () => {
+    const model: GraphViewModel = {
+      schema: "compass.viewer.graph/1",
+      title: "Interactive fixture",
+      stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+      nodes: [
+        { id: "caller", label: "Caller", community: 0 },
+        { id: "callee", label: "Callee", community: 0 }
+      ],
+      edges: [{
+        id: "caller-callee",
+        source: "caller",
+        target: "callee",
+        relation: "calls",
+        confidence: "extracted"
+      }],
+      communities: [{ id: 0, label: "Core", color: "#4e79a7", hidden: false }],
+      hyperedges: []
+    };
+
+    expect(initialGraphStateForModel(model)).toMatchObject({
+      layoutStyle: "automatic",
+      physicsRunning: false,
+      initialLayoutPending: false
+    });
+  });
+
   it("starts large graphs with their deterministic layout visible and paused", () => {
     const model: GraphViewModel = {
       schema: "compass.viewer.graph/1",

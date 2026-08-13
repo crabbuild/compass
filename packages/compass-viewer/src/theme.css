@@ -492,7 +492,7 @@ body.vscode-high-contrast {
   position: absolute;
   z-index: 12;
   top: calc(100% + 8px);
-  left: 0;
+  right: 6px;
   display: grid;
   box-sizing: border-box;
   width: min(310px, 100%);

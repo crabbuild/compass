@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep code graphs static and selectable by default, run force layout only on
+  explicit request, and keep every completed relayout paused. Simplify the
+  layout picker and group Settings and Filters together with distinct icons.
 - Follow the visible `current-snapshot` and `snapshots/` output protocol without
   breaking activation for fresh or mixed multi-root workspaces. Missing output
   remains ready for initialization, while invalid or incomplete snapshots are
