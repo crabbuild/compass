@@ -46,6 +46,9 @@ const CYCLE_NODE_LIMIT: usize = 8;
 const RAW_STRING_MAX_CHARS: usize = 4_096;
 const SOURCE_LOCATION_MAX_CHARS: usize = 64;
 const MARKDOWN_VALUE_MAX_CHARS: usize = 160;
+const MARKDOWN_IDENTIFIER_MAX_CHARS: usize = 48;
+const MARKDOWN_QUERY_MAX_CHARS: usize = 240;
+const IDENTIFIER_FINGERPRINT_CHARS: usize = 10;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DetectionSummary {
@@ -1964,15 +1967,6 @@ fn render_orientation_markdown_with_community_limit(
     let summary = &model.graph_summary;
     let community_labels = community_label_index(model);
     let shown_communities = community_limit.min(model.communities.len());
-    let mut hub_label_counts = BTreeMap::<&str, usize>::new();
-    for hub in &model.hubs {
-        let label = if hub.label.is_empty() {
-            hub.id.as_str()
-        } else {
-            hub.label.as_str()
-        };
-        *hub_label_counts.entry(label).or_default() += 1;
-    }
     let mut lines = vec![
         "# Agent Orientation".to_owned(),
         String::new(),
@@ -2100,18 +2094,13 @@ fn render_orientation_markdown_with_community_limit(
         disclosure(model.omissions.hubs),
     ]);
     for hub in &model.hubs {
-        let label = if hub.label.is_empty() {
-            hub.id.as_str()
+        let mut identity = if hub.label.is_empty() {
+            compact_identifier(&hub.id)
         } else {
-            hub.label.as_str()
+            markdown_value(&hub.label, MARKDOWN_VALUE_MAX_CHARS)
         };
-        let mut identity = markdown_value(label, MARKDOWN_VALUE_MAX_CHARS);
-        if hub_label_counts.get(label).copied().unwrap_or_default() > 1 && hub.id.as_str() != label
-        {
-            identity.push_str(&format!(
-                " [id: {}]",
-                markdown_value(&hub.id, MARKDOWN_VALUE_MAX_CHARS)
-            ));
+        if hub_identity_requires_id(hub, &model.hubs) {
+            identity.push_str(&format!(" [id: {}]", compact_identifier(&hub.id)));
         }
         let mut evidence = format!(
             "- Hub: {} · anchor: {} · community: {} · incident edges: {}",
@@ -2161,13 +2150,18 @@ fn render_orientation_markdown_with_community_limit(
             markdown_value(&query.purpose, MARKDOWN_VALUE_MAX_CHARS),
             optional_value(query.evidence_label.as_deref()),
         ));
-        if let Some(command) = &query.shell_command {
-            lines.push("- Conservative shell form (argv below is authoritative):".to_owned());
-            lines.push(format!("    {}", markdown_command(command)));
+        let argv = markdown_argv(&query.argv);
+        if char_count(&argv) > MARKDOWN_QUERY_MAX_CHARS {
+            lines.push(format!(
+                "- Exact argv: retained in `orientation.json` ({} characters; omitted here).",
+                char_count(&argv)
+            ));
+        } else if let Some(command) = &query.shell_command {
+            lines.push(format!("- Command: `{}`", markdown_command(command)));
         } else {
             lines.push("- Exact argv (non-executable evidence):".to_owned());
+            lines.push(format!("    {argv}"));
         }
-        lines.push(format!("    {}", markdown_argv(&query.argv)));
     }
     lines.extend([
         String::new(),
@@ -2239,7 +2233,7 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
         bounded_disclosure(model.omissions.import_cycles),
     ]);
     for cycle in &model.details.import_cycles {
-        lines.push(format!("- {}", value_list(&cycle.nodes)));
+        lines.push(format!("- {}", identifier_list(&cycle.nodes)));
     }
     lines.extend([
         String::new(),
@@ -2249,9 +2243,9 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
     for hyperedge in &model.details.hyperedges {
         lines.push(format!(
             "- ID: {} · members ({}): {} · confidence: {}",
-            markdown_value(&hyperedge.id, MARKDOWN_VALUE_MAX_CHARS),
+            compact_identifier(&hyperedge.id),
             inline_disclosure(hyperedge.member_coverage),
-            value_list(&hyperedge.members),
+            identifier_list(&hyperedge.members),
             markdown_value(&hyperedge.confidence, MARKDOWN_VALUE_MAX_CHARS),
         ));
     }
@@ -2263,13 +2257,13 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
     for edge in &model.details.ambiguous_edges {
         lines.push(format!(
             "- {} {} {} · relation: {} · evidence file: {}",
-            markdown_value(&edge.endpoint_a_id, MARKDOWN_VALUE_MAX_CHARS),
+            compact_identifier(&edge.endpoint_a_id),
             if model.graph_summary.directed {
                 "->"
             } else {
                 "<->"
             },
-            markdown_value(&edge.endpoint_b_id, MARKDOWN_VALUE_MAX_CHARS),
+            compact_identifier(&edge.endpoint_b_id),
             optional_value(edge.relation.as_deref()),
             optional_value(edge.evidence_file.as_deref()),
         ));
@@ -2286,7 +2280,7 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
             markdown_value(&memory.kind, MARKDOWN_VALUE_MAX_CHARS),
             markdown_value(&memory.text, MARKDOWN_VALUE_MAX_CHARS),
             inline_disclosure(memory.node_coverage),
-            value_list(&memory.nodes),
+            identifier_list(&memory.nodes),
             memory
                 .uses
                 .map_or_else(|| "unknown".to_owned(), |value| value.to_string()),
@@ -2317,7 +2311,7 @@ fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
             markdown_value(&diagnostic.message, MARKDOWN_VALUE_MAX_CHARS),
             optional_anchor(diagnostic.anchor.as_ref()),
             inline_disclosure(diagnostic.related_ids_coverage),
-            value_list(&diagnostic.related_ids),
+            identifier_list(&diagnostic.related_ids),
         ));
     }
     lines.join("\n")
@@ -3062,6 +3056,39 @@ fn value_list(values: &[String]) -> String {
     }
 }
 
+fn identifier_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_owned()
+    } else {
+        values
+            .iter()
+            .take(8)
+            .map(|value| compact_identifier(value))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn compact_identifier(value: &str) -> String {
+    if char_count(value) <= MARKDOWN_IDENTIFIER_MAX_CHARS {
+        return markdown_value(value, MARKDOWN_IDENTIFIER_MAX_CHARS);
+    }
+    const PREFIX_CHARS: usize = 18;
+    const SUFFIX_CHARS: usize = 12;
+    let prefix = value.chars().take(PREFIX_CHARS).collect::<String>();
+    let mut suffix = value.chars().rev().take(SUFFIX_CHARS).collect::<Vec<_>>();
+    suffix.reverse();
+    let suffix = suffix.into_iter().collect::<String>();
+    let fingerprint = format!("{:x}", Sha256::digest(value.as_bytes()));
+    markdown_value(
+        &format!(
+            "{prefix}…{suffix}#{}",
+            &fingerprint[..IDENTIFIER_FINGERPRINT_CHARS]
+        ),
+        MARKDOWN_IDENTIFIER_MAX_CHARS,
+    )
+}
+
 fn node_references(values: &[OrientationNodeReference]) -> String {
     if values.is_empty() {
         return "none".to_owned();
@@ -3083,14 +3110,20 @@ fn node_references(values: &[OrientationNodeReference]) -> String {
             } else {
                 value.label.as_str()
             };
-            let mut rendered = markdown_value(label, MARKDOWN_VALUE_MAX_CHARS);
-            if label_counts.get(label).copied().unwrap_or_default() > 1
-                && value.id.as_str() != label
-            {
-                rendered.push_str(&format!(
-                    " [id: {}]",
-                    markdown_value(&value.id, MARKDOWN_VALUE_MAX_CHARS)
-                ));
+            let mut rendered = if value.label.is_empty() {
+                compact_identifier(&value.id)
+            } else {
+                markdown_value(label, MARKDOWN_VALUE_MAX_CHARS)
+            };
+            let duplicate_label = label_counts.get(label).copied().unwrap_or_default() > 1;
+            let anchor_is_unique = value.anchor.is_some()
+                && values
+                    .iter()
+                    .filter(|other| other.label == value.label && other.anchor == value.anchor)
+                    .count()
+                    == 1;
+            if duplicate_label && !anchor_is_unique && value.id.as_str() != label {
+                rendered.push_str(&format!(" [id: {}]", compact_identifier(&value.id)));
             }
             if let Some(anchor) = value.anchor.as_ref() {
                 rendered.push_str(" — ");
@@ -3100,6 +3133,24 @@ fn node_references(values: &[OrientationNodeReference]) -> String {
         })
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+fn hub_identity_requires_id(value: &OrientationHub, hubs: &[OrientationHub]) -> bool {
+    if value.label.is_empty() || value.id == value.label {
+        return false;
+    }
+    let duplicate_label = hubs
+        .iter()
+        .filter(|other| other.label == value.label)
+        .count()
+        > 1;
+    let anchor_is_unique = value.anchor.is_some()
+        && hubs
+            .iter()
+            .filter(|other| other.label == value.label && other.anchor == value.anchor)
+            .count()
+            == 1;
+    duplicate_label && !anchor_is_unique
 }
 
 fn community_label_index(model: &AgentOrientation) -> BTreeMap<usize, &str> {

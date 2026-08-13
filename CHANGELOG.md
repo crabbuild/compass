@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reduce `GRAPH_REPORT.md` token use from opaque graph identities. Markdown now
+  uses unique source anchors instead of redundant duplicate-label node IDs,
+  compacts unavoidable long IDs to a bounded prefix/suffix plus deterministic
+  fingerprint, emits portable short commands only once, and leaves oversized
+  exact argv in `orientation.json`. Machine-readable IDs and argv are unchanged.
+
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use

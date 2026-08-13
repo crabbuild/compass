@@ -265,6 +265,14 @@ reports exact shown and omitted counts. Headings and boundary links prefer
 evidence labels; graph-local numeric IDs remain visible as `community:<id>`
 query scopes where an agent needs an exact follow-up command.
 
+Human-facing Markdown prefers `label — source:range` references. When duplicate
+labels have distinct source anchors, Compass omits redundant node IDs. Opaque
+IDs longer than 48 characters are shown only as a bounded prefix/suffix plus a
+deterministic fingerprint when an ID is still needed for disambiguation. Exact
+IDs and exact query argv remain unchanged in `orientation.json`; query argv
+longer than 240 rendered characters are referenced there instead of being
+duplicated into Markdown.
+
 ## `graph.html`
 
 Optional interactive visualization. It may be absent when:
