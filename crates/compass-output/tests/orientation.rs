@@ -375,6 +375,96 @@ fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), 
 }
 
 #[test]
+fn report_omits_pipe_table_only_communities_from_architecture_directory()
+-> Result<(), Box<dyn Error>> {
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": true,
+        "graph": {},
+        "nodes": [
+            {
+                "id": "runtime",
+                "label": "Runtime",
+                "source_file": "src/runtime.rs",
+                "file_type": "code"
+            },
+            {
+                "id": "table",
+                "label": "pipe table",
+                "source_file": "docs/reference.md",
+                "source_location": "L10",
+                "file_type": "document",
+                "document_kind": "pipe_table"
+            },
+            {
+                "id": "row",
+                "label": "pipe table row",
+                "source_file": "docs/reference.md",
+                "source_location": "L12",
+                "file_type": "document",
+                "document_kind": "pipe_table_row"
+            }
+        ],
+        "links": [
+            {"source": "table", "target": "row", "relation": "contains"}
+        ]
+    }))?;
+    let communities = BTreeMap::from([
+        (0, vec!["runtime".to_owned()]),
+        (1, vec!["table".to_owned(), "row".to_owned()]),
+    ]);
+    let labels = BTreeMap::from([
+        (0, "Runtime".to_owned()),
+        (1, "Table (docs/reference.md:L10)".to_owned()),
+    ]);
+    let mut options = ReportOptions::new("table-report");
+    options.min_community_size = 1;
+    options.today = Some("2026-08-12");
+
+    let model = agent_orientation(
+        &document,
+        &communities,
+        &BTreeMap::new(),
+        &labels,
+        &[GodNode {
+            id: "table".to_owned(),
+            label: "pipe table".to_owned(),
+            degree: 2,
+        }],
+        &[],
+        &DetectionSummary::default(),
+        TokenCost::default(),
+        None,
+        None,
+        &options,
+    );
+
+    assert_eq!(model.communities.len(), 1);
+    assert_eq!(model.communities[0].label, "Runtime");
+    assert!(model.hubs.is_empty());
+    assert_eq!(
+        model.omissions.hubs,
+        compass_output::SectionOmission {
+            total: 1,
+            shown: 0,
+            omitted: 1,
+        }
+    );
+    assert_eq!(
+        model.omissions.communities,
+        compass_output::SectionOmission {
+            total: 2,
+            shown: 1,
+            omitted: 1,
+        }
+    );
+    let report = render_agent_report_markdown(&model, false)?;
+    assert!(report.contains("only pipe-table parser blocks are excluded"));
+    assert!(!report.contains("Table (docs/reference.md:L10)"));
+    assert!(!report.contains("pipe table row"));
+    Ok(())
+}
+
+#[test]
 fn nonportable_argv_preserves_exact_punctuation_without_markdown_structure()
 -> Result<(), Box<dyn Error>> {
     const SPECIAL: &str = r"Exact O'Reilly * [node] C:\path <tag> ``` $HOME | # ! &";

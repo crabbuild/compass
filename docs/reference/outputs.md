@@ -226,12 +226,20 @@ The report can include:
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
 
-Community evidence labels use the highest-connectivity member's concise name
-when it is unique. When multiple communities share that name, Compass adds a
-compact source or wiring-site anchor and, only if needed, the graph-local
-community ID. These labels are deterministic navigation aids, not community
-identity; consumers that need identity should use the community ID and member
-set instead.
+Community evidence labels prefer a meaningful symbol or document heading over
+Markdown pipe-table parser blocks, even when a table container has more
+structural edges. A community containing only pipe-table blocks receives a
+source-anchored `Table (path:line)` label. When other communities share a hub
+name, Compass adds a compact source or wiring-site anchor and, only if needed,
+the graph-local community ID. These labels are deterministic navigation aids,
+not community identity; consumers that need identity should use the community
+ID and member set instead.
+
+The Architecture Map and Community Directory omit communities made entirely
+of Markdown pipe-table parser blocks. Those communities count toward the
+report's omitted-community coverage and their source-backed nodes remain in
+the graph; the report does not present parser partitions as architectural
+subsystems.
 
 The report begins with a bounded Agent Orientation for first-session or broad
 repository context. `orientation.json` is the versioned machine form of that
