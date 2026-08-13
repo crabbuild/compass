@@ -556,6 +556,38 @@ fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
 }
 
 #[test]
+fn trivia_only_hard_cut_sources_anchor_file_inventory_to_source_bytes() {
+    for (path, source_file, language) in [
+        ("/repo/pkg/blank.py", "pkg/blank.py", "python"),
+        ("/repo/pkg/blank.go", "pkg/blank.go", "go"),
+        ("/repo/pkg/Blank.java", "pkg/Blank.java", "java"),
+        ("/repo/pkg/blank.rs", "pkg/blank.rs", "rust"),
+        ("/repo/pkg/blank.js", "pkg/blank.js", "javascript"),
+        ("/repo/pkg/blank.ts", "pkg/blank.ts", "typescript"),
+        ("/repo/pkg/blank.tsx", "pkg/blank.tsx", "typescript"),
+    ] {
+        let mut engine = Engine::default();
+        let extraction = engine
+            .extract_source_combined(std::path::Path::new(path), source_file, b"\n")
+            .expect("extract trivia-only hard-cut source");
+        let evidence = extraction
+            .graph
+            .semantic_evidence
+            .expect("trivia-only source evidence");
+        validate_evidence(&evidence, EvidenceLimits::default())
+            .expect("valid trivia-only evidence");
+
+        assert_eq!(evidence.adapter.language, language);
+        assert_eq!(evidence.declarations.len(), 1);
+        assert_eq!(evidence.declarations[0].range.start_byte, 0);
+        assert_eq!(evidence.declarations[0].range.end_byte, 1);
+        assert_eq!(evidence.declarations[0].range.start_line, 1);
+        assert_eq!(evidence.declarations[0].range.end_line, 2);
+        assert_eq!(evidence.scopes[0].range, evidence.declarations[0].range);
+    }
+}
+
+#[test]
 fn typescript_javascript_candidate_is_wired_into_production_extraction() {
     for (path, source_file, language, dialect, source) in [
         (
@@ -1169,6 +1201,46 @@ def local_shadow():
 }
 
 #[test]
+fn python_module_singleton_calls_dispatch_through_the_exact_initializer_type() {
+    fn broadcast_candidate(source: &[u8]) -> RelationshipCandidate {
+        let mut engine = Engine::default();
+        engine
+            .extract_source_combined(
+                std::path::Path::new("/repo/pkg/state.py"),
+                "pkg/state.py",
+                source,
+            )
+            .expect("extract python")
+            .graph
+            .semantic_evidence
+            .expect("python universal evidence")
+            .candidates
+            .into_iter()
+            .find(|candidate| {
+                candidate.relation == CandidateRelation::Calls
+                    && candidate.target_spelling == "broadcast"
+            })
+            .expect("manager.broadcast call candidate")
+    }
+
+    let candidate = broadcast_candidate(
+        b"class ConnectionManager:\n    def broadcast(self, message):\n        pass\n\nmanager = ConnectionManager()\n\ndef send(message):\n    manager.broadcast(message)\n",
+    );
+    assert_eq!(
+        candidate.constraints.hierarchy,
+        Some(HierarchyConstraint::ReceiverDispatch {
+            receiver_qualified_name: "pkg.state.ConnectionManager".to_owned(),
+            strategy: ReceiverDispatchStrategy::C3FromReceiver,
+        })
+    );
+
+    let shadowed = broadcast_candidate(
+        b"class ConnectionManager:\n    def broadcast(self, message):\n        pass\n\nmanager = ConnectionManager()\n\ndef send(manager, message):\n    manager.broadcast(message)\n",
+    );
+    assert_eq!(shadowed.constraints.hierarchy, None);
+}
+
+#[test]
 fn python_module_variables_fail_closed_for_competing_or_conditional_bindings() {
     for source in [
         br#"class Service:
@@ -1462,7 +1534,7 @@ type Event struct {
 }
 
 func use() {
-    _ = func(value types.Input) {}
+    _ = func(value types.Input) types.Output { return types.Output{} }
 }
 "#;
     let mut engine = Engine::default();
@@ -1491,6 +1563,7 @@ func use() {
         ("Direct", None),
         ("Grouped", None),
         ("Input", Some("types")),
+        ("Output", Some("types")),
     ] {
         assert!(evidence.occurrences.iter().any(|occurrence| {
             occurrence.role == SemanticRole::TypeReference
@@ -1498,6 +1571,12 @@ func use() {
                 && occurrence.qualifier.as_deref() == qualifier
         }));
     }
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "Output" && candidate.relation == CandidateRelation::References
+    }));
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.target_spelling != "Output" || candidate.relation != CandidateRelation::Returns
+    }));
     for (member, target) in [("Token", "sample.Direct"), ("Skill", "sample.Grouped")] {
         assert!(evidence.bindings.iter().any(|binding| {
             binding.kind == BindingKind::Member

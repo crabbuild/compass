@@ -171,10 +171,39 @@ impl ResolutionDb<'_> {
             &binding.qualified_target,
             &candidate.target_spelling,
         );
-        (!imported.is_empty())
+        let imported_decision = (!imported.is_empty())
             .then(|| {
                 self.unique_decision(Some(&imported), candidate, ResolutionRule::ExplicitBinding)
             })
-            .flatten()
+            .flatten();
+        if imported_decision.is_some() {
+            return imported_decision;
+        }
+        let python_named_import = language == "python"
+            && matches!(
+                candidate.relation,
+                CandidateRelation::Imports | CandidateRelation::Reexports
+            )
+            && candidate
+                .constraints
+                .allowed_target_kinds
+                .iter()
+                .any(|kind| matches!(kind.as_str(), "class" | "function" | "variable"));
+        if python_named_import
+            && let Some(module) = candidate.constraints.module_or_package.as_deref()
+        {
+            let mut module_candidate = candidate.clone();
+            module_candidate.constraints.allowed_target_kinds =
+                vec!["file".to_owned(), "module".to_owned(), "package".to_owned()];
+            let key = (language.to_owned(), module.to_owned());
+            return self
+                .unique_decision(
+                    self.indexes.names.by_qualified.get(&key),
+                    &module_candidate,
+                    ResolutionRule::ExactSourceInventory,
+                )
+                .or_else(|| self.inventory_decision(language, module, &module_candidate));
+        }
+        None
     }
 }

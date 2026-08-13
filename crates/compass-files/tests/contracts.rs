@@ -157,6 +157,30 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
 }
 
 #[test]
+fn java_build_package_is_source_but_build_output_stays_ignored() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let package = root.join("src/main/java/build/crab/prolly");
+    fs::create_dir_all(&package)?;
+    fs::write(
+        package.join("Transaction.java"),
+        "package build.crab.prolly;\n",
+    )?;
+    let generated = root.join("build/generated");
+    fs::create_dir_all(&generated)?;
+    fs::write(generated.join("Generated.java"), "class Generated {}\n")?;
+
+    let detection = compass_files::detect(root, &DetectOptions::default())?;
+    assert_eq!(detection.files["code"].len(), 1);
+    assert!(detection.files["code"][0].ends_with("Transaction.java"));
+
+    let filter = WatchPathFilter::new(root, &DetectOptions::default())?;
+    assert!(filter.allows(&package.join("Transaction.java")));
+    assert!(!filter.allows(&generated.join("Generated.java")));
+    Ok(())
+}
+
+#[test]
 fn detection_ignores_compass_generated_output() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();

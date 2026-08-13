@@ -733,8 +733,8 @@ fn operation_role_fast_path_is_backend_neutral_and_bounded()
 
     assert_discovery_semantically_equal(&actual, &expected)?;
     assert_eq!(actual.seeds[0].node_id, "n:delta-table-builder");
-    assert!(actual.stats.candidate_nodes <= 2);
-    assert!(actual.stats.candidate_probes <= 8);
+    assert!(actual.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+    assert!(actual.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
     Ok(())
 }
 

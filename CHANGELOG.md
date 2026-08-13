@@ -22,6 +22,18 @@
   fingerprint, emits portable short commands only once, and leaves oversized
   exact argv in `orientation.json`. Machine-readable IDs and argv are unchanged.
 
+- Improve default-low code-graph fidelity and natural task discovery from a
+  five-language real-repository qualification. Python now preserves exact
+  named-import provenance, singleton/local-initializer dispatch, multiline
+  receiver parameters, and callable aliases without low-mode placeholder
+  leakage. Rust reexports retain exact namespace precedence; Go closure return
+  types remain references instead of becoming enclosing-function contracts;
+  Java `build` package paths remain source; and TypeScript callable properties
+  are valid exact call targets. Natural queries now rank source-backed
+  functions and methods by complete predicate/subject evidence while retaining
+  genuine ambiguity. Tighten performance-harness timing parsing and diagnostics
+  for these qualification runs.
+
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use

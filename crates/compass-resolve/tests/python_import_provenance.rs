@@ -7,7 +7,9 @@ use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{Engine, Extraction, RawEdgeRecord};
 use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
-use compass_resolve::resolve_with_root;
+use compass_resolve::{
+    ResolutionAdmission, resolve_prevalidated_owned_with_root_at_inference, resolve_with_root,
+};
 
 const PYTHON_IMPORT_PRODUCER: &str = "compass.resolve.python.universal";
 const UNIVERSAL_PYTHON_PRODUCER: &str = PYTHON_IMPORT_PRODUCER;
@@ -49,11 +51,11 @@ fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
         return Vec::new();
     };
     let mut cursor = skip_python_whitespace(statement, import_pos + "import".len());
-    if let Some(rest) = statement.get(cursor..) {
-        if rest.starts_with('(') {
-            cursor += 1;
-            cursor = skip_python_whitespace(statement, cursor);
-        }
+    if let Some(rest) = statement.get(cursor..)
+        && rest.starts_with('(')
+    {
+        cursor += 1;
+        cursor = skip_python_whitespace(statement, cursor);
     }
 
     let mut spans = Vec::new();
@@ -77,10 +79,9 @@ fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
         let mut paren_depth = 0usize;
 
         while end < statement.len() {
-            let ch = statement[end..]
-                .chars()
-                .next()
-                .expect("span has at least one char");
+            let Some(ch) = statement[end..].chars().next() else {
+                break;
+            };
             if ch == '(' {
                 paren_depth += 1;
                 end += ch.len_utf8();
@@ -94,10 +95,8 @@ fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
                 end += ch.len_utf8();
                 continue;
             }
-            if ch == ',' {
-                if paren_depth == 0 {
-                    break;
-                }
+            if ch == ',' && paren_depth == 0 {
+                break;
             }
             if ch == '\\' {
                 break;
@@ -110,10 +109,9 @@ fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
 
         let mut span_end = end;
         while span_end > start {
-            let trailing = statement[..span_end]
-                .chars()
-                .next_back()
-                .expect("span has at least one char");
+            let Some(trailing) = statement[..span_end].chars().next_back() else {
+                break;
+            };
             if trailing.is_whitespace() || trailing == ')' {
                 span_end -= trailing.len_utf8();
             } else {
@@ -129,8 +127,6 @@ fn python_import_item_spans(statement: &str) -> Vec<(usize, usize)> {
         if let Some(rest) = statement.get(cursor..) {
             if rest.starts_with(',') {
                 cursor += 1;
-            } else if rest.starts_with(')') {
-                break;
             } else {
                 break;
             }
@@ -150,10 +146,9 @@ fn python_import_item_token_spans(statement: &str) -> Vec<(usize, usize)> {
         }
         let start = cursor;
         while cursor < statement.len() {
-            let ch = statement[cursor..]
-                .chars()
-                .next()
-                .expect("span has at least one char");
+            let Some(ch) = statement[cursor..].chars().next() else {
+                break;
+            };
             if ch.is_whitespace() {
                 break;
             }
@@ -248,6 +243,27 @@ fn resolve_fixture(files: &[(&str, &str)]) -> Result<ResolvedFixture, Box<dyn Er
     Ok((directory, resolved, sources))
 }
 
+fn resolve_fixture_at_low_inference(
+    files: &[(&str, &str)],
+) -> Result<ResolvedFixture, Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files {
+        extractions.push(extract(&mut engine, root, relative, source)?);
+        sources.insert((*relative).to_owned(), (*source).to_owned());
+    }
+    let resolved = resolve_prevalidated_owned_with_root_at_inference(
+        extractions,
+        &sources,
+        root,
+        ResolutionAdmission::Low,
+    );
+    Ok((directory, resolved, sources))
+}
+
 fn assert_no_retired_python_projection(extraction: &Extraction) {
     assert!(extraction.edges.iter().all(|edge| {
         edge.string("extractor") != RETIRED_PYTHON_PRODUCER
@@ -260,18 +276,16 @@ fn assert_no_retired_python_projection(extraction: &Extraction) {
     }));
 }
 
-fn edge_span<'a>(edge: &compass_languages::RawEdgeRecord, source: &'a str) -> &'a str {
+fn edge_span<'a>(edge: &compass_languages::RawEdgeRecord, source: &'a str) -> Option<&'a str> {
     let start = edge
         .attributes
         .get("start_byte")
-        .and_then(serde_json::Value::as_u64)
-        .expect("edge start") as usize;
+        .and_then(serde_json::Value::as_u64)? as usize;
     let end = edge
         .attributes
         .get("end_byte")
-        .and_then(serde_json::Value::as_u64)
-        .expect("edge end") as usize;
-    source.get(start..end).expect("UTF-8 edge span")
+        .and_then(serde_json::Value::as_u64)? as usize;
+    source.get(start..end)
 }
 
 #[test]
@@ -327,12 +341,12 @@ fn universal_python_imports_publish_exact_item_spans_and_no_legacy_projection()
     assert!(
         caller_imports
             .iter()
-            .any(|edge| edge.target == widget_id && edge_span(edge, caller) == "LocalWidget")
+            .any(|edge| edge.target == widget_id && edge_span(edge, caller) == Some("LocalWidget"))
     );
     assert!(
         caller_imports
             .iter()
-            .any(|edge| { edge.target == module_id && edge_span(edge, caller) == "mod" })
+            .any(|edge| { edge.target == module_id && edge_span(edge, caller) == Some("mod") })
     );
 
     let package = resolved
@@ -389,6 +403,86 @@ fn universal_python_imports_publish_exact_item_spans_and_no_legacy_projection()
                     && evidence.confidence == EvidenceConfidence::Exact
                     && evidence.anchors.len() == 1
             })
+    }));
+    Ok(())
+}
+
+#[test]
+fn low_python_named_import_falls_back_to_one_exact_internal_module() -> Result<(), Box<dyn Error>> {
+    let caller = "from pkg.responses import Response\n";
+    let files = [
+        ("caller.py", caller),
+        (
+            "pkg/responses.py",
+            "from vendor.responses import Response as Response\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    assert_eq!(resolved.error, None);
+
+    let caller_module = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == "caller.py" && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing caller module")?;
+    let responses_module = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == "pkg/responses.py" && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing responses module")?;
+    let imports = resolved
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.source == caller_module.id
+                && edge.target == responses_module.id
+                && edge.string("relation") == "imports_from"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(imports.len(), 1, "edges={:#?}", resolved.edges);
+    assert_eq!(imports[0].string("binding_name"), "Response");
+    assert_eq!(edge_span(imports[0], caller), Some("Response"));
+    assert!(resolved.nodes.iter().all(|node| {
+        node.attributes
+            .get("placeholder")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
+fn low_python_missing_module_import_does_not_fall_back_to_its_parent_package()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        ("caller.py", "import pkg.missing as missing\n"),
+        ("pkg/__init__.py", "VALUE = 1\n"),
+    ];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    assert_eq!(resolved.error, None);
+
+    let caller_module = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == "caller.py" && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing caller module")?;
+    let package = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == "pkg/__init__.py" && node.string("symbol_kind") == "file"
+        })
+        .ok_or("missing package module")?;
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != caller_module.id
+            || edge.target != package.id
+            || edge.string("relation") != "imports_from"
     }));
     Ok(())
 }
@@ -557,10 +651,9 @@ fn function_local_python_imports_are_owned_by_the_function_and_do_not_leak()
             .iter()
             .find(|node| node.string("source_file").ends_with("caller.py") && node.label() == name)
             .map(|node| node.id.clone())
-            .unwrap_or_else(|| panic!("missing {name}"))
     };
-    let with_import = declaration("with_import()");
-    let sibling = declaration("sibling()");
+    let with_import = declaration("with_import()").ok_or("missing with_import()")?;
+    let sibling = declaration("sibling()").ok_or("missing sibling()")?;
     let run = resolved
         .nodes
         .iter()
@@ -574,7 +667,7 @@ fn function_local_python_imports_are_owned_by_the_function_and_do_not_leak()
         .collect::<Vec<_>>();
     assert_eq!(import_edges.len(), 1);
     assert_eq!(import_edges[0].source, with_import);
-    assert_eq!(edge_span(import_edges[0], caller), "run");
+    assert_eq!(edge_span(import_edges[0], caller), Some("run"));
 
     let call_edges = resolved
         .edges
@@ -619,11 +712,10 @@ fn function_local_python_import_shadows_ambiguous_file_bindings() -> Result<(), 
             .iter()
             .find(|node| node.string("source_file").ends_with(source) && node.label() == label)
             .map(|node| node.id.clone())
-            .unwrap_or_else(|| panic!("missing {source}:{label}"))
     };
-    let local = node_id("caller.py", "local()");
-    let sibling = node_id("caller.py", "sibling()");
-    let exact_run = node_id("pkg/exact.py", "run()");
+    let local = node_id("caller.py", "local()").ok_or("missing caller.py:local()")?;
+    let sibling = node_id("caller.py", "sibling()").ok_or("missing caller.py:sibling()")?;
+    let exact_run = node_id("pkg/exact.py", "run()").ok_or("missing pkg/exact.py:run()")?;
 
     let calls = resolved
         .edges
@@ -1030,6 +1122,125 @@ fn python_module_singletons_are_source_backed_with_exact_initializer_types()
                 .and_then(serde_json::Value::as_bool)
                 != Some(true)
     }));
+    Ok(())
+}
+
+#[test]
+fn python_module_singleton_method_calls_use_the_exact_initializer_type()
+-> Result<(), Box<dyn Error>> {
+    let files = [(
+        "state.py",
+        "class ConnectionManager:\n    def broadcast(self, message):\n        pass\n\nmanager = ConnectionManager()\n\ndef send(message):\n    manager.broadcast(message)\n",
+    )];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    let send = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "state.send")
+        .ok_or("missing sender")?;
+    let broadcast = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "state.ConnectionManager::broadcast")
+        .ok_or("missing broadcast method")?;
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == send.id
+            && edge.target == broadcast.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "linearized-receiver-dispatch"
+    }));
+    Ok(())
+}
+
+#[test]
+fn low_python_bound_receiver_reaches_an_exact_inherited_method() -> Result<(), Box<dyn Error>> {
+    let files = [(
+        "security.py",
+        "class HTTPBase:\n    def make_not_authenticated_error(self):\n        return None\n\nclass HTTPBasic(HTTPBase):\n    async def __call__(  # type: ignore\n        self, request\n    ):\n        if request:\n            raise self.make_not_authenticated_error()\n        try:\n            return request\n        except ValueError as error:\n            raise self.make_not_authenticated_error() from error\n        if not request:\n            raise self.make_not_authenticated_error()\n",
+    )];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    let call = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "security.HTTPBasic::__call__")
+        .ok_or("missing HTTPBasic.__call__")?;
+    let inherited = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name") == "security.HTTPBase::make_not_authenticated_error"
+        })
+        .ok_or("missing inherited method")?;
+
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == call.id
+                    && edge.target == inherited.id
+                    && edge.string("relation") == "calls"
+                    && edge.string("resolution_rule") == "linearized-receiver-dispatch"
+            })
+            .count(),
+        3
+    );
+    Ok(())
+}
+
+#[test]
+fn low_python_local_initializer_calls_the_exact_class_method() -> Result<(), Box<dyn Error>> {
+    let files = [(
+        "client.py",
+        "class DummyClient:\n    async def close(self):\n        pass\n\nasync def get_client():\n    client = DummyClient()\n    yield client\n    await client.close()\n",
+    )];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "client.get_client")
+        .ok_or("missing get_client")?;
+    let close = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "client.DummyClient::close")
+        .ok_or("missing DummyClient.close")?;
+
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id
+            && edge.target == close.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "linearized-receiver-dispatch"
+    }));
+    Ok(())
+}
+
+#[test]
+fn low_python_local_initializer_dispatch_fails_closed_for_non_dominating_or_rebound_values()
+-> Result<(), Box<dyn Error>> {
+    for source in [
+        "class DummyClient:\n    async def close(self):\n        pass\n\nasync def get_client(enabled):\n    if enabled:\n        client = DummyClient()\n    await client.close()\n",
+        "class DummyClient:\n    async def close(self):\n        pass\n\nasync def get_client(replacement):\n    client = DummyClient()\n    client = replacement\n    await client.close()\n",
+    ] {
+        let files = [("client.py", source)];
+        let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+        let caller = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == "client.get_client")
+            .ok_or("missing get_client")?;
+        let close = resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == "client.DummyClient::close")
+            .ok_or("missing DummyClient.close")?;
+        assert!(resolved.edges.iter().all(|edge| {
+            edge.source != caller.id
+                || edge.target != close.id
+                || edge.string("relation") != "calls"
+        }));
+    }
     Ok(())
 }
 

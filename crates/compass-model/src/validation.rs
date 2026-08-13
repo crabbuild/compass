@@ -584,7 +584,10 @@ fn endpoint_kinds_are_valid(
                 && (target.kind.is_callable()
                     || matches!(
                         target.kind,
-                        NodeKind::Variable | NodeKind::Import | NodeKind::TypeAlias
+                        NodeKind::Variable
+                            | NodeKind::Property
+                            | NodeKind::Import
+                            | NodeKind::TypeAlias
                     ))
         }
         EdgeKind::Imports => {
@@ -867,6 +870,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Variable
                 | NodeKind::Constant
                 | NodeKind::Parameter
+                | NodeKind::Macro
         ) | (
             NodeKind::Resource,
             NodeKind::File | NodeKind::Resource | NodeKind::ConfigKey

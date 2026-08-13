@@ -364,6 +364,14 @@ same-named type elsewhere in the repository. Ambiguous trait imports and
 parser recovery overlapping either side of the implementation header fail
 closed.
 
+Go function literals own a lexical closure scope but do not yet publish a
+callable declaration node. Their parameter and result types therefore remain
+source-anchored `references` evidence owned by the enclosing declaration. A
+literal result must not become a `returns` contract on that enclosing function
+or file; publishing such an edge would invent a return contract and can create
+an invalid file-to-type relationship. Named functions, methods, and interface
+methods continue to publish their result types as `returns` evidence.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its
@@ -384,9 +392,14 @@ Python variable declaration when the name has no competing module binding,
 deletion, import shadow, parser recovery, or proven callable-alias kind. A
 direct initializer call adds `type_of` evidence only when its target resolves
 to one source-backed class; functions and unresolved external factories do not
-invent a type. Function- and class-local shadows do not invalidate the module
-declaration. Explicit receiver calls such as `self.settings()` never borrow a
-same-named unqualified import as their target.
+invent a type. A call through that unique module variable may dispatch through
+the exact initializer class. A function-local `name = Class()` receiver uses
+the same exact dispatch only when the assignment is an unconditional,
+source-ordered binding in the callable body and no competing binding precedes
+the call; conditional and rebound values remain unresolved. Function- and
+class-local shadows do not invalidate the module declaration. Explicit
+receiver calls such as `self.settings()` never borrow a same-named unqualified
+import as their target.
 Zero-argument Python `super()` calls use source-proven C3 dispatch after the
 enclosing class. Compass may cross multiple source-backed bases only when the
 required base sets are complete and uniquely resolved for an exact target. A
@@ -460,8 +473,9 @@ ordered before later bases, and a single-inheritance chain remains proven until
 it reaches a multiple-base fork. If that prefix does not resolve the member,
 the resolver requires the complete C3 linearization and selects the first class
 that directly declares it. Python emits this strategy for `self.member(...)`
-and `cls.member(...)`; neither form can fall through to lexical, imported,
-module, or repository-wide terminal-name lookup.
+and `cls.member(...)`; comments inside a multiline parameter list do not change
+the first bound receiver parameter. Neither form can fall through to lexical,
+imported, module, or repository-wide terminal-name lookup.
 
 `C3AfterReceiver` is used for zero-argument `super().member(...)`. It first
 checks the exact first base when that direct successor is source-proven, then

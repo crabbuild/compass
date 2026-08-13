@@ -101,6 +101,10 @@ mod tests {
             query_terms("how are plugins added and tasks scheduled"),
             vec!["plugin", "add", "task", "schedule"]
         );
+        assert_eq!(
+            query_terms("why detect all agents"),
+            vec!["why", "detect", "all", "agent"]
+        );
     }
 
     #[test]

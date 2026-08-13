@@ -712,6 +712,28 @@ pub fn range_for_node(source_file: &str, node: Node<'_>) -> EvidenceRange {
     }
 }
 
+/// Return the inventory range for an entire source file, including parser
+/// trivia such as a file that contains only whitespace or comments.
+#[must_use]
+pub(super) fn range_for_file(source_file: &str, source: &[u8]) -> EvidenceRange {
+    let (end_row, end_column) = source.iter().fold((0_u32, 0_u32), |(row, column), byte| {
+        if *byte == b'\n' {
+            (row.saturating_add(1), 0)
+        } else {
+            (row, column.saturating_add(1))
+        }
+    });
+    EvidenceRange {
+        source_file: source_file.to_owned(),
+        start_byte: 0,
+        end_byte: u64::try_from(source.len()).unwrap_or(u64::MAX),
+        start_line: 1,
+        start_column: 0,
+        end_line: end_row.saturating_add(1),
+        end_column,
+    }
+}
+
 /// Extract hard-cut universal evidence directly from the parser tree.
 ///
 /// This path never reads `RawNodeRecord`, `RawEdgeRecord`, or `RawCall`.
@@ -1022,7 +1044,7 @@ impl<'source> DirectAdapterState<'source> {
         }
     }
 
-    fn add_file(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
+    fn add_file(&mut self, _root: Node<'_>) -> Result<(), EvidenceError> {
         let label = self
             .path
             .file_name()
@@ -1030,7 +1052,7 @@ impl<'source> DirectAdapterState<'source> {
             .unwrap_or(self.source_file);
         let graph_node_id = make_id(&[self.source_file]);
         self.graph_ids.insert(graph_node_id.clone());
-        let range = range_for_node(self.source_file, root);
+        let range = range_for_file(self.source_file, self.source);
         let fact_id = self.builder.declare(
             "file",
             &graph_node_id,
@@ -1817,6 +1839,7 @@ impl<'source> DirectAdapterState<'source> {
                 self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"),
             )
         });
+        let named_import = module.is_some();
         if python_import_contains_wildcard(&statement) {
             if !self.has_invalid_python_import_suffix(node)
                 && let (Some(module), Some((start, end))) =
@@ -1904,6 +1927,7 @@ impl<'source> DirectAdapterState<'source> {
                 binding_target,
                 import_target,
                 alias_node,
+                named_import,
             )?;
         }
         Ok(())
@@ -1984,6 +2008,7 @@ impl<'source> DirectAdapterState<'source> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn add_python_import_binding(
         &mut self,
         imported: Node<'_>,
@@ -1992,6 +2017,7 @@ impl<'source> DirectAdapterState<'source> {
         binding_target: String,
         import_target: String,
         alias_name_node: Option<Node<'_>>,
+        named_import: bool,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
             && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
@@ -2054,13 +2080,17 @@ impl<'source> DirectAdapterState<'source> {
                 qualified_name: Some(import_target.clone()),
                 argument_count: None,
                 argument_types: Vec::new(),
-                allowed_target_kinds: vec![
-                    "file".to_owned(),
-                    "module".to_owned(),
-                    "class".to_owned(),
-                    "function".to_owned(),
-                    "variable".to_owned(),
-                ],
+                allowed_target_kinds: if named_import {
+                    vec![
+                        "file".to_owned(),
+                        "module".to_owned(),
+                        "class".to_owned(),
+                        "function".to_owned(),
+                        "variable".to_owned(),
+                    ]
+                } else {
+                    vec!["file".to_owned(), "module".to_owned(), "package".to_owned()]
+                },
                 hierarchy: None,
                 allow_external: true,
             },
@@ -6397,11 +6427,20 @@ impl<'source> DirectAdapterState<'source> {
                     .filter_map(|field| declaration.child_by_field_name(field))
                     .map(|root| (root, CandidateRelation::References)),
             );
-            roots.extend(
-                declaration
-                    .child_by_field_name("result")
-                    .map(|root| (root, CandidateRelation::Returns)),
-            );
+            roots.extend(declaration.child_by_field_name("result").map(|root| {
+                // Anonymous Go functions currently have a lexical scope but no
+                // published callable declaration. Attributing their result to
+                // the enclosing declaration would invent a return contract (and
+                // at package scope would produce an invalid file -> type edge).
+                // Retain the source-backed type dependency as a reference until
+                // closures have their own stable graph identity.
+                let relation = if declaration.kind() == "func_literal" {
+                    CandidateRelation::References
+                } else {
+                    CandidateRelation::Returns
+                };
+                (root, relation)
+            }));
         } else if let Some(type_node) = declaration.child_by_field_name("type") {
             roots.push((type_node, CandidateRelation::References));
         }
@@ -6490,6 +6529,21 @@ impl<'source> DirectAdapterState<'source> {
         let local_python_receiver = if super_dispatch.is_none() && self.language == "python" {
             qualifier.and_then(|qualifier| {
                 self.python_local_class_receiver(owner, qualifier, function.start_byte(), call)
+                    .or_else(|| {
+                        self.python_local_initializer_receiver(
+                            owner,
+                            qualifier,
+                            function.start_byte(),
+                            call,
+                        )
+                    })
+                    .or_else(|| {
+                        self.python_module_singleton_receiver(
+                            owner,
+                            qualifier,
+                            function.start_byte(),
+                        )
+                    })
             })
         } else {
             None
@@ -6717,6 +6771,163 @@ impl<'source> DirectAdapterState<'source> {
         None
     }
 
+    fn python_local_initializer_receiver(
+        &self,
+        owner: &DeclarationContext,
+        receiver: &str,
+        use_start: usize,
+        call: Node<'_>,
+    ) -> Option<String> {
+        if !valid_python_identifier(receiver) || matches!(receiver, "self" | "cls") {
+            return None;
+        }
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .python_global_names
+                .get(current)
+                .is_some_and(|names| names.contains(receiver))
+            {
+                return None;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+
+        let mut syntax_scope = Some(call);
+        let function = loop {
+            let node = syntax_scope?;
+            if node.kind() == "function_definition"
+                && self
+                    .declarations
+                    .get(&node.id())
+                    .is_some_and(|context| context.fact_id == owner.fact_id)
+            {
+                break node;
+            }
+            syntax_scope = node.parent();
+        };
+        let body = function.child_by_field_name("body")?;
+        let mut cursor = body.walk();
+        let mut bindings = body
+            .named_children(&mut cursor)
+            .filter(|statement| statement.start_byte() < use_start)
+            .filter(|statement| {
+                crate::engine::python_bound_names(*statement, self.source, true).contains(receiver)
+            });
+        let assignment = bindings.next()?;
+        if bindings.next().is_some() || assignment.kind() != "assignment" {
+            return None;
+        }
+        let left = assignment
+            .child_by_field_name("left")
+            .filter(|node| node.kind() == "identifier")?;
+        if self.text(left) != receiver {
+            return None;
+        }
+        let initializer = assignment
+            .child_by_field_name("right")
+            .filter(|node| node.kind() == "call")?;
+        let called = initializer.child_by_field_name("function")?;
+        let raw = self.text(called);
+        let (qualifier, spelling) = split_qualified(&raw);
+        if spelling.is_empty() {
+            return None;
+        }
+        qualifier
+            .and_then(|qualifier| {
+                self.imported_qualified_target_for(owner, qualifier, called.start_byte(), true)
+                    .map(|target| format!("{target}.{spelling}"))
+            })
+            .or_else(|| {
+                qualifier.is_none().then(|| {
+                    self.local_target_for(owner, spelling)
+                        .cloned()
+                        .or_else(|| {
+                            self.imported_target_for_occurrence(
+                                owner,
+                                spelling,
+                                called.start_byte(),
+                                true,
+                            )
+                            .cloned()
+                        })
+                        .unwrap_or_else(|| format!("{}.{}", self.module_or_package, spelling))
+                })
+            })
+    }
+
+    fn python_module_singleton_receiver(
+        &self,
+        owner: &DeclarationContext,
+        receiver: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        if !valid_python_identifier(receiver)
+            || self.python_name_is_statically_local(owner, receiver)
+        {
+            return None;
+        }
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            if self
+                .python_global_names
+                .get(current)
+                .is_some_and(|names| names.contains(receiver))
+            {
+                return None;
+            }
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+
+        let file_scope = self.file.as_ref()?.scope_id.as_str();
+        let allow_later_file_binding = matches!(owner.kind.as_str(), "function" | "method");
+        let mut variables = self
+            .builder
+            .batch
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.kind == "variable"
+                    && declaration.name == receiver
+                    && declaration.scope_id.as_deref() == Some(file_scope)
+                    && (allow_later_file_binding
+                        || usize::try_from(declaration.range.end_byte)
+                            .is_ok_and(|end| end <= use_start))
+            });
+        let variable = variables.next()?;
+        if variables.next().is_some() {
+            return None;
+        }
+
+        let mut initializer_types = self
+            .builder
+            .batch
+            .candidates
+            .iter()
+            .filter_map(|candidate| {
+                (candidate.relation == CandidateRelation::TypeOf
+                    && candidate.source_declaration_id == variable.id)
+                    .then_some(candidate.constraints.exact_target_declaration_id.as_deref())
+                    .flatten()
+            });
+        let initializer_type = initializer_types.next()?;
+        if initializer_types.next().is_some() {
+            return None;
+        }
+        self.builder
+            .batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == initializer_type && declaration.kind == "class")
+            .map(|declaration| declaration.qualified_name.clone())
+    }
+
     fn python_bound_method_receiver(
         &self,
         call: Node<'_>,
@@ -6748,19 +6959,21 @@ impl<'source> DirectAdapterState<'source> {
                     let Some(parameters) = node.child_by_field_name("parameters") else {
                         return Ok(None);
                     };
-                    let Some(parameter) = parameters.named_child(0) else {
-                        return Ok(None);
-                    };
-                    let name = if parameter.kind() == "identifier" {
-                        Some(parameter)
-                    } else {
-                        parameter.child_by_field_name("name").or_else(|| {
-                            let mut cursor = parameter.walk();
-                            parameter
-                                .children(&mut cursor)
-                                .find(|child| child.kind() == "identifier")
-                        })
-                    };
+                    let mut cursor = parameters.walk();
+                    let name = parameters
+                        .named_children(&mut cursor)
+                        .find_map(|parameter| {
+                            if parameter.kind() == "identifier" {
+                                Some(parameter)
+                            } else {
+                                parameter.child_by_field_name("name").or_else(|| {
+                                    let mut cursor = parameter.walk();
+                                    parameter
+                                        .children(&mut cursor)
+                                        .find(|child| child.kind() == "identifier")
+                                })
+                            }
+                        });
                     let Some(name) = name.filter(|name| self.text(*name) == receiver) else {
                         return Ok(None);
                     };

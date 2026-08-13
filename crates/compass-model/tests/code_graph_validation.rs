@@ -425,6 +425,9 @@ fn language_specific_declarations_use_supported_endpoint_shapes() {
         (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
         (EdgeKind::Contains, NodeKind::EnumMember, NodeKind::Method),
         (EdgeKind::Contains, NodeKind::Field, NodeKind::Method),
+        (EdgeKind::Contains, NodeKind::Function, NodeKind::Macro),
+        (EdgeKind::Contains, NodeKind::Method, NodeKind::Macro),
+        (EdgeKind::Contains, NodeKind::Constructor, NodeKind::Macro),
         (
             EdgeKind::Instantiates,
             NodeKind::Method,
@@ -639,6 +642,7 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
         (EdgeKind::Calls, NodeKind::TypeAlias, NodeKind::Function),
         (EdgeKind::Calls, NodeKind::Enum, NodeKind::Function),
         (EdgeKind::Calls, NodeKind::Function, NodeKind::Variable),
+        (EdgeKind::Calls, NodeKind::Function, NodeKind::Property),
         (EdgeKind::Calls, NodeKind::Function, NodeKind::Import),
         (EdgeKind::Calls, NodeKind::Function, NodeKind::TypeAlias),
         (EdgeKind::References, NodeKind::Method, NodeKind::Annotation),

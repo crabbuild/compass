@@ -98,6 +98,29 @@ otherwise equal generated/test declarations. A frozen v1 implementation exists
 only in unit tests to prove the reviewed production-versus-generated case is a
 strict v2 improvement; it is not a runtime fallback.
 
+Natural behavior ranking treats source-backed functions, methods, and
+constructors as operation roots alongside role-shaped types. A compact
+operation-role channel may finish early only when its predicate and subject
+evidence proves that its first candidate dominates omitted declarations and
+covers the query's subject terms. A subject-matching role such as `Builder`
+cannot finish discovery before a more specific method has been read. Compact
+type-declaration exits use the same subject-coverage rule.
+Predicate-only methods can use the terminal owner as their subject (for
+example, `ClaudeGenerator::Generate`), while a method that already names a
+subject, such as `SaveStep`, is not burdened with unrelated receiver tokens.
+Matching owner terms still provide a secondary rank signal for nested APIs
+such as Java builders and test environments.
+Test/generated penalties come from path and exact namespace components, not
+CamelCase words inside a production type name: `DicerTestEnvironment` under a
+production source root is not treated as a test namespace. Symbol signatures
+also contribute bounded direct-field evidence, which lets a parameter concept
+distinguish otherwise identical overloads such as `contains(SliceKey)` and
+`contains(Slice)`.
+The stopword policy retains `all` and `why` because they can distinguish code
+identities such as `DetectAll` and `runAttributionWhy`. Paths under `e2e/` are
+ranked as test support, like `tests/` and language-specific test filenames, so
+an otherwise equal production declaration remains first.
+
 ## Natural-language intent routing
 
 `compass ask "<question>"` uses the deterministic `query-planner/1` profile
