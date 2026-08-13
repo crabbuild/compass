@@ -82,7 +82,14 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Compass — understand the codebase before changing it',
     description: siteDescription,
-    images: [siteImagePath],
+    images: [
+      {
+        url: siteImagePath,
+        width: 1200,
+        height: 630,
+        alt: 'Compass local-first code graph for understanding a codebase.',
+      },
+    ],
   },
   robots: {
     index: isProductionDeployment,

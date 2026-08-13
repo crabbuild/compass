@@ -5,7 +5,10 @@ export const siteDescription =
   'A fast, local-first knowledge graph for understanding codebases, tracing impact, and querying architecture with evidence.';
 export const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? 'https://compass.crab.build').replace(/\/$/, '');
 export const isProductionDeployment = process.env.VERCEL_ENV !== 'preview' && process.env.VERCEL_ENV !== 'development';
-export const siteImagePath = '/opengraph-image';
+// Keep the public social-card URL stable and image-like. Some link unfurlers
+// are less reliable with Next.js' extensionless metadata image route, and a
+// dedicated path also lets us invalidate a previously failed X card crawl.
+export const siteImagePath = '/social-card.png';
 export const siteKeywords = [
   'code graph',
   'codebase navigation',
@@ -79,7 +82,14 @@ export function pageMetadata(
       card: 'summary_large_image',
       title: fullTitle,
       description,
-      images: [image],
+      images: [
+        {
+          url: image,
+          width: 1200,
+          height: 630,
+          alt: imageAlt,
+        },
+      ],
     },
     robots: options.noIndex || !isProductionDeployment
       ? {
