@@ -41,7 +41,11 @@
   labels. Add bounded 1–4-hop selection isolation with incoming/outgoing edge
   filtering, layout spacing, a navigable minimap, and discoverable keyboard
   shortcuts. Resuming a settled nested community graph now reheats its layout
-  so pause/resume produces visible physics movement. Add the `workbench-json`
+  so pause/resume produces visible physics movement. Consolidate workbench
+  filters into the top graph-control rail, allow neighborhood settings to be
+  prepared before selection, keep filters scoped to the visible overview or
+  community detail, fit newly isolated neighborhoods, and scale layout reheating
+  so motion remains visible on fitted repository graphs. Add the `workbench-json`
   machine export while preserving plain `compass.viewer.graph/1` JSON
   compatibility.
 

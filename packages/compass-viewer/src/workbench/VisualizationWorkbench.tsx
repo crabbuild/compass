@@ -9,6 +9,7 @@ import {
   RouteIcon,
   SearchCodeIcon,
   ShieldCheckIcon,
+  SlidersHorizontalIcon,
   WaypointsIcon
 } from "lucide-react";
 import type { ArchitectureOverview } from "../contracts/architecture";
@@ -241,7 +242,6 @@ function FilteredGraph({
   initialInspectorLayout?: InspectorLayout | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
 }) {
-  const options = useMemo(() => graphFilterOptions(model), [model]);
   const [relation, setRelation] = useState("");
   const [evidence, setEvidence] = useState("");
   const [kind, setKind] = useState("");
@@ -251,24 +251,31 @@ function FilteredGraph({
     communityId,
     model: communityDetails?.[String(communityId)] ?? model
   };
+  const activeCommunityDetail = embeddedCommunityDetail ?? communityDetail;
+  const activeModel = activeCommunityDetail?.model ?? model;
+  const activeGraphKey = activeCommunityDetail
+    ? `community-${activeCommunityDetail.communityId}`
+    : "overview";
+  const options = useMemo(() => graphFilterOptions(activeModel), [activeModel]);
   const filtered = useMemo(
-    () => filterGraph(model, { relation, evidence, kind, language }),
-    [evidence, kind, language, model, relation]
+    () => filterGraph(activeModel, { relation, evidence, kind, language }),
+    [activeModel, evidence, kind, language, relation]
   );
+  useEffect(() => {
+    setRelation("");
+    setEvidence("");
+    setKind("");
+    setLanguage("");
+  }, [activeGraphKey]);
+  const activeFilterCount = [relation, evidence, kind, language].filter(Boolean).length;
   return (
     <div className="workbench-graph-lens">
-      <div className="workbench-filter-strip" aria-label="Graph filters">
-        <Filter label="Relationship" value={relation} values={options.relations} onChange={setRelation} />
-        <Filter label="Evidence" value={evidence} values={options.evidence} onChange={setEvidence} />
-        <Filter label="Node kind" value={kind} values={options.kinds} onChange={setKind} />
-        <Filter label="Language" value={language} values={options.languages} onChange={setLanguage} />
-        <span role="status">
-          {filtered.nodes.length.toLocaleString()} / {model.nodes.length.toLocaleString()} nodes
-        </span>
-      </div>
       <CompassGraph
-        model={filtered}
-        communityDetail={embeddedCommunityDetail ?? communityDetail}
+        model={activeCommunityDetail ? model : filtered}
+        communityDetail={activeCommunityDetail ? {
+          ...activeCommunityDetail,
+          model: filtered
+        } : undefined}
         communityLoading={communityLoading}
         communityError={communityError}
         onBackToOverview={communityId === undefined ? onBackToOverview : () => setCommunityId(undefined)}
@@ -283,6 +290,45 @@ function FilteredGraph({
         }}
         queryResult={queryResult}
         preferredLayout={preferredLayout}
+        toolbarLeading={(
+          <details className="workbench-filter-menu">
+            <summary aria-label="Graph filters">
+              <SlidersHorizontalIcon aria-hidden="true" />
+              <span>Filters</span>
+              {activeFilterCount > 0 ? <b>{activeFilterCount}</b> : null}
+              <small>
+                {filtered.nodes.length.toLocaleString()} / {activeModel.nodes.length.toLocaleString()}
+              </small>
+            </summary>
+            <div className="workbench-filter-popover" role="region" aria-label="Graph filter options">
+              <header>
+                <span>
+                  <strong>Filter graph</strong>
+                  <small>Refine visible nodes and relationships</small>
+                </span>
+                <button
+                  type="button"
+                  disabled={activeFilterCount === 0}
+                  onClick={() => {
+                    setRelation("");
+                    setEvidence("");
+                    setKind("");
+                    setLanguage("");
+                  }}
+                >
+                  Clear all
+                </button>
+              </header>
+              <Filter label="Relationship" value={relation} values={options.relations} onChange={setRelation} />
+              <Filter label="Evidence" value={evidence} values={options.evidence} onChange={setEvidence} />
+              <Filter label="Node kind" value={kind} values={options.kinds} onChange={setKind} />
+              <Filter label="Language" value={language} values={options.languages} onChange={setLanguage} />
+              <footer role="status">
+                Showing {filtered.nodes.length.toLocaleString()} of {activeModel.nodes.length.toLocaleString()} nodes
+              </footer>
+            </div>
+          </details>
+        )}
       />
     </div>
   );
