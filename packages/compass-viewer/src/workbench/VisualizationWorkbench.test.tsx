@@ -14,7 +14,8 @@ vi.mock("../graph/CompassGraph", () => ({
     host,
     toolbarLeading,
     toolbarLeadingPanel,
-    stageOverlay
+    stageOverlay,
+    preferredLayout
   }: {
     model: GraphViewModel;
     communityDetail?: { communityId: number; model: GraphViewModel };
@@ -22,6 +23,7 @@ vi.mock("../graph/CompassGraph", () => ({
     toolbarLeading?: ReactNode;
     toolbarLeadingPanel?: ReactNode;
     stageOverlay?: ReactNode;
+    preferredLayout?: string;
   }) {
     const active = communityDetail?.model ?? model;
     return (
@@ -30,6 +32,7 @@ vi.mock("../graph/CompassGraph", () => ({
         {toolbarLeadingPanel}
         {stageOverlay}
         <output data-testid="visible-nodes">{active.nodes.length}</output>
+        <output data-testid="preferred-layout">{preferredLayout}</output>
         <button type="button" onClick={() => host.openCommunity?.(1)}>
           Open community fixture
         </button>
@@ -103,6 +106,56 @@ describe("VisualizationWorkbench graph filters", () => {
 
     expect(screen.getByTestId("visible-nodes")).toHaveTextContent("1");
     expect(screen.getByLabelText("Graph filters")).toHaveTextContent("1 / 2");
+  });
+
+  it("uses a hierarchy for routes while keeping other artifacts on the grid", () => {
+    const model = graph([
+      { id: "route", label: "GET /", kind: "route", community: 1 },
+      { id: "handler", label: "handler()", kind: "function", community: 1 }
+    ]);
+    const workbench: WorkbenchModel = {
+      schema: "compass.viewer.workbench/1",
+      title: "Fixture workbench",
+      graphIdentity: "fixture-identity",
+      defaultView: "routes",
+      views: [{
+        id: "routes",
+        kind: "artifact",
+        lens: "routes",
+        title: "Routes and handlers",
+        description: "Route fixture",
+        relations: ["routes_to"],
+        coverage: {
+          status: "complete",
+          truncated: false,
+          nodes: 2,
+          edges: 1,
+          limitations: []
+        },
+        model
+      }, {
+        id: "dependencies",
+        kind: "artifact",
+        lens: "dependencies",
+        title: "Dependencies",
+        description: "Dependency fixture",
+        relations: ["depends_on"],
+        coverage: {
+          status: "complete",
+          truncated: false,
+          nodes: 2,
+          edges: 1,
+          limitations: []
+        },
+        model
+      }]
+    };
+
+    render(<VisualizationWorkbench workbench={workbench} host={{ openSource: vi.fn() }} />);
+    expect(screen.getByTestId("preferred-layout")).toHaveTextContent("hierarchical");
+
+    fireEvent.click(screen.getByRole("button", { name: /Dependencies/ }));
+    expect(screen.getByTestId("preferred-layout")).toHaveTextContent("grid");
   });
 
   it("closes the filter panel with Escape and restores trigger focus", () => {

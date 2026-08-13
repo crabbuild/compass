@@ -350,6 +350,261 @@ fn configure() -> App {
 }
 
 #[test]
+fn axum_composes_nested_router_factories_across_rust_modules() -> Result<(), Box<dyn Error>> {
+    let sources = [
+        (
+            "src/http/server.rs",
+            r#"use crate::auth::{auth, unused};
+use axum::{Router, middleware, routing};
+async fn health() {}
+async fn public() {}
+async fn global_trace() {}
+fn create_router() -> Router {
+    let repository_router = repositories::create_router();
+    let authenticated_router = Router::new()
+        .nest("/repository", repository_router)
+        .route_layer(middleware::from_fn_with_state((), auth))
+        .route("/public", routing::get(public));
+    let unauthenticated_router = Router::new()
+        .route("/health_check", routing::get(health).with_state(()));
+    let mut router = Router::new()
+        .merge(unauthenticated_router)
+        .nest("/v1", authenticated_router);
+    router = router.nest("/v1/presigned", presigned::create_router());
+    router.layer(middleware::from_fn(global_trace))
+}
+"#,
+        ),
+        (
+            "src/auth.rs",
+            r#"async fn auth() {}
+"#,
+        ),
+        (
+            "src/http/repositories.rs",
+            r#"use axum::Router;
+fn create_router() -> Router {
+    let repository_router = repository::create_router();
+    Router::new().nest("/{repository_id}", repository_router)
+}
+"#,
+        ),
+        (
+            "src/http/repositories/repository.rs",
+            r#"use axum::Router;
+fn create_router() -> Router {
+    let contents_router = contents::create_router();
+    Router::new().nest("/content", contents_router)
+}
+"#,
+        ),
+        (
+            "src/http/repositories/repository/contents.rs",
+            r#"use axum::{Router, routing};
+async fn put_handler() {}
+fn create_router() -> Router {
+    let content_router = content::create_router();
+    Router::new()
+        .route("/", routing::put(put_handler))
+        .nest("/{address}", content_router)
+}
+"#,
+        ),
+        (
+            "src/http/repositories/repository/contents/content.rs",
+            r#"use axum::{Router, middleware, routing};
+async fn get_handler() {}
+async fn presign_handler() {}
+async fn trace() {}
+fn create_router() -> Router {
+    Router::new()
+        .route("/", routing::get(get_handler))
+        .route("/presign", routing::post(presign_handler))
+        .layer(middleware::from_fn(trace))
+}
+"#,
+        ),
+        (
+            "src/http/presigned.rs",
+            r#"use axum::Router;
+fn create_router() -> Router {
+    repository::create_router()
+}
+"#,
+        ),
+        (
+            "src/http/presigned/repository.rs",
+            r#"use axum::Router;
+fn create_router() -> Router {
+    Router::new().nest("/{repository_id}", redeem::create_router())
+}
+"#,
+        ),
+        (
+            "src/http/presigned/redeem.rs",
+            r#"use axum::{Router, routing};
+async fn handler() {}
+fn create_router() -> Router {
+    Router::new().route("/{address}", routing::get(handler))
+}
+"#,
+        ),
+    ];
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut source_map = HashMap::new();
+    for (path, source) in sources {
+        extractions.push(engine.extract_source(Path::new(path), source.as_bytes())?);
+        source_map.insert(path.to_owned(), source.to_owned());
+    }
+    let mut extraction = compass_resolve::resolve(&extractions, &source_map);
+    let routes = resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    let expected = [
+        ("GET", "/health_check", "health"),
+        ("GET", "/v1/public", "public"),
+        (
+            "PUT",
+            "/v1/repository/{repository_id}/content",
+            "put_handler",
+        ),
+        (
+            "GET",
+            "/v1/repository/{repository_id}/content/{address}",
+            "get_handler",
+        ),
+        (
+            "POST",
+            "/v1/repository/{repository_id}/content/{address}/presign",
+            "presign_handler",
+        ),
+        ("GET", "/v1/presigned/{repository_id}/{address}", "handler"),
+    ];
+    for (operation, path, handler) in expected {
+        assert!(
+            routes.iter().any(|route| {
+                route.route.operation == operation
+                    && route.route.normalized_path == path
+                    && route.route.handler_reference == handler
+                    && route.state == ResolutionState::Exact
+            }),
+            "missing exact Axum route {operation} {path} -> {handler}"
+        );
+    }
+    let get_content = routes
+        .iter()
+        .find(|route| {
+            route.route.operation == "GET"
+                && route.route.normalized_path == "/v1/repository/{repository_id}/content/{address}"
+        })
+        .ok_or("missing composed content route")?;
+    assert_eq!(
+        get_content.route.middleware_references,
+        ["server.global_trace", "auth.auth", "content.trace"]
+    );
+    assert!(
+        get_content
+            .stages
+            .iter()
+            .all(|stage| { stage.state == ResolutionState::Exact && stage.target.is_some() }),
+        "unexpected Axum stages: {:#?}",
+        get_content.stages
+    );
+    let public = routes
+        .iter()
+        .find(|route| route.route.normalized_path == "/v1/public")
+        .ok_or("missing public route registered after route middleware")?;
+    assert_eq!(public.route.middleware_references, ["server.global_trace"]);
+    Ok(())
+}
+
+#[test]
+fn axum_does_not_compose_ambiguous_router_module_references() -> Result<(), Box<dyn Error>> {
+    let sources = [
+        (
+            "src/foo.rs",
+            r#"use axum::Router;
+fn create_router() -> Router {
+    Router::new().nest("/invented", bar::create_router())
+}
+"#,
+        ),
+        (
+            "src/bar.rs",
+            r#"use axum::{Router, routing};
+async fn sibling_handler() {}
+fn create_router() -> Router {
+    Router::new().route("/child", routing::get(sibling_handler))
+}
+"#,
+        ),
+        (
+            "src/foo/bar.rs",
+            r#"use axum::{Router, routing};
+async fn child_handler() {}
+fn create_router() -> Router {
+    Router::new().route("/child", routing::get(child_handler))
+}
+"#,
+        ),
+    ];
+    let mut engine = Engine::default();
+    let mut extractions = Vec::new();
+    let mut source_map = HashMap::new();
+    for (path, source) in sources {
+        extractions.push(engine.extract_source(Path::new(path), source.as_bytes())?);
+        source_map.insert(path.to_owned(), source.to_owned());
+    }
+    let mut extraction = compass_resolve::resolve(&extractions, &source_map);
+    let routes = resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+
+    assert!(
+        routes
+            .iter()
+            .all(|route| route.route.normalized_path != "/invented/child"),
+        "ambiguous Rust module candidates must not invent a composed route"
+    );
+    assert_eq!(
+        routes
+            .iter()
+            .filter(|route| route.route.normalized_path == "/child")
+            .count(),
+        2
+    );
+    Ok(())
+}
+
+#[test]
+fn axum_router_cycles_remain_local_and_bounded() -> Result<(), Box<dyn Error>> {
+    let source = r#"use axum::{Router, routing};
+async fn handler() {}
+fn create_router() -> Router {
+    Router::new()
+        .route("/loop", routing::get(handler))
+        .nest("/cycle", create_router())
+}
+"#;
+    let extracted =
+        Engine::default().extract_source(Path::new("src/routes.rs"), source.as_bytes())?;
+    let mut extraction = compass_resolve::resolve(
+        &[extracted],
+        &HashMap::from([("src/routes.rs".to_owned(), source.to_owned())]),
+    );
+    let routes = resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+
+    assert!(
+        routes
+            .iter()
+            .any(|route| route.route.normalized_path == "/loop")
+    );
+    assert!(
+        routes
+            .iter()
+            .all(|route| route.route.normalized_path != "/cycle/loop")
+    );
+    Ok(())
+}
+
+#[test]
 fn vapor_root_and_direct_grouped_routes_are_visible() -> Result<(), Box<dyn Error>> {
     let extraction = Engine::default().extract_source(
         Path::new("VaporRoutes.swift"),

@@ -5,17 +5,19 @@ use serde_json::Value;
 
 use super::routes::FrameworkResolutionError;
 
-pub(super) fn expand_django_includes(
+pub(super) fn expand_routes(
     facts: &[RawFrameworkFact],
+    routes: Vec<RawRouteFact>,
     limits: FrameworkLimits,
 ) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
-    let routes = facts
-        .iter()
-        .filter_map(|fact| match fact {
-            RawFrameworkFact::Route(route) => Some(route.clone()),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
-        })
-        .collect::<Vec<_>>();
+    let routes = expand_django_includes(routes, limits)?;
+    expand_router_mounts(facts, routes, limits)
+}
+
+fn expand_django_includes(
+    routes: Vec<RawRouteFact>,
+    limits: FrameworkLimits,
+) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
     let mut by_scope = HashMap::<String, Vec<usize>>::new();
     for (index, route) in routes.iter().enumerate() {
         if route.framework == "django" {
@@ -63,7 +65,7 @@ pub(super) fn expand_django_includes(
     Ok(output)
 }
 
-pub(super) fn expand_router_mounts(
+fn expand_router_mounts(
     facts: &[RawFrameworkFact],
     routes: Vec<RawRouteFact>,
     limits: FrameworkLimits,

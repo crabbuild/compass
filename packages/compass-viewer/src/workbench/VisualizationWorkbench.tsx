@@ -200,7 +200,9 @@ function WorkbenchView({
   }
   const preferredLayout = view.kind === "affected"
     ? "hierarchical" as const
-    : view.kind === "artifact" ? "grid" as const : "automatic" as const;
+    : view.kind === "artifact"
+      ? view.lens === "routes" ? "hierarchical" as const : "grid" as const
+      : "automatic" as const;
   return (
     <FilteredGraph
       model={view.model}
@@ -301,6 +303,7 @@ function FilteredGraph({
   }, []);
   const closeFilters = useCallback(() => setFiltersOpen(false), []);
   const activeFilterCount = [relation, evidence, kind, language].filter(Boolean).length;
+  const filtersHideEveryNode = activeFilterCount > 0 && filtered.nodes.length === 0;
   return (
     <div className="workbench-graph-lens">
       <CompassGraph
@@ -355,7 +358,7 @@ function FilteredGraph({
                 <small>Refine visible nodes and relationships</small>
               </span>
               <button type="button" disabled={activeFilterCount === 0} onClick={clearFilters}>
-                Clear all
+                Clear filters
               </button>
             </header>
             <Filter label="Relationship" value={relation} values={options.relations} onChange={setRelation} />
@@ -363,7 +366,9 @@ function FilteredGraph({
             <Filter label="Node kind" value={kind} values={options.kinds} onChange={setKind} />
             <Filter label="Language" value={language} values={options.languages} onChange={setLanguage} />
             <footer role="status">
-              Showing {filtered.nodes.length.toLocaleString()} of {activeModel.nodes.length.toLocaleString()} nodes
+              {filtersHideEveryNode
+                ? "No nodes match these filters"
+                : `Showing ${filtered.nodes.length.toLocaleString()} of ${activeModel.nodes.length.toLocaleString()} nodes`}
             </footer>
           </div>
         ) : undefined}
@@ -374,7 +379,7 @@ function FilteredGraph({
             title="This view has no graph nodes"
             detail="The exported graph lens did not contain any nodes to visualize."
           />
-        ) : activeFilterCount > 0 && filtered.nodes.length === 0 ? (
+        ) : filtersHideEveryNode && !filtersOpen ? (
           <GraphEmptyState
             title="No nodes match these filters"
             detail="Clear one or more filters to restore the graph."

@@ -36,8 +36,13 @@ pub(super) fn resolve_domains_with_targets(
         .framework_facts
         .iter()
         .filter_map(|fact| match fact {
-            RawFrameworkFact::Domain(fact) => Some(fact),
+            RawFrameworkFact::Domain(fact)
+                if !matches!(fact.kind.as_str(), "router_mount" | "router_middleware") =>
+            {
+                Some(fact)
+            }
             RawFrameworkFact::Route(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_) => None,
         })
         .collect::<Vec<_>>();
     limits.check_facts(facts.len())?;

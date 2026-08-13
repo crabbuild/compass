@@ -96,7 +96,7 @@ pub fn artifact_lens_view_model(
     max_edges: usize,
 ) -> LensProjection {
     let relations = lens.relations();
-    relation_projection(
+    let mut projection = relation_projection(
         document,
         communities,
         labels,
@@ -104,7 +104,11 @@ pub fn artifact_lens_view_model(
         &relations,
         max_nodes,
         max_edges,
-    )
+    );
+    if lens == ArtifactLens::Routes {
+        prepare_route_lens(document, &mut projection.model);
+    }
+    projection
 }
 
 pub fn affected_lens_view_model(
@@ -244,6 +248,103 @@ fn relation_projection(
         model,
         truncated: total_nodes > max_nodes || total_edges > max_edges,
     }
+}
+
+fn prepare_route_lens(document: &GraphDocument, model: &mut GraphViewModel) {
+    let route_ids = model
+        .edges
+        .iter()
+        .map(|edge| edge.source.as_str())
+        .collect::<BTreeSet<_>>();
+    let handler_ids = model
+        .edges
+        .iter()
+        .map(|edge| edge.target.as_str())
+        .filter(|id| !route_ids.contains(id))
+        .collect::<BTreeSet<_>>();
+    for node in &mut model.nodes {
+        let route = route_ids.contains(node.id.as_str());
+        node.depth = Some(usize::from(!route));
+        node.root = Some(route);
+    }
+
+    let source_nodes = document
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
+    let mut duplicate_labels = BTreeMap::<String, Vec<String>>::new();
+    for node in &model.nodes {
+        if handler_ids.contains(node.id.as_str()) {
+            duplicate_labels
+                .entry(node.label.clone())
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+    for ids in duplicate_labels.values().filter(|ids| ids.len() > 1) {
+        let qualified = ids
+            .iter()
+            .map(|id| {
+                source_nodes
+                    .get(id.as_str())
+                    .and_then(|node| node.logical_property("qualified_name"))
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        let labels = minimal_qualified_labels(&qualified);
+        for (id, label) in ids.iter().zip(labels) {
+            if label.is_empty() {
+                continue;
+            }
+            if let Some(node) = model.nodes.iter_mut().find(|node| node.id == *id) {
+                if node.label.ends_with("()") && !label.ends_with("()") {
+                    node.label = format!("{label}()");
+                } else {
+                    node.label = label;
+                }
+            }
+        }
+    }
+}
+
+fn minimal_qualified_labels(values: &[String]) -> Vec<String> {
+    let parts = values
+        .iter()
+        .map(|value| qualified_parts(value))
+        .collect::<Vec<_>>();
+    parts
+        .iter()
+        .enumerate()
+        .map(|(index, segments)| {
+            if segments.is_empty() {
+                return String::new();
+            }
+            for length in 2..=segments.len() {
+                let suffix = &segments[segments.len() - length..];
+                let unique = parts.iter().enumerate().all(|(other_index, other)| {
+                    other_index == index
+                        || other.len() < length
+                        || other[other.len() - length..] != *suffix
+                });
+                if unique {
+                    return suffix.join("::");
+                }
+            }
+            segments.join("::")
+        })
+        .collect()
+}
+
+fn qualified_parts(value: &str) -> Vec<String> {
+    value
+        .replace("::", ".")
+        .split(['.', '/', '\\', '#'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 fn filtered_document(
@@ -407,6 +508,64 @@ mod tests {
             serde_json::to_value(&first.model)?,
             serde_json::to_value(&second.model)?
         );
+        Ok(())
+    }
+
+    #[test]
+    fn route_lens_separates_routes_and_disambiguates_handlers() -> Result<(), serde_json::Error> {
+        let document = serde_json::from_value(serde_json::json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {},
+            "nodes": [
+                {"id":"get-route","label":"GET /items","kind":"route","community":0},
+                {"id":"post-route","label":"POST /items","kind":"route","community":0},
+                {
+                    "id":"get-handler",
+                    "label":"handler()",
+                    "qualifiedName":"app::items::get::handler",
+                    "kind":"function",
+                    "community":0
+                },
+                {
+                    "id":"post-handler",
+                    "label":"handler()",
+                    "qualifiedName":"app::items::post::handler",
+                    "kind":"function",
+                    "community":0
+                }
+            ],
+            "links": [
+                {"source":"get-route","target":"get-handler","relation":"routes_to"},
+                {"source":"post-route","target":"post-handler","relation":"routes_to"}
+            ]
+        }))?;
+        let projection = artifact_lens_view_model(
+            &document,
+            &BTreeMap::from([(
+                0,
+                vec![
+                    "get-route".to_owned(),
+                    "post-route".to_owned(),
+                    "get-handler".to_owned(),
+                    "post-handler".to_owned(),
+                ],
+            )]),
+            None,
+            ArtifactLens::Routes,
+            20,
+            20,
+        );
+        let nodes = projection
+            .model
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node.label.as_str(), node.depth, node.root))
+            .collect::<BTreeSet<_>>();
+        assert!(nodes.contains(&("get-route", "GET /items", Some(0), Some(true))));
+        assert!(nodes.contains(&("post-route", "POST /items", Some(0), Some(true))));
+        assert!(nodes.contains(&("get-handler", "get::handler()", Some(1), Some(false))));
+        assert!(nodes.contains(&("post-handler", "post::handler()", Some(1), Some(false))));
         Ok(())
     }
 }

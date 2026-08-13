@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use regex::Regex;
@@ -6,7 +7,7 @@ use tree_sitter::Node;
 
 use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{anchor, join_route_path, literal, normalize_route_path, text};
-use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
+use super::{RawDomainFact, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
 pub(super) fn detect_axum(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
     detect_selected(path, source, root, Some("axum"))
@@ -74,6 +75,9 @@ fn detect_selected(
     };
     let mut facts = Vec::new();
     collect_rust_calls(root, source, path, framework, "", &mut facts);
+    if axum {
+        collect_axum_router_composition(root, source, path, &mut facts);
+    }
     let masked_body = masked_rust_source(root, source);
 
     let functions = function
@@ -131,6 +135,564 @@ fn detect_selected(
     facts
 }
 
+fn collect_axum_router_composition(
+    root: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let mut functions = Vec::new();
+    collect_nodes_of_kind(root, "function_item", &mut functions);
+    let local_functions = functions
+        .iter()
+        .filter_map(|function| function.child_by_field_name("name"))
+        .map(|name| node_text(name, source).to_owned())
+        .filter(|name| !name.is_empty())
+        .collect::<BTreeSet<_>>();
+    let import_aliases = rust_import_aliases(root, source);
+    let mut owners = BTreeMap::<(u64, u64), String>::new();
+    let mut mounts = Vec::new();
+    for function in functions {
+        let Some(name) = function.child_by_field_name("name") else {
+            continue;
+        };
+        let Some(body) = function.child_by_field_name("body") else {
+            continue;
+        };
+        let function_name = node_text(name, source);
+        if function_name.is_empty() {
+            continue;
+        }
+        let mut bindings = BTreeMap::new();
+        let mut local_routers = BTreeSet::new();
+        collect_router_bindings(
+            body,
+            source,
+            function_name,
+            &mut bindings,
+            &mut local_routers,
+        );
+        collect_router_calls(
+            body,
+            source,
+            path,
+            function_name,
+            &bindings,
+            &local_routers,
+            &local_functions,
+            &import_aliases,
+            &mut owners,
+            &mut mounts,
+        );
+        if let Some(target) =
+            returned_router_target(body, source, function_name, &bindings, &local_routers)
+        {
+            mounts.push(router_mount_fact(
+                path,
+                source,
+                body,
+                &function_router_owner(function_name),
+                target,
+                "",
+                "alias",
+            ));
+        }
+    }
+    for fact in facts.iter_mut() {
+        let RawFrameworkFact::Route(route) = fact else {
+            continue;
+        };
+        if route.framework != "axum" {
+            continue;
+        }
+        if let Some(owner) = owners.get(&(route.anchor.start_byte, route.anchor.end_byte)) {
+            route.detail.insert(
+                "router_owner".to_owned(),
+                serde_json::Value::String(owner.clone()),
+            );
+        }
+    }
+    facts.extend(mounts);
+}
+
+fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
+    if node.kind() == kind {
+        output.push(node);
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_nodes_of_kind(child, kind, output);
+    }
+}
+
+fn collect_router_bindings(
+    node: Node<'_>,
+    source: &[u8],
+    function_name: &str,
+    references: &mut BTreeMap<String, String>,
+    local_routers: &mut BTreeSet<String>,
+) {
+    if node.kind() == "let_declaration"
+        && let (Some(pattern), Some(value)) = (
+            node.child_by_field_name("pattern"),
+            node.child_by_field_name("value"),
+        )
+        && let Some(binding) = rust_binding_name(pattern, source)
+    {
+        if let Some(reference) = router_factory_reference(value, source) {
+            references.insert(binding.to_owned(), reference);
+        } else if contains_router_constructor(value, source) {
+            local_routers.insert(local_router_owner(function_name, binding));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_router_bindings(child, source, function_name, references, local_routers);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_router_calls(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    function_name: &str,
+    references: &BTreeMap<String, String>,
+    local_routers: &BTreeSet<String>,
+    local_functions: &BTreeSet<String>,
+    import_aliases: &BTreeMap<String, String>,
+    owners: &mut BTreeMap<(u64, u64), String>,
+    mounts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call_expression"
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(method) = rust_call_method(function, source)
+    {
+        let owner = router_call_owner(node, source, function_name);
+        if method == "route" {
+            owners.insert(
+                (node.start_byte() as u64, node.end_byte() as u64),
+                owner.clone(),
+            );
+        }
+        if matches!(method.as_str(), "nest" | "merge") {
+            let arguments = node
+                .child_by_field_name("arguments")
+                .map(named_children)
+                .unwrap_or_default();
+            let (prefix, target) = if method == "nest" {
+                (
+                    arguments
+                        .first()
+                        .and_then(|argument| literal(node_text(*argument, source)))
+                        .unwrap_or_default(),
+                    arguments.get(1).copied(),
+                )
+            } else {
+                (String::new(), arguments.first().copied())
+            };
+            if let Some(target) = target.and_then(|target| {
+                router_target(target, source, function_name, references, local_routers)
+            }) {
+                mounts.push(router_mount_fact(
+                    path, source, node, &owner, target, &prefix, &method,
+                ));
+            }
+        }
+        if matches!(method.as_str(), "layer" | "route_layer")
+            && let Some(middleware) = node
+                .child_by_field_name("arguments")
+                .and_then(|arguments| named_children(arguments).first().copied())
+                .and_then(|argument| {
+                    axum_middleware_reference(
+                        argument,
+                        source,
+                        path,
+                        local_functions,
+                        import_aliases,
+                    )
+                })
+        {
+            mounts.push(router_middleware_fact(
+                path,
+                source,
+                node,
+                &owner,
+                &middleware,
+                &method,
+            ));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_router_calls(
+            child,
+            source,
+            path,
+            function_name,
+            references,
+            local_routers,
+            local_functions,
+            import_aliases,
+            owners,
+            mounts,
+        );
+    }
+}
+
+fn router_call_owner(node: Node<'_>, source: &[u8], function_name: &str) -> String {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "let_declaration"
+            && let Some(pattern) = parent.child_by_field_name("pattern")
+            && let Some(binding) = rust_binding_name(pattern, source)
+        {
+            return local_router_owner(function_name, binding);
+        }
+        if parent.kind() == "assignment_expression"
+            && let Some(left) = parent.child_by_field_name("left")
+            && let Some(binding) = rust_binding_name(left, source)
+        {
+            return local_router_owner(function_name, binding);
+        }
+        if parent.kind() == "function_item" {
+            break;
+        }
+        current = parent;
+    }
+    function_router_owner(function_name)
+}
+
+fn returned_router_target(
+    body: Node<'_>,
+    source: &[u8],
+    function_name: &str,
+    references: &BTreeMap<String, String>,
+    local_routers: &BTreeSet<String>,
+) -> Option<RouterTarget> {
+    let tail = named_children(body).last().copied()?;
+    if tail.kind() == "let_declaration" || tail.kind() == "assignment_expression" {
+        return None;
+    }
+    if let Some(reference) = rooted_router_factory_reference(tail, source) {
+        return Some(RouterTarget::Reference(reference));
+    }
+    let binding = root_router_binding(tail, source)?;
+    let local = local_router_owner(function_name, &binding);
+    if local_routers.contains(&local) {
+        return Some(RouterTarget::Owner(local));
+    }
+    references
+        .get(&binding)
+        .cloned()
+        .map(RouterTarget::Reference)
+}
+
+fn rooted_router_factory_reference(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if let Some(reference) = router_factory_reference(node, source) {
+        return Some(reference);
+    }
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    node.child_by_field_name("function")
+        .and_then(|function| function.child_by_field_name("value"))
+        .and_then(|value| rooted_router_factory_reference(value, source))
+}
+
+fn root_router_binding(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if node.kind() == "identifier" {
+        return Some(node_text(node, source).to_owned());
+    }
+    if node.kind() == "call_expression" {
+        return node
+            .child_by_field_name("function")
+            .and_then(|function| root_router_binding(function, source));
+    }
+    if node.kind() == "field_expression" {
+        return node
+            .child_by_field_name("value")
+            .and_then(|value| root_router_binding(value, source));
+    }
+    named_children(node)
+        .first()
+        .copied()
+        .and_then(|child| root_router_binding(child, source))
+}
+
+fn router_target(
+    node: Node<'_>,
+    source: &[u8],
+    function_name: &str,
+    references: &BTreeMap<String, String>,
+    local_routers: &BTreeSet<String>,
+) -> Option<RouterTarget> {
+    if node.kind() == "identifier" {
+        let binding = node_text(node, source);
+        if let Some(reference) = references.get(binding) {
+            return Some(RouterTarget::Reference(reference.clone()));
+        }
+        let owner = local_router_owner(function_name, binding);
+        return local_routers
+            .contains(&owner)
+            .then_some(RouterTarget::Owner(owner));
+    }
+    router_factory_reference(node, source).map(RouterTarget::Reference)
+}
+
+fn router_factory_reference(node: Node<'_>, source: &[u8]) -> Option<String> {
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    let function = node.child_by_field_name("function")?;
+    if !matches!(function.kind(), "identifier" | "scoped_identifier") {
+        return None;
+    }
+    let reference = node_text(function, source).trim();
+    let terminal = reference.rsplit("::").next().unwrap_or_default();
+    (!matches!(terminal, "new" | "default") && !reference.is_empty()).then(|| reference.to_owned())
+}
+
+fn contains_router_constructor(node: Node<'_>, source: &[u8]) -> bool {
+    node_text(node, source).contains("Router::new")
+}
+
+fn rust_binding_name<'source>(node: Node<'_>, source: &'source [u8]) -> Option<&'source str> {
+    if node.kind() == "identifier" {
+        let value = node_text(node, source);
+        return (!value.is_empty()).then_some(value);
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .find_map(|child| rust_binding_name(child, source))
+}
+
+fn function_router_owner(function_name: &str) -> String {
+    format!("fn:{function_name}")
+}
+
+fn local_router_owner(function_name: &str, binding: &str) -> String {
+    format!("fn:{function_name}#local:{binding}")
+}
+
+#[derive(Clone)]
+enum RouterTarget {
+    Owner(String),
+    Reference(String),
+}
+
+fn router_mount_fact(
+    path: &Path,
+    source: &[u8],
+    node: Node<'_>,
+    parent: &str,
+    target: RouterTarget,
+    prefix: &str,
+    operation: &str,
+) -> RawFrameworkFact {
+    let mut detail = Map::new();
+    detail.insert(
+        "parent_router".to_owned(),
+        serde_json::Value::String(parent.to_owned()),
+    );
+    match target {
+        RouterTarget::Owner(owner) => {
+            detail.insert("target_router".to_owned(), serde_json::Value::String(owner));
+        }
+        RouterTarget::Reference(reference) => {
+            detail.insert(
+                "target_reference".to_owned(),
+                serde_json::Value::String(reference),
+            );
+        }
+    }
+    detail.insert(
+        "mount_prefix".to_owned(),
+        serde_json::Value::String(prefix.to_owned()),
+    );
+    detail.insert(
+        "mount_operation".to_owned(),
+        serde_json::Value::String(operation.to_owned()),
+    );
+    RawFrameworkFact::Domain(RawDomainFact {
+        framework: "axum".to_owned(),
+        kind: "router_mount".to_owned(),
+        name: parent.to_owned(),
+        declaring_scope: path.to_string_lossy().replace('\\', "/"),
+        anchor: anchor(path, source, node.start_byte(), node.end_byte()),
+        origin: RawFrameworkOrigin::Ast,
+        detail,
+    })
+}
+
+fn axum_middleware_reference(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    local_functions: &BTreeSet<String>,
+    import_aliases: &BTreeMap<String, String>,
+) -> Option<String> {
+    if node.kind() != "call_expression" {
+        return None;
+    }
+    let function = node.child_by_field_name("function")?;
+    let method = rust_call_method(function, source)?;
+    if !matches!(method.as_str(), "from_fn" | "from_fn_with_state") {
+        return None;
+    }
+    let handler = node
+        .child_by_field_name("arguments")
+        .and_then(|arguments| named_children(arguments).last().copied())
+        .map(|handler| clean_rust_handler(node_text(handler, source)))?;
+    if handler.is_empty() {
+        return None;
+    }
+    if handler.contains('.') || !local_functions.contains(&handler) {
+        return Some(import_aliases.get(&handler).cloned().unwrap_or(handler));
+    }
+    rust_module_name(path).map_or(Some(handler.clone()), |module| {
+        Some(format!("{module}.{handler}"))
+    })
+}
+
+fn rust_import_aliases(root: Node<'_>, source: &[u8]) -> BTreeMap<String, String> {
+    let mut declarations = Vec::new();
+    collect_nodes_of_kind(root, "use_declaration", &mut declarations);
+    let mut aliases = BTreeMap::new();
+    for declaration in declarations {
+        let value = node_text(declaration, source)
+            .trim()
+            .trim_start_matches("use")
+            .trim()
+            .trim_end_matches(';')
+            .trim();
+        collect_rust_imports(value, "", &mut aliases);
+    }
+    aliases
+}
+
+fn collect_rust_imports(value: &str, prefix: &str, aliases: &mut BTreeMap<String, String>) {
+    let value = value.trim();
+    if value.is_empty() || value == "*" {
+        return;
+    }
+    if let Some(open) = value.find('{')
+        && value.ends_with('}')
+    {
+        let head = value[..open].trim().trim_end_matches("::");
+        let next_prefix = join_rust_import(prefix, head);
+        for item in split_top_level(&value[open + 1..value.len() - 1]) {
+            collect_rust_imports(item, &next_prefix, aliases);
+        }
+        return;
+    }
+    let (path, alias) = value
+        .rsplit_once(" as ")
+        .map_or((value, None), |(path, alias)| {
+            (path.trim(), Some(alias.trim()))
+        });
+    if path == "self" {
+        if let Some(name) = prefix.rsplit("::").next().filter(|name| !name.is_empty()) {
+            aliases.insert(
+                alias.unwrap_or(name).to_owned(),
+                rust_import_reference(prefix),
+            );
+        }
+        return;
+    }
+    let qualified = join_rust_import(prefix, path);
+    let Some(name) = alias.or_else(|| path.rsplit("::").next()) else {
+        return;
+    };
+    let reference = rust_import_reference(&qualified);
+    if !name.is_empty() && !reference.is_empty() {
+        aliases.insert(name.to_owned(), reference);
+    }
+}
+
+fn split_top_level(value: &str) -> Vec<&str> {
+    let mut depth = 0_usize;
+    let mut start = 0_usize;
+    let mut output = Vec::new();
+    for (index, character) in value.char_indices() {
+        match character {
+            '{' => depth = depth.saturating_add(1),
+            '}' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                output.push(value[start..index].trim());
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    output.push(value[start..].trim());
+    output
+}
+
+fn join_rust_import(prefix: &str, value: &str) -> String {
+    match (prefix.is_empty(), value.is_empty()) {
+        (true, _) => value.to_owned(),
+        (_, true) => prefix.to_owned(),
+        (false, false) => format!("{prefix}::{value}"),
+    }
+}
+
+fn rust_import_reference(value: &str) -> String {
+    value
+        .split("::")
+        .filter(|part| !matches!(*part, "crate" | "self" | "super") && !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn rust_module_name(path: &Path) -> Option<String> {
+    if path.file_name().and_then(|name| name.to_str()) == Some("mod.rs") {
+        path.parent()?
+            .file_name()?
+            .to_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    } else {
+        path.file_stem()?
+            .to_str()
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    }
+}
+
+fn router_middleware_fact(
+    path: &Path,
+    source: &[u8],
+    node: Node<'_>,
+    owner: &str,
+    reference: &str,
+    operation: &str,
+) -> RawFrameworkFact {
+    let mut detail = Map::new();
+    detail.insert(
+        "parent_router".to_owned(),
+        serde_json::Value::String(owner.to_owned()),
+    );
+    detail.insert(
+        "middleware_reference".to_owned(),
+        serde_json::Value::String(reference.to_owned()),
+    );
+    detail.insert(
+        "middleware_operation".to_owned(),
+        serde_json::Value::String(operation.to_owned()),
+    );
+    RawFrameworkFact::Domain(RawDomainFact {
+        framework: "axum".to_owned(),
+        kind: "router_middleware".to_owned(),
+        name: reference.to_owned(),
+        declaring_scope: path.to_string_lossy().replace('\\', "/"),
+        anchor: anchor(path, source, node.start_byte(), node.end_byte()),
+        origin: RawFrameworkOrigin::Ast,
+        detail,
+    })
+}
+
 fn masked_rust_source(root: Node<'_>, source: &[u8]) -> String {
     let mut masked = source.to_vec();
     mask_rust_comments(root, &mut masked);
@@ -170,10 +732,18 @@ fn collect_rust_calls(
         let argument_values = arguments
             .map(|arguments| named_children(arguments))
             .unwrap_or_default();
-        let receiver_prefix = function
-            .child_by_field_name("value")
-            .map(|value| rust_chain_prefix(value, source))
-            .unwrap_or_default();
+        // Axum's `nest` mounts its child argument; it does not turn later
+        // methods on the parent builder into children of that prefix. Actix
+        // `scope`, by contrast, is a receiver whose following routes inherit
+        // its path.
+        let receiver_prefix = if default_framework == "axum" {
+            String::new()
+        } else {
+            function
+                .child_by_field_name("value")
+                .map(|value| rust_chain_prefix(value, source))
+                .unwrap_or_default()
+        };
         let mut child_prefix = append_prefix(prefix, &receiver_prefix);
         if matches!(method.as_deref(), Some("nest" | "scope"))
             && let Some(route_prefix) = argument_values
@@ -371,7 +941,9 @@ fn rust_method_handlers(node: Node<'_>, source: &[u8]) -> Vec<(String, String)> 
             .unwrap_or_default();
         return vec![(method.to_ascii_uppercase(), handler)];
     }
-    Vec::new()
+    value
+        .map(|value| rust_method_handlers(value, source))
+        .unwrap_or_default()
 }
 
 fn is_http_method(method: &str) -> bool {
