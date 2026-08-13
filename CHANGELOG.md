@@ -45,9 +45,11 @@
   filters into the top graph-control rail, allow neighborhood settings to be
   prepared before selection, keep filters scoped to the visible overview or
   community detail, fit newly isolated neighborhoods, and scale layout reheating
-  so motion remains visible on fitted repository graphs. Add the `workbench-json`
-  machine export while preserving plain `compass.viewer.graph/1` JSON
-  compatibility.
+  so motion remains visible on fitted repository graphs. Keep filter and graph
+  settings panels mutually exclusive and viewport-bounded, provide recoverable
+  empty-filter states, and discard selections that no longer exist in the
+  filtered graph. Add the `workbench-json` machine export while preserving
+  plain `compass.viewer.graph/1` JSON compatibility.
 
 - Make PHP extraction and type resolution fail closed for colliding exact or
   case-folded symbols instead of selecting a hash-iteration winner. Qualified

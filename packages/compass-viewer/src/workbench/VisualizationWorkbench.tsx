@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   BoxesIcon,
   BracesIcon,
@@ -247,6 +247,10 @@ function FilteredGraph({
   const [kind, setKind] = useState("");
   const [language, setLanguage] = useState("");
   const [communityId, setCommunityId] = useState<number>();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterPanelId = useId();
+  const filterButtonRef = useRef<HTMLButtonElement>(null);
+  const filterPanelRef = useRef<HTMLDivElement>(null);
   const embeddedCommunityDetail = communityId === undefined ? undefined : {
     communityId,
     model: communityDetails?.[String(communityId)] ?? model
@@ -266,7 +270,36 @@ function FilteredGraph({
     setEvidence("");
     setKind("");
     setLanguage("");
+    setFiltersOpen(false);
   }, [activeGraphKey]);
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setFiltersOpen(false);
+      filterButtonRef.current?.focus();
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (filterButtonRef.current?.contains(target) || filterPanelRef.current?.contains(target)) {
+        return;
+      }
+      setFiltersOpen(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [filtersOpen]);
+  const clearFilters = useCallback(() => {
+    setRelation("");
+    setEvidence("");
+    setKind("");
+    setLanguage("");
+  }, []);
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
   const activeFilterCount = [relation, evidence, kind, language].filter(Boolean).length;
   return (
     <div className="workbench-graph-lens">
@@ -291,45 +324,83 @@ function FilteredGraph({
         queryResult={queryResult}
         preferredLayout={preferredLayout}
         toolbarLeading={(
-          <details className="workbench-filter-menu">
-            <summary aria-label="Graph filters">
-              <SlidersHorizontalIcon aria-hidden="true" />
-              <span>Filters</span>
-              {activeFilterCount > 0 ? <b>{activeFilterCount}</b> : null}
-              <small>
-                {filtered.nodes.length.toLocaleString()} / {activeModel.nodes.length.toLocaleString()}
-              </small>
-            </summary>
-            <div className="workbench-filter-popover" role="region" aria-label="Graph filter options">
-              <header>
-                <span>
-                  <strong>Filter graph</strong>
-                  <small>Refine visible nodes and relationships</small>
-                </span>
-                <button
-                  type="button"
-                  disabled={activeFilterCount === 0}
-                  onClick={() => {
-                    setRelation("");
-                    setEvidence("");
-                    setKind("");
-                    setLanguage("");
-                  }}
-                >
-                  Clear all
-                </button>
-              </header>
-              <Filter label="Relationship" value={relation} values={options.relations} onChange={setRelation} />
-              <Filter label="Evidence" value={evidence} values={options.evidence} onChange={setEvidence} />
-              <Filter label="Node kind" value={kind} values={options.kinds} onChange={setKind} />
-              <Filter label="Language" value={language} values={options.languages} onChange={setLanguage} />
-              <footer role="status">
-                Showing {filtered.nodes.length.toLocaleString()} of {activeModel.nodes.length.toLocaleString()} nodes
-              </footer>
-            </div>
-          </details>
+          <button
+            ref={filterButtonRef}
+            className="workbench-filter-trigger"
+            type="button"
+            aria-label="Graph filters"
+            aria-expanded={filtersOpen}
+            aria-controls={filterPanelId}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            <SlidersHorizontalIcon aria-hidden="true" />
+            <span>Filters</span>
+            {activeFilterCount > 0 ? <b>{activeFilterCount}</b> : null}
+            <small>
+              {filtered.nodes.length.toLocaleString()} / {activeModel.nodes.length.toLocaleString()}
+            </small>
+          </button>
         )}
+        toolbarLeadingPanel={filtersOpen ? (
+          <div
+            ref={filterPanelRef}
+            id={filterPanelId}
+            className="workbench-filter-popover"
+            role="region"
+            aria-label="Graph filter options"
+          >
+            <header>
+              <span>
+                <strong>Filter graph</strong>
+                <small>Refine visible nodes and relationships</small>
+              </span>
+              <button type="button" disabled={activeFilterCount === 0} onClick={clearFilters}>
+                Clear all
+              </button>
+            </header>
+            <Filter label="Relationship" value={relation} values={options.relations} onChange={setRelation} />
+            <Filter label="Evidence" value={evidence} values={options.evidence} onChange={setEvidence} />
+            <Filter label="Node kind" value={kind} values={options.kinds} onChange={setKind} />
+            <Filter label="Language" value={language} values={options.languages} onChange={setLanguage} />
+            <footer role="status">
+              Showing {filtered.nodes.length.toLocaleString()} of {activeModel.nodes.length.toLocaleString()} nodes
+            </footer>
+          </div>
+        ) : undefined}
+        toolbarLeadingOpen={filtersOpen}
+        onToolbarLeadingClose={closeFilters}
+        stageOverlay={activeModel.nodes.length === 0 ? (
+          <GraphEmptyState
+            title="This view has no graph nodes"
+            detail="The exported graph lens did not contain any nodes to visualize."
+          />
+        ) : activeFilterCount > 0 && filtered.nodes.length === 0 ? (
+          <GraphEmptyState
+            title="No nodes match these filters"
+            detail="Clear one or more filters to restore the graph."
+            onClear={clearFilters}
+          />
+        ) : undefined}
       />
+    </div>
+  );
+}
+
+function GraphEmptyState({
+  title,
+  detail,
+  onClear
+}: {
+  title: string;
+  detail: string;
+  onClear?: (() => void) | undefined;
+}) {
+  return (
+    <div className="workbench-graph-empty" role="status">
+      <NetworkIcon aria-hidden="true" />
+      <strong>{title}</strong>
+      <span>{detail}</span>
+      {onClear ? <button type="button" onClick={onClear}>Clear filters</button> : null}
     </div>
   );
 }
