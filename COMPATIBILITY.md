@@ -92,6 +92,11 @@ under the selected output root by default. It also materializes
 root path. Compass retains an immutable snapshot behind those conventional
 paths as its coherent internal authority.
 
+The additive `compass.graph/1` endpoint matrix accepts exact `calls` edges to
+`property` nodes. This represents source-proven callable fields, callbacks,
+and object properties without changing node or edge identity; consumers that
+validate endpoint kinds should accept this existing-major widening.
+
 The self-contained HTML viewer embeds `compass.viewer.workbench/1`, an additive
 ordered container for code, call, impact, affected, architecture, historical,
 and artifact-lens models. Each view carries explicit bounded coverage. Plain
@@ -202,13 +207,15 @@ and duplicate exact-name lookups remain explicit ambiguity.
 
 For explicit action predicates, discovery first reads one compact exact-term
 index restricted to source-backed operation-role declarations. It may finish
-from that index only when the complete role set proves that the top role also
-dominates omitted non-role types; location-style questions otherwise continue
-through general recall. A second compact channel projects the existing full
+from that index only when the complete role set proves that the top role
+matches the explicit predicate, covers the query subject, and dominates
+omitted non-role types; location-style questions otherwise continue through
+general recall. A subject-only `Builder` match cannot suppress a more specific
+method. A second compact channel projects the existing full
 term postings onto source-backed type declarations. Discovery may finish from
 that channel only when it is complete, contains every requested seed slot, and
-the existing ranker proves each selected declaration dominates every omitted
-non-type. This can intentionally keep a direct representation type ahead of a
+the existing ranker proves each selected declaration covers the query subject
+and dominates every omitted non-type. This can intentionally keep a direct representation type ahead of a
 less-specific operation-role type that max-level inferred relationship evidence
 would otherwise promote. Legacy snapshots use at most 18 deterministic bounded
 role-name/intersection probes and fall through to general recall when the

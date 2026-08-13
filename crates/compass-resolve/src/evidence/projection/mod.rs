@@ -283,6 +283,9 @@ impl UniversalResolutionIndex {
                     qualified_name,
                     evidence,
                 } => {
+                    if !admission.admits_qualified_external() {
+                        return None;
+                    }
                     let candidate = self.facts.candidates.at(pending.candidate_slot)?;
                     let id = make_id(&["external", &candidate.language, &qualified_name]);
                     Some(PreparedTarget {
@@ -295,7 +298,7 @@ impl UniversalResolutionIndex {
                         declaration_id: None,
                         external_qualified_name: Some(qualified_name),
                         deferred_qualified_name: None,
-                        emit_edge: admission.admits_qualified_external(),
+                        emit_edge: true,
                     })
                 }
                 ResolutionDecision::DeferredReceiver {

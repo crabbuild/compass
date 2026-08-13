@@ -150,14 +150,20 @@ def timing(workspace: Path, tool: str, name: str) -> dict[str, int | float]:
     text = (workspace / "logs" / f"{tool}-{name}.log").read_text(
         encoding="utf-8", errors="replace"
     )
-    wall_matches = re.findall(r"^\s*([0-9]+(?:\.[0-9]+)?) real", text, re.MULTILINE)
+    wall_matches = re.findall(
+        r"^\s*(?:real\s+([0-9]+(?:\.[0-9]+)?)|"
+        r"([0-9]+(?:\.[0-9]+)?)\s+real(?:\s+.*)?)\s*$",
+        text,
+        re.MULTILINE,
+    )
     rss_matches = re.findall(
         r"^\s*([0-9]+)\s+maximum resident set size", text, re.MULTILINE
     )
     if not wall_matches or not rss_matches:
         raise ValueError(f"timing evidence missing: {tool}/{name}")
+    wall_seconds = wall_matches[-1][0] or wall_matches[-1][1]
     return {
-        "wall_seconds": float(wall_matches[-1]),
+        "wall_seconds": float(wall_seconds),
         "peak_rss_bytes": int(rss_matches[-1]),
     }
 

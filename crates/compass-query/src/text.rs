@@ -6,7 +6,6 @@ use compass_model::{canonical_code_token, identifier_tokens};
 const QUERY_STOPWORDS: &[&str] = &[
     "how",
     "what",
-    "why",
     "when",
     "where",
     "which",
@@ -57,7 +56,6 @@ const QUERY_STOPWORDS: &[&str] = &[
     "they",
     "about",
     "any",
-    "all",
     "some",
     "work",
     "works",

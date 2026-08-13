@@ -254,15 +254,10 @@ impl WatchPathFilter {
             return false;
         };
         if relative.as_os_str().is_empty()
-            || relative.components().any(|component| {
-                let value = component.as_os_str().to_string_lossy();
-                value.starts_with('.')
-                    || SKIP_DIRS.contains(&value.as_ref())
-                    || value == self.output_name
-                    || Path::new(&self.output_name)
-                        .file_name()
-                        .is_some_and(|name| name == component.as_os_str())
-            })
+            || relative
+                .components()
+                .any(|component| component.as_os_str().to_string_lossy().starts_with('.'))
+            || has_noise_ancestor(&absolute, &self.root, &self.output_name)
         {
             return false;
         }
@@ -486,7 +481,7 @@ fn is_noise_dir(path: &Path, output_name: &str) -> bool {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
-    if SKIP_DIRS.contains(&name)
+    if (SKIP_DIRS.contains(&name) && !is_java_package_build_dir(path))
         || Path::new(output_name)
             .file_name()
             .is_some_and(|value| value == name)
@@ -517,6 +512,24 @@ fn is_noise_dir(path: &Path, output_name: &str) -> bool {
         return js_root || has_snap;
     }
     false
+}
+
+fn is_java_package_build_dir(path: &Path) -> bool {
+    if path.file_name().and_then(|value| value.to_str()) != Some("build") {
+        return false;
+    }
+    let Some(language_root) = path.parent() else {
+        return false;
+    };
+    if language_root.file_name().and_then(|value| value.to_str()) != Some("java") {
+        return false;
+    }
+    language_root
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+        == Some("src")
 }
 
 fn path_is_under(path: &Path, root: &Path) -> bool {

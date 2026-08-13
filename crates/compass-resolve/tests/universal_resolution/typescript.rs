@@ -83,6 +83,7 @@ export const wrappedDate = consume(ZonedDate);
         .iter()
         .find(|node| {
             node.label() == "ZonedDate"
+                && node.string("symbol_kind") == "class"
                 && source_matches(&node.string("source_file"), &implementation)
         })
         .ok_or("missing ZonedDate declaration")?;
@@ -182,7 +183,9 @@ export function make() { return new Widget(); }
         .nodes
         .iter()
         .find(|node| {
-            node.label() == "Widget" && source_matches(&node.string("source_file"), &implementation)
+            node.label() == "Widget"
+                && node.string("symbol_kind") == "class"
+                && source_matches(&node.string("source_file"), &implementation)
         })
         .map(|node| node.id.clone())
         .ok_or("missing Widget declaration")?;
@@ -630,6 +633,7 @@ export const value = helper();
         .iter()
         .find(|node| {
             matches!(node.label(), "helper()" | "helper")
+                && node.string("symbol_kind") == "function"
                 && source_matches(&node.string("source_file"), &declaration)
         })
         .ok_or("missing typesVersions declaration")?;
@@ -1168,7 +1172,13 @@ new DefaultWidget().run();
         .candidates
         .iter()
         .find(|candidate| {
-            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "run"
+            candidate.relation == CandidateRelation::Calls
+                && candidate.target_spelling == "run"
+                && candidate
+                    .constraints
+                    .qualified_name
+                    .as_deref()
+                    .is_some_and(|qualified| qualified.ends_with("::Widget.run"))
         })
         .ok_or("missing imported member call candidate")?;
     let default_member_call = batches[2]

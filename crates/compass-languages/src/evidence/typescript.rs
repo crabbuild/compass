@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use tree_sitter::Node;
 
-use super::build::{EvidenceBuilder, range_for_byte_span, range_for_node};
+use super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
 use super::model::{
     BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, ResolutionConstraint,
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
@@ -330,7 +330,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         EvidenceLimits::default(),
         Some(&dialect_name),
     );
-    let file_range = range_for_node(source_file, root);
+    let file_range = range_for_file(source_file, source);
     let file_graph_id = stable_graph_id(source_file, "module", &module_name, 0);
     let file_kind = if root.end_byte() == root.start_byte() {
         "file"

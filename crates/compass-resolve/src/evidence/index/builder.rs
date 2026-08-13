@@ -484,6 +484,7 @@ impl IndexBuilder<'_> {
         let (aliases, direct_bases) = rayon::join(
             || {
                 let mut aliases = AHashMap::<_, Vec<_>>::new();
+                let mut rust_reexport_aliases = AHashMap::<_, Vec<_>>::new();
                 for binding in bindings.values() {
                     let Some(owner) = binding
                         .scope_id
@@ -495,15 +496,29 @@ impl IndexBuilder<'_> {
                         continue;
                     };
                     for separator in [".", "::"] {
+                        let key = (
+                            binding.language.clone(),
+                            format!("{}{separator}{}", owner.qualified_name, binding.spelling),
+                        );
                         aliases
-                            .entry((
-                                binding.language.clone(),
-                                format!("{}{separator}{}", owner.qualified_name, binding.spelling),
-                            ))
+                            .entry(key.clone())
                             .or_default()
                             .push(binding.qualified_target.clone());
+                        if binding.language == "rust"
+                            && binding.kind == compass_languages::BindingKind::Reexport
+                        {
+                            rust_reexport_aliases
+                                .entry(key)
+                                .or_default()
+                                .push(binding.qualified_target.clone());
+                        }
                     }
                 }
+                // A Rust package library and binary share the crate-level
+                // qualified name. When both bind the same spelling, only the
+                // public reexport defines that spelling for downstream
+                // modules; private binary imports remain lexical facts.
+                aliases.extend(rust_reexport_aliases);
                 for targets in aliases.values_mut() {
                     targets.sort_unstable();
                     targets.dedup();

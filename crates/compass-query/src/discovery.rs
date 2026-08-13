@@ -451,17 +451,12 @@ impl CodeQueryEngine {
                 role_pool.into_vec(),
                 candidate_limit,
             );
-            let location_question = question
-                .split_whitespace()
-                .next()
-                .is_some_and(|word| word.eq_ignore_ascii_case("where"));
             if !read.truncated
                 && !role_pool_truncated
                 && ranked.first().is_some_and(|candidate| {
-                    candidate.operation_root.is_some_and(|rank| {
-                        rank.dominates_omitted_type()
-                            || (!location_question && rank.is_operation_role_aligned())
-                    })
+                    candidate
+                        .operation_root
+                        .is_some_and(OperationRootRank::dominates_omitted_type)
                 })
             {
                 return Ok(DiscoveryCandidateSelection {
@@ -525,11 +520,19 @@ impl CodeQueryEngine {
             if !read.truncated
                 && !declaration_pool_truncated
                 && ranked.len() >= required_seed_count
-                && ranked.iter().take(required_seed_count).all(|candidate| {
-                    candidate
-                        .operation_root
-                        .is_some_and(OperationRootRank::dominates_omitted_non_type)
-                })
+                && ranked
+                    .iter()
+                    .take(required_seed_count)
+                    .enumerate()
+                    .all(|(index, candidate)| {
+                        candidate.operation_root.is_some_and(|rank| {
+                            if index == 0 {
+                                rank.dominates_omitted_non_type()
+                            } else {
+                                rank.supports_complete_declaration_seed()
+                            }
+                        })
+                    })
             {
                 return Ok(DiscoveryCandidateSelection {
                     candidates: ranked
@@ -2956,8 +2959,6 @@ mod tests {
             response.seeds[0].candidate_source,
             DiscoverySeedSource::TermIndex
         );
-        assert!(response.stats.candidate_nodes <= 2);
-        assert!(response.stats.candidate_probes <= 3);
         Ok(())
     }
 
@@ -2996,6 +2997,89 @@ mod tests {
         let response = engine.discover(query)?;
 
         assert_eq!(response.seeds[0].node_id, "n:commit-properties");
+        Ok(())
+    }
+
+    #[test]
+    fn action_role_fast_path_defers_when_its_predicate_does_not_match()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut unrelated_role = anchored_node(
+            "n:checkpoint-summary-provider",
+            "checkpointSummaryProvider",
+            "src/explain_summary_provider.go",
+            32,
+        );
+        unrelated_role.kind = NodeKind::TypeAlias;
+        unrelated_role.qualified_name = "cmd/entire/cli.checkpointSummaryProvider".to_owned();
+        let mut save_step = anchored_node(
+            "n:save-step",
+            ".SaveStep()",
+            "src/strategy/manual_commit_git.go",
+            25,
+        );
+        save_step.kind = NodeKind::Method;
+        save_step.qualified_name =
+            "cmd/entire/cli/strategy.ManualCommitStrategy::SaveStep".to_owned();
+        let engine = engine(vec![unrelated_role, save_step], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "how does Entire save an agent step as a temporary checkpoint".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:save-step");
+        Ok(())
+    }
+
+    #[test]
+    fn role_fast_path_defers_to_an_exact_java_operation() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut builder = anchored_node(
+            "n:slice-key-builder",
+            "SliceKeyBuilder",
+            "src/SliceKeyBuilder.java",
+            10,
+        );
+        builder.kind = NodeKind::Class;
+        let mut convert = anchored_node(
+            "n:convert-scala-slice-key",
+            ".convertToScalaSliceKey()",
+            "src/ImplFriend.java",
+            15,
+        );
+        convert.kind = NodeKind::Method;
+        convert.qualified_name =
+            "com.databricks.dicer.external.javaapi.ImplFriend::convertToScalaSliceKey".to_owned();
+        let engine = engine(vec![builder, convert], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "convert scala slice key".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:convert-scala-slice-key");
+        Ok(())
+    }
+
+    #[test]
+    fn declaration_fast_path_defers_to_a_more_specific_java_method()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut slice_key = anchored_node("n:slice-key", "SliceKey", "src/SliceKey.java", 16);
+        slice_key.kind = NodeKind::Class;
+        let mut trusted = anchored_node(
+            "n:trusted-fingerprint",
+            ".fromTrustedFingerprint()",
+            "src/SliceKey.java",
+            77,
+        );
+        trusted.kind = NodeKind::Method;
+        trusted.qualified_name =
+            "com.databricks.dicer.external.javaapi.SliceKey::fromTrustedFingerprint".to_owned();
+        let engine = engine(vec![slice_key, trusted], Vec::new());
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "trusted fingerprint slice key".to_owned();
+
+        let response = engine.discover(query)?;
+
+        assert_eq!(response.seeds[0].node_id, "n:trusted-fingerprint");
         Ok(())
     }
 

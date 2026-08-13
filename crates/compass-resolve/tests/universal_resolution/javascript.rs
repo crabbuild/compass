@@ -1315,25 +1315,20 @@ unknown.direct();
         .iter()
         .filter(|candidate| candidate.relation == CandidateRelation::Calls)
         .collect::<Vec<_>>();
-    let call = |name: &str| {
+    let call = |name: &str, module: &str| {
         calls
             .iter()
-            .find(|candidate| candidate.target_spelling == name)
-            .ok_or_else(|| format!("missing call {name}"))
+            .find(|candidate| {
+                candidate.target_spelling == name
+                    && candidate.constraints.module_or_package.as_deref() == Some(module)
+            })
+            .ok_or_else(|| format!("missing call {module}::{name}"))
     };
-    let inherited = call("inherited")?;
-    let direct = call("direct")?;
-    let conflict = call("conflict")?;
-    let mutated_inherited = calls
-        .iter()
-        .filter(|candidate| candidate.target_spelling == "inherited")
-        .nth(1)
-        .ok_or("missing mutated inherited call")?;
-    let unknown_direct = calls
-        .iter()
-        .filter(|candidate| candidate.target_spelling == "direct")
-        .nth(1)
-        .ok_or("missing unknown direct call")?;
+    let inherited = call("inherited", "../lib/derived")?;
+    let direct = call("direct", "../lib/derived")?;
+    let conflict = call("conflict", "../lib/derived")?;
+    let mutated_inherited = call("inherited", "../lib/mutated")?;
+    let unknown_direct = call("direct", "../lib/unknown")?;
     let index = UniversalResolutionIndex::new_with_inventory(
         &batches,
         &[],

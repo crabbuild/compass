@@ -77,12 +77,14 @@ class AnalyzeTests(unittest.TestCase):
             logs = workspace / "logs"
             logs.mkdir(parents=True)
             (logs / "compass-sample.log").write_text(
-                "0.50 real\n1024 maximum resident set size\n"
-                "publication: omitting 2 nodes and 3 edges; 1 identity collisions\n",
+                "real 0.50\r\n1024 maximum resident set size\r\n"
+                "publication: omitting 2 nodes and 3 edges; 1 identity collisions\r\n",
                 encoding="utf-8",
             )
             (logs / "graphify-sample.log").write_text(
-                "1.25 real\n2048 maximum resident set size\n", encoding="utf-8"
+                "1.25 real 0.75 user 0.10 sys\n"
+                "2048 maximum resident set size\n",
+                encoding="utf-8",
             )
 
             manifest = root / "corpora.json"

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use compass_languages::{
-    AdapterIdentity, CandidateRelation, DeclarationFact, EvidenceRange, Extraction,
-    LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile,
+    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceRange,
+    Extraction, LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint,
+    ScopeFact, SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA,
+    UniversalAdapterProfile,
 };
 use compass_resolve::{ResolutionAdmission, resolve_prevalidated_owned_with_root_at_inference};
 
@@ -102,6 +103,62 @@ fn external_call_batch() -> SemanticEvidenceBatch {
     }
 }
 
+fn bound_external_import_batch() -> SemanticEvidenceBatch {
+    let mut batch = external_call_batch();
+    batch.adapter.capabilities = vec![
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Imports,
+        LanguageCapability::ExternalReferences,
+    ];
+    batch.bindings = vec![BindingFact {
+        id: "binding:external".to_owned(),
+        language: "python".to_owned(),
+        kind: BindingKind::Import,
+        spelling: "Response".to_owned(),
+        qualified_target: "vendor.responses.Response".to_owned(),
+        namespace: None,
+        type_only: false,
+        target_declaration_id: None,
+        scope_id: Some("scope:caller".to_owned()),
+        output_index: None,
+        result_type_qualified_name: None,
+        receiver_binding_id: None,
+        fallback_binding_id: None,
+        range: range(20, 28),
+    }];
+    batch.occurrences = vec![OccurrenceFact {
+        id: "occurrence:external-import".to_owned(),
+        language: "python".to_owned(),
+        role: SemanticRole::Import,
+        owner_declaration_id: "decl:caller".to_owned(),
+        spelling: "Response".to_owned(),
+        qualifier: None,
+        context: Some("import".to_owned()),
+        scope_id: Some("scope:caller".to_owned()),
+        range: range(20, 28),
+    }];
+    batch.candidates = vec![RelationshipCandidate {
+        id: "candidate:external-import".to_owned(),
+        language: "python".to_owned(),
+        relation: CandidateRelation::Imports,
+        source_declaration_id: "decl:caller".to_owned(),
+        occurrence_id: Some("occurrence:external-import".to_owned()),
+        binding_id: Some("binding:external".to_owned()),
+        target_spelling: "Response".to_owned(),
+        constraints: ResolutionConstraint {
+            exact_language: Some("python".to_owned()),
+            module_or_package: Some("vendor.responses".to_owned()),
+            scope_id: Some("scope:caller".to_owned()),
+            qualified_name: Some("vendor.responses.Response".to_owned()),
+            allowed_target_kinds: vec!["class".to_owned()],
+            allow_external: true,
+            ..ResolutionConstraint::default()
+        },
+    }];
+    batch
+}
+
 #[test]
 fn low_admission_never_materializes_qualified_external_inference() {
     let extraction = Extraction {
@@ -146,5 +203,29 @@ fn low_admission_never_materializes_qualified_external_inference() {
             .get("resolution_rule")
             .and_then(serde_json::Value::as_str)
             == Some("qualified-external")
+    }));
+}
+
+#[test]
+fn low_admission_does_not_leave_an_orphan_for_a_bound_external_import() {
+    let extraction = Extraction {
+        semantic_evidence: Some(bound_external_import_batch()),
+        ..Extraction::default()
+    };
+    let sources = HashMap::from([("src/lib.py".to_owned(), String::new())]);
+
+    let low = resolve_prevalidated_owned_with_root_at_inference(
+        vec![extraction],
+        &sources,
+        std::path::Path::new("."),
+        ResolutionAdmission::Low,
+    );
+
+    assert!(low.edges.is_empty());
+    assert!(low.nodes.iter().all(|node| {
+        node.attributes
+            .get("placeholder")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
     }));
 }
