@@ -61,6 +61,69 @@ fn go_frameworks_require_imports_and_resolve_handlers() -> Result<(), Box<dyn Er
             .all(|route| route.state == ResolutionState::Exact)
     );
     assert!(extract("go/near_matches.go")?.framework_facts.is_empty());
+
+    for (framework, source, expected_path) in [
+        (
+            "echo",
+            br#"package web
+import "github.com/labstack/echo/v4"
+func show(c echo.Context) error { return nil }
+func routes() {
+  e := echo.New()
+  api := e.Group("/api")
+  api.GET("/users/:id", show)
+}
+"#
+            .as_slice(),
+            "/api/users/{id}",
+        ),
+        (
+            "fiber",
+            br#"package web
+import "github.com/gofiber/fiber/v3"
+func auth(c fiber.Ctx) error { return c.Next() }
+func show(c fiber.Ctx) error { return nil }
+func routes() {
+  app := fiber.New()
+  api := app.Group("/api")
+  api.Get("/users/:id", auth, show)
+}
+"#
+            .as_slice(),
+            "/api/users/{id}",
+        ),
+    ] {
+        let extraction = Engine::default().extract_source(Path::new("routes.go"), source)?;
+        let route = extraction
+            .framework_facts
+            .iter()
+            .find_map(|fact| match fact {
+                RawFrameworkFact::Route(route)
+                    if route.framework == framework && route.normalized_path == expected_path =>
+                {
+                    Some(route)
+                }
+                RawFrameworkFact::Route(_)
+                | RawFrameworkFact::Domain(_)
+                | RawFrameworkFact::Annotation(_) => None,
+            })
+            .ok_or("missing Echo/Fiber route")?;
+        assert_eq!(route.handler_reference, "show");
+        if framework == "fiber" {
+            assert_eq!(route.middleware_references, ["auth"]);
+        }
+    }
+
+    let near_match = Engine::default().extract_source(
+        Path::new("routes.go"),
+        br#"package web
+func routes() {
+  e := echo.New()
+  e.GET("/invented", show)
+}
+"#,
+    )?;
+    assert!(near_match.framework_facts.is_empty());
     Ok(())
 }
 
@@ -135,6 +198,58 @@ fn aspnet_composes_controller_and_action_templates() -> Result<(), Box<dyn Error
             && route.state == ResolutionState::Exact
     }));
     assert!(extract("csharp/NearMatches.cs")?.framework_facts.is_empty());
+
+    let minimal = Engine::default().extract_source(
+        Path::new("Program.cs"),
+        br#"var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+var api = app.MapGroup("/api");
+var users = api.MapGroup("/users");
+users.MapGet("/{id:int}", UserHandlers.Show);
+app.MapPost("/users", (User user) => Results.Created($"/users/{user.Id}", user));
+app.Run();
+"#,
+    )?;
+    let minimal_routes = minimal
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Route(route) if route.framework == "aspnet" => Some(route),
+            RawFrameworkFact::Route(_)
+            | RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let exact = minimal_routes
+        .iter()
+        .find(|route| route.normalized_path == "/api/users/{id:int}")
+        .ok_or("missing ASP.NET Minimal API route group")?;
+    assert_eq!(exact.operation, "GET");
+    assert_eq!(exact.handler_reference, "UserHandlers.Show");
+    let inline = minimal_routes
+        .iter()
+        .find(|route| route.normalized_path == "/users")
+        .ok_or("missing ASP.NET Minimal API inline route")?;
+    assert_eq!(inline.operation, "POST");
+    assert!(
+        inline
+            .handler_reference
+            .starts_with("opaque_minimal_handler_at_")
+    );
+    assert_eq!(
+        inline.detail.get("opaque_handler"),
+        Some(&serde_json::Value::Bool(true))
+    );
+
+    let near_match = Engine::default().extract_source(
+        Path::new("Program.cs"),
+        br#"var builder = WebApplication.CreateBuilder(args);
+var app = builder.Build();
+// app.MapGet("/invented", Handler);
+/* app.MapPost("/also-invented", Handler); */
+"#,
+    )?;
+    assert!(near_match.framework_facts.is_empty());
     Ok(())
 }
 

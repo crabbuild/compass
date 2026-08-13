@@ -48,9 +48,10 @@ Compass activates a framework pack only when the repository contains direct evid
 
 ### JavaScript and TypeScript frameworks
 
-- **Express**: `express()` and `Router()` receivers; `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `all`; literal paths and ordered middleware chains; opaque inline callbacks remain unresolved
-- **Fastify**: `fastify()` receivers; HTTP method calls and `route({ method, url, handler })` objects; literal `prefix` registrations, ordered hook stages such as `preHandler`, and opaque inline callbacks remain unresolved
-- **Hono**: `new Hono()` receivers; HTTP method calls, `on([methods], path, handler)` arrays, `basePath` chains, and literal `route(prefix, child)` mounts with ordered middleware stages
+- **Express**: `express()` and `Router()` receivers; `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `all`; literal paths, ordered middleware chains, and literal `use(prefix, importedRouter)` mounts across modules; opaque inline callbacks remain unresolved
+- **Fastify**: `fastify()` receivers; HTTP method calls and `route({ method, url, handler })` objects; literal `register(importedPlugin, { prefix })` mounts across modules, ordered hook stages such as `preHandler`, and opaque inline callbacks remain unresolved
+- **Hono**: `new Hono()` receivers; HTTP method calls, `on([methods], path, handler)` arrays, `basePath` chains, and literal `route(prefix, child)` mounts within and across modules with ordered middleware stages
+- **Angular Router**: typed `Routes` arrays and arrays passed to `provideRouter`, `RouterModule.forRoot`, `RouterModule.forChild`, or `resetConfig`; nested literal paths; component targets; and opaque lazy `loadComponent` or `loadChildren` targets
 - **Next.js**: App Router `page.*` and `route.*` files under `app` or `src/app`, Pages Router pages and `pages/api` handlers, dynamic segments, route groups, named HTTP exports, and project activation from the `next` dependency or `next.config.*`
 - **Remix**: flat and nested route modules under `app/routes`, `routes`, or `src/routes`; `_index`, dotted nested segments, `$param` and splat names; and `PAGE`, `LOADER`, and `ACTION` operations from default, loader, and action exports. Project activation uses `@remix-run/*` dependencies or `remix.config.*`.
 - **NestJS**: `Controller` HTTP method decorators and `RequestMapping`; GraphQL `Resolver` `Query` and `Mutation` operations at `/graphql`; typed GraphQL field details; `WebSocketGateway` `SubscribeMessage`; `MessagePattern` and `EventPattern` transport registrations
@@ -74,7 +75,7 @@ HTTP endpoints.
 
 ### Go, Rust, and native server frameworks
 
-- **Gin, chi, and gorilla/mux**: imported router registrations, grouped or closure prefixes, Gin middleware chains, chi method calls, and gorilla `HandleFunc(...).Methods(...)`, including `PathPrefix(...).Subrouter()` chains
+- **Gin, Echo, Fiber, chi, and gorilla/mux**: imported router registrations, grouped or closure prefixes, ordered Gin/Fiber middleware chains, Echo and Fiber HTTP method calls, chi method calls, and gorilla `HandleFunc(...).Methods(...)`, including `PathPrefix(...).Subrouter()` chains
 - **Axum, actix-web, and Rocket**: Axum literal `nest` and `merge` composition
   across local router variables and uniquely resolved module factory calls,
   state-wrapped handlers, ordered `layer` and `route_layer` middleware, and
@@ -84,7 +85,7 @@ HTTP endpoints.
   imports or qualified macros. Ambiguous or cyclic Axum module factory targets
   remain local and uncomposed.
 - **Vapor**: grouped literal and path-component prefixes, closure groups, `app.on(...)`, and HTTP registrations with explicit `use:` handlers; opaque closures remain visible as unresolved handlers
-- **ASP.NET Core**: MVC controller and action templates, `[controller]` and `[action]` tokens, HTTP method attributes, and absolute `/` or `~/` action-template overrides
+- **ASP.NET Core**: MVC controller and action templates, `[controller]` and `[action]` tokens, HTTP method attributes, and absolute `/` or `~/` action-template overrides; Minimal API `MapGet`, `MapPost`, `MapPut`, `MapPatch`, `MapDelete`, `MapOptions`, and `MapHead` registrations; and nested literal `MapGroup` prefixes
 
 ## Special route contracts
 

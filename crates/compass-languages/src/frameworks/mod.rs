@@ -327,6 +327,7 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         "typescript-web",
         &["javascript", "typescript", "tsx"],
         &[
+            "@angular/router",
             "@nestjs/common",
             "react-router",
             "react-router-dom",

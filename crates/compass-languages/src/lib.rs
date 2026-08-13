@@ -18,7 +18,7 @@ mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/10";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/11";
 mod go;
 mod groovy;
 mod html;

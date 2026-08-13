@@ -2,6 +2,7 @@ mod axum;
 mod domain;
 mod jvm;
 mod native;
+mod node;
 mod php;
 mod python;
 mod qualification;
@@ -35,6 +36,21 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         pack_id: "axum-web",
         frameworks: &["axum"],
         expand: axum::expand_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "express-web",
+        frameworks: &["express"],
+        expand: node::expand_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "fastify-web",
+        frameworks: &["fastify"],
+        expand: node::expand_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "hono-web",
+        frameworks: &["hono"],
+        expand: node::expand_routes,
     },
     RouteExpansionAdapter {
         pack_id: "python-web",
