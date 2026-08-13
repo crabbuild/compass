@@ -47,6 +47,7 @@ struct CommunityLabelCandidate {
     community: usize,
     base: String,
     context: Option<String>,
+    context_required: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -444,24 +445,32 @@ pub fn label_communities_by_hub(
             .iter()
             .filter_map(|member| positions.get(member.as_str()).map(|index| (member, *index)))
             .min_by(|(left_id, left), (right_id, right)| {
-                degrees[*right]
-                    .cmp(&degrees[*left])
+                is_pipe_table_structure(&document.nodes[*left])
+                    .cmp(&is_pipe_table_structure(&document.nodes[*right]))
+                    .then_with(|| degrees[*right].cmp(&degrees[*left]))
                     .then_with(|| left_id.cmp(right_id))
             });
         let fallback = format!("Community {community}");
-        let (base, context) = hub
+        let (base, context, context_required) = hub
             .and_then(|(_, index)| document.nodes.get(index))
             .map(|node| {
+                let table_structure = is_pipe_table_structure(node);
                 (
-                    concise_community_label(node).unwrap_or_else(|| fallback.clone()),
+                    if table_structure {
+                        "Table".to_owned()
+                    } else {
+                        concise_community_label(node).unwrap_or_else(|| fallback.clone())
+                    },
                     community_label_context(node),
+                    table_structure,
                 )
             })
-            .unwrap_or((fallback, None));
+            .unwrap_or((fallback, None, false));
         candidates.push(CommunityLabelCandidate {
             community: *community,
             base,
             context,
+            context_required,
         });
     }
 
@@ -473,7 +482,7 @@ pub fn label_communities_by_hub(
         .into_iter()
         .map(|candidate| {
             let duplicate = base_counts.get(&candidate.base).copied().unwrap_or(0) > 1;
-            let label = if duplicate {
+            let label = if duplicate || candidate.context_required {
                 candidate.context.map_or_else(
                     || format!("{} (community {})", candidate.base, candidate.community),
                     |context| format!("{} ({context})", candidate.base),
@@ -509,6 +518,13 @@ pub fn label_communities_by_hub(
     }
 
     labels.into_iter().collect()
+}
+
+fn is_pipe_table_structure(node: &NodeRecord) -> bool {
+    matches!(
+        node.string("document_kind").as_str(),
+        "pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell"
+    )
 }
 
 fn concise_community_label(node: &NodeRecord) -> Option<String> {
@@ -1794,6 +1810,78 @@ mod tests {
                 (0, "shared (src/left.rs:L10)".to_owned()),
                 (1, "shared (src/right.rs:L20)".to_owned()),
                 (2, "unique".to_owned()),
+            ])
+        );
+    }
+
+    #[test]
+    fn meaningful_document_anchor_outranks_pipe_table_hub() {
+        let mut document = graph(
+            &["heading", "table", "header", "row", "cell-a", "cell-b"],
+            &[
+                ("heading", "table"),
+                ("table", "header"),
+                ("table", "row"),
+                ("header", "cell-a"),
+                ("row", "cell-b"),
+            ],
+        );
+        document.nodes[0]
+            .attributes
+            .insert("label".to_owned(), json!("Storage contract"));
+        document.nodes[0]
+            .attributes
+            .insert("document_kind".to_owned(), json!("heading"));
+        for (index, kind) in [
+            (1, "pipe_table"),
+            (2, "pipe_table_header"),
+            (3, "pipe_table_row"),
+            (4, "pipe_table_cell"),
+            (5, "pipe_table_cell"),
+        ] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!(kind.replace('_', " ")));
+            document.nodes[index]
+                .attributes
+                .insert("document_kind".to_owned(), json!(kind));
+        }
+        let communities = BTreeMap::from([(
+            0,
+            document.nodes.iter().map(|node| node.id.clone()).collect(),
+        )]);
+
+        assert_eq!(
+            label_communities_by_hub(&document, &communities),
+            BTreeMap::from([(0, "Storage contract".to_owned())])
+        );
+    }
+
+    #[test]
+    fn pipe_table_only_communities_use_source_anchored_table_labels() {
+        let mut document = graph(&["left", "right"], &[]);
+        for (index, line) in [(0, 12), (1, 44)] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!("pipe table"));
+            document.nodes[index]
+                .attributes
+                .insert("document_kind".to_owned(), json!("pipe_table"));
+            document.nodes[index]
+                .attributes
+                .insert("source_file".to_owned(), json!("docs/reference/outputs.md"));
+            document.nodes[index]
+                .attributes
+                .insert("line_start".to_owned(), json!(line));
+        }
+        let communities =
+            BTreeMap::from([(3, vec!["left".to_owned()]), (8, vec!["right".to_owned()])]);
+
+        assert_eq!(
+            label_communities_by_hub(&document, &communities),
+            BTreeMap::from([
+                (3, "Table (reference/outputs.md:L12)".to_owned()),
+                (8, "Table (reference/outputs.md:L44)".to_owned()),
             ])
         );
     }

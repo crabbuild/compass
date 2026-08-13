@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Stop Markdown pipe-table containers from overwhelming community names and
+  `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
+  symbols over higher-degree table parser nodes; table-only communities use
+  deterministic source-anchored `Table (path:line)` labels and are counted as
+  omitted from the architecture-focused report directory while remaining
+  queryable in the graph. Advance graph publication semantics to v4 so existing
+  build state is regenerated with the corrected analysis.
+
 - Make `GRAPH_REPORT.md` a more complete, label-first architecture entry map.
   The compact Agent Orientation still highlights the leading communities, while
   the bounded Community Directory now retains up to 4,096 ranked non-empty

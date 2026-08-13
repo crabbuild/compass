@@ -35,7 +35,7 @@ use crate::inference::{InferenceLevel, prefilter_extraction_inference};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Version of the normalization and publication contract behind graph schema v1.
-pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/3";
+pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/4";
 use sha2::{Digest, Sha256};
 
 const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;

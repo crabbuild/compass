@@ -442,6 +442,7 @@ pub fn agent_orientation(
     let hub_total = god_node_list.len();
     let hubs = god_node_list
         .iter()
+        .filter(|node| !graph.is_pipe_table_structure_node_id(&node.id))
         .filter(|node| graph.node_identity_and_anchor_are_safe(&node.id, &node.label))
         .take(HUB_LIMIT)
         .map(|node| build_hub(&graph, node, &node_communities))
@@ -905,11 +906,17 @@ fn build_communities(
                 .iter()
                 .filter(|member| !graph.is_file_node_id(member))
                 .collect::<Vec<_>>();
-            (!real.is_empty()).then_some((*community, real))
+            (!real.is_empty()).then_some((
+                *community,
+                real.iter()
+                    .all(|member| graph.is_pipe_table_structure_node_id(member)),
+                real,
+            ))
         })
         .collect::<Vec<_>>();
     let total = eligible.len();
-    eligible.sort_by(|(left_id, left_members), (right_id, right_members)| {
+    eligible.retain(|(_, pipe_table_only, _)| !pipe_table_only);
+    eligible.sort_by(|(left_id, _, left_members), (right_id, _, right_members)| {
         right_members
             .len()
             .cmp(&left_members.len())
@@ -931,7 +938,7 @@ fn build_communities(
         .into_iter()
         .take(COMMUNITY_LIMIT)
         .enumerate()
-        .map(|(rank, (community, members))| {
+        .map(|(rank, (community, _, members))| {
             let detailed = rank < DETAILED_COMMUNITY_LIMIT;
             let mut representatives = members
                 .iter()
@@ -939,7 +946,12 @@ fn build_communities(
                 .collect::<Vec<_>>();
             // Stable sorting preserves the deterministic community-member order
             // when two candidates have equal connectivity.
-            representatives.sort_by_key(|right| std::cmp::Reverse(graph.degree(&right.id)));
+            representatives.sort_by(|left, right| {
+                graph
+                    .is_pipe_table_structure_node_id(&left.id)
+                    .cmp(&graph.is_pipe_table_structure_node_id(&right.id))
+                    .then_with(|| graph.degree(&right.id).cmp(&graph.degree(&left.id)))
+            });
             representatives.truncate(if detailed {
                 REPRESENTATIVE_LIMIT
             } else {
@@ -1078,6 +1090,7 @@ fn build_risks(
         .filter(|node| {
             graph.degree(&node.id) <= 1
                 && !graph.is_file_node_id(&node.id)
+                && !graph.is_pipe_table_structure_node_id(&node.id)
                 && !is_concept_node(node)
                 && node.string("file_type") != "rationale"
         })
@@ -1085,11 +1098,16 @@ fn build_risks(
     let thin = communities
         .values()
         .filter(|members| {
-            let count = members
-                .iter()
-                .filter(|member| !graph.is_file_node_id(member))
-                .count();
-            count > 0 && count < min_size
+            let mut count = 0_usize;
+            let mut pipe_table_only = true;
+            for member in *members {
+                if graph.is_file_node_id(member) {
+                    continue;
+                }
+                count = count.saturating_add(1);
+                pipe_table_only &= graph.is_pipe_table_structure_node_id(member);
+            }
+            count > 0 && count < min_size && !pipe_table_only
         })
         .count();
     let mut risks = Vec::new();
@@ -2008,7 +2026,9 @@ fn render_orientation_markdown_with_community_limit(
         ),
         String::new(),
         "## Architecture Map".to_owned(),
-        "- Leading communities are ranked by member count, connectivity, label, and stable ID. See the complete bounded directory later in this report."
+        "- Leading communities are ranked by member count, connectivity, label, and stable ID. See the complete bounded directory of architecture-relevant communities later in this report."
+            .to_owned(),
+        "- Markdown communities containing only pipe-table parser blocks are excluded from this architecture view and counted in omitted coverage; their source-backed nodes remain available in the graph."
             .to_owned(),
         disclosure(SectionOmission::from_total_shown(
             model.omissions.communities.total,
@@ -2312,7 +2332,9 @@ fn append_community_directory(
     lines.extend([
         String::new(),
         "## Community Directory".to_owned(),
-        "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Communities are ranked by member count, connectivity, label, and stable ID."
+        "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Architecture-relevant communities are ranked by member count, connectivity, label, and stable ID."
+            .to_owned(),
+        "- Markdown communities containing only pipe-table parser blocks are excluded and counted in omitted coverage; mixed communities retain their meaningful headings or symbols as entry points."
             .to_owned(),
         disclosure(model.omissions.communities),
     ]);
@@ -2646,6 +2668,15 @@ impl<'a> ReportGraph<'a> {
             && Path::new(source).file_name().and_then(|name| name.to_str()) == Some(label.as_str()))
             || (label.starts_with('.') && label.ends_with("()"))
             || (label.ends_with("()") && self.degree(id) <= 1)
+    }
+
+    fn is_pipe_table_structure_node_id(&self, id: &str) -> bool {
+        self.positions.get(id).is_some_and(|node| {
+            matches!(
+                node.string("document_kind").as_str(),
+                "pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell"
+            )
+        })
     }
 }
 
