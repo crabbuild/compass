@@ -17,9 +17,9 @@ serde_json.workspace = true
 sha2.workspace = true
 time.workspace = true
 thiserror.workspace = true
-compass-model = { path = "../compass-model", version = "0.3.10" }
-compass-files = { path = "../compass-files", version = "0.3.10" }
-compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.10" }
+compass-model = { path = "../compass-model", version = "0.3.11" }
+compass-files = { path = "../compass-files", version = "0.3.11" }
+compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.11" }
 wait-timeout.workspace = true
 
 [dev-dependencies]

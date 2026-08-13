@@ -12,14 +12,14 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-compass-store = { path = "../compass-store", version = "0.3.10" }
+compass-store = { path = "../compass-store", version = "0.3.11" }
 redb.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
-compass-graph = { path = "../compass-graph", version = "0.3.10" }
-compass-model = { path = "../compass-model", version = "0.3.10" }
-compass-store = { path = "../compass-store", version = "0.3.10", features = ["test-support"] }
+compass-graph = { path = "../compass-graph", version = "0.3.11" }
+compass-model = { path = "../compass-model", version = "0.3.11" }
+compass-store = { path = "../compass-store", version = "0.3.11", features = ["test-support"] }
 tempfile.workspace = true
 
 [lints]
