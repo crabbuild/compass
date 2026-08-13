@@ -15,7 +15,7 @@ import {
   ZoomInIcon,
   ZoomOutIcon
 } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { GraphEdgeDirection } from "./neighborhood";
 import type { GraphLayoutStyle } from "./renderingProfile";
 import type { GraphLayoutSpacing } from "./state";
@@ -40,6 +40,7 @@ export function GraphToolbar({
   edgeDirection,
   layoutSpacing,
   showMinimap,
+  leadingControls,
   onTogglePhysics,
   onLayoutChange,
   onZoomOut,
@@ -68,6 +69,7 @@ export function GraphToolbar({
   edgeDirection: GraphEdgeDirection;
   layoutSpacing: GraphLayoutSpacing;
   showMinimap: boolean;
+  leadingControls?: ReactNode;
   onTogglePhysics(): void;
   onLayoutChange(layout: GraphLayoutStyle): void;
   onZoomOut(): void;
@@ -85,22 +87,22 @@ export function GraphToolbar({
   onToggleMinimap(): void;
   onBack?: (() => void) | undefined;
 }) {
-  const [exploreOpen, setExploreOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const explorationId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setExploreOpen(false);
+        setSettingsOpen(false);
         return;
       }
       if (event.key !== "?" || isEditableTarget(event.target)) return;
       event.preventDefault();
-      setExploreOpen(true);
+      setSettingsOpen(true);
     };
     const handlePointerDown = (event: PointerEvent) => {
       if (panelRef.current?.contains(event.target as Node)) return;
-      setExploreOpen(false);
+      setSettingsOpen(false);
     };
     document.addEventListener("keydown", handleKeyDown);
     document.addEventListener("pointerdown", handlePointerDown);
@@ -126,6 +128,9 @@ export function GraphToolbar({
         <span className="compass-viewer-status-dot" aria-hidden="true" />
         <span className="compass-viewer-status-text">{status}</span>
       </div>
+      {leadingControls ? (
+        <div className="compass-toolbar-leading">{leadingControls}</div>
+      ) : null}
       <div className="compass-toolbar-actions">
         {onBack && (
           <button
@@ -155,7 +160,7 @@ export function GraphToolbar({
           </select>
         </label>
         <button
-          className="compass-tool-button compass-tool-icon-button"
+          className="compass-tool-button compass-physics-button"
           type="button"
           aria-label={physicsRunning
             ? "Pause layout"
@@ -170,6 +175,9 @@ export function GraphToolbar({
           {physicsRunning
             ? <PauseIcon />
             : layoutStyle === "automatic" ? <PlayIcon /> : <PauseIcon />}
+          <span>{physicsRunning
+            ? "Pause"
+            : layoutStyle === "automatic" ? "Resume" : "Fixed"}</span>
         </button>
         <span className="compass-toolbar-separator" aria-hidden="true" />
         <div className="compass-zoom-controls" role="group" aria-label="Zoom controls">
@@ -258,16 +266,16 @@ export function GraphToolbar({
         <button
           className="compass-tool-button compass-tool-icon-button"
           type="button"
-          aria-label="Explore graph"
-          aria-expanded={exploreOpen}
+          aria-label="Graph settings"
+          aria-expanded={settingsOpen}
           aria-controls={explorationId}
-          title="Explore graph (?)"
-          onClick={() => setExploreOpen((open) => !open)}
+          title="Graph settings (?)"
+          onClick={() => setSettingsOpen((open) => !open)}
         >
           <SlidersHorizontalIcon />
         </button>
       </div>
-      {exploreOpen ? (
+      {settingsOpen ? (
         <div
           id={explorationId}
           className="compass-explore-panel compass-glass-panel"
@@ -276,11 +284,23 @@ export function GraphToolbar({
         >
           <div className="compass-explore-heading">
             <div>
-              <strong>Explore selection</strong>
-              <span>{hasSelection ? "Scope the graph around the selected node" : "Select a node to define a scope"}</span>
+              <strong>Graph settings</strong>
+              <span>{hasSelection
+                ? "Tune the selected neighborhood and canvas"
+                : "Set the next neighborhood, then select a node"}</span>
             </div>
             <kbd>?</kbd>
           </div>
+
+          {!hasSelection ? (
+            <div className="compass-selection-prompt" role="note">
+              <ScanSearchIcon aria-hidden="true" />
+              <span>
+                <strong>Select a node to isolate it</strong>
+                <small>Use the canvas or node search. Depth and direction can be set now.</small>
+              </span>
+            </div>
+          ) : null}
 
           <button
             className="compass-explore-toggle"
@@ -298,7 +318,7 @@ export function GraphToolbar({
             <i aria-hidden="true" />
           </button>
 
-          <fieldset className="compass-explore-field" disabled={!hasSelection}>
+          <fieldset className="compass-explore-field">
             <legend>Neighborhood depth</legend>
             <div className="compass-segmented-control" aria-label="Neighborhood depth">
               {[1, 2, 3, 4].map((depth) => (
@@ -315,7 +335,7 @@ export function GraphToolbar({
             </div>
           </fieldset>
 
-          <fieldset className="compass-explore-field" disabled={!hasSelection}>
+          <fieldset className="compass-explore-field">
             <legend>Edge direction</legend>
             <div className="compass-segmented-control" aria-label="Edge direction">
               {([

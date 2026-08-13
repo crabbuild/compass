@@ -15,7 +15,8 @@ const mock = vi.hoisted(() => ({
   updates: [] as Array<Array<Record<string, unknown>>>,
   movedNodes: [] as Array<{ id: string; x: number; y: number }>,
   simulationStarts: 0,
-  simulationStops: 0
+  simulationStops: 0,
+  positionScale: 10
 }));
 
 vi.mock("vis-network/standalone", () => ({
@@ -58,7 +59,10 @@ vi.mock("vis-network/standalone", () => ({
     getViewPosition() { return { x: 0, y: 0 }; }
     getScale() { return 1; }
     getPositions(ids: string[] = ["caller", "callee"]) {
-      return Object.fromEntries(ids.map((id, index) => [id, { x: index * 10, y: 0 }]));
+      return Object.fromEntries(ids.map((id, index) => [id, {
+        x: index * mock.positionScale,
+        y: 0
+      }]));
     }
     moveNode(id: string, x: number, y: number) {
       mock.movedNodes.push({ id, x, y });
@@ -101,6 +105,7 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     mock.movedNodes.length = 0;
     mock.simulationStarts = 0;
     mock.simulationStops = 0;
+    mock.positionScale = 10;
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -237,7 +242,47 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     />);
 
     expect(mock.movedNodes.map(({ id }) => id)).toEqual(["callee", "caller"]);
+    expect(mock.movedNodes[0]?.x).toBeGreaterThanOrEqual(18);
     expect(mock.simulationStarts).toBeGreaterThan(startsBeforeResume);
+  });
+
+  it("scales the reheat so motion stays visible when a large graph is fit", () => {
+    const callbacks = {
+      onFocus: vi.fn(),
+      onOpenSource: vi.fn(),
+      onOpenRelationshipSource: vi.fn(),
+      onHover: vi.fn(),
+      onHoverEdge: vi.fn(),
+      onClear: vi.fn(),
+      onStabilized: vi.fn()
+    };
+    mock.positionScale = 10_000;
+    const { rerender } = render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...callbacks}
+    />);
+
+    mock.movedNodes.length = 0;
+    rerender(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={true}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...callbacks}
+    />);
+
+    expect(mock.movedNodes[0]?.x).toBeCloseTo(96);
+    expect(screen.getByRole("region", { name: "Interactive Compass code graph" }))
+      .toHaveAttribute("data-physics-running", "true");
   });
 
   it("seeds explicit positions for a paused graph", () => {

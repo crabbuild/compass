@@ -94,7 +94,7 @@ describe("GraphToolbar", () => {
 
   it("groups advanced exploration controls in a discoverable panel", () => {
     const callbacks = renderToolbar({ hasSelection: true });
-    fireEvent.click(screen.getByRole("button", { name: "Explore graph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Graph settings" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Isolate selection" }));
     fireEvent.click(screen.getByRole("button", { name: "2 hops" }));
@@ -109,6 +109,29 @@ describe("GraphToolbar", () => {
     expect(callbacks.onEdgeDirectionChange).toHaveBeenCalledWith("outgoing");
     expect(callbacks.onLayoutSpacingChange).toHaveBeenCalledWith(1.25);
     expect(callbacks.onToggleMinimap).toHaveBeenCalledOnce();
+  });
+
+  it("lets users prepare neighborhood settings before selecting a node", () => {
+    const callbacks = renderToolbar();
+    fireEvent.click(screen.getByRole("button", { name: "Graph settings" }));
+
+    expect(screen.getByRole("note")).toHaveTextContent("Select a node to isolate it");
+    expect(screen.getByRole("button", { name: "Isolate selection" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "2 hops" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Outgoing edges" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "2 hops" }));
+    fireEvent.click(screen.getByRole("button", { name: "Outgoing edges" }));
+    expect(callbacks.onNeighborhoodDepthChange).toHaveBeenCalledWith(2);
+    expect(callbacks.onEdgeDirectionChange).toHaveBeenCalledWith("outgoing");
+  });
+
+  it("makes layout motion an explicit labeled action", () => {
+    const callbacks = renderToolbar();
+    const resume = screen.getByRole("button", { name: "Resume layout" });
+    expect(resume).toHaveTextContent("Resume");
+    fireEvent.click(resume);
+    expect(callbacks.onTogglePhysics).toHaveBeenCalledOnce();
   });
 
   it("opens the shortcut guide with question mark", () => {

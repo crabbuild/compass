@@ -127,7 +127,7 @@ test("graph exploration controls isolate directed neighborhoods and expose short
   const graph = page.getByRole("region", { name: "Interactive Compass code graph" });
 
   await expect(page.getByRole("complementary", { name: "Graph overview" })).toBeVisible();
-  await page.getByRole("button", { name: "Explore graph" }).click();
+  await page.getByRole("button", { name: "Graph settings" }).click();
   const exploration = page.getByRole("region", { name: "Graph exploration controls" });
   await expect(exploration).toBeVisible();
   await expect(page.getByLabel("Graph keyboard shortcuts")).toBeVisible();
@@ -135,7 +135,7 @@ test("graph exploration controls isolate directed neighborhoods and expose short
 
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
   await page.getByRole("option", { name: /Store/i }).click();
-  await page.getByRole("button", { name: "Explore graph" }).click();
+  await page.getByRole("button", { name: "Graph settings" }).click();
   await page.getByRole("button", { name: "2 hops" }).click();
   await page.getByRole("button", { name: "Outgoing edges" }).click();
   await page.getByRole("button", { name: "Isolate selection" }).click();
@@ -144,9 +144,9 @@ test("graph exploration controls isolate directed neighborhoods and expose short
 
   await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("1.25");
   await expect(graph).toHaveAttribute("data-layout-spacing", "1.25");
-  await page.getByRole("button", { name: "Explore graph" }).click();
+  await page.getByRole("button", { name: "Graph settings" }).click();
   await page.keyboard.press("]");
-  await page.getByRole("button", { name: "Explore graph" }).click();
+  await page.getByRole("button", { name: "Graph settings" }).click();
   await expect(page.getByRole("button", { name: "3 hops" })).toHaveAttribute(
     "aria-pressed",
     "true"

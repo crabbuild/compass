@@ -292,9 +292,16 @@ removed, and changed graph evidence.
 
 Node-link graph views provide bounded 1–4-hop selection isolation with exact
 incoming, outgoing, or bidirectional traversal, adjustable layout spacing, and
-a navigable minimap based on the rendered graph coordinates. The exploration
-panel documents keyboard controls; press `?` while focus is outside a text or
-selection control to open it.
+a navigable minimap based on the rendered graph coordinates. Workbench graph
+filters live in the top graph-control rail and open as a compact panel, leaving
+the canvas at full height. Filters and their result count follow the graph
+currently on screen when moving between an overview and community detail.
+Neighborhood depth and direction can be prepared before selecting a node;
+isolation becomes available after selection and fits the resulting
+neighborhood. The graph-settings panel documents keyboard controls; press `?`
+while focus is outside a text or selection control to open it. Pause and resume
+are explicit labeled actions; resuming a settled layout reheats it enough to
+remain visible at a fitted overview scale.
 
 The machine form is available from `compass export workbench-json`, or from
 `compass export json` when at least one view is requested. Unknown major

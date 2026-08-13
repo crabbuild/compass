@@ -83,7 +83,8 @@ const STATIC_VISIBLE_LABEL_LIMIT = 200;
 const MINIMAP_POSITION_LIMIT = 1_500;
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 3;
-const LAYOUT_REHEAT_DISTANCE = 12;
+const MIN_LAYOUT_REHEAT_DISTANCE = 18;
+const MAX_LAYOUT_REHEAT_DISTANCE = 96;
 const LAYOUT_REHEAT_NODE_LIMIT = 1_500;
 
 function reheatGraphLayout(
@@ -92,6 +93,15 @@ function reheatGraphLayout(
 ): void {
   const nodeIds = [...visibleNodeIds].sort().slice(0, LAYOUT_REHEAT_NODE_LIMIT);
   const positions = network.getPositions(nodeIds);
+  const coordinates = Object.values(positions);
+  const graphSpan = coordinates.length === 0 ? 0 : Math.max(
+    Math.max(...coordinates.map(({ x }) => x)) - Math.min(...coordinates.map(({ x }) => x)),
+    Math.max(...coordinates.map(({ y }) => y)) - Math.min(...coordinates.map(({ y }) => y))
+  );
+  const reheatDistance = Math.min(
+    MAX_LAYOUT_REHEAT_DISTANCE,
+    Math.max(MIN_LAYOUT_REHEAT_DISTANCE, graphSpan * 0.012)
+  );
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   nodeIds.forEach((id, index) => {
     const position = positions[id];
@@ -99,8 +109,8 @@ function reheatGraphLayout(
     const angle = index * goldenAngle;
     network.moveNode(
       id,
-      position.x + Math.cos(angle) * LAYOUT_REHEAT_DISTANCE,
-      position.y + Math.sin(angle) * LAYOUT_REHEAT_DISTANCE
+      position.x + Math.cos(angle) * reheatDistance,
+      position.y + Math.sin(angle) * reheatDistance
     );
   });
 }
@@ -994,6 +1004,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           className="compass-canvas"
           data-rendering-profile={renderingProfile}
           data-layout-style={layoutStyle}
+          data-physics-running={physicsRunning ? "true" : "false"}
           data-isolated={isolatedNodeIds ? "true" : "false"}
           data-layout-spacing={layoutSpacing}
           role="region"

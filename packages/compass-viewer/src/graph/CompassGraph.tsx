@@ -6,7 +6,8 @@ import {
   useReducer,
   useRef,
   useState,
-  type CSSProperties
+  type CSSProperties,
+  type ReactNode
 } from "react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
@@ -97,6 +98,7 @@ export type CompassGraphProps = {
   initialInspectorLayout?: Partial<InspectorLayout> | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
   preferredLayout?: GraphLayoutStyle | undefined;
+  toolbarLeading?: ReactNode;
 };
 
 export function CompassGraph({
@@ -110,7 +112,8 @@ export function CompassGraph({
   queryResult,
   initialInspectorLayout,
   onInspectorLayoutChange,
-  preferredLayout = "automatic"
+  preferredLayout = "automatic",
+  toolbarLeading
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -137,6 +140,7 @@ export function CompassGraph({
       inspectorLayout={inspectorLayout}
       onInspectorLayoutChange={updateInspectorLayout}
       preferredLayout={preferredLayout}
+      toolbarLeading={toolbarLeading}
     />
   );
 }
@@ -153,7 +157,8 @@ function CompassGraphView({
   queryResult,
   inspectorLayout,
   onInspectorLayoutChange,
-  preferredLayout
+  preferredLayout,
+  toolbarLeading
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -167,6 +172,7 @@ function CompassGraphView({
   inspectorLayout: InspectorLayout;
   onInspectorLayoutChange(layout: InspectorLayout): void;
   preferredLayout: GraphLayoutStyle;
+  toolbarLeading?: ReactNode;
 }) {
   const [state, dispatch] = useReducer(
     graphReducer,
@@ -459,6 +465,7 @@ function CompassGraphView({
             edgeDirection={state.edgeDirection}
             layoutSpacing={state.layoutSpacing}
             showMinimap={state.showMinimap}
+            leadingControls={toolbarLeading}
             onTogglePhysics={() => dispatch({
               type: "setPhysics",
               running: !state.physicsRunning
@@ -491,10 +498,15 @@ function CompassGraphView({
               type: "setEdgeLabels",
               visible: !state.showEdgeLabels
             })}
-            onToggleIsolation={() => dispatch({
-              type: "setIsolation",
-              isolated: !state.isolateSelection
-            })}
+            onToggleIsolation={() => {
+              const isolated = !state.isolateSelection;
+              dispatch({ type: "setIsolation", isolated });
+              if (isolated && selectedNeighborhood) {
+                window.requestAnimationFrame(() => {
+                  canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+                });
+              }
+            }}
             onNeighborhoodDepthChange={(depth) => dispatch({
               type: "setNeighborhoodDepth",
               depth
