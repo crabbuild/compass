@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Improve Markdown as first-class agent context. Repeated automatic heading
+  slugs now follow deterministic source-order suffixes, every structural block
+  has a section-qualified identity, and project resolution connects exact,
+  extensionless, repository-root, directory-index, and unique-wikilink targets
+  to document headings or source-file inventory. Missing fragments and
+  ambiguous targets remain unresolved, while exact document relationships now
+  survive the default low inference level. Advance extraction semantics to v12
+  so affected cached facts rebuild.
+
 - Improve natural code discovery on independently reviewed Python and
   TypeScript libraries. Ranking now recognizes common operation vocabulary,
   compound protocol owners, container roles, and decoder-chain intent without

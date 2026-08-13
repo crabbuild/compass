@@ -40,6 +40,9 @@ compass-languages::Engine
 document root + structural blocks + link evidence
         |
         v
+compass-resolve project inventory + heading targets
+        |
+        v
 compass-graph / compass-core publication
 ```
 
@@ -68,9 +71,12 @@ The structural projection emits ordered nodes for headings, paragraphs, lists
 and list items, block quotes, thematic breaks, fenced and indented code,
 pipe-table containers/headers/rows/cells, HTML blocks, and reference
 definitions. Each node carries `document_kind`, `block_index`, source identity,
-and an exact byte range. Heading nodes additionally carry `heading_level`,
-`heading_style`, `qualified_name`, and a deterministic `anchor_slug`; headings
-with `{#explicit-id}` retain `explicit_id`.
+a section-qualified `qualified_name`, and an exact byte range. Blocks beneath a
+heading also carry `document_section`. Heading nodes additionally carry
+`heading_level`, `heading_style`, and a deterministic `anchor_slug`; repeated
+automatic slugs receive source-order `-1`, `-2`, … suffixes, while headings
+with `{#explicit-id}` retain `explicit_id` and duplicate explicit IDs remain
+ambiguous.
 
 Nested blocks are represented by `contains` edges. Inline links are owned by
 the smallest containing structural block, so a link in a list item or table
@@ -95,11 +101,21 @@ lossy display representation while offsets remain byte offsets).
 ## Link resolution
 
 Compass records external links as bounded `markdown_external_links` evidence
-without fetching them. Supported local links produce `references` edges, while
-links to an existing source document may use the `documents` relation. A
-fragment-only link resolves to a heading only when its slug or explicit ID is
-unique. Duplicate or missing fragments remain in `markdown_unresolved_links`
-with an explicit reason; extraction never selects the first same-named heading.
+without fetching them. The per-file extractor preserves local link spelling
+and its exact source site; the project resolver selects a target only against
+the complete extracted inventory. Supported local links produce `references`
+edges, while links to source code use `documents` and target that language's
+file-inventory node.
+
+Exact and repository-root paths, `.md`/`.markdown`/`.mdx`/`.qmd`/`.skill` extension
+inference, directory `README`/`index` documents, and unique wikilink stems are
+bounded resolution rules. A same-file or cross-file fragment is percent-decoded
+within a fixed bound and resolves only when its slug or explicit ID is unique.
+Duplicate or missing fragments and
+ambiguous extension or stem candidates remain unresolved; resolution never
+selects the first candidate or substitutes a document root. Exact resolved
+relationships retain source-backed confidence and are therefore available at
+the default low inference level.
 
 Reference definitions and usages retain separate source sites. Wikilinks,
 autolinks, email links, inline links, and reference links carry a `link_kind`,

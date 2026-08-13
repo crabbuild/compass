@@ -388,6 +388,14 @@ changing node identity; consumers must preserve unknown attributes, edge
 direction, multiplicity, and source ranges. Markdown frontmatter is part of
 the file hash, so metadata-only edits invalidate compatible extraction/cache
 entries and are rebuilt under the current extraction semantics version.
+Structural blocks now carry section-qualified names and automatic duplicate
+heading slugs use deterministic source-order suffixes. Project resolution may
+connect local document links to a unique heading, document root, directory
+index, or source-file inventory node. Extension inference and wikilink stem
+matching are bounded closed rules; ambiguity or a missing fragment never picks
+one candidate or falls back to the document root. These additive attributes and
+relationships rebuild under extraction semantics v12; graph schema v1 and
+existing relationship direction remain unchanged.
 
 HTML (`.html`/`.htm`) now has the same source-driven structural contract. HTML
 nodes and link evidence preserve exact source ranges and deterministic order;

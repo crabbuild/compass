@@ -1162,6 +1162,8 @@ fn finish_resolution(
         &mut language_facts.calls,
     );
     profile_internal("resolver collision disambiguation", &mut profile_started);
+    resolve_document_link_targets(&mut merged, &canonical_root);
+    profile_internal("resolver document links", &mut profile_started);
     if has_javascript {
         resolve_javascript_workspace_symbols(&mut merged);
     }
@@ -4193,6 +4195,9 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
         })
         .collect::<HashMap<_, _>>();
     for edge in &mut extraction.edges {
+        if edge.attributes.contains_key("_document_target_path") {
+            continue;
+        }
         if node_ids.contains(edge.target.as_str()) {
             continue;
         }
@@ -4208,6 +4213,276 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
             edge.target.clone_from(target);
             stamp_endpoint_rewrite(edge, rule, 1.0);
         }
+    }
+}
+
+const DOCUMENT_TARGET_EXTENSIONS: [&str; 5] = ["md", "markdown", "mdx", "qmd", "skill"];
+
+/// Resolve Markdown links only after the complete project inventory is known.
+///
+/// The per-file extractor preserves the source spelling and an exact wiring
+/// site. This stage can therefore resolve cross-file fragments, extensionless
+/// links, repository-root links, directory index documents, and unique wiki
+/// stems without filesystem-order guesses or cross-language policy.
+fn resolve_document_link_targets(extraction: &mut Extraction, root: &Path) {
+    let profile = std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some();
+    let mut considered = 0_usize;
+    let mut rewritten = 0_usize;
+    let mut roots_by_source = BTreeMap::<String, Vec<String>>::new();
+    let mut wiki_stems = BTreeMap::<String, Vec<(String, String)>>::new();
+    let mut headings = BTreeMap::<(String, String), Vec<String>>::new();
+
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if source.is_empty() {
+            continue;
+        }
+        let source = source_key(&source, root);
+        let document_root =
+            node.string("file_type") == "document" && node.string("document_kind") == "document";
+        if document_root || is_file_node(node, &source) {
+            roots_by_source
+                .entry(source.clone())
+                .or_default()
+                .push(node.id.clone());
+            if document_root
+                && let Some(stem) = Path::new(&source)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+            {
+                wiki_stems
+                    .entry(stem.to_ascii_lowercase())
+                    .or_default()
+                    .push((source.clone(), node.id.clone()));
+            }
+        }
+        if node.string("file_type") == "document" && node.string("document_kind") == "heading" {
+            let mut aliases = BTreeSet::new();
+            for attribute in ["anchor_slug", "explicit_id"] {
+                let value = node.string(attribute);
+                if !value.is_empty() {
+                    aliases.insert(value.to_ascii_lowercase());
+                }
+            }
+            for alias in aliases {
+                headings
+                    .entry((source.clone(), alias))
+                    .or_default()
+                    .push(node.id.clone());
+            }
+        }
+    }
+    for candidates in roots_by_source.values_mut() {
+        candidates.sort();
+        candidates.dedup();
+    }
+    for candidates in wiki_stems.values_mut() {
+        candidates.sort();
+        candidates.dedup();
+    }
+    for candidates in headings.values_mut() {
+        candidates.sort();
+        candidates.dedup();
+    }
+
+    for edge in &mut extraction.edges {
+        let Some(target_path) = edge
+            .attributes
+            .get("_document_target_path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        considered = considered.saturating_add(1);
+        let extension_inferred = edge
+            .attributes
+            .get("_document_target_extension_inferred")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let wiki_link =
+            edge.attributes.get("link_kind").and_then(Value::as_str) == Some("wikilink");
+
+        let mut source_candidates = BTreeSet::new();
+        let normalized = document_target_key(&target_path, root);
+        if !normalized.is_empty() {
+            source_candidates.insert(normalized.clone());
+        }
+        if extension_inferred {
+            let path = Path::new(&normalized);
+            for extension in DOCUMENT_TARGET_EXTENSIONS {
+                source_candidates.insert(
+                    path.with_extension(extension)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+                source_candidates.insert(
+                    path.join("README")
+                        .with_extension(extension)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+                source_candidates.insert(
+                    path.join("index")
+                        .with_extension(extension)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+
+        let mut candidates = source_candidates
+            .iter()
+            .filter_map(|source| {
+                roots_by_source
+                    .get(source)
+                    .filter(|targets| targets.len() == 1)
+                    .and_then(|targets| targets.first())
+                    .map(|target| (source.clone(), target.clone()))
+            })
+            .collect::<Vec<_>>();
+        if candidates.is_empty() && wiki_link {
+            let stem = Path::new(&normalized)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if let Some(targets) = wiki_stems.get(&stem).filter(|targets| targets.len() == 1) {
+                candidates.extend(targets.iter().cloned());
+            }
+        }
+        candidates.sort();
+        candidates.dedup();
+
+        let Some((target_source, document_target)) =
+            (candidates.len() == 1).then(|| candidates.pop()).flatten()
+        else {
+            let status = if candidates.is_empty() {
+                "missing_target"
+            } else {
+                "ambiguous_target"
+            };
+            mark_unresolved_document_link(edge, &target_path, status);
+            continue;
+        };
+        let fragment = edge
+            .attributes
+            .get("fragment")
+            .and_then(Value::as_str)
+            .filter(|fragment| !fragment.is_empty())
+            .map(str::to_owned);
+        let target = if let Some(fragment) = fragment.as_deref() {
+            let key = decode_markdown_fragment(fragment).to_ascii_lowercase();
+            let Some(targets) = headings.get(&(target_source, key)) else {
+                mark_unresolved_document_link(edge, &target_path, "missing_fragment");
+                continue;
+            };
+            if targets.len() != 1 {
+                mark_unresolved_document_link(edge, &target_path, "ambiguous_fragment");
+                continue;
+            }
+            targets[0].clone()
+        } else {
+            document_target
+        };
+        if target != edge.target {
+            edge.attributes.insert(
+                "_document_original_target".to_owned(),
+                Value::String(edge.target.clone()),
+            );
+            edge.target = target;
+            rewritten = rewritten.saturating_add(1);
+        }
+        edge.attributes.insert(
+            "rule".to_owned(),
+            Value::String("document-link-exact-target".to_owned()),
+        );
+        edge.attributes.insert(
+            "resolution_rule".to_owned(),
+            Value::String("document-link-target-resolution".to_owned()),
+        );
+    }
+    if profile {
+        eprintln!(
+            "[compass internal] document links considered={considered} rewritten={rewritten}"
+        );
+    }
+}
+
+fn document_target_key(source: &str, root: &Path) -> String {
+    let key = source_key(source, root);
+    if !Path::new(&key).is_absolute() {
+        return key;
+    }
+    let path = Path::new(source);
+    let Some((parent, file_name)) = path.parent().zip(path.file_name()) else {
+        return key;
+    };
+    let Ok(parent) = std::fs::canonicalize(parent) else {
+        return key;
+    };
+    let Ok(parent) = parent.strip_prefix(root) else {
+        return key;
+    };
+    parent.join(file_name).to_string_lossy().replace('\\', "/")
+}
+
+fn mark_unresolved_document_link(edge: &mut EdgeRecord, target_path: &str, status: &str) {
+    let fragment = edge
+        .attributes
+        .get("fragment")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let source_file = edge
+        .attributes
+        .get("source_file")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let start_byte = edge
+        .attributes
+        .get("start_byte")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        .to_string();
+    edge.target = make_id(&[
+        "unresolved_document_link",
+        source_file,
+        &start_byte,
+        target_path,
+        fragment,
+    ]);
+    edge.attributes.insert(
+        "_document_target_resolution".to_owned(),
+        Value::String(status.to_owned()),
+    );
+}
+
+fn decode_markdown_fragment(fragment: &str) -> String {
+    let bytes = fragment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len().min(512));
+    let mut index = 0;
+    while index < bytes.len() && decoded.len() < 512 {
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (bytes.get(index + 1), bytes.get(index + 2))
+            && let (Some(high), Some(low)) = (hex_digit(*high), hex_digit(*low))
+        {
+            decoded.push(high.saturating_mul(16).saturating_add(low));
+            index = index.saturating_add(3);
+            continue;
+        }
+        decoded.push(bytes[index]);
+        index = index.saturating_add(1);
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+const fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
     }
 }
 

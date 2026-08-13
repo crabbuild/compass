@@ -231,6 +231,10 @@ let hidden = "[not a link](ignored.md)";
         edge.attributes.get("fragment") == Some(&serde_json::json!("start"))
             && edge.target != root.id
     }));
+    assert!(extraction.nodes.iter().any(|node| {
+        node.attributes.get("document_kind") == Some(&serde_json::json!("paragraph"))
+            && node.string("qualified_name").contains("::paragraph#")
+    }));
     assert!(extraction.nodes.iter().all(|node| {
         node.attributes
             .get("start_byte")
@@ -257,18 +261,47 @@ let hidden = "[not a link](ignored.md)";
 }
 
 #[test]
-fn markdown_duplicate_fragments_are_explicitly_unresolved() -> Result<(), Box<dyn Error>> {
+fn markdown_duplicate_heading_slugs_follow_source_order_and_explicit_ids_remain_ambiguous()
+-> Result<(), Box<dyn Error>> {
     let extraction = Engine::default().extract_source(
         std::path::Path::new("guide.md"),
-        b"# Same\n\n## Same\n\n## Other\n\n[jump](#same)\n",
+        b"# Same\n\n## Same\n\n## Other\n\n[first](#same) [second](#same-1)\n",
     )?;
-    assert!(
-        !extraction
-            .edges
-            .iter()
-            .any(|edge| edge.attributes.get("link_kind") == Some(&serde_json::json!("inline")))
-    );
-    let unresolved = extraction
+    let links = extraction
+        .edges
+        .iter()
+        .filter(|edge| edge.attributes.get("link_kind") == Some(&serde_json::json!("inline")))
+        .collect::<Vec<_>>();
+    assert_eq!(links.len(), 2);
+    assert_ne!(links[0].target, links[1].target);
+    let slugs = extraction
+        .nodes
+        .iter()
+        .filter_map(|node| node.attributes.get("anchor_slug"))
+        .filter_map(serde_json::Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(slugs.contains(&"same"));
+    assert!(slugs.contains(&"same-1"));
+
+    let encoded = Engine::default().extract_source(
+        std::path::Path::new("encoded.md"),
+        b"# Encoded {#agent:rules}\n\n[jump](#agent%3Arules)\n",
+    )?;
+    let encoded_heading = encoded
+        .nodes
+        .iter()
+        .find(|node| node.string("explicit_id") == "agent:rules")
+        .ok_or("missing encoded-fragment heading")?;
+    assert!(encoded.edges.iter().any(|edge| {
+        edge.attributes.get("fragment") == Some(&serde_json::json!("agent%3Arules"))
+            && edge.target == encoded_heading.id
+    }));
+
+    let explicit = Engine::default().extract_source(
+        std::path::Path::new("explicit.md"),
+        b"# One {#shared}\n\n# Two {#shared}\n\n[jump](#shared)\n",
+    )?;
+    let unresolved = explicit
         .extensions
         .get("markdown_unresolved_links")
         .and_then(serde_json::Value::as_array)

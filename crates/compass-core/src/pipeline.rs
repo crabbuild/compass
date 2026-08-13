@@ -8231,14 +8231,18 @@ mod tests {
         let directory = tempfile::tempdir()?;
         fs::write(
             directory.path().join("guide.md"),
-            "# Guide\n[Implementation](documented.rs)\n",
+            "# Guide\n[Implementation](documented.rs)\n[Details](details#usage)\n",
+        )?;
+        fs::write(
+            directory.path().join("details.md"),
+            "# Details\n\n## Usage\n\nExact project documentation.\n",
         )?;
         fs::write(
             directory.path().join("documented.rs"),
             "pub fn documented() {}\n",
         )?;
         let mut options = BuildOptions::new(directory.path());
-        options.inference_level = InferenceLevel::Max;
+        options.inference_level = InferenceLevel::Low;
         options.no_cluster = true;
         options.no_viz = true;
         options.force = true;
@@ -8250,6 +8254,16 @@ mod tests {
                 .iter()
                 .any(|edge| edge.kind.as_str() == "documents"),
             "graph={graph:#?}"
+        );
+        assert!(
+            graph.links.iter().any(|edge| {
+                edge.kind.as_str() == "references"
+                    && edge
+                        .relationship_site
+                        .as_ref()
+                        .is_some_and(|site| site.file == "guide.md")
+            }),
+            "exact document resolution must survive default-low publication: {graph:#?}"
         );
         Ok(())
     }
