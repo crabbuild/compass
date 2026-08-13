@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+- Expand route extraction across popular framework families: add Angular Router
+  typed and provider-backed route configs, Echo and Fiber receiver-aware Go
+  routes, ASP.NET Core Minimal APIs and nested route groups, and deterministic
+  cross-module Express, Fastify, and Hono router mounts. Ambiguous imported
+  routers remain local rather than receiving an invented prefix. Advance
+  extraction semantics to v11 so affected cached facts rebuild.
+
 - Complete Axum route composition across local router variables, `nest` and
   `merge` chains, cross-module router factories, state-wrapped handlers, and
   ordered `layer` or `route_layer` middleware with import-aware targets.
   Ambiguous or cyclic Rust router targets now remain uncomposed instead of
-  inventing an endpoint, and extraction semantics advance to v10 so cached
-  route facts rebuild. The Routes and handlers HTML lens now uses a
+  inventing an endpoint. The Routes and handlers HTML lens now uses a
   hierarchical layout and minimally qualified labels for same-named handlers.
 
 - Reduce `GRAPH_REPORT.md` token use from opaque graph identities. Markdown now

@@ -35,6 +35,18 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
             "gorilla",
             EvidenceKind::Import,
             "github.com/gorilla/mux",
+        )
+        .direct_if(
+            body.contains("github.com/labstack/echo/"),
+            "echo",
+            EvidenceKind::Import,
+            "github.com/labstack/echo",
+        )
+        .direct_if(
+            body.contains("github.com/gofiber/fiber/"),
+            "fiber",
+            EvidenceKind::Import,
+            "github.com/gofiber/fiber",
         );
     let framework = if evidence.activates("gin") {
         "gin"
@@ -42,11 +54,15 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
         "chi"
     } else if evidence.activates("gorilla") {
         "gorilla"
+    } else if evidence.activates("echo") {
+        "echo"
+    } else if evidence.activates("fiber") {
+        "fiber"
     } else {
         return Vec::new();
     };
     let Ok(receiver_types) = Regex::new(
-        r#"\b([A-Za-z_]\w*)\s+(?:\*\s*)?(gin\.Engine|chi\.Router|mux\.Router)\b|\b([A-Za-z_]\w*)\s*:?=\s*(?:gin\.(?:New|Default)|chi\.NewRouter|mux\.NewRouter)\s*\("#,
+        r#"\b([A-Za-z_]\w*)\s+(?:\*\s*)?(gin\.Engine|chi\.Router|mux\.Router|echo\.(?:Echo|Group)|fiber\.(?:App|Router))\b|\b([A-Za-z_]\w*)\s*:?=\s*(?:gin\.(?:New|Default)|chi\.NewRouter|mux\.NewRouter|echo\.New|fiber\.New)\s*\("#,
     ) else {
         return Vec::new();
     };
@@ -63,6 +79,8 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
                 "gin.Engine" => Some("gin"),
                 "chi.Router" => Some("chi"),
                 "mux.Router" => Some("gorilla"),
+                "echo.Echo" | "echo.Group" => Some("echo"),
+                "fiber.App" | "fiber.Router" => Some("fiber"),
                 _ => None,
             })
             .or_else(|| {
@@ -76,6 +94,10 @@ pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrame
                             Some("chi")
                         } else if value.contains("mux.") {
                             Some("gorilla")
+                        } else if value.contains("echo.") {
+                            Some("echo")
+                        } else if value.contains("fiber.") {
+                            Some("fiber")
                         } else {
                             None
                         }
@@ -169,9 +191,9 @@ fn collect_go_route_calls(
                 .map(|(handler, middleware)| (handler.clone(), middleware.to_vec()))
         {
             let normalized_path = if route_prefix.is_empty() {
-                normalize_route_path(&raw_path)
+                normalize_go_route_path(&raw_path)
             } else {
-                join_route_path(&route_prefix, &raw_path)
+                normalize_go_route_path(&join_route_path(&route_prefix, &raw_path))
             };
             let operations = if method.eq_ignore_ascii_case("handlefunc") {
                 method_operations(node, source).unwrap_or_else(|| {
@@ -192,7 +214,7 @@ fn collect_go_route_calls(
             for operation in operations {
                 facts.push(RawFrameworkFact::Route(RawRouteFact {
                     framework: framework.to_owned(),
-                    operation,
+                    operation: canonical_operation(&operation),
                     raw_path: raw_path.clone(),
                     normalized_path: normalized_path.clone(),
                     declaring_scope: receiver.clone(),
@@ -353,7 +375,25 @@ fn matches_method(method: &str) -> bool {
             | "Options"
             | "Head"
             | "HandleFunc"
+            | "Any"
+            | "All"
     )
+}
+
+fn canonical_operation(operation: &str) -> String {
+    if matches!(operation, "Any" | "All" | "ANY" | "ALL") {
+        "ANY".to_owned()
+    } else {
+        operation.to_ascii_uppercase()
+    }
+}
+
+fn normalize_go_route_path(path: &str) -> String {
+    let normalized = normalize_route_path(path);
+    let Ok(parameters) = Regex::new(r"/:([A-Za-z_][A-Za-z0-9_]*)") else {
+        return normalized;
+    };
+    parameters.replace_all(&normalized, "/{$1}").into_owned()
 }
 
 fn method_operations(node: Node<'_>, source: &[u8]) -> Option<Vec<String>> {
