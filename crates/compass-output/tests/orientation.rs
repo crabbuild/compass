@@ -1176,6 +1176,80 @@ fn publication_diagnostics_and_same_label_anchors_remain_typed_and_distinct()
     );
     assert!(markdown.contains("src/a.rs:1:0-1:4 bytes 1-5"));
     assert!(markdown.contains("src/b.rs:9:2-9:6 bytes 11-15"));
+    assert!(!markdown.contains("[id:"));
+    Ok(())
+}
+
+#[test]
+fn markdown_compacts_long_ids_while_json_retains_exact_identity() -> Result<(), Box<dyn Error>> {
+    let left = format!("node::{}::left", "a".repeat(180));
+    let right = format!("node::{}::right", "b".repeat(180));
+    let hyperedge = format!("hyperedge::{}", "c".repeat(180));
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": true,
+        "graph": {
+            "hyperedges": [{
+                "id": hyperedge,
+                "nodes": [left, right],
+                "confidence": "INFERRED"
+            }],
+            "diagnostics": [{
+                "code": "long_identity",
+                "message": "Long IDs are retained in JSON",
+                "relatedIds": [left, right]
+            }]
+        },
+        "nodes": [
+            {"id": left, "label": "Duplicate"},
+            {"id": right, "label": "Duplicate"}
+        ],
+        "links": [
+            {"source": left, "target": right, "relation": "imports_from", "confidence": "AMBIGUOUS"},
+            {"source": right, "target": left, "relation": "imports_from", "confidence": "EXTRACTED"}
+        ]
+    }))?;
+    let communities = BTreeMap::from([(0, vec![left.clone(), right.clone()])]);
+    let labels = BTreeMap::from([(0, "Long identities".to_owned())]);
+    let gods = [
+        GodNode {
+            id: left.clone(),
+            label: "Duplicate".to_owned(),
+            degree: 2,
+        },
+        GodNode {
+            id: right.clone(),
+            label: "Duplicate".to_owned(),
+            degree: 2,
+        },
+    ];
+    let mut options = ReportOptions::new("long-identities");
+    options.min_community_size = 1;
+    let model = agent_orientation(
+        &document,
+        &communities,
+        &BTreeMap::new(),
+        &labels,
+        &gods,
+        &[],
+        &DetectionSummary::default(),
+        TokenCost::default(),
+        None,
+        None,
+        &options,
+    );
+
+    let markdown = render_agent_report_markdown(&model, false)?;
+    assert!(!markdown.contains(&left));
+    assert!(!markdown.contains(&right));
+    assert!(!markdown.contains(&hyperedge));
+    assert!(markdown.contains("[id: node::aaaaaaaaaaaa…aaaaaa::left＃"));
+    assert!(markdown.contains("[id: node::bbbbbbbbbbbb…bbbbb::right＃"));
+    assert!(markdown.contains("retained in `orientation.json`"));
+
+    let json = render_orientation_json(&model)?;
+    assert!(json.contains(&left));
+    assert!(json.contains(&right));
+    assert!(json.contains(&hyperedge));
     Ok(())
 }
 
