@@ -41,6 +41,9 @@ export function GraphToolbar({
   layoutSpacing,
   showMinimap,
   leadingControls,
+  leadingPanel,
+  leadingPanelOpen,
+  onLeadingPanelClose,
   onTogglePhysics,
   onLayoutChange,
   onZoomOut,
@@ -70,6 +73,9 @@ export function GraphToolbar({
   layoutSpacing: GraphLayoutSpacing;
   showMinimap: boolean;
   leadingControls?: ReactNode;
+  leadingPanel?: ReactNode;
+  leadingPanelOpen?: boolean | undefined;
+  onLeadingPanelClose?: (() => void) | undefined;
   onTogglePhysics(): void;
   onLayoutChange(layout: GraphLayoutStyle): void;
   onZoomOut(): void;
@@ -90,14 +96,28 @@ export function GraphToolbar({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const explorationId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const restoreSettingsFocusRef = useRef(false);
+  useEffect(() => {
+    if (leadingPanelOpen) setSettingsOpen(false);
+  }, [leadingPanelOpen]);
+  useEffect(() => {
+    if (settingsOpen || !restoreSettingsFocusRef.current) return;
+    restoreSettingsFocusRef.current = false;
+    settingsButtonRef.current?.focus();
+  }, [settingsOpen]);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setSettingsOpen(false);
+        if (settingsOpen) {
+          restoreSettingsFocusRef.current = true;
+          setSettingsOpen(false);
+        }
         return;
       }
       if (event.key !== "?" || isEditableTarget(event.target)) return;
       event.preventDefault();
+      onLeadingPanelClose?.();
       setSettingsOpen(true);
     };
     const handlePointerDown = (event: PointerEvent) => {
@@ -110,7 +130,7 @@ export function GraphToolbar({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, []);
+  }, [onLeadingPanelClose, settingsOpen]);
 
   return (
     <div
@@ -264,17 +284,23 @@ export function GraphToolbar({
           <RouteIcon />
         </button>
         <button
+          ref={settingsButtonRef}
           className="compass-tool-button compass-tool-icon-button"
           type="button"
           aria-label="Graph settings"
           aria-expanded={settingsOpen}
           aria-controls={explorationId}
           title="Graph settings (?)"
-          onClick={() => setSettingsOpen((open) => !open)}
+          onClick={() => setSettingsOpen((open) => {
+            const next = !open;
+            if (next) onLeadingPanelClose?.();
+            return next;
+          })}
         >
           <SlidersHorizontalIcon />
         </button>
       </div>
+      {leadingPanel}
       {settingsOpen ? (
         <div
           id={explorationId}

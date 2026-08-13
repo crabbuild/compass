@@ -99,6 +99,10 @@ export type CompassGraphProps = {
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
   preferredLayout?: GraphLayoutStyle | undefined;
   toolbarLeading?: ReactNode;
+  toolbarLeadingPanel?: ReactNode;
+  toolbarLeadingOpen?: boolean | undefined;
+  onToolbarLeadingClose?: (() => void) | undefined;
+  stageOverlay?: ReactNode;
 };
 
 export function CompassGraph({
@@ -113,7 +117,11 @@ export function CompassGraph({
   initialInspectorLayout,
   onInspectorLayoutChange,
   preferredLayout = "automatic",
-  toolbarLeading
+  toolbarLeading,
+  toolbarLeadingPanel,
+  toolbarLeadingOpen,
+  onToolbarLeadingClose,
+  stageOverlay
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -141,6 +149,10 @@ export function CompassGraph({
       onInspectorLayoutChange={updateInspectorLayout}
       preferredLayout={preferredLayout}
       toolbarLeading={toolbarLeading}
+      toolbarLeadingPanel={toolbarLeadingPanel}
+      toolbarLeadingOpen={toolbarLeadingOpen}
+      onToolbarLeadingClose={onToolbarLeadingClose}
+      stageOverlay={stageOverlay}
     />
   );
 }
@@ -158,7 +170,11 @@ function CompassGraphView({
   inspectorLayout,
   onInspectorLayoutChange,
   preferredLayout,
-  toolbarLeading
+  toolbarLeading,
+  toolbarLeadingPanel,
+  toolbarLeadingOpen,
+  onToolbarLeadingClose,
+  stageOverlay
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -173,6 +189,10 @@ function CompassGraphView({
   onInspectorLayoutChange(layout: InspectorLayout): void;
   preferredLayout: GraphLayoutStyle;
   toolbarLeading?: ReactNode;
+  toolbarLeadingPanel?: ReactNode;
+  toolbarLeadingOpen?: boolean | undefined;
+  onToolbarLeadingClose?: (() => void) | undefined;
+  stageOverlay?: ReactNode;
 }) {
   const [state, dispatch] = useReducer(
     graphReducer,
@@ -296,6 +316,9 @@ function CompassGraphView({
     setEdgeHover(null);
     dispatch({ type: "clearFocus" });
   }, []);
+  useEffect(() => {
+    if (state.focusedNodeId && !nodeById.has(state.focusedNodeId)) clear();
+  }, [clear, nodeById, state.focusedNodeId]);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -430,7 +453,7 @@ function CompassGraphView({
           <VisNetworkCanvas
             ref={canvasRef}
             model={model}
-            focusedNodeId={state.focusedNodeId}
+            focusedNodeId={selected?.id ?? null}
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
@@ -453,6 +476,7 @@ function CompassGraphView({
             onClear={clear}
             onStabilized={handleStabilized}
           />
+          {stageOverlay}
           <GraphToolbar
             status={status}
             physicsRunning={state.physicsRunning}
@@ -466,6 +490,9 @@ function CompassGraphView({
             layoutSpacing={state.layoutSpacing}
             showMinimap={state.showMinimap}
             leadingControls={toolbarLeading}
+            leadingPanel={toolbarLeadingPanel}
+            leadingPanelOpen={toolbarLeadingOpen}
+            onLeadingPanelClose={onToolbarLeadingClose}
             onTogglePhysics={() => dispatch({
               type: "setPhysics",
               running: !state.physicsRunning

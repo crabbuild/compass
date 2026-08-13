@@ -39,6 +39,19 @@ describe("graphReducer", () => {
     expect(graphReducer(focused, { type: "clearFocus" }).physicsRunning).toBe(false);
   });
 
+  it("disables isolation when its focus is cleared", () => {
+    const focused = {
+      ...initialGraphState,
+      focusedNodeId: "n1",
+      isolateSelection: true
+    };
+
+    expect(graphReducer(focused, { type: "clearFocus" })).toMatchObject({
+      focusedNodeId: null,
+      isolateSelection: false
+    });
+  });
+
   it("only resumes through the explicit physics action", () => {
     const settled = graphReducer(initialGraphState, { type: "stabilized" });
     expect(settled.physicsRunning).toBe(false);

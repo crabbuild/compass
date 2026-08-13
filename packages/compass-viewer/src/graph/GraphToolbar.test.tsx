@@ -22,7 +22,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = 
     onLayoutSpacingChange: vi.fn(),
     onToggleMinimap: vi.fn()
   };
-  render(<GraphToolbar
+  const view = render(<GraphToolbar
     status="Layout paused"
     physicsRunning={false}
     layoutStyle="automatic"
@@ -37,7 +37,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = 
     {...callbacks}
     {...overrides}
   />);
-  return callbacks;
+  return { ...callbacks, ...view };
 }
 
 describe("GraphToolbar", () => {
@@ -138,5 +138,30 @@ describe("GraphToolbar", () => {
     renderToolbar();
     fireEvent.keyDown(document, { key: "?" });
     expect(screen.getByLabelText("Graph keyboard shortcuts")).toBeVisible();
+  });
+
+  it("returns focus to the settings trigger when Escape closes its panel", () => {
+    renderToolbar();
+    const trigger = screen.getByRole("button", { name: "Graph settings" });
+    fireEvent.click(trigger);
+    screen.getByRole("combobox", { name: "Layout spacing" }).focus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("region", { name: "Graph exploration controls" })).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("requests that a competing leading panel close before settings open", () => {
+    const onLeadingPanelClose = vi.fn();
+    renderToolbar({
+      leadingPanelOpen: true,
+      onLeadingPanelClose
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Graph settings" }));
+
+    expect(onLeadingPanelClose).toHaveBeenCalledOnce();
+    expect(screen.getByRole("region", { name: "Graph exploration controls" })).toBeVisible();
   });
 });
