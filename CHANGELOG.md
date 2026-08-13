@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Complete Axum route composition across local router variables, `nest` and
+  `merge` chains, cross-module router factories, state-wrapped handlers, and
+  ordered `layer` or `route_layer` middleware with import-aware targets.
+  Ambiguous or cyclic Rust router targets now remain uncomposed instead of
+  inventing an endpoint, and extraction semantics advance to v10 so cached
+  route facts rebuild. The Routes and handlers HTML lens now uses a
+  hierarchical layout and minimally qualified labels for same-named handlers.
+
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use

@@ -75,7 +75,14 @@ HTTP endpoints.
 ### Go, Rust, and native server frameworks
 
 - **Gin, chi, and gorilla/mux**: imported router registrations, grouped or closure prefixes, Gin middleware chains, chi method calls, and gorilla `HandleFunc(...).Methods(...)`, including `PathPrefix(...).Subrouter()` chains
-- **Axum, actix-web, and Rocket**: Axum nested `.nest(...).route(...)` chains, actix scoped resources and `.route(...).to(...)` handlers, plus Rocket and actix route attributes, including multiline attributes, guarded by framework imports or qualified macros
+- **Axum, actix-web, and Rocket**: Axum literal `nest` and `merge` composition
+  across local router variables and uniquely resolved module factory calls,
+  state-wrapped handlers, ordered `layer` and `route_layer` middleware, and
+  route registrations;
+  actix scoped resources and `.route(...).to(...)` handlers; plus Rocket and
+  actix route attributes, including multiline attributes, guarded by framework
+  imports or qualified macros. Ambiguous or cyclic Axum module factory targets
+  remain local and uncomposed.
 - **Vapor**: grouped literal and path-component prefixes, closure groups, `app.on(...)`, and HTTP registrations with explicit `use:` handlers; opaque closures remain visible as unresolved handlers
 - **ASP.NET Core**: MVC controller and action templates, `[controller]` and `[action]` tokens, HTTP method attributes, and absolute `/` or `~/` action-template overrides
 

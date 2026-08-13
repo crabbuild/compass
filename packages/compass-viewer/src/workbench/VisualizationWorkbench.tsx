@@ -200,7 +200,9 @@ function WorkbenchView({
   }
   const preferredLayout = view.kind === "affected"
     ? "hierarchical" as const
-    : view.kind === "artifact" ? "grid" as const : "automatic" as const;
+    : view.kind === "artifact"
+      ? view.lens === "routes" ? "hierarchical" as const : "grid" as const
+      : "automatic" as const;
   return (
     <FilteredGraph
       model={view.model}
