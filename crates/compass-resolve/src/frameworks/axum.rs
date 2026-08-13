@@ -27,7 +27,7 @@ struct RouterMiddleware {
     applies_through: u64,
 }
 
-pub(super) fn expand_router_mounts(
+pub(super) fn expand_routes(
     facts: &[RawFrameworkFact],
     routes: Vec<RawRouteFact>,
     limits: FrameworkLimits,

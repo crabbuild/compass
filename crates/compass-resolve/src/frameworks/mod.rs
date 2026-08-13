@@ -15,6 +15,34 @@ use compass_languages::{RawNodeRecord, make_id};
 use rayon::join;
 use serde_json::{Map, Value};
 
+type RouteExpansion = fn(
+    &[compass_languages::RawFrameworkFact],
+    Vec<compass_languages::RawRouteFact>,
+    compass_languages::FrameworkLimits,
+) -> Result<Vec<compass_languages::RawRouteFact>, FrameworkResolutionError>;
+
+struct RouteExpansionAdapter {
+    pack_id: &'static str,
+    frameworks: &'static [&'static str],
+    expand: RouteExpansion,
+}
+
+/// Framework-owned route composition adapters. The shared route resolver only
+/// drives this deterministic registry; framework-specific mount/include rules
+/// remain in their owning module.
+const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
+    RouteExpansionAdapter {
+        pack_id: "axum-web",
+        frameworks: &["axum"],
+        expand: axum::expand_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "python-web",
+        frameworks: &["django", "fastapi", "flask"],
+        expand: python::expand_routes,
+    },
+];
+
 type UniversalFrameworkExpansion =
     fn(&mut compass_languages::Extraction) -> Result<(), FrameworkResolutionError>;
 
@@ -58,6 +86,70 @@ pub(crate) fn expand_universal_framework_facts(
         (pack.expand)(extraction)?;
     }
     Ok(())
+}
+
+pub(super) fn expand_framework_routes(
+    facts: &[compass_languages::RawFrameworkFact],
+    limits: compass_languages::FrameworkLimits,
+) -> Result<Vec<compass_languages::RawRouteFact>, FrameworkResolutionError> {
+    let claimed_frameworks = ROUTE_EXPANSION_ADAPTERS
+        .iter()
+        .flat_map(|adapter| adapter.frameworks.iter().copied())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut routes = facts
+        .iter()
+        .filter_map(|fact| match fact {
+            compass_languages::RawFrameworkFact::Route(route)
+                if !claimed_frameworks.contains(route.framework.as_str()) =>
+            {
+                Some(route.clone())
+            }
+            compass_languages::RawFrameworkFact::Domain(_)
+            | compass_languages::RawFrameworkFact::Annotation(_)
+            | compass_languages::RawFrameworkFact::Route(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    for adapter in ROUTE_EXPANSION_ADAPTERS {
+        let adapter_facts = facts
+            .iter()
+            .filter(|fact| adapter.frameworks.contains(&fact_framework(fact)))
+            .cloned()
+            .collect::<Vec<_>>();
+        if adapter_facts.is_empty() {
+            continue;
+        }
+        let adapter_routes = adapter_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                compass_languages::RawFrameworkFact::Route(route) => Some(route.clone()),
+                compass_languages::RawFrameworkFact::Domain(_)
+                | compass_languages::RawFrameworkFact::Annotation(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let expanded = (adapter.expand)(&adapter_facts, adapter_routes, limits)?;
+        for route in &expanded {
+            if !adapter.frameworks.contains(&route.framework.as_str()) {
+                return Err(FrameworkResolutionError::InvalidRoute {
+                    framework: route.framework.clone(),
+                    detail: format!(
+                        "route expansion adapter {} emitted a framework it does not own",
+                        adapter.pack_id
+                    ),
+                });
+            }
+        }
+        routes.extend(expanded);
+    }
+    Ok(routes)
+}
+
+fn fact_framework(fact: &compass_languages::RawFrameworkFact) -> &str {
+    match fact {
+        compass_languages::RawFrameworkFact::Route(route) => &route.framework,
+        compass_languages::RawFrameworkFact::Domain(domain) => &domain.framework,
+        compass_languages::RawFrameworkFact::Annotation(annotation) => &annotation.framework,
+    }
 }
 
 pub(crate) fn resolve_framework_facts(
@@ -234,10 +326,12 @@ pub(super) fn materialize_universal_framework_targets(
 mod tests {
     use std::path::Path;
 
-    use compass_languages::FrameworkPackRegistry;
-    use compass_languages::{Extraction, FrameworkLimits};
+    use compass_languages::{
+        Extraction, FrameworkLimits, FrameworkPackRegistry, RawFrameworkAnchor, RawFrameworkFact,
+        RawFrameworkOrigin, RawRouteFact,
+    };
 
-    use super::UNIVERSAL_FRAMEWORK_PACKS;
+    use super::{ROUTE_EXPANSION_ADAPTERS, UNIVERSAL_FRAMEWORK_PACKS, expand_framework_routes};
 
     #[test]
     fn empty_framework_facts_skip_target_indexing() {
@@ -285,6 +379,98 @@ mod tests {
                 "duplicate expansion adapter {}",
                 pack.id
             );
+        }
+    }
+
+    #[test]
+    fn route_expansion_adapters_have_unique_pack_and_framework_ownership() {
+        let mut pack_ids = std::collections::BTreeSet::new();
+        let mut frameworks = std::collections::BTreeSet::new();
+        for adapter in ROUTE_EXPANSION_ADAPTERS {
+            assert!(
+                pack_ids.insert(adapter.pack_id),
+                "duplicate route expansion adapter {}",
+                adapter.pack_id
+            );
+            assert!(
+                !adapter.frameworks.is_empty(),
+                "route expansion adapter {} has no activation frameworks",
+                adapter.pack_id
+            );
+            assert!(
+                adapter.frameworks.windows(2).all(|pair| pair[0] < pair[1]),
+                "route expansion adapter {} frameworks must be sorted and unique",
+                adapter.pack_id
+            );
+            for framework in adapter.frameworks {
+                assert!(
+                    frameworks.insert(framework),
+                    "framework {framework} is owned by multiple route expansion adapters"
+                );
+            }
+        }
+        assert!(
+            ROUTE_EXPANSION_ADAPTERS
+                .windows(2)
+                .all(|pair| pair[0].pack_id < pair[1].pack_id),
+            "route expansion adapters must be sorted by pack ID"
+        );
+    }
+
+    #[test]
+    fn route_expansion_dispatches_mixed_frameworks_without_cross_framework_mutation() {
+        let custom = route("custom", "/custom");
+        let facts = vec![
+            RawFrameworkFact::Route(route("fastapi", "/python")),
+            RawFrameworkFact::Route(custom.clone()),
+            RawFrameworkFact::Route(route("axum", "/rust")),
+        ];
+
+        let result = expand_framework_routes(&facts, FrameworkLimits::default());
+        assert!(result.is_ok(), "mixed framework routes should expand");
+        let expanded = result.unwrap_or_default();
+        let by_framework = expanded
+            .into_iter()
+            .map(|route| (route.framework.clone(), route))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        assert_eq!(by_framework.len(), 3);
+        assert_eq!(by_framework.get("custom"), Some(&custom));
+        assert_eq!(
+            by_framework
+                .get("fastapi")
+                .map(|route| route.normalized_path.as_str()),
+            Some("/python")
+        );
+        assert_eq!(
+            by_framework
+                .get("axum")
+                .map(|route| route.normalized_path.as_str()),
+            Some("/rust")
+        );
+    }
+
+    fn route(framework: &str, path: &str) -> RawRouteFact {
+        RawRouteFact {
+            framework: framework.to_owned(),
+            operation: "GET".to_owned(),
+            raw_path: path.to_owned(),
+            normalized_path: path.to_owned(),
+            declaring_scope: "test".to_owned(),
+            anchor: RawFrameworkAnchor {
+                source_file: "routes.test".to_owned(),
+                start_byte: 0,
+                end_byte: 1,
+                start_line: 1,
+                start_column: 0,
+                end_line: 1,
+                end_column: 1,
+            },
+            handler_reference: "handler".to_owned(),
+            middleware_references: Vec::new(),
+            origin: RawFrameworkOrigin::Ast,
+            rule: None,
+            detail: serde_json::Map::new(),
         }
     }
 }

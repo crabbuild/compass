@@ -71,8 +71,15 @@ before adding cross-file lookup rules or language-specific resolution policy.
 Framework extraction has one static runtime in `compass-languages`. It owns
 source, universal, configuration, and template pack selection, manifest
 activation, deterministic ordering, fact budgets, and publication. A new pack
-adds one adapter entry to the runtime table; it does not create a second
-registry or a language-specific dispatch branch.
+adds one adapter entry to the runtime table; it does not create an ad hoc
+detector registry or a language-specific dispatch branch.
+
+If a pack emits project-wide route composition facts such as router mounts,
+includes, or inherited middleware, also register its dedicated resolver in
+`ROUTE_EXPANSION_ADAPTERS` in `compass-resolve`. Use the same stable pack ID and
+declare every framework identity that resolver owns. The shared route pipeline
+partitions facts by that ownership and preserves unregistered frameworks; it
+must not call framework modules directly or encode cross-framework stage order.
 
 For a universal pack, also add the validated `FrameworkPackDescriptor` and one
 project-wide expansion adapter keyed by the same stable pack ID in

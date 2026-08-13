@@ -72,15 +72,7 @@ pub(super) fn resolve_routes_with_targets(
 ) -> Result<Vec<ResolvedRoute>, FrameworkResolutionError> {
     validate_fact_limits(extraction, limits)?;
     let aliases = alias_map(extraction, limits, root)?;
-    let expanded = super::axum::expand_router_mounts(
-        &extraction.framework_facts,
-        super::python::expand_router_mounts(
-            &extraction.framework_facts,
-            super::python::expand_django_includes(&extraction.framework_facts, limits)?,
-            limits,
-        )?,
-        limits,
-    )?;
+    let expanded = super::expand_framework_routes(&extraction.framework_facts, limits)?;
     let mut unique = BTreeMap::new();
     for route in expanded {
         route
