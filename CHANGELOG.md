@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.11 - 2026-08-13
+
 - Expand route extraction across popular framework families: add Angular Router
   typed and provider-backed route configs, Echo and Fiber receiver-aware Go
   routes, ASP.NET Core Minimal APIs and nested route groups, and deterministic
