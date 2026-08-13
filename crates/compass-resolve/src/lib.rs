@@ -60,8 +60,8 @@ use compass_languages::{
     is_language_builtin_global, make_id, parse_jsonc,
 };
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE,
-    append_endpoint_rewrite_evidence, preserve_occurrence_rule,
+    EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
+    preserve_occurrence_rule,
 };
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -901,7 +901,7 @@ fn restore_framework_callable_names(
         };
         if handler_references
             .iter()
-            .any(|reference| edge_matches_framework_reference(edge, target, reference))
+            .any(|reference| frameworks::edge_targets_declared_callable(edge, target, reference))
         {
             // Universal binding/reference evidence is the source-backed bridge
             // for framework handlers that live in another TS/JS file. Only a
@@ -954,34 +954,6 @@ fn restore_framework_callable_names(
                 .insert("language".to_owned(), Value::String(dialect.to_owned()));
         }
     }
-}
-
-fn edge_matches_framework_reference(edge: &EdgeRecord, node: &NodeRecord, reference: &str) -> bool {
-    if !matches!(
-        string_attribute(node, "symbol_kind").as_str(),
-        "function" | "method"
-    ) {
-        return false;
-    }
-    let terminal = reference
-        .trim_end_matches("()")
-        .rsplit(['.', ':', '#', '/'])
-        .find(|part| !part.is_empty())
-        .unwrap_or(reference);
-    let label = string_attribute(node, "label");
-    if label
-        .trim_start_matches('.')
-        .trim_end_matches("()")
-        .eq(terminal)
-    {
-        return true;
-    }
-    edge.attributes
-        .get(OCCURRENCE_RULE_ATTRIBUTE)
-        .and_then(Value::as_str)
-        .and_then(|rule| rule.split_once(":binding:").map(|(_, binding)| binding))
-        .and_then(|binding| binding.split(':').next())
-        .is_some_and(|binding| binding == terminal)
 }
 
 fn framework_source_dialect(source: &str) -> Option<&'static str> {
@@ -5459,7 +5431,7 @@ mod tests {
                 {
                     let mut edge = edge("controller", "handler", "references", "controller.ts");
                     edge.attributes.insert(
-                        OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+                        compass_model::provenance::OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
                         Value::String(
                             "universal-reference-project-module-binding:binding:HandlerAlias:0:0"
                                 .to_owned(),

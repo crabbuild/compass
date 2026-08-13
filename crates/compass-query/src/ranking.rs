@@ -418,23 +418,20 @@ impl Ord for OperationRootRank {
             // ordinary context so they cannot displace a complete function
             // name like `encode_request`.
             .then_with(|| self.specific_owner_match.cmp(&other.specific_owner_match))
-            .then_with(|| {
-                (self.type_node && self.full_subject_match && self.matched_subject_tokens >= 2).cmp(
-                    &(other.type_node
-                        && other.full_subject_match
-                        && other.matched_subject_tokens >= 2),
-                )
-            })
-            .then_with(|| {
-                (self.type_node && self.predicate_operation_role_aligned)
-                    .cmp(&(other.type_node && other.predicate_operation_role_aligned))
-            })
+            // A complete semantic subject is stronger than a literal verb.
+            // Keeping this rule independent of node kind avoids favoring a
+            // class merely because it is a type, while preserving operation
+            // roots such as Rust builders and exact Java converter methods.
+            .then_with(|| self.full_subject_match.cmp(&other.full_subject_match))
             .then_with(|| {
                 self.direct_predicate_matches
                     .cmp(&other.direct_predicate_matches)
             })
             .then_with(|| self.predicate_matches.cmp(&other.predicate_matches))
-            .then_with(|| self.full_subject_match.cmp(&other.full_subject_match))
+            .then_with(|| {
+                (self.type_node && self.predicate_operation_role_aligned)
+                    .cmp(&(other.type_node && other.predicate_operation_role_aligned))
+            })
             .then_with(|| {
                 self.query_subject_coverage
                     .cmp(&other.query_subject_coverage)
@@ -649,16 +646,23 @@ fn operation_root_rank(
         direct_predicate_matches,
         predicate_matches,
         matched_subject_tokens,
-        specific_owner_match: matched_owner_tokens >= 2
-            || (owner_has_initialism && matched_owner_tokens > 0)
-            || (owner_tokens.contains("container")
-                && terms
-                    .binary_search_by(|term| term.as_str().cmp("container"))
-                    .is_ok())
-            || (owner_tokens.contains("multi")
-                && terms
-                    .binary_search_by(|term| term.as_str().cmp("chain"))
-                    .is_ok()),
+        // Owner context refines a callable only when its own predicate also
+        // expresses the requested action. Without this guard, a generic
+        // method on a well-matched owner (for example
+        // `DeltaTableBuilder::build_storage` for "open Delta table") can
+        // displace the owner type that represents the requested operation.
+        // The rule is language-neutral and applies equally to `::`, `.`, and
+        // source-projected method identities.
+        specific_owner_match: predicate_matches > 0
+            && ((owner_has_initialism && matched_owner_tokens > 0)
+                || (owner_tokens.contains("container")
+                    && terms
+                        .binary_search_by(|term| term.as_str().cmp("container"))
+                        .is_ok())
+                || (owner_tokens.contains("multi")
+                    && terms
+                        .binary_search_by(|term| term.as_str().cmp("chain"))
+                        .is_ok())),
         matched_owner_tokens,
         predicate_operation_role_aligned,
         operation_role_aligned,
@@ -899,6 +903,7 @@ pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
         "check" => Some("check"),
         "compact" => Some("compact"),
         "convert" => Some("convert"),
+        "decode" => Some("decode"),
         "delete" => Some("delete"),
         "discover" => Some("discover"),
         "dispatch" => Some("dispatch"),
@@ -955,6 +960,7 @@ pub(crate) fn is_explicit_operation_predicate(token: &str) -> bool {
             | "construct"
             | "convert"
             | "create"
+            | "decode"
             | "delete"
             | "detect"
             | "discover"
@@ -1633,6 +1639,7 @@ mod tests {
     fn common_library_operation_words_align_with_symbol_predicates() {
         for (query, symbol, canonical) in [
             ("construct", "build", "create"),
+            ("decode", "decode", "decode"),
             ("execute", "handle", "execute"),
             ("extract", "extract", "extract"),
             ("iterate", "iter", "iterate"),
@@ -1729,6 +1736,44 @@ mod tests {
         );
 
         assert_eq!(ranked[0].node_id, "n:multi");
+    }
+
+    #[test]
+    fn compound_owner_does_not_promote_an_unrelated_rust_method() {
+        let candidates = vec![
+            SearchCandidate {
+                node: owned_node(
+                    "n:storage",
+                    ".build_storage()",
+                    "deltalake_core::table::builder::DeltaTableBuilder::build_storage",
+                    "crates/core/src/table/builder.rs",
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:builder",
+                    "DeltaTableBuilder",
+                    NodeKind::Struct,
+                    "crates/core/src/table/builder.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how is a Delta table opened from a URL",
+            &["delta".to_owned(), "open".to_owned(), "table".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:builder");
     }
 
     #[test]
@@ -2792,6 +2837,36 @@ mod tests {
                     "generateSummary()",
                     "cmd/entire/cli/strategy.generateSummary",
                     "cmd/entire/cli/strategy/manual_commit_condensation.go",
+                ),
+            ),
+            (
+                "create router execution context",
+                owned_node(
+                    "n:router-context-create",
+                    ".create()",
+                    "router-execution-context.RouterExecutionContext.create",
+                    "packages/core/router/router-execution-context.ts",
+                ),
+                owned_node(
+                    "n:router-explorer-create",
+                    ".create()",
+                    "router-explorer.RouterExplorer.create",
+                    "packages/core/router/router-explorer.ts",
+                ),
+            ),
+            (
+                "convert scala slice key",
+                owned_node(
+                    "n:convert-scala-slice-key",
+                    ".convertToScalaSliceKey()",
+                    "com.databricks.dicer.external.javaapi.ImplFriend::convertToScalaSliceKey",
+                    "src/main/java/com/databricks/dicer/external/javaapi/ImplFriend.java",
+                ),
+                owned_node(
+                    "n:slice-key-to-scala",
+                    ".toScala()",
+                    "com.databricks.dicer.external.javaapi.SliceKey::toScala",
+                    "src/main/java/com/databricks/dicer/external/javaapi/SliceKey.java",
                 ),
             ),
         ] {

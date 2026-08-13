@@ -12,6 +12,8 @@ mod spring;
 mod target_index;
 mod typescript;
 
+pub(crate) use typescript::edge_targets_declared_callable;
+
 use compass_languages::{RawNodeRecord, make_id};
 use rayon::join;
 use serde_json::{Map, Value};

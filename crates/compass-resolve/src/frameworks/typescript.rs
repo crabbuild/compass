@@ -2,6 +2,7 @@ use ahash::AHashMap as HashMap;
 use std::path::Path;
 
 use compass_languages::{Extraction, FrameworkLimits};
+use compass_model::provenance::OCCURRENCE_RULE_ATTRIBUTE;
 use serde_json::Value;
 
 use super::{FrameworkResolutionError, target_index::source_key};
@@ -15,6 +16,43 @@ pub(super) struct ImportAlias {
 }
 
 pub(super) type ImportAliases = HashMap<(String, String), ImportAlias>;
+
+/// Return whether a universal project edge proves that its target is the
+/// callable named by a TypeScript/JavaScript framework stage.
+///
+/// Framework aliases belong here rather than in the shared collection
+/// resolver: direct references can match the target label, while imported JSX
+/// or route aliases retain their local binding in the immutable occurrence
+/// rule. Other language families continue through their own framework target
+/// utilities and never interpret this TypeScript binding encoding.
+pub(crate) fn edge_targets_declared_callable(
+    edge: &compass_languages::RawEdgeRecord,
+    node: &compass_languages::RawNodeRecord,
+    reference: &str,
+) -> bool {
+    if !matches!(node.string("symbol_kind").as_str(), "function" | "method") {
+        return false;
+    }
+    let terminal = reference
+        .trim_end_matches("()")
+        .rsplit(['.', ':', '#', '/'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(reference);
+    if node
+        .string("label")
+        .trim_start_matches('.')
+        .trim_end_matches("()")
+        .eq(terminal)
+    {
+        return true;
+    }
+    edge.attributes
+        .get(OCCURRENCE_RULE_ATTRIBUTE)
+        .and_then(Value::as_str)
+        .and_then(|rule| rule.split_once(":binding:").map(|(_, binding)| binding))
+        .and_then(|binding| binding.split(':').next())
+        .is_some_and(|binding| binding == terminal)
+}
 
 pub(super) fn import_alias_map(
     extraction: &Extraction,
