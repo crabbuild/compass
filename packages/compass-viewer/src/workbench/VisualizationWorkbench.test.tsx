@@ -13,18 +13,24 @@ vi.mock("../graph/CompassGraph", () => ({
     communityDetail,
     host,
     toolbarLeading,
+    toolbarLeadingPanel,
+    stageOverlay,
     preferredLayout
   }: {
     model: GraphViewModel;
     communityDetail?: { communityId: number; model: GraphViewModel };
     host: { openCommunity?(communityId: number): void };
     toolbarLeading?: ReactNode;
+    toolbarLeadingPanel?: ReactNode;
+    stageOverlay?: ReactNode;
     preferredLayout?: string;
   }) {
     const active = communityDetail?.model ?? model;
     return (
       <div>
         {toolbarLeading}
+        {toolbarLeadingPanel}
+        {stageOverlay}
         <output data-testid="visible-nodes">{active.nodes.length}</output>
         <output data-testid="preferred-layout">{preferredLayout}</output>
         <button type="button" onClick={() => host.openCommunity?.(1)}>
@@ -150,5 +156,85 @@ describe("VisualizationWorkbench graph filters", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Dependencies/ }));
     expect(screen.getByTestId("preferred-layout")).toHaveTextContent("grid");
+  });
+
+  it("closes the filter panel with Escape and restores trigger focus", () => {
+    const overview = graph([
+      { id: "root", label: "Root", kind: "module", community: 1 }
+    ]);
+    const workbench: WorkbenchModel = {
+      schema: "compass.viewer.workbench/1",
+      title: "Fixture workbench",
+      graphIdentity: "fixture-identity",
+      defaultView: "code",
+      views: [{
+        id: "code",
+        kind: "code",
+        title: "Code graph",
+        description: "Fixture graph",
+        coverage: {
+          status: "complete",
+          truncated: false,
+          nodes: 1,
+          edges: 0,
+          limitations: []
+        },
+        model: overview,
+        communityDetails: {}
+      }]
+    };
+
+    render(<VisualizationWorkbench workbench={workbench} host={{ openSource: vi.fn() }} />);
+    const trigger = screen.getByRole("button", { name: "Graph filters" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("region", { name: "Graph filter options" })).toBeVisible();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("region", { name: "Graph filter options" })).toBeNull();
+    expect(trigger).toHaveFocus();
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("explains an empty filtered graph and clears every filter", () => {
+    const overview = graph([
+      { id: "root", label: "Root", kind: "module", language: "rust", community: 1 },
+      { id: "helper", label: "Helper", kind: "function", language: "typescript", community: 1 }
+    ]);
+    const workbench: WorkbenchModel = {
+      schema: "compass.viewer.workbench/1",
+      title: "Fixture workbench",
+      graphIdentity: "fixture-identity",
+      defaultView: "code",
+      views: [{
+        id: "code",
+        kind: "code",
+        title: "Code graph",
+        description: "Fixture graph",
+        coverage: {
+          status: "complete",
+          truncated: false,
+          nodes: 2,
+          edges: 0,
+          limitations: []
+        },
+        model: overview,
+        communityDetails: {}
+      }]
+    };
+
+    render(<VisualizationWorkbench workbench={workbench} host={{ openSource: vi.fn() }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Graph filters" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Node kind" }), {
+      target: { value: "module" }
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Language" }), {
+      target: { value: "typescript" }
+    });
+
+    expect(screen.getByText("No nodes match these filters")).toBeVisible();
+    expect(screen.getByTestId("visible-nodes")).toHaveTextContent("0");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByTestId("visible-nodes")).toHaveTextContent("2");
+    expect(screen.queryByText("No nodes match these filters")).toBeNull();
   });
 });

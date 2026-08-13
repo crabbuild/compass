@@ -10,6 +10,12 @@
   route facts rebuild. The Routes and handlers HTML lens now uses a
   hierarchical layout and minimally qualified labels for same-named handlers.
 
+- Reduce `GRAPH_REPORT.md` token use from opaque graph identities. Markdown now
+  uses unique source anchors instead of redundant duplicate-label node IDs,
+  compacts unavoidable long IDs to a bounded prefix/suffix plus deterministic
+  fingerprint, emits portable short commands only once, and leaves oversized
+  exact argv in `orientation.json`. Machine-readable IDs and argv are unchanged.
+
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use
@@ -53,9 +59,11 @@
   filters into the top graph-control rail, allow neighborhood settings to be
   prepared before selection, keep filters scoped to the visible overview or
   community detail, fit newly isolated neighborhoods, and scale layout reheating
-  so motion remains visible on fitted repository graphs. Add the `workbench-json`
-  machine export while preserving plain `compass.viewer.graph/1` JSON
-  compatibility.
+  so motion remains visible on fitted repository graphs. Keep filter and graph
+  settings panels mutually exclusive and viewport-bounded, provide recoverable
+  empty-filter states, and discard selections that no longer exist in the
+  filtered graph. Add the `workbench-json` machine export while preserving
+  plain `compass.viewer.graph/1` JSON compatibility.
 
 - Make PHP extraction and type resolution fail closed for colliding exact or
   case-folded symbols instead of selecting a hash-iteration winner. Qualified
