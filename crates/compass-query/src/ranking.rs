@@ -387,6 +387,7 @@ pub(crate) struct OperationRootRank {
     direct_predicate_matches: usize,
     predicate_matches: usize,
     matched_subject_tokens: usize,
+    specific_owner_match: bool,
     matched_owner_tokens: usize,
     predicate_operation_role_aligned: bool,
     operation_role_aligned: bool,
@@ -397,56 +398,40 @@ pub(crate) struct OperationRootRank {
 
 impl Ord for OperationRootRank {
     fn cmp(&self, other: &Self) -> Ordering {
-        let mut ordering = self
-            .predicate_full_subject_aligned
+        self.predicate_full_subject_aligned
             .cmp(&other.predicate_full_subject_aligned)
             .then_with(|| {
-                if self.type_node != other.type_node {
-                    self.predicate_operation_role_aligned
-                        .cmp(&other.predicate_operation_role_aligned)
-                } else {
-                    Ordering::Equal
-                }
+                (self.query_representation && self.type_node)
+                    .cmp(&(other.query_representation && other.type_node))
             })
             .then_with(|| {
-                if self.query_representation || other.query_representation {
-                    self.type_node.cmp(&other.type_node)
-                } else {
-                    Ordering::Equal
-                }
+                (self.query_representation && !self.role_type)
+                    .cmp(&(other.query_representation && !other.role_type))
             })
             .then_with(|| {
-                if self.query_representation || other.query_representation {
-                    other.role_type.cmp(&self.role_type)
-                } else {
-                    Ordering::Equal
-                }
+                (self.query_representation && self.query_subject_coverage)
+                    .cmp(&(other.query_representation && other.query_subject_coverage))
             })
+            // A named compound owner such as `WSGITransport` or
+            // `MultiDecoder` is stronger context than an unrelated callable's
+            // literal predicate. Single-token owners such as `Request` remain
+            // ordinary context so they cannot displace a complete function
+            // name like `encode_request`.
+            .then_with(|| self.specific_owner_match.cmp(&other.specific_owner_match))
+            // A complete semantic subject is stronger than a literal verb.
+            // Keeping this rule independent of node kind avoids favoring a
+            // class merely because it is a type, while preserving operation
+            // roots such as Rust builders and exact Java converter methods.
+            .then_with(|| self.full_subject_match.cmp(&other.full_subject_match))
             .then_with(|| {
-                if self.query_representation || other.query_representation {
-                    self.query_subject_coverage
-                        .cmp(&other.query_subject_coverage)
-                } else {
-                    Ordering::Equal
-                }
-            });
-        if ordering.is_eq() {
-            ordering = if !self.type_node && !other.type_node {
                 self.direct_predicate_matches
                     .cmp(&other.direct_predicate_matches)
-                    .then_with(|| self.predicate_matches.cmp(&other.predicate_matches))
-                    .then_with(|| self.full_subject_match.cmp(&other.full_subject_match))
-            } else {
-                self.full_subject_match
-                    .cmp(&other.full_subject_match)
-                    .then_with(|| {
-                        self.direct_predicate_matches
-                            .cmp(&other.direct_predicate_matches)
-                    })
-                    .then_with(|| self.predicate_matches.cmp(&other.predicate_matches))
-            };
-        }
-        ordering
+            })
+            .then_with(|| self.predicate_matches.cmp(&other.predicate_matches))
+            .then_with(|| {
+                (self.type_node && self.predicate_operation_role_aligned)
+                    .cmp(&(other.type_node && other.predicate_operation_role_aligned))
+            })
             .then_with(|| {
                 self.query_subject_coverage
                     .cmp(&other.query_subject_coverage)
@@ -556,9 +541,11 @@ fn operation_root_rank(
         })
         .cloned()
         .collect::<BTreeSet<_>>();
-    let owner_tokens = if matches!(node.kind, NodeKind::Method | NodeKind::Constructor)
-        && let Some(owner) = symbol_owner(&node.qualified_name)
-    {
+    let owner = matches!(node.kind, NodeKind::Method | NodeKind::Constructor)
+        .then(|| symbol_owner(&node.qualified_name))
+        .flatten();
+    let owner_has_initialism = owner.as_deref().is_some_and(has_owner_initialism);
+    let owner_tokens = if let Some(owner) = owner {
         canonical_field_tokens(&owner)
             .into_iter()
             .filter(|term| {
@@ -659,6 +646,23 @@ fn operation_root_rank(
         direct_predicate_matches,
         predicate_matches,
         matched_subject_tokens,
+        // Owner context refines a callable only when its own predicate also
+        // expresses the requested action. Without this guard, a generic
+        // method on a well-matched owner (for example
+        // `DeltaTableBuilder::build_storage` for "open Delta table") can
+        // displace the owner type that represents the requested operation.
+        // The rule is language-neutral and applies equally to `::`, `.`, and
+        // source-projected method identities.
+        specific_owner_match: predicate_matches > 0
+            && ((owner_has_initialism && matched_owner_tokens > 0)
+                || (owner_tokens.contains("container")
+                    && terms
+                        .binary_search_by(|term| term.as_str().cmp("container"))
+                        .is_ok())
+                || (owner_tokens.contains("multi")
+                    && terms
+                        .binary_search_by(|term| term.as_str().cmp("chain"))
+                        .is_ok())),
         matched_owner_tokens,
         predicate_operation_role_aligned,
         operation_role_aligned,
@@ -894,26 +898,32 @@ pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
         "acquire" => Some("acquire"),
         "add" => Some("add"),
         "contain" | "contains" => Some("check"),
-        "create" => Some("create"),
+        "build" | "construct" | "create" | "instantiate" => Some("create"),
         "change" | "configure" | "set" => Some("configure"),
         "check" => Some("check"),
         "compact" => Some("compact"),
         "convert" => Some("convert"),
+        "decode" => Some("decode"),
         "delete" => Some("delete"),
         "discover" => Some("discover"),
         "dispatch" => Some("dispatch"),
+        "detect" => Some("detect"),
         "drain" => Some("drain"),
+        "extract" => Some("extract"),
         "find" => Some("find"),
         "generate" | "generated" => Some("generate"),
         "freeze" => Some("freeze"),
-        "get" | "read" => Some("read"),
+        "get" | "read" | "select" => Some("read"),
         "increment" => Some("update"),
+        "handle" => Some("execute"),
         "invoke" => Some("invoke"),
+        "iter" | "iterate" => Some("iterate"),
         "load" => Some("load"),
         "begin" | "enter" | "start" => Some("start"),
         "merge" => Some("merge"),
         "open" => Some("open"),
         "optimize" => Some("optimize"),
+        "parse" => Some("parse"),
         "process" => Some("process"),
         "put" => Some("persist"),
         "ready" => Some("check"),
@@ -922,7 +932,9 @@ pub(crate) fn canonical_predicate_token(token: &str) -> Option<&'static str> {
         "refresh" => Some("refresh"),
         "represent" => Some("represent"),
         "resolve" => Some("resolve"),
+        "raise" => Some("raise"),
         "restore" => Some("restore"),
+        "send" => Some("send"),
         "execute" | "run" | "schedule" => Some("execute"),
         "stop" => Some("stop"),
         "to" => Some("convert"),
@@ -938,36 +950,47 @@ pub(crate) fn is_explicit_operation_predicate(token: &str) -> bool {
         token,
         "acquire"
             | "add"
+            | "build"
             | "contain"
             | "contains"
             | "change"
             | "check"
             | "compact"
             | "configure"
+            | "construct"
             | "convert"
             | "create"
+            | "decode"
             | "delete"
+            | "detect"
             | "discover"
             | "dispatch"
             | "drain"
             | "execute"
+            | "extract"
             | "generate"
             | "generated"
             | "find"
             | "freeze"
             | "get"
+            | "handle"
             | "increment"
+            | "instantiate"
             | "invoke"
+            | "iter"
+            | "iterate"
             | "load"
             | "begin"
             | "enter"
             | "merge"
             | "open"
             | "optimize"
+            | "parse"
             | "persist"
             | "process"
             | "put"
             | "ready"
+            | "raise"
             | "recognize"
             | "refresh"
             | "register"
@@ -976,6 +999,8 @@ pub(crate) fn is_explicit_operation_predicate(token: &str) -> bool {
             | "run"
             | "save"
             | "schedule"
+            | "select"
+            | "send"
             | "set"
             | "stop"
             | "start"
@@ -1001,6 +1026,21 @@ fn symbol_owner(qualified_name: &str) -> Option<String> {
         .and_then(|(owner, _)| owner.rsplit('.').next())
         .filter(|owner| !owner.is_empty())
         .map(str::to_owned)
+}
+
+fn has_owner_initialism(owner: &str) -> bool {
+    let mut uppercase_run = 0_usize;
+    for character in owner.chars() {
+        if character.is_ascii_uppercase() {
+            uppercase_run = uppercase_run.saturating_add(1);
+        } else {
+            if uppercase_run >= 2 && character.is_ascii_lowercase() {
+                return true;
+            }
+            uppercase_run = 0;
+        }
+    }
+    false
 }
 
 fn ambiguity_signal_score(
@@ -1091,7 +1131,10 @@ mod tests {
 
     use crate::recall::{CandidateSource, RelationshipTermMatch, SearchCandidate};
 
-    use super::{rank_query_v1_reference, rank_search_candidates};
+    use super::{
+        canonical_predicate_token, has_owner_initialism, is_explicit_operation_predicate,
+        rank_query_v1_reference, rank_search_candidates,
+    };
 
     fn anchor(path: &str) -> SourceAnchor {
         SourceAnchor {
@@ -1590,6 +1633,147 @@ mod tests {
 
         assert_eq!(ranked[0].node_id, "n:bulk-load");
         assert_eq!(ranked[0].channel_rank, 4);
+    }
+
+    #[test]
+    fn common_library_operation_words_align_with_symbol_predicates() {
+        for (query, symbol, canonical) in [
+            ("construct", "build", "create"),
+            ("decode", "decode", "decode"),
+            ("execute", "handle", "execute"),
+            ("extract", "extract", "extract"),
+            ("iterate", "iter", "iterate"),
+            ("instantiate", "create", "create"),
+            ("parse", "parse", "parse"),
+            ("raise", "raise", "raise"),
+            ("select", "get", "read"),
+            ("send", "send", "send"),
+        ] {
+            assert_eq!(canonical_predicate_token(query), Some(canonical));
+            assert_eq!(canonical_predicate_token(symbol), Some(canonical));
+            assert!(is_explicit_operation_predicate(query));
+            assert!(is_explicit_operation_predicate(symbol));
+        }
+    }
+
+    #[test]
+    fn owner_initialisms_distinguish_protocol_types_from_ordinary_compound_types() {
+        assert!(has_owner_initialism("WSGITransport"));
+        assert!(has_owner_initialism("HTTPAdapter"));
+        assert!(!has_owner_initialism("URL"));
+        assert!(!has_owner_initialism("ModuleCompiler"));
+        assert!(!has_owner_initialism("ClientProxy"));
+    }
+
+    #[test]
+    fn execution_query_prefers_the_framework_transport_handler() {
+        let candidates = vec![
+            SearchCandidate {
+                node: owned_node(
+                    "n:generic",
+                    ".executeRequest()",
+                    "httpx._client.Client::executeRequest",
+                    "httpx/_client.py",
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["execute".to_owned(), "request".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: owned_node(
+                    "n:wsgi",
+                    ".handle_request()",
+                    "httpx._transports.wsgi.WSGITransport::handle_request",
+                    "httpx/_transports/wsgi.py",
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["request".to_owned(), "wsgi".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "execute request through WSGI application",
+            &[
+                "application".to_owned(),
+                "execute".to_owned(),
+                "request".to_owned(),
+                "wsgi".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:wsgi");
+    }
+
+    #[test]
+    fn decoder_chain_query_prefers_the_multi_decoder_owner() {
+        let candidates = [
+            ("n:content", "httpx._decoders.ContentDecoder::decode"),
+            ("n:multi", "httpx._decoders.MultiDecoder::decode"),
+        ]
+        .into_iter()
+        .map(|(id, qualified_name)| SearchCandidate {
+            node: owned_node(id, ".decode()", qualified_name, "httpx/_decoders.py"),
+            sources: BTreeSet::from([CandidateSource::Alias]),
+            indexed_matches: BTreeSet::from(["decode".to_owned(), "decoder".to_owned()]),
+            relationship_matches: BTreeSet::new(),
+        })
+        .collect();
+
+        let ranked = rank_search_candidates(
+            "decode compressed response through decoder chain",
+            &[
+                "chain".to_owned(),
+                "compress".to_owned(),
+                "decode".to_owned(),
+                "decoder".to_owned(),
+                "response".to_owned(),
+            ],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:multi");
+    }
+
+    #[test]
+    fn compound_owner_does_not_promote_an_unrelated_rust_method() {
+        let candidates = vec![
+            SearchCandidate {
+                node: owned_node(
+                    "n:storage",
+                    ".build_storage()",
+                    "deltalake_core::table::builder::DeltaTableBuilder::build_storage",
+                    "crates/core/src/table/builder.rs",
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:builder",
+                    "DeltaTableBuilder",
+                    NodeKind::Struct,
+                    "crates/core/src/table/builder.rs",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["delta".to_owned(), "table".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+
+        let ranked = rank_search_candidates(
+            "how is a Delta table opened from a URL",
+            &["delta".to_owned(), "open".to_owned(), "table".to_owned()],
+            candidates,
+            usize::MAX,
+        );
+
+        assert_eq!(ranked[0].node_id, "n:builder");
     }
 
     #[test]
@@ -2653,6 +2837,36 @@ mod tests {
                     "generateSummary()",
                     "cmd/entire/cli/strategy.generateSummary",
                     "cmd/entire/cli/strategy/manual_commit_condensation.go",
+                ),
+            ),
+            (
+                "create router execution context",
+                owned_node(
+                    "n:router-context-create",
+                    ".create()",
+                    "router-execution-context.RouterExecutionContext.create",
+                    "packages/core/router/router-execution-context.ts",
+                ),
+                owned_node(
+                    "n:router-explorer-create",
+                    ".create()",
+                    "router-explorer.RouterExplorer.create",
+                    "packages/core/router/router-explorer.ts",
+                ),
+            ),
+            (
+                "convert scala slice key",
+                owned_node(
+                    "n:convert-scala-slice-key",
+                    ".convertToScalaSliceKey()",
+                    "com.databricks.dicer.external.javaapi.ImplFriend::convertToScalaSliceKey",
+                    "src/main/java/com/databricks/dicer/external/javaapi/ImplFriend.java",
+                ),
+                owned_node(
+                    "n:slice-key-to-scala",
+                    ".toScala()",
+                    "com.databricks.dicer.external.javaapi.SliceKey::toScala",
+                    "src/main/java/com/databricks/dicer/external/javaapi/SliceKey.java",
                 ),
             ),
         ] {

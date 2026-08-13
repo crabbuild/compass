@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Improve natural code discovery on independently reviewed Python and
+  TypeScript libraries. Ranking now recognizes common operation vocabulary,
+  compound protocol owners, container roles, and decoder-chain intent without
+  weakening bounded recall or negative-query handling. TypeScript framework
+  compatibility propagation is limited to declared handlers and middleware so
+  ordinary referenced callables retain stable module-qualified identities.
+  Add pinned HTTPX and NestJS low-inference relevance oracles for repeatable
+  cross-tool qualification.
+
 ## 0.3.11 - 2026-08-13
 
 - Expand route extraction across popular framework families: add Angular Router
