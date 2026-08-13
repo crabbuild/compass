@@ -128,10 +128,27 @@ describe("GraphToolbar", () => {
 
   it("makes layout motion an explicit labeled action", () => {
     const callbacks = renderToolbar();
-    const resume = screen.getByRole("button", { name: "Resume layout" });
-    expect(resume).toHaveTextContent("Resume");
-    fireEvent.click(resume);
+    const layout = screen.getByRole("button", { name: "Run layout" });
+    expect(layout).toHaveTextContent("Layout");
+    fireEvent.click(layout);
     expect(callbacks.onTogglePhysics).toHaveBeenCalledOnce();
+  });
+
+  it("removes depth layers and places filters after Lucide settings", () => {
+    renderToolbar({
+      leadingControls: (
+        <button type="button" aria-label="Graph filters">
+          <span>Filters</span>
+        </button>
+      )
+    });
+
+    expect(screen.queryByRole("option", { name: "Depth layers" })).toBeNull();
+    const settings = screen.getByRole("button", { name: "Graph settings" });
+    const filters = screen.getByRole("button", { name: "Graph filters" });
+    expect(settings.querySelector(".lucide-settings")).not.toBeNull();
+    expect(settings.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .not.toBe(0);
   });
 
   it("opens the shortcut guide with question mark", () => {

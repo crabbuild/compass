@@ -1,8 +1,5 @@
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
-import {
-  graphRenderingProfile,
-  type GraphLayoutStyle
-} from "./renderingProfile";
+import type { GraphLayoutStyle } from "./renderingProfile";
 import type { GraphEdgeDirection } from "./neighborhood";
 
 export type GraphChangeType = NonNullable<GraphNode["change"]>;
@@ -46,9 +43,9 @@ export type GraphAction =
 
 export const initialGraphState: GraphState = {
   focusedNodeId: null,
-  physicsRunning: true,
+  physicsRunning: false,
   layoutStyle: "automatic",
-  initialLayoutPending: true,
+  initialLayoutPending: false,
   forceLabels: false,
   showEdgeLabels: false,
   isolateSelection: false,
@@ -62,7 +59,7 @@ export const initialGraphState: GraphState = {
 };
 
 export function initialGraphStateForModel(
-  model: GraphViewModel,
+  _model: GraphViewModel,
   preferredLayout: GraphLayoutStyle = "automatic"
 ): GraphState {
   if (preferredLayout !== "automatic") {
@@ -73,7 +70,6 @@ export function initialGraphStateForModel(
       initialLayoutPending: false
     };
   }
-  if (graphRenderingProfile(model) === "interactive") return initialGraphState;
   return {
     ...initialGraphState,
     physicsRunning: false,

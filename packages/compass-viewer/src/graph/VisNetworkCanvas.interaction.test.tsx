@@ -16,6 +16,7 @@ const mock = vi.hoisted(() => ({
   movedNodes: [] as Array<{ id: string; x: number; y: number }>,
   simulationStarts: 0,
   simulationStops: 0,
+  eventHandlers: new Map<string, Array<() => void>>(),
   positionScale: 10
 }));
 
@@ -50,8 +51,21 @@ vi.mock("vis-network/standalone", () => ({
     startSimulation() { mock.simulationStarts += 1; }
     fit(options?: Record<string, unknown>) { mock.fits.push(options); }
     destroy() {}
-    on() {}
-    once() {}
+    on(event: string, callback: () => void) {
+      const handlers = mock.eventHandlers.get(event) ?? [];
+      handlers.push(callback);
+      mock.eventHandlers.set(event, handlers);
+    }
+    once(event: string, callback: () => void) {
+      const wrapped = () => {
+        callback();
+        const handlers = mock.eventHandlers.get(event) ?? [];
+        mock.eventHandlers.set(event, handlers.filter((handler) => handler !== wrapped));
+      };
+      const handlers = mock.eventHandlers.get(event) ?? [];
+      handlers.push(wrapped);
+      mock.eventHandlers.set(event, handlers);
+    }
     getConnectedNodes(id: string) {
       mock.connectedNodeRequests.push(id);
       return id === "caller" ? ["callee"] : [];
@@ -105,6 +119,7 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     mock.movedNodes.length = 0;
     mock.simulationStarts = 0;
     mock.simulationStops = 0;
+    mock.eventHandlers.clear();
     mock.positionScale = 10;
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
@@ -244,6 +259,51 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     expect(mock.movedNodes.map(({ id }) => id)).toEqual(["callee", "caller"]);
     expect(mock.movedNodes[0]?.x).toBeGreaterThanOrEqual(18);
     expect(mock.simulationStarts).toBeGreaterThan(startsBeforeResume);
+  });
+
+  it("reports stabilization after every explicit relayout", () => {
+    const onStabilized = vi.fn();
+    const view = render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={onStabilized}
+    />);
+
+    for (const handler of [...mock.eventHandlers.get("stabilizationIterationsDone") ?? []]) {
+      handler();
+    }
+    view.rerender(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={true}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={onStabilized}
+    />);
+    for (const handler of [...mock.eventHandlers.get("stabilizationIterationsDone") ?? []]) {
+      handler();
+    }
+
+    expect(onStabilized).toHaveBeenCalledTimes(2);
   });
 
   it("scales the reheat so motion stays visible when a large graph is fit", () => {

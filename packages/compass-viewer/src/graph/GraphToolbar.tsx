@@ -10,7 +10,7 @@ import {
   RotateCcwIcon,
   RouteIcon,
   ScanSearchIcon,
-  SlidersHorizontalIcon,
+  SettingsIcon,
   TagsIcon,
   ZoomInIcon,
   ZoomOutIcon
@@ -148,9 +148,6 @@ export function GraphToolbar({
         <span className="compass-viewer-status-dot" aria-hidden="true" />
         <span className="compass-viewer-status-text">{status}</span>
       </div>
-      {leadingControls ? (
-        <div className="compass-toolbar-leading">{leadingControls}</div>
-      ) : null}
       <div className="compass-toolbar-actions">
         {onBack && (
           <button
@@ -172,7 +169,6 @@ export function GraphToolbar({
             onChange={(event) => onLayoutChange(event.target.value as GraphLayoutStyle)}
           >
             <option value="automatic">Automatic</option>
-            <option value="hierarchical">Depth layers</option>
             <option value="circle">Circle</option>
             <option value="concentric">Concentric</option>
             <option value="spiral">Spiral</option>
@@ -183,12 +179,12 @@ export function GraphToolbar({
           className="compass-tool-button compass-physics-button"
           type="button"
           aria-label={physicsRunning
-            ? "Pause layout"
-            : layoutStyle === "automatic" ? "Resume layout" : "Fixed layout"}
+            ? "Stop layout"
+            : layoutStyle === "automatic" ? "Run layout" : "Fixed layout"}
           aria-pressed={physicsRunning}
           disabled={layoutStyle !== "automatic"}
           title={layoutStyle === "automatic"
-            ? physicsRunning ? "Pause layout" : "Resume layout"
+            ? physicsRunning ? "Stop layout" : "Run layout"
             : "Physics is available in Automatic layout"}
           onClick={onTogglePhysics}
         >
@@ -196,8 +192,8 @@ export function GraphToolbar({
             ? <PauseIcon />
             : layoutStyle === "automatic" ? <PlayIcon /> : <PauseIcon />}
           <span>{physicsRunning
-            ? "Pause"
-            : layoutStyle === "automatic" ? "Resume" : "Fixed"}</span>
+            ? "Stop"
+            : layoutStyle === "automatic" ? "Layout" : "Fixed"}</span>
         </button>
         <span className="compass-toolbar-separator" aria-hidden="true" />
         <div className="compass-zoom-controls" role="group" aria-label="Zoom controls">
@@ -297,8 +293,11 @@ export function GraphToolbar({
             return next;
           })}
         >
-          <SlidersHorizontalIcon />
+          <SettingsIcon />
         </button>
+        {leadingControls ? (
+          <div className="compass-toolbar-leading">{leadingControls}</div>
+        ) : null}
       </div>
       {leadingPanel}
       {settingsOpen ? (

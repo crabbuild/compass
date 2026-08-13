@@ -711,7 +711,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         onHoverEdge: (change) => eventHandlersRef.current.onHoverEdge(change),
         onClear: () => eventHandlersRef.current.onClear()
       });
-      network.once("stabilizationIterationsDone", () => {
+      network.on("stabilizationIterationsDone", () => {
         initialViewRef.current = {
           position: network.getViewPosition(),
           scale: network.getScale()
@@ -877,12 +877,19 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       }));
       if (focusedNodeId) {
         network.selectNodes([focusedNodeId]);
-        network.focus(focusedNodeId, {
-          scale: 1.35,
-          animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-            ? false
-            : { duration: 260, easingFunction: "easeInOutQuad" }
-        });
+        if (!physicsRunningRef.current) {
+          const position = network.getPositions([focusedNodeId])[focusedNodeId];
+          if (position) {
+            network.moveTo({ position, scale: 1.35, animation: false });
+          }
+        } else {
+          network.focus(focusedNodeId, {
+            scale: 1.35,
+            animation: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+              ? false
+              : { duration: 260, easingFunction: "easeInOutQuad" }
+          });
+        }
       } else {
         network.unselectAll();
       }
