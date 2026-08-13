@@ -60,8 +60,8 @@ use compass_languages::{
     is_language_builtin_global, make_id, parse_jsonc,
 };
 use compass_model::provenance::{
-    EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
-    preserve_occurrence_rule,
+    EndpointRewriteEvidence, EndpointRewriteRule, OCCURRENCE_RULE_ATTRIBUTE,
+    append_endpoint_rewrite_evidence, preserve_occurrence_rule,
 };
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -827,10 +827,16 @@ fn restore_framework_callable_names(
     root: &Path,
 ) {
     let mut framework_sources = BTreeSet::new();
+    let mut framework_handlers = BTreeMap::<String, BTreeSet<String>>::new();
     for fact in &extraction.framework_facts {
         match fact {
             compass_languages::RawFrameworkFact::Route(route) => {
                 framework_sources.insert(route.anchor.source_file.clone());
+                let handlers = framework_handlers
+                    .entry(source_key(&route.anchor.source_file, root))
+                    .or_default();
+                handlers.insert(route.handler_reference.clone());
+                handlers.extend(route.middleware_references.iter().cloned());
                 if let Some(handler_source) = route
                     .detail
                     .get("handler_source")
@@ -886,9 +892,24 @@ fn restore_framework_callable_names(
         else {
             continue;
         };
-        // Universal binding/reference evidence is the source-backed bridge
-        // for framework handlers that live in another TS/JS file.
-        framework_sources.insert(target_source.to_owned());
+        let Some(handler_references) = framework_handlers.get(&source_key(edge_source, root))
+        else {
+            continue;
+        };
+        let Some(target) = nodes_by_id.get(edge.target.as_str()) else {
+            continue;
+        };
+        if handler_references
+            .iter()
+            .any(|reference| edge_matches_framework_reference(edge, target, reference))
+        {
+            // Universal binding/reference evidence is the source-backed bridge
+            // for framework handlers that live in another TS/JS file. Only a
+            // declared handler or middleware may extend the compatibility
+            // surface; ordinary references from a framework file must keep
+            // their universal qualified names.
+            framework_sources.insert(target_source.to_owned());
+        }
     }
     if framework_sources.is_empty() {
         return;
@@ -933,6 +954,34 @@ fn restore_framework_callable_names(
                 .insert("language".to_owned(), Value::String(dialect.to_owned()));
         }
     }
+}
+
+fn edge_matches_framework_reference(edge: &EdgeRecord, node: &NodeRecord, reference: &str) -> bool {
+    if !matches!(
+        string_attribute(node, "symbol_kind").as_str(),
+        "function" | "method"
+    ) {
+        return false;
+    }
+    let terminal = reference
+        .trim_end_matches("()")
+        .rsplit(['.', ':', '#', '/'])
+        .find(|part| !part.is_empty())
+        .unwrap_or(reference);
+    let label = string_attribute(node, "label");
+    if label
+        .trim_start_matches('.')
+        .trim_end_matches("()")
+        .eq(terminal)
+    {
+        return true;
+    }
+    edge.attributes
+        .get(OCCURRENCE_RULE_ATTRIBUTE)
+        .and_then(Value::as_str)
+        .and_then(|rule| rule.split_once(":binding:").map(|(_, binding)| binding))
+        .and_then(|binding| binding.split(':').next())
+        .is_some_and(|binding| binding == terminal)
 }
 
 fn framework_source_dialect(source: &str) -> Option<&'static str> {
@@ -5359,6 +5408,103 @@ mod tests {
             target: target.to_owned(),
             attributes,
         }
+    }
+
+    fn typescript_callable(
+        id: &str,
+        label: &str,
+        qualified_name: &str,
+        legacy_qualified_name: &str,
+        source_file: &str,
+    ) -> NodeRecord {
+        let mut callable = node(id, label, source_file, "method");
+        callable.attributes.extend([
+            (
+                "qualified_name".to_owned(),
+                Value::String(qualified_name.to_owned()),
+            ),
+            (
+                "legacy_qualified_name".to_owned(),
+                Value::String(legacy_qualified_name.to_owned()),
+            ),
+            ("symbol_kind".to_owned(), Value::String("method".to_owned())),
+            (
+                "language".to_owned(),
+                Value::String("typescript".to_owned()),
+            ),
+        ]);
+        callable
+    }
+
+    #[test]
+    fn framework_identity_propagation_is_limited_to_declared_handlers() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                typescript_callable(
+                    "handler",
+                    ".handle()",
+                    "service.Service.handle",
+                    "Service::handle()@10",
+                    "service.ts",
+                ),
+                typescript_callable(
+                    "client-send",
+                    ".send()",
+                    "client-proxy.ClientProxy.send",
+                    "ClientProxy::send()@20",
+                    "client-proxy.ts",
+                ),
+            ],
+            edges: vec![
+                {
+                    let mut edge = edge("controller", "handler", "references", "controller.ts");
+                    edge.attributes.insert(
+                        OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+                        Value::String(
+                            "universal-reference-project-module-binding:binding:HandlerAlias:0:0"
+                                .to_owned(),
+                        ),
+                    );
+                    edge
+                },
+                edge("controller", "client-send", "references", "controller.ts"),
+            ],
+            framework_facts: vec![compass_languages::RawFrameworkFact::Route(
+                compass_languages::RawRouteFact {
+                    framework: "nest".to_owned(),
+                    operation: "GET".to_owned(),
+                    raw_path: "/items".to_owned(),
+                    normalized_path: "/items".to_owned(),
+                    declaring_scope: "ItemsController".to_owned(),
+                    anchor: compass_languages::RawFrameworkAnchor {
+                        source_file: "controller.ts".to_owned(),
+                        start_byte: 0,
+                        end_byte: 1,
+                        start_line: 1,
+                        start_column: 0,
+                        end_line: 1,
+                        end_column: 1,
+                    },
+                    handler_reference: "HandlerAlias".to_owned(),
+                    middleware_references: Vec::new(),
+                    origin: compass_languages::RawFrameworkOrigin::Ast,
+                    rule: None,
+                    detail: Map::new(),
+                },
+            )],
+            ..Extraction::default()
+        };
+
+        restore_framework_callable_names(&mut extraction, &HashMap::new(), Path::new("."));
+
+        assert_eq!(
+            extraction.nodes[0].string("qualified_name"),
+            "Service::handle()@10"
+        );
+        assert_eq!(
+            extraction.nodes[1].string("qualified_name"),
+            "client-proxy.ClientProxy.send"
+        );
     }
 
     #[test]

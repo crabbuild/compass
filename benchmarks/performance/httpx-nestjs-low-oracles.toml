@@ -1,0 +1,460 @@
+schema = "compass.performance-suite/1"
+
+[[repository]]
+name = "httpx"
+url = "https://github.com/encode/httpx.git"
+commit = "b5addb64f0161ff6bfe94c124ef76f6a1fba5254"
+mutation_suffix = ".py"
+
+[[repository.query]]
+question = "resolve digest authentication qop"
+required = ["_resolve_qop"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._auth.DigestAuth::_resolve_qop", source = { file = "httpx/_auth.py", startLine = 329 } }]
+expectedSeeds = [{ qualifiedName = "httpx._auth.DigestAuth::_resolve_qop", source = { file = "httpx/_auth.py", startLine = 329 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "DigestAuth._resolve_qop selects the supported auth/auth-int quality-of-protection mode or rejects unsupported values."
+
+[[repository.query]]
+question = "detect file-like stream length"
+required = ["peek_filelike_length"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._utils.peek_filelike_length", source = { file = "httpx/_utils.py", startLine = 95 } }]
+expectedSeeds = [{ qualifiedName = "httpx._utils.peek_filelike_length", source = { file = "httpx/_utils.py", startLine = 95 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "peek_filelike_length uses seek/tell or fileno metadata to determine a stream's remaining byte length."
+
+[[repository.query]]
+question = "encode request body and content headers"
+required = ["encode_request"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._content.encode_request", source = { file = "httpx/_content.py", startLine = 186 } }]
+expectedSeeds = [{ qualifiedName = "httpx._content.encode_request", source = { file = "httpx/_content.py", startLine = 186 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "encode_request selects content, data, files, or JSON encoding and returns headers plus a byte stream."
+
+[[repository.query]]
+question = "calculate multipart content length"
+required = ["get_content_length"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._multipart.MultipartStream::get_content_length", source = { file = "httpx/_multipart.py", startLine = 265 } }]
+expectedSeeds = [{ qualifiedName = "httpx._multipart.MultipartStream::get_content_length", source = { file = "httpx/_multipart.py", startLine = 265 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "MultipartStream.get_content_length sums boundaries, headers, and field lengths or reports an unknown streaming length."
+
+[[repository.query]]
+question = "create configured SSL context"
+required = ["create_ssl_context"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._config.create_ssl_context", source = { file = "httpx/_config.py", startLine = 23 } }]
+expectedSeeds = [{ qualifiedName = "httpx._config.create_ssl_context", source = { file = "httpx/_config.py", startLine = 23 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "create_ssl_context applies verify, certificate, key, and environment settings to an SSLContext."
+
+[[repository.query]]
+question = "attach request to mapped transport exceptions"
+required = ["request_context"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._exceptions.request_context", source = { file = "httpx/_exceptions.py", startLine = 365 } }]
+expectedSeeds = [{ qualifiedName = "httpx._exceptions.request_context", source = { file = "httpx/_exceptions.py", startLine = 365 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "request_context ensures mapped RequestError instances retain the originating request."
+
+[[repository.query]]
+question = "execute request through WSGI application"
+required = ["WSGITransport", "handle_request"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._transports.wsgi.WSGITransport::handle_request", source = { file = "httpx/_transports/wsgi.py", startLine = 91 } }]
+expectedSeeds = [{ qualifiedName = "httpx._transports.wsgi.WSGITransport::handle_request", source = { file = "httpx/_transports/wsgi.py", startLine = 91 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "WSGITransport.handle_request constructs a WSGI environ, runs the app, and converts its result into an HTTPX Response."
+
+[[repository.query]]
+question = "execute request through ASGI application"
+required = ["ASGITransport", "handle_async_request"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._transports.asgi.ASGITransport::handle_async_request", source = { file = "httpx/_transports/asgi.py", startLine = 99 } }]
+expectedSeeds = [{ qualifiedName = "httpx._transports.asgi.ASGITransport::handle_async_request", source = { file = "httpx/_transports/asgi.py", startLine = 99 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ASGITransport.handle_async_request drives ASGI receive/send messages and produces the response stream."
+
+[[repository.query]]
+question = "parse URL components"
+required = ["urlparse"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._urlparse.urlparse", source = { file = "httpx/_urlparse.py", startLine = 213 } }]
+expectedSeeds = [{ qualifiedName = "httpx._urlparse.urlparse", source = { file = "httpx/_urlparse.py", startLine = 213 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "urlparse validates and normalizes URL components into ParseResult."
+
+[[repository.query]]
+question = "encode international URL host"
+required = ["encode_host"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._urlparse.encode_host", source = { file = "httpx/_urlparse.py", startLine = 348 } }]
+expectedSeeds = [{ qualifiedName = "httpx._urlparse.encode_host", source = { file = "httpx/_urlparse.py", startLine = 348 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "encode_host normalizes IPv4, IPv6, and IDNA hostnames."
+
+[[repository.query]]
+question = "raise error for unsuccessful HTTP status"
+required = ["raise_for_status"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._models.Response::raise_for_status", source = { file = "httpx/_models.py", startLine = 794 } }]
+expectedSeeds = [{ qualifiedName = "httpx._models.Response::raise_for_status", source = { file = "httpx/_models.py", startLine = 794 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Response.raise_for_status classifies non-success statuses and raises HTTPStatusError with request and response context."
+
+[[repository.query]]
+question = "iterate decoded response lines"
+required = ["iter_lines"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._models.Response::iter_lines", source = { file = "httpx/_models.py", startLine = 926 } }]
+expectedSeeds = [{ qualifiedName = "httpx._models.Response::iter_lines", source = { file = "httpx/_models.py", startLine = 926 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Response.iter_lines incrementally decodes the response text stream into normalized lines."
+
+[[repository.query]]
+question = "select response content decoder"
+required = ["_get_content_decoder"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._models.Response::_get_content_decoder", source = { file = "httpx/_models.py", startLine = 699 } }]
+expectedSeeds = [{ qualifiedName = "httpx._models.Response::_get_content_decoder", source = { file = "httpx/_models.py", startLine = 699 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Response._get_content_decoder maps Content-Encoding values to one decoder or a decoding chain."
+
+[[repository.query]]
+question = "extract response cookies into cookie jar"
+required = ["extract_cookies"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._models.Cookies::extract_cookies", source = { file = "httpx/_models.py", startLine = 1101 } }]
+expectedSeeds = [{ qualifiedName = "httpx._models.Cookies::extract_cookies", source = { file = "httpx/_models.py", startLine = 1101 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Cookies.extract_cookies adapts request/response objects and updates the cookie jar."
+
+[[repository.query]]
+question = "build client request with merged configuration"
+required = ["build_request"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._client.BaseClient::build_request", source = { file = "httpx/_client.py", startLine = 340 } }]
+expectedSeeds = [{ qualifiedName = "httpx._client.BaseClient::build_request", source = { file = "httpx/_client.py", startLine = 340 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "BaseClient.build_request merges base URL, headers, cookies, params, timeout, and body settings into a Request."
+
+[[repository.query]]
+question = "construct redirect request"
+required = ["_build_redirect_request"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._client.BaseClient::_build_redirect_request", source = { file = "httpx/_client.py", startLine = 475 } }]
+expectedSeeds = [{ qualifiedName = "httpx._client.BaseClient::_build_redirect_request", source = { file = "httpx/_client.py", startLine = 475 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "BaseClient._build_redirect_request derives redirect method, URL, headers, and body stream."
+
+[[repository.query]]
+question = "resolve redirect location URL"
+required = ["_redirect_url"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._client.BaseClient::_redirect_url", source = { file = "httpx/_client.py", startLine = 517 } }]
+expectedSeeds = [{ qualifiedName = "httpx._client.BaseClient::_redirect_url", source = { file = "httpx/_client.py", startLine = 517 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "BaseClient._redirect_url parses Location, repairs malformed forms, and joins relative redirects to the request URL."
+
+[[repository.query]]
+question = "send request while handling authentication flow"
+required = ["_send_handling_auth"]
+expectedDirection = "both"
+expectedAmbiguous = true
+relevantNodes = [{ qualifiedName = "httpx._client.Client::_send_handling_auth", source = { file = "httpx/_client.py", startLine = 930 } }]
+expectedSeeds = [{ qualifiedName = "httpx._client.Client::_send_handling_auth", source = { file = "httpx/_client.py", startLine = 930 } }]
+acceptableSeeds = [{ qualifiedName = "httpx._client.AsyncClient::_send_handling_auth", source = { file = "httpx/_client.py", startLine = 1645 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "The sync and async clients implement equivalent authentication-flow orchestration, so an unscoped request is genuinely ambiguous."
+
+[[repository.query]]
+question = "send one request through selected transport"
+required = ["_send_single_request"]
+expectedDirection = "both"
+expectedAmbiguous = true
+relevantNodes = [{ qualifiedName = "httpx._client.Client::_send_single_request", source = { file = "httpx/_client.py", startLine = 1001 } }]
+expectedSeeds = [{ qualifiedName = "httpx._client.Client::_send_single_request", source = { file = "httpx/_client.py", startLine = 1001 } }]
+acceptableSeeds = [{ qualifiedName = "httpx._client.AsyncClient::_send_single_request", source = { file = "httpx/_client.py", startLine = 1717 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Both client variants select the URL transport, execute exactly one request, and bind response streams."
+
+[[repository.query]]
+question = "decode compressed response through decoder chain"
+required = ["MultiDecoder", "decode"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "httpx._decoders.MultiDecoder::decode", source = { file = "httpx/_decoders.py", startLine = 216 } }]
+expectedSeeds = [{ qualifiedName = "httpx._decoders.MultiDecoder::decode", source = { file = "httpx/_decoders.py", startLine = 216 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "MultiDecoder.decode applies the configured content decoders in reverse order."
+
+[[repository.query]]
+question = "QzxvHttpxBananaTransport"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned HTTPX source."
+
+[[repository.query]]
+question = "FlorbDigestWalrusQuasar"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned HTTPX source."
+
+[[repository.query]]
+question = "NebulaMultipartPineappleGizmo"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned HTTPX source."
+
+[[repository.query]]
+question = "CeruleanRedirectCactusFactory"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned HTTPX source."
+
+[[repository.query]]
+question = "ZorpCookieMangoProtocol"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned HTTPX source."
+
+[[repository]]
+name = "nestjs"
+url = "https://github.com/nestjs/nest.git"
+commit = "c3bc75c973813969aa676793e20a7cba12a9daf5"
+mutation_suffix = ".ts"
+
+[[repository.query]]
+question = "create HTTP route execution context"
+required = ["RouterExecutionContext", "create"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "router-execution-context.RouterExecutionContext.create", source = { file = "packages/core/router/router-execution-context.ts", startLine = 80 } }]
+expectedSeeds = [{ qualifiedName = "router-execution-context.RouterExecutionContext.create", source = { file = "packages/core/router/router-execution-context.ts", startLine = 80 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "RouterExecutionContext.create composes metadata, pipes, guards, interceptors, and response handling for one controller callback."
+
+[[repository.query]]
+question = "register controller routers"
+required = ["RoutesResolver", "registerRouters"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "routes-resolver.RoutesResolver.registerRouters", source = { file = "packages/core/router/routes-resolver.ts", startLine = 88 } }]
+expectedSeeds = [{ qualifiedName = "routes-resolver.RoutesResolver.registerRouters", source = { file = "packages/core/router/routes-resolver.ts", startLine = 88 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "RoutesResolver.registerRouters walks controller wrappers and delegates their resolved paths to RouterExplorer."
+
+[[repository.query]]
+question = "convert observable route result"
+required = ["RouterResponseController", "transformToResult"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "router-response-controller.RouterResponseController.transformToResult", source = { file = "packages/core/router/router-response-controller.ts", startLine = 66 } }]
+expectedSeeds = [{ qualifiedName = "router-response-controller.RouterResponseController.transformToResult", source = { file = "packages/core/router/router-response-controller.ts", startLine = 66 } }]
+acceptableSeeds = [{ qualifiedName = "external-context-creator.ExternalContextCreator.transformToResult", source = { file = "packages/core/helpers/external-context-creator.ts", startLine = 331 } }]
+expectedAmbiguous = true
+judgmentSource = "manual_source_review"
+judgmentReason = "Both HTTP routing and external contexts convert deferred Observable results; the RouterResponseController method is the route-specific answer."
+
+[[repository.query]]
+question = "calculate URI version prefix"
+required = ["getVersionPrefix"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "route-path-factory.RoutePathFactory.getVersionPrefix", source = { file = "packages/core/router/route-path-factory.ts", startLine = 86 } }]
+expectedSeeds = [{ qualifiedName = "route-path-factory.RoutePathFactory.getVersionPrefix", source = { file = "packages/core/router/route-path-factory.ts", startLine = 86 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "RoutePathFactory.getVersionPrefix applies the configured URI version prefix or the default."
+
+[[repository.query]]
+question = "create request-scoped controller handler"
+required = ["RouterExplorer", "createRequestScopedHandler"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "router-explorer.RouterExplorer.createRequestScopedHandler", source = { file = "packages/core/router/router-explorer.ts", startLine = 378 } }]
+expectedSeeds = [{ qualifiedName = "router-explorer.RouterExplorer.createRequestScopedHandler", source = { file = "packages/core/router/router-explorer.ts", startLine = 378 } }]
+acceptableSeeds = [{ qualifiedName = "listeners-controller.ListenersController.createRequestScopedHandler", source = { file = "packages/microservices/listeners-controller.ts", startLine = 224 } }]
+expectedAmbiguous = true
+judgmentSource = "manual_source_review"
+judgmentReason = "HTTP and microservice controllers both have request-scoped handler factories; the RouterExplorer method is the HTTP-specific implementation."
+
+[[repository.query]]
+question = "extract dynamic module metadata"
+required = ["ModuleCompiler", "extractMetadata"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "compiler.ModuleCompiler.extractMetadata", source = { file = "packages/core/injector/compiler.ts", startLine = 47 } }]
+expectedSeeds = [{ qualifiedName = "compiler.ModuleCompiler.extractMetadata", source = { file = "packages/core/injector/compiler.ts", startLine = 47 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ModuleCompiler.extractMetadata separates a static module type from optional dynamic metadata."
+
+[[repository.query]]
+question = "instantiate module dependencies"
+required = ["InstanceLoader", "createInstancesOfDependencies"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "instance-loader.InstanceLoader.createInstancesOfDependencies", source = { file = "packages/core/injector/instance-loader.ts", startLine = 25 } }]
+expectedSeeds = [{ qualifiedName = "instance-loader.InstanceLoader.createInstancesOfDependencies", source = { file = "packages/core/injector/instance-loader.ts", startLine = 25 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "InstanceLoader.createInstancesOfDependencies creates provider, injectable, and controller prototypes and instances for modules."
+
+[[repository.query]]
+question = "detect circular dependency settlement"
+required = ["SettlementSignal", "isCycle"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "settlement-signal.SettlementSignal.isCycle", source = { file = "packages/core/injector/settlement-signal.ts", startLine = 56 } }]
+expectedSeeds = [{ qualifiedName = "settlement-signal.SettlementSignal.isCycle", source = { file = "packages/core/injector/settlement-signal.ts", startLine = 56 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "SettlementSignal.isCycle checks whether an unresolved wrapper dependency is already referenced by the current settlement."
+
+[[repository.query]]
+question = "determine whether dependency tree is static"
+required = ["InstanceWrapper", "isDependencyTreeStatic"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "instance-wrapper.InstanceWrapper.isDependencyTreeStatic", source = { file = "packages/core/injector/instance-wrapper.ts", startLine = 311 } }]
+expectedSeeds = [{ qualifiedName = "instance-wrapper.InstanceWrapper.isDependencyTreeStatic", source = { file = "packages/core/injector/instance-wrapper.ts", startLine = 311 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "InstanceWrapper.isDependencyTreeStatic recursively classifies request-scoped and transient dependency subtrees."
+
+[[repository.query]]
+question = "add compiled module to container"
+required = ["NestContainer", "addModule"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "container.NestContainer.addModule", source = { file = "packages/core/injector/container.ts", startLine = 92 } }]
+expectedSeeds = [{ qualifiedName = "container.NestContainer.addModule", source = { file = "packages/core/injector/container.ts", startLine = 92 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "NestContainer.addModule compiles a module, deduplicates it by token, and installs its dynamic metadata."
+
+[[repository.query]]
+question = "validate exported provider belongs to module"
+required = ["validateExportedProvider"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "module.Module.validateExportedProvider", source = { file = "packages/core/injector/module.ts", startLine = 488 } }]
+expectedSeeds = [{ qualifiedName = "module.Module.validateExportedProvider", source = { file = "packages/core/injector/module.ts", startLine = 488 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Module.validateExportedProvider accepts local providers/imports and otherwise throws UnknownExportException."
+
+[[repository.query]]
+question = "scan recursively for imported modules"
+required = ["DependenciesScanner", "scanForModules"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "scanner.DependenciesScanner.scanForModules", source = { file = "packages/core/scanner.ts", startLine = 106 } }]
+expectedSeeds = [{ qualifiedName = "scanner.DependenciesScanner.scanForModules", source = { file = "packages/core/scanner.ts", startLine = 106 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "DependenciesScanner.scanForModules resolves forward references and dynamic metadata while recursively inserting imports."
+
+[[repository.query]]
+question = "start Nest HTTP application listening"
+required = ["NestApplication", "listen"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "nest-application.NestApplication.listen", source = { file = "packages/core/nest-application.ts", startLine = 297 } }]
+expectedSeeds = [{ qualifiedName = "nest-application.NestApplication.listen", source = { file = "packages/core/nest-application.ts", startLine = 297 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "NestApplication.listen initializes the app, installs signal handlers, and starts the configured HTTP adapter."
+
+[[repository.query]]
+question = "signal dependency barrier and wait"
+required = ["Barrier", "signalAndWait"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "barrier.Barrier.signalAndWait", source = { file = "packages/core/helpers/barrier.ts", startLine = 51 } }]
+expectedSeeds = [{ qualifiedName = "barrier.Barrier.signalAndWait", source = { file = "packages/core/helpers/barrier.ts", startLine = 51 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "Barrier.signalAndWait records one arrival and awaits completion by all participants."
+
+[[repository.query]]
+question = "derive dependency injection context from request"
+required = ["ContextIdFactory", "getByRequest"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "context-id-factory.ContextIdFactory.getByRequest", source = { file = "packages/core/helpers/context-id-factory.ts", startLine = 57 } }]
+expectedSeeds = [{ qualifiedName = "context-id-factory.ContextIdFactory.getByRequest", source = { file = "packages/core/helpers/context-id-factory.ts", startLine = 57 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ContextIdFactory.getByRequest reuses request context identifiers or applies the configured durable-context strategy."
+
+[[repository.query]]
+question = "find module key providing controller"
+required = ["getContextModuleKey"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "external-context-creator.ExternalContextCreator.getContextModuleKey", source = { file = "packages/core/helpers/external-context-creator.ts", startLine = 241 } }]
+expectedSeeds = [{ qualifiedName = "external-context-creator.ExternalContextCreator.getContextModuleKey", source = { file = "packages/core/helpers/external-context-creator.ts", startLine = 241 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ExternalContextCreator.getContextModuleKey searches module entries for the provider owning a controller constructor."
+
+[[repository.query]]
+question = "send request-response message through microservice client"
+required = ["ClientProxy", "send"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "client-proxy.ClientProxy.send", source = { file = "packages/microservices/client/client-proxy.ts", startLine = 86 } }]
+expectedSeeds = [{ qualifiedName = "client-proxy.ClientProxy.send", source = { file = "packages/microservices/client/client-proxy.ts", startLine = 86 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ClientProxy.send connects lazily, publishes a patterned packet, and exposes the response through an Observable."
+
+[[repository.query]]
+question = "handle incoming Kafka message"
+required = ["ServerKafka", "handleMessage"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "server-kafka.ServerKafka.handleMessage", source = { file = "packages/microservices/server/server-kafka.ts", startLine = 202 } }]
+expectedSeeds = [{ qualifiedName = "server-kafka.ServerKafka.handleMessage", source = { file = "packages/microservices/server/server-kafka.ts", startLine = 202 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ServerKafka.handleMessage deserializes a Kafka record, resolves the handler, and publishes correlated replies."
+
+[[repository.query]]
+question = "send StreamableFile response through Express"
+required = ["ExpressAdapter", "reply"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "express-adapter.ExpressAdapter.reply", source = { file = "packages/platform-express/adapters/express-adapter.ts", startLine = 103 } }]
+expectedSeeds = [{ qualifiedName = "express-adapter.ExpressAdapter.reply", source = { file = "packages/platform-express/adapters/express-adapter.ts", startLine = 103 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ExpressAdapter.reply maps StreamableFile metadata and ordinary bodies onto Express responses."
+
+[[repository.query]]
+question = "create Express middleware for HTTP method"
+required = ["ExpressAdapter", "createMiddlewareFactory"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "express-adapter.ExpressAdapter.createMiddlewareFactory", source = { file = "packages/platform-express/adapters/express-adapter.ts", startLine = 254 } }]
+expectedSeeds = [{ qualifiedName = "express-adapter.ExpressAdapter.createMiddlewareFactory", source = { file = "packages/platform-express/adapters/express-adapter.ts", startLine = 254 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ExpressAdapter.createMiddlewareFactory selects the Express router method for a Nest RequestMethod."
+
+[[repository.query]]
+question = "create external callback execution context"
+required = ["ExternalContextCreator", "create"]
+expectedDirection = "both"
+relevantNodes = [{ qualifiedName = "external-context-creator.ExternalContextCreator.create", source = { file = "packages/core/helpers/external-context-creator.ts", startLine = 91 } }]
+expectedSeeds = [{ qualifiedName = "external-context-creator.ExternalContextCreator.create", source = { file = "packages/core/helpers/external-context-creator.ts", startLine = 91 } }]
+judgmentSource = "manual_source_review"
+judgmentReason = "ExternalContextCreator.create composes guards, pipes, filters, interceptors, and parameter extraction around an arbitrary callback."
+
+[[repository.query]]
+question = "QzxvNestBananaInjector"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned NestJS source."
+
+[[repository.query]]
+question = "FlorbRouterWalrusQuasar"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned NestJS source."
+
+[[repository.query]]
+question = "NebulaKafkaPineappleGizmo"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned NestJS source."
+
+[[repository.query]]
+question = "CeruleanBarrierCactusFactory"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned NestJS source."
+
+[[repository.query]]
+question = "ZorpExpressMangoProtocol"
+expectedDirection = "both"
+allowNoMatch = true
+judgmentSource = "manual_source_review"
+judgmentReason = "The composite identifier is absent from the pinned NestJS source."
