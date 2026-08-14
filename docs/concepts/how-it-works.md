@@ -211,7 +211,8 @@ A god node has unusually high degree. It may be:
 - a noisy or overly broad extraction target.
 
 Degree identifies connectivity, not quality or business importance. Compass
-filters common built-in noise in reports, but interpretation still matters.
+does not publish calls to known, unshadowed language globals and filters
+additional common built-in noise in reports, but interpretation still matters.
 
 ## Stage 5: atomic publication
 

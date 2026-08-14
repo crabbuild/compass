@@ -123,6 +123,13 @@
   genuine ambiguity. Tighten performance-harness timing parsing and diagnostics
   for these qualification runs.
 
+- Exclude unshadowed JavaScript, TypeScript, Python, Go, and Swift built-in
+  globals from call-target publication so constructors, coercion functions,
+  standard-library types, and common global methods do not become noisy graph
+  hubs. Source-proven same-file declarations and explicit bindings retain
+  precedence. Advance extraction semantics to v2 so cached graphs rebuild
+  with the denser call topology.
+
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use

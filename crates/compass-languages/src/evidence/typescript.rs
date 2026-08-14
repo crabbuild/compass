@@ -4142,11 +4142,6 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         true
     }
 
-    fn builtin_global_target(&self, scope_id: &str, name: &str) -> Option<(String, String)> {
-        self.is_unshadowed_builtin(scope_id, name)
-            .then(|| (format!("global::{name}"), "javascript.global".to_owned()))
-    }
-
     fn builtin_receiver_name(&self, scope_id: &str, object: Node<'tree>) -> Option<String> {
         match object.kind() {
             "identifier" | "type_identifier" | "jsx_identifier" => {
@@ -4166,25 +4161,20 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
-    fn builtin_member_target(
+    fn is_builtin_member_target(
         &self,
         scope_id: &str,
         object: Node<'tree>,
         property_name: &str,
-    ) -> Option<(String, String)> {
-        let receiver = self.builtin_receiver_name(scope_id, object)?;
-        let known = if object.kind() == "new_expression" {
+    ) -> bool {
+        let Some(receiver) = self.builtin_receiver_name(scope_id, object) else {
+            return false;
+        };
+        if object.kind() == "new_expression" {
             known_builtin_instance_member(&receiver, property_name)
         } else {
             known_builtin_static_member(&receiver, property_name)
-        };
-        if !known {
-            return None;
         }
-        Some((
-            format!("global::{receiver}.{property_name}"),
-            "javascript.global".to_owned(),
-        ))
     }
 
     fn builtin_type_target(&self, scope_id: &str, name: &str) -> Option<(String, String)> {
@@ -5092,39 +5082,9 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             );
             let Some(resolution) = resolution else {
                 if let Some(object) = object
-                    && let Some((target, module)) =
-                        self.builtin_member_target(scope_id, object, &property_name)
+                    && self.is_builtin_member_target(scope_id, object, &property_name)
                 {
-                    return self.add_external_resolution_candidate(
-                        property,
-                        scope_id,
-                        if construction {
-                            CandidateRelation::Constructs
-                        } else {
-                            CandidateRelation::Calls
-                        },
-                        if construction {
-                            SemanticRole::Construction
-                        } else {
-                            SemanticRole::Call
-                        },
-                        &property_name,
-                        Some(&node_text(self.source, function)),
-                        member_context,
-                        &target,
-                        &module,
-                        argument_count,
-                        argument_types,
-                        &[
-                            "function",
-                            "method",
-                            "constructor",
-                            "class",
-                            "variable",
-                            "property",
-                            "external",
-                        ],
-                    );
+                    return Ok(());
                 }
                 // A dynamic receiver, proxy, or ambiguous member is not a
                 // safe call target. Preserve its source occurrence as
@@ -5353,31 +5313,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             &argument_types,
         );
         let Some(resolution) = resolution else {
-            if let Some((qualified_target, module)) =
-                self.builtin_global_target(scope_id, &spelling)
-            {
-                return self.add_external_resolution_candidate(
-                    target,
-                    scope_id,
-                    if construction {
-                        CandidateRelation::Constructs
-                    } else {
-                        CandidateRelation::Calls
-                    },
-                    if construction {
-                        SemanticRole::Construction
-                    } else {
-                        SemanticRole::Call
-                    },
-                    &spelling,
-                    None,
-                    call_context,
-                    &qualified_target,
-                    &module,
-                    argument_count,
-                    argument_types,
-                    &["function", "class", "external"],
-                );
+            if self.is_unshadowed_builtin(scope_id, &spelling) {
+                return Ok(());
             }
             return self.add_unresolved_candidate(
                 target,
@@ -5910,24 +5847,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 ],
             );
         }
-        if let Some((target, module)) = self.builtin_member_target(scope_id, object, &property_name)
-        {
-            return self.add_external_resolution_candidate(
-                property,
-                scope_id,
-                CandidateRelation::AccessesMember,
-                SemanticRole::MemberAccess,
-                &property_name,
-                Some(&node_text(self.source, object)),
-                "builtin_member",
-                &target,
-                &module,
-                None,
-                Vec::new(),
-                &[
-                    "property", "method", "function", "class", "variable", "external",
-                ],
-            );
+        if self.is_builtin_member_target(scope_id, object, &property_name) {
+            return Ok(());
         }
         // A local variable without a source-proven nominal type is still a
         // real member occurrence, but its target is not safe to derive from
