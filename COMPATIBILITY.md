@@ -62,6 +62,14 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+Before the first compatibility-stable release, Compass hard-resets active
+internal extraction, cache, publication, store-index, query-index/ranker,
+overview, qualification, and semantic-diff identities to v1. Provisional
+higher-numbered artifacts are unsupported and are not migrated or interpreted
+alongside earlier v1 prototypes. Discard existing pre-release artifacts and
+rebuild project output with the current binary; disposable query indexes rebuild
+automatically.
+
 The release workflow publishes `compass-release.json` with schema
 `compass.release/1`. `compass upgrade` retrieves that bounded static manifest
 through the GitHub release-download path, requires one exact artifact for each
@@ -118,12 +126,14 @@ Standalone HTML may additionally embed optional, presentation-only source
 navigation metadata for a recognized Git forge and full source commit. This
 metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
 versioned graph/view contracts are unchanged.
-Passing `--store sqlite` also publishes a validated `store.sqlite3`
-sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
-`--engine store` explicitly selects and validates the sidecar. The SQLite file
-and reference are internal realizations of the backend-neutral `compass-store`
-contract, not a stable SQL schema or pointer format that consumers may query
-directly.
+Structural builds publish a validated `store.sqlite3` sidecar and typed
+`store.ref` selector by default; `--store json` explicitly opts out. Typed code
+queries prefer that validated sidecar by default, while `--engine json`
+explicitly selects the permanent JSON engine. Once a store reference is
+present, corruption or a selector mismatch fails closed instead of silently
+querying a different realization. The SQLite file and reference are internal
+realizations of the backend-neutral `compass-store` contract, not a stable SQL
+schema or pointer format that consumers may query directly.
 
 The additive `compass ask` command continues to route bounded questions to the
 typed `compass.query/1` operations. Plain `compass query` against a typed graph
@@ -184,7 +194,7 @@ The Rust library's `query_natural_profiled` API returns a separate
 fields to `compass.query/1`, so ordinary responses remain deterministic and
 backend-neutral.
 
-Typed symbol search now unconditionally uses `query-ranker/2`. The internal
+Typed symbol search now unconditionally uses `query-ranker/1`. The internal
 `COMPASS_QUERY_RANKER_PROFILE` experiment switch and v1 runtime fallback have
 been removed. This does not change the `compass.query/1` schema, but intentional
 score and ordering improvements can change which equally lexical candidate is
@@ -379,16 +389,17 @@ qualification tests; it is not a CLI or packaging dependency. PostgreSQL and
 DynamoDB are future adapters, not supported release backends. No local store
 command accepts cloud credentials, endpoints, or TLS configuration.
 
-The default published location is `DIR/graph.json` under the selected
-`--out DIR` (default `compass-out/`). A `--store sqlite` build additionally
+The default published locations are `DIR/graph.json` and the validated SQLite
+sidecar under the selected `--out DIR` (default `compass-out/`). The build
 publishes `store.ref` beside the current snapshot's `graph.json` and keeps the
-shared database at `DIR/store/store.sqlite3`.
+shared database at `DIR/store/store.sqlite3`; `--store json` omits those
+sidecars while retaining the same JSON artifact.
 `compass store status|validate|backup|restore` are the supported operational
 surface. Backups are digest-bound directories and restores never overwrite an
 existing destination. Local publication retains two complete snapshots and
 performs bounded reachability GC; remote leases, service quotas, and
 distributed GC remain deferred. The local API enforces bounded values, scans,
-transactions, and request work. Current `compass.store.graph-index/2`
+transactions, and request work. Current `compass.store.graph-index/1`
 snapshots do not impose an aggregate canonical-payload or record-count limit:
 their manifest uses `u64` byte and record counts, while each immutable tree
 object, write batch, scan, and query remains independently bounded. The legacy
@@ -400,8 +411,8 @@ not depend on the whole-JSON reader limit.
 
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve
-`graph.json`, run `scripts/rebuild_compass_store.sh`, or continue with the
-default JSON engine. The JSON engine does not require a database and is not a
+`graph.json`, run `scripts/rebuild_compass_store.sh`, or explicitly select
+`--engine json`. The JSON engine does not require a database and is not a
 migration fallback scheduled for removal.
 
 Markdown graph extraction is a structural, extensible projection. New

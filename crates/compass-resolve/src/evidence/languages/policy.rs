@@ -8,6 +8,7 @@ use super::super::resolve::context::ResolutionDb;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::evidence) enum LanguagePolicyKind {
     TypeScript,
+    CSharp,
     Java,
     Rust,
     Generic,
@@ -17,6 +18,7 @@ impl LanguagePolicyKind {
     pub(in crate::evidence) fn for_language(language: &str) -> Self {
         match language {
             "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => Self::TypeScript,
+            "csharp" => Self::CSharp,
             "java" => Self::Java,
             "rust" => Self::Rust,
             _ => Self::Generic,
@@ -31,6 +33,7 @@ impl LanguagePolicyKind {
     ) -> Option<ResolutionDecision> {
         match self {
             Self::TypeScript => db.resolve_typescript_import_candidate(language, candidate),
+            Self::CSharp => db.resolve_csharp_candidate(language, candidate),
             Self::Rust => {
                 let HierarchyConstraint::RustAssociatedType {
                     receiver_declaration_id,
@@ -60,7 +63,7 @@ impl LanguagePolicyKind {
     ) -> Option<&'a str> {
         match self {
             Self::Java => db.unique_java_applicable_overload(overloads, argument_types),
-            Self::TypeScript | Self::Rust | Self::Generic => None,
+            Self::CSharp | Self::TypeScript | Self::Rust | Self::Generic => None,
         }
     }
 }
@@ -74,6 +77,10 @@ mod tests {
         assert_eq!(
             LanguagePolicyKind::for_language("typescriptreact"),
             LanguagePolicyKind::TypeScript
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("csharp"),
+            LanguagePolicyKind::CSharp
         );
         assert_eq!(
             LanguagePolicyKind::for_language("java"),

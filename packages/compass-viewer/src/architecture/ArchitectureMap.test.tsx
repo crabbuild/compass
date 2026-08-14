@@ -132,7 +132,7 @@ describe("ArchitectureMap", () => {
 
     expect(api.getAttribute("transform")).not.toBe(initialTransform);
     expect(window.localStorage.getItem(
-      "compass.architecture.layout.v2:Fixture:production:all"
+      "compass.architecture.layout.v1:Fixture:production:all"
     )).toContain("\"api\"");
     expect(screen.getByRole("button", { name: "Reset subsystem positions" }))
       .not.toBeDisabled();

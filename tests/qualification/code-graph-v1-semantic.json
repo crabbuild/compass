@@ -1,5 +1,5 @@
 {
-  "schema": "compass.code-graph-qualification/2",
+  "schema": "compass.code-graph-qualification/1",
   "flows": [
     {
       "id": "flow-django",

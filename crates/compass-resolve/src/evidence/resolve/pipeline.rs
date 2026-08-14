@@ -8,8 +8,8 @@ use crate::ResolutionAdmission;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResolutionStage {
     ExactSource,
-    ReceiverHierarchy,
     LanguagePolicy,
+    ReceiverHierarchy,
     ExplicitBinding,
     DirectBase,
     QualifiedOwnership,
@@ -24,8 +24,8 @@ enum ResolutionStage {
 impl ResolutionStage {
     const ORDER: [Self; 12] = [
         Self::ExactSource,
-        Self::ReceiverHierarchy,
         Self::LanguagePolicy,
+        Self::ReceiverHierarchy,
         Self::ExplicitBinding,
         Self::DirectBase,
         Self::QualifiedOwnership,
@@ -350,8 +350,8 @@ mod tests {
             ResolutionStage::ORDER,
             [
                 ExactSource,
-                ReceiverHierarchy,
                 LanguagePolicy,
+                ReceiverHierarchy,
                 ExplicitBinding,
                 DirectBase,
                 QualifiedOwnership,

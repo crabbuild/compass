@@ -104,15 +104,15 @@ mutation_suffix = ".cs"
 question = "how are HTTP requests processed"
 required = ["HttpProtocol"]
 expectedDirection = "both"
-relevantNodes = [{ qualifiedName = "HttpProtocol::ProcessRequests(IHttpApplication<TContext>)@22029", source = { file = "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs", startLine = 646 } }]
-expectedSeeds = [{ qualifiedName = "HttpProtocol::ProcessRequests(IHttpApplication<TContext>)@22029", source = { file = "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs", startLine = 646 } }]
+relevantNodes = [{ qualifiedName = "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequests", source = { file = "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs", startLine = 646 } }]
+expectedSeeds = [{ qualifiedName = "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequests", source = { file = "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs", startLine = 646 } }]
 [[repository.query]]
 question = "how is middleware invoked"
 required = ["Middleware"]
 expectedDirection = "both"
 expectedAmbiguous = true
-relevantNodes = [{ qualifiedName = "IISMiddleware::Invoke(HttpContext)@4688", source = { file = "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs", startLine = 101 } }]
-expectedSeeds = [{ qualifiedName = "IISMiddleware::Invoke(HttpContext)@4688", source = { file = "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs", startLine = 101 } }]
+relevantNodes = [{ qualifiedName = "Microsoft.AspNetCore.Server.IISIntegration.IISMiddleware::Invoke", source = { file = "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs", startLine = 101 } }]
+expectedSeeds = [{ qualifiedName = "Microsoft.AspNetCore.Server.IISIntegration.IISMiddleware::Invoke", source = { file = "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs", startLine = 101 } }]
 
 [[repository]]
 name = "angular"

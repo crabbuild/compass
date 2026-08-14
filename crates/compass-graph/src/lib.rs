@@ -30,7 +30,7 @@ pub use inference::{
 use inference::{prefilter_raw_edges_inference, prune_orphan_external_placeholders};
 pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
 pub use snapshot::{
-    CanonicalGraphDocument, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_LAYOUT_V2,
+    CanonicalGraphDocument, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_LAYOUT_V1,
     GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1,
     GRAPH_TERM_POSTING_CHUNK_ITEMS, GraphSnapshotBuilder, GraphSnapshotGcStats,
     GraphSnapshotManifest, GraphSnapshotMetadata, GraphSnapshotReader, IndexKind,

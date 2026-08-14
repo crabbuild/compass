@@ -13,7 +13,19 @@
   Extend universal evidence with typed override roles and relationships, and
   move XAML code-behind lookup onto the same exact C# ownership facts. Keep
   sourceless external import identities scoped to their exact wiring sites so
-  imports in different files cannot merge their provenance.
+  imports in different files cannot merge their provenance. Recover malformed
+  zero-width parser evidence without dropping whole files; resolve C# bases
+  and typed receivers through namespace imports, interfaces, constrained
+  generics, fields, properties, and inherited members without crossing
+  languages. Extend Minimal API coverage to bounded multiline lambdas and
+  `MapMethods`, and keep reviewed Kestrel request-processing and middleware
+  anchors ahead of generic role-name matches in natural query ranking. Natural
+  search now removes question stop words and canonicalizes inflections before
+  bounded recall, while persistent discovery caps speculative accelerator
+  hydration before general recall. Since these contracts are still
+  pre-compatibility, hard-reset active extraction, cache, publication, store
+  index, query index/ranker, overview, qualification, and semantic-diff
+  identities to v1 instead of carrying forward provisional version numbers.
 
 - Improve source navigation and canvas space in exported graph workbenches.
   VS Code continues to open and select local source ranges, while standalone

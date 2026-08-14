@@ -47,21 +47,20 @@ it.
 ## Typed code-query storage selection
 
 The typed `search`, `callers`, `callees`, `impact`, `explore`, and `node`
-commands open through `compass_query::open`. The default selector always uses
-the permanent `graph.json` engine and does not open an adjacent database. A
-store selected with `--engine store` must have a matching `store.ref`, which is
+commands open through `compass_query::open`. The default selector prefers a
+published persistent store and its matching `store.ref`, which is
 checked against store identity, snapshot ID, manifest digest, and graph digest
 before query state is created. `--engine json` also uses the compatible JSON
 engine without opening the database, while `--engine store`
 requires a readable, referenced store and reports corruption or absence
 explicitly. The query index remains disposable and keyed by canonical snapshot
-bytes for the JSON engine. Its current `compass-code-index/4` FTS tokenizer
+bytes for the JSON engine. Its current `compass-code-index/1` FTS tokenizer
 uses the shared `compass.search-term/1` analyzer, which applies Unicode case
 normalization and combining-mark removal while preserving underscore tokens.
 Store queries use immutable snapshot indexes instead of this disposable cache.
 The corresponding immutable term-posting layout is
-`compass.store.graph-index/3`; a v2 snapshot is rejected and rebuilt rather
-than being reinterpreted with the new analyzer.
+`compass.store.graph-index/1`. Unknown layouts are rejected rather than being
+reinterpreted with the current analyzer.
 
 Search candidate truncation is observable and therefore backend-neutral. Both
 engines select matching candidates in canonical node-ID order, apply the bound,
@@ -88,15 +87,15 @@ Bounded typo variants are generated only when the higher-confidence recall
 channels produce too few candidates. Diacritic normalization is attempted when
 it changes the term, then adjacent transpositions are tried before deletions so
 the fixed three-variant budget prioritizes common spelling mistakes. Fuzzy
-candidates retain their explicit source penalty in `query-ranker/2`.
-`query-ranker/2` is now the unconditional typed-search ranker. The former
-runtime selection and v1 fallback have been removed, so equivalent inputs do
+candidates retain their explicit source penalty in `query-ranker/1`.
+`query-ranker/1` is the unconditional typed-search ranker. Runtime profile
+selection has been removed, so equivalent inputs do
 not depend on process environment. The ranker combines lexical coverage,
 candidate provenance, evidence confidence, semantic node kind, and bounded
 ambiguity penalties. Production source receives a deterministic advantage over
 otherwise equal generated/test declarations. A frozen v1 implementation exists
-only in unit tests to prove the reviewed production-versus-generated case is a
-strict v2 improvement; it is not a runtime fallback.
+only in unit tests to prove the reviewed production-versus-generated case; it
+is not a runtime fallback.
 
 Natural behavior ranking treats source-backed functions, methods, and
 constructors as operation roots alongside role-shaped types. A compact

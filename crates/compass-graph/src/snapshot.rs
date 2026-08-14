@@ -30,14 +30,14 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
-pub const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
+pub const GRAPH_SNAPSHOT_LAYOUT_V1: &str = "compass.store.graph-index/1";
 pub const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
 pub const GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1: &str = "canonical-json-v1";
 pub const DISCOVERY_SCOPE_INDEX_CAPABILITY_V1: &str = "compass.discovery-scope-index/1";
 pub const IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1: &str = "__compass_cap_identifier_subwords_v1__";
 pub const OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_operation_role_terms_v1__";
 pub const DECLARATION_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_declaration_terms_v1__";
-pub const RELATIONSHIP_TERM_INDEX_CAPABILITY_V2: &str = "__compass_cap_relationship_terms_v2__";
+pub const RELATIONSHIP_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_relationship_terms_v1__";
 pub const GRAPH_SNAPSHOT_OBJECT_PARTITION: &str = "graph-snapshot/objects";
 pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
 pub const GRAPH_SNAPSHOT_ACTIVE_KEY: &str = "active";
@@ -149,9 +149,9 @@ pub struct GraphSnapshotManifest {
 
 impl GraphSnapshotManifest {
     pub fn validate(&self) -> Result<(), SnapshotError> {
-        if self.schema != GRAPH_SNAPSHOT_LAYOUT_V2 {
+        if self.schema != GRAPH_SNAPSHOT_LAYOUT_V1 {
             return Err(SnapshotError::Unsupported(format!(
-                "expected {GRAPH_SNAPSHOT_LAYOUT_V2}, found {}",
+                "expected {GRAPH_SNAPSHOT_LAYOUT_V1}, found {}",
                 self.schema
             )));
         }
@@ -856,7 +856,7 @@ impl GraphSnapshotBuilder {
         graph_bytes: u64,
     ) -> Result<PreparedGraphSnapshot, SnapshotError> {
         let manifest = GraphSnapshotManifest {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
             canonical_encoding: GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1.to_owned(),
             snapshot_id: content.snapshot_id,
             graph_schema: CODE_GRAPH_SCHEMA_V1.to_owned(),
@@ -2333,7 +2333,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
 
     /// Whether this snapshot includes exact direct-caller concept postings.
     pub fn supports_relationship_terms(&self) -> Result<bool, SnapshotError> {
-        let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
+        let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V1;
         let posting_prefix = capability.get(..3).unwrap_or(capability);
         let key = encode_graph_index_key(
             IndexKind::Terms,
@@ -3414,7 +3414,7 @@ fn build_index(
                     &(),
                 )?;
             }
-            let relationship_capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
+            let relationship_capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V1;
             let relationship_prefix = relationship_capability
                 .get(..3)
                 .unwrap_or(relationship_capability);
@@ -3820,7 +3820,7 @@ fn update_index_tree<S: Store + ?Sized>(
             put_tree_object(
                 writer,
                 &TreeObject::Branch {
-                    schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+                    schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
                     index,
                     children: updated_children,
                 },
@@ -3862,7 +3862,7 @@ fn build_index_tree<S: Store + ?Sized>(
     }
     if current.is_empty() && leaves.is_empty() {
         let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
             index,
             entries: Vec::new(),
         };
@@ -3887,7 +3887,7 @@ fn put_leaf_entries<S: Store + ?Sized>(
         .map(|entry| entry.key.clone())
         .ok_or_else(|| SnapshotError::Corrupt("empty leaf".to_owned()))?;
     let object = TreeObject::Leaf {
-        schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+        schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
         index,
         entries,
     };
@@ -3941,7 +3941,7 @@ fn build_branch_levels<S: Store + ?Sized>(
             .map(|child| child.first_key.clone())
             .ok_or_else(|| SnapshotError::Corrupt("empty branch group".to_owned()))?;
         let object = TreeObject::Branch {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
             index,
             children: chunk,
         };
@@ -4309,7 +4309,7 @@ fn validate_tree_header(
     index: IndexKind,
     expected: IndexKind,
 ) -> Result<(), SnapshotError> {
-    if schema != GRAPH_SNAPSHOT_LAYOUT_V2 {
+    if schema != GRAPH_SNAPSHOT_LAYOUT_V1 {
         return Err(SnapshotError::Unsupported(format!(
             "tree object schema {schema} is not supported"
         )));
@@ -4747,7 +4747,7 @@ mod tests {
             IndexKind::Nodes,
             "branch",
             TreeObject::Branch {
-                schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+                schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
                 index: IndexKind::Nodes,
                 children: vec![TreeChild {
                     first_key: vec![0],
@@ -4760,7 +4760,7 @@ mod tests {
                 IndexKind::Nodes,
                 &format!("leaf-{index:02}"),
                 TreeObject::Leaf {
-                    schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+                    schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
                     index: IndexKind::Nodes,
                     entries: vec![TreeEntry {
                         key: vec![u8::try_from(index).unwrap_or_default()],
@@ -5104,7 +5104,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_v2_snapshot_without_scope_capability_remains_readable_but_rejects_scopes()
+    fn snapshot_without_scope_capability_remains_readable_but_rejects_scopes()
     -> Result<(), SnapshotError> {
         let graph = GraphDocument::empty_v1(BuildMetadata {
             builder_version: "legacy-test".to_owned(),
@@ -5165,7 +5165,7 @@ mod tests {
         let mut content = builder.prepare_content(&store, &graph)?;
         let term_postings = build_term_postings(&graph);
         let mut term_entries = build_index(&graph, IndexKind::Terms, Some(&term_postings))?;
-        let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
+        let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V1;
         let prefix = capability.get(..3).unwrap_or(capability);
         term_entries.remove(&encode_graph_index_key(
             IndexKind::Terms,
@@ -5427,7 +5427,7 @@ mod tests {
     #[test]
     fn tree_decoder_accepts_compact_and_legacy_encodings() -> Result<(), SnapshotError> {
         let object = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
             index: IndexKind::Nodes,
             entries: vec![TreeEntry {
                 key: encode_graph_index_key(IndexKind::Nodes, &[b"node-id"])?,
@@ -5439,7 +5439,7 @@ mod tests {
         assert_eq!(decode_tree_object(&encode_json(&object)?)?, object);
 
         let compressible = TreeObject::Leaf {
-            schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+            schema: GRAPH_SNAPSHOT_LAYOUT_V1.to_owned(),
             index: IndexKind::Nodes,
             entries: vec![TreeEntry {
                 key: encode_graph_index_key(IndexKind::Nodes, &[b"compressible"])?,

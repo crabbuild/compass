@@ -125,7 +125,7 @@ public partial class UsersController : ControllerBase, IWorker
         CandidateRelation::Calls,
         CandidateRelation::Constructs,
         CandidateRelation::Annotates,
-        CandidateRelation::Implements,
+        CandidateRelation::Extends,
         CandidateRelation::TypeOf,
         CandidateRelation::Returns,
         CandidateRelation::Owns,
@@ -163,6 +163,37 @@ fn csharp_evidence_is_deterministic_and_parser_recovery_is_explicit() -> Result<
             "parser_error" | "partial_parser_recovery"
         )
     }));
+    Ok(())
+}
+
+#[test]
+fn csharp_missing_tokens_publish_bounded_partial_evidence() -> Result<(), Box<dyn Error>> {
+    for source in [
+        b"namespace Demo; class Broken { void Run(".as_slice(),
+        b"namespace Demo; class Broken :".as_slice(),
+        b"namespace Demo; class Broken { string Value =>".as_slice(),
+        b"namespace Demo; public union Choice(int, string);".as_slice(),
+    ] {
+        let extraction = Engine::default().extract_source(Path::new("Broken.cs"), source)?;
+        assert_eq!(extraction.error, None, "extraction={extraction:#?}");
+        let evidence = extraction
+            .semantic_evidence
+            .as_ref()
+            .ok_or("missing bounded partial C# evidence")?;
+        assert!(!evidence.declarations.is_empty());
+        assert!(evidence.diagnostics.iter().any(|diagnostic| {
+            matches!(
+                diagnostic.code.as_str(),
+                "parser_error" | "partial_parser_recovery"
+            )
+        }));
+        assert!(evidence.diagnostics.iter().all(|diagnostic| {
+            diagnostic.range.as_ref().is_none_or(|range| {
+                range.start_byte < range.end_byte
+                    && usize::try_from(range.end_byte).is_ok_and(|end| end <= source.len())
+            })
+        }));
+    }
     Ok(())
 }
 

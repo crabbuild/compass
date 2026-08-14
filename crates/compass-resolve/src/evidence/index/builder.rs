@@ -2,7 +2,8 @@
 
 use super::super::*;
 use super::{
-    HierarchyIndexes, MemberIndexes, NameIndexes, RustIndexes, TypeScriptIndexes, WildcardIndexes,
+    CSharpBinding, CSharpIndexes, HierarchyIndexes, MemberIndexes, NameIndexes, RustIndexes,
+    TypeScriptIndexes, WildcardIndexes,
 };
 use crate::ResolutionAdmission;
 
@@ -11,6 +12,7 @@ struct LanguagePresence {
     typescript: bool,
     rust: bool,
     go: bool,
+    csharp: bool,
 }
 
 impl LanguagePresence {
@@ -32,6 +34,7 @@ impl LanguagePresence {
             }
             "rust" => self.rust = true,
             "go" => self.go = true,
+            "csharp" => self.csharp = true,
             _ => {}
         }
     }
@@ -243,6 +246,30 @@ impl IndexBuilder<'_> {
         let bindings = FactTable::from_values(bindings)?;
         let candidates = candidates.finish()?;
         let scopes = FactTable::from_values(scopes)?;
+        let mut csharp_bindings_by_source = AHashMap::<String, Vec<CSharpBinding>>::new();
+        if languages.csharp {
+            for binding in bindings
+                .values()
+                .filter(|binding| binding.language == "csharp")
+            {
+                csharp_bindings_by_source
+                    .entry(binding.range.source_file.clone())
+                    .or_default()
+                    .push(CSharpBinding {
+                        kind: binding.kind,
+                        spelling: binding.spelling.clone(),
+                        qualified_target: binding.qualified_target.clone(),
+                    });
+            }
+            for source_bindings in csharp_bindings_by_source.values_mut() {
+                source_bindings.sort_unstable_by(|left, right| {
+                    left.spelling
+                        .cmp(&right.spelling)
+                        .then_with(|| left.qualified_target.cmp(&right.qualified_target))
+                });
+                source_bindings.truncate(candidate_storage_limit(limits.candidates_per_lookup));
+            }
+        }
         profile_internal("universal fact collection", &mut profile_started);
         let rust_source_wildcard_targets = if languages.rust {
             declarations
@@ -995,6 +1022,9 @@ impl IndexBuilder<'_> {
                     impl_associated_trait_names: rust_impl_associated_trait_names,
                     impl_traits: rust_impl_traits,
                     source_wildcard_targets: rust_source_wildcard_targets,
+                },
+                csharp: CSharpIndexes {
+                    bindings_by_source: csharp_bindings_by_source,
                 },
             }),
             project: ProjectContext {

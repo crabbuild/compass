@@ -18,8 +18,8 @@ use compass_model::query_contract::{
     NodeTrailRequest, SearchRequest,
 };
 use compass_query::{
-    EngineSelection, QueryEngineCache, QueryEngineKind, open, open_with_document, open_with_engine,
-    open_with_store, open_with_store_selector,
+    EngineSelection, NaturalQueryRequest, QueryEngineCache, QueryEngineKind, open,
+    open_with_document, open_with_engine, open_with_store, open_with_store_selector,
 };
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use compass_store_redb::RedbStore;
@@ -689,6 +689,118 @@ fn default_query_open_prefers_published_store_and_matches_json()
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(reopened.engine_kind(), QueryEngineKind::Store);
+    Ok(())
+}
+
+#[test]
+fn aspnet_anchor_questions_are_canonicalized_before_json_and_store_recall()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .first()
+        .ok_or("fixture graph has no nodes")?
+        .clone();
+    let make_node = |id: &str, kind: NodeKind, name: &str, qualified_name: &str| {
+        let mut node = template.clone();
+        node.id = id.to_owned();
+        node.kind = kind;
+        node.name = name.to_owned();
+        node.qualified_name = qualified_name.to_owned();
+        node.language = Some("csharp".to_owned());
+        node.framework = None;
+        node
+    };
+    graph.nodes.extend([
+        make_node(
+            "n:aspnet-http-protocol-process-requests",
+            NodeKind::Method,
+            ".ProcessRequests()",
+            "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequests",
+        ),
+        make_node(
+            "n:aspnet-iis-middleware-invoke",
+            NodeKind::Method,
+            ".Invoke()",
+            "Microsoft.AspNetCore.Server.IISIntegration.IISMiddleware::Invoke",
+        ),
+        make_node(
+            "n:http-request-noise",
+            NodeKind::Property,
+            "Http",
+            "Microsoft.AspNetCore.Http.DefaultHttpRequest::Http",
+        ),
+        make_node(
+            "n:middleware-noise",
+            NodeKind::Class,
+            "Middleware",
+            "Microsoft.AspNetCore.Analyzers.MiddlewareAnalysis::Middleware",
+        ),
+        make_node(
+            "n:other-middleware-invoke",
+            NodeKind::Method,
+            ".Invoke()",
+            "Microsoft.AspNetCore.HttpsPolicy.HstsMiddleware::Invoke",
+        ),
+    ]);
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open(&graph_path, None, &directory.path().join("store-cache"))?;
+    assert_eq!(stored.engine_kind(), QueryEngineKind::Store);
+
+    for (question, expected) in [
+        (
+            "how are HTTP requests processed",
+            "n:aspnet-http-protocol-process-requests",
+        ),
+        (
+            "how is middleware invoked",
+            "n:aspnet-iis-middleware-invoke",
+        ),
+    ] {
+        let request = NaturalQueryRequest {
+            question: question.to_owned(),
+            include_heuristic: false,
+            limits: CodeQueryLimits::default(),
+        };
+        for response in [
+            json.query_natural(request.clone())?,
+            stored.query_natural(request)?,
+        ] {
+            assert_eq!(
+                response
+                    .results
+                    .first()
+                    .map(|result| result.node_id.as_str()),
+                Some(expected),
+                "question={question:?}, response={response:#?}"
+            );
+        }
+        for response in [
+            json.discover(discovery_request(question))?,
+            stored.discover(discovery_request(question))?,
+        ] {
+            assert_eq!(
+                response.seeds.first().map(|seed| seed.node_id.as_str()),
+                Some(expected),
+                "question={question:?}, response={response:#?}"
+            );
+            if question == "how is middleware invoked" {
+                assert!(response.seeds[0].ambiguous, "response={response:#?}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1386,7 +1498,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
 }
 
 #[test]
-fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
+fn provisional_json_index_is_rebuilt_to_v1() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -1409,7 +1521,7 @@ fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
         connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
             row.get(0)
         })?;
-    assert_eq!(format, "compass-code-index/7");
+    assert_eq!(format, "compass-code-index/1");
     Ok(())
 }
 

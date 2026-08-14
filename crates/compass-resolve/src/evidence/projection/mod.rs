@@ -267,10 +267,26 @@ impl UniversalResolutionIndex {
                     evidence,
                 } => {
                     let target = self.facts.declarations.get(&declaration_id)?;
+                    let candidate = self.facts.candidates.at(pending.candidate_slot)?;
+                    let source = self
+                        .facts
+                        .declarations
+                        .get(&candidate.source_declaration_id)?;
+                    let relation_override = pending.relation_override.or_else(|| {
+                        (candidate.language == "csharp"
+                            && candidate.relation == CandidateRelation::Extends
+                            && matches!(
+                                candidate.constraints.hierarchy.as_ref(),
+                                Some(HierarchyConstraint::DirectBase { .. })
+                            )
+                            && source.kind != "interface"
+                            && target.kind == "interface")
+                            .then_some(CandidateRelation::Implements)
+                    });
                     Some(PreparedTarget {
                         candidate_slot: pending.candidate_slot,
                         candidate_id_override: pending.candidate_id_override,
-                        relation_override: pending.relation_override,
+                        relation_override,
                         target: graph_ids[&target.id].clone(),
                         rule: evidence.rule,
                         target_kind: Some(target.kind.clone()),
@@ -354,9 +370,13 @@ impl UniversalResolutionIndex {
             let Some(original_candidate) = self.facts.candidates.at(prepared.candidate_slot) else {
                 continue;
             };
-            let overridden_candidate = prepared.candidate_id_override.as_ref().map(|id| {
+            let overridden_candidate = (prepared.candidate_id_override.is_some()
+                || prepared.relation_override.is_some())
+            .then(|| {
                 let mut candidate = original_candidate.clone();
-                candidate.id.clone_from(id);
+                if let Some(id) = prepared.candidate_id_override.as_ref() {
+                    candidate.id.clone_from(id);
+                }
                 if let Some(relation) = prepared.relation_override {
                     candidate.relation = relation;
                 }
@@ -434,9 +454,13 @@ impl UniversalResolutionIndex {
                         target_site,
                     )| {
                         let original_candidate = self.facts.candidates.at(candidate_slot)?;
-                        let overridden_candidate = candidate_id_override.map(|id| {
+                        let overridden_candidate = (candidate_id_override.is_some()
+                            || relation_override.is_some())
+                        .then(|| {
                             let mut candidate = original_candidate.clone();
-                            candidate.id = id;
+                            if let Some(id) = candidate_id_override {
+                                candidate.id = id;
+                            }
                             if let Some(relation) = relation_override {
                                 candidate.relation = relation;
                             }

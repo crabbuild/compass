@@ -45,6 +45,21 @@ cache payloads remain Compass contracts: do not copy `graphify-out/cache/` or
 `graphify-out/manifest.json` into `compass-out/`. Compass rebuilds them from
 source while retaining its own internal snapshot and store protocols.
 
+### Rebuild provisional Compass artifacts after the v1 identity reset
+
+Compass currently makes no backward-compatibility promise for pre-release
+internal artifacts. Extraction, cache, publication, store-index, query-index
+and ranker, overview, qualification, and semantic-diff identities have been
+reset to v1. Artifacts carrying provisional higher version numbers are not
+migrated. Run a forced update with the current binary to publish one coherent
+v1 artifact set:
+
+```bash
+compass update . --force
+```
+
+Disposable query indexes rebuild automatically on their next use.
+
 ## Update natural-query automation
 
 Plain `compass query "<question>"` now returns structured discovery text by
