@@ -282,6 +282,9 @@ impl ResolutionDb<'_> {
         else {
             return StageOutcome::Continue;
         };
+        if is_language_builtin_qualified_target(context.language, &qualified_name) {
+            return StageOutcome::Decided(ResolutionDecision::Unresolved);
+        }
         StageOutcome::Decided(ResolutionDecision::QualifiedExternal {
             qualified_name,
             evidence: ResolutionEvidence {

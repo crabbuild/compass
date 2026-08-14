@@ -211,8 +211,11 @@ A god node has unusually high degree. It may be:
 - a noisy or overly broad extraction target.
 
 Degree identifies connectivity, not quality or business importance. Compass
-does not publish calls to known, unshadowed language globals and filters
-additional common built-in noise in reports, but interpretation still matters.
+does not publish calls to known, unshadowed JavaScript/TypeScript globals,
+Python built-ins, Go predeclared identifiers, Rust prelude symbols, Java
+`java.lang` types, or Swift standard-library/Foundation globals. Source and
+explicit import resolution take precedence over this filter. Reports also
+filter additional common built-in noise, but interpretation still matters.
 
 ## Stage 5: atomic publication
 

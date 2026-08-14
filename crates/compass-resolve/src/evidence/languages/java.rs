@@ -3,6 +3,34 @@
 use super::super::*;
 
 impl ResolutionDb<'_> {
+    pub(in crate::evidence) fn resolve_java_same_package_builtin_collision(
+        &self,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        let module = candidate.constraints.module_or_package.as_deref()?;
+        if module == "java.lang" {
+            return None;
+        }
+        let builtin = candidate
+            .constraints
+            .qualified_name
+            .as_deref()?
+            .strip_prefix("java.lang.")?;
+        let builtin_type = builtin.split("::").next()?;
+        if !compass_languages::is_language_builtin_global("java", builtin_type) {
+            return None;
+        }
+        let same_package = format!("{module}.{builtin}");
+        self.unique_decision(
+            self.indexes
+                .names
+                .by_qualified
+                .get(&(candidate.language.clone(), same_package)),
+            candidate,
+            ResolutionRule::UniqueModuleOrPackage,
+        )
+    }
+
     pub(in crate::evidence) fn unique_java_applicable_overload<'a>(
         &self,
         overloads: &[&'a DeclarationFact],

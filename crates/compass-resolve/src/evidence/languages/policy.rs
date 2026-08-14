@@ -54,7 +54,8 @@ impl LanguagePolicyKind {
                     candidate,
                 ))
             }
-            Self::Java | Self::Generic => None,
+            Self::Java => db.resolve_java_same_package_builtin_collision(candidate),
+            Self::Generic => None,
         }
     }
 

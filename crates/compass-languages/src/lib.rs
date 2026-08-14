@@ -50,7 +50,7 @@ pub use adapters::{
     AdapterProfile, AdapterRegistry, AdapterRegistryError, UniversalAdapterProfile,
 };
 #[doc(hidden)]
-pub use builtins::is_language_builtin_global;
+pub use builtins::{is_language_builtin_global, is_language_builtin_qualified_target};
 pub use evidence::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,

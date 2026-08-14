@@ -3282,7 +3282,7 @@ impl<'source> DirectAdapterState<'source> {
         self.imported_target_for_occurrence(owner, spelling, use_start, true)
             .cloned()
             .or_else(|| self.local_target_for(owner, spelling).cloned())
-            .or_else(|| java_lang_type(spelling).map(str::to_owned))
+            .or_else(|| java_lang_type(spelling))
             .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
     }
 
@@ -8257,28 +8257,8 @@ fn java_primitive_type(name: &str) -> bool {
     )
 }
 
-fn java_lang_type(name: &str) -> Option<&'static str> {
-    match name {
-        "String" => Some("java.lang.String"),
-        "Object" => Some("java.lang.Object"),
-        "Class" => Some("java.lang.Class"),
-        "Integer" => Some("java.lang.Integer"),
-        "Long" => Some("java.lang.Long"),
-        "Double" => Some("java.lang.Double"),
-        "Float" => Some("java.lang.Float"),
-        "Boolean" => Some("java.lang.Boolean"),
-        "Byte" => Some("java.lang.Byte"),
-        "Short" => Some("java.lang.Short"),
-        "Character" => Some("java.lang.Character"),
-        "Number" => Some("java.lang.Number"),
-        "Appendable" => Some("java.lang.Appendable"),
-        "Throwable" => Some("java.lang.Throwable"),
-        "Exception" => Some("java.lang.Exception"),
-        "RuntimeException" => Some("java.lang.RuntimeException"),
-        "Enum" => Some("java.lang.Enum"),
-        "Record" => Some("java.lang.Record"),
-        _ => None,
-    }
+fn java_lang_type(name: &str) -> Option<String> {
+    crate::builtins::is_language_builtin_global("java", name).then(|| format!("java.lang.{name}"))
 }
 
 fn rust_container_kind(kind: &str) -> Option<&'static str> {
@@ -9096,40 +9076,7 @@ fn rust_primitive_type(raw: &str) -> bool {
 }
 
 fn rust_prelude_symbol(raw: &str) -> bool {
-    matches!(
-        raw,
-        "Box"
-            | "Clone"
-            | "Copy"
-            | "Default"
-            | "DoubleEndedIterator"
-            | "Drop"
-            | "Eq"
-            | "Err"
-            | "ExactSizeIterator"
-            | "Extend"
-            | "Fn"
-            | "FnMut"
-            | "FnOnce"
-            | "From"
-            | "Into"
-            | "Iterator"
-            | "None"
-            | "Ok"
-            | "Option"
-            | "Ord"
-            | "PartialEq"
-            | "PartialOrd"
-            | "Result"
-            | "Send"
-            | "Sized"
-            | "Some"
-            | "String"
-            | "Sync"
-            | "ToOwned"
-            | "ToString"
-            | "Vec"
-    )
+    crate::builtins::is_language_builtin_global("rust", raw)
 }
 
 fn rust_deferred_owner(raw: &str) -> bool {
