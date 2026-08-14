@@ -192,6 +192,19 @@ Operators can set `COMPASS_MAX_GRAPH_BYTES` to an explicit byte count or
 `<N>MB`/`<N>GB`; raising it also raises the memory exposure of JSON decoding
 and indexing.
 
+That whole-JSON reader cap is separate from the current SQLite graph-index
+snapshot used by `--store sqlite`. The graph-index has no aggregate canonical
+payload or record-count limit: it publishes content-addressed tree objects of
+at most 256 KiB through write batches of at most 16 MiB, and bounds each point
+or range query independently. Consumers that request a whole-graph export can
+still encounter the materialized-read record budget and should use indexed
+queries for substantially larger repositories.
+
+`compass store status`, `validate`, `backup`, and `restore` also remain on the
+large-graph path. They stream file digests through fixed-size buffers and
+validate the selected manifest plus every reachable immutable tree object;
+they do not require a `COMPASS_MAX_GRAPH_BYTES` override.
+
 ### Partial publication diagnostics
 
 A successful build can publish a strictly valid partial graph after

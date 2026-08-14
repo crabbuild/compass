@@ -1,11 +1,9 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use compass_files::BuildGuard;
-use compass_graph::{
-    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
-};
-use compass_model::code_graph::GraphDocument;
+use compass_graph::{GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector};
 use compass_store::{
     STORE_FILE_NAME, STORE_REF_FILE_NAME, STORE_SCHEMA_V1, SqliteStore, StoreRef,
     local_sqlite_store_path,
@@ -60,17 +58,15 @@ fn status(args: &[String]) -> Result<Value, String> {
     let graph_path = output.join("graph.json");
     let store_path = local_sqlite_store_path(&graph_path);
     let reference_path = output.join(STORE_REF_FILE_NAME);
-    let graph = if graph_path.is_file() {
-        let bytes = fs::read(&graph_path).map_err(|error| format!("read graph.json: {error}"))?;
-        let document = GraphDocument::load(&graph_path).map_err(|error| error.to_string())?;
-        Some(graph_status(&bytes, &document))
+    let mut graph = if graph_path.is_file() {
+        Some(graph_status(&graph_path)?)
     } else {
         None
     };
 
     let store = if store_path.is_file() {
         match SqliteStore::open_read_only(&store_path) {
-            Ok(store) => match validate_store(&store, graph.as_ref(), &graph_path) {
+            Ok(store) => match validate_store(&store, graph.as_mut(), &graph_path) {
                 Ok((reference, snapshot_id, manifest_digest)) => Some(json!({
                     "present": true,
                     "valid": true,
@@ -142,16 +138,14 @@ fn validate(args: &[String]) -> Result<Value, String> {
             store_path.display()
         ));
     }
-    let graph = if graph_path.is_file() {
-        let bytes = fs::read(&graph_path).map_err(|error| format!("read graph.json: {error}"))?;
-        let document = GraphDocument::load(&graph_path).map_err(|error| error.to_string())?;
-        Some(graph_status(&bytes, &document))
+    let mut graph = if graph_path.is_file() {
+        Some(graph_status(&graph_path)?)
     } else {
         None
     };
     let store = SqliteStore::open_read_only(&store_path).map_err(|error| error.to_string())?;
     let (reference, snapshot_id, manifest_digest) =
-        validate_store(&store, graph.as_ref(), &graph_path)?;
+        validate_store(&store, graph.as_mut(), &graph_path)?;
     let reference_path = output.join(STORE_REF_FILE_NAME);
     if !reference_path.is_file() {
         return Err(format!(
@@ -194,17 +188,15 @@ fn backup(args: &[String]) -> Result<Value, String> {
     let graph_path = output.join("graph.json");
     let store_path = local_sqlite_store_path(&graph_path);
     let reference_path = output.join(STORE_REF_FILE_NAME);
-    let graph_bytes = fs::read(&graph_path).map_err(|error| format!("read graph.json: {error}"))?;
-    let graph = GraphDocument::load(&graph_path).map_err(|error| error.to_string())?;
+    let mut graph_value = graph_status(&graph_path)?;
     let reference_bytes =
         fs::read(&reference_path).map_err(|error| format!("read store.ref: {error}"))?;
     let reference: StoreRef = serde_json::from_slice(&reference_bytes)
         .map_err(|error| format!("decode store.ref: {error}"))?;
     reference.validate().map_err(|error| error.to_string())?;
     let store = SqliteStore::open(&store_path).map_err(|error| error.to_string())?;
-    let graph_value = graph_status(&graph_bytes, &graph);
     let (_, snapshot_id, manifest_digest) =
-        validate_store(&store, Some(&graph_value), &graph_path)?;
+        validate_store(&store, Some(&mut graph_value), &graph_path)?;
     if reference.snapshot_id != snapshot_id || reference.manifest_digest != manifest_digest {
         return Err("store.ref does not match the active snapshot".to_owned());
     }
@@ -223,7 +215,11 @@ fn backup(args: &[String]) -> Result<Value, String> {
             schema: BACKUP_SCHEMA_V1.to_owned(),
             store_schema: STORE_SCHEMA_V1.to_owned(),
             adapter: "sqlite".to_owned(),
-            graph_digest: digest(&graph_bytes),
+            graph_digest: graph_value
+                .get("sha256")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "graph status is missing its digest".to_owned())?
+                .to_owned(),
             store_digest: digest_file(&destination.join(STORE_FILE_NAME))?,
             snapshot_id,
             manifest_digest,
@@ -282,20 +278,14 @@ fn restore(args: &[String]) -> Result<Value, String> {
         .store_reference
         .validate()
         .map_err(|error| error.to_string())?;
-    let graph_bytes = fs::read(source.join("graph.json"))
-        .map_err(|error| format!("read backup graph.json: {error}"))?;
-    if digest(&graph_bytes) != manifest.graph_digest {
+    let graph_path = source.join("graph.json");
+    let mut graph_value = graph_status(&graph_path)?;
+    if graph_value.get("sha256").and_then(Value::as_str) != Some(&manifest.graph_digest) {
         return Err("backup graph digest does not match manifest".to_owned());
     }
-    let graph_path = source.join("graph.json");
-    let graph = GraphDocument::load(&graph_path).map_err(|error| error.to_string())?;
     let backup_store = source.join(STORE_FILE_NAME);
     let store = SqliteStore::open_read_only(&backup_store).map_err(|error| error.to_string())?;
-    validate_store(
-        &store,
-        Some(&graph_status(&graph_bytes, &graph)),
-        &graph_path,
-    )?;
+    validate_store(&store, Some(&mut graph_value), &graph_path)?;
     if digest_file(&backup_store)? != manifest.store_digest {
         return Err("backup store digest does not match manifest".to_owned());
     }
@@ -313,7 +303,7 @@ fn restore(args: &[String]) -> Result<Value, String> {
     let result = (|| {
         SqliteStore::restore_from(&backup_store, destination.join(STORE_FILE_NAME))
             .map_err(|error| error.to_string())?;
-        fs::write(destination.join("graph.json"), &graph_bytes)
+        fs::copy(&graph_path, destination.join("graph.json"))
             .map_err(|error| format!("restore graph.json: {error}"))?;
         fs::copy(
             source.join(STORE_REF_FILE_NAME),
@@ -337,7 +327,7 @@ fn restore(args: &[String]) -> Result<Value, String> {
 
 fn validate_store(
     store: &SqliteStore,
-    graph: Option<&Value>,
+    graph: Option<&mut Value>,
     graph_path: &Path,
 ) -> Result<(StoreRef, String, String), String> {
     let reference_path = graph_path
@@ -360,16 +350,26 @@ fn validate_store(
     )
     .map_err(|error| error.to_string())?;
     let manifest = reader.manifest();
-    let exported = reader
-        .export_json_bytes()
+    reader
+        .validate_integrity()
         .map_err(|error| error.to_string())?;
     if let Some(graph) = graph {
-        let graph_bytes =
-            fs::read(graph_path).map_err(|error| format!("read graph.json: {error}"))?;
-        let expected = graph_bytes_from_status(graph, &graph_bytes)?;
-        if exported != expected {
-            return Err("store export is not byte-identical to graph.json".to_owned());
+        let graph_bytes = graph
+            .get("bytes")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| "graph status is missing its byte count".to_owned())?;
+        let graph_digest = graph
+            .get("sha256")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "graph status is missing its digest".to_owned())?;
+        if graph_bytes != manifest.graph_bytes || graph_digest != manifest.graph_digest {
+            return Err(format!(
+                "store manifest does not match {}",
+                graph_path.display()
+            ));
         }
+        graph["nodes"] = json!(manifest.node_count);
+        graph["edges"] = json!(manifest.edge_count);
     }
     let actual = store
         .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
@@ -381,27 +381,15 @@ fn validate_store(
     Ok((reference, manifest.snapshot_id.clone(), manifest_digest))
 }
 
-fn graph_status(bytes: &[u8], graph: &GraphDocument) -> Value {
-    json!({
+fn graph_status(path: &Path) -> Result<Value, String> {
+    let bytes = fs::metadata(path)
+        .map_err(|error| format!("inspect {}: {error}", path.display()))?
+        .len();
+    Ok(json!({
         "present": true,
-        "bytes": bytes.len(),
-        "sha256": digest(bytes),
-        "nodes": graph.nodes.len(),
-        "edges": graph.links.len(),
-    })
-}
-
-fn graph_bytes_from_status(graph: &Value, bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let expected = graph
-        .get("sha256")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "graph status is missing its digest".to_owned())?;
-    if expected != digest(bytes) {
-        return Err("graph status digest changed during validation".to_owned());
-    }
-    let document = serde_json::from_slice::<GraphDocument>(bytes)
-        .map_err(|error| format!("decode graph.json: {error}"))?;
-    canonical_graph_json(&document).map_err(|error| error.to_string())
+        "bytes": bytes,
+        "sha256": digest_file(path)?,
+    }))
 }
 
 fn output_root(args: &[String]) -> Result<PathBuf, String> {
@@ -460,14 +448,21 @@ fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     })
 }
 
-fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
-}
-
 fn digest_file(path: &Path) -> Result<String, String> {
-    Ok(digest(&fs::read(path).map_err(|error| {
-        format!("read {}: {error}", path.display())
-    })?))
+    let mut reader =
+        File::open(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn render_text(value: &Value) -> String {

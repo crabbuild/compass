@@ -19,9 +19,9 @@ use compass_model::code_graph::{
 };
 use compass_model::validate_code_graph;
 use compass_store::{
-    ImmutableWrite, Key, MAX_GRAPH_BYTES, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS,
-    MAX_KEY_SEGMENTS, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey,
-    Store, StoreError, WriteCondition, decode_key_segments, encode_key_segments,
+    ImmutableWrite, Key, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS, MAX_KEY_SEGMENTS,
+    MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
+    WriteCondition, decode_key_segments, encode_key_segments,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -43,6 +43,12 @@ pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
 pub const GRAPH_SNAPSHOT_ACTIVE_KEY: &str = "active";
 pub const GRAPH_SNAPSHOT_MAX_DEPTH: usize = 64;
 pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
+/// Maximum records materialized by one snapshot read/export request.
+///
+/// This is deliberately not a limit on the logical graph stored in the
+/// content-addressed tree. Point and range queries remain independently
+/// bounded even when a snapshot contains more records than one materialized
+/// response may return.
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
@@ -169,17 +175,10 @@ impl GraphSnapshotManifest {
                 SnapshotError::Corrupt(format!("{name} is not a SHA-256 digest: {error}"))
             })?;
         }
-        if self.graph_bytes == 0 || self.graph_bytes > MAX_GRAPH_BYTES as u64 {
-            return Err(SnapshotError::Corrupt(format!(
-                "graph byte count exceeds the {MAX_GRAPH_BYTES}-byte limit"
-            )));
-        }
-        if self.node_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
-            || self.edge_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
-        {
-            return Err(SnapshotError::Limit(format!(
-                "graph record count exceeds the {GRAPH_SNAPSHOT_MAX_ITEMS}-item snapshot limit"
-            )));
+        if self.graph_bytes == 0 {
+            return Err(SnapshotError::Corrupt(
+                "graph byte count must be nonzero".to_owned(),
+            ));
         }
         if self.roots.len() != IndexKind::ALL.len() {
             return Err(SnapshotError::Corrupt(format!(
@@ -211,6 +210,27 @@ impl GraphSnapshotManifest {
             return Err(SnapshotError::Corrupt(
                 "manifest contains duplicate or missing index roots".to_owned(),
             ));
+        }
+        for (index, expected) in [
+            (IndexKind::Nodes, self.node_count),
+            (IndexKind::Edges, self.edge_count),
+            (IndexKind::Outgoing, self.edge_count),
+            (IndexKind::Incoming, self.edge_count),
+        ] {
+            let actual = self
+                .roots
+                .iter()
+                .find(|root| root.index == index)
+                .map(|root| root.entry_count)
+                .ok_or_else(|| {
+                    SnapshotError::Corrupt(format!("{} root is missing", index.as_str()))
+                })?;
+            if actual != expected {
+                return Err(SnapshotError::Corrupt(format!(
+                    "{} root count {actual} does not match manifest count {expected}",
+                    index.as_str()
+                )));
+            }
         }
         Ok(())
     }
@@ -1016,10 +1036,7 @@ fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
     validate_records: bool,
     writer: &mut W,
 ) -> io::Result<bool> {
-    if previous_bytes.is_empty()
-        || previous_bytes.len() > MAX_GRAPH_BYTES
-        || previous_bytes.len() > GRAPH_JSON_DELTA_MAX_SOURCE_BYTES
-    {
+    if previous_bytes.is_empty() || previous_bytes.len() > GRAPH_JSON_DELTA_MAX_SOURCE_BYTES {
         return Ok(false);
     }
     let Some(nodes_range) = top_level_member_range(previous_bytes, "nodes") else {
@@ -1763,6 +1780,29 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             multigraph: record.multigraph,
             graph,
         })
+    }
+
+    /// Verify every independently bounded immutable object reachable from the
+    /// selected manifest without materializing the graph.
+    ///
+    /// The traversal validates content addresses, object schemas, index keys,
+    /// branch separators, global key ordering, tree depth, and root entry
+    /// counts. Memory remains bounded by the decoded-object cache and one
+    /// branch path even when the logical graph exceeds whole-document reader
+    /// budgets.
+    pub fn validate_integrity(&self) -> Result<(), SnapshotError> {
+        for root in &self.manifest.roots {
+            let integrity = validate_tree_integrity(self, root.index, &root.digest, 0)?;
+            if integrity.entries != root.entry_count {
+                return Err(SnapshotError::Corrupt(format!(
+                    "{} tree contains {} entries but its root declares {}",
+                    root.index.as_str(),
+                    integrity.entries,
+                    root.entry_count
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Read graph-level metadata without materializing file, coverage, or
@@ -2845,6 +2885,74 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     }
 }
 
+struct TreeIntegrity {
+    entries: u64,
+    first_key: Option<Vec<u8>>,
+    last_key: Option<Vec<u8>>,
+}
+
+fn validate_tree_integrity<S: Store + ?Sized>(
+    reader: &GraphSnapshotReader<'_, S>,
+    index: IndexKind,
+    digest: &str,
+    depth: usize,
+) -> Result<TreeIntegrity, SnapshotError> {
+    if depth >= GRAPH_SNAPSHOT_MAX_DEPTH {
+        return Err(SnapshotError::Limit(
+            "tree integrity validation exceeded the depth limit".to_owned(),
+        ));
+    }
+    let object = reader.load_tree_object_cached(index, digest)?;
+    match object.as_ref() {
+        TreeObject::Leaf { entries, .. } => Ok(TreeIntegrity {
+            entries: u64::try_from(entries.len()).map_err(|_| {
+                SnapshotError::Limit("tree leaf entry count does not fit u64".to_owned())
+            })?,
+            first_key: entries.first().map(|entry| entry.key.clone()),
+            last_key: entries.last().map(|entry| entry.key.clone()),
+        }),
+        TreeObject::Branch { children, .. } => {
+            let mut entry_count = 0_u64;
+            let mut first_key = None;
+            let mut last_key: Option<Vec<u8>> = None;
+            for child in children {
+                let child_integrity =
+                    validate_tree_integrity(reader, index, &child.digest, depth.saturating_add(1))?;
+                let child_first = child_integrity.first_key.ok_or_else(|| {
+                    SnapshotError::Corrupt("tree branch references an empty child".to_owned())
+                })?;
+                if child.first_key != child_first {
+                    return Err(SnapshotError::Corrupt(format!(
+                        "{} tree branch separator does not match its child",
+                        index.as_str()
+                    )));
+                }
+                if last_key
+                    .as_ref()
+                    .is_some_and(|previous| previous >= &child_first)
+                {
+                    return Err(SnapshotError::Corrupt(format!(
+                        "{} tree child ranges are not strictly ordered",
+                        index.as_str()
+                    )));
+                }
+                first_key.get_or_insert_with(|| child_first.clone());
+                last_key = child_integrity.last_key;
+                entry_count = entry_count
+                    .checked_add(child_integrity.entries)
+                    .ok_or_else(|| {
+                        SnapshotError::Limit("tree entry count exceeds u64".to_owned())
+                    })?;
+            }
+            Ok(TreeIntegrity {
+                entries: entry_count,
+                first_key,
+                last_key,
+            })
+        }
+    }
+}
+
 fn index_entry_id(entry: &TreeEntry, label: &str) -> Result<String, SnapshotError> {
     let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
     let id = segments
@@ -2930,10 +3038,10 @@ fn digest_canonical_graph(
     graph: &GraphDocument,
     clear_generation: bool,
 ) -> Result<(String, u64), SnapshotError> {
-    digest_json(
-        &canonical_graph_document_with_generation(graph, clear_generation),
-        MAX_GRAPH_BYTES,
-    )
+    digest_json(&canonical_graph_document_with_generation(
+        graph,
+        clear_generation,
+    ))
 }
 
 fn canonical_graph_document_with_generation(
@@ -4270,31 +4378,28 @@ fn encode_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SnapshotError> {
 
 struct DigestWriter {
     hasher: Sha256,
-    bytes: usize,
-    maximum: usize,
-    exceeded: bool,
+    bytes: u64,
+    overflowed: bool,
 }
 
 impl DigestWriter {
-    fn new(maximum: usize) -> Self {
+    fn new() -> Self {
         Self {
             hasher: Sha256::new(),
             bytes: 0,
-            maximum,
-            exceeded: false,
+            overflowed: false,
         }
     }
 }
 
 impl Write for DigestWriter {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        let next = self.bytes.saturating_add(buffer.len());
-        if next > self.maximum {
-            self.exceeded = true;
-            return Err(std::io::Error::other(
-                "serialized value exceeds its byte limit",
-            ));
-        }
+        let buffer_len = u64::try_from(buffer.len())
+            .map_err(|_| std::io::Error::other("serialized byte count does not fit u64"))?;
+        let Some(next) = self.bytes.checked_add(buffer_len) else {
+            self.overflowed = true;
+            return Err(std::io::Error::other("serialized byte count exceeds u64"));
+        };
         self.hasher.update(buffer);
         self.bytes = next;
         Ok(buffer.len())
@@ -4305,13 +4410,13 @@ impl Write for DigestWriter {
     }
 }
 
-fn digest_json<T: Serialize>(value: &T, maximum: usize) -> Result<(String, u64), SnapshotError> {
-    let mut writer = DigestWriter::new(maximum);
+fn digest_json<T: Serialize>(value: &T) -> Result<(String, u64), SnapshotError> {
+    let mut writer = DigestWriter::new();
     if let Err(error) = serde_json::to_writer(&mut writer, value) {
-        if writer.exceeded {
-            return Err(SnapshotError::Limit(format!(
-                "canonical graph exceeds the {maximum}-byte limit"
-            )));
+        if writer.overflowed {
+            return Err(SnapshotError::Limit(
+                "canonical graph byte count exceeds u64".to_owned(),
+            ));
         }
         return Err(SnapshotError::Encode(error.to_string()));
     }
@@ -4320,8 +4425,7 @@ fn digest_json<T: Serialize>(value: &T, maximum: usize) -> Result<(String, u64),
             "canonical graph serialization is empty".to_owned(),
         ));
     }
-    let bytes = writer.bytes as u64;
-    Ok((format!("{:x}", writer.hasher.finalize()), bytes))
+    Ok((format!("{:x}", writer.hasher.finalize()), writer.bytes))
 }
 
 fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
@@ -4480,6 +4584,20 @@ mod tests {
     };
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn canonical_digest_counter_has_no_two_gibibyte_cutoff() -> Result<(), std::io::Error> {
+        let mut writer = DigestWriter::new();
+        writer.bytes = (2_u64 * 1024 * 1024 * 1024) + 1;
+
+        writer.write_all(b"x")?;
+
+        assert_eq!(writer.bytes, (2_u64 * 1024 * 1024 * 1024) + 2);
+        writer.bytes = u64::MAX;
+        assert!(writer.write_all(b"x").is_err());
+        assert!(writer.overflowed);
+        Ok(())
+    }
 
     #[derive(Default)]
     struct CountingStore {
