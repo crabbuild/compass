@@ -355,11 +355,16 @@ There is no profile-mismatch override: unlike profiles do not produce a
 semantic or exact report. Compass checks graph-engine compatibility explicitly
 before comparing the complete build profiles.
 
-`compass review` handles an older preferred realization from a compatible
-`0.3.x` patch release automatically when it must materialize the other side.
-It preserves user-selected profile options, rebuilds a current-version pair,
-and leaves the older immutable realization intact. A profile from a newer
-binary or another release line remains an explicit compatibility error.
+`compass review` handles a preferred realization or repository history profile
+with noncurrent engine fields automatically when its persisted user-option
+shape remains reconstructable. This includes comparisons where both revisions
+already have preferred realizations. Compass replaces engine-owned fields with
+the running contract, validates the complete reconstructed profile, and rebuilds
+a current pair only when both sides retain identical user-selected options. It
+does not parse, order, or allowlist the persisted Compass release number, and it
+leaves historical realizations intact. A malformed or unsupported profile shape
+or genuinely different user options remains an explicit compatibility error.
+Profile-shape changes use a hard cutover instead of release-specific migrations.
 
 ## 7. Export a realization
 

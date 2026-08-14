@@ -144,10 +144,38 @@ pub(crate) fn resolve_or_materialize(
     rebuild: bool,
     replace_corrupt: bool,
 ) -> Result<(HistoryStore, PublishedVersion), String> {
+    resolve_or_materialize_inner(repository, commit, options, rebuild, replace_corrupt, false)
+}
+
+fn resolve_or_materialize_matching_profile(
+    repository: &Repository,
+    commit: CommitId,
+    options: &HistoryBuildOptions,
+    rebuild: bool,
+    replace_corrupt: bool,
+) -> Result<(HistoryStore, PublishedVersion), String> {
+    resolve_or_materialize_inner(repository, commit, options, rebuild, replace_corrupt, true)
+}
+
+fn resolve_or_materialize_inner(
+    repository: &Repository,
+    commit: CommitId,
+    options: &HistoryBuildOptions,
+    rebuild: bool,
+    replace_corrupt: bool,
+    require_profile_match: bool,
+) -> Result<(HistoryStore, PublishedVersion), String> {
+    let requested_profile = options.profile();
     let existing = HistoryStore::open_existing(repository).map_err(|error| error.to_string())?;
     if !rebuild && let Some(history) = existing {
         match history.preferred(&commit) {
-            Ok(Some(preferred)) => return Ok((history, preferred)),
+            Ok(Some(preferred))
+                if !require_profile_match
+                    || preferred.version.build_profile == requested_profile =>
+            {
+                return Ok((history, preferred));
+            }
+            Ok(Some(_)) => {}
             Ok(None) => {}
             Err(error) => return Err(error.to_string()),
         }
@@ -160,7 +188,7 @@ pub(crate) fn resolve_or_materialize(
     let queue = HistoryQueue::for_repository(repository).map_err(|error| error.to_string())?;
     let request = JobRequest {
         commit: commit.clone(),
-        profile: options.profile(),
+        profile: requested_profile,
     };
     let job_id = if rebuild {
         queue.enqueue_rebuild(request, replace_corrupt)
@@ -211,7 +239,7 @@ pub(crate) fn resolve_or_materialize(
 fn configured_build_options(repository: &Repository) -> Result<HistoryBuildOptions, String> {
     let config = HistoryConfig::load(repository).map_err(|error| error.to_string())?;
     if let Some(profile) = config.profile {
-        return HistoryBuildOptions::from_compatible_profile(profile)
+        return HistoryBuildOptions::from_rebuild_profile(profile)
             .map_err(|error| error.to_string());
     }
     HistoryBuildOptions::defaults().map_err(|error| error.to_string())
@@ -258,43 +286,94 @@ pub(crate) fn resolve_comparable_pair(
         return Err("the requested fingerprint is not materialized at both commits".to_owned());
     }
     let (history, old, new) = match (old, new) {
-        (Some(old), Some(new)) => (
+        (Some(old), Some(new)) if required_fingerprint.is_some() => (
             existing.ok_or_else(|| "history store disappeared".to_owned())?,
             old,
             new,
         ),
+        (Some(old), Some(new)) => {
+            let old_options =
+                HistoryBuildOptions::from_rebuild_profile(old.version.build_profile.clone())
+                    .map_err(|error| error.to_string())?;
+            let new_options =
+                HistoryBuildOptions::from_rebuild_profile(new.version.build_profile.clone())
+                    .map_err(|error| error.to_string())?;
+            if old_options.profile() == new_options.profile() {
+                let (_, old) = resolve_or_materialize_matching_profile(
+                    repository,
+                    old_commit,
+                    &old_options,
+                    false,
+                    false,
+                )?;
+                let (history, new) = resolve_or_materialize_matching_profile(
+                    repository,
+                    new_commit,
+                    &new_options,
+                    false,
+                    false,
+                )?;
+                (history, old, new)
+            } else {
+                return Err(format!(
+                    "realizations retain different user-selected build options after current-engine reconstruction\n\nOLD {} ({}) profile: {}\nNEW {} ({}) profile: {}\n\nBuild a comparable realization:\n  compass history build {} --profile-from {}",
+                    old.version.git_commit,
+                    old.id,
+                    old.version.profile_digest,
+                    new.version.git_commit,
+                    new.id,
+                    new.version.profile_digest,
+                    new.version.git_commit,
+                    old.version.git_commit,
+                ));
+            }
+        }
         (Some(old), None) => {
             let options =
-                HistoryBuildOptions::from_compatible_profile(old.version.build_profile.clone())
+                HistoryBuildOptions::from_rebuild_profile(old.version.build_profile.clone())
                     .map_err(|error| error.to_string())?;
             let old = if old.version.build_profile == options.profile() {
                 old
             } else {
-                resolve_or_materialize(repository, old_commit, &options, true, false)?.1
+                resolve_or_materialize_matching_profile(
+                    repository, old_commit, &options, true, false,
+                )?
+                .1
             };
-            let (history, new) =
-                resolve_or_materialize(repository, new_commit, &options, false, false)?;
+            let (history, new) = resolve_or_materialize_matching_profile(
+                repository, new_commit, &options, false, false,
+            )?;
             (history, old, new)
         }
         (None, Some(new)) => {
             let options =
-                HistoryBuildOptions::from_compatible_profile(new.version.build_profile.clone())
+                HistoryBuildOptions::from_rebuild_profile(new.version.build_profile.clone())
                     .map_err(|error| error.to_string())?;
             let new = if new.version.build_profile == options.profile() {
                 new
             } else {
-                resolve_or_materialize(repository, new_commit, &options, true, false)?.1
+                resolve_or_materialize_matching_profile(
+                    repository, new_commit, &options, true, false,
+                )?
+                .1
             };
-            let (history, old) =
-                resolve_or_materialize(repository, old_commit, &options, false, false)?;
+            let (history, old) = resolve_or_materialize_matching_profile(
+                repository, old_commit, &options, false, false,
+            )?;
             (history, old, new)
         }
         (None, None) => {
             let options = configured_build_options(repository)?;
-            let (_, old) =
-                resolve_or_materialize(repository, old_commit.clone(), &options, false, false)?;
-            let (history, new) =
-                resolve_or_materialize(repository, new_commit, &options, false, false)?;
+            let (_, old) = resolve_or_materialize_matching_profile(
+                repository,
+                old_commit.clone(),
+                &options,
+                false,
+                false,
+            )?;
+            let (history, new) = resolve_or_materialize_matching_profile(
+                repository, new_commit, &options, false, false,
+            )?;
             (history, old, new)
         }
     };
@@ -1866,7 +1945,7 @@ fn execute_build(
     let parsed = parse_build_command(command, args).map_err(usage)?;
     let commit = repository.resolve(&parsed.revision).map_err(runtime)?;
     let options = if let Some(source) = &parsed.profile_from {
-        HistoryBuildOptions::from_compatible_profile(
+        HistoryBuildOptions::from_rebuild_profile(
             stored_profile(repository, source).map_err(runtime)?,
         )
         .map_err(runtime)?
@@ -1909,7 +1988,7 @@ fn execute_build(
     } else {
         false
     };
-    let (_history, published) = resolve_or_materialize(
+    let (_history, published) = resolve_or_materialize_matching_profile(
         repository,
         commit,
         &options,

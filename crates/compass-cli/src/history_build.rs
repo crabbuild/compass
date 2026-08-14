@@ -109,33 +109,11 @@ impl HistoryBuildOptions {
         })
     }
 
-    pub(crate) fn from_compatible_profile(mut profile: BuildProfile) -> Result<Self, HistoryError> {
-        let persisted = profile.value("compass_version").ok_or_else(|| {
-            HistoryError::InvalidFingerprint(
+    pub(crate) fn from_rebuild_profile(mut profile: BuildProfile) -> Result<Self, HistoryError> {
+        if profile.value("compass_version").is_none() {
+            return Err(HistoryError::InvalidFingerprint(
                 "persisted compass_version is missing from build profile".to_owned(),
-            )
-        })?;
-        if persisted == env!("CARGO_PKG_VERSION") {
-            return Self::from_profile(profile);
-        }
-        let persisted = semver::Version::parse(persisted).map_err(|_| {
-            HistoryError::InvalidFingerprint(
-                "persisted compass_version is not a semantic version".to_owned(),
-            )
-        })?;
-        let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| {
-            HistoryError::InvalidFingerprint(
-                "running compass_version is not a semantic version".to_owned(),
-            )
-        })?;
-        if persisted.major != current.major
-            || persisted.minor != current.minor
-            || persisted >= current
-        {
-            return Err(HistoryError::InvalidFingerprint(format!(
-                "persisted compass_version {persisted} cannot be upgraded by {}",
-                env!("CARGO_PKG_VERSION")
-            )));
+            ));
         }
         let deep = match profile.value("semantic_mode") {
             Some("standard") => false,
@@ -1589,36 +1567,39 @@ mod tests {
     }
 
     #[test]
-    fn compatible_patch_profiles_advance_engine_fields_and_preserve_user_options()
+    fn rebuild_profiles_replace_engine_identity_without_release_comparison()
     -> Result<(), Box<dyn std::error::Error>> {
-        let mut profile = HistoryBuildOptions::defaults()?.profile();
-        let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
-        let mut previous = current.clone();
-        previous.patch = previous
-            .patch
-            .checked_sub(1)
-            .ok_or("patch release fixture")?;
-        profile.insert("compass_version", &previous.to_string())?;
-        profile.insert("pipeline_version", "compass-core/older")?;
-        profile.insert("resolution", "2")?;
+        for persisted_engine in ["historical-engine", "999.0.0", env!("CARGO_PKG_VERSION")] {
+            let mut profile = HistoryBuildOptions::defaults()?.profile();
+            profile.insert("compass_version", persisted_engine)?;
+            profile.insert("pipeline_version", "compass-core/other")?;
+            profile.insert("resolution", "2")?;
 
-        let upgraded = HistoryBuildOptions::from_compatible_profile(profile)?.profile();
+            let rebuilt = HistoryBuildOptions::from_rebuild_profile(profile)?.profile();
 
-        assert_eq!(
-            upgraded.value("compass_version"),
-            Some(env!("CARGO_PKG_VERSION"))
-        );
-        assert_eq!(upgraded.value("pipeline_version"), Some("compass-core/v1"));
-        assert_eq!(upgraded.value("resolution"), Some("2"));
+            assert_eq!(
+                rebuilt.value("compass_version"),
+                Some(env!("CARGO_PKG_VERSION"))
+            );
+            assert_eq!(rebuilt.value("pipeline_version"), Some("compass-core/v1"));
+            assert_eq!(rebuilt.value("resolution"), Some("2"));
+        }
+        Ok(())
+    }
 
-        let mut future_profile = upgraded;
-        let mut future = current;
-        future.patch = future.patch.saturating_add(1);
-        future_profile.insert("compass_version", &future.to_string())?;
-        let error = HistoryBuildOptions::from_compatible_profile(future_profile)
+    #[test]
+    fn rebuild_profiles_hard_fail_unsupported_shapes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut unsupported = HistoryBuildOptions::defaults()?.profile();
+        unsupported.insert("compass_version", "historical-engine")?;
+        unsupported.insert("future_option", "enabled")?;
+        let error = HistoryBuildOptions::from_rebuild_profile(unsupported)
             .err()
-            .ok_or("future profile unexpectedly accepted")?;
-        assert!(error.to_string().contains("cannot be upgraded"));
+            .ok_or("unsupported profile unexpectedly accepted")?;
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported persisted build-profile field")
+        );
         Ok(())
     }
 

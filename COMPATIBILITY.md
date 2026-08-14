@@ -330,11 +330,17 @@ integer rubric is version 1; each deterministic gate has its own rule version.
 Presentation formats and the reusable GitHub Action consume this report and do
 not redefine its semantics.
 
-When only one side of a review has a preferred realization from an older patch
-release in the same supported `0.3.x` line, Compass advances engine-owned
-profile fields and materializes both revisions with the running binary. The
-older realization remains immutable and queryable. Newer profiles and profiles
-from another release line still fail explicitly rather than being downgraded.
+When either side of a review has a preferred realization or repository history
+profile with noncurrent engine fields, Compass replaces every engine-owned
+field with the running contract and then validates the complete reconstructed
+profile before materializing both revisions. The persisted `compass_version`
+is provenance, not a compatibility gate: review does not parse, order, or
+allowlist release numbers. This also applies when both revisions already have
+preferred realizations. Reconciliation proceeds only when their user-selected
+options are identical after reconstruction. Historical realizations remain
+immutable and queryable. Malformed or unsupported profile shapes and different
+user options fail explicitly. When the supported profile shape changes, Compass
+uses a hard cutover rather than accumulating release-specific migrations.
 
 Dependency findings in `compass.semantic_diff.report/1` may now carry the
 optional strict `dependency_topology` object. It records source/target community

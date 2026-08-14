@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Allow `compass review` on `0.3.x` to rebuild comparable realizations from
+  any repository profile or preferred realization whose persisted user-option
+  shape remains reconstructable, including when both compared revisions are
+  already materialized. Rebuilding does not order or allowlist Compass release
+  numbers: it preserves matching user-selected options, replaces engine-owned
+  fingerprint fields, and keeps original historical realizations immutable.
+
 ## 0.3.13 - 2026-08-14
 
 - Make `compass review` recover automatically when one compared revision still
