@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Allow `compass review` on `0.3.x` to rebuild comparable realizations from
+  build profiles persisted by Compass `0.1.10` or later. The upgrade preserves
+  user-selected options, refreshes engine-owned fingerprint fields, and keeps
+  the original historical realization immutable.
+
 ## 0.3.13 - 2026-08-14
 
 - Make `compass review` recover automatically when one compared revision still

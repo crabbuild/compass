@@ -15,6 +15,13 @@ use compass_history::{
     HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
 };
 
+// Compass 0.1.10 is the earliest released build-profile shape qualified for
+// current-option reconstruction. Pin the target minor as well: before 1.0, a
+// future minor must re-evaluate this migration instead of inheriting it.
+const COMPATIBLE_PROFILE_UPGRADE_FLOOR: semver::Version = semver::Version::new(0, 1, 10);
+const COMPATIBLE_PROFILE_TARGET_MAJOR: u64 = 0;
+const COMPATIBLE_PROFILE_TARGET_MINOR: u64 = 3;
+
 #[derive(Clone, Debug)]
 pub(crate) struct HistoryBuildOptions {
     profile: BuildProfile,
@@ -128,10 +135,7 @@ impl HistoryBuildOptions {
                 "running compass_version is not a semantic version".to_owned(),
             )
         })?;
-        if persisted.major != current.major
-            || persisted.minor != current.minor
-            || persisted >= current
-        {
+        if !is_compatible_profile_upgrade(&persisted, &current) {
             return Err(HistoryError::InvalidFingerprint(format!(
                 "persisted compass_version {persisted} cannot be upgraded by {}",
                 env!("CARGO_PKG_VERSION")
@@ -298,6 +302,13 @@ impl HistoryBuildOptions {
             code_only: values.code_only,
         })
     }
+}
+
+fn is_compatible_profile_upgrade(persisted: &semver::Version, current: &semver::Version) -> bool {
+    current.major == COMPATIBLE_PROFILE_TARGET_MAJOR
+        && current.minor == COMPATIBLE_PROFILE_TARGET_MINOR
+        && persisted >= &COMPATIBLE_PROFILE_UPGRADE_FLOOR
+        && persisted < current
 }
 
 fn insert_current_engine_profile(
@@ -1619,6 +1630,34 @@ mod tests {
             .err()
             .ok_or("future profile unexpectedly accepted")?;
         assert!(error.to_string().contains("cannot be upgraded"));
+        Ok(())
+    }
+
+    #[test]
+    fn compatible_0_1_10_profiles_advance_engine_fields_and_preserve_user_options()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut profile = HistoryBuildOptions::defaults()?.profile();
+        profile.insert("compass_version", "0.1.10")?;
+        profile.insert("pipeline_version", "compass-core/older")?;
+        profile.insert("resolution", "2")?;
+
+        let upgraded = HistoryBuildOptions::from_compatible_profile(profile)?.profile();
+
+        assert_eq!(
+            upgraded.value("compass_version"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(upgraded.value("pipeline_version"), Some("compass-core/v1"));
+        assert_eq!(upgraded.value("resolution"), Some("2"));
+
+        let below_floor = semver::Version::new(0, 1, 9);
+        let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
+        assert!(!is_compatible_profile_upgrade(&below_floor, &current));
+        assert!(!is_compatible_profile_upgrade(&current, &current));
+        assert!(!is_compatible_profile_upgrade(
+            &semver::Version::new(1, 0, 0),
+            &current
+        ));
         Ok(())
     }
 

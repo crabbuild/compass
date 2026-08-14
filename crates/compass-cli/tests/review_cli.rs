@@ -48,7 +48,7 @@ fn publish_historical_base(root: &Path, commit: &str) -> Result<(), Box<dyn std:
     let current = history.preferred(&commit)?.ok_or("seeded realization")?;
     let completed = history.artifacts(&current.id)?;
     let mut historical_profile = current.version.build_profile;
-    historical_profile.insert("compass_version", "0.3.9")?;
+    historical_profile.insert("compass_version", "0.1.10")?;
     history.publish(PublishRequest {
         commit: commit.clone(),
         parents: repository.parents(&commit)?,
@@ -142,7 +142,7 @@ fn local_review_writes_round_trippable_exact_report() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn local_review_rebuilds_a_comparable_pair_after_a_compass_patch_upgrade()
+fn local_review_rebuilds_a_comparable_pair_from_compass_0_1_10()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     initialize(directory.path())?;
@@ -182,7 +182,7 @@ fn local_review_rebuilds_a_comparable_pair_after_a_compass_patch_upgrade()
         Some(env!("CARGO_PKG_VERSION"))
     );
     assert!(history.list(Some(&base))?.iter().any(|realization| {
-        realization.version.build_profile.value("compass_version") == Some("0.3.9")
+        realization.version.build_profile.value("compass_version") == Some("0.1.10")
     }));
     Ok(())
 }
