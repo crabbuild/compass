@@ -6,7 +6,7 @@ use compass_history::{
 };
 use compass_pr_intelligence::{GateState, MergeOutcome, PullRequestReport, RiskBand};
 
-const SYNTHETIC_OLDER_COMPASS_VERSION: &str = "0.0.0";
+const SYNTHETIC_ENGINE_IDENTITY: &str = "historical-engine";
 
 fn git(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("git")
@@ -52,7 +52,7 @@ fn publish_historical_base(root: &Path, commit: &str) -> Result<(), Box<dyn std:
     let current = history.preferred(&commit)?.ok_or("seeded realization")?;
     let completed = history.artifacts(&current.id)?;
     let mut historical_profile = current.version.build_profile;
-    historical_profile.insert("compass_version", SYNTHETIC_OLDER_COMPASS_VERSION)?;
+    historical_profile.insert("compass_version", SYNTHETIC_ENGINE_IDENTITY)?;
     history.publish(PublishRequest {
         commit: commit.clone(),
         parents: repository.parents(&commit)?,
@@ -78,7 +78,7 @@ fn persist_historical_repository_profile(root: &Path) -> Result<(), Box<dyn std:
     let mut profile = HistoryConfig::load(&repository)?
         .profile
         .ok_or("enabled profile")?;
-    profile.insert("compass_version", SYNTHETIC_OLDER_COMPASS_VERSION)?;
+    profile.insert("compass_version", SYNTHETIC_ENGINE_IDENTITY)?;
     HistoryConfig::enable(&repository, profile)?;
     Ok(())
 }
@@ -164,7 +164,7 @@ fn local_review_writes_round_trippable_exact_report() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn local_review_rebuilds_a_comparable_pair_from_an_older_profile()
+fn local_review_rebuilds_a_comparable_pair_from_a_noncurrent_profile()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     initialize(directory.path())?;
@@ -205,13 +205,13 @@ fn local_review_rebuilds_a_comparable_pair_from_an_older_profile()
     );
     assert!(history.list(Some(&base))?.iter().any(|realization| {
         realization.version.build_profile.value("compass_version")
-            == Some(SYNTHETIC_OLDER_COMPASS_VERSION)
+            == Some(SYNTHETIC_ENGINE_IDENTITY)
     }));
     Ok(())
 }
 
 #[test]
-fn local_review_upgrades_an_older_persisted_profile_after_a_current_graph_build()
+fn local_review_rebuilds_a_persisted_profile_after_a_current_graph_build()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     initialize(directory.path())?;
@@ -242,7 +242,7 @@ fn local_review_upgrades_an_older_persisted_profile_after_a_current_graph_build(
             .profile
             .and_then(|profile| profile.value("compass_version").map(str::to_owned))
             .as_deref(),
-        Some(SYNTHETIC_OLDER_COMPASS_VERSION)
+        Some(SYNTHETIC_ENGINE_IDENTITY)
     );
 
     let reviewed = run(
@@ -280,9 +280,9 @@ fn local_review_upgrades_an_older_persisted_profile_after_a_current_graph_build(
     Ok(())
 }
 
-#[test]
-fn local_review_reconciles_existing_compatible_realizations()
--> Result<(), Box<dyn std::error::Error>> {
+fn assert_review_reconciles_existing_realizations(
+    noncurrent_head: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     initialize(directory.path())?;
     git(directory.path(), &["checkout", "--quiet", "-b", "feature"])?;
@@ -302,16 +302,20 @@ fn local_review_reconciles_existing_compatible_realizations()
     git(directory.path(), &["commit", "--quiet", "-m", "target"])?;
     let base = git(directory.path(), &["rev-parse", "HEAD"])?;
     publish_historical_base(directory.path(), &base)?;
-    let built = run(
-        directory.path(),
-        &["history", "build", &head, "--code-only"],
-    )?;
-    assert!(
-        built.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&built.stdout),
-        String::from_utf8_lossy(&built.stderr)
-    );
+    if noncurrent_head {
+        publish_historical_base(directory.path(), &head)?;
+    } else {
+        let built = run(
+            directory.path(),
+            &["history", "build", &head, "--code-only"],
+        )?;
+        assert!(
+            built.status.success(),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&built.stdout),
+            String::from_utf8_lossy(&built.stderr)
+        );
+    }
 
     let reviewed = run(
         directory.path(),
@@ -342,6 +346,18 @@ fn local_review_reconciles_existing_compatible_realizations()
         );
     }
     Ok(())
+}
+
+#[test]
+fn local_review_reconciles_existing_different_engine_profiles()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_review_reconciles_existing_realizations(false)
+}
+
+#[test]
+fn local_review_hard_cuts_over_matching_noncurrent_engine_profiles()
+-> Result<(), Box<dyn std::error::Error>> {
+    assert_review_reconciles_existing_realizations(true)
 }
 
 #[test]

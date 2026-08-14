@@ -51,10 +51,29 @@ fn current_history_profile() -> Result<compass_history::BuildProfile, compass_hi
         ("program_analyzer_version", "1"),
         ("enabled_features", "workspace-default"),
         ("direction", "native-source-semantics"),
-        ("semantic_prompt_sha256", "fixture-prompt"),
+        ("cluster_algorithm", "seeded-louvain/v1"),
+        ("cluster_seed", "42"),
+        ("gitignore", "true"),
+        ("code_only", "true"),
+        ("cargo", "false"),
+        ("dedup_llm", "false"),
+        ("semantic_mode", "standard"),
+        ("provider", "none"),
+        ("model", "none"),
+        ("resolution", "1"),
+        ("exclude_hubs", "none"),
+        ("token_budget", "default"),
+        ("provider_endpoint", "none"),
+        ("provider_temperature", "none"),
+        ("provider_max_output_tokens", "none"),
+        ("provider_region", "none"),
     ] {
         profile.insert(key, value)?;
     }
+    profile.insert(
+        "semantic_prompt_sha256",
+        &compass_semantic::extraction_prompt_sha256(false),
+    )?;
     Ok(profile)
 }
 
@@ -1464,35 +1483,6 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
 
     let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
     assert!(String::from_utf8_lossy(&empty.stdout).contains("0 likely breaks"));
-    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
-    let mut incompatible_profile = current_history_profile()?;
-    incompatible_profile.insert("compass_version", "incompatible")?;
-    let incompatible = history.publish(PublishRequest {
-        commit: new_commit,
-        parents: repository.parents(&repository.resolve("HEAD")?)?,
-        profile: incompatible_profile,
-        fingerprint: std::iter::repeat_n('d', 64)
-            .collect::<String>()
-            .parse::<ExtractionFingerprint>()?,
-        artifacts: new_artifacts,
-        completion: CompletionEvidence {
-            extraction_succeeded: true,
-            allow_partial: false,
-            semantic_files_expected: 0,
-            semantic_files_completed: 0,
-            failed_chunks: 0,
-        },
-        make_preferred: true,
-    })?;
-    let head = repository.resolve("HEAD")?;
-    let current = history
-        .preferred(&head)?
-        .ok_or("missing current preferred realization")?;
-    assert!(history.compare_and_set_preferred(&head, Some(&current.id), &incompatible.id)?);
-    drop(history);
-    let mismatch = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
-    assert_eq!(mismatch.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("incompatible graph engines"));
     Ok(())
 }
 
