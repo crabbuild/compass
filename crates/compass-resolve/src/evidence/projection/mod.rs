@@ -45,13 +45,13 @@ impl UniversalResolutionIndex {
         self.materialize_inner(nodes, edges, ResolutionAdmission::Max, false);
     }
 
-    pub(crate) fn materialize_at_inference(
+    pub(crate) fn materialize_relationships_at_inference(
         &self,
         nodes: &mut Vec<NodeRecord>,
         edges: &mut Vec<EdgeRecord>,
         admission: ResolutionAdmission,
     ) {
-        self.materialize_inner(nodes, edges, admission, true);
+        self.materialize_inner_with_declarations(nodes, edges, admission, true, false);
     }
 
     fn materialize_inner(
@@ -61,49 +61,68 @@ impl UniversalResolutionIndex {
         admission: ResolutionAdmission,
         release_resolution_indexes: bool,
     ) {
+        self.materialize_inner_with_declarations(
+            nodes,
+            edges,
+            admission,
+            release_resolution_indexes,
+            true,
+        );
+    }
+
+    fn materialize_inner_with_declarations(
+        &self,
+        nodes: &mut Vec<NodeRecord>,
+        edges: &mut Vec<EdgeRecord>,
+        admission: ResolutionAdmission,
+        release_resolution_indexes: bool,
+        project_declarations: bool,
+    ) {
         let mut profile_started = Instant::now();
-        let overloads = declaration_overloads(self.facts.declarations.values());
         let graph_ids = materialized_declaration_ids(self.facts.declarations.values());
-        let existing_positions = nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.id.clone(), index))
-            .collect::<AHashMap<_, _>>();
-        let mut existing_nodes = nodes
-            .iter()
-            .map(|node| node.id.clone())
-            .collect::<AHashSet<_>>();
-        let mut declarations = self.facts.declarations.values().collect::<Vec<_>>();
-        declarations.sort_unstable_by(|left, right| left.id.cmp(&right.id));
-        const DECLARATION_BATCH_SIZE: usize = 8_192;
-        for declaration_batch in declarations.chunks(DECLARATION_BATCH_SIZE) {
-            let prepared = declaration_batch
-                .par_iter()
-                .map(|declaration| {
-                    let graph_node_id = &graph_ids[&declaration.id];
-                    let definition_range = self.facts.definition_ranges.get(&declaration.id);
-                    let node = declaration_node(declaration, definition_range, graph_node_id);
-                    let discriminator = overloads.get(&declaration.id).cloned();
-                    (node, discriminator)
-                })
-                .collect::<Vec<_>>();
-            for (mut node, discriminator) in prepared {
-                if let Some(index) = existing_positions.get(&node.id) {
-                    nodes[*index].attributes.extend(node.attributes);
-                    if let Some(discriminator) = discriminator {
-                        nodes[*index].attributes.insert(
-                            "overload_discriminator".to_owned(),
-                            Value::String(discriminator),
-                        );
+        if project_declarations {
+            let overloads = declaration_overloads(self.facts.declarations.values());
+            let existing_positions = nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (node.id.clone(), index))
+                .collect::<AHashMap<_, _>>();
+            let mut existing_nodes = nodes
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<AHashSet<_>>();
+            let mut declarations = self.facts.declarations.values().collect::<Vec<_>>();
+            declarations.sort_unstable_by(|left, right| left.id.cmp(&right.id));
+            const DECLARATION_BATCH_SIZE: usize = 8_192;
+            for declaration_batch in declarations.chunks(DECLARATION_BATCH_SIZE) {
+                let prepared = declaration_batch
+                    .par_iter()
+                    .map(|declaration| {
+                        let graph_node_id = &graph_ids[&declaration.id];
+                        let definition_range = self.facts.definition_ranges.get(&declaration.id);
+                        let node = declaration_node(declaration, definition_range, graph_node_id);
+                        let discriminator = overloads.get(&declaration.id).cloned();
+                        (node, discriminator)
+                    })
+                    .collect::<Vec<_>>();
+                for (mut node, discriminator) in prepared {
+                    if let Some(index) = existing_positions.get(&node.id) {
+                        nodes[*index].attributes.extend(node.attributes);
+                        if let Some(discriminator) = discriminator {
+                            nodes[*index].attributes.insert(
+                                "overload_discriminator".to_owned(),
+                                Value::String(discriminator),
+                            );
+                        }
+                    } else if existing_nodes.insert(node.id.clone()) {
+                        if let Some(discriminator) = discriminator {
+                            node.attributes.insert(
+                                "overload_discriminator".to_owned(),
+                                Value::String(discriminator),
+                            );
+                        }
+                        nodes.push(node);
                     }
-                } else if existing_nodes.insert(node.id.clone()) {
-                    if let Some(discriminator) = discriminator {
-                        node.attributes.insert(
-                            "overload_discriminator".to_owned(),
-                            Value::String(discriminator),
-                        );
-                    }
-                    nodes.push(node);
                 }
             }
         }
@@ -327,6 +346,10 @@ impl UniversalResolutionIndex {
             .flatten()
             .collect::<Vec<_>>();
         let mut resolved_targets = Vec::with_capacity(prepared_targets.len());
+        let mut existing_nodes = nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<AHashSet<_>>();
         for mut prepared in prepared_targets {
             let Some(original_candidate) = self.facts.candidates.at(prepared.candidate_slot) else {
                 continue;
@@ -606,6 +629,79 @@ impl UniversalResolutionIndex {
         }
         profile_internal("universal edge materialization", &mut profile_started);
     }
+}
+
+pub(super) fn project_declaration_batches(
+    batches: &[SemanticEvidenceBatch],
+    nodes: &mut Vec<NodeRecord>,
+) -> AHashMap<String, String> {
+    let mut declarations = batches
+        .iter()
+        .flat_map(|batch| &batch.declarations)
+        .collect::<Vec<_>>();
+    let overloads = declaration_overloads(declarations.iter().copied());
+    let graph_ids = materialized_declaration_ids(declarations.iter().copied());
+    let definition_ranges = batch_definition_ranges(batches, &declarations);
+    let existing_positions = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.clone(), index))
+        .collect::<AHashMap<_, _>>();
+    let mut existing_nodes = nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<AHashSet<_>>();
+    declarations.sort_unstable_by(|left, right| left.id.cmp(&right.id));
+    for declaration in declarations {
+        let mut node = declaration_node(
+            declaration,
+            definition_ranges.get(&declaration.id),
+            &graph_ids[&declaration.id],
+        );
+        if let Some(discriminator) = overloads.get(&declaration.id) {
+            node.attributes.insert(
+                "overload_discriminator".to_owned(),
+                Value::String(discriminator.clone()),
+            );
+        }
+        if let Some(index) = existing_positions.get(&node.id) {
+            nodes[*index].attributes.extend(node.attributes);
+        } else if existing_nodes.insert(node.id.clone()) {
+            nodes.push(node);
+        }
+    }
+    graph_ids
+}
+
+fn batch_definition_ranges(
+    batches: &[SemanticEvidenceBatch],
+    declarations: &[&DeclarationFact],
+) -> BTreeMap<String, EvidenceRange> {
+    let declarations = declarations
+        .iter()
+        .map(|declaration| (declaration.id.as_str(), *declaration))
+        .collect::<BTreeMap<_, _>>();
+    let mut ranges = BTreeMap::new();
+    let mut ambiguous = BTreeSet::new();
+    for scope in batches.iter().flat_map(|batch| &batch.scopes) {
+        let Some(owner_id) = scope.owner_declaration_id.as_ref() else {
+            continue;
+        };
+        let Some(declaration) = declarations.get(owner_id.as_str()) else {
+            continue;
+        };
+        if !range_contains(&scope.range, &declaration.range) || ambiguous.contains(owner_id) {
+            continue;
+        }
+        if ranges
+            .insert(owner_id.clone(), scope.range.clone())
+            .is_some()
+        {
+            ranges.remove(owner_id);
+            ambiguous.insert(owner_id.clone());
+        }
+    }
+    ranges
 }
 
 #[cfg(test)]

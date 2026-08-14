@@ -21,6 +21,7 @@ mod budget;
 mod facts;
 mod index;
 mod languages;
+mod partition;
 mod project;
 mod projection;
 mod resolve;
@@ -28,7 +29,22 @@ mod resolve;
 use projection::is_deferred_receiver;
 pub(crate) use projection::is_replaced_relation;
 
-pub use api::{ResolutionDecision, ResolutionEvidence, ResolutionRule, UniversalResolutionLimits};
+pub use api::{
+    ResolutionDecision, ResolutionEvidence, ResolutionRule, UNIVERSAL_RESOLUTION_REPORT_EXTENSION,
+    UniversalResolutionCounts, UniversalResolutionLimits, UniversalResolutionReport,
+};
+pub(crate) use partition::materialize_bounded_owned;
+
+#[must_use]
+pub fn universal_resolution_report(
+    extraction: &compass_languages::Extraction,
+) -> Option<UniversalResolutionReport> {
+    extraction
+        .extensions
+        .get(UNIVERSAL_RESOLUTION_REPORT_EXTENSION)
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
 use budget::LookupBudget;
 use facts::{
     CandidateSlot, CandidateTable, CandidateTableBuilder, FactStore, FactTable, OccurrenceRef,

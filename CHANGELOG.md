@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Prevent oversized universal-evidence collections from collapsing code graphs
+  to file scaffolding. Default-low builds compact unused leaf declaration
+  details, project retained declarations before resolution, and resolve safe
+  exact relationships in deterministic bounded partitions. Any remaining
+  omissions are published through `universal_resolution_partial`, counted as
+  omitted edges, and make the build exit nonzero while retaining the useful
+  partial graph. Pipeline workers now use an explicit portable stack bound so
+  deeply nested generated sources fail neither the resolver nor the process.
+
 - Improve Markdown as first-class agent context. Repeated automatic heading
   slugs now follow deterministic source-order suffixes, every structural block
   has a section-qualified identity, and project resolution connects exact,

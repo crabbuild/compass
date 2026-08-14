@@ -1,5 +1,55 @@
 //! Stable public contracts for universal evidence resolution.
 
+use serde::{Deserialize, Serialize};
+
+/// Internal extraction extension carrying the bounded collection-resolution outcome.
+///
+/// The build pipeline consumes this before publication. The corresponding public
+/// contract is the graph diagnostic emitted for degraded resolution.
+pub const UNIVERSAL_RESOLUTION_REPORT_EXTENSION: &str = "_compass_universal_resolution_report";
+
+/// Aggregate fact cardinalities used to select a bounded resolution strategy.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UniversalResolutionCounts {
+    pub declarations: usize,
+    pub bindings: usize,
+    pub occurrences: usize,
+    pub candidates: usize,
+    pub scopes: usize,
+}
+
+impl UniversalResolutionCounts {
+    #[must_use]
+    pub const fn fits(self, limits: UniversalResolutionLimits) -> bool {
+        self.declarations <= limits.declarations
+            && self.bindings <= limits.bindings
+            && self.occurrences <= limits.occurrences
+            && self.candidates <= limits.candidates
+            && self.scopes <= limits.candidates
+    }
+}
+
+/// Outcome of project-wide universal resolution.
+///
+/// `degraded` means some relationship candidates could not safely be resolved
+/// under the bounded partition strategy. Declarations that survive the selected
+/// inference profile are still projected.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UniversalResolutionReport {
+    pub partitioned: bool,
+    pub degraded: bool,
+    pub partitions: usize,
+    pub failed_partitions: usize,
+    pub compacted_declarations: usize,
+    pub omitted_candidates: usize,
+    pub input: UniversalResolutionCounts,
+    pub retained: UniversalResolutionCounts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
 /// Aggregate and per-lookup limits for the universal evidence resolver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UniversalResolutionLimits {

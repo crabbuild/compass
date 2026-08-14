@@ -307,6 +307,29 @@ sorts candidate identities, and applies this order:
 6. source-scoped qualified external endpoint when explicitly allowed;
 7. ambiguous or unresolved.
 
+At low inference, Compass first removes unreferenced leaf declaration details
+such as parameters and type parameters that cannot contribute to an admitted
+relationship. This compaction is deterministic and preserves every detail
+used as a relationship source, exact target, binding target, or hierarchy
+constraint.
+
+When aggregate evidence still exceeds one resolver envelope, Compass projects
+all retained source declarations before building resolution indexes, then
+packs source files into deterministic bounded partitions. Partitioned
+resolution publishes only relationships whose source and parser-proven exact
+target are both present in the same partition. It does not use partition-local
+uniqueness for name-based target selection, because declarations outside that
+partition could make such a selection ambiguous. Candidates that cannot be
+proved safely are counted as omitted.
+
+A partitioned or failed collection resolution publishes a useful partial graph
+rather than file scaffolding: retained declarations remain queryable, exact
+safe relationships are preserved, and `compass.graph/1` includes the error
+diagnostic `universal_resolution_partial` with bounded counts and a reason.
+The build command reports the exact relationship omission count and exits
+nonzero so automation cannot mistake partial collection resolution for a
+complete graph. Low-profile compaction alone is informational and successful.
+
 Explicit bindings precede lexical lookup because a source import is direct
 use-site evidence and must shadow a same-named enclosing declaration. A
 binding can name an exact declaration, qualified declaration, or source

@@ -5,6 +5,7 @@ pub mod frameworks;
 mod members;
 mod program;
 
+pub use evidence::universal_resolution_report;
 pub use members::resolve_language_calls;
 pub use program::{
     ProgramProjectionSites, apply_program_projection, collect_program_projection_sites,
@@ -59,6 +60,7 @@ use compass_languages::{
     RawNodeRecord as NodeRecord, SemanticEvidenceBatch, SemanticRole, file_stem,
     is_language_builtin_global, make_id, parse_jsonc,
 };
+use compass_model::code_graph::{DiagnosticSeverity, GraphDiagnostic};
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
     preserve_occurrence_rule,
@@ -69,6 +71,7 @@ use sha1::{Digest, Sha1};
 
 const DECLARATION_SUFFIXES: &[&str] = &["h", "hpp", "hh", "hxx"];
 const IMPLEMENTATION_SUFFIXES: &[&str] = &["m", "mm", "cpp", "cc", "cxx", "c"];
+const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
 
 /// Collapse a clean sibling header/implementation declaration pair before
 /// portable file-prefix remapping would split their shared symbol IDs.
@@ -1117,37 +1120,16 @@ fn finish_resolution(
         let project_edges = project_resolution
             .as_ref()
             .map_or(&[][..], |project| project.edges.as_slice());
-        let index = if evidence_prevalidated {
-            evidence::UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned_at_inference(
-                evidence_batches,
-                &merged.nodes,
-                project_edges,
-                &canonical_root,
-                evidence::UniversalResolutionLimits::default(),
-                admission,
-            )
-        } else {
-            evidence::UniversalResolutionIndex::new_with_project_inventory_owned(
-                evidence_batches,
-                &merged.nodes,
-                project_edges,
-                &canonical_root,
-                evidence::UniversalResolutionLimits::default(),
-            )
-        };
-        match index {
-            Ok(index) => {
-                index.materialize_at_inference(&mut merged.nodes, &mut merged.edges, admission)
-            }
-            Err(error) => {
-                if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
-                    eprintln!("[compass internal] universal resolution failed: {error}");
-                }
-                merged
-                    .error
-                    .get_or_insert_with(|| format!("universal resolution failed: {error}"));
-            }
-        }
+        let report = evidence::materialize_bounded_owned(
+            evidence_batches,
+            project_edges,
+            &canonical_root,
+            evidence::UniversalResolutionLimits::default(),
+            admission,
+            evidence_prevalidated,
+            (&mut merged.nodes, &mut merged.edges),
+        );
+        append_universal_resolution_report(&mut merged, &report);
     }
     profile_internal("resolver universal evidence", &mut profile_started);
     restore_framework_callable_names(&mut merged, sources, &canonical_root);
@@ -1250,6 +1232,65 @@ fn finish_resolution(
     }
     profile_internal("resolver framework domains", &mut profile_started);
     merged
+}
+
+fn append_universal_resolution_report(
+    extraction: &mut Extraction,
+    report: &evidence::UniversalResolutionReport,
+) {
+    if let Ok(value) = serde_json::to_value(report) {
+        extraction.extensions.insert(
+            evidence::UNIVERSAL_RESOLUTION_REPORT_EXTENSION.to_owned(),
+            value,
+        );
+    }
+    let mut diagnostics = extraction
+        .extensions
+        .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+        .and_then(|value| serde_json::from_value::<Vec<GraphDiagnostic>>(value).ok())
+        .unwrap_or_default();
+    if report.compacted_declarations > 0 {
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Info,
+            code: "low_inference_declaration_compaction".to_owned(),
+            message: format!(
+                "low inference omitted {} unreferenced parameter/property declarations before project resolution",
+                report.compacted_declarations
+            ),
+            anchor: None,
+            related_ids: Vec::new(),
+        });
+    }
+    if report.degraded {
+        let reason = report
+            .reason
+            .as_deref()
+            .unwrap_or("bounded universal resolution could not complete")
+            .chars()
+            .take(1_024)
+            .collect::<String>();
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: "universal_resolution_partial".to_owned(),
+            message: format!(
+                "published bounded partial universal resolution across {} partitions; {} relationship candidates were omitted and {} partitions failed: {reason}",
+                report.partitions, report.omitted_candidates, report.failed_partitions
+            ),
+            anchor: None,
+            related_ids: Vec::new(),
+        });
+    }
+    diagnostics.sort_by(|left, right| {
+        left.code
+            .cmp(&right.code)
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    diagnostics.dedup();
+    if let Ok(value) = serde_json::to_value(diagnostics) {
+        extraction
+            .extensions
+            .insert(GRAPH_DIAGNOSTICS_EXTENSION.to_owned(), value);
+    }
 }
 
 fn profile_internal(label: &str, started: &mut Instant) {
@@ -5627,6 +5668,35 @@ mod tests {
 
     use compass_graph::{build_from_extraction, normalize_document_v1};
     use serde_json::json;
+
+    #[test]
+    fn degraded_universal_resolution_is_machine_visible() {
+        let mut extraction = Extraction::default();
+        let report = evidence::UniversalResolutionReport {
+            partitioned: true,
+            degraded: true,
+            partitions: 3,
+            failed_partitions: 1,
+            omitted_candidates: 17,
+            reason: Some("bounded test failure".to_owned()),
+            ..evidence::UniversalResolutionReport::default()
+        };
+
+        append_universal_resolution_report(&mut extraction, &report);
+
+        assert_eq!(universal_resolution_report(&extraction), Some(report));
+        let diagnostics = extraction
+            .extensions
+            .get(GRAPH_DIAGNOSTICS_EXTENSION)
+            .cloned()
+            .and_then(|value| serde_json::from_value::<Vec<GraphDiagnostic>>(value).ok())
+            .unwrap_or_default();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Error
+                && diagnostic.code == "universal_resolution_partial"
+                && diagnostic.message.contains("17 relationship candidates")
+        }));
+    }
 
     fn node(id: &str, label: &str, source_file: &str, kind: &str) -> NodeRecord {
         let mut attributes = Map::new();
