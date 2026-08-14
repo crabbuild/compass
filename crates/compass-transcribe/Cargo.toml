@@ -28,8 +28,8 @@ rubato.workspace = true
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true
-compass-ingest = { version = "0.3.11", path = "../compass-ingest" }
-compass-whisper = { version = "0.3.11", path = "../compass-whisper", optional = true }
+compass-ingest = { version = "0.3.12", path = "../compass-ingest" }
+compass-whisper = { version = "0.3.12", path = "../compass-whisper", optional = true }
 
 [lints]
 workspace = true
