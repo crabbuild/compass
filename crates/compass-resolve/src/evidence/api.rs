@@ -82,6 +82,7 @@ pub enum ResolutionRule {
     MemberBinding,
     DeferredReceiver,
     WildcardBinding,
+    PhpGlobalFunctionFallback,
     UniqueModuleOrPackage,
     ExactHierarchyBase,
     DirectReceiverSuccessorDispatch,

@@ -472,5 +472,40 @@ pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPa
     },
 };
 
-const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] =
-    &[ASPNET_CSHARP_DESCRIPTOR, SPRING_JAVA_DESCRIPTOR];
+pub(super) const PHP_FRAMEWORKS_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "php-frameworks",
+    kind: FrameworkPackKind::Source,
+    languages: &["php"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Aliases,
+        LanguageCapability::Calls,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["drupal/core", "laravel/framework"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "composer-dependency",
+        "drupal-hook-declaration",
+        "laravel-route-call",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
+    ASPNET_CSHARP_DESCRIPTOR,
+    PHP_FRAMEWORKS_DESCRIPTOR,
+    SPRING_JAVA_DESCRIPTOR,
+];

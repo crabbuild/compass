@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Hard-cut PHP production extraction to the version-1 universal candidate with
+  modern declarations, namespaces, grouped and aliased imports, traits,
+  attributes, enum cases, promoted properties, calls, construction, typed
+  receivers, and source-backed ownership. Resolve PHP type and callable names
+  with explicit case-insensitive rules, namespace-to-global function fallback,
+  conservative class/trait/parent precedence, and ambiguity preservation.
+  Add bounded, repository-contained Composer PSR-4 project evidence. Convert
+  Laravel routes and Drupal hooks to universal source evidence while retaining
+  Drupal routing configuration and Blade template extraction.
+
 - Hard-cut C# production extraction to the version-1 universal candidate with
   bounded AST-backed declarations, namespaces, imports and aliases, overload
   signatures, typed members and parameters, construction and call evidence,

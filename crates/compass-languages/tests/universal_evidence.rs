@@ -476,6 +476,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             "go",
             "java",
             "javascript",
+            "php",
             "python",
             "rust",
             "typescript",
@@ -538,6 +539,7 @@ fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
         ("/repo/pkg/empty.java", "pkg/empty.java", "java"),
         ("/repo/pkg/empty.rs", "pkg/empty.rs", "rust"),
         ("/repo/pkg/empty.js", "pkg/empty.js", "javascript"),
+        ("/repo/pkg/empty.php", "pkg/empty.php", "php"),
         ("/repo/pkg/empty.ts", "pkg/empty.ts", "typescript"),
         ("/repo/pkg/empty.tsx", "pkg/empty.tsx", "typescript"),
     ] {
@@ -571,6 +573,7 @@ fn trivia_only_hard_cut_sources_anchor_file_inventory_to_source_bytes() {
         ("/repo/pkg/Blank.java", "pkg/Blank.java", "java"),
         ("/repo/pkg/blank.rs", "pkg/blank.rs", "rust"),
         ("/repo/pkg/blank.js", "pkg/blank.js", "javascript"),
+        ("/repo/pkg/blank.php", "pkg/blank.php", "php"),
         ("/repo/pkg/blank.ts", "pkg/blank.ts", "typescript"),
         ("/repo/pkg/blank.tsx", "pkg/blank.tsx", "typescript"),
     ] {
@@ -578,6 +581,11 @@ fn trivia_only_hard_cut_sources_anchor_file_inventory_to_source_bytes() {
         let extraction = engine
             .extract_source_combined(std::path::Path::new(path), source_file, b"\n")
             .expect("extract trivia-only hard-cut source");
+        assert!(
+            extraction.graph.semantic_evidence.is_some(),
+            "missing trivia-only evidence for {path}: {:?}",
+            extraction.graph.error
+        );
         let evidence = extraction
             .graph
             .semantic_evidence

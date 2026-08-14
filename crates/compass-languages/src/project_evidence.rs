@@ -18,6 +18,11 @@ const MAX_PROJECT_CONFIGURATION_KEYS: usize = 2_000;
 const MAX_PROJECT_ALIASES: usize = 2_000;
 const MAX_PROJECT_PLUGINS: usize = 2_000;
 const MAX_PROJECT_ROUTE_ROOTS: usize = 256;
+const MAX_COMPOSER_AUTOLOAD_ROOTS: usize = 4_096;
+const MAX_COMPOSER_ROOTS_PER_PREFIX: usize = 64;
+const MAX_COMPOSER_NAMESPACE_PREFIX_BYTES: usize = 1_024;
+const MAX_COMPOSER_DIRECTORY_BYTES: usize = 4_096;
+const MAX_PROJECT_EVIDENCE_DIAGNOSTICS: usize = 4_096;
 const MAX_PROJECT_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_PROJECT_DIRECTORY_ENTRIES: usize = 4_096;
 const FIXED_MANIFEST_NAMES: &[&str] = &[
@@ -75,7 +80,26 @@ pub struct ProjectEvidence {
     aliases: BTreeMap<String, String>,
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
+    composer_autoload_roots: Vec<ComposerAutoloadRoot>,
+    diagnostics: Vec<ProjectEvidenceDiagnostic>,
     fingerprint: String,
+}
+
+/// One repository-contained Composer PSR-4 mapping.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ComposerAutoloadRoot {
+    pub namespace_prefix: String,
+    pub directory: String,
+    pub development: bool,
+    pub manifest: String,
+}
+
+/// A deterministic project-manifest diagnostic retained with cache evidence.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ProjectEvidenceDiagnostic {
+    pub code: String,
+    pub manifest: String,
+    pub message: String,
 }
 
 impl ProjectEvidence {
@@ -122,6 +146,16 @@ impl ProjectEvidence {
     #[must_use]
     pub fn route_roots(&self) -> &BTreeMap<String, BTreeSet<String>> {
         &self.route_roots
+    }
+
+    #[must_use]
+    pub fn composer_autoload_roots(&self) -> &[ComposerAutoloadRoot] {
+        &self.composer_autoload_roots
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[ProjectEvidenceDiagnostic] {
+        &self.diagnostics
     }
 
     #[must_use]
@@ -263,6 +297,30 @@ impl ProjectEvidenceIndex {
                         .dependencies
                         .extend(parsed.dependencies.into_iter().take(remaining));
                 }
+                if file_name(&project_file).eq_ignore_ascii_case("composer.json") {
+                    let (roots, mut diagnostics) = parse_composer_autoload_roots(
+                        &repository_root,
+                        &project_root,
+                        &project_file,
+                    );
+                    let remaining = MAX_COMPOSER_AUTOLOAD_ROOTS
+                        .saturating_sub(builder.composer_autoload_roots.len());
+                    if roots.len() > remaining {
+                        diagnostics.insert(project_diagnostic(
+                            "composer_psr4_total_limit",
+                            &relative_project_file(&repository_root, &project_file),
+                            "Composer PSR-4 roots exceed the project-wide bounded limit",
+                        ));
+                    }
+                    builder
+                        .composer_autoload_roots
+                        .extend(roots.into_iter().take(remaining));
+                    let diagnostic_capacity =
+                        MAX_PROJECT_EVIDENCE_DIAGNOSTICS.saturating_sub(builder.diagnostics.len());
+                    builder
+                        .diagnostics
+                        .extend(diagnostics.into_iter().take(diagnostic_capacity));
+                }
                 if let Some(parsed) = parse_configuration(&project_file) {
                     builder.configuration_keys.extend(
                         parsed.configuration_keys.into_iter().take(
@@ -382,6 +440,8 @@ struct ProjectBuilder {
     aliases: BTreeMap<String, String>,
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
+    composer_autoload_roots: BTreeSet<ComposerAutoloadRoot>,
+    diagnostics: BTreeSet<ProjectEvidenceDiagnostic>,
 }
 
 struct ParsedManifest {
@@ -409,6 +469,11 @@ fn finish_project(
     let aliases = builder.aliases;
     let plugins = builder.plugins;
     let route_roots = builder.route_roots;
+    let composer_autoload_roots = builder
+        .composer_autoload_roots
+        .into_iter()
+        .collect::<Vec<_>>();
+    let diagnostics = builder.diagnostics.into_iter().collect::<Vec<_>>();
     let relative_root = project_root
         .strip_prefix(repository_root)
         .unwrap_or(&project_root)
@@ -457,6 +522,23 @@ fn finish_project(
             digest.update([0]);
         }
     }
+    for root in &composer_autoload_roots {
+        digest.update(root.namespace_prefix.as_bytes());
+        digest.update([0]);
+        digest.update(root.directory.as_bytes());
+        digest.update([0]);
+        digest.update([u8::from(root.development)]);
+        digest.update(root.manifest.as_bytes());
+        digest.update([0]);
+    }
+    for diagnostic in &diagnostics {
+        digest.update(diagnostic.code.as_bytes());
+        digest.update([0]);
+        digest.update(diagnostic.manifest.as_bytes());
+        digest.update([0]);
+        digest.update(diagnostic.message.as_bytes());
+        digest.update([0]);
+    }
     ProjectEvidence {
         project_root,
         manifests,
@@ -467,7 +549,221 @@ fn finish_project(
         aliases,
         plugins,
         route_roots,
+        composer_autoload_roots,
+        diagnostics,
         fingerprint: format!("sha256:{:x}", digest.finalize()),
+    }
+}
+
+fn parse_composer_autoload_roots(
+    repository_root: &Path,
+    project_root: &Path,
+    manifest: &Path,
+) -> (
+    BTreeSet<ComposerAutoloadRoot>,
+    BTreeSet<ProjectEvidenceDiagnostic>,
+) {
+    let manifest_name = relative_project_file(repository_root, manifest);
+    let mut roots = BTreeSet::new();
+    let mut diagnostics = BTreeSet::new();
+    let metadata = match fs::symlink_metadata(manifest) {
+        Ok(metadata)
+            if metadata.file_type().is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.len() <= MAX_MANIFEST_BYTES =>
+        {
+            metadata
+        }
+        Ok(_) => {
+            diagnostics.insert(project_diagnostic(
+                "composer_manifest_rejected",
+                &manifest_name,
+                "Composer manifest is not a bounded regular file",
+            ));
+            return (roots, diagnostics);
+        }
+        Err(_) => return (roots, diagnostics),
+    };
+    let _ = metadata;
+    let source = match fs::read_to_string(manifest) {
+        Ok(source) => source,
+        Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "composer_manifest_unreadable",
+                &manifest_name,
+                "Composer manifest could not be read as UTF-8",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+    let document = match serde_json::from_str::<Value>(&source) {
+        Ok(Value::Object(document)) => document,
+        Ok(_) | Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "composer_manifest_invalid",
+                &manifest_name,
+                "Composer manifest is not a valid JSON object",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+    for (section, development) in [("autoload", false), ("autoload-dev", true)] {
+        let Some(psr4) = document
+            .get(section)
+            .and_then(Value::as_object)
+            .and_then(|autoload| autoload.get("psr-4"))
+        else {
+            continue;
+        };
+        let Some(entries) = psr4.as_object() else {
+            diagnostics.insert(project_diagnostic(
+                "composer_psr4_invalid",
+                &manifest_name,
+                &format!("{section}.psr-4 must be an object"),
+            ));
+            continue;
+        };
+        for (prefix, directories) in entries {
+            let Some(prefix) = normalize_composer_prefix(prefix) else {
+                diagnostics.insert(project_diagnostic(
+                    "composer_psr4_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid PSR-4 namespace prefix {prefix:?}"),
+                ));
+                continue;
+            };
+            let values = match directories {
+                Value::String(directory) => vec![directory.as_str()],
+                Value::Array(values) => values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .take(MAX_COMPOSER_ROOTS_PER_PREFIX.saturating_add(1))
+                    .collect::<Vec<_>>(),
+                _ => {
+                    diagnostics.insert(project_diagnostic(
+                        "composer_psr4_directory_invalid",
+                        &manifest_name,
+                        &format!("PSR-4 root for {prefix:?} must be a string or string array"),
+                    ));
+                    continue;
+                }
+            };
+            if values.len() > MAX_COMPOSER_ROOTS_PER_PREFIX {
+                diagnostics.insert(project_diagnostic(
+                    "composer_psr4_root_limit",
+                    &manifest_name,
+                    &format!("PSR-4 root count for {prefix:?} exceeds the bounded limit"),
+                ));
+                continue;
+            }
+            for directory in values {
+                let Some(directory) =
+                    contained_composer_directory(repository_root, project_root, directory)
+                else {
+                    diagnostics.insert(project_diagnostic(
+                        "composer_psr4_directory_rejected",
+                        &manifest_name,
+                        &format!("PSR-4 root {directory:?} is invalid or leaves the repository"),
+                    ));
+                    continue;
+                };
+                if roots.len() >= MAX_COMPOSER_AUTOLOAD_ROOTS {
+                    diagnostics.insert(project_diagnostic(
+                        "composer_psr4_total_limit",
+                        &manifest_name,
+                        "Composer PSR-4 roots exceed the project-wide bounded limit",
+                    ));
+                    return (roots, diagnostics);
+                }
+                roots.insert(ComposerAutoloadRoot {
+                    namespace_prefix: prefix.clone(),
+                    directory,
+                    development,
+                    manifest: manifest_name.clone(),
+                });
+            }
+        }
+    }
+    (roots, diagnostics)
+}
+
+fn normalize_composer_prefix(prefix: &str) -> Option<String> {
+    let prefix = prefix
+        .trim()
+        .trim_start_matches('\\')
+        .trim_end_matches('\\');
+    if prefix.is_empty() {
+        return Some(String::new());
+    }
+    if prefix.len() > MAX_COMPOSER_NAMESPACE_PREFIX_BYTES {
+        return None;
+    }
+    if !prefix.split('\\').all(valid_php_identifier) {
+        return None;
+    }
+    Some(format!("{prefix}\\"))
+}
+
+fn valid_php_identifier(segment: &str) -> bool {
+    let mut bytes = segment.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
+fn contained_composer_directory(
+    repository_root: &Path,
+    project_root: &Path,
+    directory: &str,
+) -> Option<String> {
+    if directory.len() > MAX_COMPOSER_DIRECTORY_BYTES
+        || directory.starts_with(['/', '\\'])
+        || directory.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut candidate = project_root.to_path_buf();
+    for component in Path::new(directory).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => candidate.push(segment),
+            std::path::Component::ParentDir => {
+                if candidate == repository_root || !candidate.pop() {
+                    return None;
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    if !candidate.starts_with(repository_root) {
+        return None;
+    }
+    let canonical_repository = fs::canonicalize(repository_root).ok()?;
+    let mut existing_ancestor = candidate.clone();
+    while !existing_ancestor.exists() {
+        if existing_ancestor == repository_root || !existing_ancestor.pop() {
+            return None;
+        }
+    }
+    let canonical_ancestor = fs::canonicalize(existing_ancestor).ok()?;
+    if !canonical_ancestor.starts_with(canonical_repository) {
+        return None;
+    }
+    let relative = candidate.strip_prefix(repository_root).ok()?;
+    let normalized = normalize_project_path(&relative.to_string_lossy());
+    Some(if normalized.is_empty() {
+        ".".to_owned()
+    } else {
+        normalized
+    })
+}
+
+fn project_diagnostic(code: &str, manifest: &str, message: &str) -> ProjectEvidenceDiagnostic {
+    ProjectEvidenceDiagnostic {
+        code: code.to_owned(),
+        manifest: manifest.to_owned(),
+        message: message.to_owned(),
     }
 }
 
@@ -1187,6 +1483,128 @@ mod tests {
         assert_eq!(
             evidence.fingerprint(),
             second.evidence_for(&source).fingerprint()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn composer_psr4_roots_are_bounded_contained_and_deterministic() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        for path in ["src", "src/Domain", "tests", "packages/shared"] {
+            fs::create_dir_all(root.join(path))?;
+        }
+        let source = root.join("src/Domain/Model.php");
+        fs::write(&source, "<?php namespace App\\Domain; class Model {}")?;
+        fs::write(
+            root.join("composer.json"),
+            r#"{
+              "require": {"laravel/framework": "^12"},
+              "autoload": {"psr-4": {
+                "App\\": ["src/", "./src"],
+                "App\\Domain\\": "src/Domain",
+                "Shared\\": "packages/shared",
+                "Root\\": ""
+              }},
+              "autoload-dev": {"psr-4": {"Tests\\": "tests"}}
+            }"#,
+        )?;
+
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = first.evidence_for(&source);
+        let roots = evidence.composer_autoload_roots();
+
+        assert_eq!(roots.len(), 5, "roots={roots:#?}");
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "App\\" && entry.directory == "src" && !entry.development
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "App\\Domain\\"
+                && entry.directory == "src/Domain"
+                && !entry.development
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "Tests\\" && entry.directory == "tests" && entry.development
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "Root\\" && entry.directory == "." && !entry.development
+        }));
+        assert!(evidence.diagnostics().is_empty());
+        assert_eq!(
+            evidence.fingerprint(),
+            second.evidence_for(&source).fingerprint()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn composer_psr4_rejects_escapes_absolute_paths_and_malformed_entries()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src"))?;
+        let source = root.join("src/App.php");
+        fs::write(&source, "<?php class App {}")?;
+        fs::write(
+            root.join("composer.json"),
+            r#"{
+              "autoload": {"psr-4": {
+                "": "src",
+                "Escape\\": "../../outside",
+                "Absolute\\": "/private/source",
+                "Drive\\": "C:\\source",
+                "Malformed Prefix!\\": "src",
+                "WrongShape\\": 42
+              }}
+            }"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert_eq!(evidence.composer_autoload_roots().len(), 1);
+        assert!(
+            evidence
+                .composer_autoload_roots()
+                .iter()
+                .any(|entry| { entry.namespace_prefix.is_empty() && entry.directory == "src" })
+        );
+        let codes = evidence
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(codes.contains("composer_psr4_directory_rejected"));
+        assert!(codes.contains("composer_psr4_directory_invalid"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn composer_psr4_rejects_a_directory_symlink_that_leaves_the_repository()
+    -> Result<(), Box<dyn Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir()?;
+        let outside = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src"))?;
+        symlink(outside.path(), root.join("src/external"))?;
+        let source = root.join("src/App.php");
+        fs::write(&source, "<?php class App {}")?;
+        fs::write(
+            root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"Escaped\\":"src/external/missing"}}}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(evidence.composer_autoload_roots().is_empty());
+        assert!(
+            evidence
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| { diagnostic.code == "composer_psr4_directory_rejected" })
         );
         Ok(())
     }

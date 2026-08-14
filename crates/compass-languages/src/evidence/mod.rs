@@ -1,6 +1,7 @@
 mod build;
 mod csharp;
 mod model;
+mod php;
 mod typescript;
 mod validate;
 

@@ -325,6 +325,7 @@ fn validate_fact(
                         "java",
                         "class" | "interface" | "enum" | "record" | "annotation_type"
                     ) | ("csharp", "class" | "interface" | "record" | "struct")
+                        | ("php", "class" | "interface" | "trait" | "enum")
                         | ("rust", "trait")
                 )
             {
@@ -560,16 +561,17 @@ fn validate_fact(
                     HierarchyConstraint::DirectBase { .. }
                         if !matches!(
                             fact.relation,
-                            CandidateRelation::Extends | CandidateRelation::Implements
+                            CandidateRelation::Extends
+                                | CandidateRelation::Implements
+                                | CandidateRelation::UsesTrait
                         ) || occurrence.is_none_or(|occurrence| {
                             occurrence.role != SemanticRole::BaseType
-                                && !(fact.language == "rust"
-                                    && occurrence.role == SemanticRole::TraitBound)
+                                && occurrence.role != SemanticRole::TraitBound
                         }) =>
                     {
                         return Err(invalid_fact(
                             &fact.id,
-                            "direct-base hierarchy evidence requires an extends-or-implements/base-type occurrence",
+                            "direct-base hierarchy evidence requires an extends, implements, or trait-use occurrence",
                         ));
                     }
                     HierarchyConstraint::ReceiverDispatch {

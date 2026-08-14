@@ -64,6 +64,7 @@ use resolve::context::ResolutionDb;
 
 #[derive(Clone, Debug)]
 struct DirectBaseLink {
+    relation: CandidateRelation,
     qualified_name: Option<String>,
     source_file: String,
     start_byte: u64,

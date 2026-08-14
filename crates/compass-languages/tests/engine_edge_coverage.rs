@@ -33,9 +33,10 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 2);
+    assert_eq!(FrameworkPackRegistry::descriptors().len(), 3);
     assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
-    assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "spring-java");
+    assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "php-frameworks");
+    assert_eq!(FrameworkPackRegistry::descriptors()[2].id, "spring-java");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -326,29 +327,23 @@ class SecondController {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing PHP semantic evidence")?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.label() == ".index()")
+        .filter(|declaration| declaration.kind == "method" && declaration.name == "index")
         .collect::<Vec<_>>();
 
-    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(methods.len(), 2, "declarations={:?}", evidence.declarations);
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.string("lexical_owner"))
+            .map(|declaration| declaration.qualified_name.clone())
             .collect::<std::collections::BTreeSet<_>>(),
-        ["FirstController", "SecondController"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
-    );
-    assert_eq!(
-        methods
-            .iter()
-            .map(|node| node.string("qualified_name"))
-            .collect::<std::collections::BTreeSet<_>>(),
-        ["FirstController::index", "SecondController::index"]
+        ["firstcontroller::index", "secondcontroller::index"]
             .into_iter()
             .map(str::to_owned)
             .collect()
@@ -369,26 +364,34 @@ class Like {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let post = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing PHP semantic evidence")?;
+    let post = evidence
+        .declarations
         .iter()
-        .find(|node| node.label() == "Post")
+        .find(|declaration| declaration.kind == "class" && declaration.qualified_name == "post")
         .ok_or("missing Post class")?;
-    let method = extraction
-        .nodes
+    let method = evidence
+        .declarations
         .iter()
-        .find(|node| node.label() == ".post()")
+        .find(|declaration| {
+            declaration.kind == "method" && declaration.qualified_name == "like::post"
+        })
         .ok_or("missing Like::post method")?;
 
-    assert!(
-        extraction
-            .edges
-            .iter()
-            .any(|edge| { edge.target == post.id && edge.string("relation") == "calls" })
-    );
-    assert!(!extraction.edges.iter().any(|edge| {
-        edge.string("relation") == "references_constant"
-            && (edge.target == post.id || edge.target == method.id)
+    assert_ne!(post.id, method.id);
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "factory"
+            && matches!(
+                candidate.constraints.hierarchy.as_ref(),
+                Some(compass_languages::HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name,
+                    ..
+                }) if receiver_qualified_name == "post"
+            )
     }));
     Ok(())
 }

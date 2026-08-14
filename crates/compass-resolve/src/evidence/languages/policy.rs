@@ -10,6 +10,7 @@ pub(in crate::evidence) enum LanguagePolicyKind {
     TypeScript,
     CSharp,
     Java,
+    Php,
     Rust,
     Generic,
 }
@@ -20,6 +21,7 @@ impl LanguagePolicyKind {
             "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => Self::TypeScript,
             "csharp" => Self::CSharp,
             "java" => Self::Java,
+            "php" => Self::Php,
             "rust" => Self::Rust,
             _ => Self::Generic,
         }
@@ -34,6 +36,7 @@ impl LanguagePolicyKind {
         match self {
             Self::TypeScript => db.resolve_typescript_import_candidate(language, candidate),
             Self::CSharp => db.resolve_csharp_candidate(language, candidate),
+            Self::Php => db.resolve_php_candidate(language, candidate),
             Self::Rust => {
                 let HierarchyConstraint::RustAssociatedType {
                     receiver_declaration_id,
@@ -63,7 +66,7 @@ impl LanguagePolicyKind {
     ) -> Option<&'a str> {
         match self {
             Self::Java => db.unique_java_applicable_overload(overloads, argument_types),
-            Self::CSharp | Self::TypeScript | Self::Rust | Self::Generic => None,
+            Self::CSharp | Self::Php | Self::TypeScript | Self::Rust | Self::Generic => None,
         }
     }
 }
@@ -89,6 +92,10 @@ mod tests {
         assert_eq!(
             LanguagePolicyKind::for_language("rust"),
             LanguagePolicyKind::Rust
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("php"),
+            LanguagePolicyKind::Php
         );
         assert_eq!(
             LanguagePolicyKind::for_language("future-language"),
