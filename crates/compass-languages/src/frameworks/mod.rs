@@ -55,6 +55,7 @@ type SourceDetector = for<'source, 'tree> fn(
 ) -> Vec<RawFrameworkFact>;
 
 struct UniversalDetectionContext<'source, 'tree> {
+    path: &'source Path,
     source: &'source [u8],
     root: Node<'tree>,
     project: Option<&'source ProjectEvidence>,
@@ -229,6 +230,7 @@ impl FrameworkPack {
                     return Ok(Vec::new());
                 };
                 detector(&UniversalDetectionContext {
+                    path: context.path,
                     source: context.source,
                     root: context.root,
                     project: context.project,
@@ -286,12 +288,7 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     ),
     FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
     FrameworkPack::source("python-web", &["python"], &[], detect_python),
-    FrameworkPack::source(
-        "php-frameworks",
-        &["php"],
-        &["laravel/framework", "drupal/core"],
-        detect_php,
-    ),
+    FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::source("rails-routes", &["ruby"], &["rails"], detect_ruby),
     FrameworkPack::source(
         "spring-web-kotlin",
@@ -536,13 +533,6 @@ fn detect_python(
     _extraction: &mut Extraction,
 ) -> Vec<RawFrameworkFact> {
     python::detect(context.path, context.source, context.root)
-}
-
-fn detect_php(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
-    php::detect(context.path, context.source, context.root)
 }
 
 fn detect_ruby(

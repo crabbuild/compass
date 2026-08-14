@@ -180,6 +180,7 @@ pub(super) fn relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Returns => "returns",
         CandidateRelation::Extends => "inherits",
         CandidateRelation::Implements => "implements",
+        CandidateRelation::UsesTrait => "mixes_in",
         CandidateRelation::Overrides => "overrides",
         CandidateRelation::AccessesMember => "accesses",
         CandidateRelation::Contains | CandidateRelation::Owns => "contains",
@@ -341,6 +342,7 @@ pub(super) fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
         | CandidateRelation::TypeOf
         | CandidateRelation::Returns => "type_alias",
         CandidateRelation::Implements => "interface",
+        CandidateRelation::UsesTrait => "trait",
         CandidateRelation::Overrides => "function",
         CandidateRelation::AccessesMember => "variable",
         CandidateRelation::Calls | CandidateRelation::IndirectCalls => "function",

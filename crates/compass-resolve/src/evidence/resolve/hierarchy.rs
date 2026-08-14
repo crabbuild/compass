@@ -657,7 +657,7 @@ impl ResolutionDb<'_> {
                 matches!(
                     declaration.kind.as_str(),
                     "class" | "interface" | "record" | "struct"
-                )
+                ) || (language == "php" && matches!(declaration.kind.as_str(), "trait" | "enum"))
             })
             .take(2)
             .collect::<Vec<_>>();

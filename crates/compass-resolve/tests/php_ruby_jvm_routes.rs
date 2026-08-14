@@ -24,12 +24,6 @@ fn extract(relative: &str) -> Result<Extraction, Box<dyn Error>> {
     Ok(extraction)
 }
 
-fn merge(target: &mut Extraction, mut source: Extraction) {
-    target.nodes.append(&mut source.nodes);
-    target.edges.append(&mut source.edges);
-    target.framework_facts.append(&mut source.framework_facts);
-}
-
 fn extract_and_resolve(relatives: &[&str]) -> Result<Extraction, Box<dyn Error>> {
     let mut extractions = Vec::with_capacity(relatives.len());
     let mut sources = HashMap::new();
@@ -82,7 +76,7 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
     }));
     assert!(routes.iter().any(|route| {
         route.operation == "POST"
-            && route.handler_reference == "UserController.store"
+            && route.handler_reference == "usercontroller.store"
             && route.normalized_path == "/users"
     }));
 
@@ -175,18 +169,18 @@ Route::prefix('/wrong')->group(function () {
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 4, "routes={routes:#?}");
     assert!(routes.iter().any(|route| {
-        route.normalized_path == "/alias" && route.handler_reference == "AliasController.show"
+        route.normalized_path == "/alias" && route.handler_reference == "aliascontroller.show"
     }));
     assert!(routes.iter().any(|route| {
         route.normalized_path == "/grouped-alias"
-            && route.handler_reference == "AliasController.update"
+            && route.handler_reference == "aliascontroller.update"
     }));
     assert!(routes.iter().any(|route| {
         route.normalized_path == "/qualified"
-            && route.handler_reference == "QualifiedController.store"
+            && route.handler_reference == "qualifiedcontroller.store"
     }));
     assert!(routes.iter().any(|route| {
-        route.normalized_path == "/unprefixed" && route.handler_reference == "AliasController.show"
+        route.normalized_path == "/unprefixed" && route.handler_reference == "aliascontroller.show"
     }));
     assert!(
         routes
@@ -198,8 +192,7 @@ Route::prefix('/wrong')->group(function () {
 
 #[test]
 fn drupal_yaml_and_hook_files_publish_auditable_routes() -> Result<(), Box<dyn Error>> {
-    let mut extraction = extract("php/drupal.routing.yml")?;
-    merge(&mut extraction, extract("php/drupal.module")?);
+    let mut extraction = extract_and_resolve(&["php/drupal.routing.yml", "php/drupal.module"])?;
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
 
@@ -215,9 +208,12 @@ fn drupal_yaml_and_hook_files_publish_auditable_routes() -> Result<(), Box<dyn E
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from(["GET", "POST"])
     );
-    assert!(views.iter().all(|route| {
-        route.route.origin.as_str() == "config" && route.state == ResolutionState::Exact
-    }));
+    assert!(
+        views.iter().all(|route| {
+            route.route.origin.as_str() == "config" && route.state == ResolutionState::Exact
+        }),
+        "routes={resolved:#?}"
+    );
     assert!(resolved.iter().any(|route| {
         route.route.operation == "HOOK"
             && route.route.normalized_path == "/__hook/hook_entity_type_build"

@@ -33,6 +33,7 @@ This architecture is transitioning one language at a time. The status labels bel
 | Available now | Rust is a quality-gated, hard-cut version-15 `UniversalCandidate`; version 15 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
 | Available now | Java is a hard-cut version-3 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | TypeScript and JavaScript are hard-cut `UniversalCandidate` adapters; TSX uses the TypeScript identity, both share the bounded ECMAScript evidence emitter, and their replaced generic publisher is removed |
+| Available now | PHP is a hard-cut version-1 `UniversalCandidate` with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 

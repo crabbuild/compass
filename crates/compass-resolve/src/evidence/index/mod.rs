@@ -66,6 +66,11 @@ pub(super) struct CSharpIndexes {
 }
 
 #[derive(Default)]
+pub(super) struct PhpIndexes {
+    pub(super) members_by_owner_folded: AHashMap<(String, String), Vec<DeclarationSlot>>,
+}
+
+#[derive(Default)]
 pub(super) struct ResolutionIndexes {
     pub(super) names: NameIndexes,
     pub(super) hierarchy: HierarchyIndexes,
@@ -74,4 +79,5 @@ pub(super) struct ResolutionIndexes {
     pub(super) typescript: TypeScriptIndexes,
     pub(super) rust: RustIndexes,
     pub(super) csharp: CSharpIndexes,
+    pub(super) php: PhpIndexes,
 }

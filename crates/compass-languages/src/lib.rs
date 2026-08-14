@@ -70,7 +70,8 @@ pub use ids::{file_stem, make_id, normalize_id};
 pub use json_config::parse_jsonc;
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use project_evidence::{
-    FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidence, ProjectEvidenceIndex,
+    ComposerAutoloadRoot, FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidence,
+    ProjectEvidenceDiagnostic, ProjectEvidenceIndex,
 };
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};

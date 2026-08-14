@@ -155,6 +155,7 @@ pub enum CandidateRelation {
     Annotates,
     Extends,
     Implements,
+    UsesTrait,
     Overrides,
     References,
     TypeOf,
@@ -182,6 +183,7 @@ impl CandidateRelation {
             | Self::Returns
             | Self::Implements => LanguageCapability::TypeReferences,
             Self::Extends => LanguageCapability::BaseTypes,
+            Self::UsesTrait => LanguageCapability::Traits,
             Self::Overrides => LanguageCapability::HierarchyDispatch,
             Self::AccessesMember => LanguageCapability::Members,
             Self::Contains | Self::Owns => LanguageCapability::Ownership,

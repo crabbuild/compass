@@ -171,7 +171,7 @@
       "path": "/users",
       "routeSource": "fixtures/code-graph/routes/php/laravel.php",
       "handler": {
-        "qualifiedName": "UserController::index"
+        "qualifiedName": "usercontroller::index"
       },
       "handlerSource": "fixtures/code-graph/routes/php/laravel.php",
       "relationship": "routes_to",
@@ -198,7 +198,7 @@
       "path": "/examples/{example}",
       "routeSource": "fixtures/code-graph/routes/php/drupal.routing.yml",
       "handler": {
-        "qualifiedName": "ExampleController::view"
+        "qualifiedName": "examplecontroller::view"
       },
       "handlerSource": "fixtures/code-graph/routes/php/drupal.module",
       "relationship": "routes_to",

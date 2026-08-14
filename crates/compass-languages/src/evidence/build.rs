@@ -828,6 +828,9 @@ pub(crate) fn extract_tree_evidence(
     if profile.language == "csharp" {
         return super::csharp::extract_candidate_tree_evidence(path, source_file, source, root);
     }
+    if profile.language == "php" {
+        return super::php::extract_candidate_tree_evidence(path, source_file, source, root);
+    }
     if matches!(profile.language, "javascript" | "typescript") {
         return super::typescript::extract_candidate_tree_evidence(
             path,
@@ -10333,6 +10336,7 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
         CandidateRelation::Annotates
         | CandidateRelation::Extends
         | CandidateRelation::Implements
+        | CandidateRelation::UsesTrait
         | CandidateRelation::Embeds => vec![
             "class".to_owned(),
             "struct".to_owned(),
@@ -10520,6 +10524,7 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Annotates => "annotates",
         CandidateRelation::Extends => "extends",
         CandidateRelation::Implements => "implements",
+        CandidateRelation::UsesTrait => "uses_trait",
         CandidateRelation::Overrides => "overrides",
         CandidateRelation::References => "references",
         CandidateRelation::TypeOf => "type_of",

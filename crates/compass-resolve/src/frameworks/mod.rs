@@ -79,6 +79,10 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
         expand: aspnet::expand,
     },
     UniversalFrameworkPack {
+        id: "php-frameworks",
+        expand: php::expand,
+    },
+    UniversalFrameworkPack {
         id: "spring-java",
         expand: spring::expand,
     },
@@ -209,7 +213,7 @@ fn universal_framework_targets_are_materialized(
     let Some(batch) = extraction.semantic_evidence.as_ref().filter(|batch| {
         matches!(
             batch.adapter.language.as_str(),
-            "csharp" | "javascript" | "typescript"
+            "csharp" | "javascript" | "php" | "typescript"
         )
     }) else {
         return true;
@@ -239,7 +243,7 @@ fn universal_framework_targets_are_materialized(
     })
 }
 
-/// Universal C#/TypeScript/JavaScript extraction publishes declaration evidence
+/// Universal C#/PHP/TypeScript/JavaScript extraction publishes declaration evidence
 /// first and lets the project resolver materialize graph nodes. Framework
 /// route/domain resolution can also be invoked directly on a single-file
 /// extraction, so provide the target index with source-backed declaration
@@ -250,7 +254,7 @@ pub(super) fn materialize_universal_framework_targets(
     let Some(batches) = extraction.semantic_evidence.as_ref().filter(|batch| {
         matches!(
             batch.adapter.language.as_str(),
-            "csharp" | "javascript" | "typescript"
+            "csharp" | "javascript" | "php" | "typescript"
         )
     }) else {
         return extraction.clone();

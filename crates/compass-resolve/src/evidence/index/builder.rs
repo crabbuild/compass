@@ -2,8 +2,8 @@
 
 use super::super::*;
 use super::{
-    CSharpBinding, CSharpIndexes, HierarchyIndexes, MemberIndexes, NameIndexes, RustIndexes,
-    TypeScriptIndexes, WildcardIndexes,
+    CSharpBinding, CSharpIndexes, HierarchyIndexes, MemberIndexes, NameIndexes, PhpIndexes,
+    RustIndexes, TypeScriptIndexes, WildcardIndexes,
 };
 use crate::ResolutionAdmission;
 
@@ -13,6 +13,7 @@ struct LanguagePresence {
     rust: bool,
     go: bool,
     csharp: bool,
+    php: bool,
 }
 
 impl LanguagePresence {
@@ -35,6 +36,7 @@ impl LanguagePresence {
             "rust" => self.rust = true,
             "go" => self.go = true,
             "csharp" => self.csharp = true,
+            "php" => self.php = true,
             _ => {}
         }
     }
@@ -586,6 +588,7 @@ impl IndexBuilder<'_> {
                     entry.complete &= base_set_complete;
                     if entry.links.len() <= limits.candidates_per_lookup {
                         entry.links.push(DirectBaseLink {
+                            relation: candidate.relation,
                             qualified_name: candidate.constraints.qualified_name.clone(),
                             source_file: range
                                 .map_or_else(String::new, |range| range.source_file.clone()),
@@ -646,6 +649,8 @@ impl IndexBuilder<'_> {
         }
         let mut members_by_owner =
             AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
+        let mut php_members_by_owner_folded =
+            AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
         for declaration in declarations.values() {
             let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
                 continue;
@@ -667,6 +672,15 @@ impl IndexBuilder<'_> {
                 ))
                 .or_default()
                 .push(slot);
+            if languages.php && declaration.language == "php" {
+                php_members_by_owner_folded
+                    .entry((
+                        owner.qualified_name.to_ascii_lowercase(),
+                        declaration.name.to_ascii_lowercase(),
+                    ))
+                    .or_default()
+                    .push(slot);
+            }
         }
         // Object-literal members are deliberately collected in their lexical
         // binding scope by the TypeScript adapter: unlike a class/interface,
@@ -730,6 +744,15 @@ impl IndexBuilder<'_> {
             }
         }
         for members in members_by_owner.values_mut() {
+            members.sort_unstable_by(|left, right| {
+                declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
+            });
+            members.dedup();
+            if members.len() > limits.candidates_per_lookup {
+                members.truncate(candidate_storage_limit(limits.candidates_per_lookup));
+            }
+        }
+        for members in php_members_by_owner_folded.values_mut() {
             members.sort_unstable_by(|left, right| {
                 declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
             });
@@ -1025,6 +1048,9 @@ impl IndexBuilder<'_> {
                 },
                 csharp: CSharpIndexes {
                     bindings_by_source: csharp_bindings_by_source,
+                },
+                php: PhpIndexes {
+                    members_by_owner_folded: php_members_by_owner_folded,
                 },
             }),
             project: ProjectContext {
