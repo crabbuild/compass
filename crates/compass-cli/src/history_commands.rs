@@ -211,7 +211,8 @@ pub(crate) fn resolve_or_materialize(
 fn configured_build_options(repository: &Repository) -> Result<HistoryBuildOptions, String> {
     let config = HistoryConfig::load(repository).map_err(|error| error.to_string())?;
     if let Some(profile) = config.profile {
-        return HistoryBuildOptions::from_profile(profile).map_err(|error| error.to_string());
+        return HistoryBuildOptions::from_compatible_profile(profile)
+            .map_err(|error| error.to_string());
     }
     HistoryBuildOptions::defaults().map_err(|error| error.to_string())
 }
@@ -263,15 +264,27 @@ pub(crate) fn resolve_comparable_pair(
             new,
         ),
         (Some(old), None) => {
-            let options = HistoryBuildOptions::from_profile(old.version.build_profile.clone())
-                .map_err(|error| error.to_string())?;
+            let options =
+                HistoryBuildOptions::from_compatible_profile(old.version.build_profile.clone())
+                    .map_err(|error| error.to_string())?;
+            let old = if old.version.build_profile == options.profile() {
+                old
+            } else {
+                resolve_or_materialize(repository, old_commit, &options, true, false)?.1
+            };
             let (history, new) =
                 resolve_or_materialize(repository, new_commit, &options, false, false)?;
             (history, old, new)
         }
         (None, Some(new)) => {
-            let options = HistoryBuildOptions::from_profile(new.version.build_profile.clone())
-                .map_err(|error| error.to_string())?;
+            let options =
+                HistoryBuildOptions::from_compatible_profile(new.version.build_profile.clone())
+                    .map_err(|error| error.to_string())?;
+            let new = if new.version.build_profile == options.profile() {
+                new
+            } else {
+                resolve_or_materialize(repository, new_commit, &options, true, false)?.1
+            };
             let (history, old) =
                 resolve_or_materialize(repository, old_commit, &options, false, false)?;
             (history, old, new)
@@ -1853,8 +1866,10 @@ fn execute_build(
     let parsed = parse_build_command(command, args).map_err(usage)?;
     let commit = repository.resolve(&parsed.revision).map_err(runtime)?;
     let options = if let Some(source) = &parsed.profile_from {
-        HistoryBuildOptions::from_profile(stored_profile(repository, source).map_err(runtime)?)
-            .map_err(runtime)?
+        HistoryBuildOptions::from_compatible_profile(
+            stored_profile(repository, source).map_err(runtime)?,
+        )
+        .map_err(runtime)?
     } else if parsed.use_repository_profile {
         configured_build_options(repository).map_err(runtime)?
     } else {

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Make `compass review` recover automatically when one compared revision still
+  prefers a realization from an older compatible `0.3.x` patch release. Compass
+  now preserves user-selected build options, advances engine-owned fingerprint
+  fields, and publishes a new current-version comparable pair without rewriting
+  the historical realization. Materialization also verifies the requested
+  profile before reusing a preferred realization.
+
 - Hard-cut PHP production extraction to the version-1 universal candidate with
   modern declarations, namespaces, grouped and aliased imports, traits,
   attributes, enum cases, promoted properties, calls, construction, typed

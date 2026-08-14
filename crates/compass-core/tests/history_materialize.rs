@@ -316,6 +316,47 @@ fn materializer_builds_target_without_reconstructing_an_ancestor()
 }
 
 #[test]
+fn materializer_does_not_reuse_a_preferred_realization_with_another_profile()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    git(directory.path(), &["init", "--quiet"])?;
+    git(directory.path(), &["config", "user.name", "Compass Test"])?;
+    git(
+        directory.path(),
+        &["config", "user.email", "compass@example.invalid"],
+    )?;
+    std::fs::write(directory.path().join("service.rs"), "fn service() {}\n")?;
+    git(directory.path(), &["add", "service.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "service"])?;
+    let repository = Repository::discover(directory.path())?;
+    let commit = repository.resolve("HEAD")?;
+    let store = HistoryStore::create(&repository)?;
+    let builder = RecordingBuilder::default();
+
+    let first = materialize_history(
+        &store,
+        &builder,
+        request(&repository, commit.clone(), false)?,
+    )?;
+    let mut changed = request(&repository, commit.clone(), false)?;
+    changed.profile.insert("profile_variant", "second")?;
+    let second = materialize_history(&store, &builder, changed)?;
+
+    assert_ne!(first.id, second.id);
+    assert_eq!(builder.builds()?, 2);
+    assert_eq!(
+        second.version.build_profile.value("profile_variant"),
+        Some("second")
+    );
+    assert_eq!(store.list(Some(&commit))?.len(), 2);
+    assert_eq!(
+        store.preferred(&commit)?.map(|version| version.id),
+        Some(second.id)
+    );
+    Ok(())
+}
+
+#[test]
 fn incomplete_builder_output_is_never_published() -> Result<(), Box<dyn std::error::Error>> {
     struct IncompleteBuilder;
     impl CompleteGraphBuilder for IncompleteBuilder {

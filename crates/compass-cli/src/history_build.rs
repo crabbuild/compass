@@ -109,6 +109,47 @@ impl HistoryBuildOptions {
         })
     }
 
+    pub(crate) fn from_compatible_profile(mut profile: BuildProfile) -> Result<Self, HistoryError> {
+        let persisted = profile.value("compass_version").ok_or_else(|| {
+            HistoryError::InvalidFingerprint(
+                "persisted compass_version is missing from build profile".to_owned(),
+            )
+        })?;
+        if persisted == env!("CARGO_PKG_VERSION") {
+            return Self::from_profile(profile);
+        }
+        let persisted = semver::Version::parse(persisted).map_err(|_| {
+            HistoryError::InvalidFingerprint(
+                "persisted compass_version is not a semantic version".to_owned(),
+            )
+        })?;
+        let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| {
+            HistoryError::InvalidFingerprint(
+                "running compass_version is not a semantic version".to_owned(),
+            )
+        })?;
+        if persisted.major != current.major
+            || persisted.minor != current.minor
+            || persisted >= current
+        {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "persisted compass_version {persisted} cannot be upgraded by {}",
+                env!("CARGO_PKG_VERSION")
+            )));
+        }
+        let deep = match profile.value("semantic_mode") {
+            Some("standard") => false,
+            Some("deep") => true,
+            _ => {
+                return Err(HistoryError::InvalidFingerprint(
+                    "persisted semantic mode is invalid".to_owned(),
+                ));
+            }
+        };
+        insert_current_engine_profile(&mut profile, deep)?;
+        Self::from_profile(profile)
+    }
+
     pub(crate) fn builder(
         &self,
         executable: PathBuf,
@@ -145,36 +186,8 @@ impl HistoryBuildOptions {
             resolve_provider(&mut values)?;
         }
         let mut profile = BuildProfile::default();
+        insert_current_engine_profile(&mut profile, values.deep)?;
         for (key, value) in [
-            ("compass_version", env!("CARGO_PKG_VERSION").to_owned()),
-            ("graph_schema", HISTORY_GRAPH_SCHEMA.to_owned()),
-            ("extractor_version", "compass-languages/v1".to_owned()),
-            ("resolver_version", "compass-resolve/v1".to_owned()),
-            ("pipeline_version", "compass-core/v1".to_owned()),
-            (
-                "program_provider_policy",
-                "offline-artifacts-first".to_owned(),
-            ),
-            (
-                "program_ir_schema",
-                compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
-            ),
-            (
-                "program_merger_version",
-                compass_program::MERGER_VERSION.to_string(),
-            ),
-            (
-                "program_analysis_schema",
-                compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
-            ),
-            (
-                "program_analyzer_version",
-                compass_analysis::ANALYZER_VERSION.to_string(),
-            ),
-            ("enabled_features", "workspace-default".to_owned()),
-            ("direction", "native-source-semantics".to_owned()),
-            ("cluster_algorithm", "seeded-louvain/v1".to_owned()),
-            ("cluster_seed", "42".to_owned()),
             ("gitignore", values.gitignore.to_string()),
             ("code_only", values.code_only.to_string()),
             ("cargo", values.cargo.to_string()),
@@ -182,10 +195,6 @@ impl HistoryBuildOptions {
             (
                 "semantic_mode",
                 if values.deep { "deep" } else { "standard" }.to_owned(),
-            ),
-            (
-                "semantic_prompt_sha256",
-                compass_semantic::extraction_prompt_sha256(values.deep),
             ),
             (
                 "provider",
@@ -289,6 +298,50 @@ impl HistoryBuildOptions {
             code_only: values.code_only,
         })
     }
+}
+
+fn insert_current_engine_profile(
+    profile: &mut BuildProfile,
+    deep: bool,
+) -> Result<(), HistoryError> {
+    for (key, value) in [
+        ("compass_version", env!("CARGO_PKG_VERSION").to_owned()),
+        ("graph_schema", HISTORY_GRAPH_SCHEMA.to_owned()),
+        ("extractor_version", "compass-languages/v1".to_owned()),
+        ("resolver_version", "compass-resolve/v1".to_owned()),
+        ("pipeline_version", "compass-core/v1".to_owned()),
+        (
+            "program_provider_policy",
+            "offline-artifacts-first".to_owned(),
+        ),
+        (
+            "program_ir_schema",
+            compass_ir::PROGRAM_SCHEMA_VERSION.to_string(),
+        ),
+        (
+            "program_merger_version",
+            compass_program::MERGER_VERSION.to_string(),
+        ),
+        (
+            "program_analysis_schema",
+            compass_analysis::ANALYSIS_SCHEMA_VERSION.to_string(),
+        ),
+        (
+            "program_analyzer_version",
+            compass_analysis::ANALYZER_VERSION.to_string(),
+        ),
+        ("enabled_features", "workspace-default".to_owned()),
+        ("direction", "native-source-semantics".to_owned()),
+        ("cluster_algorithm", "seeded-louvain/v1".to_owned()),
+        ("cluster_seed", "42".to_owned()),
+        (
+            "semantic_prompt_sha256",
+            compass_semantic::extraction_prompt_sha256(deep),
+        ),
+    ] {
+        profile.insert(key, &value)?;
+    }
+    Ok(())
 }
 
 fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError> {
@@ -1532,6 +1585,40 @@ mod tests {
             result,
             Err(error) if error.to_string().contains(HISTORY_GRAPH_SCHEMA)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn compatible_patch_profiles_advance_engine_fields_and_preserve_user_options()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut profile = HistoryBuildOptions::defaults()?.profile();
+        let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
+        let mut previous = current.clone();
+        previous.patch = previous
+            .patch
+            .checked_sub(1)
+            .ok_or("patch release fixture")?;
+        profile.insert("compass_version", &previous.to_string())?;
+        profile.insert("pipeline_version", "compass-core/older")?;
+        profile.insert("resolution", "2")?;
+
+        let upgraded = HistoryBuildOptions::from_compatible_profile(profile)?.profile();
+
+        assert_eq!(
+            upgraded.value("compass_version"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(upgraded.value("pipeline_version"), Some("compass-core/v1"));
+        assert_eq!(upgraded.value("resolution"), Some("2"));
+
+        let mut future_profile = upgraded;
+        let mut future = current;
+        future.patch = future.patch.saturating_add(1);
+        future_profile.insert("compass_version", &future.to_string())?;
+        let error = HistoryBuildOptions::from_compatible_profile(future_profile)
+            .err()
+            .ok_or("future profile unexpectedly accepted")?;
+        assert!(error.to_string().contains("cannot be upgraded"));
         Ok(())
     }
 
