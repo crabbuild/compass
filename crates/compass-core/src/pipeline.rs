@@ -53,7 +53,7 @@ use compass_output::{
 use compass_resolve::{
     ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
     merge_decl_def_classes_if_needed, merge_decl_def_classes_if_needed_changed,
-    resolve_prevalidated_owned_with_root_at_inference,
+    resolve_prevalidated_owned_with_root_at_inference, universal_resolution_report,
 };
 use compass_store::{
     GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
@@ -82,6 +82,10 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = "semantic-marker.json";
 const PIPELINE_RAYON_WORKER_CAP: usize = 12;
+// Debug builds and deeply nested parser inputs can exhaust Rayon's platform
+// default (commonly 2 MiB) while one worker owns the full collection pipeline.
+// Keep the bound explicit and portable; stack pages remain demand-paged.
+const PIPELINE_RAYON_STACK_SIZE_BYTES: usize = 8 * 1024 * 1024;
 const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
@@ -202,6 +206,8 @@ struct OutputStats {
     omitted_edges: usize,
     #[serde(default)]
     identity_collisions: usize,
+    #[serde(default)]
+    resolution_degraded: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1855,6 +1861,7 @@ fn publish_fact_neutral_incremental(
     let published_nodes = current.nodes.len();
     let published_edges = current.links.len();
     let omissions = saved_publication_omissions(&output_dir);
+    let resolution_degraded = saved_resolution_degraded(&output_dir);
     let graph_path = output_dir.join("graph.json");
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let previous = previous.ok_or_else(|| {
@@ -1929,6 +1936,7 @@ fn publish_fact_neutral_incremental(
         communities,
         clustered,
         omissions,
+        resolution_degraded,
     )?;
     write_ast_fact_digest_state(&output_dir, fact_state)?;
     write_semantic_marker(&output_dir, None)?;
@@ -1978,7 +1986,8 @@ fn publish_fact_neutral_incremental(
         omitted_nodes: omissions.nodes,
         omitted_edges: omissions.edges,
         identity_collisions: omissions.identity_collisions,
-        partial_graph: omissions.is_partial(),
+        partial_graph: omissions.is_partial() || resolution_degraded,
+        resolution_degraded,
         html_written: false,
         outputs_changed: true,
         program_modules: 0,
@@ -2010,6 +2019,8 @@ pub struct BuildResult {
     pub omitted_edges: usize,
     pub identity_collisions: usize,
     pub partial_graph: bool,
+    /// Universal collection resolution omitted candidates under its bounded strategy.
+    pub resolution_degraded: bool,
     pub html_written: bool,
     pub outputs_changed: bool,
     pub program_modules: usize,
@@ -2245,6 +2256,7 @@ fn build_graph_inner(
     let worker_count = pipeline_rayon_workers(options);
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(worker_count)
+        .stack_size(PIPELINE_RAYON_STACK_SIZE_BYTES)
         .thread_name(|index| format!("compass-pipeline-{index}"))
         .build()
         .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
@@ -2463,7 +2475,9 @@ fn build_graph_inner_unscoped(
                     identity_collisions: state.stats.identity_collisions,
                     partial_graph: state.stats.omitted_nodes > 0
                         || state.stats.omitted_edges > 0
-                        || state.stats.identity_collisions > 0,
+                        || state.stats.identity_collisions > 0
+                        || saved_resolution_degraded(&output_dir),
+                    resolution_degraded: saved_resolution_degraded(&output_dir),
                     html_written: output_dir.join("graph.html").is_file(),
                     outputs_changed: false,
                     program_modules: state.stats.program_modules,
@@ -2546,7 +2560,8 @@ fn build_graph_inner_unscoped(
                 omitted_nodes: stats.omitted_nodes,
                 omitted_edges: stats.omitted_edges,
                 identity_collisions: stats.identity_collisions,
-                partial_graph: stats.omissions().is_partial(),
+                partial_graph: stats.omissions().is_partial() || stats.resolution_degraded,
+                resolution_degraded: stats.resolution_degraded,
                 html_written: output_dir.join("graph.html").is_file(),
                 outputs_changed: false,
                 program_modules: program_modules(unchanged_program.as_ref()),
@@ -3232,6 +3247,9 @@ fn build_graph_inner_unscoped(
         &root,
         resolution_admission,
     );
+    let resolution_report = universal_resolution_report(&resolved).unwrap_or_default();
+    let resolution_degraded = resolution_report.degraded;
+    let resolution_omitted_candidates = resolution_report.omitted_candidates;
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
     internal_started = Instant::now();
@@ -3310,6 +3328,7 @@ fn build_graph_inner_unscoped(
         && !source_removed
         && supplemental.is_empty()
         && semantic.is_some_and(semantic_layer_is_empty)
+        && !resolution_degraded
         && let Ok(document) = GraphDocument::load(&output_dir.join("graph.json"))
     {
         let omissions = saved_publication_omissions(&output_dir);
@@ -3360,6 +3379,7 @@ fn build_graph_inner_unscoped(
                 omitted_edges: omissions.edges,
                 identity_collisions: omissions.identity_collisions,
                 partial_graph: omissions.is_partial(),
+                resolution_degraded: false,
                 html_written: false,
                 outputs_changed: false,
                 program_modules: program_modules(program.as_ref()),
@@ -3436,7 +3456,10 @@ fn build_graph_inner_unscoped(
         if published.document.nodes.is_empty() {
             return Err(CoreError::EmptyGraph);
         }
-        let omissions = published.omissions;
+        let mut omissions = published.omissions;
+        omissions.edges = omissions
+            .edges
+            .saturating_add(resolution_omitted_candidates);
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
         let no_cluster_graph_write_started = Instant::now();
@@ -3481,6 +3504,7 @@ fn build_graph_inner_unscoped(
             0,
             false,
             omissions,
+            resolution_degraded,
         )?;
         write_ast_fact_digest_state(&output_dir, &current_fact_state)?;
         write_semantic_marker(&output_dir, semantic)?;
@@ -3556,7 +3580,8 @@ fn build_graph_inner_unscoped(
                 omitted_nodes: omissions.nodes,
                 omitted_edges: omissions.edges,
                 identity_collisions: omissions.identity_collisions,
-                partial_graph: omissions.is_partial(),
+                partial_graph: omissions.is_partial() || resolution_degraded,
+                resolution_degraded,
                 html_written: false,
                 outputs_changed: true,
                 program_modules: program_modules(program.as_ref()),
@@ -3633,7 +3658,8 @@ fn build_graph_inner_unscoped(
         apply_inference_level(&mut preflight.document, options.inference_level);
         let preflight_document = preflight.document.to_legacy_document()?;
         profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
-        if !preflight.omissions.is_partial()
+        if !resolution_degraded
+            && !preflight.omissions.is_partial()
             && GraphDocument::load(&output_dir.join("graph.json"))
                 .is_ok_and(|existing| topology_is_unchanged(&existing, &preflight_document))
         {
@@ -3693,6 +3719,7 @@ fn build_graph_inner_unscoped(
                     omitted_edges: 0,
                     identity_collisions: 0,
                     partial_graph: false,
+                    resolution_degraded: false,
                     html_written: output_dir.join("graph.html").is_file(),
                     outputs_changed: false,
                     program_modules: program_modules(program.as_ref()),
@@ -3762,7 +3789,10 @@ fn build_graph_inner_unscoped(
     if published.document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
-    let omissions = published.omissions;
+    let mut omissions = published.omissions;
+    omissions.edges = omissions
+        .edges
+        .saturating_add(resolution_omitted_candidates);
     let report_health = current_orientation_health(options, omissions);
     // Legacy clustering and report code needs a compatibility projection, but
     // retaining it beside the complete typed authority doubles the dominant
@@ -4063,6 +4093,7 @@ fn build_graph_inner_unscoped(
                 communities.len(),
                 true,
                 omissions,
+                resolution_degraded,
             )
         },
     );
@@ -4114,7 +4145,8 @@ fn build_graph_inner_unscoped(
         omitted_nodes: omissions.nodes,
         omitted_edges: omissions.edges,
         identity_collisions: omissions.identity_collisions,
-        partial_graph: omissions.is_partial(),
+        partial_graph: omissions.is_partial() || resolution_degraded,
+        resolution_degraded,
         html_written,
         outputs_changed: true,
         program_modules: program_modules(program.as_ref()),
@@ -6851,6 +6883,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             omitted_nodes: 0,
             omitted_edges: 0,
             identity_collisions: 0,
+            resolution_degraded: false,
         };
         let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
         return Some(stats);
@@ -6879,6 +6912,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
         omitted_nodes: 0,
         omitted_edges: 0,
         identity_collisions: 0,
+        resolution_degraded: false,
     };
     let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
     Some(stats)
@@ -6891,6 +6925,13 @@ fn saved_publication_omissions(output_dir: &Path) -> PublicationOmissions {
         .map_or_else(PublicationOmissions::default, |stats| stats.omissions())
 }
 
+fn saved_resolution_degraded(output_dir: &Path) -> bool {
+    fs::read(output_dir.join(OUTPUT_STATS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OutputStats>(&bytes).ok())
+        .is_some_and(|stats| stats.resolution_degraded)
+}
+
 fn save_output_stats(
     output_dir: &Path,
     nodes: usize,
@@ -6898,6 +6939,7 @@ fn save_output_stats(
     communities: usize,
     clustered: bool,
     omissions: PublicationOmissions,
+    resolution_degraded: bool,
 ) -> Result<(), CoreError> {
     let graph_bytes = fs::metadata(output_dir.join("graph.json"))
         .map_err(|source| compass_files::FileError::Io {
@@ -6916,6 +6958,7 @@ fn save_output_stats(
             omitted_nodes: omissions.nodes,
             omitted_edges: omissions.edges,
             identity_collisions: omissions.identity_collisions,
+            resolution_degraded,
         },
         true,
     )?;

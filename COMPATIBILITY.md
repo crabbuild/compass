@@ -97,6 +97,16 @@ The additive `compass.graph/1` endpoint matrix accepts exact `calls` edges to
 and object properties without changing node or edge identity; consumers that
 validate endpoint kinds should accept this existing-major widening.
 
+Large universal-evidence collections now degrade explicitly instead of
+silently publishing file scaffolding. Compass retains source declarations and
+safe exact relationships in deterministic bounded partitions, records omitted
+relationship candidates in publication statistics, and adds the
+`universal_resolution_partial` error diagnostic to `compass.graph/1`. A build
+that emits this diagnostic publishes the useful partial artifact but exits
+nonzero. This is an additive diagnostic and completeness behavior change; the
+graph schema major and identities of successfully resolved records are
+unchanged.
+
 The self-contained HTML viewer embeds `compass.viewer.workbench/1`, an additive
 ordered container for code, call, impact, affected, architecture, historical,
 and artifact-lens models. Each view carries explicit bounded coverage. Plain

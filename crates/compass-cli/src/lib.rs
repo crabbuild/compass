@@ -2217,9 +2217,7 @@ fn command_build_with_validation_inner(
                 output.push_str(&notes.join("\n"));
             }
             let mut outcome = Outcome::success(output);
-            if let Some(warning) = format_partial_graph_warning(&result) {
-                outcome.stderr = warning;
-            }
+            apply_build_quality_outcome(&result, &mut outcome);
             if let Some(warning) = global_warning {
                 if !outcome.stderr.is_empty() {
                     outcome.stderr.push('\n');
@@ -5450,11 +5448,27 @@ fn format_program_analysis(result: &BuildResult) -> String {
 
 fn format_partial_graph_warning(result: &BuildResult) -> Option<String> {
     result.partial_graph.then(|| {
-        format!(
-            "warning: Compass published a partial graph after omitting {} nodes and {} edges; {} identity collisions quarantined.",
-            result.omitted_nodes, result.omitted_edges, result.identity_collisions
-        )
+        if result.resolution_degraded {
+            format!(
+                "error: Compass published a bounded partial graph because universal collection resolution omitted {} relationship candidates; declarations remain available. See graph diagnostic 'universal_resolution_partial'.",
+                result.omitted_edges
+            )
+        } else {
+            format!(
+                "warning: Compass published a partial graph after omitting {} nodes and {} edges; {} identity collisions quarantined.",
+                result.omitted_nodes, result.omitted_edges, result.identity_collisions
+            )
+        }
     })
+}
+
+fn apply_build_quality_outcome(result: &BuildResult, outcome: &mut Outcome) {
+    if let Some(warning) = format_partial_graph_warning(result) {
+        outcome.stderr = warning;
+    }
+    if result.resolution_degraded {
+        outcome.code = 1;
+    }
 }
 
 #[cfg(test)]
@@ -5491,6 +5505,7 @@ mod mcp_option_tests {
             omitted_edges: 0,
             identity_collisions: 0,
             partial_graph: false,
+            resolution_degraded: false,
             html_written,
             outputs_changed,
             program_modules: 0,
@@ -5519,6 +5534,23 @@ mod mcp_option_tests {
             Some(
                 "warning: Compass published a partial graph after omitting 3 nodes and 5 edges; 2 identity collisions quarantined."
             )
+        );
+    }
+
+    #[test]
+    fn degraded_resolution_is_a_non_success_with_a_machine_diagnostic_pointer() {
+        let mut result = sample_build_result(true, false);
+        result.partial_graph = true;
+        result.resolution_degraded = true;
+        result.omitted_edges = 7;
+        let mut outcome = Outcome::success("graph published".to_owned());
+
+        apply_build_quality_outcome(&result, &mut outcome);
+
+        assert_eq!(outcome.code, 1);
+        assert_eq!(
+            outcome.stderr,
+            "error: Compass published a bounded partial graph because universal collection resolution omitted 7 relationship candidates; declarations remain available. See graph diagnostic 'universal_resolution_partial'."
         );
     }
 
