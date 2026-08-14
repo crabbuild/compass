@@ -1,8 +1,10 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
-use compass_history::{ExtractionFingerprint, HistoryStore, PublishRequest, Repository};
-use compass_pr_intelligence::{GateState, PullRequestReport, RiskBand};
+use compass_history::{
+    ExtractionFingerprint, HistoryConfig, HistoryStore, PublishRequest, Repository,
+};
+use compass_pr_intelligence::{GateState, MergeOutcome, PullRequestReport, RiskBand};
 
 fn git(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("git")
@@ -58,6 +60,24 @@ fn publish_historical_base(root: &Path, commit: &str) -> Result<(), Box<dyn std:
         completion: completed.completion,
         make_preferred: true,
     })?;
+    Ok(())
+}
+
+fn persist_historical_repository_profile(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let enabled = run(root, &["history", "enable", "--code-only"])?;
+    if !enabled.status.success() {
+        return Err(format!(
+            "could not enable history: {}",
+            String::from_utf8_lossy(&enabled.stderr)
+        )
+        .into());
+    }
+    let repository = Repository::discover(root)?;
+    let mut profile = HistoryConfig::load(&repository)?
+        .profile
+        .ok_or("enabled profile")?;
+    profile.insert("compass_version", "0.1.10")?;
+    HistoryConfig::enable(&repository, profile)?;
     Ok(())
 }
 
@@ -184,6 +204,140 @@ fn local_review_rebuilds_a_comparable_pair_from_compass_0_1_10()
     assert!(history.list(Some(&base))?.iter().any(|realization| {
         realization.version.build_profile.value("compass_version") == Some("0.1.10")
     }));
+    Ok(())
+}
+
+#[test]
+fn local_review_upgrades_a_persisted_0_1_10_profile_after_a_current_graph_build()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    initialize(directory.path())?;
+    let base = git(directory.path(), &["rev-parse", "HEAD"])?;
+    git(directory.path(), &["checkout", "--quiet", "-b", "feature"])?;
+    std::fs::write(
+        directory.path().join("feature.rs"),
+        "pub fn feature() -> u8 { 2 }\n",
+    )?;
+    git(directory.path(), &["add", "feature.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "feature"])?;
+    let head = git(directory.path(), &["rev-parse", "HEAD"])?;
+    persist_historical_repository_profile(directory.path())?;
+
+    let built = run(
+        directory.path(),
+        &["extract", ".", "--code-only", "--no-viz"],
+    )?;
+    assert!(
+        built.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&built.stdout),
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let repository = Repository::discover(directory.path())?;
+    assert_eq!(
+        HistoryConfig::load(&repository)?
+            .profile
+            .and_then(|profile| profile.value("compass_version").map(str::to_owned))
+            .as_deref(),
+        Some("0.1.10")
+    );
+
+    let reviewed = run(
+        directory.path(),
+        &[
+            "review", "--base", &base, "--head", &head, "--format", "json",
+        ],
+    )?;
+    assert!(
+        reviewed.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&reviewed.stdout),
+        String::from_utf8_lossy(&reviewed.stderr)
+    );
+    let report = PullRequestReport::from_json(&reviewed.stdout)?;
+    assert_eq!(report.identity.revisions.target_head, base);
+    assert_eq!(report.identity.revisions.pull_request_head, head);
+    let comparison = report
+        .identity
+        .revisions
+        .merge_result
+        .object_id()
+        .unwrap_or(&report.identity.revisions.pull_request_head)
+        .to_owned();
+
+    let history = HistoryStore::open_existing(&repository)?.ok_or("history store")?;
+    for revision in [base, comparison] {
+        let commit = repository.resolve(&revision)?;
+        let preferred = history.preferred(&commit)?.ok_or("preferred realization")?;
+        assert_eq!(
+            preferred.version.build_profile.value("compass_version"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn local_review_reconciles_existing_compatible_realizations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    initialize(directory.path())?;
+    git(directory.path(), &["checkout", "--quiet", "-b", "feature"])?;
+    std::fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn shared() -> u8 { 2 }\n",
+    )?;
+    git(directory.path(), &["add", "lib.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "feature"])?;
+    let head = git(directory.path(), &["rev-parse", "HEAD"])?;
+    git(directory.path(), &["checkout", "--quiet", "main"])?;
+    std::fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn shared() -> u8 { 3 }\n",
+    )?;
+    git(directory.path(), &["add", "lib.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "target"])?;
+    let base = git(directory.path(), &["rev-parse", "HEAD"])?;
+    publish_historical_base(directory.path(), &base)?;
+    let built = run(
+        directory.path(),
+        &["history", "build", &head, "--code-only"],
+    )?;
+    assert!(
+        built.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&built.stdout),
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let reviewed = run(
+        directory.path(),
+        &[
+            "review", "--base", &base, "--head", &head, "--format", "json",
+        ],
+    )?;
+    assert!(
+        reviewed.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&reviewed.stdout),
+        String::from_utf8_lossy(&reviewed.stderr)
+    );
+    let report = PullRequestReport::from_json(&reviewed.stdout)?;
+    assert!(matches!(
+        report.identity.revisions.merge_result,
+        MergeOutcome::Conflicted { .. }
+    ));
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("history store")?;
+    for revision in [base, head] {
+        let commit = repository.resolve(&revision)?;
+        let preferred = history.preferred(&commit)?.ok_or("preferred realization")?;
+        assert_eq!(
+            preferred.version.build_profile.value("compass_version"),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+    }
     Ok(())
 }
 

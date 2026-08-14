@@ -144,10 +144,14 @@ pub(crate) fn resolve_or_materialize(
     rebuild: bool,
     replace_corrupt: bool,
 ) -> Result<(HistoryStore, PublishedVersion), String> {
+    let requested_profile = options.profile();
     let existing = HistoryStore::open_existing(repository).map_err(|error| error.to_string())?;
     if !rebuild && let Some(history) = existing {
         match history.preferred(&commit) {
-            Ok(Some(preferred)) => return Ok((history, preferred)),
+            Ok(Some(preferred)) if preferred.version.build_profile == requested_profile => {
+                return Ok((history, preferred));
+            }
+            Ok(Some(_)) => {}
             Ok(None) => {}
             Err(error) => return Err(error.to_string()),
         }
@@ -160,7 +164,7 @@ pub(crate) fn resolve_or_materialize(
     let queue = HistoryQueue::for_repository(repository).map_err(|error| error.to_string())?;
     let request = JobRequest {
         commit: commit.clone(),
-        profile: options.profile(),
+        profile: requested_profile,
     };
     let job_id = if rebuild {
         queue.enqueue_rebuild(request, replace_corrupt)
@@ -258,11 +262,35 @@ pub(crate) fn resolve_comparable_pair(
         return Err("the requested fingerprint is not materialized at both commits".to_owned());
     }
     let (history, old, new) = match (old, new) {
-        (Some(old), Some(new)) => (
-            existing.ok_or_else(|| "history store disappeared".to_owned())?,
-            old,
-            new,
-        ),
+        (Some(old), Some(new)) => {
+            if old.version.build_profile == new.version.build_profile {
+                (
+                    existing.ok_or_else(|| "history store disappeared".to_owned())?,
+                    old,
+                    new,
+                )
+            } else {
+                let old_options =
+                    HistoryBuildOptions::from_compatible_profile(old.version.build_profile.clone())
+                        .map_err(|error| error.to_string())?;
+                let new_options =
+                    HistoryBuildOptions::from_compatible_profile(new.version.build_profile.clone())
+                        .map_err(|error| error.to_string())?;
+                if old_options.profile() == new_options.profile() {
+                    let (_, old) =
+                        resolve_or_materialize(repository, old_commit, &old_options, false, false)?;
+                    let (history, new) =
+                        resolve_or_materialize(repository, new_commit, &new_options, false, false)?;
+                    (history, old, new)
+                } else {
+                    (
+                        existing.ok_or_else(|| "history store disappeared".to_owned())?,
+                        old,
+                        new,
+                    )
+                }
+            }
+        }
         (Some(old), None) => {
             let options =
                 HistoryBuildOptions::from_compatible_profile(old.version.build_profile.clone())
