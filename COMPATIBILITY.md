@@ -384,7 +384,15 @@ surface. Backups are digest-bound directories and restores never overwrite an
 existing destination. Local publication retains two complete snapshots and
 performs bounded reachability GC; remote leases, service quotas, and
 distributed GC remain deferred. The local API enforces bounded values, scans,
-transactions, graph sizes, and request work.
+transactions, and request work. Current `compass.store.graph-index/2`
+snapshots do not impose an aggregate canonical-payload or record-count limit:
+their manifest uses `u64` byte and record counts, while each immutable tree
+object, write batch, scan, and query remains independently bounded. The legacy
+monolithic `compass.store.graph-snapshot/1` compatibility API still enforces
+its 2 GiB materialized-payload limit. `compass store status|validate|backup|restore`
+stream graph and database digests through fixed-size buffers and traverse the
+reachable immutable tree objects with bounded cache and path memory; they do
+not depend on the whole-JSON reader limit.
 
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve

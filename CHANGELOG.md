@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Remove the 2 GiB aggregate canonical-payload limit from current SQLite
+  graph-index snapshots. Large graphs are now admitted by their validated
+  manifest and stored as independently bounded, content-addressed tree objects
+  with bounded write batches; point and range query work remains explicitly
+  bounded. Store status, validation, backup, and restore now stream file
+  digests and validate every reachable tree object without materializing the
+  canonical graph. The legacy monolithic snapshot compatibility API and
+  whole-JSON readers retain their existing allocation limits.
+
 - Prevent oversized universal-evidence collections from collapsing code graphs
   to file scaffolding. Default-low builds compact unused leaf declaration
   details, project retained declarations before resolution, and resolve safe

@@ -41,13 +41,12 @@ pub const MAX_SCAN_ITEMS: usize = 1_000;
 pub const MAX_SCAN_BYTES: usize = 1024 * 1024;
 pub const MAX_IMMUTABLE_BATCH_ITEMS: usize = 1_024;
 pub const MAX_IMMUTABLE_BATCH_BYTES: usize = 16 * 1024 * 1024;
-/// Maximum canonical graph payload accepted by the bounded store snapshot.
+/// Maximum payload accepted by the legacy monolithic snapshot compatibility API.
 ///
-/// The portable in-memory JSON readers intentionally keep their independent
-/// 1 GiB cap.  The local store is the bounded large-graph path and therefore
-/// accepts up to 2 GiB while serving records through indexed scans instead of
-/// materializing the whole document.  The limit is still finite so malformed
-/// or hostile snapshots cannot request unbounded allocation.
+/// The current graph-index snapshot stores independently bounded immutable tree
+/// objects and has no aggregate payload limit. This cap remains on the legacy
+/// `publish_snapshot`/`read_snapshot` path because that API materializes the
+/// canonical payload in one allocation.
 pub const MAX_GRAPH_BYTES: usize = 2 * 1024 * 1024 * 1024;
 const GRAPH_NAMESPACE: &[u8] = b"compass.current.graph.v1";
 const CATALOG_PARTITION: &[u8] = b"catalog";

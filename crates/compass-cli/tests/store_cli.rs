@@ -124,3 +124,36 @@ fn store_validate_rejects_a_corrupt_sidecar_without_touching_graph_json()
     assert_eq!(fs::read(active_output.join("graph.json"))?, graph);
     Ok(())
 }
+
+#[test]
+fn store_status_and_validation_do_not_use_the_whole_json_reader_limit() -> Result<(), Box<dyn Error>>
+{
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("main.rs"), "fn main() {}\n")?;
+    let init = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["init", ".", "--yes", "--store", "sqlite"])
+        .current_dir(root.path())
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(init.status.success());
+    let output = root.path().join("compass-out");
+
+    for operation in ["status", "validate"] {
+        let result = Command::new(env!("CARGO_BIN_EXE_compass"))
+            .args([
+                "store",
+                operation,
+                output.to_str().ok_or("output path")?,
+                "--format",
+                "json",
+            ])
+            .env("COMPASS_MAX_GRAPH_BYTES", "1")
+            .output()?;
+        assert!(
+            result.status.success(),
+            "{operation} stderr: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    Ok(())
+}

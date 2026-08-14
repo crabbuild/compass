@@ -15,7 +15,10 @@ use compass_model::provenance::{
     EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
 };
 use compass_store::SqliteStore;
-use compass_store::{Key, MemoryStore, NamespaceId, PartitionKey, Store, WriteCondition};
+use compass_store::{
+    Key, KeyRange, MAX_GRAPH_BYTES, MAX_VALUE_BYTES, MemoryStore, NamespaceId, PartitionKey,
+    ScanLimits, Store, WriteCondition,
+};
 use sha2::Digest;
 use tempfile::tempdir;
 
@@ -160,9 +163,12 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
         unknown.validate(),
         Err(SnapshotError::Unsupported(_))
     ));
-    let mut oversized = first.manifest.clone();
-    oversized.edge_count = (compass_graph::GRAPH_SNAPSHOT_MAX_ITEMS as u64) + 1;
-    assert!(matches!(oversized.validate(), Err(SnapshotError::Limit(_))));
+    let mut mismatched = first.manifest.clone();
+    mismatched.edge_count = mismatched.edge_count.saturating_add(1);
+    assert!(matches!(
+        mismatched.validate(),
+        Err(SnapshotError::Corrupt(_))
+    ));
     assert_eq!(second.new_objects, 0);
     assert!(second.reused_objects > 0);
     assert_eq!(first.write_transactions, 2);
@@ -243,6 +249,61 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
             })
             .all(|root| root.entry_count > 0)
     );
+    Ok(())
+}
+
+#[test]
+fn segmented_snapshot_accepts_a_logical_graph_larger_than_two_gibibytes()
+-> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let content = builder.prepare_content(&store, &graph())?;
+    let logical_graph_bytes = (MAX_GRAPH_BYTES as u64).saturating_add(1);
+
+    let prepared = builder.finish_content(&store, content, "a".repeat(64), logical_graph_bytes)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    assert_eq!(reader.manifest().graph_bytes, logical_graph_bytes);
+    assert_eq!(
+        reader.get_node("a")?.map(|node| node.id),
+        Some("a".to_owned())
+    );
+    let object_page = store.scan(
+        &NamespaceId::graph(),
+        &PartitionKey::new("graph-snapshot/objects")?,
+        &KeyRange::default(),
+        ScanLimits::default(),
+        None,
+    )?;
+    assert!(object_page.next.is_none());
+    assert!(!object_page.entries.is_empty());
+    assert!(
+        object_page
+            .entries
+            .iter()
+            .all(|entry| entry.value.len() <= MAX_VALUE_BYTES)
+    );
+    Ok(())
+}
+
+#[test]
+fn segmented_manifest_counts_are_not_limited_by_materialized_read_budgets()
+-> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let mut manifest = GraphSnapshotBuilder::new()
+        .prepare(&store, &graph())?
+        .manifest;
+    let logical_node_count = (compass_graph::GRAPH_SNAPSHOT_MAX_ITEMS as u64).saturating_add(1);
+    manifest.node_count = logical_node_count;
+    manifest
+        .roots
+        .iter_mut()
+        .find(|root| root.index == IndexKind::Nodes)
+        .ok_or("node root missing")?
+        .entry_count = logical_node_count;
+
+    manifest.validate()?;
     Ok(())
 }
 
@@ -845,6 +906,7 @@ fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
     let prepared = builder.prepare(&store, &graph())?;
     let selector = builder.activate(&store, &prepared)?;
     let reader = GraphSnapshotReader::open_selector(&store, selector)?;
+    reader.validate_integrity()?;
     let root = reader
         .manifest()
         .roots
@@ -861,6 +923,11 @@ fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
         b"corrupt",
         WriteCondition::Any,
     )?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert!(matches!(
+        reader.validate_integrity(),
+        Err(SnapshotError::Corrupt(_))
+    ));
     assert!(matches!(
         reader.get_node("a"),
         Err(SnapshotError::Corrupt(_))
