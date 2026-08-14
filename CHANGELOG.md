@@ -19,8 +19,11 @@
   generics, fields, properties, and inherited members without crossing
   languages. Extend Minimal API coverage to bounded multiline lambdas and
   `MapMethods`, and keep reviewed Kestrel request-processing and middleware
-  anchors ahead of generic role-name matches in natural query ranking. Advance
-  extraction semantics to v13 so cached C# evidence rebuilds with these fixes.
+  anchors ahead of generic role-name matches in natural query ranking. Natural
+  search now removes question stop words and canonicalizes inflections before
+  bounded recall, while persistent discovery caps speculative accelerator
+  hydration before general recall. Advance extraction semantics to v13 so
+  cached C# evidence rebuilds with these fixes.
 
 ## 0.3.12 - 2026-08-13
 

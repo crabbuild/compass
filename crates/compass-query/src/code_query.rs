@@ -1768,7 +1768,30 @@ impl CodeQueryEngine {
             }
         }
 
-        let terms = search_query_terms(query)?;
+        // Validate the public lexical bound against the original query before
+        // stop-word removal so many tiny tokens cannot bypass it.
+        let literal_terms = search_query_terms(query)?;
+        let terms = if query.chars().any(char::is_whitespace) {
+            query_recall_terms(query)
+                .into_iter()
+                .filter(|term| {
+                    !matches!(
+                        term.to_ascii_uppercase().as_str(),
+                        "AND" | "OR" | "NOT" | "NEAR"
+                    )
+                })
+                .map(canonical_query_token)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            // A single symbol-shaped token may carry qualification and a
+            // typo (`UserService.lits`). Preserve its literal pieces for the
+            // bounded fuzzy resolver; natural-language phrases use canonical
+            // stop-word and inflection handling above.
+            literal_terms
+        };
+        validate_search_term_count(&terms)?;
         let prepared = PreparedSearchQuery {
             fts_query: fts_query_from_terms(&terms),
             ranking_terms: terms.clone(),

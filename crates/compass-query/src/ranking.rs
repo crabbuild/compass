@@ -1741,8 +1741,8 @@ mod tests {
     fn aspnet_queries_prefer_request_and_middleware_execution_anchors() {
         let mut request = owned_node(
             "n:http-protocol",
-            ".ProcessRequestsAsync()",
-            "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequestsAsync",
+            ".ProcessRequests()",
+            "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequests",
             "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs",
         );
         request.language = Some("csharp".to_owned());
@@ -1783,10 +1783,10 @@ mod tests {
         assert_eq!(ranked[0].node_id, "n:http-protocol", "ranked={ranked:#?}");
 
         let mut middleware = owned_node(
-            "n:middleware-invoke",
-            ".InvokeAsync()",
-            "Microsoft.AspNetCore.Authentication.AuthenticationMiddleware::InvokeAsync",
-            "src/Security/Authentication/Core/src/AuthenticationMiddleware.cs",
+            "n:iis-middleware-invoke",
+            ".Invoke()",
+            "Microsoft.AspNetCore.Server.IISIntegration.IISMiddleware::Invoke",
+            "src/Servers/IIS/IISIntegration/src/IISMiddleware.cs",
         );
         middleware.language = Some("csharp".to_owned());
         let ranked = rank_search_candidates(
@@ -1800,11 +1800,12 @@ mod tests {
                     relationship_matches: BTreeSet::new(),
                 },
                 SearchCandidate {
-                    node: owned_node(
-                        "n:middleware-factory",
-                        ".Create()",
-                        "Microsoft.AspNetCore.Http.MiddlewareFactory::Create",
-                        "src/Http/Http/src/MiddlewareFactory.cs",
+                    node: node(
+                        "n:middleware-analysis",
+                        "Middleware",
+                        NodeKind::Class,
+                        "src/Analyzers/Analyzers/src/MiddlewareAnalysis.cs",
+                        false,
                     ),
                     sources: BTreeSet::from([CandidateSource::TermIndex]),
                     indexed_matches: BTreeSet::from(["middleware".to_owned()]),
@@ -1813,7 +1814,7 @@ mod tests {
             ],
             usize::MAX,
         );
-        assert_eq!(ranked[0].node_id, "n:middleware-factory");
+        assert_eq!(ranked[0].node_id, "n:iis-middleware-invoke");
     }
 
     #[test]
