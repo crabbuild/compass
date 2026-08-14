@@ -64,14 +64,16 @@ use compass_model::query_contract::{
 };
 use compass_output::{
     AffectedLensOptions, AgentOrientation, ArtifactLens, CallflowOptions, CallflowSection,
-    CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions, TreeOptions, WikiOptions,
-    WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
+    CanvasOptions, HtmlOptions, ObsidianOptions, SourceNavigation, SvgOptions, TreeOptions,
+    WikiOptions, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
     WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model, callflow_view_model,
     export_obsidian, export_wiki, graph_artifact_identity, graph_community_view_model_document,
     graph_view_model_bundle_document, graph_view_model_document, node_filenames,
     render_orientation_json, validate_orientation_graph_identity, write_callflow_html,
-    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html, write_workbench_html,
+    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
+    write_workbench_html_with_source_navigation,
 };
+use compass_prs::{ProcessRunner, SystemRunner};
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions,
     TextPageOptions, TraversalMode, discovery_request_digest, format_affected, format_benchmark,
@@ -3621,7 +3623,10 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                         program_path: program_path.as_deref(),
                     },
                 )
-                .and_then(|model| export_workbench_html(&model, path))
+                .and_then(|model| {
+                    let source_navigation = export_source_navigation(&inputs, &graph_path);
+                    export_workbench_html(&model, source_navigation.as_ref(), path)
+                })
             }
         }
         "json" | "viewer-json" => {
@@ -4124,8 +4129,13 @@ fn architecture_view_model(
     })
 }
 
-fn export_workbench_html(model: &WorkbenchModel, path: PathBuf) -> Result<ExportOutput, String> {
-    write_workbench_html(model, &path).map_err(|error| error.to_string())?;
+fn export_workbench_html(
+    model: &WorkbenchModel,
+    source_navigation: Option<&SourceNavigation>,
+    path: PathBuf,
+) -> Result<ExportOutput, String> {
+    write_workbench_html_with_source_navigation(model, source_navigation, &path)
+        .map_err(|error| error.to_string())?;
     Ok(ExportOutput::html(
         format!(
             "{} written - open in any browser, no server needed",
@@ -4133,6 +4143,86 @@ fn export_workbench_html(model: &WorkbenchModel, path: PathBuf) -> Result<Export
         ),
         path,
     ))
+}
+
+fn export_source_navigation(inputs: &ExportInputs, graph_path: &Path) -> Option<SourceNavigation> {
+    const GIT_SOURCE_LINK_TIMEOUT: Duration = Duration::from_secs(2);
+    let revision = inputs
+        .document
+        .graph
+        .get("build")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|build| build.get("sourceCommit"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            inputs
+                .document
+                .extras
+                .get("built_at_commit")
+                .and_then(serde_json::Value::as_str)
+        })?;
+    let directory = graph_path.parent()?.to_str()?;
+    if !matches!(revision.len(), 40 | 64) || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let root = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                directory.to_owned(),
+                "rev-parse".to_owned(),
+                "--show-toplevel".to_owned(),
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if root.code != 0 {
+        return None;
+    }
+    let root = root.stdout.trim();
+    if root.is_empty()
+        || root
+            .chars()
+            .any(|character| matches!(character, '\0' | '\n' | '\r'))
+    {
+        return None;
+    }
+    let commit_object = format!("{revision}^{{commit}}");
+    let commit = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                root.to_owned(),
+                "cat-file".to_owned(),
+                "-e".to_owned(),
+                commit_object,
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if commit.code != 0 {
+        return None;
+    }
+    let remote = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                root.to_owned(),
+                "remote".to_owned(),
+                "get-url".to_owned(),
+                "origin".to_owned(),
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if remote.code != 0 {
+        return None;
+    }
+    SourceNavigation::from_git_remote(remote.stdout.trim(), revision)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -6,6 +6,8 @@ import {
   GitCompareArrowsIcon,
   GitForkIcon,
   NetworkIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
   RouteIcon,
   SearchCodeIcon,
   ShieldCheckIcon,
@@ -14,7 +16,7 @@ import {
 } from "lucide-react";
 import type { ArchitectureOverview } from "../contracts/architecture";
 import type { CallflowViewModel } from "../contracts/callflow";
-import type { GraphViewModel, SourceLocation } from "../contracts/graph";
+import type { GraphViewModel } from "../contracts/graph";
 import type { WorkbenchModel, WorkbenchView } from "../contracts/workbench";
 import { ArchitectureMap, type ArchitectureSelection } from "../architecture/ArchitectureMap";
 import { CallGraph } from "../calls/CallGraph";
@@ -48,6 +50,7 @@ export function VisualizationWorkbench({
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
 }) {
   const [activeViewId, setActiveViewId] = useState(() => hashView(workbench) ?? workbench.defaultView);
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const activeView = workbench.views.find((view) => view.id === activeViewId)
     ?? workbench.views[0];
 
@@ -68,14 +71,36 @@ export function VisualizationWorkbench({
 
   if (!activeView) return null;
   return (
-    <div className="visualization-workbench">
-      <aside className="visualization-rail">
+    <div
+      className="visualization-workbench"
+      data-navigation-collapsed={navigationCollapsed}
+    >
+      <aside
+        className="visualization-rail"
+        data-collapsed={navigationCollapsed}
+        aria-label="Compass navigation"
+      >
         <header>
           <span className="visualization-bearing" aria-hidden="true"><WaypointsIcon /></span>
           <span>
             <strong>Compass</strong>
-            <small>Graph workbench</small>
+            <small title={workbench.title}>{workbench.title}</small>
           </span>
+          <button
+            className="visualization-rail-disclosure"
+            type="button"
+            aria-label={navigationCollapsed
+              ? "Expand graph navigation"
+              : "Collapse graph navigation"}
+            title={navigationCollapsed
+              ? "Expand graph navigation"
+              : "Collapse graph navigation"}
+            onClick={() => setNavigationCollapsed((collapsed) => !collapsed)}
+          >
+            {navigationCollapsed
+              ? <PanelLeftOpenIcon aria-hidden="true" />
+              : <PanelLeftCloseIcon aria-hidden="true" />}
+          </button>
         </header>
         <nav aria-label="Graph views">
           {workbench.views.map((view) => (
@@ -194,6 +219,10 @@ function WorkbenchView({
           model={comparison.graph}
           host={host}
           preferredLayout="grid"
+          sourceRevisions={{
+            before: view.baseRevision,
+            after: view.targetRevision
+          }}
         />
       </div>
     );
@@ -223,6 +252,7 @@ function FilteredGraph({
   model,
   host,
   queryResult,
+  sourceRevisions,
   preferredLayout,
   communityDetails,
   communityDetail,
@@ -235,6 +265,7 @@ function FilteredGraph({
   model: GraphViewModel;
   host: VisualizationWorkbenchHost;
   queryResult?: Parameters<typeof CompassGraph>[0]["queryResult"];
+  sourceRevisions?: Parameters<typeof CompassGraph>[0]["sourceRevisions"];
   preferredLayout: Parameters<typeof CompassGraph>[0]["preferredLayout"];
   communityDetails?: Record<string, GraphViewModel> | undefined;
   communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
@@ -325,6 +356,8 @@ function FilteredGraph({
           }
         }}
         queryResult={queryResult}
+        sourceRevisions={sourceRevisions}
+        showInspectorHeader={false}
         preferredLayout={preferredLayout}
         toolbarLeading={(
           <button
@@ -647,8 +680,4 @@ function humanize(value: string): string {
 
 function sectionName(overview: ArchitectureOverview, id: string): string {
   return overview.sections.find((section) => section.id === id)?.name ?? id;
-}
-
-export function dispatchOpenSource(source: SourceLocation): void {
-  window.dispatchEvent(new CustomEvent("compass:open-source", { detail: source }));
 }

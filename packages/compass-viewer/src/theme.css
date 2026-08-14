@@ -154,6 +154,10 @@ body.vscode-high-contrast {
   background: var(--background);
 }
 
+.visualization-workbench[data-navigation-collapsed="true"] {
+  grid-template-columns: 48px minmax(0, 1fr);
+}
+
 .visualization-rail {
   display: grid;
   min-width: 0;
@@ -165,11 +169,59 @@ body.vscode-high-contrast {
 }
 
 .visualization-rail > header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
   padding: 18px 16px 16px;
   border-bottom: 1px solid var(--compass-line);
+}
+
+.visualization-rail-disclosure {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.visualization-rail-disclosure:hover {
+  border-color: var(--compass-line);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.visualization-rail-disclosure svg {
+  width: 16px;
+  height: 16px;
+}
+
+.visualization-rail[data-collapsed="true"] > header {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 7px 10px;
+}
+
+.visualization-rail[data-collapsed="true"] > header > span:nth-child(2),
+.visualization-rail[data-collapsed="true"] nav button > span,
+.visualization-rail[data-collapsed="true"] nav i,
+.visualization-rail[data-collapsed="true"] > footer {
+  display: none;
+}
+
+.visualization-rail[data-collapsed="true"] .visualization-bearing {
+  width: 30px;
+  height: 30px;
+}
+
+.visualization-rail[data-collapsed="true"] nav button {
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding-inline: 5px;
 }
 
 .visualization-bearing {
@@ -189,7 +241,7 @@ body.vscode-high-contrast {
   height: 18px;
 }
 
-.visualization-rail header > span:last-child,
+.visualization-rail header > span:nth-child(2),
 .visualization-rail nav button > span {
   display: grid;
   min-width: 0;
@@ -770,11 +822,14 @@ body.vscode-high-contrast {
   }
 
   .visualization-rail > header {
+    display: flex;
+    flex-direction: column;
     justify-content: center;
+    gap: 9px;
     padding-inline: 8px;
   }
 
-  .visualization-rail header > span:last-child,
+  .visualization-rail header > span:nth-child(2),
   .visualization-rail nav button > span,
   .visualization-rail nav i,
   .visualization-rail > footer {
@@ -2205,8 +2260,11 @@ button:not(:disabled),
 
 .compass-inspector-header small {
   margin-top: 2px;
+  overflow: hidden;
   color: var(--compass-faint);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compass-product-mark {
@@ -2273,6 +2331,21 @@ button:not(:disabled),
   position: relative;
   padding: 10px 12px;
   border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-inspector-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.compass-inspector-search-row .compass-search-field:last-child {
+  grid-column: 1 / -1;
+}
+
+.compass-inspector-search-disclosure {
+  border-color: var(--compass-line);
 }
 
 .compass-search-field {

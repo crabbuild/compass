@@ -441,7 +441,7 @@ const PAGES: &[Page] = &[
         "export html",
         "Generate the interactive graph HTML report",
         ["compass export html [OPTIONS]"],
-        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum nodes rendered [default: 5000]\n  --no-viz                Skip visualization output\n\nExamples:\n  compass export html\n  compass export html --node-limit 2000\n\nNotes:\n  Large exports embed a bounded set of complete community details; use VS Code or export json --community ID for an omitted detail. Interactive terminals ask before opening the generated HTML; scripts and --no-viz never prompt or open a browser."
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum nodes rendered [default: 5000]\n  --no-viz                Skip visualization output\n\nExamples:\n  compass export html\n  compass export html --node-limit 2000\n\nNotes:\n  Large exports embed a bounded set of complete community details; use VS Code or export json --community ID for an omitted detail. Source actions open immutable commit links for recognized GitHub, GitLab, and Bitbucket origins when the graph records a full source commit. Interactive terminals ask before opening the generated HTML; scripts and --no-viz never prompt or open a browser."
     ),
     page!(
         "export callflow-html",
