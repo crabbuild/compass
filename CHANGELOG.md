@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.12 - 2026-08-13
+
 - Remove the 2 GiB aggregate canonical-payload limit from current SQLite
   graph-index snapshots. Large graphs are now admitted by their validated
   manifest and stored as independently bounded, content-addressed tree objects
