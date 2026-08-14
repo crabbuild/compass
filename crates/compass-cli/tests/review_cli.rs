@@ -6,6 +6,8 @@ use compass_history::{
 };
 use compass_pr_intelligence::{GateState, MergeOutcome, PullRequestReport, RiskBand};
 
+const SYNTHETIC_OLDER_COMPASS_VERSION: &str = "0.0.0";
+
 fn git(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
     let output = Command::new("git")
         .args(arguments)
@@ -50,7 +52,7 @@ fn publish_historical_base(root: &Path, commit: &str) -> Result<(), Box<dyn std:
     let current = history.preferred(&commit)?.ok_or("seeded realization")?;
     let completed = history.artifacts(&current.id)?;
     let mut historical_profile = current.version.build_profile;
-    historical_profile.insert("compass_version", "0.1.10")?;
+    historical_profile.insert("compass_version", SYNTHETIC_OLDER_COMPASS_VERSION)?;
     history.publish(PublishRequest {
         commit: commit.clone(),
         parents: repository.parents(&commit)?,
@@ -76,7 +78,7 @@ fn persist_historical_repository_profile(root: &Path) -> Result<(), Box<dyn std:
     let mut profile = HistoryConfig::load(&repository)?
         .profile
         .ok_or("enabled profile")?;
-    profile.insert("compass_version", "0.1.10")?;
+    profile.insert("compass_version", SYNTHETIC_OLDER_COMPASS_VERSION)?;
     HistoryConfig::enable(&repository, profile)?;
     Ok(())
 }
@@ -162,7 +164,7 @@ fn local_review_writes_round_trippable_exact_report() -> Result<(), Box<dyn std:
 }
 
 #[test]
-fn local_review_rebuilds_a_comparable_pair_from_compass_0_1_10()
+fn local_review_rebuilds_a_comparable_pair_from_an_older_profile()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     initialize(directory.path())?;
@@ -202,13 +204,14 @@ fn local_review_rebuilds_a_comparable_pair_from_compass_0_1_10()
         Some(env!("CARGO_PKG_VERSION"))
     );
     assert!(history.list(Some(&base))?.iter().any(|realization| {
-        realization.version.build_profile.value("compass_version") == Some("0.1.10")
+        realization.version.build_profile.value("compass_version")
+            == Some(SYNTHETIC_OLDER_COMPASS_VERSION)
     }));
     Ok(())
 }
 
 #[test]
-fn local_review_upgrades_a_persisted_0_1_10_profile_after_a_current_graph_build()
+fn local_review_upgrades_an_older_persisted_profile_after_a_current_graph_build()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     initialize(directory.path())?;
@@ -239,7 +242,7 @@ fn local_review_upgrades_a_persisted_0_1_10_profile_after_a_current_graph_build(
             .profile
             .and_then(|profile| profile.value("compass_version").map(str::to_owned))
             .as_deref(),
-        Some("0.1.10")
+        Some(SYNTHETIC_OLDER_COMPASS_VERSION)
     );
 
     let reviewed = run(

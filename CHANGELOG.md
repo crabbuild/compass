@@ -3,10 +3,11 @@
 ## Unreleased
 
 - Allow `compass review` on `0.3.x` to rebuild comparable realizations from
-  repository profiles and preferred realizations persisted by Compass `0.1.10`
-  or later, including when both compared revisions are already materialized.
-  The upgrade preserves matching user-selected options, refreshes engine-owned
-  fingerprint fields, and keeps original historical realizations immutable.
+  any older repository profile or preferred realization whose persisted shape
+  remains reconstructable, including when both compared revisions are already
+  materialized. The upgrade preserves matching user-selected options, refreshes
+  engine-owned fingerprint fields, and keeps original historical realizations
+  immutable.
 
 ## 0.3.13 - 2026-08-14
 

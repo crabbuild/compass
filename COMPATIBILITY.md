@@ -331,14 +331,16 @@ Presentation formats and the reusable GitHub Action consume this report and do
 not redefine its semantics.
 
 When either side of a review has a preferred realization or repository history
-profile persisted by Compass `0.1.10` or later, the `0.3.x` line advances
-engine-owned profile fields and materializes both revisions with the running
-binary. This also applies when both revisions already have preferred
-realizations. Reconciliation proceeds only when their user-selected options are
-identical after engine advancement. Older realizations remain immutable and
-queryable. Profiles older than `0.1.10`, newer than the running binary,
-targeting a future release line, or retaining different user options still fail
-explicitly rather than being guessed or downgraded.
+profile from an older Compass release, the `0.3.x` line advances engine-owned
+profile fields and validates whether the persisted profile shape can still be
+reconstructed before materializing both revisions with the running binary.
+This also applies when both revisions already have preferred realizations.
+Reconciliation proceeds only when their user-selected options are identical
+after engine advancement. Older realizations remain immutable and queryable.
+Malformed or unsupported profile shapes, versions newer than the running
+binary, and different user options still fail explicitly rather than being
+guessed or downgraded. Future running minor lines must re-qualify this migration
+before inheriting it.
 
 Dependency findings in `compass.semantic_diff.report/1` may now carry the
 optional strict `dependency_topology` object. It records source/target community

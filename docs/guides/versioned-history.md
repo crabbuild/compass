@@ -356,13 +356,15 @@ semantic or exact report. Compass checks graph-engine compatibility explicitly
 before comparing the complete build profiles.
 
 `compass review` handles an older preferred realization or repository history
-profile from Compass `0.1.10` or later automatically. This includes comparisons
-where both revisions already have preferred realizations. Compass advances the
-engine fields and rebuilds a current-version pair only when both sides retain
+profile automatically when its persisted shape remains reconstructable. This
+includes comparisons where both revisions already have preferred realizations.
+Compass advances the engine fields, validates the complete reconstructed
+profile, and rebuilds a current-version pair only when both sides retain
 identical user-selected options. It leaves older immutable realizations intact.
-A profile older than `0.1.10`, newer than the running binary, from another
-release line, or carrying genuinely different user options remains an explicit
-compatibility error.
+A malformed or unsupported profile shape, a version newer than the running
+binary, or genuinely different user options remains an explicit compatibility
+error. Future running minor lines must re-qualify this migration before
+inheriting it.
 
 ## 7. Export a realization
 

@@ -15,10 +15,9 @@ use compass_history::{
     HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
 };
 
-// Compass 0.1.10 is the earliest released build-profile shape qualified for
-// current-option reconstruction. Pin the target minor as well: before 1.0, a
-// future minor must re-evaluate this migration instead of inheriting it.
-const COMPATIBLE_PROFILE_UPGRADE_FLOOR: semver::Version = semver::Version::new(0, 1, 10);
+// Pin the target minor: before 1.0, a future minor must re-evaluate this
+// migration instead of inheriting it. Persisted profiles are admitted by their
+// reconstructable shape, not by an allowlisted historical Compass release.
 const COMPATIBLE_PROFILE_TARGET_MAJOR: u64 = 0;
 const COMPATIBLE_PROFILE_TARGET_MINOR: u64 = 3;
 
@@ -307,7 +306,6 @@ impl HistoryBuildOptions {
 fn is_compatible_profile_upgrade(persisted: &semver::Version, current: &semver::Version) -> bool {
     current.major == COMPATIBLE_PROFILE_TARGET_MAJOR
         && current.minor == COMPATIBLE_PROFILE_TARGET_MINOR
-        && persisted >= &COMPATIBLE_PROFILE_UPGRADE_FLOOR
         && persisted < current
 }
 
@@ -1634,10 +1632,10 @@ mod tests {
     }
 
     #[test]
-    fn compatible_0_1_10_profiles_advance_engine_fields_and_preserve_user_options()
+    fn reconstructable_older_profiles_advance_engine_fields_without_a_release_floor()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut profile = HistoryBuildOptions::defaults()?.profile();
-        profile.insert("compass_version", "0.1.10")?;
+        profile.insert("compass_version", "0.0.0")?;
         profile.insert("pipeline_version", "compass-core/older")?;
         profile.insert("resolution", "2")?;
 
@@ -1650,9 +1648,23 @@ mod tests {
         assert_eq!(upgraded.value("pipeline_version"), Some("compass-core/v1"));
         assert_eq!(upgraded.value("resolution"), Some("2"));
 
-        let below_floor = semver::Version::new(0, 1, 9);
+        let mut unsupported = HistoryBuildOptions::defaults()?.profile();
+        unsupported.insert("compass_version", "0.0.0")?;
+        unsupported.insert("future_option", "enabled")?;
+        let error = HistoryBuildOptions::from_compatible_profile(unsupported)
+            .err()
+            .ok_or("unsupported older profile unexpectedly accepted")?;
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported persisted build-profile field")
+        );
+
         let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
-        assert!(!is_compatible_profile_upgrade(&below_floor, &current));
+        assert!(is_compatible_profile_upgrade(
+            &semver::Version::new(0, 0, 0),
+            &current
+        ));
         assert!(!is_compatible_profile_upgrade(&current, &current));
         assert!(!is_compatible_profile_upgrade(
             &semver::Version::new(1, 0, 0),
