@@ -378,6 +378,7 @@ fn behavior_channel_rank(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct OperationRootRank {
+    unmatched_subject_role_type: Reverse<bool>,
     predicate_full_subject_aligned: bool,
     query_subject_coverage: bool,
     query_representation: bool,
@@ -398,8 +399,12 @@ pub(crate) struct OperationRootRank {
 
 impl Ord for OperationRootRank {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.predicate_full_subject_aligned
-            .cmp(&other.predicate_full_subject_aligned)
+        self.unmatched_subject_role_type
+            .cmp(&other.unmatched_subject_role_type)
+            .then_with(|| {
+                self.predicate_full_subject_aligned
+                    .cmp(&other.predicate_full_subject_aligned)
+            })
             .then_with(|| {
                 (self.query_representation && self.type_node)
                     .cmp(&(other.query_representation && other.type_node))
@@ -637,6 +642,13 @@ fn operation_root_rank(
             || (subject_root && (subject_tokens.len() >= 2 || matched_owner_tokens > 0))
     };
     eligible.then_some(OperationRootRank {
+        unmatched_subject_role_type: Reverse(
+            role_type
+                && !builder
+                && !query_subjects.is_empty()
+                && !query_subject_coverage
+                && matched_subject_tokens == 0,
+        ),
         predicate_full_subject_aligned,
         query_subject_coverage,
         query_representation,
@@ -839,6 +851,7 @@ fn semantic_field_score(node: &NodeRecord, terms: &[String]) -> f64 {
         .as_deref()
         .map(canonical_field_tokens)
         .unwrap_or_default();
+    let context = framework_context_tokens(node);
     terms.iter().fold(0.0, |score, term| {
         score
             + if behavior.contains(term) {
@@ -847,6 +860,11 @@ fn semantic_field_score(node: &NodeRecord, terms: &[String]) -> f64 {
                 0.0
             }
             + if owner.contains(term) { 32_000.0 } else { 0.0 }
+            + if context.contains(term) {
+                12_000.0
+            } else {
+                0.0
+            }
     })
 }
 
@@ -867,10 +885,22 @@ fn direct_field_evidence(node: &NodeRecord, terms: &[String]) -> (usize, usize) 
     {
         fields.extend(canonical_field_tokens(signature));
     }
+    fields.extend(framework_context_tokens(node));
     (
         terms.iter().filter(|term| fields.contains(*term)).count(),
         fields.len(),
     )
+}
+
+fn framework_context_tokens(node: &NodeRecord) -> BTreeSet<String> {
+    let mut fields = canonical_field_tokens(&node.qualified_name);
+    if let Some(framework) = node.framework.as_deref() {
+        fields.extend(canonical_field_tokens(framework));
+        if framework.eq_ignore_ascii_case("aspnet") {
+            fields.extend(["asp".to_owned(), "http".to_owned(), "net".to_owned()]);
+        }
+    }
+    fields
 }
 
 fn predicate_alignment(node: &NodeRecord, query_terms: &[String]) -> (usize, usize) {
@@ -1705,6 +1735,85 @@ mod tests {
         );
 
         assert_eq!(ranked[0].node_id, "n:wsgi");
+    }
+
+    #[test]
+    fn aspnet_queries_prefer_request_and_middleware_execution_anchors() {
+        let mut request = owned_node(
+            "n:http-protocol",
+            ".ProcessRequestsAsync()",
+            "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequestsAsync",
+            "src/Servers/Kestrel/Core/src/Internal/Http/HttpProtocol.cs",
+        );
+        request.language = Some("csharp".to_owned());
+        let request_candidates = vec![
+            SearchCandidate {
+                node: request,
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from([
+                    "http".to_owned(),
+                    "process".to_owned(),
+                    "request".to_owned(),
+                ]),
+                relationship_matches: BTreeSet::new(),
+            },
+            SearchCandidate {
+                node: node(
+                    "n:process-manager",
+                    "PROCESS_MANAGER",
+                    NodeKind::Class,
+                    "src/Servers/IIS/OutOfProcessRequestHandler/processmanager.h",
+                    false,
+                ),
+                sources: BTreeSet::from([CandidateSource::TermIndex]),
+                indexed_matches: BTreeSet::from(["process".to_owned()]),
+                relationship_matches: BTreeSet::new(),
+            },
+        ];
+        let ranked = rank_search_candidates(
+            "how are HTTP requests processed",
+            &[
+                "http".to_owned(),
+                "process".to_owned(),
+                "request".to_owned(),
+            ],
+            request_candidates,
+            usize::MAX,
+        );
+        assert_eq!(ranked[0].node_id, "n:http-protocol", "ranked={ranked:#?}");
+
+        let mut middleware = owned_node(
+            "n:middleware-invoke",
+            ".InvokeAsync()",
+            "Microsoft.AspNetCore.Authentication.AuthenticationMiddleware::InvokeAsync",
+            "src/Security/Authentication/Core/src/AuthenticationMiddleware.cs",
+        );
+        middleware.language = Some("csharp".to_owned());
+        let ranked = rank_search_candidates(
+            "how is middleware invoked",
+            &["invoke".to_owned(), "middleware".to_owned()],
+            vec![
+                SearchCandidate {
+                    node: middleware,
+                    sources: BTreeSet::from([CandidateSource::TermIndex]),
+                    indexed_matches: BTreeSet::from(["invoke".to_owned(), "middleware".to_owned()]),
+                    relationship_matches: BTreeSet::new(),
+                },
+                SearchCandidate {
+                    node: owned_node(
+                        "n:middleware-factory",
+                        ".Create()",
+                        "Microsoft.AspNetCore.Http.MiddlewareFactory::Create",
+                        "src/Http/Http/src/MiddlewareFactory.cs",
+                    ),
+                    sources: BTreeSet::from([CandidateSource::TermIndex]),
+                    indexed_matches: BTreeSet::from(["middleware".to_owned()]),
+                    relationship_matches: BTreeSet::new(),
+                },
+            ],
+            usize::MAX,
+        );
+        assert_eq!(ranked[0].node_id, "n:middleware-factory");
     }
 
     #[test]

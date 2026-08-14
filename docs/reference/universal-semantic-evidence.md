@@ -710,5 +710,12 @@ typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
 and security capabilities; ASP.NET consumes exact C# imports, attributes,
 ownership, callable signatures, and source ranges to derive MVC routes. Kotlin
 Spring remains on its established detector.
+
+C# project resolution is language-keyed and namespace/import aware. Direct
+bases and receiver types resolve only to exact C# declarations; ambiguous
+imports remain unresolved. Receiver dispatch includes parameters, inferred
+locals, fields, properties, constrained generic parameters, interfaces, and
+source-proven inherited members. Parser recovery diagnostics use bounded,
+nonempty source ranges even when Tree-sitter reports a zero-width missing token.
 Do not infer support for another language or framework from file extensions,
 raw graph output, or total node and edge counts.

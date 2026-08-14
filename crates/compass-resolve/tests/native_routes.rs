@@ -210,6 +210,10 @@ var api = app.MapGroup("/api");
 var users = api.MapGroup("/users");
 users.MapGet("/{id:int}", UserHandlers.Show);
 app.MapPost("/users", (User user) => Results.Created($"/users/{user.Id}", user));
+users.MapMethods(
+    "/search",
+    new[] { "GET", "HEAD" },
+    (string query, int limit) => Results.Ok(new { query, limit }));
 app.Run();
 "#,
     )?;
@@ -234,15 +238,21 @@ app.Run();
         .find(|route| route.normalized_path == "/users")
         .ok_or("missing ASP.NET Minimal API inline route")?;
     assert_eq!(inline.operation, "POST");
-    assert!(
-        inline
-            .handler_reference
-            .starts_with("opaque_minimal_handler_at_")
-    );
+    assert!(inline.handler_reference.starts_with("lambda_handler_at_"));
     assert_eq!(
-        inline.detail.get("opaque_handler"),
-        Some(&serde_json::Value::Bool(true))
+        inline.detail.get("handler_kind"),
+        Some(&serde_json::Value::String("lambda".to_owned()))
     );
+    for operation in ["GET", "HEAD"] {
+        assert!(
+            minimal_routes.iter().any(|route| {
+                route.operation == operation
+                    && route.normalized_path == "/api/users/search"
+                    && route.handler_reference.starts_with("lambda_handler_at_")
+            }),
+            "missing {operation} MapMethods route: {minimal_routes:#?}"
+        );
+    }
 
     let near_match = Engine::default().extract_source(
         Path::new("Program.cs"),

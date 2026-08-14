@@ -9,7 +9,7 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::build::{EvidenceBuilder, range_for_node};
+use super::build::{EvidenceBuilder, range_for_byte_span, range_for_node};
 use super::model::{
     BindingKind, CandidateRelation, HierarchyConstraint, ReceiverDispatchStrategy,
     ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
@@ -66,6 +66,7 @@ struct State<'source> {
     types: BTreeMap<String, Vec<usize>>,
     imports: Vec<Import>,
     value_types: HashMap<(String, String), String>,
+    generic_constraints: HashMap<(String, String), String>,
     direct_class_bases: BTreeMap<String, Vec<String>>,
 }
 
@@ -120,6 +121,7 @@ pub(super) fn extract_candidate_tree_evidence(
         types: BTreeMap::new(),
         imports: Vec::new(),
         value_types: HashMap::new(),
+        generic_constraints: HashMap::new(),
         direct_class_bases: BTreeMap::new(),
     };
     state.capture_errors(root, 0)?;
@@ -159,6 +161,9 @@ impl<'source> State<'source> {
                 return Ok(());
             };
             let segment = self.text(name).trim();
+            if segment.is_empty() {
+                return Ok(());
+            }
             let nested =
                 if node.kind() == "file_scoped_namespace_declaration" && namespace == segment {
                     namespace.to_owned()
@@ -174,13 +179,13 @@ impl<'source> State<'source> {
                 Some(&nested),
                 Some(&scope),
                 Some(SymbolNamespace::Namespace),
-                range_for_node(self.source_file, name),
+                self.evidence_range(name),
             )?;
             let namespace_scope = self.builder.open_scope(
                 "namespace",
                 Some(&namespace_id),
                 Some(&scope),
-                range_for_node(self.source_file, node),
+                self.evidence_range(node),
             )?;
             let namespace_index = self.declarations.len();
             self.declarations.push(Decl {
@@ -237,13 +242,13 @@ impl<'source> State<'source> {
                 Some(SymbolNamespace::ValueAndType),
                 type_parameter_signature(node, self.source).as_deref(),
                 direct_bases_complete,
-                range_for_node(self.source_file, name_node),
+                self.evidence_range(name_node),
             )?;
             let type_scope = self.builder.open_scope(
                 kind,
                 Some(&declaration_id),
                 Some(&scope),
-                range_for_node(self.source_file, node),
+                self.evidence_range(node),
             )?;
             let index = self.declarations.len();
             self.declarations.push(Decl {
@@ -260,6 +265,7 @@ impl<'source> State<'source> {
                 .map(|owner| self.declarations[owner].id.clone())
                 .unwrap_or_else(|| self.file.id.clone());
             self.own(&owner_id, &declaration_id)?;
+            self.collect_generic_constraints(node, &type_scope);
             self.collect_base_types(node, index)?;
             let mut cursor = node.walk();
             for child in node.children(&mut cursor).filter(|child| child.is_named()) {
@@ -317,6 +323,9 @@ impl<'source> State<'source> {
             return Ok(());
         };
         let name = self.text(name_node).trim().to_owned();
+        if name.is_empty() {
+            return Ok(());
+        }
         let owner_qualified = owner.map(|index| self.declarations[index].qualified.clone());
         let qualified = owner_qualified.as_deref().map_or_else(
             || join_qualified(namespace, &name, "::"),
@@ -337,13 +346,13 @@ impl<'source> State<'source> {
             Some(&signature),
             parameter_types.clone(),
             has_params_parameter(node, self.source),
-            range_for_node(self.source_file, name_node),
+            self.evidence_range(name_node),
         )?;
         let callable_scope = self.builder.open_scope(
             kind,
             Some(&declaration_id),
             Some(parent_scope),
-            range_for_node(self.source_file, node),
+            self.evidence_range(node),
         )?;
         let index = self.declarations.len();
         self.declarations.push(Decl {
@@ -359,6 +368,7 @@ impl<'source> State<'source> {
             .map(|owner| self.declarations[owner].id.clone())
             .unwrap_or_else(|| self.file.id.clone());
         self.own(&owner_id, &declaration_id)?;
+        self.collect_generic_constraints(node, &callable_scope);
         self.collect_override(node, index)?;
         self.collect_parameter_types(node, index, &callable_scope)?;
         self.collect_return_type(node, index, &callable_scope)?;
@@ -384,6 +394,9 @@ impl<'source> State<'source> {
             return Ok(());
         };
         let name = self.text(name_node).trim();
+        if name.is_empty() {
+            return Ok(());
+        }
         let qualified = join_qualified(&self.declarations[owner].qualified, name, "::");
         let kind = match node.kind() {
             "event_declaration" => "event",
@@ -402,7 +415,7 @@ impl<'source> State<'source> {
             Some(scope),
             Some(SymbolNamespace::Value),
             signature.as_deref(),
-            range_for_node(self.source_file, name_node),
+            self.evidence_range(name_node),
         )?;
         self.own(&self.declarations[owner].id.clone(), &id)?;
         if let Some(value_type) = signature {
@@ -446,6 +459,9 @@ impl<'source> State<'source> {
                     continue;
                 };
                 let name = self.text(name_node).trim();
+                if name.is_empty() {
+                    continue;
+                }
                 let qualified = join_qualified(&self.declarations[owner].qualified, name, "::");
                 let kind = if node.kind() == "event_field_declaration" {
                     "event"
@@ -468,7 +484,7 @@ impl<'source> State<'source> {
                     Some(scope),
                     Some(SymbolNamespace::Value),
                     value_type.as_deref(),
-                    range_for_node(self.source_file, name_node),
+                    self.evidence_range(name_node),
                 )?;
                 self.own(&self.declarations[owner].id.clone(), &id)?;
                 if let Some(value_type) = value_type.as_ref() {
@@ -509,6 +525,9 @@ impl<'source> State<'source> {
             return Ok(());
         };
         let name = self.text(name_node).trim();
+        if name.is_empty() {
+            return Ok(());
+        }
         let qualified = join_qualified(&self.declarations[owner].qualified, name, "::");
         let graph_id = make_id(&["csharp", "enum_member", &qualified]);
         let id = self.builder.declare_with_namespace(
@@ -519,7 +538,7 @@ impl<'source> State<'source> {
             None,
             Some(scope),
             Some(SymbolNamespace::Value),
-            range_for_node(self.source_file, name_node),
+            self.evidence_range(name_node),
         )?;
         self.own(&self.declarations[owner].id.clone(), &id)
     }
@@ -562,7 +581,7 @@ impl<'source> State<'source> {
                         SymbolNamespace::Namespace
                     }),
                     false,
-                    range_for_node(self.source_file, root),
+                    self.evidence_range(root),
                 )?;
                 let occurrence = self.builder.occur(
                     SemanticRole::Import,
@@ -570,7 +589,7 @@ impl<'source> State<'source> {
                     target,
                     None,
                     Some(&scope),
-                    range_for_node(self.source_file, root),
+                    self.evidence_range(root),
                 )?;
                 self.builder.relate(
                     CandidateRelation::Imports,
@@ -641,7 +660,7 @@ impl<'source> State<'source> {
             spelling.rsplit_once('.').map(|(qualifier, _)| qualifier),
             Some(&scope),
             Some("attribute"),
-            range_for_node(self.source_file, node),
+            self.evidence_range(node),
         )?;
         let qualified = self.resolve_type_name(spelling, &scope, true);
         self.builder.relate(
@@ -690,21 +709,17 @@ impl<'source> State<'source> {
             &spelling,
             qualifier.as_deref(),
             Some(&scope),
-            range_for_node(self.source_file, node),
+            self.evidence_range(node),
         )?;
         let receiver_type = qualifier
             .as_deref()
             .and_then(|receiver| self.receiver_type(receiver, owner));
-        let hierarchy = qualifier
-            .as_deref()
-            .filter(|receiver| matches!(*receiver, "this" | "base"))
-            .and(receiver_type.clone())
-            .map(
-                |receiver_qualified_name| HierarchyConstraint::ReceiverDispatch {
-                    receiver_qualified_name,
-                    strategy: ReceiverDispatchStrategy::C3FromReceiver,
-                },
-            );
+        let hierarchy = receiver_type.clone().map(|receiver_qualified_name| {
+            HierarchyConstraint::ReceiverDispatch {
+                receiver_qualified_name,
+                strategy: ReceiverDispatchStrategy::C3FromReceiver,
+            }
+        });
         let qualified = if hierarchy.is_none() {
             receiver_type
                 .as_deref()
@@ -755,7 +770,7 @@ impl<'source> State<'source> {
             terminal(&spelling),
             spelling.rsplit_once('.').map(|(qualifier, _)| qualifier),
             Some(&scope),
-            range_for_node(self.source_file, node),
+            self.evidence_range(node),
         )?;
         self.builder.relate(
             CandidateRelation::Constructs,
@@ -800,16 +815,26 @@ impl<'source> State<'source> {
                 spelling.rsplit_once('.').map(|(qualifier, _)| qualifier),
                 Some(&scope),
                 Some("base_type"),
-                range_for_node(self.source_file, base),
+                self.evidence_range(base),
             )?;
             let qualified = self.resolve_type_name(&spelling, &scope, false);
-            let local_kind = self
-                .unique_local_type(&spelling)
-                .map(|index| self.declarations[index].kind.as_str());
-            let relation = match local_kind {
-                Some("interface") => CandidateRelation::Implements,
-                Some(_) => CandidateRelation::Extends,
-                None => CandidateRelation::References,
+            let owner_kind = self.declarations[owner].kind.as_str();
+            let relation = if owner_kind == "struct" {
+                CandidateRelation::Implements
+            } else {
+                // C# base-list syntax does not identify whether an unresolved
+                // first entry is a class or interface. Resolve one typed base
+                // candidate project-wide, then let projection publish
+                // `implements` when its exact source target is an interface.
+                CandidateRelation::Extends
+            };
+            let allowed_target_kinds = match owner_kind {
+                "interface" | "struct" => vec!["interface".to_owned()],
+                _ => vec![
+                    "class".to_owned(),
+                    "interface".to_owned(),
+                    "record".to_owned(),
+                ],
             };
             self.builder.relate(
                 relation,
@@ -821,22 +846,18 @@ impl<'source> State<'source> {
                     exact_language: Some("csharp".to_owned()),
                     scope_id: Some(scope.clone()),
                     qualified_name: qualified,
-                    allowed_target_kinds: vec![
-                        "class".to_owned(),
-                        "interface".to_owned(),
-                        "record".to_owned(),
-                        "struct".to_owned(),
-                    ],
-                    hierarchy: (relation != CandidateRelation::References).then_some(
-                        HierarchyConstraint::DirectBase {
-                            base_set_complete: complete,
-                        },
-                    ),
+                    allowed_target_kinds,
+                    hierarchy: Some(HierarchyConstraint::DirectBase {
+                        base_set_complete: complete,
+                    }),
                     allow_external: true,
                     ..ResolutionConstraint::default()
                 },
             )?;
             if relation == CandidateRelation::Extends
+                && self
+                    .unique_local_type(&spelling)
+                    .is_none_or(|index| self.declarations[index].kind != "interface")
                 && let Some(qualified) = self.resolve_type_name(&spelling, &scope, false)
             {
                 self.direct_class_bases
@@ -873,7 +894,7 @@ impl<'source> State<'source> {
                 Some(&base),
                 Some(&self.declarations[owner].scope_id),
                 Some("override_modifier"),
-                range_for_node(self.source_file, node),
+                self.evidence_range(node),
             )?;
             self.builder.relate(
                 CandidateRelation::Overrides,
@@ -919,6 +940,9 @@ impl<'source> State<'source> {
             ) {
                 let spelling = canonical_type(self.text(value_type));
                 let parameter_name = self.text(name).trim();
+                if parameter_name.is_empty() {
+                    continue;
+                }
                 let qualified =
                     join_qualified(&self.declarations[owner].qualified, parameter_name, "::");
                 let graph_id = make_id(&["csharp", "parameter", &qualified]);
@@ -931,7 +955,7 @@ impl<'source> State<'source> {
                     Some(scope),
                     Some(SymbolNamespace::Value),
                     Some(&spelling),
-                    range_for_node(self.source_file, name),
+                    self.evidence_range(name),
                 )?;
                 self.own(&self.declarations[owner].id.clone(), &parameter_id)?;
                 self.value_types.insert(
@@ -997,7 +1021,7 @@ impl<'source> State<'source> {
             spelling.rsplit_once('.').map(|(qualifier, _)| qualifier),
             Some(scope),
             Some(context),
-            range_for_node(self.source_file, node),
+            self.evidence_range(node),
         )?;
         self.builder.relate(
             relation,
@@ -1066,6 +1090,41 @@ impl<'source> State<'source> {
         }
     }
 
+    fn collect_generic_constraints(&mut self, node: Node<'_>, scope: &str) {
+        let mut cursor = node.walk();
+        for clause in node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "type_parameter_constraints_clause")
+        {
+            let raw = self.text(clause).trim();
+            let Some(raw) = raw.strip_prefix("where") else {
+                continue;
+            };
+            let Some((parameter, constraints)) = raw.split_once(':') else {
+                continue;
+            };
+            let parameter = parameter.trim();
+            let constraint = constraints
+                .split(',')
+                .map(str::trim)
+                .map(nominal_type)
+                .find(|constraint| {
+                    !constraint.is_empty()
+                        && !matches!(
+                            constraint.as_str(),
+                            "class" | "class?" | "default" | "notnull" | "struct" | "unmanaged"
+                        )
+                        && !constraint.starts_with("new(")
+                });
+            if !parameter.is_empty()
+                && let Some(constraint) = constraint
+            {
+                self.generic_constraints
+                    .insert((scope.to_owned(), parameter.to_owned()), constraint);
+            }
+        }
+    }
+
     fn own(&mut self, owner: &str, child: &str) -> Result<(), EvidenceError> {
         self.builder.relate(
             CandidateRelation::Owns,
@@ -1128,26 +1187,50 @@ impl<'source> State<'source> {
         if receiver == "base" {
             return self.declarations[owner].enclosing_type.clone();
         }
-        self.value_types
-            .get(&(
-                self.declarations[owner].scope_id.clone(),
-                receiver.to_owned(),
-            ))
-            .and_then(|value_type| {
-                self.resolve_type_name(value_type, &self.declarations[owner].scope_id, false)
-                    .or_else(|| {
-                        self.declarations[owner]
-                            .enclosing_type
-                            .as_deref()
-                            .and_then(|enclosing| enclosing.rsplit_once('.'))
-                            .map(|(namespace, _)| join_qualified(namespace, value_type, "."))
+        let callable_scope = self.declarations[owner].scope_id.as_str();
+        let type_scope = self.declarations[owner]
+            .enclosing_type
+            .as_deref()
+            .and_then(|qualified| {
+                self.declarations
+                    .iter()
+                    .find(|declaration| declaration.qualified == qualified)
+                    .map(|declaration| declaration.scope_id.as_str())
+            });
+        [Some(callable_scope), type_scope]
+            .into_iter()
+            .flatten()
+            .find_map(|scope| {
+                self.value_types
+                    .get(&(scope.to_owned(), receiver.to_owned()))
+                    .map(|value_type| {
+                        self.constrained_receiver_type(value_type, callable_scope, type_scope)
                     })
-                    .or_else(|| Some(value_type.clone()))
             })
             .or_else(|| {
                 self.unique_local_type(receiver)
                     .map(|index| self.declarations[index].qualified.clone())
             })
+    }
+
+    fn constrained_receiver_type(
+        &self,
+        value_type: &str,
+        callable_scope: &str,
+        type_scope: Option<&str>,
+    ) -> String {
+        let nominal = nominal_type(value_type);
+        let constrained = [Some(callable_scope), type_scope]
+            .into_iter()
+            .flatten()
+            .find_map(|scope| {
+                self.generic_constraints
+                    .get(&(scope.to_owned(), nominal.clone()))
+            })
+            .cloned()
+            .unwrap_or(nominal);
+        self.resolve_type_name(&constrained, callable_scope, false)
+            .unwrap_or(constrained)
     }
 
     fn enclosing_declaration(&self, byte: usize) -> Option<usize> {
@@ -1186,7 +1269,7 @@ impl<'source> State<'source> {
             self.builder.diagnose(
                 "parser_error",
                 None,
-                Some(range_for_node(self.source_file, node)),
+                recovery_diagnostic_range(self.source_file, self.source, node),
                 "tree-sitter reported an error or missing C# syntax node",
             )?;
         }
@@ -1201,7 +1284,7 @@ impl<'source> State<'source> {
         self.builder.diagnose(
             "traversal_depth_limit",
             None,
-            Some(range_for_node(self.source_file, node)),
+            Some(self.evidence_range(node)),
             "C# syntax traversal exceeded the bounded depth limit",
         )?;
         Err(EvidenceError::new(
@@ -1213,6 +1296,36 @@ impl<'source> State<'source> {
     fn text(&self, node: Node<'_>) -> &'source str {
         node.utf8_text(self.source).unwrap_or_default()
     }
+
+    fn evidence_range(&self, node: Node<'_>) -> crate::EvidenceRange {
+        recovery_diagnostic_range(self.source_file, self.source, node)
+            .unwrap_or_else(|| range_for_node(self.source_file, node))
+    }
+}
+
+/// Tree-sitter represents an inserted recovery token as a zero-width missing
+/// node. Evidence facts must remain non-empty, but a diagnostic can truthfully
+/// point at the nearest bounded source byte instead of invalidating every
+/// otherwise valid fact in the file. Empty files have no source byte to anchor
+/// and therefore retain a range-less diagnostic.
+fn recovery_diagnostic_range(
+    source_file: &str,
+    source: &[u8],
+    node: Node<'_>,
+) -> Option<crate::EvidenceRange> {
+    if node.start_byte() < node.end_byte() {
+        return Some(range_for_node(source_file, node));
+    }
+    if source.is_empty() {
+        return None;
+    }
+    let start = node.start_byte().min(source.len());
+    let (start, end) = if start < source.len() {
+        (start, start.saturating_add(1))
+    } else {
+        (source.len().saturating_sub(1), source.len())
+    };
+    Some(range_for_byte_span(source_file, source, start, end))
 }
 
 fn csharp_type_kind(kind: &str) -> &'static str {
@@ -1264,6 +1377,29 @@ fn canonical_type(value: &str) -> String {
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect()
+}
+
+fn nominal_type(value: &str) -> String {
+    let canonical = canonical_type(value);
+    let canonical = canonical.strip_prefix("global::").unwrap_or(&canonical);
+    let mut nominal = String::with_capacity(canonical.len());
+    let mut generic_depth = 0_u32;
+    for character in canonical.chars() {
+        match character {
+            '<' => generic_depth = generic_depth.saturating_add(1),
+            '>' => generic_depth = generic_depth.saturating_sub(1),
+            _ if generic_depth == 0 => nominal.push(character),
+            _ => {}
+        }
+    }
+    while nominal.ends_with('?') || nominal.ends_with("[]") {
+        if nominal.ends_with("[]") {
+            nominal.truncate(nominal.len().saturating_sub(2));
+        } else {
+            nominal.pop();
+        }
+    }
+    nominal
 }
 
 fn is_predefined(value: &str) -> bool {

@@ -13,7 +13,14 @@
   Extend universal evidence with typed override roles and relationships, and
   move XAML code-behind lookup onto the same exact C# ownership facts. Keep
   sourceless external import identities scoped to their exact wiring sites so
-  imports in different files cannot merge their provenance.
+  imports in different files cannot merge their provenance. Recover malformed
+  zero-width parser evidence without dropping whole files; resolve C# bases
+  and typed receivers through namespace imports, interfaces, constrained
+  generics, fields, properties, and inherited members without crossing
+  languages. Extend Minimal API coverage to bounded multiline lambdas and
+  `MapMethods`, and keep reviewed Kestrel request-processing and middleware
+  anchors ahead of generic role-name matches in natural query ranking. Advance
+  extraction semantics to v13 so cached C# evidence rebuilds with these fixes.
 
 ## 0.3.12 - 2026-08-13
 

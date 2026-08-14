@@ -166,9 +166,9 @@ fn collect_minimal_api_routes(
         );
     }
 
-    let Ok(route_pattern) = Regex::new(
-        r#"(?s)\b([A-Za-z_]\w*)\.Map(Get|Post|Put|Patch|Delete|Options|Head)\s*\(\s*"([^"]*)"\s*,\s*([^,;\r\n]+)"#,
-    ) else {
+    let Ok(route_pattern) =
+        Regex::new(r"\b([A-Za-z_]\w*)\.Map(Get|Post|Put|Patch|Delete|Options|Head|Methods)\s*\(")
+    else {
         return Vec::new();
     };
     let Ok(reference_pattern) = Regex::new(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$") else {
@@ -176,21 +176,46 @@ fn collect_minimal_api_routes(
     };
     let mut facts = Vec::new();
     for capture in route_pattern.captures_iter(body) {
-        let (Some(whole), Some(receiver), Some(operation), Some(raw_path), Some(handler)) = (
-            capture.get(0),
-            capture.get(1),
-            capture.get(2),
-            capture.get(3),
-            capture.get(4),
-        ) else {
+        let (Some(start), Some(receiver), Some(operation)) =
+            (capture.get(0), capture.get(1), capture.get(2))
+        else {
             continue;
         };
-        let handler = handler.as_str().trim().trim_end_matches(')').trim();
+        let Some(end) = balanced_call_end(body, start.end().saturating_sub(1)) else {
+            continue;
+        };
+        let arguments = split_top_level_arguments(&body[start.end()..end.saturating_sub(1)]);
+        let Some(raw_path) = arguments
+            .first()
+            .and_then(|argument| string_literal(argument))
+        else {
+            continue;
+        };
+        let (operations, handler_index) = if operation.as_str() == "Methods" {
+            let Some(methods) = arguments.get(1) else {
+                continue;
+            };
+            let methods = quoted_literals(methods);
+            if methods.is_empty() {
+                continue;
+            }
+            (methods, 2)
+        } else {
+            (vec![operation.as_str().to_ascii_uppercase()], 1)
+        };
+        let Some(handler) = arguments.get(handler_index).map(|handler| handler.trim()) else {
+            continue;
+        };
         let (handler_reference, detail) = if reference_pattern.is_match(handler) {
             (handler.to_owned(), Map::new())
+        } else if handler.contains("=>") {
+            (
+                format!("lambda_handler_at_{}", start.start()),
+                Map::from_iter([("handler_kind".into(), Value::String("lambda".into()))]),
+            )
         } else {
             (
-                format!("opaque_minimal_handler_at_{}", whole.start()),
+                format!("opaque_minimal_handler_at_{}", start.start()),
                 Map::from_iter([("opaque_handler".into(), Value::Bool(true))]),
             )
         };
@@ -198,21 +223,108 @@ fn collect_minimal_api_routes(
             .get(receiver.as_str())
             .map(String::as_str)
             .unwrap_or_default();
-        facts.push(RawFrameworkFact::Route(RawRouteFact {
-            framework: FRAMEWORK.to_owned(),
-            operation: operation.as_str().to_ascii_uppercase(),
-            raw_path: raw_path.as_str().to_owned(),
-            normalized_path: join_route_path(receiver_prefix, raw_path.as_str()),
-            declaring_scope: receiver.as_str().to_owned(),
-            anchor: source_anchor(context.path, context.source, whole.start(), whole.end()),
-            handler_reference,
-            middleware_references: Vec::new(),
-            origin: RawFrameworkOrigin::Ast,
-            rule: None,
-            detail,
-        }));
+        for operation in operations {
+            facts.push(RawFrameworkFact::Route(RawRouteFact {
+                framework: FRAMEWORK.to_owned(),
+                operation,
+                raw_path: raw_path.clone(),
+                normalized_path: join_route_path(receiver_prefix, &raw_path),
+                declaring_scope: receiver.as_str().to_owned(),
+                anchor: source_anchor(context.path, context.source, start.start(), end),
+                handler_reference: handler_reference.clone(),
+                middleware_references: Vec::new(),
+                origin: RawFrameworkOrigin::Ast,
+                rule: None,
+                detail: detail.clone(),
+            }));
+        }
     }
     facts
+}
+
+fn balanced_call_end(body: &str, open: usize) -> Option<usize> {
+    let bytes = body.as_bytes();
+    (bytes.get(open) == Some(&b'(')).then_some(())?;
+    let mut depth = 0_u32;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, byte) in bytes.get(open..)?.iter().copied().enumerate() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'"' | b'\'' => quote = Some(byte),
+            b'(' => depth = depth.saturating_add(1),
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(open.saturating_add(offset).saturating_add(1));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_top_level_arguments(body: &str) -> Vec<&str> {
+    let bytes = body.as_bytes();
+    let mut output = Vec::new();
+    let mut start = 0_usize;
+    let mut depths = [0_u32; 4];
+    let mut quote = None;
+    let mut escaped = false;
+    for (index, byte) in bytes.iter().copied().enumerate() {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        match byte {
+            b'"' | b'\'' => quote = Some(byte),
+            b'(' => depths[0] = depths[0].saturating_add(1),
+            b')' => depths[0] = depths[0].saturating_sub(1),
+            b'[' => depths[1] = depths[1].saturating_add(1),
+            b']' => depths[1] = depths[1].saturating_sub(1),
+            b'{' => depths[2] = depths[2].saturating_add(1),
+            b'}' => depths[2] = depths[2].saturating_sub(1),
+            b'<' => depths[3] = depths[3].saturating_add(1),
+            b'>' => depths[3] = depths[3].saturating_sub(1),
+            b',' if depths.iter().all(|depth| *depth == 0) => {
+                output.push(body[start..index].trim());
+                start = index.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    output.push(body[start..].trim());
+    output
+}
+
+fn quoted_literals(value: &str) -> Vec<String> {
+    let Ok(pattern) = Regex::new(r#""([^"]+)""#) else {
+        return Vec::new();
+    };
+    pattern
+        .captures_iter(value)
+        .filter_map(|capture| {
+            capture
+                .get(1)
+                .map(|value| value.as_str().to_ascii_uppercase())
+        })
+        .collect()
 }
 
 fn qualified_attribute(

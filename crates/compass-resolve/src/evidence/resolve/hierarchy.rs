@@ -653,7 +653,12 @@ impl ResolutionDb<'_> {
         let eligible = declarations
             .iter()
             .filter_map(|slot| self.declaration(*slot))
-            .filter(|declaration| declaration.kind == "class")
+            .filter(|declaration| {
+                matches!(
+                    declaration.kind.as_str(),
+                    "class" | "interface" | "record" | "struct"
+                )
+            })
             .take(2)
             .collect::<Vec<_>>();
         let [declaration] = eligible.as_slice() else {

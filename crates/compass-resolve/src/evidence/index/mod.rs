@@ -53,6 +53,18 @@ pub(super) struct RustIndexes {
     pub(super) source_wildcard_targets: AHashSet<String>,
 }
 
+#[derive(Clone)]
+pub(super) struct CSharpBinding {
+    pub(super) kind: compass_languages::BindingKind,
+    pub(super) spelling: String,
+    pub(super) qualified_target: String,
+}
+
+#[derive(Default)]
+pub(super) struct CSharpIndexes {
+    pub(super) bindings_by_source: AHashMap<String, Vec<CSharpBinding>>,
+}
+
 #[derive(Default)]
 pub(super) struct ResolutionIndexes {
     pub(super) names: NameIndexes,
@@ -61,4 +73,5 @@ pub(super) struct ResolutionIndexes {
     pub(super) wildcards: WildcardIndexes,
     pub(super) typescript: TypeScriptIndexes,
     pub(super) rust: RustIndexes,
+    pub(super) csharp: CSharpIndexes,
 }
