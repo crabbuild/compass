@@ -9,7 +9,7 @@ use compass_model::query_contract::{
 };
 use compass_query::{
     EngineSelection, NaturalQueryIntent, NaturalQueryRequest, ProfiledCodeQueryResponse,
-    QUERY_EXECUTION_PROFILE_V1, QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V2,
+    QUERY_EXECUTION_PROFILE_V1, QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V1,
     open_with_engine, plan_natural_query,
 };
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
@@ -189,7 +189,7 @@ fn profiled_natural_queries_report_real_stage_work_without_changing_the_response
     assert_eq!(profiled.response, repeated.response);
     assert_eq!(profiled.profile.schema, QUERY_EXECUTION_PROFILE_V1);
     assert_eq!(profiled.profile.planner_profile, QUERY_PLANNER_PROFILE_V1);
-    assert_eq!(profiled.profile.ranker_profile, QUERY_RANKER_PROFILE_V2);
+    assert_eq!(profiled.profile.ranker_profile, QUERY_RANKER_PROFILE_V1);
     assert!(profiled.profile.work.candidates_read > 0);
     assert_eq!(
         profiled.profile.work.candidates_read,

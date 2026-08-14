@@ -102,6 +102,7 @@ export type CompassGraphProps = {
   toolbarLeadingOpen?: boolean | undefined;
   onToolbarLeadingClose?: (() => void) | undefined;
   stageOverlay?: ReactNode;
+  showInspectorHeader?: boolean | undefined;
 };
 
 export function CompassGraph({
@@ -120,7 +121,8 @@ export function CompassGraph({
   toolbarLeadingPanel,
   toolbarLeadingOpen,
   onToolbarLeadingClose,
-  stageOverlay
+  stageOverlay,
+  showInspectorHeader = true
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -152,6 +154,7 @@ export function CompassGraph({
       toolbarLeadingOpen={toolbarLeadingOpen}
       onToolbarLeadingClose={onToolbarLeadingClose}
       stageOverlay={stageOverlay}
+      showInspectorHeader={showInspectorHeader}
     />
   );
 }
@@ -173,7 +176,8 @@ function CompassGraphView({
   toolbarLeadingPanel,
   toolbarLeadingOpen,
   onToolbarLeadingClose,
-  stageOverlay
+  stageOverlay,
+  showInspectorHeader
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -192,6 +196,7 @@ function CompassGraphView({
   toolbarLeadingOpen?: boolean | undefined;
   onToolbarLeadingClose?: (() => void) | undefined;
   stageOverlay?: ReactNode;
+  showInspectorHeader: boolean;
 }) {
   const [state, dispatch] = useReducer(
     graphReducer,
@@ -627,6 +632,7 @@ function CompassGraphView({
           sourceRevisions={sourceRevisions}
           queryResult={queryResult}
           renderedEdgeCount={renderedEdgeCount}
+          showHeader={showInspectorHeader}
           onQueryChange={(query) => dispatch({ type: "search", query })}
           onFocus={focus}
           onOpenSource={host.openSource}

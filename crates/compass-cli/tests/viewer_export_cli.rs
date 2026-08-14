@@ -1,6 +1,7 @@
 mod support;
 
 use std::error::Error;
+use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -393,6 +394,43 @@ fn impact_graph_export_uses_the_typed_query_contract() -> Result<(), Box<dyn Err
 #[test]
 fn html_export_embeds_one_workbench_for_multiple_views() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
+    let initialized = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(initialized.success());
+    let remote = Command::new("git")
+        .args(["remote", "add", "origin", "git@gitlab.com:acme/compass.git"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(remote.success());
+    std::fs::create_dir_all(directory.path().join("src"))?;
+    std::fs::write(directory.path().join("src/lib.rs"), "fn caller() {}\n")?;
+    let added = Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(added.success());
+    let committed = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Compass Test",
+            "-c",
+            "user.email=compass@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "fixture",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(committed.success());
+    let source_commit = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(directory.path())
+        .output()?;
+    assert!(source_commit.status.success());
+    let source_commit = String::from_utf8(source_commit.stdout)?.trim().to_owned();
     let graph = directory.path().join("graph.json");
     let html = directory.path().join("review.html");
     std::fs::write(
@@ -400,7 +438,10 @@ fn html_export_embeds_one_workbench_for_multiple_views() -> Result<(), Box<dyn E
         serde_json::to_vec(&json!({
             "directed": true,
             "multigraph": false,
-            "graph": {"schema":"compass.graph/1"},
+            "graph": {
+                "schema":"compass.graph/1",
+                "build":{"sourceCommit":source_commit}
+            },
             "nodes": [
                 {"id":"caller","label":"caller","kind":"function","community":0,"source_file":"src/lib.rs","line_start":1},
                 {"id":"target","label":"target","kind":"function","community":0,"source_file":"src/lib.rs","line_start":2}
@@ -434,6 +475,10 @@ fn html_export_embeds_one_workbench_for_multiple_views() -> Result<(), Box<dyn E
     assert_eq!(document.matches("id=\"compass-viewer-model\"").count(), 1);
     assert!(document.contains("compass.viewer.workbench/1"));
     assert!(document.contains("\"kind\":\"call\""));
+    assert!(document.contains("id=\"compass-source-navigation\""));
+    assert!(document.contains("\"provider\":\"gitlab\""));
+    assert!(document.contains("\"repositoryUrl\":\"https://gitlab.com/acme/compass\""));
+    assert!(document.contains(&format!("\"revision\":\"{source_commit}\"")));
     Ok(())
 }
 

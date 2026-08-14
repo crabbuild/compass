@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "crates/compass-query/tests/fixtures/relevance/executable-reviewed-v2.json"
+OUTPUT = ROOT / "crates/compass-query/tests/fixtures/relevance/executable-reviewed-v1.json"
 SCHEMA = "compass.query-judgments/1"
 REVIEW = (
     "AI-reviewed synthetic equivalence case; approved by Codex judgment on "
@@ -411,10 +411,10 @@ def build() -> dict[str, object]:
         raise RuntimeError("generated query texts are not unique")
     return {
         "schema": SCHEMA,
-        "corpusId": "compass-query-executable-ai-reviewed-v2",
+        "corpusId": "compass-query-executable-ai-reviewed-v1",
         "graphSchema": "compass.graph/1",
         "graphDigest": "sha256:1fcf2e655dbef361301736117c3da03ab428de183e3fde20b42494d39eed98ee",
-        "repositoryRevision": "crates/compass-query/tests/support@v2",
+        "repositoryRevision": "crates/compass-query/tests/support@v1",
         "analyzerVersion": "compass.search-term/1",
         "queries": queries,
     }

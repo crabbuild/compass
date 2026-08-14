@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crate::code_query::{CodeQueryEngine, validate_limits};
 use crate::cql::{QueryError, QueryErrorKind};
-use crate::ranking::QUERY_RANKER_PROFILE_V2;
+use crate::ranking::QUERY_RANKER_PROFILE_V1;
 use crate::telemetry::{ProfiledCodeQueryResponse, QueryInstrumentation};
 
 pub const QUERY_PLANNER_PROFILE_V1: &str = "query-planner/1";
@@ -86,7 +86,7 @@ impl CodeQueryEngine {
             response,
             total_started.elapsed(),
             QUERY_PLANNER_PROFILE_V1,
-            QUERY_RANKER_PROFILE_V2,
+            QUERY_RANKER_PROFILE_V1,
         ))
     }
 

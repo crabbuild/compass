@@ -12,7 +12,7 @@ use compass_model::query_contract::{
 use compass_query::{
     EdgeIdentity, EdgeJudgment, IdJudgment, JudgedQuery, JudgmentCorpus, NaturalQueryRequest,
     ObservedEdge, ObservedPath, PathJudgment, PathPattern, ProfiledCodeQueryResponse,
-    QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V2, QueryClass, QueryObservation,
+    QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V1, QueryClass, QueryObservation,
     RelevanceError, WorkCounts, qualification_report, score,
 };
 use compass_query::{EngineSelection, open_with_engine};
@@ -29,7 +29,7 @@ fn corpus() -> Result<JudgmentCorpus, Box<dyn std::error::Error>> {
 
 fn executable_reviewed_corpus() -> Result<JudgmentCorpus, Box<dyn std::error::Error>> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/relevance/executable-reviewed-v2.json");
+        .join("tests/fixtures/relevance/executable-reviewed-v1.json");
     Ok(serde_json::from_slice::<JudgmentCorpus>(&fs::read(path)?)?)
 }
 
@@ -282,7 +282,7 @@ fn executable_corpus(graph_digest: String) -> JudgmentCorpus {
         corpus_id: "compass-query-executable-reviewed-v1".to_owned(),
         graph_schema: "compass.graph/1".to_owned(),
         graph_digest,
-        repository_revision: "crates/compass-query/tests/support@v2".to_owned(),
+        repository_revision: "crates/compass-query/tests/support@v1".to_owned(),
         analyzer_version: "compass.search-term/1".to_owned(),
         queries: vec![
             search(
@@ -525,7 +525,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
             .first()
             .map(|result| result.node_id.as_str()),
         Some("n:z-payment-charge"),
-        "v2 must prefer source implementation over generated test ambiguity: results={:?}, nodes={:?}",
+        "current v1 must prefer source implementation over generated test ambiguity: results={:?}, nodes={:?}",
         charge_ranking.results,
         charge_ranking.nodes
     );
@@ -587,7 +587,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
     let report = qualification_report(
         &corpus,
         &store_observations,
-        QUERY_RANKER_PROFILE_V2,
+        QUERY_RANKER_PROFILE_V1,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         limits,
@@ -647,7 +647,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
     let deterministic_report = qualification_report(
         &corpus,
         &deterministic_observations,
-        QUERY_RANKER_PROFILE_V2,
+        QUERY_RANKER_PROFILE_V1,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         BTreeMap::from([
@@ -660,7 +660,7 @@ fn executable_baseline_is_digest_pinned_and_backend_deterministic()
         serde_json::to_vec(&qualification_report(
             &corpus,
             &deterministic_observations,
-            QUERY_RANKER_PROFILE_V2,
+            QUERY_RANKER_PROFILE_V1,
             QUERY_PLANNER_PROFILE_V1,
             "store",
             BTreeMap::from([
@@ -734,7 +734,7 @@ fn five_hundred_reviewed_queries_execute_with_qualified_relevance_and_bounded_wo
     let report = qualification_report(
         &corpus,
         &observations,
-        QUERY_RANKER_PROFILE_V2,
+        QUERY_RANKER_PROFILE_V1,
         QUERY_PLANNER_PROFILE_V1,
         "store",
         BTreeMap::from([

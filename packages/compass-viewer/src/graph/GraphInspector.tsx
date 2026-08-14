@@ -93,6 +93,7 @@ export function GraphInspector({
   sourceRevisions,
   queryResult,
   renderedEdgeCount,
+  showHeader,
   onQueryChange,
   onFocus,
   onOpenSource,
@@ -114,6 +115,7 @@ export function GraphInspector({
   sourceRevisions?: GraphSourceRevisions | undefined;
   queryResult?: CodeQueryResponse | undefined;
   renderedEdgeCount: number;
+  showHeader: boolean;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation, revision?: string): void;
@@ -199,46 +201,60 @@ export function GraphInspector({
 
   return (
     <aside className="compass-graph-inspector" aria-label="Graph inspector">
-      <header className="compass-inspector-header">
-        <span className="compass-product-mark" aria-hidden="true"><CompassIcon /></span>
-        <span className="compass-inspector-title">
-          <strong>Compass</strong>
-          <small>{model.title}</small>
-        </span>
-        <button
-          className="compass-inspector-disclosure"
-          type="button"
-          aria-label="Collapse graph inspector"
-          title="Collapse graph inspector"
-          onClick={onToggleCollapsed}
-        >
-          <PanelRightCloseIcon aria-hidden="true" />
-        </button>
-      </header>
-
+      {showHeader && (
+        <header className="compass-inspector-header">
+          <span className="compass-product-mark" aria-hidden="true"><CompassIcon /></span>
+          <span className="compass-inspector-title">
+            <strong>Compass</strong>
+            <small>{model.title}</small>
+          </span>
+          <button
+            className="compass-inspector-disclosure"
+            type="button"
+            aria-label="Collapse graph inspector"
+            title="Collapse graph inspector"
+            onClick={onToggleCollapsed}
+          >
+            <PanelRightCloseIcon aria-hidden="true" />
+          </button>
+        </header>
+      )}
       <div className="compass-inspector-search" role="search">
         <label className="sr-only" htmlFor="compass-node-search">Search graph nodes</label>
-        <div className="compass-search-field">
-          <SearchIcon aria-hidden="true" />
-          <input
-            id="compass-node-search"
-            type="search"
-            role="combobox"
-            value={query}
-            placeholder="Search nodes and files"
-            autoComplete="off"
-            aria-controls="compass-search-results"
-            aria-autocomplete="list"
-            aria-expanded={matches.length > 0}
-            aria-activedescendant={matches[activeResult]
-              ? `compass-search-result-${activeResult}`
-              : undefined}
-            onChange={(event) => {
-              onQueryChange(event.target.value);
-              setActiveResult(0);
-            }}
-            onKeyDown={onSearchKeyDown}
-          />
+        <div className="compass-inspector-search-row">
+          <div className="compass-search-field">
+            <SearchIcon aria-hidden="true" />
+            <input
+              id="compass-node-search"
+              type="search"
+              role="combobox"
+              value={query}
+              placeholder="Search nodes and files"
+              autoComplete="off"
+              aria-controls="compass-search-results"
+              aria-autocomplete="list"
+              aria-expanded={matches.length > 0}
+              aria-activedescendant={matches[activeResult]
+                ? `compass-search-result-${activeResult}`
+                : undefined}
+              onChange={(event) => {
+                onQueryChange(event.target.value);
+                setActiveResult(0);
+              }}
+              onKeyDown={onSearchKeyDown}
+            />
+          </div>
+          {!showHeader && (
+            <button
+              className="compass-inspector-disclosure compass-inspector-search-disclosure"
+              type="button"
+              aria-label="Collapse graph inspector"
+              title="Collapse graph inspector"
+              onClick={onToggleCollapsed}
+            >
+              <PanelRightCloseIcon aria-hidden="true" />
+            </button>
+          )}
         </div>
         {matches.length > 0 && (
           <div

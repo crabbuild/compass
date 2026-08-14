@@ -55,7 +55,7 @@ export function ArchitectureMap({
   onSelect(selection: Exclude<ArchitectureSelection, undefined>): void;
 }) {
   const storageKey = [
-    "compass.architecture.layout.v2",
+    "compass.architecture.layout.v1",
     overview.provenance.projectName,
     overview.scope,
     overview.evidence

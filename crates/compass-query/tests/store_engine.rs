@@ -1498,7 +1498,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
 }
 
 #[test]
-fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
+fn provisional_json_index_is_rebuilt_to_v1() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -1521,7 +1521,7 @@ fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
         connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
             row.get(0)
         })?;
-    assert_eq!(format, "compass-code-index/7");
+    assert_eq!(format, "compass-code-index/1");
     Ok(())
 }
 

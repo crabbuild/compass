@@ -8,7 +8,7 @@ use compass_model::search::OPERATION_ROLE_TOKENS;
 use crate::recall::{CandidateSource, SearchCandidate};
 use crate::text::{canonical_query_token, search_tokens, strip_diacritics};
 
-pub const QUERY_RANKER_PROFILE_V2: &str = "query-ranker/2";
+pub const QUERY_RANKER_PROFILE_V1: &str = "query-ranker/1";
 
 #[derive(Clone, Debug)]
 pub(crate) struct RankedSearchResult {
@@ -58,11 +58,11 @@ pub(crate) fn rank_search_candidates(
     candidates: Vec<SearchCandidate>,
     limit: usize,
 ) -> Vec<RankedSearchResult> {
-    rank_v2(query, terms, candidates, limit)
+    rank_v1(query, terms, candidates, limit)
 }
 
 #[cfg(test)]
-fn rank_query_v1_reference(
+fn rank_query_legacy_reference(
     query: &str,
     candidates: Vec<SearchCandidate>,
     limit: usize,
@@ -116,7 +116,7 @@ fn rank_query_v1_reference(
     ranked
 }
 
-fn rank_v2(
+fn rank_v1(
     query: &str,
     terms: &[String],
     candidates: Vec<SearchCandidate>,
@@ -241,7 +241,7 @@ fn rank_v2(
         let lexical_score = if relationship_only_behavior {
             0.0
         } else {
-            lexical_score_v2(
+            lexical_score_v1(
                 &normalized_query,
                 &normalized_name,
                 &normalized_qualified,
@@ -255,7 +255,7 @@ fn rank_v2(
             )
         };
         let evidence_score = evidence_score(&candidate.node);
-        let trust_score = trust_score_v2(source_rank, source_count, matched_fields.len());
+        let trust_score = trust_score_v1(source_rank, source_count, matched_fields.len());
         let semantic_score = semantic_signal_score(&candidate.node);
         let field_score = if relationship_only_behavior {
             0.0
@@ -746,7 +746,7 @@ fn normalize_symbol_name(value: &str) -> String {
         .to_owned()
 }
 
-fn lexical_score_v2(
+fn lexical_score_v1(
     normalized_query: &str,
     normalized_name: &str,
     normalized_qualified: &str,
@@ -830,7 +830,7 @@ fn evidence_confidence_rank(node: &NodeRecord) -> u8 {
     }
 }
 
-fn trust_score_v2(source_rank: u8, source_count: usize, matched_fields: usize) -> f64 {
+fn trust_score_v1(source_rank: u8, source_count: usize, matched_fields: usize) -> f64 {
     let mut score = f64::from(source_rank) * 1_200.0;
     score += matched_fields as f64 * 200.0;
     score += f64::from(source_count as u16) * 3_000.0;
@@ -1163,7 +1163,7 @@ mod tests {
 
     use super::{
         canonical_predicate_token, has_owner_initialism, is_explicit_operation_predicate,
-        rank_query_v1_reference, rank_search_candidates,
+        rank_query_legacy_reference, rank_search_candidates,
     };
 
     fn anchor(path: &str) -> SourceAnchor {
@@ -1232,13 +1232,13 @@ mod tests {
                 relationship_matches: BTreeSet::new(),
             },
         ];
-        let ranked = rank_query_v1_reference("query", candidates, usize::MAX);
+        let ranked = rank_query_legacy_reference("query", candidates, usize::MAX);
         assert_eq!(ranked[0].node_id, "n:a");
         assert_eq!(ranked[1].node_id, "n:z");
     }
 
     #[test]
-    fn profile_v2_prefers_source_backed_over_generated_candidates() {
+    fn profile_v1_prefers_source_backed_over_generated_candidates() {
         let candidates = vec![
             SearchCandidate {
                 node: node(
@@ -1275,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_strictly_improves_the_reviewed_production_over_generated_ambiguity() {
+    fn current_v1_strictly_improves_the_reviewed_production_over_generated_ambiguity() {
         let candidates = vec![
             SearchCandidate {
                 node: node(
@@ -1314,7 +1314,7 @@ mod tests {
                 relationship_matches: BTreeSet::new(),
             },
         ];
-        let reference_v1 = rank_query_v1_reference("charge", candidates.clone(), 1);
+        let reference_v1 = rank_query_legacy_reference("charge", candidates.clone(), 1);
         let current = rank_search_candidates(
             "charge",
             std::slice::from_ref(&"charge".to_owned()),
@@ -2826,7 +2826,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_v2_tiebreaks_stably_for_equal_scores() {
+    fn profile_v1_tiebreaks_stably_for_equal_scores() {
         let candidates = vec![
             SearchCandidate {
                 node: node("n:aa", "same", NodeKind::Function, "src/lib.rs", false),

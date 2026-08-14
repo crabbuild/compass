@@ -5,7 +5,12 @@ import {
 } from "./contracts/graph";
 import { WorkbenchModelSchema } from "./contracts/workbench";
 import { CompassGraph } from "./graph/CompassGraph";
-import { VisualizationWorkbench, dispatchOpenSource } from "./workbench/VisualizationWorkbench";
+import { VisualizationWorkbench } from "./workbench/VisualizationWorkbench";
+import {
+  openExportSource,
+  SourceNavigationSchema,
+  type SourceNavigation
+} from "./sourceLinks";
 import "./theme.css";
 
 function mount() {
@@ -15,13 +20,18 @@ function mount() {
     throw new Error("Compass viewer root or model is missing");
   }
   const untrusted = JSON.parse(modelElement.textContent ?? "");
+  const sourceNavigation = parseSourceNavigation();
   const root = createRoot(rootElement);
   const workbench = WorkbenchModelSchema.safeParse(untrusted);
   if (workbench.success) {
     root.render(
       <VisualizationWorkbench
         workbench={workbench.data}
-        host={{ openSource: dispatchOpenSource }}
+        host={{
+          openSource(source, revision) {
+            openExportSource(sourceNavigation, source, revision);
+          }
+        }}
       />
     );
     return;
@@ -45,10 +55,8 @@ function mount() {
           render();
         } : undefined}
         host={{
-          openSource(source) {
-            window.dispatchEvent(new CustomEvent("compass:open-source", {
-              detail: source
-            }));
+          openSource(source, revision) {
+            openExportSource(sourceNavigation, source, revision);
           },
           openCommunity(communityId) {
             if (communityLoading !== null) return;
@@ -87,6 +95,13 @@ function mount() {
     );
   };
   render();
+}
+
+function parseSourceNavigation(): SourceNavigation | undefined {
+  const element = document.getElementById("compass-source-navigation");
+  if (!element?.textContent) return undefined;
+  const parsed = SourceNavigationSchema.safeParse(JSON.parse(element.textContent));
+  return parsed.success ? parsed.data : undefined;
 }
 
 if (document.readyState === "loading") {

@@ -57,7 +57,7 @@ const GRAPH_SNAPSHOT_OBJECT_PARTITION: &[u8] = b"graph-snapshot/objects";
 const MANIFEST_PREFIX: &[u8] = b"manifest/";
 const CHUNK_PREFIX: &[u8] = b"chunk/";
 const CHUNK_BYTES: usize = MAX_VALUE_BYTES - 1_024;
-const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
+const GRAPH_SNAPSHOT_LAYOUT_V1: &str = "compass.store.graph-index/1";
 const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
 const GRAPH_SNAPSHOT_ACTIVE_KEY: &[u8] = b"active";
 const RETENTION_METADATA_KEY: &str = "retention.v1";
@@ -1236,7 +1236,7 @@ impl SqliteStore {
         }
         let manifest: GraphSnapshotManifest = serde_json::from_slice(&manifest_entry.value)
             .map_err(|error| StoreError::Corrupt(format!("graph snapshot manifest: {error}")))?;
-        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V2
+        if manifest.schema != GRAPH_SNAPSHOT_LAYOUT_V1
             || manifest.graph_schema != GRAPH_SCHEMA_V1
             || manifest.snapshot_id != snapshot_id
         {

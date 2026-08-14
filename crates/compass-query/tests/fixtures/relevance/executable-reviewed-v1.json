@@ -1,9 +1,9 @@
 {
   "schema": "compass.query-judgments/1",
-  "corpusId": "compass-query-executable-ai-reviewed-v2",
+  "corpusId": "compass-query-executable-ai-reviewed-v1",
   "graphSchema": "compass.graph/1",
   "graphDigest": "sha256:1fcf2e655dbef361301736117c3da03ab428de183e3fde20b42494d39eed98ee",
-  "repositoryRevision": "crates/compass-query/tests/support@v2",
+  "repositoryRevision": "crates/compass-query/tests/support@v1",
   "analyzerVersion": "compass.search-term/1",
   "queries": [
     {

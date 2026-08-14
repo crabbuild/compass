@@ -77,8 +77,10 @@ pub use viewer_model::{
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub use workbench::{
-    WORKBENCH_SCHEMA, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
-    WorkbenchViewContent, workbench_html_document, write_workbench_html,
+    SourceNavigation, SourceProvider, WORKBENCH_SCHEMA, WorkbenchCoverage, WorkbenchCoverageStatus,
+    WorkbenchModel, WorkbenchView, WorkbenchViewContent, workbench_html_document,
+    workbench_html_document_with_source_navigation, write_workbench_html,
+    write_workbench_html_with_source_navigation,
 };
 
 #[derive(Debug, thiserror::Error)]

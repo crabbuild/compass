@@ -6,7 +6,7 @@ grades are authored independently from a ranker's current output.
 
 The 80-question corpus is metric-contract coverage, not an executable graph
 baseline: its synthetic IDs intentionally do not name the compact test graph.
-`executable-reviewed-v2.json` contains exactly 500 unique, executable questions
+`executable-reviewed-v1.json` contains exactly 500 unique, executable questions
 over the checked-in `tests/support` graph fixture. Every record carries an
 explicit AI-review disclosure, locale, expected intent and slots, graded stable
 node identities, and edge/path direction where applicable. The distribution is

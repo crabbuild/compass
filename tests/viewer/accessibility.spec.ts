@@ -38,6 +38,12 @@ test("workbench graph panels stay exclusive, bounded, and recover from empty fil
   await page.setViewportSize({ width: 320, height: 720 });
   await page.goto("/workbench.html");
 
+  const navigation = page.getByRole("complementary", { name: "Compass navigation" });
+  await page.getByRole("button", { name: "Collapse graph navigation" }).click();
+  await expect(navigation).toHaveAttribute("data-collapsed", "true");
+  await page.getByRole("button", { name: "Expand graph navigation" }).click();
+  await expect(navigation).toHaveAttribute("data-collapsed", "false");
+
   const filters = page.getByRole("button", { name: "Graph filters" });
   const settings = page.getByRole("button", { name: "Graph settings" });
   await expect(settings.locator(".lucide-settings")).toHaveCount(1);

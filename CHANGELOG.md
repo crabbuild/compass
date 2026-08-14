@@ -22,8 +22,17 @@
   anchors ahead of generic role-name matches in natural query ranking. Natural
   search now removes question stop words and canonicalizes inflections before
   bounded recall, while persistent discovery caps speculative accelerator
-  hydration before general recall. Advance extraction semantics to v13 so
-  cached C# evidence rebuilds with these fixes.
+  hydration before general recall. Since these contracts are still
+  pre-compatibility, hard-reset active extraction, cache, publication, store
+  index, query index/ranker, overview, qualification, and semantic-diff
+  identities to v1 instead of carrying forward provisional version numbers.
+
+- Improve source navigation and canvas space in exported graph workbenches.
+  VS Code continues to open and select local source ranges, while standalone
+  HTML opens commit-pinned GitHub, GitLab, or Bitbucket line links when the Git
+  origin and graph source commit are known. The navigation and inspector rails
+  now collapse independently, repository identity is consolidated in the left
+  header, and the inspector begins directly with search and node details.
 
 ## 0.3.12 - 2026-08-13
 

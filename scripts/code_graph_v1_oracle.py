@@ -10,7 +10,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA = "compass.code-graph-qualification/2"
+SCHEMA = "compass.code-graph-qualification/1"
 GRAPH_SCHEMA = "compass.graph/1"
 NODE_KINDS = (
     "file", "module", "package", "namespace", "class", "struct", "interface",

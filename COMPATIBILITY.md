@@ -62,6 +62,14 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+Before the first compatibility-stable release, Compass hard-resets active
+internal extraction, cache, publication, store-index, query-index/ranker,
+overview, qualification, and semantic-diff identities to v1. Provisional
+higher-numbered artifacts are unsupported and are not migrated or interpreted
+alongside earlier v1 prototypes. Discard existing pre-release artifacts and
+rebuild project output with the current binary; disposable query indexes rebuild
+automatically.
+
 The release workflow publishes `compass-release.json` with schema
 `compass.release/1`. `compass upgrade` retrieves that bounded static manifest
 through the GitHub release-download path, requires one exact artifact for each
@@ -114,6 +122,10 @@ and artifact-lens models. Each view carries explicit bounded coverage. Plain
 views, or using `compass export workbench-json`, returns the workbench contract.
 Consumers must reject an unknown workbench major version. The HTML DOM and CSS
 remain presentation details rather than machine contracts.
+Standalone HTML may additionally embed optional, presentation-only source
+navigation metadata for a recognized Git forge and full source commit. This
+metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
+versioned graph/view contracts are unchanged.
 Structural builds publish a validated `store.sqlite3` sidecar and typed
 `store.ref` selector by default; `--store json` explicitly opts out. Typed code
 queries prefer that validated sidecar by default, while `--engine json`
@@ -182,7 +194,7 @@ The Rust library's `query_natural_profiled` API returns a separate
 fields to `compass.query/1`, so ordinary responses remain deterministic and
 backend-neutral.
 
-Typed symbol search now unconditionally uses `query-ranker/2`. The internal
+Typed symbol search now unconditionally uses `query-ranker/1`. The internal
 `COMPASS_QUERY_RANKER_PROFILE` experiment switch and v1 runtime fallback have
 been removed. This does not change the `compass.query/1` schema, but intentional
 score and ordering improvements can change which equally lexical candidate is
@@ -387,7 +399,7 @@ surface. Backups are digest-bound directories and restores never overwrite an
 existing destination. Local publication retains two complete snapshots and
 performs bounded reachability GC; remote leases, service quotas, and
 distributed GC remain deferred. The local API enforces bounded values, scans,
-transactions, and request work. Current `compass.store.graph-index/2`
+transactions, and request work. Current `compass.store.graph-index/1`
 snapshots do not impose an aggregate canonical-payload or record-count limit:
 their manifest uses `u64` byte and record counts, while each immutable tree
 object, write batch, scan, and query remains independently bounded. The legacy
