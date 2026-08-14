@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.13 - 2026-08-14
+
 - Make `compass review` recover automatically when one compared revision still
   prefers a realization from an older compatible `0.3.x` patch release. Compass
   now preserves user-selected build options, advances engine-owned fingerprint
