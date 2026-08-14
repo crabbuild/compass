@@ -13281,6 +13281,7 @@ fn role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Decorator => "decorator",
         SemanticRole::Annotation => "annotation",
         SemanticRole::BaseType => "base_type",
+        SemanticRole::Override => "override",
         SemanticRole::TypeReference => "type_reference",
         SemanticRole::MemberAccess => "member_access",
         SemanticRole::Ownership => "ownership",

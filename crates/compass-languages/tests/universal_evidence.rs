@@ -471,7 +471,15 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             .iter()
             .map(|profile| profile.language)
             .collect::<Vec<_>>(),
-        ["go", "java", "javascript", "python", "rust", "typescript"]
+        [
+            "csharp",
+            "go",
+            "java",
+            "javascript",
+            "python",
+            "rust",
+            "typescript",
+        ]
     );
     assert!(
         profiles

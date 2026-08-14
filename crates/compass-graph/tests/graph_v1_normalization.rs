@@ -2047,6 +2047,90 @@ fn sourceless_placeholder_identity_never_merges_same_name_across_source_files()
 }
 
 #[test]
+fn sourceless_import_placeholder_identity_never_merges_across_source_files()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let external_name = "Microsoft.AspNetCore.Mvc";
+    let mut external = raw_external_node("raw:mvc", external_name);
+    external.attributes.extend(Map::from_iter([
+        ("symbol_kind".to_owned(), json!("import")),
+        ("language".to_owned(), json!("csharp")),
+        (
+            "extractor".to_owned(),
+            json!("compass.resolve.csharp.universal"),
+        ),
+        ("_origin".to_owned(), json!("ast")),
+        ("confidence".to_owned(), json!("EXTRACTED")),
+        ("_canonical_external_symbol".to_owned(), json!(true)),
+    ]));
+    let graph = Extraction {
+        nodes: vec![
+            raw_file_node(root, "raw:first", "src/FirstController.cs"),
+            raw_file_node(root, "raw:second", "src/SecondController.cs"),
+            external,
+        ],
+        edges: vec![
+            raw_php_edge(
+                root,
+                "src/FirstController.cs",
+                "raw:first",
+                "raw:mvc",
+                "imports_from",
+                0,
+            ),
+            raw_php_edge(
+                root,
+                "src/SecondController.cs",
+                "raw:second",
+                "raw:mvc",
+                "imports_from",
+                0,
+            ),
+        ],
+        ..Extraction::default()
+    };
+    let mut evidence = build_evidence(root)?;
+    add_inventory_file(
+        root,
+        &mut evidence,
+        "src/FirstController.cs",
+        "csharp",
+        b'f',
+    )?;
+    add_inventory_file(
+        root,
+        &mut evidence,
+        "src/SecondController.cs",
+        "csharp",
+        b's',
+    )?;
+
+    let document = normalize_v1(graph, evidence)?;
+    let external = document
+        .nodes
+        .iter()
+        .filter(|node| node.qualified_name == external_name)
+        .collect::<Vec<_>>();
+    assert_eq!(external.len(), 2, "nodes={:#?}", document.nodes);
+    assert!(external.iter().all(|node| {
+        node.evidence
+            .iter()
+            .filter(|evidence| evidence.rule.as_deref() == Some("external-symbol-placeholder"))
+            .count()
+            == 1
+    }));
+    let targets = document
+        .links
+        .iter()
+        .map(|edge| edge.target.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(targets.len(), 2);
+    assert!(document.links.iter().all(|edge| edge.deferred));
+    Ok(())
+}
+
+#[test]
 fn sourceless_implemented_placeholder_infers_a_deferred_interface()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

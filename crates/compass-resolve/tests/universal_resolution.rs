@@ -3,6 +3,7 @@
 //! Universal resolver integration characterization, grouped by ownership.
 
 include!("universal_resolution/core.rs");
+include!("universal_resolution/csharp.rs");
 include!("universal_resolution/rust.rs");
 include!("universal_resolution/python.rs");
 include!("universal_resolution/go.rs");

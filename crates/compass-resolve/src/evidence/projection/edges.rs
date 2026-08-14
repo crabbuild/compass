@@ -275,6 +275,7 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Annotates => "annotation",
         CandidateRelation::Extends => "extends",
         CandidateRelation::Implements => "implements",
+        CandidateRelation::Overrides => "override",
         CandidateRelation::References => "reference",
         CandidateRelation::TypeOf => "type-of",
         CandidateRelation::Returns => "return-type",

@@ -698,13 +698,17 @@ Python or Go has met the production qualification gates.
 
 ## Current qualification boundary
 
-Python and Go are hard-cut universal language adapters. Rust, Java,
+Python and Go are hard-cut universal language adapters. C#, Rust, Java,
 TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
 bounded ECMAScript emitter but retain distinct adapter identities. TSX uses the
-TypeScript candidate profile. Candidate status means the universal route is
-active while complete capability and corpus qualification remain in progress.
-`spring-java` is the first production universal framework pack and advertises
+TypeScript candidate profile. C# uses a dedicated bounded AST emitter and no
+longer publishes or resolves through the replaced C# raw-graph/type-table path.
+Candidate status means the universal route is active while complete capability
+and corpus qualification remain in progress. `spring-java` and
+`aspnet-csharp` are production universal framework packs. Spring advertises
 typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
-and security capabilities. Kotlin Spring remains on its established detector.
+and security capabilities; ASP.NET consumes exact C# imports, attributes,
+ownership, callable signatures, and source ranges to derive MVC routes. Kotlin
+Spring remains on its established detector.
 Do not infer support for another language or framework from file extensions,
 raw graph output, or total node and edge counts.

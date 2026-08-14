@@ -169,6 +169,87 @@ impl EvidenceBuilder {
         )
     }
 
+    /// Add a callable declaration with the source-proven signature shape used
+    /// by deterministic overload selection.
+    ///
+    /// Language adapters retain responsibility for canonicalizing their own
+    /// parameter spellings. The builder only publishes the bounded, typed
+    /// fields already present in the universal evidence schema.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_callable(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        parameter_types: Vec<String>,
+        variadic: bool,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        let metadata = DeclarationMetadata {
+            signature: signature.map(str::to_owned),
+            parameter_count: Some(u32::try_from(parameter_types.len()).map_err(|_| {
+                EvidenceError::new(
+                    EvidenceErrorCode::ResourceLimit,
+                    "callable parameter count exceeds the evidence schema limit",
+                )
+            })?),
+            parameter_types,
+            variadic,
+            ..DeclarationMetadata::default()
+        };
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            metadata,
+        )
+    }
+
+    /// Add a nominal type declaration and state whether its complete direct
+    /// base list was parsed. This is shared resolver input, not a claim that
+    /// every base target is locally resolvable.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_type(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        direct_bases_complete: bool,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        let metadata = DeclarationMetadata {
+            signature: signature.map(str::to_owned),
+            direct_bases_complete,
+            ..DeclarationMetadata::default()
+        };
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            metadata,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn declare_with_metadata(
         &mut self,
@@ -744,6 +825,9 @@ pub(crate) fn extract_tree_evidence(
     root: Node<'_>,
     profile: &'static AdapterProfile,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
+    if profile.language == "csharp" {
+        return super::csharp::extract_candidate_tree_evidence(path, source_file, source, root);
+    }
     if matches!(profile.language, "javascript" | "typescript") {
         return super::typescript::extract_candidate_tree_evidence(
             path,
@@ -10232,7 +10316,10 @@ fn rust_is_lexical_scope_node(kind: &str) -> bool {
 
 fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
     match relation {
-        CandidateRelation::Calls | CandidateRelation::IndirectCalls | CandidateRelation::Tests => {
+        CandidateRelation::Calls
+        | CandidateRelation::IndirectCalls
+        | CandidateRelation::Overrides
+        | CandidateRelation::Tests => {
             vec!["function".to_owned(), "method".to_owned()]
         }
         CandidateRelation::Constructs => {
@@ -10413,6 +10500,7 @@ const fn semantic_role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Decorator => "decorator",
         SemanticRole::Annotation => "annotation",
         SemanticRole::BaseType => "base_type",
+        SemanticRole::Override => "override",
         SemanticRole::TypeReference => "type_reference",
         SemanticRole::MemberAccess => "member_access",
         SemanticRole::Ownership => "ownership",
@@ -10432,6 +10520,7 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Annotates => "annotates",
         CandidateRelation::Extends => "extends",
         CandidateRelation::Implements => "implements",
+        CandidateRelation::Overrides => "overrides",
         CandidateRelation::References => "references",
         CandidateRelation::TypeOf => "type_of",
         CandidateRelation::Returns => "returns",

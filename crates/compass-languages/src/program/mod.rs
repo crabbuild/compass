@@ -62,6 +62,13 @@ pub(crate) fn extract_from_tree(
     Ok(batch)
 }
 
+pub(crate) fn supports_language(language: &str) -> bool {
+    matches!(
+        language,
+        "python" | "rust" | "typescript" | "tsx" | "javascript"
+    )
+}
+
 impl SyntaxProvider for TreeSitterSyntaxProvider {
     fn descriptor(&self, input: &FileInput<'_>) -> ProviderDescriptor {
         syntax_descriptor(input)

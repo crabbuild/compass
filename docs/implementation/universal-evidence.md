@@ -30,10 +30,10 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | Python, Go, Rust, Java, TypeScript, and JavaScript are entries in the hard-cut `AdapterRegistry`; Go and Java are at adapter version 3, Python is at version 11, Rust is at version 15, and the ECMAScript candidates are at version 5 |
-| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; TypeScript and JavaScript share a source-grounded emitter and retain distinct adapter identities |
+| Available now | C#, Python, Go, Rust, Java, TypeScript, and JavaScript are entries in the hard-cut `AdapterRegistry`; C# is at adapter version 1, Go and Java are at version 3, Python is at version 11, Rust is at version 15, and the ECMAScript candidates are at version 5 |
+| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; C# and the ECMAScript family use dedicated source-grounded emitters, while TypeScript and JavaScript retain distinct adapter identities |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust has passed Phase 2 qualification; Java, TypeScript, and JavaScript remain `UniversalCandidate` while their respective completion gates run |
+| Available now | Rust has passed Phase 2 qualification; C#, Java, TypeScript, and JavaScript remain `UniversalCandidate` while their respective completion gates run |
 | Planned | `GrammarProvider`, grammar provenance, and producer-registry validation |
 | Planned | Independently qualified hard cuts for the remaining registered languages |
 

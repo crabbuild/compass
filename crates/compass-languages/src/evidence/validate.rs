@@ -324,12 +324,13 @@ fn validate_fact(
                     (
                         "java",
                         "class" | "interface" | "enum" | "record" | "annotation_type"
-                    ) | ("rust", "trait")
+                    ) | ("csharp", "class" | "interface" | "record" | "struct")
+                        | ("rust", "trait")
                 )
             {
                 return Err(invalid_fact(
                     &fact.id,
-                    "complete direct-base evidence requires a Java type or Rust trait declaration",
+                    "complete direct-base evidence requires a qualified nominal type declaration",
                 ));
             }
         }
@@ -557,16 +558,18 @@ fn validate_fact(
                     .and_then(|id| occurrences.get(id));
                 match hierarchy {
                     HierarchyConstraint::DirectBase { .. }
-                        if fact.relation != CandidateRelation::Extends
-                            || occurrence.is_none_or(|occurrence| {
-                                occurrence.role != SemanticRole::BaseType
-                                    && !(fact.language == "rust"
-                                        && occurrence.role == SemanticRole::TraitBound)
-                            }) =>
+                        if !matches!(
+                            fact.relation,
+                            CandidateRelation::Extends | CandidateRelation::Implements
+                        ) || occurrence.is_none_or(|occurrence| {
+                            occurrence.role != SemanticRole::BaseType
+                                && !(fact.language == "rust"
+                                    && occurrence.role == SemanticRole::TraitBound)
+                        }) =>
                     {
                         return Err(invalid_fact(
                             &fact.id,
-                            "direct-base hierarchy evidence requires an extends/base-type occurrence",
+                            "direct-base hierarchy evidence requires an extends-or-implements/base-type occurrence",
                         ));
                     }
                     HierarchyConstraint::ReceiverDispatch {

@@ -85,7 +85,7 @@ HTTP endpoints.
   imports or qualified macros. Ambiguous or cyclic Axum module factory targets
   remain local and uncomposed.
 - **Vapor**: grouped literal and path-component prefixes, closure groups, `app.on(...)`, and HTTP registrations with explicit `use:` handlers; opaque closures remain visible as unresolved handlers
-- **ASP.NET Core**: MVC controller and action templates, `[controller]` and `[action]` tokens, HTTP method attributes, and absolute `/` or `~/` action-template overrides; Minimal API `MapGet`, `MapPost`, `MapPut`, `MapPatch`, `MapDelete`, `MapOptions`, and `MapHead` registrations; and nested literal `MapGroup` prefixes
+- **ASP.NET Core**: universal C# evidence-backed MVC controller and action templates, `[controller]` and `[action]` tokens, aliased HTTP method attributes, `AcceptVerbs`, `[NonAction]`, and absolute `/` or `~/` action-template overrides; Minimal API `MapGet`, `MapPost`, `MapPut`, `MapPatch`, `MapDelete`, `MapOptions`, and `MapHead` registrations; and nested literal `MapGroup` prefixes
 
 ## Special route contracts
 

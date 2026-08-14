@@ -440,16 +440,12 @@ namespace Two {
             "ts_ownership.Two.Shared",
             Some("ts_ownership.Two"),
         ),
-        ("CsharpOwnership.cs", "Shared@", None),
-        ("CsharpOwnership.cs", "One::Item@", Some("One")),
-        ("CsharpOwnership.cs", "One::Outer@", Some("One")),
-        (
-            "CsharpOwnership.cs",
-            "One::Outer::Leaf@",
-            Some("One::Outer@"),
-        ),
-        ("CsharpOwnership.cs", "Two::Item@", Some("Two")),
-        ("CsharpOwnership.cs", "Two::Shared@", Some("Two")),
+        ("CsharpOwnership.cs", "Shared", None),
+        ("CsharpOwnership.cs", "One.Item", Some("One")),
+        ("CsharpOwnership.cs", "One.Outer", Some("One")),
+        ("CsharpOwnership.cs", "One.Outer.Leaf", Some("One.Outer")),
+        ("CsharpOwnership.cs", "Two.Item", Some("Two")),
+        ("CsharpOwnership.cs", "Two.Shared", Some("Two")),
     ] {
         assert_public_containment(&graph, file, target, owner)?;
     }

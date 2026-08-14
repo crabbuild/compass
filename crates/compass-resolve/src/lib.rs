@@ -1025,9 +1025,6 @@ fn finish_resolution(
             "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts"
         )
     });
-    let has_csharp = sources
-        .keys()
-        .any(|source| matches!(extension(source).as_str(), "cs" | "razor" | "cshtml"));
     let has_php = sources.keys().any(|source| extension(source) == "php");
     let mut project_resolution = (!project_edges.is_empty()).then(|| Extraction {
         nodes: merged
@@ -1153,10 +1150,6 @@ fn finish_resolution(
         "resolver JavaScript workspace symbols",
         &mut profile_started,
     );
-    if has_csharp {
-        canonicalize_csharp_namespace_nodes(&mut merged);
-    }
-    profile_internal("resolver C# namespace normalization", &mut profile_started);
     if has_php {
         resolve_php_type_references(&mut merged, sources);
     }
@@ -3827,73 +3820,6 @@ fn resolve_javascript_reexports(extraction: &mut Extraction) {
         })
         .collect::<Vec<_>>();
     extraction.edges.extend(additions);
-}
-
-/// Match Python's last-writer graph semantics without making the retained C#
-/// namespace depend on filesystem traversal order. Namespace IDs are label
-/// based, so declarations from multiple files intentionally collide; the
-/// lexicographically earliest source/location is the canonical representative.
-fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
-    let mut by_label = HashMap::<String, Vec<usize>>::new();
-    for (index, node) in extraction.nodes.iter().enumerate() {
-        if string_attribute(node, "type") == "namespace" {
-            by_label
-                .entry(node.label().to_owned())
-                .or_default()
-                .push(index);
-        }
-    }
-
-    let mut dropped = HashSet::new();
-    let mut remap = HashMap::new();
-    for indexes in by_label.values().filter(|indexes| indexes.len() > 1) {
-        let canonical = indexes
-            .iter()
-            .copied()
-            .min_by_key(|index| {
-                let node = &extraction.nodes[*index];
-                (
-                    string_attribute(node, "source_file"),
-                    string_attribute(node, "source_location"),
-                    node.id.clone(),
-                )
-            })
-            .unwrap_or(indexes[0]);
-        let canonical_id = extraction.nodes[canonical].id.clone();
-        for &index in indexes {
-            if index != canonical {
-                dropped.insert(index);
-                remap.insert(extraction.nodes[index].id.clone(), canonical_id.clone());
-            }
-        }
-    }
-    if dropped.is_empty() {
-        return;
-    }
-    for edge in &mut extraction.edges {
-        let mut rewritten = false;
-        if let Some(target) = remap.get(&edge.source) {
-            edge.source.clone_from(target);
-            rewritten = true;
-        }
-        if let Some(target) = remap.get(&edge.target) {
-            edge.target.clone_from(target);
-            rewritten = true;
-        }
-        if rewritten {
-            stamp_endpoint_rewrite(
-                edge,
-                EndpointRewriteRule::CsharpNamespaceCanonicalization,
-                1.0,
-            );
-        }
-    }
-    let mut index = 0_usize;
-    extraction.nodes.retain(|_| {
-        let keep = !dropped.contains(&index);
-        index += 1;
-        keep
-    });
 }
 
 /// Resolve a sourceless type stub inside the language family of the edge that
@@ -6575,42 +6501,6 @@ mod tests {
 
         assert_eq!(extraction.edges[1].target, "package-b-base");
         assert!(extraction.nodes.iter().all(|node| node.id != "base"));
-    }
-
-    #[test]
-    fn csharp_namespace_canonicalization_keeps_lexicographically_earliest_source() {
-        let mut later = node(
-            "namespace-id",
-            "Demo.ViewModels",
-            "views/ToolkitViewModel.cs",
-            "namespace",
-        );
-        later
-            .attributes
-            .insert("source_location".to_owned(), Value::String("L4".to_owned()));
-        let mut earlier = node(
-            "namespace-id",
-            "Demo.ViewModels",
-            "views/DesignViewModel.cs",
-            "namespace",
-        );
-        earlier
-            .attributes
-            .insert("source_location".to_owned(), Value::String("L1".to_owned()));
-        let mut extraction = Extraction {
-            nodes: vec![later, earlier],
-            edges: vec![edge("consumer", "namespace-id", "imports", "views/App.cs")],
-            ..Extraction::default()
-        };
-
-        canonicalize_csharp_namespace_nodes(&mut extraction);
-
-        assert_eq!(extraction.nodes.len(), 1);
-        assert_eq!(
-            extraction.nodes[0].string("source_file"),
-            "views/DesignViewModel.cs"
-        );
-        assert_eq!(extraction.edges[0].target, "namespace-id");
     }
 
     #[test]

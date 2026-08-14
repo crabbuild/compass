@@ -4520,6 +4520,8 @@ fn node_identity(
             domain_id(kind, source_path, &positional_name)
         }
         NodeKind::Import | NodeKind::Export => {
+            let identity_source =
+                node_identity_source(attributes, source_path, record, identity_site);
             let mut binding = match details {
                 Some(NodeDetails::ImportExport(details)) => format!(
                     "{}:{}:{}",
@@ -4535,7 +4537,7 @@ fn node_identity(
             }
             symbol_id(
                 language.unwrap_or("unknown"),
-                source_path,
+                &identity_source,
                 kind,
                 qualified_name,
                 &binding,
@@ -4551,20 +4553,8 @@ fn node_identity(
             domain_id(kind, &namespace, qualified_name)
         }
         _ => {
-            let unresolved_scope;
-            let identity_source = if source_path.is_empty() {
-                unresolved_scope = optional_string(attributes, "external_identity_scope")
-                    .filter(|scope| !scope.trim().is_empty())
-                    .unwrap_or_else(|| {
-                        identity_site.map_or_else(
-                            || format!("unresolved:{record}"),
-                            |site| format!("{}#{}:{}", site.file, site.start_byte, site.end_byte),
-                        )
-                    });
-                unresolved_scope.as_str()
-            } else {
-                source_path
-            };
+            let identity_source =
+                node_identity_source(attributes, source_path, record, identity_site);
             let overload = optional_string(attributes, "overload_discriminator");
             let lexical_owner =
                 optional_any_string(attributes, &["lexical_owner", "declaring_scope"]);
@@ -4576,7 +4566,7 @@ fn node_identity(
             };
             symbol_id(
                 language.unwrap_or("unknown"),
-                identity_source,
+                &identity_source,
                 kind,
                 qualified_name,
                 &disambiguator,
@@ -4584,6 +4574,25 @@ fn node_identity(
         }
     };
     Ok(id)
+}
+
+fn node_identity_source(
+    attributes: &Map<String, Value>,
+    source_path: &str,
+    record: &str,
+    identity_site: Option<&SourceAnchor>,
+) -> String {
+    if !source_path.is_empty() {
+        return source_path.to_owned();
+    }
+    optional_string(attributes, "external_identity_scope")
+        .filter(|scope| !scope.trim().is_empty())
+        .unwrap_or_else(|| {
+            identity_site.map_or_else(
+                || format!("unresolved:{record}"),
+                |site| format!("{}#{}:{}", site.file, site.start_byte, site.end_byte),
+            )
+        })
 }
 
 fn raw_markdown_heading(attributes: &Map<String, Value>) -> bool {

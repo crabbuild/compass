@@ -33,8 +33,9 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 1);
-    assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "spring-java");
+    assert_eq!(FrameworkPackRegistry::descriptors().len(), 2);
+    assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
+    assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "spring-java");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -2064,7 +2065,12 @@ const rows = items.map(formatRow);
         let path = directory.path().join(name);
         fs::write(&path, source)?;
         let extraction = engine.extract(&path)?;
-        assert!(!extraction.nodes.is_empty(), "{name}");
+        if let Some(evidence) = extraction.semantic_evidence.as_ref() {
+            assert!(!evidence.declarations.is_empty(), "{name}");
+            assert!(!evidence.candidates.is_empty(), "{name}");
+            continue;
+        }
+        assert!(!extraction.nodes.is_empty(), "{name}: {extraction:#?}");
         assert!(
             extraction.edges.iter().any(|edge| matches!(
                 edge.string("relation").as_str(),
