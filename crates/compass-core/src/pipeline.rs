@@ -184,6 +184,7 @@ pub enum BuildPurpose {
 const OUTPUT_STATS_FILE: &str = "output-stats.json";
 const AST_FACT_DIGESTS_FILE: &str = "ast-fact-digests.json";
 const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/1";
+const AST_FACT_DIGESTS_PROFILE: &str = "compass.ast-fact-digests/profile/1";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
@@ -443,7 +444,7 @@ fn build_profile_digest(profile: &BuildProfile, output_dir: &Path) -> Result<Str
         source,
     })?;
     let mut digest = Sha256::new();
-    digest.update(b"compass.ast-fact-digests/profile/3");
+    digest.update(AST_FACT_DIGESTS_PROFILE.as_bytes());
     digest.update([0]);
     for component in [
         compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
