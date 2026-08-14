@@ -114,6 +114,10 @@ and artifact-lens models. Each view carries explicit bounded coverage. Plain
 views, or using `compass export workbench-json`, returns the workbench contract.
 Consumers must reject an unknown workbench major version. The HTML DOM and CSS
 remain presentation details rather than machine contracts.
+Standalone HTML may additionally embed optional, presentation-only source
+navigation metadata for a recognized Git forge and full source commit. This
+metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
+versioned graph/view contracts are unchanged.
 Passing `--store sqlite` also publishes a validated `store.sqlite3`
 sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
 `--engine store` explicitly selects and validates the sidecar. The SQLite file

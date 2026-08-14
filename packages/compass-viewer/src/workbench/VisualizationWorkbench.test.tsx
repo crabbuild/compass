@@ -93,6 +93,11 @@ describe("VisualizationWorkbench graph filters", () => {
       host={{ openSource: vi.fn() }}
     />);
 
+    expect(screen.getByLabelText("Compass navigation")).toHaveTextContent("Fixture workbench");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse graph navigation" }));
+    expect(screen.getByLabelText("Compass navigation")).toHaveAttribute("data-collapsed", "true");
+    expect(screen.getByRole("button", { name: "Expand graph navigation" })).toBeInTheDocument();
+
     expect(screen.getByLabelText("Graph filters")).toHaveTextContent("3 / 3");
     fireEvent.click(screen.getByRole("button", { name: "Open community fixture" }));
 

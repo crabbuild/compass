@@ -297,15 +297,30 @@ Optional interactive visualization. It may be absent when:
 It is not required for query commands.
 
 The document is self-contained and uses the same versioned graph workbench as
-the VS Code extension. It performs no runtime network requests, follows the
+the VS Code extension. Loading and exploring it performs no runtime network requests, follows the
 operating system's light or dark color scheme, and retains keyboard, reduced
 motion, narrow-screen, and high-contrast behavior from the shared viewer.
+
+Double-clicking a source-backed node, edge, or inspector source card opens the
+file and highlights its recorded lines in the VS Code extension. A standalone
+HTML export instead opens an immutable forge permalink when all required
+evidence is available: the graph records a full source commit, the graph is
+inside a Git worktree with a recognized `origin`, and that origin is GitHub,
+GitLab, or Bitbucket. The link uses the graph's commit rather than a mutable
+branch; historical comparisons use the commit for the selected side. If any
+part of that evidence is absent or unsafe, the viewer does not invent a link.
+No repository URL is added to `compass.viewer.workbench/1` or
+`workbench-json`; standalone HTML carries the optional presentation metadata
+separately.
 
 The embedded `compass.viewer.workbench/1` model contains an ordered list of
 independently bounded views with explicit `complete`, `summary`, or `partial`
 coverage. One HTML file can contain code, call, impact, affected, architecture,
 history-comparison, and artifact-specific lenses. Its navigation rail keeps
 the current graph identity and exposes hash links such as `#view=impact-run`.
+Both the navigation rail and graph inspector can collapse independently, and
+the repository title appears once in the navigation header so inspector space
+starts with search and node details.
 Graph lenses share relationship, evidence, node-kind, and language filters;
 call, impact, and affected views start in a deterministic depth-layer layout.
 Architecture views use subsystem routes, while history views overlay added,

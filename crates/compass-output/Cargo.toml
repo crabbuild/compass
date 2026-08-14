@@ -29,6 +29,7 @@ compass-model = { path = "../compass-model", version = "0.3.12" }
 compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.12" }
 compass-query = { path = "../compass-query", version = "0.3.12" }
 unicode-normalization.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -15,6 +15,13 @@
   sourceless external import identities scoped to their exact wiring sites so
   imports in different files cannot merge their provenance.
 
+- Improve source navigation and canvas space in exported graph workbenches.
+  VS Code continues to open and select local source ranges, while standalone
+  HTML opens commit-pinned GitHub, GitLab, or Bitbucket line links when the Git
+  origin and graph source commit are known. The navigation and inspector rails
+  now collapse independently, repository identity is consolidated in the left
+  header, and the inspector begins directly with search and node details.
+
 ## 0.3.12 - 2026-08-13
 
 - Remove the 2 GiB aggregate canonical-payload limit from current SQLite
