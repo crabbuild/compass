@@ -6,7 +6,6 @@ mod bash;
 mod builtins;
 mod config;
 mod cpp;
-mod csharp;
 mod dart;
 mod dm;
 mod dotnet_project;

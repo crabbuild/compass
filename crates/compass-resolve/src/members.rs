@@ -302,7 +302,6 @@ struct TypeTables {
     swift: HashMap<String, HashMap<String, String>>,
     typescript: HashMap<String, HashMap<String, String>>,
     cpp: HashMap<String, HashMap<String, String>>,
-    csharp: HashMap<String, HashMap<String, String>>,
     objc: HashMap<String, HashMap<String, String>>,
 }
 
@@ -316,7 +315,6 @@ impl TypeTables {
             collect_table(extraction, "swift_type_table", &mut tables.swift);
             collect_table(extraction, "ts_type_table", &mut tables.typescript);
             collect_table(extraction, "cpp_type_table", &mut tables.cpp);
-            collect_table(extraction, "csharp_type_table", &mut tables.csharp);
             collect_table(extraction, "objc_type_table", &mut tables.objc);
         }
         tables
@@ -335,7 +333,6 @@ fn indexed_families(calls: &[RawCall], tables: &TypeTables) -> (HashSet<&'static
         (!tables.swift.is_empty(), "swift"),
         (!tables.typescript.is_empty(), "javascript"),
         (!tables.cpp.is_empty(), "cpp"),
-        (!tables.csharp.is_empty(), "csharp"),
         (!tables.objc.is_empty(), "objc"),
     ] {
         if present {
@@ -413,7 +410,7 @@ fn resolve_typed_members(
                         .cloned()
                         .map(|owner| (owner, true))
                 } else {
-                    typed_owner(receiver, source, &tables.csharp, indexes, None)
+                    None
                 }
             }
             MemberFamily::Objc => {

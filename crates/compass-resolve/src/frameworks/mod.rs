@@ -1,3 +1,4 @@
+mod aspnet;
 mod axum;
 mod domain;
 mod jvm;
@@ -72,10 +73,16 @@ struct UniversalFrameworkPack {
 /// Project-wide expansion adapters are registered by pack identity rather
 /// than selected through a language-specific match. Adding a universal pack
 /// therefore changes one registry entry and leaves the lifecycle unchanged.
-const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[UniversalFrameworkPack {
-    id: "spring-java",
-    expand: spring::expand,
-}];
+const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
+    UniversalFrameworkPack {
+        id: "aspnet-csharp",
+        expand: aspnet::expand,
+    },
+    UniversalFrameworkPack {
+        id: "spring-java",
+        expand: spring::expand,
+    },
+];
 
 pub use domain::{
     ResolvedDomainFact, publish_resolved_domains, resolve_and_publish_framework_domains,
@@ -199,11 +206,12 @@ pub(crate) fn resolve_framework_facts(
 fn universal_framework_targets_are_materialized(
     extraction: &compass_languages::Extraction,
 ) -> bool {
-    let Some(batch) = extraction
-        .semantic_evidence
-        .as_ref()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    else {
+    let Some(batch) = extraction.semantic_evidence.as_ref().filter(|batch| {
+        matches!(
+            batch.adapter.language.as_str(),
+            "csharp" | "javascript" | "typescript"
+        )
+    }) else {
         return true;
     };
     let existing = extraction
@@ -231,7 +239,7 @@ fn universal_framework_targets_are_materialized(
     })
 }
 
-/// Universal TypeScript/JavaScript extraction publishes declaration evidence
+/// Universal C#/TypeScript/JavaScript extraction publishes declaration evidence
 /// first and lets the project resolver materialize graph nodes. Framework
 /// route/domain resolution can also be invoked directly on a single-file
 /// extraction, so provide the target index with source-backed declaration
@@ -239,11 +247,12 @@ fn universal_framework_targets_are_materialized(
 pub(super) fn materialize_universal_framework_targets(
     extraction: &compass_languages::Extraction,
 ) -> compass_languages::Extraction {
-    let Some(batches) = extraction
-        .semantic_evidence
-        .as_ref()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    else {
+    let Some(batches) = extraction.semantic_evidence.as_ref().filter(|batch| {
+        matches!(
+            batch.adapter.language.as_str(),
+            "csharp" | "javascript" | "typescript"
+        )
+    }) else {
         return extraction.clone();
     };
     let mut enriched = extraction.clone();

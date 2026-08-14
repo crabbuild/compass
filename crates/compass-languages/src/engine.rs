@@ -213,7 +213,11 @@ impl Engine {
                 program: None,
             });
         }
-        if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
+        let universal_profile = Registry::universal_profile_for_spec(spec);
+        if spec.kind == ExtractorKind::Generic
+            && universal_profile.is_some()
+            && !crate::program::supports_language(spec.name)
+        {
             let tree = self.parse(path, spec, source)?;
             let mut graph = self.extract_generic_from_tree(
                 path,
@@ -230,12 +234,7 @@ impl Engine {
                 program: None,
             });
         }
-        if spec.kind != ExtractorKind::Generic
-            || !matches!(
-                spec.name,
-                "python" | "rust" | "typescript" | "tsx" | "javascript"
-            )
-        {
+        if spec.kind != ExtractorKind::Generic || !crate::program::supports_language(spec.name) {
             return self
                 .extract_source(path, source)
                 .map(|graph| CombinedExtraction {
@@ -372,7 +371,6 @@ impl Engine {
             match spec.name {
                 "go" => crate::go::extract(path, source, root),
                 "bash" => crate::bash::extract(path, source, root),
-                "csharp" => crate::csharp::extract(path, source, root),
                 "cpp" => crate::cpp::extract(path, source, root),
                 "php" => crate::php::extract(path, source, root),
                 "swift" => crate::swift::extract(path, source, root),
@@ -4639,6 +4637,47 @@ export class OrdersConsumer {
                 crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
             };
             anchor.source_file == "src/orders.ts"
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_source_identity_controls_csharp_universal_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("Controllers/OrdersController.cs");
+        let source = br#"using Microsoft.AspNetCore.Mvc;
+namespace Store.Controllers;
+[ApiController]
+[Route("api/[controller]")]
+public class OrdersController : ControllerBase {
+    [HttpGet("{id:int}")]
+    public string Get(int id) => id.ToString();
+}
+"#;
+
+        let extraction = Engine::default().extract_source_graph_only(
+            &path,
+            "Controllers/OrdersController.cs",
+            source,
+        )?;
+        let evidence = extraction
+            .semantic_evidence
+            .ok_or("C# universal evidence was not emitted")?;
+
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .all(|fact| { fact.range.source_file == "Controllers/OrdersController.cs" })
+        );
+        assert!(extraction.framework_facts.iter().all(|fact| {
+            let anchor = match fact {
+                crate::RawFrameworkFact::Route(route) => &route.anchor,
+                crate::RawFrameworkFact::Domain(domain) => &domain.anchor,
+                crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
+            };
+            anchor.source_file == "Controllers/OrdersController.cs"
         }));
         Ok(())
     }

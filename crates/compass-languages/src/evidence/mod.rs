@@ -1,4 +1,5 @@
 mod build;
+mod csharp;
 mod model;
 mod typescript;
 mod validate;

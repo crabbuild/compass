@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Hard-cut C# production extraction to the version-1 universal candidate with
+  bounded AST-backed declarations, namespaces, imports and aliases, overload
+  signatures, typed members and parameters, construction and call evidence,
+  base types, ownership, and explicit overrides. Remove the replaced C# raw
+  graph, namespace canonicalizer, and member type-table paths. Convert ASP.NET
+  MVC routing to the universal `aspnet-csharp` pack with evidence-backed
+  attributes, aliases, `AcceptVerbs`, controller/action token composition,
+  absolute templates, overload-safe handler resolution, and `[NonAction]`.
+  Extend universal evidence with typed override roles and relationships, and
+  move XAML code-behind lookup onto the same exact C# ownership facts. Keep
+  sourceless external import identities scoped to their exact wiring sites so
+  imports in different files cannot merge their provenance.
+
 ## 0.3.12 - 2026-08-13
 
 - Remove the 2 GiB aggregate canonical-payload limit from current SQLite

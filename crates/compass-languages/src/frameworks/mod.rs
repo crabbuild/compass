@@ -277,6 +277,13 @@ impl FrameworkPack {
 /// intentionally static: pack identity, ordering, activation policy, and
 /// adapter ownership remain deterministic and do not require a plugin ABI.
 const FRAMEWORK_PACKS: &[FrameworkPack] = &[
+    FrameworkPack::universal(&pack::ASPNET_CSHARP_DESCRIPTOR, csharp::detect),
+    FrameworkPack::source(
+        "aspnet-minimal-csharp",
+        &["csharp"],
+        &["microsoft.aspnetcore.app"],
+        csharp::detect_minimal,
+    ),
     FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
     FrameworkPack::source("python-web", &["python"], &[], detect_python),
     FrameworkPack::source(
@@ -298,12 +305,6 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::source("go-web", &["go"], &[], detect_go),
     FrameworkPack::source("axum-web", &["rust"], &["axum"], detect_axum),
     FrameworkPack::source("rust-web", &["rust"], &[], detect_rust),
-    FrameworkPack::source(
-        "aspnet-web",
-        &["csharp"],
-        &["microsoft.aspnetcore.app"],
-        detect_csharp,
-    ),
     FrameworkPack::source("vapor-routes", &["swift"], &["vapor"], detect_swift),
     FrameworkPack::source(
         "express-web",
@@ -579,13 +580,6 @@ fn detect_axum(
     axum::detect(context.path, context.source, context.root)
 }
 
-fn detect_csharp(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
-    csharp::detect(context.path, context.source, context.root)
-}
-
 fn detect_swift(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
@@ -704,7 +698,7 @@ mod tests {
             "go-web",
             "axum-web",
             "rust-web",
-            "aspnet-web",
+            "aspnet-csharp",
             "vapor-routes",
             "express-web",
             "fastify-web",

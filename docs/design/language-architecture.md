@@ -344,7 +344,7 @@ supported languages.
 ## Language-by-language transitions
 
 An established language keeps its direct implementation until its universal
-candidate proves the transition is safe. TypeScript and JavaScript have
+candidate proves the transition is safe. C#, TypeScript, and JavaScript have
 completed the route switch and remain candidates while their completion gates
 run.
 
@@ -374,16 +374,19 @@ Framework detection is downstream of language parsing but upstream of final
 Code Graph v1 publication. Packs emit anchored route or domain facts; the
 framework resolver validates targets and materializes typed relationships.
 
-The Java Spring source pack is the first production universal framework pack.
-It consumes exact Java annotation, call, import, type, ownership, and hierarchy
+The Java Spring and C# ASP.NET source packs are production universal framework
+packs.
+The Spring pack consumes exact Java annotation, call, import, type, ownership, and hierarchy
 evidence and derives HTTP, bean, injection, messaging, scheduling, persistence,
 transaction, and security meaning before framework resolution. Its Java legacy
 detectors are removed atomically; Kotlin Spring routing remains on its explicit
 established pack until Kotlin has a universal language adapter. Established
 source, config, and template adapters execute through the same static runtime,
 which owns selection, activation, limits, and publication without requiring a
-runtime plugin ABI. Other packs retain their established semantics until their
-own qualification and hard cut.
+runtime plugin ABI. The ASP.NET pack consumes exact C# attribute, alias, import,
+ownership, and overload evidence, then composes controller/action templates in
+the project resolver; its former regex/line scanner is removed. Other packs
+retain their established semantics until their own qualification and hard cut.
 
 ## Quality and failure boundaries
 

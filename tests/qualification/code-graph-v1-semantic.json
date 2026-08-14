@@ -549,7 +549,7 @@
       "path": "/api/Users/{id}",
       "routeSource": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "handler": {
-        "qualifiedName": "UsersController::Show(string)@129"
+        "qualifiedName": "UsersController::Show"
       },
       "handlerSource": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "relationship": "routes_to",
@@ -916,7 +916,7 @@
       "kind": "namespace",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "Qualification",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -926,8 +926,8 @@
       "id": "node-class",
       "kind": "class",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "BaseService@84",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.BaseService",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -948,8 +948,8 @@
       "id": "node-interface",
       "kind": "interface",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "IService@26",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.IService",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1025,8 +1025,8 @@
       "id": "node-method",
       "kind": "method",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "BaseService::Run(int)@115",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.BaseService::Run",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1036,8 +1036,8 @@
       "id": "node-constructor",
       "kind": "constructor",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service::Service(int)@327",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::Service",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1047,8 +1047,8 @@
       "id": "node-property",
       "kind": "property",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service@176::Count@291",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::Count",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1058,8 +1058,8 @@
       "id": "node-field",
       "kind": "field",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service@176::count@280",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::count",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1080,8 +1080,8 @@
       "id": "node-constant",
       "kind": "constant",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service@176::Limit@244",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::Limit",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1091,8 +1091,8 @@
       "id": "node-parameter",
       "kind": "parameter",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "BaseService::Run(int)@115::value@141",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.BaseService::Run::value",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1380,7 +1380,7 @@
       "kind": "contains",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1424,7 +1424,7 @@
       "kind": "extends",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1435,7 +1435,7 @@
       "kind": "implements",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1444,9 +1444,9 @@
     {
       "id": "edge-references",
       "kind": "references",
-      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1457,7 +1457,7 @@
       "kind": "type_of",
       "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1468,7 +1468,7 @@
       "kind": "returns",
       "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1490,7 +1490,7 @@
       "kind": "overrides",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],

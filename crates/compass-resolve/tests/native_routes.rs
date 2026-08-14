@@ -174,12 +174,15 @@ fn multiline() {}
 #[test]
 fn aspnet_composes_controller_and_action_templates() -> Result<(), Box<dyn Error>> {
     let routes = resolved("csharp/AspNetController.cs")?;
-    assert!(routes.iter().any(|route| {
-        route.route.operation == "GET"
-            && route.route.normalized_path == "/api/Users/{id}"
-            && route.route.handler_reference == "UsersController.Show"
-            && route.state == ResolutionState::Exact
-    }));
+    assert!(
+        routes.iter().any(|route| {
+            route.route.operation == "GET"
+                && route.route.normalized_path == "/api/Users/{id}"
+                && route.route.handler_reference == "UsersController.Show"
+                && route.state == ResolutionState::Exact
+        }),
+        "routes={routes:#?}"
+    );
     assert!(routes.iter().any(|route| {
         route.route.operation == "POST"
             && route.route.normalized_path == "/api/Users"
@@ -250,6 +253,37 @@ var app = builder.Build();
 "#,
     )?;
     assert!(near_match.framework_facts.is_empty());
+    Ok(())
+}
+
+#[test]
+fn aspnet_universal_pack_handles_aliases_verbs_absolute_routes_and_non_actions()
+-> Result<(), Box<dyn Error>> {
+    let raw = extract("csharp/AdvancedController.cs")?;
+    assert!(raw.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Annotation(annotation) if annotation.owner_qualified_name.ends_with("::List"))
+    }), "raw facts={:#?} evidence={:#?}", raw.framework_facts, raw.semantic_evidence);
+    let routes = resolved("csharp/AdvancedController.cs")?;
+    for (operation, path, handler) in [
+        ("GET", "/v2/Plain/List", "PlainController.List"),
+        ("GET", "/v2/Plain/multi", "PlainController.Multi"),
+        ("POST", "/v2/Plain/multi", "PlainController.Multi"),
+        ("GET", "/ready", "PlainController.Ready"),
+    ] {
+        assert!(
+            routes.iter().any(|route| {
+                route.route.operation == operation
+                    && route.route.normalized_path == path
+                    && route.route.handler_reference == handler
+                    && route.state == ResolutionState::Exact
+            }),
+            "missing {operation} {path}: routes={routes:#?}"
+        );
+    }
+    assert!(routes.iter().all(|route| {
+        route.route.handler_reference != "PlainController.Hidden"
+            && route.route.normalized_path != "/v2/Plain/hidden"
+    }));
     Ok(())
 }
 

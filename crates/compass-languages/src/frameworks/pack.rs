@@ -435,4 +435,42 @@ pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPack
     },
 };
 
-const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[SPRING_JAVA_DESCRIPTOR];
+pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "aspnet-csharp",
+    kind: FrameworkPackKind::Source,
+    languages: &["csharp"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Aliases,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["microsoft.aspnetcore.app"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["aspnet-mvc-attribute-binding", "aspnet-project-dependency"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Annotation,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 64,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+    },
+};
+
+const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] =
+    &[ASPNET_CSHARP_DESCRIPTOR, SPRING_JAVA_DESCRIPTOR];

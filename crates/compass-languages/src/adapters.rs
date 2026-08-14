@@ -120,6 +120,24 @@ const GO_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+const CSHARP_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
 const PYTHON_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
     LanguageCapability::LexicalScopes,
@@ -213,6 +231,14 @@ const TYPESCRIPT_CAPABILITIES: &[LanguageCapability] = &[
 ];
 
 const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
+    AdapterProfile {
+        id: "compass.csharp.candidate",
+        language: "csharp",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
+        capabilities: CSHARP_CAPABILITIES,
+    },
     AdapterProfile {
         id: "compass.go",
         language: "go",
