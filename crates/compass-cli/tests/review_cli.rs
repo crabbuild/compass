@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 
+use compass_history::{ExtractionFingerprint, HistoryStore, PublishRequest, Repository};
 use compass_pr_intelligence::{GateState, PullRequestReport, RiskBand};
 
 fn git(root: &Path, arguments: &[&str]) -> Result<String, Box<dyn std::error::Error>> {
@@ -29,6 +30,34 @@ fn initialize(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::write(root.join("lib.rs"), "pub fn shared() -> u8 { 1 }\n")?;
     git(root, &["add", "lib.rs"])?;
     git(root, &["commit", "--quiet", "-m", "base"])?;
+    Ok(())
+}
+
+fn publish_historical_base(root: &Path, commit: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let seeded = run(root, &["history", "build", commit, "--code-only"])?;
+    if !seeded.status.success() {
+        return Err(format!(
+            "could not seed current history: {}",
+            String::from_utf8_lossy(&seeded.stderr)
+        )
+        .into());
+    }
+    let repository = Repository::discover(root)?;
+    let commit = repository.resolve(commit)?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("seeded history store")?;
+    let current = history.preferred(&commit)?.ok_or("seeded realization")?;
+    let completed = history.artifacts(&current.id)?;
+    let mut historical_profile = current.version.build_profile;
+    historical_profile.insert("compass_version", "0.3.9")?;
+    history.publish(PublishRequest {
+        commit: commit.clone(),
+        parents: repository.parents(&commit)?,
+        profile: historical_profile,
+        fingerprint: "a".repeat(64).parse::<ExtractionFingerprint>()?,
+        artifacts: completed.artifacts,
+        completion: completed.completion,
+        make_preferred: true,
+    })?;
     Ok(())
 }
 
@@ -109,6 +138,52 @@ fn local_review_writes_round_trippable_exact_report() -> Result<(), Box<dyn std:
     assert!(bounded.stdout.is_empty());
     assert!(String::from_utf8_lossy(&bounded.stderr).contains("PR review output is"));
     assert_eq!(std::fs::read_to_string(preserved_path)?, "preserve-me");
+    Ok(())
+}
+
+#[test]
+fn local_review_rebuilds_a_comparable_pair_after_a_compass_patch_upgrade()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    initialize(directory.path())?;
+    let base = git(directory.path(), &["rev-parse", "HEAD"])?;
+    git(directory.path(), &["checkout", "--quiet", "-b", "feature"])?;
+    std::fs::write(
+        directory.path().join("feature.rs"),
+        "pub fn feature() -> u8 { 2 }\n",
+    )?;
+    git(directory.path(), &["add", "feature.rs"])?;
+    git(directory.path(), &["commit", "--quiet", "-m", "feature"])?;
+    let head = git(directory.path(), &["rev-parse", "HEAD"])?;
+    publish_historical_base(directory.path(), &base)?;
+
+    let output = run(
+        directory.path(),
+        &[
+            "review", "--base", &base, "--head", &head, "--format", "json",
+        ],
+    )?;
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report = PullRequestReport::from_json(&output.stdout)?;
+    assert_eq!(report.identity.revisions.target_head, base);
+    assert_eq!(report.identity.revisions.pull_request_head, head);
+
+    let repository = Repository::discover(directory.path())?;
+    let history = HistoryStore::open_existing(&repository)?.ok_or("history store")?;
+    let base = repository.resolve(&base)?;
+    let preferred = history.preferred(&base)?.ok_or("preferred base")?;
+    assert_eq!(
+        preferred.version.build_profile.value("compass_version"),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    assert!(history.list(Some(&base))?.iter().any(|realization| {
+        realization.version.build_profile.value("compass_version") == Some("0.3.9")
+    }));
     Ok(())
 }
 

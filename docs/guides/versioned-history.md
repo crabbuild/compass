@@ -355,6 +355,12 @@ There is no profile-mismatch override: unlike profiles do not produce a
 semantic or exact report. Compass checks graph-engine compatibility explicitly
 before comparing the complete build profiles.
 
+`compass review` handles an older preferred realization from a compatible
+`0.3.x` patch release automatically when it must materialize the other side.
+It preserves user-selected profile options, rebuilds a current-version pair,
+and leaves the older immutable realization intact. A profile from a newer
+binary or another release line remains an explicit compatibility error.
+
 ## 7. Export a realization
 
 Canonical graph JSON:

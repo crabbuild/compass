@@ -330,6 +330,12 @@ integer rubric is version 1; each deterministic gate has its own rule version.
 Presentation formats and the reusable GitHub Action consume this report and do
 not redefine its semantics.
 
+When only one side of a review has a preferred realization from an older patch
+release in the same supported `0.3.x` line, Compass advances engine-owned
+profile fields and materializes both revisions with the running binary. The
+older realization remains immutable and queryable. Newer profiles and profiles
+from another release line still fail explicitly rather than being downgraded.
+
 Dependency findings in `compass.semantic_diff.report/1` may now carry the
 optional strict `dependency_topology` object. It records source/target community
 IDs when present and bounded directed-cycle participation when the snapshot
