@@ -9,6 +9,21 @@
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
 
+## 0.3.14 - 2026-08-14
+
+- Allow `compass review` to reconcile either compared revision from any
+  reconstructable repository profile or preferred realization. Review now
+  replaces engine-owned fingerprint fields with the running contract, keeps
+  user-selected options aligned, and leaves historical realizations immutable;
+  persisted Compass release numbers are provenance rather than a compatibility
+  allowlist.
+
+- Filter unshadowed JavaScript, TypeScript, Python, Go, Rust, Java, and Swift
+  built-in globals from call-target publication so constructors, coercion
+  helpers, language preludes, and common global methods do not become noisy
+  graph hubs. Source-proven local and imported declarations retain precedence,
+  and extraction semantics advance to v2 so cached graphs rebuild correctly.
+
 ## 0.3.13 - 2026-08-14
 
 - Make `compass review` recover automatically when one compared revision still
