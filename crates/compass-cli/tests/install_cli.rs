@@ -156,6 +156,44 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn project_claude_install_follows_an_in_scope_skills_symlink() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let linked_root = fixture.project.join(".agents/skills");
+    fs::create_dir_all(&linked_root)?;
+    fs::create_dir_all(fixture.project.join(".claude"))?;
+    std::os::unix::fs::symlink("../.agents/skills", fixture.project.join(".claude/skills"))?;
+
+    let output = fixture.run(&["install", "claude"])?;
+    assert_success("Claude install through in-scope skills symlink", &output);
+    assert!(linked_root.join("compass/SKILL.md").is_file());
+    assert!(fixture.project.join(".claude/skills").is_symlink());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn project_claude_install_rejects_an_out_of_scope_skills_symlink() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let outside_root = fixture
+        .project
+        .parent()
+        .ok_or("fixture parent")?
+        .join("external-claude-skills");
+    fs::create_dir_all(&outside_root)?;
+    fs::create_dir_all(fixture.project.join(".claude"))?;
+    fs::write(outside_root.join("sentinel"), "keep")?;
+    std::os::unix::fs::symlink(&outside_root, fixture.project.join(".claude/skills"))?;
+
+    let output = fixture.run(&["install", "claude"])?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("outside the selected scope"));
+    assert!(outside_root.join("sentinel").is_file());
+    assert!(!outside_root.join("compass").exists());
+    Ok(())
+}
+
 #[test]
 fn every_project_platform_installs_native_content() -> Result<(), Box<dyn Error>> {
     for platform in PROJECT_PLATFORMS {
