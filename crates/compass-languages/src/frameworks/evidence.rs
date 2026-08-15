@@ -2,6 +2,7 @@
 pub(super) enum EvidenceKind {
     Import,
     Receiver,
+    #[allow(dead_code)]
     DecoratorOrAttribute,
     Macro,
     ConfigurationContract,

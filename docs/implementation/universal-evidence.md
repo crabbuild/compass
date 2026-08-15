@@ -30,10 +30,10 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | C#, Python, Go, Rust, Java, TypeScript, and JavaScript are entries in the hard-cut `AdapterRegistry`; C# is at adapter version 1, Go and Java are at version 3, Python is at version 11, Rust is at version 15, and the ECMAScript candidates are at version 5 |
+| Available now | C#, Python, Go, Rust, Java, Kotlin, TypeScript, and JavaScript are entries in the hard-cut `AdapterRegistry`; C# and Kotlin are at adapter version 1, Go and Java are at version 3, Python is at version 11, Rust is at version 15, and the ECMAScript candidates are at version 5 |
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; C# and the ECMAScript family use dedicated source-grounded emitters, while TypeScript and JavaScript retain distinct adapter identities |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust has passed Phase 2 qualification; C#, Java, TypeScript, and JavaScript remain `UniversalCandidate` while their respective completion gates run |
+| Available now | Rust has passed Phase 2 qualification; C#, Java, Kotlin, TypeScript, and JavaScript remain `UniversalCandidate` while their respective completion gates run |
 | Planned | `GrammarProvider`, grammar provenance, and producer-registry validation |
 | Planned | Independently qualified hard cuts for the remaining registered languages |
 
@@ -389,25 +389,29 @@ This table describes the current branch.
 | Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
 | Rust | Hard-cut `UniversalCandidate` | Version-15 adapter evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
 | Java | Hard-cut `UniversalCandidate` | Version-3 evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
+| Kotlin | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; exact Kotlin-only source resolution, named/default arguments and extensions, replaced Kotlin paths removed, and complete quality-audit gates still pending |
 | TypeScript | Hard-cut `UniversalCandidate` | Version-5 evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
 | JavaScript | Hard-cut `UniversalCandidate` | Version-5 evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
 | Remaining registered languages | Established direct adapters | Current language-specific or generic extraction paths |
 
-Python, Go, Rust, Java, TypeScript, and JavaScript are hard-cut on this branch.
+Python, Go, Rust, Java, Kotlin, TypeScript, and JavaScript are hard-cut on this branch.
 Each later language
 reuses the same hard-cut registry, evidence model, resolver, and projector
 without adding language cases to the central publisher. A language's
 transition does not alter the publication route of any other language.
+The pinned Kotlin baseline, coverage deltas, performance results, and open
+audit gates are recorded in
+[Kotlin universal candidate qualification](kotlin-universal-qualification.md).
 
 ## Framework-pack status
 
 `FrameworkPackDescriptor` and `FrameworkPackRegistry` define the universal pack
 contract and validate language capabilities, framework capabilities, activation
 evidence, accepted roles, typed relationship families, occurrence policy, and
-limits. The production registry contains `spring-java`. It derives framework
-meaning only from universal Java evidence and publishes through the shared
-framework resolver. Established source, config, and template packs remain
-active until their individual hard cutovers.
+limits. The production registry contains `spring-java` and `spring-kotlin`.
+They derive framework meaning only from exact language-keyed universal
+evidence and publish through the shared framework resolver. Established source,
+config, and template packs remain active until their individual hard cutovers.
 
 All established and universal framework adapters now execute through one
 static framework-pack runtime in `compass-languages`. The runtime owns pack

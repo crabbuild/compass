@@ -249,6 +249,24 @@ const PHP_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+const KOTLIN_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
 const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.csharp.candidate",
@@ -281,6 +299,14 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: JAVASCRIPT_CAPABILITIES,
+    },
+    AdapterProfile {
+        id: "compass.kotlin.candidate",
+        language: "kotlin",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        profile: UniversalAdapterProfile::UniversalCandidate,
+        capabilities: KOTLIN_CAPABILITIES,
     },
     AdapterProfile {
         id: "compass.php",

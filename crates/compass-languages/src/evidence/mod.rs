@@ -1,5 +1,6 @@
 mod build;
 mod csharp;
+mod kotlin;
 mod model;
 mod php;
 mod typescript;

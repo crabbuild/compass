@@ -325,6 +325,15 @@ fn validate_fact(
                         "java",
                         "class" | "interface" | "enum" | "record" | "annotation_type"
                     ) | ("csharp", "class" | "interface" | "record" | "struct")
+                        | (
+                            "kotlin",
+                            "annotation_type"
+                                | "class"
+                                | "companion_object"
+                                | "enum"
+                                | "interface"
+                                | "object"
+                        )
                         | ("php", "class" | "interface" | "trait" | "enum")
                         | ("rust", "trait")
                 )

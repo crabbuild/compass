@@ -33,10 +33,11 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 3);
+    assert_eq!(FrameworkPackRegistry::descriptors().len(), 4);
     assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
     assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "php-frameworks");
     assert_eq!(FrameworkPackRegistry::descriptors()[2].id, "spring-java");
+    assert_eq!(FrameworkPackRegistry::descriptors()[3].id, "spring-kotlin");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {

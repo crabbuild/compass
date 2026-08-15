@@ -299,6 +299,33 @@
       "candidates": []
     },
     {
+      "id": "flow-spring-kotlin",
+      "framework": "spring",
+      "routeFramework": "spring",
+      "operation": "GET",
+      "path": "/kotlin/users/{id}",
+      "routeSource": "fixtures/code-graph/routes/jvm/SpringController.kt",
+      "handler": {
+        "qualifiedName": "example.kotlin.SpringKotlinController::show"
+      },
+      "handlerSource": "fixtures/code-graph/routes/jvm/SpringController.kt",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "kotlin",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.spring",
+      "rules": [
+        "spring-request-mapping|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
       "id": "flow-gin",
       "framework": "gin",
       "routeFramework": "gin",

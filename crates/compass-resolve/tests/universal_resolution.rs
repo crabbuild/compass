@@ -4,6 +4,7 @@
 
 include!("universal_resolution/core.rs");
 include!("universal_resolution/csharp.rs");
+include!("universal_resolution/kotlin.rs");
 include!("universal_resolution/rust.rs");
 include!("universal_resolution/python.rs");
 include!("universal_resolution/go.rs");

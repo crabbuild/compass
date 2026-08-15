@@ -10,6 +10,7 @@ pub(in crate::evidence) enum LanguagePolicyKind {
     TypeScript,
     CSharp,
     Java,
+    Kotlin,
     Php,
     Rust,
     Generic,
@@ -21,6 +22,7 @@ impl LanguagePolicyKind {
             "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => Self::TypeScript,
             "csharp" => Self::CSharp,
             "java" => Self::Java,
+            "kotlin" => Self::Kotlin,
             "php" => Self::Php,
             "rust" => Self::Rust,
             _ => Self::Generic,
@@ -55,6 +57,7 @@ impl LanguagePolicyKind {
                 ))
             }
             Self::Java => db.resolve_java_same_package_builtin_collision(candidate),
+            Self::Kotlin => db.resolve_kotlin_candidate(candidate),
             Self::Generic => None,
         }
     }
@@ -67,7 +70,12 @@ impl LanguagePolicyKind {
     ) -> Option<&'a str> {
         match self {
             Self::Java => db.unique_java_applicable_overload(overloads, argument_types),
-            Self::CSharp | Self::Php | Self::TypeScript | Self::Rust | Self::Generic => None,
+            Self::CSharp
+            | Self::Kotlin
+            | Self::Php
+            | Self::TypeScript
+            | Self::Rust
+            | Self::Generic => None,
         }
     }
 }
@@ -89,6 +97,10 @@ mod tests {
         assert_eq!(
             LanguagePolicyKind::for_language("java"),
             LanguagePolicyKind::Java
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("kotlin"),
+            LanguagePolicyKind::Kotlin
         );
         assert_eq!(
             LanguagePolicyKind::for_language("rust"),

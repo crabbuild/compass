@@ -18,6 +18,7 @@ pub(super) fn declaration_node(
     // all generic parameters as `parameter` nodes.
     let graph_kind = match declaration.kind.as_str() {
         "type_parameter" | "lifetime_parameter" | "const_parameter" => "parameter",
+        "object" | "companion_object" if declaration.language == "kotlin" => "class",
         kind => kind,
     };
     let mut attributes = Map::from_iter([
