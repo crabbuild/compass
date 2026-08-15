@@ -5550,6 +5550,7 @@ fn language_name_from_source(source: &str) -> Option<&'static str> {
         "go" => Some("go"),
         "rs" => Some("rust"),
         "java" => Some("java"),
+        "swift" => Some("swift"),
         _ => None,
     }
 }
@@ -5978,6 +5979,33 @@ mod tests {
             candidate.source == "js-caller"
                 && candidate.target == "js-target"
                 && relation(candidate) == "calls"
+        }));
+    }
+
+    #[test]
+    fn swift_builtin_cross_file_resolution_is_filtered_but_same_file_shadowing_is_kept() {
+        let mut cross_file = Extraction {
+            nodes: vec![
+                node("caller", "caller()", "Sources/Use.swift", "function"),
+                node("data", "Data", "Sources/Model.swift", "constructor"),
+            ],
+            raw_calls: Some(vec![raw("caller", "Data", "Sources/Use.swift")]),
+            ..Extraction::default()
+        };
+        resolve_cross_file_calls(&mut cross_file, &HashMap::new());
+        assert!(cross_file.edges.is_empty());
+
+        let mut same_file = Extraction {
+            nodes: vec![
+                node("caller", "caller()", "Sources/Use.swift", "function"),
+                node("data", "Data", "Sources/Use.swift", "constructor"),
+            ],
+            raw_calls: Some(vec![raw("caller", "Data", "Sources/Use.swift")]),
+            ..Extraction::default()
+        };
+        resolve_cross_file_calls(&mut same_file, &HashMap::new());
+        assert!(same_file.edges.iter().any(|edge| {
+            edge.source == "caller" && edge.target == "data" && relation(edge) == "calls"
         }));
     }
 

@@ -194,22 +194,17 @@ fn unresolved_javascript_and_python_builtins_remain_suppressed() -> Result<(), B
                 extraction.raw_calls
             );
             if path.extension().and_then(|extension| extension.to_str()) == Some("js") {
-                assert_eq!(
-                    evidence
-                        .candidates
-                        .iter()
-                        .filter(|candidate| candidate.constraints.allow_external)
-                        .map(|candidate| candidate.target_spelling.as_str())
-                        .collect::<HashSet<_>>(),
-                    HashSet::from(["Map", "parseInt", "Array"]),
+                assert!(
+                    evidence.candidates.iter().all(|candidate| {
+                        candidate.relation != CandidateRelation::Calls
+                            || !matches!(
+                                candidate.target_spelling.as_str(),
+                                "Map" | "parseInt" | "Array"
+                            )
+                    }),
                     "{path:?}: candidates={:?}",
                     evidence.candidates
                 );
-                assert!(evidence.candidates.iter().all(|candidate| {
-                    !candidate.constraints.allow_external
-                        || candidate.constraints.module_or_package.as_deref()
-                            == Some("javascript.global")
-                }));
             } else {
                 assert!(
                     !evidence

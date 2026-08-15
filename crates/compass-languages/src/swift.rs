@@ -5,7 +5,7 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::Node;
 
-use crate::{Extraction, RawCall, file_stem, make_id};
+use crate::{Extraction, RawCall, file_stem, is_language_builtin_global, make_id};
 
 pub(crate) fn extract(path: &Path, source: &[u8], root: Node<'_>) -> Extraction {
     let source_file = path.to_string_lossy().into_owned();
@@ -169,12 +169,18 @@ impl<'tree> State<'_, 'tree> {
             }
             let relation = self.classify_base(&base, kind, first);
             first = false;
+            if !self.should_publish_type_reference(&base) {
+                continue;
+            }
             let target = self.ensure_named(&base);
             self.add_edge(&id, &target, relation, line(node), None);
             if let Some(arguments) = first_descendant(user_type, "type_arguments") {
                 let mut refs = Vec::new();
                 collect_type_refs(arguments, self.source, true, &mut refs);
                 for (reference, _) in refs {
+                    if !self.should_publish_type_reference(&reference) {
+                        continue;
+                    }
                     let target = self.ensure_named(&reference);
                     if target != id {
                         self.add_edge(&id, &target, "references", line(node), Some("generic_arg"));
@@ -214,15 +220,17 @@ impl<'tree> State<'_, 'tree> {
             let mut references = Vec::new();
             collect_type_refs(annotation, self.source, false, &mut references);
             for (reference, generic) in &references {
-                let target = self.ensure_named(reference);
-                if target != class_id {
-                    self.add_edge(
-                        class_id,
-                        &target,
-                        "references",
-                        line(node),
-                        Some(if *generic { "generic_arg" } else { "field" }),
-                    );
+                if self.should_publish_type_reference(reference) {
+                    let target = self.ensure_named(reference);
+                    if target != class_id {
+                        self.add_edge(
+                            class_id,
+                            &target,
+                            "references",
+                            line(node),
+                            Some(if *generic { "generic_arg" } else { "field" }),
+                        );
+                    }
                 }
                 if property_type.is_none() && !generic {
                     property_type = Some(reference.clone());
@@ -251,6 +259,9 @@ impl<'tree> State<'_, 'tree> {
             let mut references = Vec::new();
             collect_type_refs(parameters, self.source, false, &mut references);
             for (reference, generic) in references {
+                if !self.should_publish_type_reference(&reference) {
+                    continue;
+                }
                 let target = self.ensure_named(&reference);
                 if target != enum_id {
                     self.add_edge(
@@ -326,19 +337,21 @@ impl<'tree> State<'_, 'tree> {
             }
             let mut parameter_type = None;
             for (reference, generic) in references {
-                let target = self.ensure_named(&reference);
-                if target != id {
-                    self.add_edge(
-                        &id,
-                        &target,
-                        "references",
-                        line(node),
-                        Some(if generic {
-                            "generic_arg"
-                        } else {
-                            "parameter_type"
-                        }),
-                    );
+                if self.should_publish_type_reference(&reference) {
+                    let target = self.ensure_named(&reference);
+                    if target != id {
+                        self.add_edge(
+                            &id,
+                            &target,
+                            "references",
+                            line(node),
+                            Some(if generic {
+                                "generic_arg"
+                            } else {
+                                "parameter_type"
+                            }),
+                        );
+                    }
                 }
                 if parameter_type.is_none() && !generic {
                     parameter_type = Some(reference);
@@ -357,6 +370,9 @@ impl<'tree> State<'_, 'tree> {
             let mut references = Vec::new();
             collect_type_refs(return_type, self.source, false, &mut references);
             for (reference, generic) in references {
+                if !self.should_publish_type_reference(&reference) {
+                    continue;
+                }
                 let target = self.ensure_named(&reference);
                 if target != id {
                     self.add_edge(
@@ -427,7 +443,6 @@ impl<'tree> State<'_, 'tree> {
         }
         if node.kind() == "call_expression"
             && let Some(call) = swift_call(node, self.source)
-            && !matches!(call.name.as_str(), "filter" | "print")
         {
             if let Some(target) = labels
                 .get(&call.name)
@@ -442,7 +457,7 @@ impl<'tree> State<'_, 'tree> {
                     self.add_edge(caller, target, "calls", line(node), Some("call"));
                     crate::facts::stamp_last_edge_range(&mut self.extraction, node);
                 }
-            } else {
+            } else if !is_language_builtin_global("swift", &call.name) {
                 self.extraction.raw_calls_mut().push(RawCall {
                     caller_nid: caller.to_owned(),
                     callee: call.name,
@@ -484,6 +499,12 @@ impl<'tree> State<'_, 'tree> {
             });
         }
         id
+    }
+
+    fn should_publish_type_reference(&self, name: &str) -> bool {
+        !is_language_builtin_global("swift", name)
+            || self.protocols.contains(name)
+            || self.classes.contains(name)
     }
 
     fn text(&self, node: Node<'_>) -> &str {

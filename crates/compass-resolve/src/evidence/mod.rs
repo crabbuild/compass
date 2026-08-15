@@ -8,7 +8,7 @@ use ahash::{AHashMap, AHashSet};
 use compass_languages::{
     BindingFact, CandidateRelation, DeclarationFact, EvidenceLimits, EvidenceRange,
     HierarchyConstraint, ReceiverDispatchStrategy, RelationshipCandidate, SemanticEvidenceBatch,
-    make_id, validate_evidence,
+    is_language_builtin_qualified_target, make_id, validate_evidence,
 };
 use compass_model::provenance::{NODE_PROVENANCE_ANCHOR_ATTRIBUTE, OCCURRENCE_RULE_ATTRIBUTE};
 use rayon::prelude::*;

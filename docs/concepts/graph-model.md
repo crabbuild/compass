@@ -280,8 +280,11 @@ LeafParser --USES--> Token     AppContext
 
 A god node is highly connected relative to the graph. It can reveal a critical
 hub or a design smell, but it can also be a legitimate shared abstraction.
-Compass's report filters some common built-in noise; it does not make a final
-architectural judgment.
+Compass excludes known, unshadowed language globals from call-target
+publication and filters additional common noise from reports. A source-proven
+declaration or explicit binding with the same spelling still takes precedence;
+Compass does not make a final architectural judgment about the hubs that
+remain.
 
 ## Hyperedges
 

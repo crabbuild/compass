@@ -17,7 +17,7 @@ mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/1";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/2";
 mod go;
 mod groovy;
 mod html;
@@ -50,7 +50,7 @@ pub use adapters::{
     AdapterProfile, AdapterRegistry, AdapterRegistryError, UniversalAdapterProfile,
 };
 #[doc(hidden)]
-pub use builtins::is_language_builtin_global;
+pub use builtins::{is_language_builtin_global, is_language_builtin_qualified_target};
 pub use evidence::{
     AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
