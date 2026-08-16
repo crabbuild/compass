@@ -21,10 +21,10 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tempfile.workspace = true
-compass-files = { path = "../compass-files", version = "0.3.14" }
-compass-analysis = { path = "../compass-analysis", version = "0.3.14" }
-compass-ir = { path = "../compass-ir", version = "0.3.14" }
-compass-model = { path = "../compass-model", version = "0.3.14" }
+compass-files = { path = "../compass-files", version = "0.3.15" }
+compass-analysis = { path = "../compass-analysis", version = "0.3.15" }
+compass-ir = { path = "../compass-ir", version = "0.3.15" }
+compass-model = { path = "../compass-model", version = "0.3.15" }
 
 [target.'cfg(windows)'.dependencies]
 # `replace_atomic` uses MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH), providing the
