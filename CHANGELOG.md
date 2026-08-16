@@ -20,6 +20,22 @@
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
 
+## 0.3.15 - 2026-08-15
+
+- Hard-cut Kotlin onto the version-1 universal evidence adapter with bounded
+  packages, declarations, extension functions, annotations, generic and
+  nullable types, and named/default argument resolution. Spring Kotlin now
+  uses the universal framework pack and Java/Kotlin calls require exact
+  compiler evidence.
+
+- Make metadata-only incremental graph updates fact-neutral and bounded while
+  refreshing source envelopes without moving symbol anchors, point-updating
+  immutable node values, reusing unchanged graph records, and amortizing
+  snapshot garbage collection. Topology or secondary-index changes still fall
+  back to full publication.
+
+- Allow in-scope symlinked skill destinations during Compass installation.
+
 ## 0.3.14 - 2026-08-14
 
 - Allow `compass review` to reconcile either compared revision from any

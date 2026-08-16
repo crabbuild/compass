@@ -12,16 +12,16 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 serde_json = "1"
 tempfile = "3"
-compass-model = { version = "0.3.14", path = "../crates/compass-model" }
-compass-cli = { version = "0.3.14", path = "../crates/compass-cli" }
-compass-cypher = { version = "0.3.14", path = "../crates/compass-cypher" }
-compass-files = { version = "0.3.14", path = "../crates/compass-files" }
-compass-graph = { version = "0.3.14", path = "../crates/compass-graph" }
-compass-languages = { version = "0.3.14", path = "../crates/compass-languages" }
-compass-output = { version = "0.3.14", path = "../crates/compass-output" }
-compass-query = { version = "0.3.14", path = "../crates/compass-query" }
-compass-semantic = { version = "0.3.14", path = "../crates/compass-semantic" }
-compass-transcribe = { version = "0.3.14", path = "../crates/compass-transcribe", default-features = false }
+compass-model = { version = "0.3.15", path = "../crates/compass-model" }
+compass-cli = { version = "0.3.15", path = "../crates/compass-cli" }
+compass-cypher = { version = "0.3.15", path = "../crates/compass-cypher" }
+compass-files = { version = "0.3.15", path = "../crates/compass-files" }
+compass-graph = { version = "0.3.15", path = "../crates/compass-graph" }
+compass-languages = { version = "0.3.15", path = "../crates/compass-languages" }
+compass-output = { version = "0.3.15", path = "../crates/compass-output" }
+compass-query = { version = "0.3.15", path = "../crates/compass-query" }
+compass-semantic = { version = "0.3.15", path = "../crates/compass-semantic" }
+compass-transcribe = { version = "0.3.15", path = "../crates/compass-transcribe", default-features = false }
 
 [[bin]]
 name = "graph_input"
