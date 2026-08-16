@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use std::path::Path;
@@ -76,6 +76,27 @@ const JSON_NOISE_LABELS: &[&str] = &[
     "optionaldependencies",
     "bundleddependencies",
     "bundledependencies",
+];
+
+const COMMUNITY_GAP_MIN_REAL_NODES: usize = 4;
+const COMMUNITY_GAP_MIN_CONNECTANCE: f64 = 1.2;
+const COMMUNITY_GAP_MAX_NEIGHBOR_COMMUNITIES: usize = 32;
+const COMMUNITY_GAP_MAX_PAIRS: usize = 200_000;
+const COMMUNITY_GAP_MAX_QUESTIONS: usize = 3;
+const ANALYSIS_LABEL_MAX_CHARS: usize = 160;
+
+// These relations describe graph wiring rather than a topical or semantic
+// connection. They may make two communities adjacent without making them a
+// useful structural-gap candidate.
+const COMMUNITY_GAP_WIRING_RELATIONS: &[&str] = &[
+    "contains",
+    "declares",
+    "defines",
+    "imports",
+    "imports_from",
+    "member_of",
+    "method",
+    "re_exports",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
@@ -378,6 +399,15 @@ fn suggest_questions_in(
             });
         }
     }
+    questions.extend(community_gap_questions_in(
+        graph,
+        communities,
+        community_labels,
+        top_n,
+    ));
+    if let Some(question) = disconnected_component_question(graph) {
+        questions.push(question);
+    }
     if questions.is_empty() {
         questions.push(SuggestedQuestion {
             kind: "no_signal".to_owned(),
@@ -387,6 +417,290 @@ fn suggest_questions_in(
     }
     questions.truncate(top_n);
     questions
+}
+
+/// Add deterministic questions for healthy communities that are close through
+/// shared intermediaries but have little direct topical evidence between them.
+///
+/// This is intentionally a question generator rather than a new graph edge:
+/// proximity is useful evidence for investigation, not proof that a missing
+/// relationship exists. Wiring-only edges and common JSON keys are excluded so
+/// repository structure does not manufacture editorial or semantic gaps.
+fn community_gap_questions_in(
+    graph: &AnalysisGraph<'_>,
+    communities: &Communities,
+    community_labels: &BTreeMap<usize, String>,
+    top_n: usize,
+) -> Vec<SuggestedQuestion> {
+    if top_n == 0 || graph.len() == 0 || communities.len() < 2 {
+        return Vec::new();
+    }
+
+    let node_community = invert_communities(communities);
+    let mut real_members = BTreeMap::<usize, Vec<usize>>::new();
+    for (community, members) in communities {
+        let mut positions = members
+            .iter()
+            .filter_map(|member| graph.positions.get(member.as_str()).copied())
+            .filter(|position| is_community_gap_real_node(graph, *position))
+            .collect::<Vec<_>>();
+        positions.sort_unstable();
+        positions.dedup();
+        real_members.insert(*community, positions);
+    }
+
+    let mut internal_edges = BTreeMap::<usize, usize>::new();
+    for edge in &graph.edges {
+        let left = node_community.get(&graph.nodes[edge.left].id);
+        let right = node_community.get(&graph.nodes[edge.right].id);
+        if let (Some(left), Some(right)) = (left, right)
+            && left == right
+            && is_community_gap_real_node(graph, edge.left)
+            && is_community_gap_real_node(graph, edge.right)
+        {
+            *internal_edges.entry(*left).or_default() += 1;
+        }
+    }
+
+    let eligible = real_members
+        .into_iter()
+        .filter(|(community, members)| {
+            let internal = internal_edges.get(community).copied().unwrap_or_default();
+            let connectance = if members.is_empty() {
+                0.0
+            } else {
+                (internal as f64 * 2.0) / members.len() as f64
+            };
+            members.len() >= COMMUNITY_GAP_MIN_REAL_NODES
+                && connectance >= COMMUNITY_GAP_MIN_CONNECTANCE
+        })
+        .collect::<BTreeMap<_, _>>();
+    if eligible.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut topical_adjacency = vec![Vec::<usize>::new(); graph.len()];
+    for edge in &graph.edges {
+        if is_community_gap_wiring_relation(edge.record) {
+            continue;
+        }
+        topical_adjacency[edge.left].push(edge.right);
+        topical_adjacency[edge.right].push(edge.left);
+    }
+    for neighbors in &mut topical_adjacency {
+        neighbors.sort_unstable();
+        neighbors.dedup();
+    }
+
+    // (proximity, shared intermediary count, direct topical edge count)
+    let mut pair_scores = BTreeMap::<(usize, usize), (f64, usize, usize)>::new();
+    let mut pair_budget_exhausted = false;
+    for (middle, neighbors) in topical_adjacency.iter().enumerate() {
+        if graph.is_file_node(middle) || is_json_key_node(graph.nodes[middle]) {
+            continue;
+        }
+        let mut neighbor_communities = BTreeSet::new();
+        for neighbor in neighbors {
+            if let Some(community) = node_community.get(&graph.nodes[*neighbor].id)
+                && eligible.contains_key(community)
+            {
+                neighbor_communities.insert(*community);
+            }
+        }
+        if neighbor_communities.len() < 2
+            || neighbor_communities.len() > COMMUNITY_GAP_MAX_NEIGHBOR_COMMUNITIES
+        {
+            continue;
+        }
+        let neighbor_communities = neighbor_communities.into_iter().collect::<Vec<_>>();
+        let weight = 1.0 / (graph.degree(middle).max(1) as f64).sqrt();
+        for left_index in 0..neighbor_communities.len().saturating_sub(1) {
+            for right_index in (left_index + 1)..neighbor_communities.len() {
+                let pair = (
+                    neighbor_communities[left_index],
+                    neighbor_communities[right_index],
+                );
+                if !pair_scores.contains_key(&pair) && pair_scores.len() >= COMMUNITY_GAP_MAX_PAIRS
+                {
+                    pair_budget_exhausted = true;
+                    continue;
+                }
+                let score = pair_scores.entry(pair).or_insert((0.0, 0, 0));
+                score.0 += weight;
+                score.1 += 1;
+            }
+        }
+    }
+
+    for edge in &graph.edges {
+        if is_community_gap_wiring_relation(edge.record) {
+            continue;
+        }
+        let Some(left) = node_community.get(&graph.nodes[edge.left].id) else {
+            continue;
+        };
+        let Some(right) = node_community.get(&graph.nodes[edge.right].id) else {
+            continue;
+        };
+        if left == right || !eligible.contains_key(left) || !eligible.contains_key(right) {
+            continue;
+        }
+        let pair = if left < right {
+            (*left, *right)
+        } else {
+            (*right, *left)
+        };
+        if let Some(score) = pair_scores.get_mut(&pair) {
+            score.2 += 1;
+        }
+    }
+
+    let mut ranked = pair_scores
+        .into_iter()
+        .map(|((left, right), (proximity, shared, direct))| {
+            let score = proximity / (1.0 + direct as f64);
+            (score, left, right, shared, direct)
+        })
+        .filter(|(score, _, _, _, _)| *score > 0.0)
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .0
+            .partial_cmp(&left.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+    });
+
+    let mut questions = ranked
+        .into_iter()
+        .take(COMMUNITY_GAP_MAX_QUESTIONS.min(top_n))
+        .filter_map(|(score, left, right, shared, direct)| {
+            let left_label = community_gap_label(
+                left,
+                community_labels,
+                graph,
+                eligible.get(&left)?,
+            );
+            let right_label = community_gap_label(
+                right,
+                community_labels,
+                graph,
+                eligible.get(&right)?,
+            );
+            Some(SuggestedQuestion {
+                kind: "community_gap".to_owned(),
+                question: Some(format!(
+                    "What evidence would directly connect `{left_label}` and `{right_label}` (for example, through a shared intermediary)?"
+                )),
+                why: format!(
+                    "Structural gap score {score:.4}: {shared} shared two-hop intermediaries and {direct} direct topical edges; wiring-only relations are excluded."
+                ),
+            })
+        })
+        .collect::<Vec<_>>();
+    if pair_budget_exhausted {
+        questions.push(SuggestedQuestion {
+            kind: "community_gap_limit".to_owned(),
+            question: None,
+            why: format!(
+                "Structural-gap analysis reached its bounded candidate-pair limit ({COMMUNITY_GAP_MAX_PAIRS}); the displayed gaps are a deterministic prefix of the eligible evidence."
+            ),
+        });
+    }
+    questions
+}
+
+fn community_gap_label(
+    community: usize,
+    community_labels: &BTreeMap<usize, String>,
+    graph: &AnalysisGraph<'_>,
+    members: &[usize],
+) -> String {
+    if let Some(label) = community_labels.get(&community)
+        && !label.is_empty()
+    {
+        return bounded_analysis_label(label);
+    }
+    let representative = members.iter().copied().min_by(|left, right| {
+        graph
+            .degree(*right)
+            .cmp(&graph.degree(*left))
+            .then_with(|| left.cmp(right))
+    });
+    representative.map_or_else(
+        || format!("Community {community}"),
+        |position| bounded_analysis_label(graph.nodes[position].label()),
+    )
+}
+
+fn bounded_analysis_label(value: &str) -> String {
+    value.chars().take(ANALYSIS_LABEL_MAX_CHARS).collect()
+}
+
+fn is_community_gap_real_node(graph: &AnalysisGraph<'_>, position: usize) -> bool {
+    !graph.is_file_node(position)
+        && !is_concept_node(graph.nodes[position])
+        && !is_json_key_node(graph.nodes[position])
+}
+
+fn is_community_gap_wiring_relation(edge: &EdgeRecord) -> bool {
+    COMMUNITY_GAP_WIRING_RELATIONS.contains(&edge_string(edge, "relation").as_str())
+}
+
+fn disconnected_component_question(graph: &AnalysisGraph<'_>) -> Option<SuggestedQuestion> {
+    if graph.len() == 0 {
+        return None;
+    }
+    let adjacency = undirected_adjacency(graph);
+    let mut visited = vec![false; graph.len()];
+    let mut component_count = 0_usize;
+    let mut largest_component = 0_usize;
+    for start in 0..graph.len() {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut queue = VecDeque::from([start]);
+        let mut real_nodes = 0_usize;
+        while let Some(node) = queue.pop_front() {
+            if is_community_gap_real_node(graph, node) {
+                real_nodes += 1;
+            }
+            for neighbor in &adjacency[node] {
+                if !visited[*neighbor] {
+                    visited[*neighbor] = true;
+                    queue.push_back(*neighbor);
+                }
+            }
+        }
+        if real_nodes >= 2 {
+            component_count += 1;
+            largest_component = largest_component.max(real_nodes);
+        }
+    }
+    (component_count > 1).then(|| SuggestedQuestion {
+        kind: "disconnected_components".to_owned(),
+        question: Some(format!(
+            "Which relationships are missing between the {component_count} disconnected source-backed components?"
+        )),
+        why: format!(
+            "The graph contains {component_count} weakly connected source-backed components; the largest has {largest_component} real nodes. File, concept, and JSON-key-only components are not counted."
+        ),
+    })
+}
+
+fn undirected_adjacency(graph: &AnalysisGraph<'_>) -> Vec<Vec<usize>> {
+    let mut adjacency = vec![Vec::<usize>::new(); graph.len()];
+    for edge in &graph.edges {
+        adjacency[edge.left].push(edge.right);
+        adjacency[edge.right].push(edge.left);
+    }
+    for neighbors in &mut adjacency {
+        neighbors.sort_unstable();
+        neighbors.dedup();
+    }
+    adjacency
 }
 
 #[must_use]

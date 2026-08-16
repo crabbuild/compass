@@ -157,6 +157,11 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
             question: None,
             why: "omitted text".to_owned(),
         },
+        SuggestedQuestion {
+            kind: "community_gap".to_owned(),
+            question: Some("What evidence would directly connect Alpha and Beta?".to_owned()),
+            why: "Structural gap score 0.5000: 2 shared two-hop intermediaries and 0 direct topical edges; wiring-only relations are excluded.".to_owned(),
+        },
     ];
     let learning = json!({
         "overlay":{
@@ -222,6 +227,7 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
         "known＿dead＿end",
         "Suggested Compass Queries",
         "How does runtime flow?",
+        "Structural gap score",
     ] {
         assert!(report.contains(expected), "missing {expected:?}\n{report}");
     }

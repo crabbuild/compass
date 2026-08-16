@@ -180,6 +180,12 @@
   become noisy graph hubs. Source-proven same-file, same-package, and imported
   declarations retain precedence. Advance extraction semantics to v2 so
   cached graphs rebuild with the denser call topology.
+- Add deterministic graph blind-spot questions to GRAPH_REPORT.md and Agent
+  Orientation. Structural-gap analysis finds well-formed communities that
+  share bounded two-hop topical evidence but have little direct topical
+  linkage, damping mega-hubs and excluding wiring-only relations and JSON-key
+  noise. Also surface multiple disconnected source-backed graph components as
+  an explicit investigation question; neither diagnostic invents a graph edge.
 
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or

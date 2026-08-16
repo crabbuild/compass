@@ -95,6 +95,122 @@ fn questions_cover_no_signal_isolation_inference_ambiguity_bridge_and_low_cohesi
 }
 
 #[test]
+fn questions_surface_structural_gaps_without_wiring_or_json_noise() -> Result<(), Box<dyn Error>> {
+    let mut nodes = Vec::new();
+    for (prefix, file_prefix) in [("a", "docs/a"), ("b", "docs/b")] {
+        for index in 0..4 {
+            nodes.push(node(
+                &format!("{prefix}{index}"),
+                &format!("{prefix}{index}"),
+                &format!("{file_prefix}{index}.md"),
+            ));
+        }
+    }
+    nodes.push(node("bridge", "Bridge", "docs/bridge.md"));
+    nodes.push(node("json-key", "dependencies", "config.json"));
+    let mut links = Vec::new();
+    for prefix in ["a", "b"] {
+        for (left, right) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
+            links.push(edge(
+                &format!("{prefix}{left}"),
+                &format!("{prefix}{right}"),
+                "calls",
+                "EXTRACTED",
+            ));
+        }
+    }
+    links.extend([
+        edge("a0", "bridge", "references", "EXTRACTED"),
+        edge("b0", "bridge", "references", "EXTRACTED"),
+        // Structural wiring must not turn a gap into a topical connection.
+        edge("a1", "b1", "contains", "EXTRACTED"),
+    ]);
+    let graph = document(nodes, links, true);
+    let communities = BTreeMap::from([
+        (0, (0..4).map(|index| format!("a{index}")).collect()),
+        (1, (0..4).map(|index| format!("b{index}")).collect()),
+    ]);
+    let labels = BTreeMap::from([(0, "Alpha".to_owned()), (1, "Beta".to_owned())]);
+    let first = suggest_questions(&graph, &communities, &labels, 20);
+    let second = suggest_questions(&graph, &communities, &labels, 20);
+    assert_eq!(first, second);
+    let gap = first
+        .iter()
+        .find(|question| question.kind == "community_gap")
+        .ok_or("missing structural gap question")?;
+    assert!(
+        gap.question
+            .as_deref()
+            .is_some_and(|question| { question.contains("Alpha") && question.contains("Beta") })
+    );
+    assert!(gap.why.contains("shared two-hop intermediaries"));
+    assert!(gap.why.contains("0 direct topical edges"));
+
+    let mut noisy_nodes = Vec::new();
+    for (prefix, file_prefix) in [("a", "docs/a"), ("b", "docs/b")] {
+        for index in 0..4 {
+            noisy_nodes.push(node(
+                &format!("{prefix}{index}"),
+                &format!("{prefix}{index}"),
+                &format!("{file_prefix}{index}.md"),
+            ));
+        }
+    }
+    noisy_nodes.push(node("json-key", "dependencies", "config.json"));
+    let mut noisy_links = Vec::new();
+    for prefix in ["a", "b"] {
+        for (left, right) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
+            noisy_links.push(edge(
+                &format!("{prefix}{left}"),
+                &format!("{prefix}{right}"),
+                "calls",
+                "EXTRACTED",
+            ));
+        }
+    }
+    noisy_links.extend([
+        edge("a0", "json-key", "references", "EXTRACTED"),
+        edge("b0", "json-key", "references", "EXTRACTED"),
+    ]);
+    let noisy_graph = document(noisy_nodes, noisy_links, true);
+    assert!(
+        !suggest_questions(&noisy_graph, &communities, &labels, 20)
+            .iter()
+            .any(|question| question.kind == "community_gap")
+    );
+    Ok(())
+}
+
+#[test]
+fn questions_surface_disconnected_source_backed_components() -> Result<(), Box<dyn Error>> {
+    let nodes = (0..6)
+        .map(|index| node(&format!("n{index}"), &format!("N{index}"), "src/module.rs"))
+        .collect();
+    let links = [
+        edge("n0", "n1", "calls", "EXTRACTED"),
+        edge("n1", "n2", "calls", "EXTRACTED"),
+        edge("n2", "n0", "calls", "EXTRACTED"),
+        edge("n3", "n4", "calls", "EXTRACTED"),
+        edge("n4", "n5", "calls", "EXTRACTED"),
+        edge("n5", "n3", "calls", "EXTRACTED"),
+    ];
+    let graph = document(nodes, links.to_vec(), true);
+    let questions = suggest_questions(&graph, &Communities::new(), &BTreeMap::new(), 20);
+    let disconnected = questions
+        .iter()
+        .find(|question| question.kind == "disconnected_components")
+        .ok_or("missing disconnected component question")?;
+    assert!(
+        disconnected
+            .question
+            .as_deref()
+            .is_some_and(|question| question.contains("2 disconnected"))
+    );
+    assert!(disconnected.why.contains("largest has 3 real nodes"));
+    Ok(())
+}
+
+#[test]
 fn surprises_cover_cross_file_scoring_cross_community_and_structural_fallbacks() {
     let mut nodes = vec![
         node("hub", "Hub", "backend/hub.py"),

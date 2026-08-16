@@ -234,10 +234,19 @@ The report can include:
 - communities;
 - surprising connections;
 - cycles/diagnostics;
-- suggested questions.
+- suggested questions, including bounded structural-gap questions when two
+  well-formed communities share topical two-hop evidence but lack a direct
+  topical relationship, and disconnected-component questions for multiple
+  source-backed graph islands.
 
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
+
+Structural-gap questions are investigative evidence, not newly inferred graph
+edges. Compass dampens shared intermediaries by their degree, excludes
+containment/import/wiring relations from topical linkage, and ignores
+file/concept/JSON-key-only noise. The report may therefore ask what would
+connect two communities without asserting that a connection exists.
 
 Community evidence labels prefer a meaningful symbol or document heading over
 Markdown pipe-table parser blocks, even when a table container has more
