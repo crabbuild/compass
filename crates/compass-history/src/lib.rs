@@ -1,6 +1,7 @@
 //! Immutable, SQLite-backed version history for complete Compass graphs.
 
 mod artifacts;
+mod blind_spots;
 mod cache;
 mod canonical;
 mod config;
@@ -22,6 +23,10 @@ mod timeline;
 mod validate;
 
 pub use artifacts::{CompletedGraphArtifacts, GraphArtifacts, PartitionedGraph};
+pub use blind_spots::{
+    BLIND_SPOT_HISTORY_SCHEMA, BlindSpotObservation, BlindSpotTrend, BlindSpotTrendItem,
+    BlindSpotTrendOmissions, summarize_blind_spots,
+};
 pub use cache::{
     CacheGcPlan, CacheNamespaceStatus, CacheStatus, DerivedCacheNamespace, HISTORY_CACHE_VERSION,
     HistoryCache,

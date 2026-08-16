@@ -374,6 +374,7 @@ Runs the native graph-query benchmark surface.
 ```text
 compass history enable [build-profile options]
 compass history disable
+compass history blind-spots [--rev REV] [--limit N] [--format text|json]
 compass history status [REV] [--format text|json]
 compass history build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]
 compass history rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]
@@ -396,6 +397,12 @@ commit failures, emits a complete final report, and exits `1` if any failed.
 compass history build main --all --code-only
 compass history build main --all --first-parent
 ```
+
+`history blind-spots` reads the preferred immutable realization for each
+reachable commit and compares typed graph-insights IDs. It reports active and
+resolved gaps/components, preserves explicit omission counts, and treats
+missing sidecars from older realizations as unavailable evidence rather than
+as empty reports.
 
 Build-profile options include:
 
@@ -846,6 +853,7 @@ compass export callflow-json --output PATH
 compass program call-graph (--symbol SYMBOL | --source FILE --byte BYTE)
   [--direction callers|callees|both] [--depth N] --format json
 compass history timeline [--rev REV] [--limit N [--after CURSOR]] --format json
+compass history blind-spots [--rev REV] [--limit N] [--format text|json]
 compass history change-counts REV [--parent REV] --format json
 compass history diff OLD NEW [--root NAME] [--output PATH] --format jsonl
 compass history export REV --format json [--community ID] [--node-limit N] --output PATH

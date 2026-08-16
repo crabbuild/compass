@@ -161,6 +161,17 @@ compass history status HEAD
 compass history list HEAD
 ```
 
+Compare structural blind spots across the retained preferred realizations:
+
+```bash
+compass history blind-spots --rev HEAD --limit 200
+compass history blind-spots --rev HEAD --format json
+```
+
+The command tracks stable typed gap/component IDs, separates active findings
+from resolved findings, and counts historical realizations that predate the
+graph-insights sidecar instead of treating them as empty graphs.
+
 For automation:
 
 ```bash

@@ -9,9 +9,11 @@ mod snapshot;
 mod v1;
 
 pub use analyze::{
-    DiffEdge, DiffNode, GodNode, GraphDiff, ImportCycle, SuggestedQuestion, SurpriseConnection,
-    find_import_cycles, god_nodes, graph_diff, graph_insights, suggest_questions,
-    surprising_connections,
+    BlindSpotEdge, BlindSpotLimits, BlindSpotNode, BlindSpotOmissions, BlindSpotReport,
+    CommunityGap, DiffEdge, DiffNode, DisconnectedComponent, GRAPH_INSIGHTS_SCHEMA, GodNode,
+    GraphDiff, GraphInsights, ImportCycle, SuggestedQuestion, SurpriseConnection,
+    blind_spot_report, find_import_cycles, god_nodes, graph_diff, graph_insights,
+    graph_insights_with_blind_spots, suggest_questions, surprising_connections,
 };
 pub use cluster::{
     ClusterOptions, Communities, IncrementalClusterLimits, IncrementalClusterResult, cluster,

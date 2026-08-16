@@ -13,6 +13,7 @@ compass-out/
 ├── graph.json
 ├── graph.html                   # unless omitted by size or --no-viz
 ├── GRAPH_REPORT.md
+├── orientation.json              # clustered Agent Orientation
 ├── manifest.json
 ├── program.json                 # only with --program or --program-artifact
 ├── graph-overview.json          # clustered builds
@@ -247,6 +248,23 @@ edges. Compass dampens shared intermediaries by their degree, excludes
 containment/import/wiring relations from topical linkage, and ignores
 file/concept/JSON-key-only noise. The report may therefore ask what would
 connect two communities without asserting that a connection exists.
+
+## Typed graph-insights projection
+
+Clustered `analysis.json` includes a bounded `blindSpots` value with schema
+`compass.graph-insights/1`. It contains ranked `communityGaps` and, when more
+than one source-backed component exists, `disconnectedComponents`. Each gap
+retains stable anchors, shared-intermediary witnesses, direct topical-edge
+witnesses, and exact counts; each component retains bounded member witnesses.
+`omissions` and `limits` are part of the contract, so a missing item is never
+silently interpreted as evidence that no item existed.
+
+The same projection is included as optional `blindSpots` in
+`compass.orientation/2`, rendered in `GRAPH_REPORT.md`, and exposed through
+the read-only MCP resource `compass://graph-insights`. The projection does not
+add, remove, or rewrite graph edges. `compass history blind-spots --format
+json` compares these exact IDs across immutable realizations; realizations
+without the sidecar are counted as observations without graph insights.
 
 Community evidence labels prefer a meaningful symbol or document heading over
 Markdown pipe-table parser blocks, even when a table container has more
@@ -661,6 +679,12 @@ First-party editor and offline-viewer contracts are versioned independently:
 - `compass.history.timeline/1` — commit and materialization states;
 - `compass.history.change_counts/1` — lazy structural counts between existing
   realizations;
+- `compass.graph-insights/1` — bounded structural-gap and disconnected-component
+  evidence with witnesses and omission limits;
+- `compass.graph-blind-spot-history/1` — active/resolved blind-spot trends over
+  immutable history observations;
+- `compass.orientation/2` — fitted Agent Orientation with optional typed
+  `blindSpots` evidence;
 - `compass.history.viewer_graph/1` — exact historical graph envelope;
 - `compass.semantic_diff.report/1` — exhaustive semantic findings, source
   changes, and exact added, removed, and changed node/edge records consumed by

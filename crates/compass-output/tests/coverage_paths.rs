@@ -2,10 +2,15 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 
-use compass_graph::{Communities, GodNode, SuggestedQuestion, SurpriseConnection};
+use compass_graph::{
+    Communities, GodNode, SuggestedQuestion, SurpriseConnection, blind_spot_report,
+};
 use compass_model::GraphDocument;
 use compass_output::{
-    DetectionSummary, ReportOptions, TokenCost, generate_report, graphml_document, write_graphml,
+    DetectionSummary, ORIENTATION_JSON_MAX_BYTES, REPORT_MARKDOWN_MAX_CHARS, ReportOptions,
+    TokenCost, agent_orientation_with_blind_spots, generate_report,
+    generate_report_with_blind_spots, graphml_document, render_agent_report_markdown,
+    render_orientation_json, write_graphml,
 };
 use serde_json::json;
 
@@ -232,6 +237,24 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
         assert!(report.contains(expected), "missing {expected:?}\n{report}");
     }
 
+    let blind_spots = blind_spot_report(&graph, &communities, &labels);
+    let typed_report = generate_report_with_blind_spots(
+        &graph,
+        &communities,
+        &cohesion,
+        &labels,
+        &gods,
+        &surprises,
+        &detection,
+        TokenCost::default(),
+        Some(&questions),
+        Some(&blind_spots),
+        Some(&learning),
+        &options,
+    );
+    assert!(typed_report.contains("Structural Blind Spots"));
+    assert!(typed_report.contains("compass.graph-insights/1"));
+
     let warning = DetectionSummary {
         warning: Some("Corpus warning".to_owned()),
         ..DetectionSummary::default()
@@ -258,5 +281,64 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
     assert!(minimal.contains("Publication: unknown"));
     assert!(minimal.contains("files: unknown · words: unknown"));
     assert!(minimal.contains("Work-Memory Observations"));
+    Ok(())
+}
+
+#[test]
+fn typed_blind_spots_remain_within_orientation_and_report_budgets() -> Result<(), Box<dyn Error>> {
+    let mut nodes = Vec::new();
+    let mut links = Vec::new();
+    let long_label = "x".repeat(160);
+    for component in 0..33 {
+        for member in 0..100 {
+            let id = format!("component-{component}-member-{member}");
+            nodes.push(json!({
+                "id": id,
+                "label": format!("{long_label}-{component}-{member}"),
+                "source_file": format!("src/{component}/member-{member}.rs"),
+                "file_type": "code"
+            }));
+            if member > 0 {
+                links.push(json!({
+                    "source": format!("component-{component}-member-{}", member - 1),
+                    "target": format!("component-{component}-member-{member}"),
+                    "relation": "calls",
+                    "confidence": "EXTRACTED"
+                }));
+            }
+        }
+    }
+    let graph = document(json!({
+        "directed": true,
+        "multigraph": false,
+        "graph": {},
+        "nodes": nodes,
+        "links": links
+    }))?;
+    let communities = Communities::new();
+    let labels = BTreeMap::new();
+    let blind_spots = blind_spot_report(&graph, &communities, &labels);
+    assert_eq!(blind_spots.disconnected_component_count, 33);
+    assert_eq!(blind_spots.disconnected_components.len(), 32);
+
+    let options = ReportOptions::new("bounded");
+    let model = agent_orientation_with_blind_spots(
+        &graph,
+        &communities,
+        &BTreeMap::new(),
+        &labels,
+        &[],
+        &[],
+        &DetectionSummary::default(),
+        TokenCost::default(),
+        None,
+        Some(&blind_spots),
+        None,
+        &options,
+    );
+    let orientation = render_orientation_json(&model)?;
+    assert!(orientation.len() <= ORIENTATION_JSON_MAX_BYTES);
+    let report = render_agent_report_markdown(&model, false)?;
+    assert!(report.chars().count() <= REPORT_MARKDOWN_MAX_CHARS);
     Ok(())
 }

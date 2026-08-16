@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Publish bounded, typed blind-spot evidence in `analysis.json`,
+  `orientation.json` (`compass.orientation/2`), and MCP
+  `compass://graph-insights`, including stable IDs, witnesses, multiplicity,
+  exact omissions, and explicit limits. Preserve the existing graph edges;
+  structural gaps remain investigative projections rather than inferred
+  relationships.
+
+- Add `compass history blind-spots` to compare persisted graph-insights
+  observations across immutable realizations and report active/resolved
+  structural gaps and disconnected components without treating missing older
+  sidecars as empty graphs.
+
 - Make `compass update` use the fact-neutral incremental path for metadata-only
   source edits, refresh full-file source envelopes without moving exact symbol
   anchors, point-update immutable node values, reuse unchanged graph JSON
@@ -180,13 +192,6 @@
   become noisy graph hubs. Source-proven same-file, same-package, and imported
   declarations retain precedence. Advance extraction semantics to v2 so
   cached graphs rebuild with the denser call topology.
-- Add deterministic graph blind-spot questions to GRAPH_REPORT.md and Agent
-  Orientation. Structural-gap analysis finds well-formed communities that
-  share bounded two-hop topical evidence but have little direct topical
-  linkage, damping mega-hubs and excluding wiring-only relations and JSON-key
-  noise. Also surface multiple disconnected source-backed graph components as
-  an explicit investigation question; neither diagnostic invents a graph edge.
-
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use

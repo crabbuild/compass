@@ -2,16 +2,25 @@ use std::collections::BTreeMap;
 use std::error::Error;
 
 use compass_graph::{
-    Communities, find_import_cycles, god_nodes, graph_diff, suggest_questions,
+    Communities, blind_spot_report, find_import_cycles, god_nodes, graph_diff, suggest_questions,
     surprising_connections,
 };
 use compass_model::GraphDocument;
 use serde_json::{Value, json};
 
 fn document(nodes: Vec<Value>, links: Vec<Value>, directed: bool) -> GraphDocument {
+    document_with_multigraph(nodes, links, directed, false)
+}
+
+fn document_with_multigraph(
+    nodes: Vec<Value>,
+    links: Vec<Value>,
+    directed: bool,
+    multigraph: bool,
+) -> GraphDocument {
     let parsed = serde_json::from_value(json!({
         "directed":directed,
-        "multigraph":false,
+        "multigraph":multigraph,
         "graph":{},
         "nodes":nodes,
         "links":links
@@ -157,6 +166,7 @@ fn questions_surface_structural_gaps_without_wiring_or_json_noise() -> Result<()
         }
     }
     noisy_nodes.push(node("json-key", "dependencies", "config.json"));
+    noisy_nodes.push(node("concept", "Shared Concept", "Concept"));
     let mut noisy_links = Vec::new();
     for prefix in ["a", "b"] {
         for (left, right) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
@@ -171,6 +181,8 @@ fn questions_surface_structural_gaps_without_wiring_or_json_noise() -> Result<()
     noisy_links.extend([
         edge("a0", "json-key", "references", "EXTRACTED"),
         edge("b0", "json-key", "references", "EXTRACTED"),
+        edge("a1", "concept", "references", "EXTRACTED"),
+        edge("b1", "concept", "references", "EXTRACTED"),
     ]);
     let noisy_graph = document(noisy_nodes, noisy_links, true);
     assert!(
@@ -179,6 +191,113 @@ fn questions_surface_structural_gaps_without_wiring_or_json_noise() -> Result<()
             .any(|question| question.kind == "community_gap")
     );
     Ok(())
+}
+
+#[test]
+fn typed_blind_spots_keep_witnesses_and_parallel_topical_relations() -> Result<(), Box<dyn Error>> {
+    let mut nodes = Vec::new();
+    for (prefix, file_prefix) in [("a", "docs/a"), ("b", "docs/b")] {
+        for index in 0..4 {
+            nodes.push(node(
+                &format!("{prefix}{index}"),
+                &format!("{prefix}{index}"),
+                &format!("{file_prefix}{index}.md"),
+            ));
+        }
+    }
+    nodes.push(node("bridge", "Bridge", "docs/bridge.md"));
+    let communities = BTreeMap::from([
+        (0, (0..4).map(|index| format!("a{index}")).collect()),
+        (1, (0..4).map(|index| format!("b{index}")).collect()),
+    ]);
+    let labels = BTreeMap::from([(0, "Alpha".to_owned()), (1, "Beta".to_owned())]);
+    let mut links = Vec::new();
+    for prefix in ["a", "b"] {
+        for (left, right) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
+            links.push(edge(
+                &format!("{prefix}{left}"),
+                &format!("{prefix}{right}"),
+                "calls",
+                "EXTRACTED",
+            ));
+        }
+    }
+    links.extend([
+        edge("a0", "bridge", "references", "EXTRACTED"),
+        edge("b0", "bridge", "references", "EXTRACTED"),
+        edge("a1", "b1", "contains", "EXTRACTED"),
+        edge("a1", "b1", "references", "EXTRACTED"),
+    ]);
+    let graph = document_with_multigraph(nodes.clone(), links.clone(), true, true);
+    let report = blind_spot_report(&graph, &communities, &labels);
+    assert_eq!(report.schema, "compass.graph-insights/1");
+    let gap = report.community_gaps.first().ok_or("missing typed gap")?;
+    assert_eq!(gap.left_label, "Alpha");
+    assert_eq!(gap.right_label, "Beta");
+    assert!(gap.shared_intermediary_count >= 1);
+    assert!(
+        gap.shared_intermediaries
+            .iter()
+            .any(|witness| witness.id == "bridge")
+    );
+    assert_eq!(gap.direct_topical_edge_count, 1);
+    assert_eq!(gap.direct_topical_edges[0].relation, "references");
+    assert!(!gap.left_anchor.is_empty());
+    assert!(!gap.right_anchor.is_empty());
+
+    links.reverse();
+    let reversed = document_with_multigraph(nodes, links, true, true);
+    assert_eq!(report, blind_spot_report(&reversed, &communities, &labels));
+    Ok(())
+}
+
+#[test]
+fn blind_spot_questions_are_not_starved_by_older_question_categories() {
+    let mut nodes = Vec::new();
+    for (prefix, file_prefix) in [("a", "docs/a"), ("b", "docs/b")] {
+        for index in 0..4 {
+            nodes.push(node(
+                &format!("{prefix}{index}"),
+                &format!("{prefix}{index}"),
+                &format!("{file_prefix}{index}.md"),
+            ));
+        }
+    }
+    nodes.push(node("bridge", "Bridge", "docs/bridge.md"));
+    nodes.push(node("orphan-a", "Orphan A", "docs/orphan-a.md"));
+    nodes.push(node("orphan-b", "Orphan B", "docs/orphan-b.md"));
+    let mut links = vec![edge("a0", "a1", "references", "AMBIGUOUS")];
+    for prefix in ["a", "b"] {
+        for (left, right) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
+            links.push(edge(
+                &format!("{prefix}{left}"),
+                &format!("{prefix}{right}"),
+                "calls",
+                "EXTRACTED",
+            ));
+        }
+    }
+    links.extend([
+        edge("a0", "bridge", "references", "EXTRACTED"),
+        edge("b0", "bridge", "references", "EXTRACTED"),
+        edge("orphan-a", "orphan-b", "references", "EXTRACTED"),
+    ]);
+    let graph = document(nodes, links, true);
+    let communities = BTreeMap::from([
+        (0, (0..4).map(|index| format!("a{index}")).collect()),
+        (1, (0..4).map(|index| format!("b{index}")).collect()),
+    ]);
+    let labels = BTreeMap::from([(0, "Alpha".to_owned()), (1, "Beta".to_owned())]);
+    let questions = suggest_questions(&graph, &communities, &labels, 1);
+    assert_eq!(questions[0].kind, "community_gap");
+    let questions = suggest_questions(&graph, &communities, &labels, 2);
+    assert_eq!(
+        questions
+            .iter()
+            .map(|question| question.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["community_gap", "disconnected_components"]
+    );
 }
 
 #[test]

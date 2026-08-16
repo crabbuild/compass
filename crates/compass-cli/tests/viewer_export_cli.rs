@@ -66,7 +66,7 @@ fn cluster_only_preserves_the_typed_graph_used_by_orientation_export() -> Result
         String::from_utf8_lossy(&exported.stderr)
     );
     let orientation: Value = serde_json::from_slice(&exported.stdout)?;
-    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert_eq!(orientation["schema"], "compass.orientation/2");
     assert_eq!(orientation["graphSummary"]["edges"], typed.links.len());
     Ok(())
 }
@@ -102,7 +102,7 @@ fn orientation_json_export_is_bound_to_the_selected_graph_generation() -> Result
         String::from_utf8_lossy(&exported.stderr)
     );
     let orientation: Value = serde_json::from_slice(&exported.stdout)?;
-    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert_eq!(orientation["schema"], "compass.orientation/2");
     assert!(orientation["evidenceStatus"]["generationId"].is_string());
 
     let active = compass_files::BuildGuard::resolve_current_snapshot_directory(

@@ -21,7 +21,7 @@ use compass_graph::{
     SnapshotSelector, SourceDigest, apply_inference_level,
     build_owned_with_tiebreaker_at_inference as build_document, canonical_edge_kind,
     canonical_raw_edge_sites, cluster_incremental, deduped_node_count, extraction_from_v1,
-    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    garbage_collect_graph_snapshots, graph_insights_with_blind_spots, graph_snapshot_needs_gc,
     label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_best_effort_at_inference, score_communities,
@@ -47,8 +47,9 @@ use compass_model::provenance::{
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, GraphViewModel, HtmlOptions,
-    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost, agent_orientation,
-    graph_view_model_document, render_agent_report_markdown, render_orientation_json, write_html,
+    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost,
+    agent_orientation_with_blind_spots, graph_view_model_document, render_agent_report_markdown,
+    render_orientation_json, write_html,
 };
 use compass_resolve::{
     ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
@@ -3928,10 +3929,16 @@ fn build_graph_inner_unscoped(
     > {
         let started = Instant::now();
         let analysis_compute_started = Instant::now();
-        let (cohesion, (gods, surprises, questions)) = rayon::join(
+        let (cohesion, insights) = rayon::join(
             || score_communities(&document, &communities),
-            || graph_insights(&document, &communities, &labels, 10, 5, 10),
+            || graph_insights_with_blind_spots(&document, &communities, &labels, 10, 5, 10),
         );
+        let compass_graph::GraphInsights {
+            gods,
+            surprises,
+            questions,
+            blind_spots,
+        } = insights;
         profile_internal_duration(
             "graph analyses computation",
             analysis_compute_started.elapsed(),
@@ -3944,6 +3951,7 @@ fn build_graph_inner_unscoped(
                 "cohesion": cohesion.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
                 "gods": gods,
                 "surprises": surprises,
+                "blindSpots": blind_spots,
                 "tokens": {"input": tokens.0, "output": tokens.1},
             })
         } else {
@@ -3953,6 +3961,7 @@ fn build_graph_inner_unscoped(
                 "gods": gods,
                 "surprises": surprises,
                 "questions": questions,
+                "blindSpots": blind_spots,
             })
         };
         if options.purpose == BuildPurpose::Extract {
@@ -3976,7 +3985,7 @@ fn build_graph_inner_unscoped(
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
             report_options.health = report_health.clone();
-            Some(agent_orientation(
+            Some(agent_orientation_with_blind_spots(
                 &document,
                 &communities,
                 &cohesion,
@@ -3986,6 +3995,7 @@ fn build_graph_inner_unscoped(
                 &detection_summary,
                 TokenCost::default(),
                 Some(&questions),
+                Some(&blind_spots),
                 None,
                 &report_options,
             ))

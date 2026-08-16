@@ -187,7 +187,7 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
     let graph = write_typed_graph(directory.path())?;
     let server = CompassMcp::new(graph);
     let orientation: Value = serde_json::from_str(&server.read("compass://orientation")?)?;
-    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert_eq!(orientation["schema"], "compass.orientation/2");
     for (tool, arguments, operation) in [
         ("search_symbols", json!({"query":"Target"}), "search"),
         ("get_callers", json!({"symbol":"Target"}), "callers"),
@@ -365,7 +365,7 @@ fn cluster_only_output_remains_typed_and_serves_orientation_resources() -> Resul
     assert_eq!(typed.links.len(), 2);
     let server = CompassMcp::new(output.join("graph.json"));
     let orientation: Value = serde_json::from_str(&server.read("compass://orientation")?)?;
-    assert_eq!(orientation["schema"], "compass.orientation/1");
+    assert_eq!(orientation["schema"], "compass.orientation/2");
     assert!(orientation["evidenceStatus"]["buildCommit"].is_null());
     assert_eq!(orientation["graphSummary"]["edges"], 2);
     let report = server.read("compass://report")?;

@@ -15,7 +15,9 @@ use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
 use compass_core::LoadedGraph;
-use compass_graph::{Communities, god_nodes, suggest_questions, surprising_connections};
+use compass_graph::{
+    Communities, blind_spot_report, god_nodes, suggest_questions, surprising_connections,
+};
 use compass_model::code_graph::GraphDocument as CodeGraphDocument;
 use compass_model::query_contract::{
     MAX_DISCOVERY_CANDIDATES, MAX_DISCOVERY_DEPTH, MAX_DISCOVERY_EDGES,
@@ -395,6 +397,7 @@ impl ServerHandler for CompassMcp {
         let mime = match request.uri.as_str() {
             "compass://report" => "text/markdown",
             "compass://orientation" => "application/json",
+            "compass://graph-insights" => "application/json",
             _ => "text/plain",
         };
         let required_bytes = text.len();
@@ -1206,6 +1209,12 @@ fn resource_specs() -> Vec<Resource> {
             "Suggested questions for this codebase",
             "text/plain",
         ),
+        (
+            "compass://graph-insights",
+            "Graph Insights",
+            "Typed structural gaps, disconnected components, witnesses, and limits",
+            "application/json",
+        ),
     ]
     .into_iter()
     .map(|(uri, name, description, mime)| {
@@ -2002,12 +2011,35 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
                 return Ok("No suggested questions available.".to_owned());
             }
             let mut lines = vec!["Suggested questions:".to_owned()];
-            lines.extend(
-                questions
-                    .into_iter()
-                    .map(|item| format!("  - {}", item.question.unwrap_or_default())),
-            );
+            lines.extend(questions.into_iter().map(|item| {
+                format!(
+                    "  - {}",
+                    item.question
+                        .unwrap_or_else(|| { format!("[{}] {}", item.kind, item.why) })
+                )
+            }));
             Ok(lines.join("\n"))
+        }
+        "compass://graph-insights" => {
+            let document = context.document().map_err(InvocationError::InvalidParams)?;
+            let labels_path = context
+                .path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("labels.json");
+            let labels = fs::read(&labels_path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<BTreeMap<usize, String>>(&bytes).ok())
+                .unwrap_or_else(|| {
+                    context
+                        .communities
+                        .keys()
+                        .map(|community| (*community, format!("Community {community}")))
+                        .collect()
+                });
+            let report = blind_spot_report(&document, &context.community_ids(), &labels);
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| InvocationError::Internal(error.to_string()))
         }
         _ => Err(InvocationError::InvalidParams(format!(
             "Unknown resource: {uri}"
@@ -2187,7 +2219,7 @@ mod tests {
             assert_eq!(spec.input_schema["additionalProperties"], false);
             assert_eq!(spec.input_schema["required"], required);
         }
-        assert_eq!(CompassMcp::resources().len(), 7);
+        assert_eq!(CompassMcp::resources().len(), 8);
         let text = server.invoke("graph_stats", Map::new());
         assert_eq!(
             text,
@@ -2499,6 +2531,7 @@ mod tests {
             "compass://surprises",
             "compass://audit",
             "compass://questions",
+            "compass://graph-insights",
         ] {
             assert!(!server.read(uri)?.is_empty(), "{uri}");
         }
@@ -2590,7 +2623,7 @@ mod tests {
         );
         assert_eq!(
             empty.read("compass://questions")?,
-            "Suggested questions:\n  - "
+            "Suggested questions:\n  - [no_signal] Not enough signal to generate questions. This usually means the corpus has no AMBIGUOUS edges, no bridge nodes, no INFERRED relationships, and all communities are tightly cohesive. Add more files or run with --mode deep to extract richer edges."
         );
         assert_eq!(
             empty.invoke("god_nodes", Map::new()),
