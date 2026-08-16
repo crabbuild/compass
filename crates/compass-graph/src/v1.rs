@@ -979,7 +979,7 @@ fn finalize_prepared_edge(
     }
     if matches!(
         edge.kind,
-        EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements
+        EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements | EdgeKind::MixesIn
     ) {
         let valid = match edge.kind {
             EdgeKind::Embeds | EdgeKind::Extends => source_kind.is_type() && target_kind.is_type(),
@@ -996,6 +996,7 @@ fn finalize_prepared_edge(
                             | NodeKind::TypeAlias
                     )
             }
+            EdgeKind::MixesIn => source_kind.is_type() && target_kind.is_type(),
             _ => false,
         };
         if !valid {
@@ -2265,7 +2266,8 @@ fn placeholder_scope_key(
 
 fn inferred_external_target_kind(attributes: &Map<String, Value>) -> Option<&'static str> {
     match optional_string(attributes, "relation").as_deref() {
-        Some("implements" | "scip_impl" | "mixes_in") => Some("interface"),
+        Some("implements" | "scip_impl") => Some("interface"),
+        Some("mixes_in") => Some("trait"),
         Some("extends" | "inherits") => Some("class"),
         Some("calls" | "indirect_call") => Some("function"),
         Some("type_of" | "returns" | "scip_typed") => Some("type_alias"),
@@ -3506,9 +3508,10 @@ fn normalize_node(
         .unwrap_or("code");
     let (kind, resource_kind) = map_node_kind(raw_kind, file_type)
         .ok_or_else(|| raw_error(&raw.id, "unknown raw node kind or file_type"))?;
-    let name = required_any_string(&raw.attributes, &["name", "label"], &raw.id)?;
-    let qualified_name = optional_any_string(&raw.attributes, &["qualified_name", "qualifiedName"])
-        .unwrap_or_else(|| name.clone());
+    let mut name = required_any_string(&raw.attributes, &["name", "label"], &raw.id)?;
+    let mut qualified_name =
+        optional_any_string(&raw.attributes, &["qualified_name", "qualifiedName"])
+            .unwrap_or_else(|| name.clone());
     let language = optional_any_string(&raw.attributes, &["language", "lang"]);
     let framework = optional_string(&raw.attributes, "framework");
     let source = raw_anchor(&raw.attributes, root, file_facts)?;
@@ -3538,6 +3541,15 @@ fn normalize_node(
             .transpose()?
             .unwrap_or_default(),
     };
+    if kind == NodeKind::File && !source_path.is_empty() {
+        name = source_path
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(source_path.as_str())
+            .to_owned();
+        qualified_name.clone_from(&source_path);
+    }
     let roles = raw
         .attributes
         .get("roles")
@@ -4141,6 +4153,7 @@ fn map_node_kind(
         "enum_member" | "enum_constant" => NodeKind::EnumMember,
         "type_alias" | "alias" | "type" => NodeKind::TypeAlias,
         "function" => NodeKind::Function,
+        "closure" => NodeKind::Closure,
         "method" | "destructor" => NodeKind::Method,
         "constructor" => NodeKind::Constructor,
         "property" => NodeKind::Property,
@@ -4259,7 +4272,7 @@ fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
         "configures" => (EdgeKind::DependsOn, None, false),
         "case_of" | "defines" | "method" => (EdgeKind::Contains, None, false),
         "embeds" => (EdgeKind::Embeds, Some("embedded-member"), false),
-        "mixes_in" => (EdgeKind::Implements, Some("mixin-contract"), false),
+        "mixes_in" => (EdgeKind::MixesIn, None, false),
         _ => return None,
     };
     Some(mapped)
@@ -4379,6 +4392,7 @@ fn node_details(
         | NodeKind::EnumMember
         | NodeKind::TypeAlias
         | NodeKind::Function
+        | NodeKind::Closure
         | NodeKind::Method
         | NodeKind::Constructor
         | NodeKind::Property

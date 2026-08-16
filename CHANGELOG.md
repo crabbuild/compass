@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Preserve anonymous PHP functions and arrow functions as typed callable
+  `closure` nodes, and publish exact PHP trait composition as `mixes_in`
+  instead of collapsing it into `implements`. These additions eliminate
+  closure-induced partial graphs while retaining exact UTF-8 occurrence
+  anchors, deterministic identities, and strict endpoint validation. Also
+  canonicalize file-node names from their portable source paths before
+  coalescing, preventing empty ECMAScript module evidence from colliding with
+  the same detected file identity.
+
 - Publish bounded, typed blind-spot evidence in `analysis.json`,
   `orientation.json` (`compass.orientation/2`), and MCP
   `compass://graph-insights`, including stable IDs, witnesses, multiplicity,

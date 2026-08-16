@@ -31,6 +31,7 @@ pub enum NodeKind {
     EnumMember,
     TypeAlias,
     Function,
+    Closure,
     Method,
     Constructor,
     Property,
@@ -82,6 +83,7 @@ impl NodeKind {
             Self::EnumMember => "enum_member",
             Self::TypeAlias => "type_alias",
             Self::Function => "function",
+            Self::Closure => "closure",
             Self::Method => "method",
             Self::Constructor => "constructor",
             Self::Property => "property",
@@ -121,7 +123,11 @@ impl NodeKind {
     pub const fn is_callable(self) -> bool {
         matches!(
             self,
-            Self::Function | Self::Method | Self::Constructor | Self::DatabaseProcedure
+            Self::Function
+                | Self::Closure
+                | Self::Method
+                | Self::Constructor
+                | Self::DatabaseProcedure
         )
     }
 
@@ -207,6 +213,7 @@ pub enum EdgeKind {
     Exports,
     Extends,
     Implements,
+    MixesIn,
     References,
     TypeOf,
     Returns,
@@ -242,6 +249,7 @@ impl EdgeKind {
             Self::Exports => "exports",
             Self::Extends => "extends",
             Self::Implements => "implements",
+            Self::MixesIn => "mixes_in",
             Self::References => "references",
             Self::TypeOf => "type_of",
             Self::Returns => "returns",

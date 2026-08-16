@@ -506,6 +506,7 @@ fn operation_root_rank(
             | NodeKind::Enum
             | NodeKind::TypeAlias
             | NodeKind::Function
+            | NodeKind::Closure
             | NodeKind::Method
             | NodeKind::Constructor
     ) || node.source_file().is_none_or(str::is_empty)
@@ -1099,7 +1100,7 @@ fn ambiguity_signal_score(
 
 fn semantic_seed_rank(node: &NodeRecord) -> u8 {
     match node.kind {
-        NodeKind::Function | NodeKind::Method | NodeKind::Constructor => 4,
+        NodeKind::Function | NodeKind::Closure | NodeKind::Method | NodeKind::Constructor => 4,
         NodeKind::Class
         | NodeKind::Interface
         | NodeKind::Struct
