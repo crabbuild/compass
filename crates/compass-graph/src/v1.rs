@@ -91,6 +91,7 @@ struct PreparedNodeFailure {
 
 struct EdgeNodeFacts {
     kind: NodeKind,
+    kotlin_interface: bool,
     rust_type_parameter: bool,
     rust_enum_member: bool,
     unresolved_wiring_site: Option<SourceAnchor>,
@@ -882,7 +883,9 @@ fn finalize_prepared_edge(
         .unwrap_or(NodeKind::Variable);
     let target_is_constructible = edge_node_facts
         .get(edge.target.as_str())
-        .is_some_and(|facts| facts.kind.is_constructible() || facts.rust_enum_member);
+        .is_some_and(|facts| {
+            facts.kind.is_constructible() || facts.rust_enum_member || facts.kotlin_interface
+        });
     let source_is_rust_type_parameter = edge_node_facts
         .get(edge.source.as_str())
         .is_some_and(|facts| facts.rust_type_parameter);
@@ -1241,6 +1244,8 @@ fn normalize_v1_with_mode(
                 id.as_str(),
                 EdgeNodeFacts {
                     kind: node.kind,
+                    kotlin_interface: node.kind == NodeKind::Interface
+                        && node.language.as_deref() == Some("kotlin"),
                     rust_type_parameter: node.kind == NodeKind::Parameter
                         && node.language.as_deref() == Some("rust"),
                     rust_enum_member: node.kind == NodeKind::EnumMember

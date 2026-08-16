@@ -301,6 +301,7 @@ pub(super) const fn resolution_rule_name(rule: ResolutionRule) -> &'static str {
         ResolutionRule::DeferredReceiver => "deferred-receiver",
         ResolutionRule::WildcardBinding => "wildcard-binding",
         ResolutionRule::PhpGlobalFunctionFallback => "php-global-function-fallback",
+        ResolutionRule::KotlinNamedDefaultArguments => "kotlin-named-default-arguments",
         ResolutionRule::UniqueModuleOrPackage => "unique-module-or-package",
         ResolutionRule::ExactHierarchyBase => "exact-hierarchy-base",
         ResolutionRule::DirectReceiverSuccessorDispatch => "direct-receiver-successor-dispatch",

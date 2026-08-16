@@ -791,6 +791,82 @@ impl GraphSnapshotBuilder {
         })
     }
 
+    /// Prepare a point-update snapshot when graph metadata and node payloads
+    /// change without changing any secondary-index projection. Callers must
+    /// supply the exact changed-node set; the preflight proves that node IDs,
+    /// relationships, file-path keys, names, terms, and communities remain
+    /// unchanged before reusing their immutable roots.
+    pub fn prepare_node_value_delta<S: Store + ?Sized>(
+        &self,
+        store: &S,
+        previous: &GraphDocument,
+        current: &GraphDocument,
+        changed_node_ids: &BTreeSet<String>,
+    ) -> Result<PreparedGraphSnapshotContent, SnapshotError> {
+        validate_code_graph(current)
+            .map_err(|error| SnapshotError::Corrupt(format!("graph validation failed: {error}")))?;
+        validate_node_value_delta(previous, current, changed_node_ids)?;
+        let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
+            SnapshotError::Unsupported("node-value delta requires an active snapshot".to_owned())
+        })?;
+        let previous_snapshot_id = snapshot_identity(previous)?;
+        if reader.selector().snapshot_id != previous_snapshot_id
+            || reader.manifest().node_count != previous.nodes.len() as u64
+            || reader.manifest().edge_count != previous.links.len() as u64
+        {
+            return Err(SnapshotError::Corrupt(
+                "active snapshot does not match the previous graph".to_owned(),
+            ));
+        }
+
+        let current_nodes = current
+            .nodes
+            .iter()
+            .map(|node| (node.id.as_str(), node))
+            .collect::<BTreeMap<_, _>>();
+        let node_updates = changed_node_ids
+            .iter()
+            .map(|id| {
+                let node = current_nodes.get(id.as_str()).ok_or_else(|| {
+                    SnapshotError::Corrupt(format!("node-value delta is missing changed node {id}"))
+                })?;
+                Ok((
+                    encode_graph_index_key(IndexKind::Nodes, &[id.as_bytes()])?,
+                    Some(encode_json(node)?),
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, SnapshotError>>()?;
+
+        let mut writer = ObjectWriter::new(store)?;
+        let metadata_entries = build_index(current, IndexKind::Metadata, None)?;
+        let metadata_entry_count = metadata_entries.len() as u64;
+        let metadata_digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
+        let mut roots = reader.manifest().roots.clone();
+        for root in &mut roots {
+            if root.index == IndexKind::Metadata {
+                root.entry_count = metadata_entry_count;
+                root.digest = metadata_digest.clone();
+            } else if root.index == IndexKind::Nodes {
+                root.digest = update_index_tree(
+                    store,
+                    &mut writer,
+                    root.index,
+                    &root.digest,
+                    &node_updates,
+                    0,
+                )?;
+            }
+        }
+        let stats = writer.finish()?;
+        Ok(PreparedGraphSnapshotContent {
+            snapshot_id: snapshot_identity(current)?,
+            node_count: current.nodes.len() as u64,
+            edge_count: current.links.len() as u64,
+            roots,
+            stats,
+        })
+    }
+
     /// Prepare a bounded graph delta when an incremental edit changes graph
     /// records or relationships. Unchanged immutable index trees are reused;
     /// only indexes whose logical projection depends on changed records are
@@ -830,11 +906,30 @@ impl GraphSnapshotBuilder {
             if !changed_indexes.contains(&root.index) {
                 continue;
             }
-            let term_postings =
+            let previous_term_postings =
+                (root.index == IndexKind::Terms).then(|| build_term_postings(previous));
+            let current_term_postings =
                 (root.index == IndexKind::Terms).then(|| build_term_postings(current));
-            let entries = build_index(current, root.index, term_postings.as_ref())?;
-            root.entry_count = entries.len() as u64;
-            root.digest = build_index_tree(&mut writer, root.index, entries)?;
+            let previous_entries =
+                build_index(previous, root.index, previous_term_postings.as_ref())?;
+            let current_entries = build_index(current, root.index, current_term_postings.as_ref())?;
+            if previous_entries == current_entries {
+                continue;
+            }
+            root.entry_count = current_entries.len() as u64;
+            root.digest = if previous_entries.keys().eq(current_entries.keys()) {
+                let updates = current_entries
+                    .iter()
+                    .filter(|(key, value)| previous_entries.get(*key) != Some(*value))
+                    .map(|(key, value)| (key.clone(), Some(value.clone())))
+                    .collect::<BTreeMap<_, _>>();
+                update_index_tree(store, &mut writer, root.index, &root.digest, &updates, 0)?
+            } else {
+                // Insertions and deletions can move persistent-tree separators.
+                // Rebuild this index conservatively; point updates are safe only
+                // when the complete ordered key set is unchanged.
+                build_index_tree(&mut writer, root.index, current_entries)?
+            };
         }
         let stats = writer.finish()?;
         Ok(PreparedGraphSnapshotContent {
@@ -992,21 +1087,15 @@ pub fn write_canonical_graph_json<W: Write + ?Sized>(
 /// The function performs a complete structural preflight before writing any
 /// bytes. It returns `Ok(false)` when the previous artifact is not the
 /// canonical node-link shape or when the supplied changed-node set is not
-/// compatible with a file-only delta, allowing the caller to use the normal
+/// compatible with a node-value-only delta, allowing the caller to use the normal
 /// full serializer without risking a partial duplicate document.
 pub fn write_fact_neutral_graph_json_delta<W: Write + ?Sized>(
     previous_bytes: &[u8],
     graph: &GraphDocument,
-    changed_file_node_ids: &BTreeSet<String>,
+    changed_node_ids: &BTreeSet<String>,
     writer: &mut W,
 ) -> io::Result<bool> {
-    write_fact_neutral_graph_json_delta_inner(
-        previous_bytes,
-        graph,
-        changed_file_node_ids,
-        true,
-        writer,
-    )
+    write_fact_neutral_graph_json_delta_inner(previous_bytes, graph, changed_node_ids, true, writer)
 }
 
 /// Publish a fact-neutral edit after the caller has already validated the
@@ -1017,13 +1106,13 @@ pub fn write_fact_neutral_graph_json_delta<W: Write + ?Sized>(
 pub fn write_fact_neutral_graph_json_delta_prevalidated<W: Write + ?Sized>(
     previous_bytes: &[u8],
     graph: &GraphDocument,
-    changed_file_node_ids: &BTreeSet<String>,
+    changed_node_ids: &BTreeSet<String>,
     writer: &mut W,
 ) -> io::Result<bool> {
     write_fact_neutral_graph_json_delta_inner(
         previous_bytes,
         graph,
-        changed_file_node_ids,
+        changed_node_ids,
         false,
         writer,
     )
@@ -1032,7 +1121,7 @@ pub fn write_fact_neutral_graph_json_delta_prevalidated<W: Write + ?Sized>(
 fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
     previous_bytes: &[u8],
     graph: &GraphDocument,
-    changed_file_node_ids: &BTreeSet<String>,
+    changed_node_ids: &BTreeSet<String>,
     validate_records: bool,
     writer: &mut W,
 ) -> io::Result<bool> {
@@ -1072,14 +1161,11 @@ fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
     let mut changed_seen = BTreeSet::new();
     for (index, _) in node_ranges.iter().enumerate() {
         let current = &graph.nodes[index];
-        if changed_file_node_ids.contains(&current.id) {
-            if current.kind != NodeKind::File {
-                return Ok(false);
-            }
+        if changed_node_ids.contains(&current.id) {
             changed_seen.insert(current.id.clone());
         }
     }
-    if changed_seen.len() != changed_file_node_ids.len() {
+    if changed_seen.len() != changed_node_ids.len() {
         return Ok(false);
     }
 
@@ -1101,7 +1187,7 @@ fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
             writer.write_all(b",")?;
         }
         let node = &graph.nodes[index];
-        if changed_file_node_ids.contains(&node.id) {
+        if changed_node_ids.contains(&node.id) {
             serde_json::to_writer(&mut *writer, node).map_err(io::Error::other)?;
         } else {
             writer.write_all(&previous_bytes[range.clone()])?;
@@ -3092,47 +3178,7 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
 
     let mut term_postings = BTreeMap::<String, Vec<String>>::new();
     for node in &graph.nodes {
-        let mut terms = BTreeSet::new();
-        terms.extend(search_terms(&node.name));
-        terms.extend(search_terms(&node.qualified_name));
-        terms.extend(compass_model::search::identifier_search_terms(&node.name));
-        terms.extend(compass_model::search::identifier_search_terms(
-            &node.qualified_name,
-        ));
-        terms.extend(search_terms(node.kind.as_str()));
-        for role in &node.roles {
-            let role = format!("{role:?}");
-            terms.extend(search_terms(&role));
-        }
-        if let Some(language) = &node.language {
-            terms.extend(search_terms(language));
-        }
-        if let Some(framework) = &node.framework {
-            terms.extend(search_terms(framework));
-        }
-        if let Some(source) = &node.source {
-            terms.extend(search_terms(&source.file));
-        }
-        if let Some(community) = &node.community {
-            terms.extend(search_terms(&community.id.to_string()));
-            if let Some(label) = &community.label {
-                terms.extend(search_terms(label));
-            }
-        }
-        if let Some(path) = node
-            .details
-            .as_ref()
-            .and_then(|details| serde_json::to_value(details).ok())
-            .and_then(|value| {
-                value
-                    .get("data")
-                    .and_then(|data| data.get("path"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned)
-            })
-        {
-            terms.extend(search_terms(&path));
-        }
+        let mut terms = searchable_node_terms(node);
         for alias in aliases_by_target
             .get(node.id.as_str())
             .into_iter()
@@ -3150,6 +3196,51 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
         node_ids.dedup();
     }
     term_postings
+}
+
+fn searchable_node_terms(node: &NodeRecord) -> BTreeSet<String> {
+    let mut terms = BTreeSet::new();
+    terms.extend(search_terms(&node.name));
+    terms.extend(search_terms(&node.qualified_name));
+    terms.extend(compass_model::search::identifier_search_terms(&node.name));
+    terms.extend(compass_model::search::identifier_search_terms(
+        &node.qualified_name,
+    ));
+    terms.extend(search_terms(node.kind.as_str()));
+    for role in &node.roles {
+        let role = format!("{role:?}");
+        terms.extend(search_terms(&role));
+    }
+    if let Some(language) = &node.language {
+        terms.extend(search_terms(language));
+    }
+    if let Some(framework) = &node.framework {
+        terms.extend(search_terms(framework));
+    }
+    if let Some(source) = &node.source {
+        terms.extend(search_terms(&source.file));
+    }
+    if let Some(community) = &node.community {
+        terms.extend(search_terms(&community.id.to_string()));
+        if let Some(label) = &community.label {
+            terms.extend(search_terms(label));
+        }
+    }
+    if let Some(path) = node
+        .details
+        .as_ref()
+        .and_then(|details| serde_json::to_value(details).ok())
+        .and_then(|value| {
+            value
+                .get("data")
+                .and_then(|data| data.get("path"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+    {
+        terms.extend(search_terms(&path));
+    }
+    terms
 }
 
 fn build_index(
@@ -3690,6 +3781,72 @@ fn validate_graph_delta(
     if previous.directed != current.directed || previous.multigraph != current.multigraph {
         return Err(SnapshotError::Unsupported(
             "graph delta changed graph directionality".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_node_value_delta(
+    previous: &GraphDocument,
+    current: &GraphDocument,
+    changed_node_ids: &BTreeSet<String>,
+) -> Result<(), SnapshotError> {
+    if previous.directed != current.directed
+        || previous.multigraph != current.multigraph
+        || previous.links != current.links
+    {
+        return Err(SnapshotError::Unsupported(
+            "node-value delta changed graph topology".to_owned(),
+        ));
+    }
+    let file_keys = |graph: &GraphDocument| {
+        graph
+            .graph
+            .files
+            .iter()
+            .map(|file| (file.path.clone(), file.id.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    if file_keys(previous) != file_keys(current) {
+        return Err(SnapshotError::Unsupported(
+            "node-value delta changed the file path index".to_owned(),
+        ));
+    }
+    if previous.nodes.len() != current.nodes.len() {
+        return Err(SnapshotError::Unsupported(
+            "node-value delta changed the node set".to_owned(),
+        ));
+    }
+    let mut changed_seen = BTreeSet::new();
+    for (before, after) in previous.nodes.iter().zip(&current.nodes) {
+        if before.id != after.id {
+            return Err(SnapshotError::Unsupported(
+                "node-value delta changed node identity or ordering".to_owned(),
+            ));
+        }
+        if before == after {
+            continue;
+        }
+        if !changed_node_ids.contains(&after.id)
+            || before.name != after.name
+            || before.qualified_name != after.qualified_name
+            || before.community != after.community
+            || searchable_node_terms(before) != searchable_node_terms(after)
+        {
+            return Err(SnapshotError::Unsupported(
+                "node-value delta changed a secondary index projection".to_owned(),
+            ));
+        }
+        changed_seen.insert(after.id.clone());
+    }
+    if changed_seen != *changed_node_ids {
+        return Err(SnapshotError::Corrupt(
+            "node-value delta changed-node set is not exact".to_owned(),
+        ));
+    }
+    if changed_node_ids.is_empty() && previous.graph == current.graph {
+        return Err(SnapshotError::Corrupt(
+            "node-value delta contains no changed graph values".to_owned(),
         ));
     }
     Ok(())
@@ -5088,7 +5245,35 @@ mod tests {
         );
         assert_eq!(prevalidated, expected);
 
-        let invalid = BTreeSet::from(["symbol".to_owned()]);
+        let mut node_value_changed = current.clone();
+        node_value_changed.nodes[1].source = Some(SourceAnchor {
+            file: "src/main.rs".to_owned(),
+            start_byte: 2,
+            end_byte: 6,
+            start_line: 2,
+            start_column: 0,
+            end_line: 2,
+            end_column: 4,
+        });
+        let node_value_expected = {
+            let mut bytes = Vec::new();
+            write_canonical_graph_json(&node_value_changed, &mut bytes)
+                .map_err(|error| SnapshotError::Encode(error.to_string()))?;
+            bytes
+        };
+        let mut node_value_actual = Vec::new();
+        assert!(
+            write_fact_neutral_graph_json_delta(
+                &previous_bytes,
+                &node_value_changed,
+                &BTreeSet::from(["file".to_owned(), "symbol".to_owned()]),
+                &mut node_value_actual,
+            )
+            .map_err(|error| SnapshotError::Encode(error.to_string()))?
+        );
+        assert_eq!(node_value_actual, node_value_expected);
+
+        let invalid = BTreeSet::from(["missing".to_owned()]);
         let mut no_output = Vec::new();
         assert!(
             !write_fact_neutral_graph_json_delta(

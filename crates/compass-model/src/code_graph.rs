@@ -129,7 +129,12 @@ impl NodeKind {
     pub const fn is_constructible(self) -> bool {
         matches!(
             self,
-            Self::Class | Self::Struct | Self::Enum | Self::Component | Self::DatabaseProcedure
+            Self::Class
+                | Self::Struct
+                | Self::Enum
+                | Self::Annotation
+                | Self::Component
+                | Self::DatabaseProcedure
         )
     }
 

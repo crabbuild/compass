@@ -18,7 +18,6 @@ mod remix;
 mod ruby;
 mod rust;
 mod spring;
-mod spring_kotlin;
 mod swift;
 mod text;
 mod typescript;
@@ -287,18 +286,10 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         csharp::detect_minimal,
     ),
     FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
+    FrameworkPack::universal(&pack::SPRING_KOTLIN_DESCRIPTOR, spring::detect_kotlin),
     FrameworkPack::source("python-web", &["python"], &[], detect_python),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::source("rails-routes", &["ruby"], &["rails"], detect_ruby),
-    FrameworkPack::source(
-        "spring-web-kotlin",
-        &["kotlin"],
-        &[
-            "org.springframework:spring-web",
-            "org.springframework.boot:spring-boot",
-        ],
-        detect_kotlin,
-    ),
     FrameworkPack::source("go-web", &["go"], &[], detect_go),
     FrameworkPack::source("axum-web", &["rust"], &["axum"], detect_axum),
     FrameworkPack::source("rust-web", &["rust"], &[], detect_rust),
@@ -542,13 +533,6 @@ fn detect_ruby(
     ruby::detect(context.path, context.source, context.root)
 }
 
-fn detect_kotlin(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
-    spring_kotlin::detect(context.path, context.source, context.root)
-}
-
 fn detect_go(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
@@ -684,7 +668,7 @@ mod tests {
             "python-web",
             "php-frameworks",
             "rails-routes",
-            "spring-web-kotlin",
+            "spring-kotlin",
             "go-web",
             "axum-web",
             "rust-web",

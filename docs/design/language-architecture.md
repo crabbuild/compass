@@ -34,6 +34,7 @@ This architecture is transitioning one language at a time. The status labels bel
 | Available now | Java is a hard-cut version-3 `UniversalCandidate`; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | TypeScript and JavaScript are hard-cut `UniversalCandidate` adapters; TSX uses the TypeScript identity, both share the bounded ECMAScript evidence emitter, and their replaced generic publisher is removed |
 | Available now | PHP is a hard-cut version-1 `UniversalCandidate` with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
+| Available now | Kotlin is a hard-cut version-1 `UniversalCandidate` with packages, imports, nominal and companion declarations, constructors, functions and extensions, properties, annotations, generic and nullable types, and named/default argument evidence; its complete quality audit remains open |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 
@@ -375,19 +376,31 @@ Framework detection is downstream of language parsing but upstream of final
 Code Graph v1 publication. Packs emit anchored route or domain facts; the
 framework resolver validates targets and materializes typed relationships.
 
-The Java Spring and C# ASP.NET source packs are production universal framework
-packs.
-The Spring pack consumes exact Java annotation, call, import, type, ownership, and hierarchy
+The Java and Kotlin Spring and C# ASP.NET source packs are production universal
+framework packs.
+The Spring packs consume exact language-keyed annotation, call, import, type, ownership, and hierarchy
 evidence and derives HTTP, bean, injection, messaging, scheduling, persistence,
 transaction, and security meaning before framework resolution. Its Java legacy
-detectors are removed atomically; Kotlin Spring routing remains on its explicit
-established pack until Kotlin has a universal language adapter. Established
+detector and Kotlin established detector are removed atomically. Established
 source, config, and template adapters execute through the same static runtime,
 which owns selection, activation, limits, and publication without requiring a
 runtime plugin ABI. The ASP.NET pack consumes exact C# attribute, alias, import,
 ownership, and overload evidence, then composes controller/action templates in
 the project resolver; its former regex/line scanner is removed. Other packs
 retain their established semantics until their own qualification and hard cut.
+
+## Java/Kotlin interoperability boundary
+
+Kotlin syntax evidence is always keyed to the exact `kotlin` language. Java and
+Kotlin declarations may share JVM package names and terminal spellings, but
+neither is evidence that one declaration is the other's callable target.
+Cross-language calls are therefore published only when fresh project/compiler
+evidence, such as an exact SCIP definition endpoint, identifies both anchored
+ends. Package proximity, JVM-family membership, imports, and terminal-name
+matching cannot create a Java/Kotlin call edge. Missing or conflicting compiler
+evidence remains unresolved. This boundary does not prevent a framework pack
+from recognizing an external Spring annotation; it prevents that annotation or
+call from being rebound to an unrelated local JVM declaration.
 
 ## Quality and failure boundaries
 

@@ -207,6 +207,7 @@ fn only_hard_cut_languages_expose_universal_profiles() {
     let python = Registry::resolve(Path::new("src/example.py")).expect("python spec");
     let go = Registry::resolve(Path::new("src/example.go")).expect("go spec");
     let java = Registry::resolve(Path::new("src/Example.java")).expect("java spec");
+    let kotlin = Registry::resolve(Path::new("src/Example.kt")).expect("kotlin spec");
     let rust = Registry::resolve(Path::new("src/example.rs")).expect("rust spec");
     let typescript = Registry::resolve(Path::new("src/example.ts")).expect("typescript spec");
     let tsx = Registry::resolve(Path::new("src/example.tsx")).expect("tsx spec");
@@ -223,6 +224,10 @@ fn only_hard_cut_languages_expose_universal_profiles() {
     assert_eq!(
         Registry::universal_profile_for_spec(java).map(|profile| profile.language),
         Some("java")
+    );
+    assert_eq!(
+        Registry::universal_profile_for_spec(kotlin).map(|profile| profile.language),
+        Some("kotlin")
     );
     assert_eq!(
         Registry::universal_profile_for_spec(rust).map(|profile| profile.language),

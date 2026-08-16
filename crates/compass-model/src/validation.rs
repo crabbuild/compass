@@ -631,6 +631,8 @@ fn endpoint_kinds_are_valid(
         EdgeKind::Instantiates => {
             is_call_source(source.kind)
                 && (target.kind.is_constructible()
+                    || (target.kind == NodeKind::Interface
+                        && target.language.as_deref() == Some("kotlin"))
                     || (target.kind == NodeKind::EnumMember
                         && target.language.as_deref() == Some("rust")))
         }
@@ -833,6 +835,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Trait
                 | NodeKind::Protocol
                 | NodeKind::Enum
+                | NodeKind::Annotation
                 | NodeKind::Component
                 | NodeKind::Schema,
             NodeKind::Class
@@ -1000,6 +1003,7 @@ const fn is_import_target(kind: NodeKind) -> bool {
             NodeKind::Import
                 | NodeKind::Export
                 | NodeKind::TypeAlias
+                | NodeKind::Property
                 | NodeKind::Variable
                 | NodeKind::Field
                 | NodeKind::Constant
@@ -1303,6 +1307,20 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn kotlin_annotation_classes_and_top_level_properties_have_valid_endpoints() {
+        assert!(NodeKind::Annotation.is_constructible());
+        assert!(contains_endpoint_pair(
+            NodeKind::Annotation,
+            NodeKind::Constructor
+        ));
+        assert!(contains_endpoint_pair(
+            NodeKind::Annotation,
+            NodeKind::Property
+        ));
+        assert!(is_import_target(NodeKind::Property));
+    }
 
     #[test]
     fn accepts_links_and_python_numeric_id_equality() {

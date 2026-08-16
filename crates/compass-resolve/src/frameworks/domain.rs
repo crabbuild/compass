@@ -667,6 +667,15 @@ fn domain_attributes(
         }
         return attributes;
     }
+    if symbol_kind == "component" {
+        attributes.insert(
+            "component_type".into(),
+            fact.detail
+                .get("bean_kind")
+                .cloned()
+                .unwrap_or_else(|| Value::String(fact.kind.clone())),
+        );
+    }
     if symbol_kind == "job" {
         for key in ["schedule", "queue"] {
             if let Some(value) = fact.detail.get(key).cloned() {

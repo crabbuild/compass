@@ -86,6 +86,10 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
         id: "spring-java",
         expand: spring::expand,
     },
+    UniversalFrameworkPack {
+        id: "spring-kotlin",
+        expand: spring::expand_kotlin,
+    },
 ];
 
 pub use domain::{

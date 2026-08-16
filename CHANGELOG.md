@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Make `compass update` use the fact-neutral incremental path for metadata-only
+  source edits, refresh full-file source envelopes without moving exact symbol
+  anchors, point-update immutable node values, reuse unchanged graph JSON
+  records, and amortize bounded snapshot garbage collection. Exact preflights
+  fall back to full publication whenever topology or secondary indexes change.
+
+- Hard-cut Kotlin onto a version-1 universal candidate adapter with packages,
+  declarations, extension functions, annotations, generic/nullable types, and
+  named/default argument resolution; convert Spring Kotlin to the universal
+  framework pack and require exact compiler evidence for Java/Kotlin calls.
+
 - Allow `compass review` on `0.3.x` to rebuild comparable realizations from
   any repository profile or preferred realization whose persisted user-option
   shape remains reconstructable, including when both compared revisions are

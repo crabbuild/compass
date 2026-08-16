@@ -24,6 +24,36 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Incremental code-graph qualification
+
+Fact-neutral updates may bypass project-wide resolution only after the changed
+files reproduce the prior normalized extraction-fact digests. The publisher
+then refreshes inventory and full-file envelopes, validates the complete graph,
+proves that node IDs, relationships, file keys, names, search terms, and
+communities are unchanged, and point-updates only graph metadata and changed
+node values. Any failed proof uses the complete graph publisher. Immutable-store
+garbage collection remains bounded but is amortized across eight manifests so
+ordinary one-file edits do not perform a full mark-and-sweep.
+
+The 2026-08-15 release-build qualification used copied, read-only-derived
+corpora from real repositories with SQLite storage, maximum inference, and
+clustering/visualization disabled. Each observation appended or removed one
+language comment and reported zero graph-assembly time:
+
+| Language / corpus | Indexed files | Nodes / edges | Observed incremental wall | Extracted / cached |
+| --- | ---: | ---: | ---: | ---: |
+| Kotlin / Spring Framework Kotlin corpus | 388 | 10,708 / 15,650 | 1.01 s | 1 / 387 |
+| Rust / ripgrep | 142 | 12,185 / 32,040 | 2.50 s | 1 / 141 |
+| Go / go-git | 709 | 21,578 / 67,522 | 3.31 s | 1 / 708 |
+| TypeScript / NestJS | 2,017 | 75,298 / 116,515 | 10.33 s | 25 / 1,992 |
+| Python / FastAPI production package | 56 | 1,707 / 6,622 | 1.17 s | 1 / 55 |
+| C# / ASP.NET Core Http.Extensions source | 35 | 1,130 / 1,291 | 0.61 s | 1 / 34 |
+
+These are single observations, not medians. NestJS still exposes a separate
+large-repository cost: 24 successful empty/unsupported inputs are not portable
+AST cache entries and are rechecked with the edited file. The fact-neutral
+proof nevertheless avoids resolution and complete index reconstruction.
+
 Real-repository natural-query qualification materializes one SQLite-backed
 query artifact per repository. Fresh latency/RSS is one direct `compass query`
 process per observation; warm latency is measured inside one persistent MCP

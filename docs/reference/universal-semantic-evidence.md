@@ -699,20 +699,26 @@ Python or Go has met the production qualification gates.
 ## Current qualification boundary
 
 Python and Go are hard-cut universal language adapters. C#, PHP, Rust, Java,
-TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
+Kotlin, TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
 bounded ECMAScript emitter but retain distinct adapter identities. TSX uses the
 TypeScript candidate profile. C# and PHP use dedicated bounded AST emitters and
 no longer publish or resolve through their replaced raw extraction paths.
 Candidate status means the universal route is active while complete capability
-and corpus qualification remain in progress. `spring-java` and
+and corpus qualification remain in progress. `spring-java`, `spring-kotlin`, and
 `aspnet-csharp` are production universal framework packs. The
 `php-frameworks` pack consumes exact PHP call/import/ownership evidence for
 Laravel routes and Drupal hooks while configuration and template extraction
 remain separate. Spring advertises
 typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
 and security capabilities; ASP.NET consumes exact C# imports, attributes,
-ownership, callable signatures, and source ranges to derive MVC routes. Kotlin
-Spring remains on its established detector.
+ownership, callable signatures, and source ranges to derive MVC routes. The
+Kotlin pack consumes the version-1 Kotlin universal evidence batch and never
+re-enters the removed established detector.
+
+Kotlin source resolution is exact-language only. Java/Kotlin call edges require
+fresh project/compiler evidence with exact anchored endpoints; imports, shared
+packages, JVM-family membership, or equal terminal names are insufficient. An
+absent or conflicting endpoint remains unresolved.
 
 C# project resolution is language-keyed and namespace/import aware. Direct
 bases and receiver types resolve only to exact C# declarations; ambiguous

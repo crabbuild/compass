@@ -805,6 +805,66 @@ fn graph_delta_rebuilds_relationship_indexes_without_rewriting_nodes() -> Result
     assert_eq!(reader.get_edge(&replacement.id)?, Some(replacement));
     assert_eq!(reader.outgoing("b", limits(4))?.len(), 1);
     assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+
+    Ok(())
+}
+
+#[test]
+fn graph_delta_point_updates_value_only_node_changes() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut previous = graph();
+    previous
+        .nodes
+        .extend((0..300).map(|index| node(&format!("node-{index:03}"))));
+    previous.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let first = builder.prepare(&store, &previous)?;
+    builder.activate(&store, &first)?;
+
+    let mut current = previous.clone();
+    current.graph.build.generation_id = "next-generation".to_owned();
+    let changed = current
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "node-150")
+        .ok_or("node-150 missing")?;
+    let provenance = changed
+        .evidence
+        .first_mut()
+        .ok_or("node evidence missing")?;
+    provenance.score = Some(0.75);
+
+    let changed_ids = BTreeSet::from(["node-150".to_owned()]);
+    let content = builder.prepare_node_value_delta(&store, &previous, &current, &changed_ids)?;
+    let graph_bytes = canonical_graph_json(&current)?;
+    let graph_digest = format!("{:x}", sha2::Sha256::digest(&graph_bytes));
+    let delta = builder.finish_content(&store, content, graph_digest, graph_bytes.len() as u64)?;
+    assert!(
+        delta.new_objects <= 6,
+        "point update wrote {} immutable objects",
+        delta.new_objects
+    );
+
+    builder.activate(&store, &delta)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+
+    let mut invalid = current.clone();
+    invalid
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "node-150")
+        .ok_or("node-150 missing")?
+        .name = "renamed".to_owned();
+    assert!(
+        builder
+            .prepare_node_value_delta(&store, &current, &invalid, &changed_ids)
+            .is_err()
+    );
+
+    let mut metadata_only = current.clone();
+    metadata_only.graph.build.generation_id = "metadata-only".to_owned();
+    builder.prepare_node_value_delta(&store, &current, &metadata_only, &BTreeSet::new())?;
     Ok(())
 }
 

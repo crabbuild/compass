@@ -87,6 +87,11 @@ const PIPELINE_RAYON_WORKER_CAP: usize = 12;
 // Keep the bound explicit and portable; stack pages remain demand-paged.
 const PIPELINE_RAYON_STACK_SIZE_BYTES: usize = 8 * 1024 * 1024;
 const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
+// Full mark-and-sweep walks every immutable graph object and can dominate a
+// one-file update. Keep a small, explicit number of unreachable manifests so
+// ordinary edits pay only point-update publication; the next sweep still
+// retains exactly the staging and active snapshots.
+const SHARED_STORE_GC_MANIFEST_THRESHOLD: usize = 8;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
 const ROOT_ARTIFACTS: [&str; 7] = [
@@ -769,6 +774,27 @@ struct FactDigestFrameworkFacts<'a> {
     facts: &'a [RawFrameworkFact],
 }
 
+fn normalize_framework_fact_digest_value(value: &mut Value) {
+    match value {
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(normalize_framework_fact_digest_value),
+        Value::Object(values) => {
+            // Universal evidence IDs include source ranges. Framework facts
+            // already retain stable graph owners, qualified names, bindings,
+            // and exact anchors, so these redundant internal IDs must not turn
+            // a file-envelope edit into a semantic graph change.
+            for key in ["ownerDeclarationId", "occurrenceId", "scopeId"] {
+                values.remove(key);
+            }
+            values
+                .values_mut()
+                .for_each(normalize_framework_fact_digest_value);
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 impl Serialize for FactDigestFrameworkFacts<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -779,13 +805,16 @@ impl Serialize for FactDigestFrameworkFacts<'_> {
             .iter()
             .map(|fact| {
                 serde_json::to_value(fact)
-                    .map(|value| (value, fact))
+                    .map(|mut value| {
+                        normalize_framework_fact_digest_value(&mut value);
+                        value
+                    })
                     .map_err(S::Error::custom)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        facts.sort_unstable_by(|left, right| compare_fact_values(&left.0, &right.0));
+        facts.sort_unstable_by(compare_fact_values);
         let mut sequence = serializer.serialize_seq(Some(self.facts.len()))?;
-        for (value, _) in facts {
+        for value in facts {
             sequence.serialize_element(&FactDigestValue(&value))?;
         }
         sequence.end()
@@ -929,16 +958,17 @@ impl Serialize for FactDigestDeclaration<'_, '_> {
             map.serialize_entry("directBasesComplete", &true)?;
         }
         map.serialize_entry("variadic", &declaration.variadic)?;
-        if let Some(value) = &declaration.signature_hash {
-            map.serialize_entry("signatureHash", value)?;
-        }
-        if let Some(value) = &declaration.implementation_hash {
-            map.serialize_entry("implementationHash", value)?;
-        }
-        if let Some(value) = &declaration.source_hash {
-            map.serialize_entry("sourceHash", value)?;
-        }
-        if !self.context.declaration_is_file(&declaration.id) {
+        let file_declaration = self.context.declaration_is_file(&declaration.id);
+        if !file_declaration {
+            if let Some(value) = &declaration.signature_hash {
+                map.serialize_entry("signatureHash", value)?;
+            }
+            if let Some(value) = &declaration.implementation_hash {
+                map.serialize_entry("implementationHash", value)?;
+            }
+            if let Some(value) = &declaration.source_hash {
+                map.serialize_entry("sourceHash", value)?;
+            }
             map.serialize_entry("range", &declaration.range)?;
         }
         map.end()
@@ -1001,7 +1031,9 @@ impl Serialize for FactDigestScope<'_, '_> {
             .owner_declaration_id
             .as_deref()
             .is_some_and(|owner| self.context.declaration_is_file(owner));
-        if !file_scope {
+        let file_envelope_scope =
+            file_scope || matches!(self.scope.kind.as_str(), "module" | "package");
+        if !file_envelope_scope {
             map.serialize_entry("range", &self.scope.range)?;
         }
         map.end()
@@ -1140,7 +1172,11 @@ impl Serialize for FactDigestCandidate<'_, '_> {
                 .context
                 .declaration_key(&candidate.source_declaration_id),
         )?;
-        map.serialize_entry("targetSpelling", &candidate.target_spelling)?;
+        if let Some(target) = &candidate.constraints.exact_target_declaration_id {
+            map.serialize_entry("targetSpelling", &self.context.declaration_key(target))?;
+        } else {
+            map.serialize_entry("targetSpelling", &candidate.target_spelling)?;
+        }
         map.serialize_entry(
             "constraints",
             &FactDigestResolutionConstraint {
@@ -1463,7 +1499,7 @@ fn fact_neutral_pre_cache_sources(
 ) -> Option<Vec<PathBuf>> {
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
-        || options.purpose != BuildPurpose::Extract
+        || !supports_fact_neutral_incremental(options.purpose)
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1581,7 +1617,7 @@ fn fact_neutral_incremental_candidate(
 ) -> bool {
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
-        || options.purpose != BuildPurpose::Extract
+        || !supports_fact_neutral_incremental(options.purpose)
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1606,6 +1642,10 @@ fn fact_neutral_incremental_candidate(
         let key = relative_fact_path(path, root);
         prior_state.entries.get(&key) == current_state.entries.get(&key)
     })
+}
+
+const fn supports_fact_neutral_incremental(purpose: BuildPurpose) -> bool {
+    matches!(purpose, BuildPurpose::Update | BuildPurpose::Extract)
 }
 
 fn extraction_file_anchors(
@@ -1727,34 +1767,34 @@ fn prepare_fact_neutral_document(
     } else {
         (None, previous)
     };
-    let mut changed_file_node_ids = BTreeSet::new();
+    let mut changed_node_ids = BTreeSet::new();
     let mut evidence = BuildEvidence::new(root.to_path_buf(), current.graph.build.clone());
     evidence.files = current.graph.files.clone();
+    let changed_file_ids = current
+        .graph
+        .files
+        .iter()
+        .filter(|file| source_digests.contains_key(&file.path))
+        .map(|file| file.id.clone())
+        .collect::<BTreeSet<_>>();
     evidence.coverage = current
         .graph
         .coverage
         .iter()
-        .filter(|coverage| coverage.capability != "file_inventory")
-        .cloned()
-        .collect();
-    evidence.diagnostics = current
-        .graph
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            !matches!(
-                diagnostic.code.as_str(),
-                "parser_recovery"
-                    | "partial_extraction"
-                    | "extractor_failure"
-                    | "unsupported_input"
-                    | "excluded_input"
-                    | "generated_input"
-                    | "binary_input"
-            )
+        .filter(|coverage| {
+            coverage.capability != "file_inventory"
+                || coverage
+                    .file_id
+                    .as_ref()
+                    .is_none_or(|file_id| !changed_file_ids.contains(file_id))
         })
         .cloned()
         .collect();
+    // The fact-neutral proof covers only successfully and completely parsed
+    // changed files. Preserve extraction diagnostics for every unchanged file;
+    // rebuilding inventory from the changed batch alone would otherwise erase
+    // unrelated parser-recovery and partial-coverage evidence.
+    evidence.diagnostics = current.graph.diagnostics.clone();
     for file in &mut evidence.files {
         if let Some(digest) = source_digests.get(&file.path) {
             file.content_digest.clone_from(&digest.content_digest);
@@ -1762,10 +1802,19 @@ fn prepare_fact_neutral_document(
         }
     }
     evidence.build.configuration_digest = configuration_digest;
-    evidence.include_inventory(inventory)?;
+    let changed_inventory = inventory
+        .into_iter()
+        .filter(|item| source_digests.contains_key(&relative_fact_path(&item.path, root)));
+    evidence.include_inventory(changed_inventory)?;
     canonicalize_fact_neutral_metadata(&mut evidence.coverage, &mut evidence.diagnostics);
 
     let anchors = extraction_file_anchors(extractions, root);
+    let previous_file_sizes = current
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.byte_size))
+        .collect::<BTreeMap<_, _>>();
     current.graph.build = evidence.build;
     current.graph.files = evidence.files;
     current.graph.coverage = evidence.coverage;
@@ -1777,9 +1826,6 @@ fn prepare_fact_neutral_document(
         .map(|file| (file.path.as_str(), file))
         .collect::<BTreeMap<_, _>>();
     for node in &mut current.nodes {
-        if node.kind != NodeKind::File {
-            continue;
-        }
         let before = node.clone();
         let Some(source) = node.source_file() else {
             continue;
@@ -1788,36 +1834,59 @@ fn prepare_fact_neutral_document(
         let Some(file) = files.get(source.as_str()) else {
             continue;
         };
-        node.details = Some(NodeDetails::File(FileNodeDetails {
-            content_digest: file.content_digest.clone(),
-            byte_size: file.byte_size,
-            generated: file.generated,
-        }));
-        let anchor = source_digests.contains_key(&source).then(|| {
+        if node.kind == NodeKind::File {
+            node.details = Some(NodeDetails::File(FileNodeDetails {
+                content_digest: file.content_digest.clone(),
+                byte_size: file.byte_size,
+                generated: file.generated,
+            }));
+        }
+        let refreshed_envelope = source_digests.contains_key(&source).then(|| {
             anchors
                 .get(&source)
                 .cloned()
                 .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
         });
-        if let Some(anchor) = anchor.flatten() {
-            node.source = Some(anchor.clone());
+        if let Some(anchor) = refreshed_envelope.flatten() {
+            let source_was_file_envelope = node.source.as_ref().is_some_and(|previous| {
+                previous.start_byte == 0
+                    && previous_file_sizes
+                        .get(&source)
+                        .is_some_and(|size| previous.end_byte == *size)
+            });
+            if node.kind == NodeKind::File || source_was_file_envelope {
+                node.source = Some(anchor.clone());
+            }
             for provenance in &mut node.evidence {
                 for candidate in &mut provenance.anchors {
-                    if candidate.file == source {
+                    let candidate_was_file_envelope = candidate.file == source
+                        && candidate.start_byte == 0
+                        && previous_file_sizes
+                            .get(&source)
+                            .is_some_and(|size| candidate.end_byte == *size);
+                    if candidate.file == source
+                        && (node.kind == NodeKind::File || candidate_was_file_envelope)
+                    {
                         candidate.clone_from(&anchor);
                     }
                 }
-                if provenance
-                    .wiring_site
-                    .as_ref()
-                    .is_some_and(|candidate| candidate.file == source)
+                let wiring_was_file_envelope =
+                    provenance.wiring_site.as_ref().is_some_and(|candidate| {
+                        candidate.file == source
+                            && candidate.start_byte == 0
+                            && previous_file_sizes
+                                .get(&source)
+                                .is_some_and(|size| candidate.end_byte == *size)
+                    });
+                if provenance.wiring_site.is_some()
+                    && (node.kind == NodeKind::File || wiring_was_file_envelope)
                 {
                     provenance.wiring_site = Some(anchor.clone());
                 }
             }
         }
         if *node != before {
-            changed_file_node_ids.insert(node.id.clone());
+            changed_node_ids.insert(node.id.clone());
         }
     }
     compass_model::validate_code_graph(&current).map_err(|error| {
@@ -1825,7 +1894,7 @@ fn prepare_fact_neutral_document(
             "fact-neutral incremental graph failed validation: {error}"
         ))
     })?;
-    Ok(Some((previous_for_delta, current, changed_file_node_ids)))
+    Ok(Some((previous_for_delta, current, changed_node_ids)))
 }
 
 /// Keep the byte-preserving JSON delta bounded independently from the graph
@@ -1854,7 +1923,7 @@ fn publish_fact_neutral_incremental(
     empty_files: Vec<PathBuf>,
     previous: Option<&V1GraphDocument>,
     current: &V1GraphDocument,
-    changed_file_node_ids: &BTreeSet<String>,
+    changed_node_ids: &BTreeSet<String>,
     fact_state: &AstFactDigestState,
     timings: &mut BuildTimings,
 ) -> Result<BuildResult, CoreError> {
@@ -1870,7 +1939,8 @@ fn publish_fact_neutral_incremental(
                 "fact-neutral SQLite publication is missing its prior graph".to_owned(),
             )
         })?;
-        let (metrics, seal) = publish_graph_and_store_delta(&output_dir, previous, current)?;
+        let (metrics, seal) =
+            publish_graph_and_store_delta(&output_dir, previous, current, Some(changed_node_ids))?;
         (Some(metrics), Some(seal))
     } else {
         let previous_bytes = read_fact_neutral_delta_source(&graph_path);
@@ -1880,7 +1950,7 @@ fn publish_fact_neutral_incremental(
                 write_fact_neutral_graph_json_delta_prevalidated(
                     bytes,
                     current,
-                    changed_file_node_ids,
+                    changed_node_ids,
                     writer,
                 )
                 .map_err(|source| compass_files::FileError::Io {
@@ -3465,12 +3535,13 @@ fn build_graph_inner_unscoped(
         let published_edges = published.document.links.len();
         let no_cluster_graph_write_started = Instant::now();
         let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
-            let (metrics, seal) =
-                if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
-                    publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
-                } else {
-                    publish_graph_and_store_from_canonical(&output_dir, &published.document)?
-                };
+            let (metrics, seal) = if let Some(previous) =
+                load_graph_delta_base(&output_dir, &published.document)
+            {
+                publish_graph_and_store_delta(&output_dir, &previous, &published.document, None)?
+            } else {
+                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+            };
             (Some(metrics), Some(seal))
         } else {
             let graph_path = output_dir.join("graph.json");
@@ -4021,7 +4092,7 @@ fn build_graph_inner_unscoped(
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let (metrics, seal) =
             if let Some(previous) = load_graph_delta_base(&output_dir, &published_document) {
-                publish_graph_and_store_delta(&output_dir, &previous, &published_document)?
+                publish_graph_and_store_delta(&output_dir, &previous, &published_document, None)?
             } else {
                 publish_graph_and_store_from_canonical(&output_dir, &published_document)?
             };
@@ -4559,7 +4630,9 @@ fn garbage_collect_shared_store(
         .collect::<Vec<_>>();
     let graph_path = staging_directory.join("graph.json");
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
-    if all_references.len() <= 2 && !graph_snapshot_needs_gc(&store, 2)? {
+    if all_references.len() <= 2
+        && !graph_snapshot_needs_gc(&store, SHARED_STORE_GC_MANIFEST_THRESHOLD)?
+    {
         return Ok(GraphSnapshotGcStats::default());
     }
     let stats = garbage_collect_graph_snapshots(
@@ -4738,6 +4811,7 @@ fn publish_graph_and_store_delta(
     output_dir: &Path,
     previous: &V1GraphDocument,
     graph: &V1GraphDocument,
+    changed_node_ids: Option<&BTreeSet<String>>,
 ) -> Result<(StorePublishMetrics, ArtifactSeal), CoreError> {
     if graph.graph.schema != GRAPH_SCHEMA_V1 {
         return Err(CoreError::InvalidBuildState(format!(
@@ -4746,30 +4820,69 @@ fn publish_graph_and_store_delta(
         )));
     }
     let graph_path = output_dir.join("graph.json");
+    let previous_bytes = changed_node_ids.and_then(|_| read_fact_neutral_delta_source(&graph_path));
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
     let builder = GraphSnapshotBuilder::new();
     let (graph_receipt, content) = rayon::join(
         || {
-            write_atomic_with_digest(&graph_path, |writer| {
-                write_canonical_graph_json(graph, writer).map_err(|source| {
-                    compass_files::FileError::Io {
-                        path: graph_path.clone(),
-                        source,
+            let started = Instant::now();
+            let result = write_atomic_with_digest(&graph_path, |writer| {
+                let used_delta = match (previous_bytes.as_deref(), changed_node_ids) {
+                    (Some(bytes), Some(changed)) => {
+                        write_fact_neutral_graph_json_delta_prevalidated(
+                            bytes, graph, changed, writer,
+                        )
+                        .map_err(|source| {
+                            compass_files::FileError::Io {
+                                path: graph_path.clone(),
+                                source,
+                            }
+                        })?
                     }
-                })
-            })
+                    _ => false,
+                };
+                if used_delta {
+                    Ok(())
+                } else {
+                    write_canonical_graph_json(graph, writer).map_err(|source| {
+                        compass_files::FileError::Io {
+                            path: graph_path.clone(),
+                            source,
+                        }
+                    })
+                }
+            });
+            profile_internal_duration("graph JSON delta publication", started.elapsed());
+            result
         },
-        || builder.prepare_graph_delta(&store, previous, graph),
+        || {
+            let started = Instant::now();
+            let result = if let Some(changed) = changed_node_ids {
+                builder.prepare_node_value_delta(&store, previous, graph, changed)
+            } else {
+                builder.prepare_graph_delta(&store, previous, graph)
+            };
+            profile_internal_duration("immutable store graph delta", started.elapsed());
+            result
+        },
     );
     let graph_receipt = graph_receipt?;
     let graph_seal = ArtifactSeal {
         bytes: graph_receipt.bytes,
         sha256: graph_receipt.sha256.clone(),
     };
-    let content = content.or_else(|_| builder.prepare_content(&store, graph))?;
+    let content = match content {
+        Ok(content) => content,
+        Err(error) => {
+            profile_internal_message(&format!("immutable store delta fallback: {error}"));
+            builder.prepare_content(&store, graph)?
+        }
+    };
+    let finish_started = Instant::now();
     let prepared =
         builder.finish_content(&store, content, graph_receipt.sha256, graph_receipt.bytes)?;
     let metrics = finish_store_snapshot(output_dir, &store, &builder, prepared)?;
+    profile_internal_duration("immutable store delta activation", finish_started.elapsed());
     Ok((metrics, graph_seal))
 }
 
@@ -7078,6 +7191,12 @@ fn profile_internal_duration(label: &str, elapsed: Duration) {
     }
 }
 
+fn profile_internal_message(message: &str) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!("[compass internal] {message}");
+    }
+}
+
 fn profile_extraction_inventory(extractions: &[Extraction]) {
     if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_none() {
         return;
@@ -8469,6 +8588,8 @@ mod tests {
             "def main():\n    return 1\n\n# metadata-only edit\n",
         )?;
         let changed = build_local_graph(&options)?;
+        assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
         let after_store = SqliteStore::open(&store_path)?;
         let after_reader = GraphSnapshotReader::open_active(&after_store)?
             .ok_or("changed snapshot is not active")?;
@@ -8624,6 +8745,68 @@ mod tests {
     }
 
     #[test]
+    fn fact_neutral_kotlin_update_refreshes_file_envelope_nodes() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("Main.kt");
+        fs::write(
+            root.join("recovery.py"),
+            "def broken(\n\ndef healthy():\n    return True\n",
+        )?;
+        let initial = "package example\n\nclass Main\n\n// metadata-only tail\n";
+        let changed_source = "package example\n\nclass Main\n";
+        fs::write(&source, initial)?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = true;
+        options.no_viz = true;
+
+        let cold = build_local_graph(&options)?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        assert!(
+            cold_graph
+                .graph
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "parser_recovery")
+        );
+        fs::write(&source, changed_source)?;
+        let changed = build_local_graph(&options)?;
+        assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.files_cached, 1);
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
+        assert!(changed.timings.store_new_objects <= 8);
+
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        assert_eq!(
+            changed_graph.graph.diagnostics,
+            cold_graph.graph.diagnostics
+        );
+        let semantic_identity = |graph: &V1GraphDocument| {
+            graph
+                .nodes
+                .iter()
+                .filter(|node| node.kind != NodeKind::File)
+                .map(|node| (node.id.clone(), node.kind, node.qualified_name.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            semantic_identity(&changed_graph),
+            semantic_identity(&cold_graph)
+        );
+        let package = changed_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Package)
+            .ok_or("Kotlin package node missing")?;
+        assert_eq!(
+            package.source.as_ref().map(|anchor| anchor.end_byte),
+            Some(changed_source.len() as u64)
+        );
+        compass_model::validate_code_graph(&changed_graph)?;
+        Ok(())
+    }
+
+    #[test]
     fn clustered_fact_neutral_incremental_reuses_community_artifacts() -> Result<(), Box<dyn Error>>
     {
         let directory = tempfile::tempdir()?;
@@ -8694,6 +8877,33 @@ mod tests {
         fs::write(&source, changed_source)?;
         let changed =
             engine.extract_source_graph_only(&source, "main.py", changed_source.as_bytes())?;
+        let initial_digest = serde_json::to_value(FactDigestExtraction {
+            extraction: &initial,
+        })?;
+        let changed_digest = serde_json::to_value(FactDigestExtraction {
+            extraction: &changed,
+        })?;
+        assert_eq!(initial_digest, changed_digest);
+        Ok(())
+    }
+
+    #[test]
+    fn fact_digest_ignores_kotlin_file_envelope_edits() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("Main.kt");
+        let initial_source = "package example\n\nimport org.springframework.context.annotation.Configuration\nimport org.springframework.context.annotation.EnableLoadTimeWeaving\n\n@Configuration\n@EnableLoadTimeWeaving\nclass Main\n";
+        let changed_source = "package example\n\nimport org.springframework.context.annotation.Configuration\nimport org.springframework.context.annotation.EnableLoadTimeWeaving\n\n@Configuration\n@EnableLoadTimeWeaving\nclass Main\n\n// metadata-only edit\n";
+        fs::write(&source, initial_source)?;
+        let evidence = Arc::new(ProjectEvidenceIndex::build(
+            directory.path(),
+            std::slice::from_ref(&source),
+        ));
+        let mut engine = Engine::with_project_evidence(evidence);
+        let initial =
+            engine.extract_source_graph_only(&source, "Main.kt", initial_source.as_bytes())?;
+        fs::write(&source, changed_source)?;
+        let changed =
+            engine.extract_source_graph_only(&source, "Main.kt", changed_source.as_bytes())?;
         let initial_digest = serde_json::to_value(FactDigestExtraction {
             extraction: &initial,
         })?;

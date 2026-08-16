@@ -398,7 +398,17 @@ class KotlinController {
 }
 "#;
     let mut engine = Engine::default();
-    let mut extraction = engine.extract_source(Path::new("src/KotlinController.kt"), source)?;
+    let extraction = engine.extract_source(Path::new("src/KotlinController.kt"), source)?;
+    assert!(
+        !extraction.framework_facts.is_empty(),
+        "missing Kotlin universal Spring facts: evidence={:#?}",
+        extraction.semantic_evidence
+    );
+    let sources = HashMap::from([(
+        "src/KotlinController.kt".to_owned(),
+        String::from_utf8(source.to_vec())?,
+    )]);
+    let mut extraction = resolve(&[extraction], &sources);
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
 
@@ -406,7 +416,18 @@ class KotlinController {
         resolved.iter().any(|route| {
             route.route.operation == "GET"
                 && route.route.normalized_path == "/api/users/{id}"
-                && route.route.handler_reference == "KotlinController.show"
+                && route
+                    .route
+                    .detail
+                    .get("target_qualified_name")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("example.KotlinController::show")
+                && route
+                    .route
+                    .detail
+                    .get("frameworkPack")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("spring-kotlin")
                 && route.state == ResolutionState::Exact
         }),
         "routes={resolved:#?}"

@@ -435,6 +435,75 @@ pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPack
     },
 };
 
+pub(super) const SPRING_KOTLIN_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "spring-kotlin",
+    kind: FrameworkPackKind::Source,
+    languages: &["kotlin"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Aliases,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::Beans,
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Scheduling,
+        FrameworkCapability::Persistence,
+        FrameworkCapability::Transactions,
+        FrameworkCapability::Security,
+    ],
+    dependency_markers: &[
+        "org.springframework.boot:spring-boot",
+        "org.springframework:spring-web",
+    ],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "spring-annotation-import",
+        "spring-direct-annotation",
+        "spring-project-dependency",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Annotation,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::Decorates,
+        FrameworkRelation::RoutesTo,
+        FrameworkRelation::Registers,
+        FrameworkRelation::Handles,
+        FrameworkRelation::Publishes,
+        FrameworkRelation::Subscribes,
+        FrameworkRelation::Produces,
+        FrameworkRelation::Consumes,
+        FrameworkRelation::Schedules,
+        FrameworkRelation::Triggers,
+        FrameworkRelation::DependsOn,
+        FrameworkRelation::MapsTo,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 20,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+    },
+};
+
 pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "aspnet-csharp",
     kind: FrameworkPackKind::Source,
@@ -508,4 +577,5 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     ASPNET_CSHARP_DESCRIPTOR,
     PHP_FRAMEWORKS_DESCRIPTOR,
     SPRING_JAVA_DESCRIPTOR,
+    SPRING_KOTLIN_DESCRIPTOR,
 ];
