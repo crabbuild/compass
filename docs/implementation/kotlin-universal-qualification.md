@@ -66,6 +66,16 @@ The candidate expands relation coverage but currently regresses cold, warm,
 and incremental latency. These measurements are evidence for optimization
 work, not a performance claim.
 
+An incremental-publication follow-up on the same 388-file Spring Kotlin corpus
+reduced a one-file trailing-comment restoration to 1.01 seconds with the
+optimized binary. The run extracted one file, reused 387, spent zero reported
+time in graph assembly, wrote zero new immutable objects, and reused 55 store
+objects. The earlier 30.13-second observation exposed two defects now covered
+by regression tests: `update` did not enter the fact-neutral path, and Kotlin
+file/package envelope anchors made harmless EOF edits look semantic. Peak RSS
+was not recaptured in the follow-up, so the original memory evidence remains
+the only recorded comparison.
+
 ## Completion status
 
 Fixture conformance covers exact UTF-8 anchors, deterministic ordering,
