@@ -185,6 +185,42 @@ fn identical_input_is_byte_identical_and_round_trips() -> Result<(), Box<dyn std
 }
 
 #[test]
+fn finding_statement_uses_human_entity_name_without_changing_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut finding = semantic_finding(Confidence::Exact);
+    finding.headline = "symbol:api signature changed".to_owned();
+    let mut semantic = semantic_report(RESULT, vec![finding]);
+    semantic
+        .entity_display_names
+        .insert("symbol:api".to_owned(), "Api::run()".to_owned());
+    let report = analyze(
+        &request(MergeOutcome::Clean {
+            object_id: RESULT.to_owned(),
+        }),
+        &snapshot(BASE),
+        Some(&snapshot(RESULT)),
+        &manifest(Completeness::DownstreamComplete)?,
+        &semantic,
+    )?;
+
+    assert_eq!(report.findings[0].statement, "Api::run() signature changed");
+    assert_eq!(report.findings[0].source_entities, vec!["symbol:api"]);
+    assert_eq!(
+        report.findings[0].fingerprint,
+        clean_report(
+            Completeness::DownstreamComplete,
+            Some(semantic_finding(Confidence::Exact)),
+        )?
+        .findings[0]
+            .fingerprint
+    );
+    let canonical = String::from_utf8(canonical_json_bytes(&report)?)?;
+    assert!(canonical.contains("Api::run() signature changed"));
+    assert!(canonical.contains("\"source_entities\":[\"symbol:api\"]"));
+    Ok(())
+}
+
+#[test]
 fn readiness_is_additive_deterministic_and_conservative_about_tests_and_docs()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut documented_change = semantic_finding(Confidence::Exact);

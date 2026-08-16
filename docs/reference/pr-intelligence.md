@@ -124,6 +124,12 @@ requires the corresponding objects locally. `--output` uses atomic writing.
 Markdown bounds report the exact projection omission count and do not mutate
 the canonical digest.
 
+On a fresh checkout with non-code files and no existing history profile, build
+the target realization explicitly with `compass history build BASE --code-only`
+before running review. This is the local structural path; semantic profiles
+remain explicit and are never silently downgraded. The reusable GitHub Action
+performs this preparation automatically.
+
 Usage errors exit 2. Capture, history, profile, semantic, limit, and output
 errors exit 1. A valid report exits 0 even when advisory risk is critical or a
 deterministic gate reports `fail`; merge policy belongs to the Action or the
@@ -164,7 +170,11 @@ transport `semanticResultDigest`.
 
 - JSON is the canonical report and round-trips through the strict schema.
 - Text and Markdown include exact identity, completeness, factors, gates,
-  findings, witness paths/locations, verification gaps, and omissions.
+  findings, witness paths/locations, verification gaps, and omissions. Finding
+  statements in the canonical JSON and human-facing projections resolve
+  retained entity identities to human-readable names; stable entity identities
+  remain in `source_entities`, `target_entities`, and fingerprints for machine
+  traceability.
 - SARIF 2.1.0 preserves Compass fingerprints in `partialFingerprints` and
   carries the report digest, completeness, advisory result, factors, gates,
   witness evidence, and omissions in typed properties.

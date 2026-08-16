@@ -557,6 +557,9 @@ risk, deterministic gates, canonical omissions, and a content digest.
 Markdown and text expose the same fingerprints and finding count unless an
 explicit Markdown projection budget omits findings. In that case the footer
 states the exact omitted count; the canonical report and digest are unchanged.
+Finding statements and SARIF messages resolve retained entity identities to
+human-readable names. Stable source and target identities remain available in
+the canonical JSON for machine traceability.
 SARIF 2.1.0 stores each Compass fingerprint in `partialFingerprints` and keeps
 report identity, completeness, factors, gates, evidence, and omissions in
 properties. SARIF severity is a presentation hint, not merge policy.

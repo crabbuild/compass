@@ -120,8 +120,15 @@ runs:
           args+=(--fingerprint "$COMPASS_ACTION_FINGERPRINT")
         fi
         set +e
-        compass "${args[@]}" >"$COMPASS_ACTION_LOG.stdout" 2>"$COMPASS_ACTION_LOG"
-        status=$?
+        : >"$COMPASS_ACTION_LOG"
+        compass history build "$COMPASS_ACTION_BASE" --code-only >>"$COMPASS_ACTION_LOG" 2>&1
+        profile_status=$?
+        if [ "$profile_status" -eq 0 ]; then
+          compass "${args[@]}" >"$COMPASS_ACTION_LOG.stdout" 2>>"$COMPASS_ACTION_LOG"
+          status=$?
+        else
+          status=$profile_status
+        fi
         set -e
         if [ "$status" -eq 0 ]; then
           echo "ok=true" >> "$GITHUB_OUTPUT"
