@@ -91,6 +91,24 @@ impl RealizationReader<'_> {
             })
     }
 
+    /// Read the immutable analysis sidecar retained by this realization.
+    pub fn analysis_json(&self) -> Result<Option<serde_json::Value>, HistoryError> {
+        let tree = self.tree(&self.published.version.analysis_root);
+        let key = crate::artifacts::analysis_key(&[b"sidecar", b"analysis.json"]);
+        let Some(bytes) = self.prolly.get(&tree, &key)? else {
+            return Ok(None);
+        };
+        if bytes.len() > crate::MAX_RECORD_VALUE_BYTES {
+            return Err(HistoryError::CorruptHistory(
+                "historical analysis sidecar exceeds byte limit".to_owned(),
+            ));
+        }
+        Ok(Some(crate::artifacts::decode_typed(
+            &bytes,
+            "compass.analysis.sidecar",
+        )?))
+    }
+
     pub fn read(&self, key: HistoryRecordKey<'_>) -> Result<Option<HistoryRecord>, HistoryError> {
         let owned = OwnedHistoryRecordKey::from(key);
         if let Some(value) = self.records.borrow().get(&owned) {

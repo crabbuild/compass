@@ -59,9 +59,10 @@ pub use report::{
     OrientationLearnedQuestion, OrientationNodeReference, OrientationOmissions,
     OrientationPublicationDiagnostic, OrientationQuery, OrientationRisk, OrientationSourceAnchor,
     OrientationWorkMemory, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS, ReportOptions,
-    SectionOmission, TokenCost, WorkingTreeState, agent_orientation, generate_report,
+    SectionOmission, TokenCost, WorkingTreeState, agent_orientation,
+    agent_orientation_with_blind_spots, generate_report, generate_report_with_blind_spots,
     graph_artifact_identity, render_agent_report_markdown, render_orientation_json,
-    render_orientation_markdown, validate_orientation_graph_identity,
+    render_orientation_markdown, validate_blind_spot_report, validate_orientation_graph_identity,
 };
 pub use review::{
     MAX_REVIEW_RENDER_BYTES, RenderedReview, render_readiness_json, render_readiness_markdown,

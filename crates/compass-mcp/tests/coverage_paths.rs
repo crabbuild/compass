@@ -50,14 +50,14 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
 
     let info = server.get_info();
     assert_eq!(info.server_info.name, "compass");
-    assert_eq!(CompassMcp::tools().len(), 16);
+    assert_eq!(CompassMcp::tools().len(), 18);
     assert!(CompassMcp::tools().iter().all(|tool| {
         tool.input_schema
             .get("properties")
             .and_then(Value::as_object)
             .is_some_and(|properties| properties.contains_key("project_path"))
     }));
-    assert_eq!(CompassMcp::resources().len(), 7);
+    assert_eq!(CompassMcp::resources().len(), 8);
 
     assert!(
         server
@@ -218,6 +218,8 @@ fn resources_and_hot_reload_cover_reports_analysis_and_cache_refresh() -> Result
     assert!(server.read("compass://audit")?.contains("Total edges: 3"));
     assert!(!server.read("compass://surprises")?.is_empty());
     assert!(!server.read("compass://questions")?.is_empty());
+    let insights: Value = serde_json::from_str(&server.read("compass://graph-insights")?)?;
+    assert_eq!(insights["schema"], "compass.graph-insights/1");
     assert!(server.read("compass://unknown").is_err());
 
     fs::write(
@@ -296,9 +298,9 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
     let client = ().serve(client_transport).await?;
 
     let tools = client.list_tools(None).await?;
-    assert_eq!(tools.tools.len(), 16);
+    assert_eq!(tools.tools.len(), 18);
     let resources = client.list_resources(None).await?;
-    assert_eq!(resources.resources.len(), 7);
+    assert_eq!(resources.resources.len(), 8);
 
     let call = client
         .call_tool(CallToolRequestParams::new("graph_stats"))

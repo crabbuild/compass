@@ -7,10 +7,11 @@ use compass_core::{
     materialize_history_with_observer,
 };
 use compass_history::{
-    ArtifactClass, BuildProfile, ChangeKind, ChangeSink, ClaimedJob, CommitId,
-    DerivedCacheNamespace, ExtractionFingerprint, GitTargetLimitation, GraphChange, HistoryConfig,
-    HistoryError, HistoryQueue, HistoryStore, JobRequest, JobState, PublishedVersion,
-    RealizationId, RecordKind, Repository, canonical_json_bytes,
+    ArtifactClass, BlindSpotObservation, BuildProfile, ChangeKind, ChangeSink, ClaimedJob,
+    CommitId, DerivedCacheNamespace, ExtractionFingerprint, GitTargetLimitation, GraphChange,
+    HistoryConfig, HistoryError, HistoryQueue, HistoryStore, JobRequest, JobState,
+    PublishedVersion, RealizationId, RecordKind, Repository, canonical_json_bytes,
+    summarize_blind_spots,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -20,8 +21,12 @@ use crate::{Frontend, Outcome};
 
 pub(crate) fn help(_frontend: Frontend) -> String {
     let prefix = "compass";
-    format!(
+    let rendered = format!(
         "Usage: {prefix} history <command>\n\nCommands:\n  enable [build-profile options]\n  disable\n  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  change-counts REV [--parent REV] --format json\n  diff OLD NEW [--root NAME] [--output PATH] --format jsonl\n  status [REV] [--format text|json]\n  verify REV|REALIZATION [--format text|json]\n  build REV [--all [--first-parent]] [build-profile options|--profile-from REV|REALIZATION] [--format text|json]\n  rebuild REV [build-profile options] [--replace-corrupt] [--format text|json]\n  list [REV] [--format text|json]\n  show REALIZATION [--format text|json]\n  prefer REV REALIZATION [--format text|json]\n  export REV --format graph-json|json|compass-out [--community ID] [--node-limit N] --output PATH\n  cache status [--format text|json]\n  cache gc [--max-bytes N] [--max-age-days N] [--yes] [--format text|json]\n  gc [--prune-non-preferred] [--yes] [--format text|json]\n\nExact diff roots:\n  nodes, edges, hyperedges, analysis, metadata, program-facts, program-summaries\n\nBuild options:\n  --all                    Build every commit reachable from REV\n  --first-parent           With --all, build only the first-parent lineage\n\nBuild-profile options:\n  --code-only              Build a complete local AST/inferred realization without model credentials\n  --backend NAME           Build a semantic realization with the selected provider\n  --model NAME             Select the provider model\n  --exclude PATTERN        Exclude a committed path pattern (repeatable)\n  --cargo                   Include Cargo package metadata"
+    );
+    rendered.replace(
+        "  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n",
+        "  timeline [--rev REV] [--limit N [--after CURSOR]] --format json\n  blind-spots [--rev REV] [--limit N] [--format text|json]\n",
     )
 }
 
@@ -472,6 +477,9 @@ fn execute(frontend: Frontend, args: &[String]) -> Result<String, CommandFailure
     }
     if args[0] == "timeline" {
         return execute_timeline(&repository, &args[1..]);
+    }
+    if args[0] == "blind-spots" {
+        return execute_blind_spots(&repository, &args[1..]);
     }
     if args[0] == "change-counts" {
         return execute_change_counts(&repository, &args[1..]);
@@ -1389,6 +1397,132 @@ fn parse_cache_format(args: &[String]) -> Result<&str, CommandFailure> {
     }
 }
 
+fn execute_blind_spots(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
+    let mut revision = "HEAD".to_owned();
+    let mut limit = 200_usize;
+    let mut format = "text";
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--rev" => {
+                index += 1;
+                revision = args
+                    .get(index)
+                    .ok_or_else(|| usage("history blind-spots --rev requires a revision"))?
+                    .clone();
+            }
+            value if value.starts_with("--rev=") => revision = value[6..].to_owned(),
+            "--limit" => {
+                index += 1;
+                limit = args
+                    .get(index)
+                    .ok_or_else(|| usage("history blind-spots --limit requires a value"))?
+                    .parse::<usize>()
+                    .map_err(|_| usage("history blind-spots --limit must be an integer"))?;
+            }
+            value if value.starts_with("--limit=") => {
+                limit = value[8..]
+                    .parse::<usize>()
+                    .map_err(|_| usage("history blind-spots --limit must be an integer"))?;
+            }
+            "--format" => {
+                index += 1;
+                format = args
+                    .get(index)
+                    .ok_or_else(|| usage("history blind-spots --format requires a value"))?;
+            }
+            value if value.starts_with("--format=") => format = &value[9..],
+            value => return Err(usage(format!("unknown history blind-spots option {value}"))),
+        }
+        index += 1;
+    }
+    if !(1..=1_000).contains(&limit) {
+        return Err(usage(
+            "history blind-spots --limit must be between 1 and 1000",
+        ));
+    }
+    if !matches!(format, "text" | "json") {
+        return Err(usage("history blind-spots --format must be text or json"));
+    }
+    let head = repository.resolve(&revision).map_err(runtime)?;
+    let mut commits = repository
+        .reachable_commits(&head, false)
+        .map_err(runtime)?;
+    // Repository::reachable_commits is already parent-before-child order;
+    // trend aggregation needs that chronological direction to classify an ID
+    // as active or resolved correctly.
+    if commits.len() > limit {
+        commits = commits.split_off(commits.len() - limit);
+    }
+    let metadata = repository.timeline_commits(&commits).map_err(runtime)?;
+    let history = HistoryStore::open_existing(repository)
+        .map_err(runtime)?
+        .ok_or_else(|| runtime("history blind-spots requires an existing history store"))?;
+    let versions = history.preferred_many(&commits).map_err(runtime)?;
+    let versions = versions
+        .into_iter()
+        .map(|version| (version.version.git_commit.clone(), version))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut observations = Vec::new();
+    for (commit, metadata) in commits.iter().zip(metadata) {
+        let report = if let Some(version) = versions.get(commit.as_str()) {
+            let reader = history.reader(&version.id).map_err(runtime)?;
+            reader
+                .analysis_json()
+                .map_err(runtime)?
+                .and_then(|analysis| analysis.get("blindSpots").cloned())
+        } else {
+            None
+        };
+        observations.push(BlindSpotObservation {
+            commit: commit.to_string(),
+            authored_at_seconds: metadata.authored_at_seconds,
+            report,
+        });
+    }
+    let trend = summarize_blind_spots(&observations).map_err(runtime)?;
+    if format == "json" {
+        serde_json::to_string(&trend).map_err(runtime)
+    } else {
+        Ok(format_blind_spot_trend(&trend))
+    }
+}
+
+fn format_blind_spot_trend(trend: &compass_history::BlindSpotTrend) -> String {
+    let mut lines = vec![
+        format!(
+            "blind spots: {} observations · {} with graph insights",
+            trend.observation_count, trend.observations_with_graph_insights
+        ),
+        format!(
+            "range: {} -> {}",
+            trend.first_commit.as_deref().unwrap_or("none"),
+            trend.last_commit.as_deref().unwrap_or("none")
+        ),
+        format!("active: {}", trend.active.len()),
+    ];
+    lines.extend(trend.active.iter().map(|item| {
+        format!(
+            "  active {} [{}] · seen {} times · first {}",
+            item.id, item.kind, item.observation_count, item.first_commit
+        )
+    }));
+    lines.push(format!("resolved: {}", trend.resolved.len()));
+    lines.extend(trend.resolved.iter().map(|item| {
+        format!(
+            "  resolved {} [{}] · last {} · seen {} times",
+            item.id, item.kind, item.last_commit, item.observation_count
+        )
+    }));
+    if trend.omissions.items > 0 || trend.omissions.observations_without_graph_insights > 0 {
+        lines.push(format!(
+            "omitted: {} trend items · {} observations without graph insights",
+            trend.omissions.items, trend.omissions.observations_without_graph_insights
+        ));
+    }
+    lines.join("\n")
+}
+
 fn execute_timeline(repository: &Repository, args: &[String]) -> Result<String, CommandFailure> {
     let mut revision = "HEAD".to_owned();
     let mut revision_selected = false;
@@ -2234,6 +2368,7 @@ mod tests {
     #[test]
     fn help_failures_and_common_argument_boundaries_are_total() {
         assert!(help(Frontend::Compass).starts_with("Usage: compass history"));
+        assert!(help(Frontend::Compass).contains("blind-spots [--rev REV]"));
         assert_eq!(command(Frontend::Compass, &[]).code, 0);
         assert_eq!(
             command_worker(Frontend::Compass, &["extra".to_owned()]).code,

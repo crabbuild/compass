@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Preserve anonymous PHP functions and arrow functions as typed callable
+  `closure` nodes, and publish exact PHP trait composition as `mixes_in`
+  instead of collapsing it into `implements`. These additions eliminate
+  closure-induced partial graphs while retaining exact UTF-8 occurrence
+  anchors, deterministic identities, and strict endpoint validation. Also
+  canonicalize file-node names from their portable source paths before
+  coalescing, preventing empty ECMAScript module evidence from colliding with
+  the same detected file identity.
+
+- Publish bounded, typed blind-spot evidence in `analysis.json`,
+  `orientation.json` (`compass.orientation/2`), and MCP
+  `compass://graph-insights`, including stable IDs, witnesses, multiplicity,
+  exact omissions, and explicit limits. Preserve the existing graph edges;
+  structural gaps remain investigative projections rather than inferred
+  relationships.
+
+- Add `compass history blind-spots` to compare persisted graph-insights
+  observations across immutable realizations and report active/resolved
+  structural gaps and disconnected components without treating missing older
+  sidecars as empty graphs.
+
 - Make `compass update` use the fact-neutral incremental path for metadata-only
   source edits, refresh full-file source envelopes without moving exact symbol
   anchors, point-update immutable node values, reuse unchanged graph JSON
@@ -180,7 +201,6 @@
   become noisy graph hubs. Source-proven same-file, same-package, and imported
   declarations retain precedence. Advance extraction semantics to v2 so
   cached graphs rebuild with the denser call topology.
-
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use

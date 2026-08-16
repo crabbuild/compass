@@ -157,9 +157,11 @@ result plus its query-owned `semanticResultDigest`. The digest is computed from
 canonical v1 semantic response bytes; the digest field is outside that result,
 so the v1 payload and its byte/shape contract remain unchanged.
 
-Clustered updates publish `orientation.json` (`compass.orientation/1`) from the
+Clustered updates publish `orientation.json` (`compass.orientation/2`) from the
 same fitted model as `GRAPH_REPORT.md` and include it in the coherent snapshot
-and build state. `compass export orientation-json` and
+and build state. The additive `blindSpots` field carries the versioned,
+bounded graph-insights report with witnesses, exact omission counts, and
+limits. `compass export orientation-json` and
 `compass://orientation` validate that its generation, source/configuration
 identity, commit, graph summary, and exact streamed `graph.json` artifact
 digest match the selected guarded graph. A direct or historical graph without

@@ -15,7 +15,7 @@ GRAPH_SCHEMA = "compass.graph/1"
 NODE_KINDS = (
     "file", "module", "package", "namespace", "class", "struct", "interface",
     "trait", "protocol", "enum", "enum_member", "type_alias", "function",
-    "method", "constructor", "property", "field", "variable", "constant",
+    "method", "constructor", "closure", "property", "field", "variable", "constant",
     "parameter", "import", "export", "macro", "annotation", "route",
     "component", "event", "message", "topic", "queue", "job", "resource",
     "schema", "query", "migration", "config_key", "database",
@@ -24,7 +24,7 @@ NODE_KINDS = (
     "database_trigger",
 )
 EDGE_KINDS = (
-    "contains", "calls", "imports", "exports", "extends", "implements",
+    "contains", "calls", "imports", "exports", "extends", "implements", "mixes_in",
     "references", "type_of", "returns", "instantiates", "overrides",
     "decorates", "routes_to", "reads", "writes", "aliases", "registers",
     "handles", "publishes", "subscribes", "produces", "consumes", "schedules",
@@ -32,7 +32,7 @@ EDGE_KINDS = (
 )
 DETAIL_TYPES = {
     "file": {"file"},
-    "symbol": set(NODE_KINDS[1:24]) | {"migration"},
+    "symbol": set(NODE_KINDS[1:25]) | {"migration"},
     "import_export": {"import", "export"},
     "route": {"route"},
     "component": {"component"},
@@ -42,7 +42,7 @@ DETAIL_TYPES = {
     "schema": {"schema"},
     "query": {"query"},
     "config": {"config_key"},
-    "database": set(NODE_KINDS[36:]),
+    "database": set(NODE_KINDS[37:]),
 }
 TRUSTED_ORIGINS = {"ast", "config", "convention", "artifact"}
 ALL_ORIGINS = TRUSTED_ORIGINS | {"heuristic"}
@@ -60,22 +60,22 @@ KNOWN_PRODUCER = re.compile(
 )
 
 TYPE_KINDS = {"class", "struct", "interface", "trait", "protocol", "enum", "type_alias"}
-CALLABLE = {"function", "method", "constructor", "database_procedure"}
+CALLABLE = {"function", "method", "constructor", "closure", "database_procedure"}
 CONTAINER = {
     "file", "module", "package", "namespace", "class", "struct", "interface",
     "trait", "protocol", "enum", "component", "resource", "schema", "database",
     "database_schema", "database_table", "database_view",
 }
-CONTAINS_FILE_TARGETS = set(NODE_KINDS[1:36]) | {"database"}
-CONTAINS_SCOPE_TARGETS = set(NODE_KINDS[:36])
+CONTAINS_FILE_TARGETS = set(NODE_KINDS[1:37]) | {"database"}
+CONTAINS_SCOPE_TARGETS = set(NODE_KINDS[:37])
 CONTAINS_TYPE_TARGETS = {
     "class", "struct", "interface", "trait", "protocol", "enum", "enum_member",
-    "type_alias", "function", "method", "constructor", "property", "field",
+    "type_alias", "function", "method", "constructor", "closure", "property", "field",
     "variable", "constant", "parameter", "macro", "annotation", "component",
 }
 CONTAINS_CALLABLE_TARGETS = {
     "class", "struct", "interface", "trait", "protocol", "enum", "type_alias",
-    "function", "method", "constructor", "property", "field", "variable",
+    "function", "method", "constructor", "closure", "property", "field", "variable",
     "constant", "parameter",
 }
 EXECUTABLE = CALLABLE | {"component", "job", "query", "database_trigger"}
@@ -379,6 +379,8 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
         return s in TYPE_KINDS and t in TYPE_KINDS
     if kind == "implements":
         return s in TYPE_KINDS and t in {"interface", "trait", "protocol"}
+    if kind == "mixes_in":
+        return s in TYPE_KINDS and t in TYPE_KINDS
     if kind == "type_of":
         return s in VALUE_KINDS and t in TYPE_KINDS | {"parameter"}
     if kind == "returns":

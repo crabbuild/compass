@@ -116,6 +116,37 @@ fn raw_file_node(root: &Path, id: &str, relative: &str) -> RawNodeRecord {
 }
 
 #[test]
+fn file_nodes_canonicalize_extension_preserving_identity_before_coalescing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let detected = raw_file_node(root, "raw:detected", "src/lib.rs");
+    let mut universal = raw_file_node(root, "raw:universal", "src/lib.rs");
+    universal
+        .attributes
+        .insert("label".to_owned(), json!("lib"));
+    universal
+        .attributes
+        .insert("qualified_name".to_owned(), json!("lib"));
+
+    let outcome = normalize_v1_best_effort(
+        Extraction {
+            nodes: vec![detected, universal],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(outcome.omissions.identity_collisions, 0);
+    assert_eq!(outcome.omissions.nodes, 0);
+    assert_eq!(outcome.document.nodes.len(), 1);
+    assert_eq!(outcome.document.nodes[0].kind, NodeKind::File);
+    assert_eq!(outcome.document.nodes[0].name, "lib.rs");
+    assert_eq!(outcome.document.nodes[0].qualified_name, "src/lib.rs");
+    Ok(())
+}
+
+#[test]
 fn node_navigation_extent_preserves_and_contains_exact_provenance()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

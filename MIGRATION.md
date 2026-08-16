@@ -86,6 +86,11 @@ the exact `graph.json` digest. Agent-facing orientation/report exports fail
 explicitly for older, missing, detached, or stale sidecars instead of pairing
 evidence by filename alone.
 
+The orientation contract is now `compass.orientation/2`. Consumers that parse
+`orientation.json` must accept the new schema and may read its optional typed
+`blindSpots` projection; older orientation files should be regenerated with
+`compass update .` rather than edited in place.
+
 ## Select inference breadth explicitly when upgrading
 
 Structural `init`, `update`, `extract`, and `watch` builds now default to

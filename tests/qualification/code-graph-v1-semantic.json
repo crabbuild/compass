@@ -909,7 +909,7 @@
       "id": "node-file",
       "kind": "file",
       "source": "fixtures/code-graph/qualification/MissingReference.csproj",
-      "qualifiedName": "MissingReference.csproj",
+      "qualifiedName": "fixtures/code-graph/qualification/MissingReference.csproj",
       "producer": "compass.languages.project-xml",
       "origins": [
         "ast"
@@ -1390,6 +1390,17 @@
       "detailType": "database"
     },
     {
+      "id": "node-closure",
+      "kind": "closure",
+      "source": "fixtures/code-graph/qualification/rich.php",
+      "qualifiedName": "*",
+      "producer": "compass.languages.php.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
       "id": "node-database_trigger",
       "kind": "database_trigger",
       "source": "fixtures/code-graph/domain/database.sql",
@@ -1463,6 +1474,17 @@
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
       "producer": "compass.resolve.csharp.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-mixes-in",
+      "kind": "mixes_in",
+      "source": "fixtures/code-graph/qualification/rich.php",
+      "qualifiedName": "*",
+      "producer": "compass.resolve.php.universal",
       "origins": [
         "ast"
       ],

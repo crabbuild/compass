@@ -531,6 +531,7 @@ fn details_match_kind(kind: NodeKind, details: Option<&NodeDetails>) -> bool {
                 | NodeKind::EnumMember
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -623,6 +624,7 @@ fn endpoint_kinds_are_valid(
                         | NodeKind::TypeAlias
                 )
         }
+        EdgeKind::MixesIn => source.kind.is_type() && target.kind.is_type(),
         EdgeKind::TypeOf => {
             is_typed_value(source.kind)
                 && (target.kind.is_type() || target.kind == NodeKind::Parameter)
@@ -698,6 +700,7 @@ fn endpoint_kinds_are_valid(
             matches!(
                 source.kind,
                 NodeKind::Function
+                    | NodeKind::Closure
                     | NodeKind::Method
                     | NodeKind::Component
                     | NodeKind::Job
@@ -712,6 +715,7 @@ fn endpoint_kinds_are_valid(
                 && matches!(
                     target.kind,
                     NodeKind::Function
+                        | NodeKind::Closure
                         | NodeKind::Method
                         | NodeKind::Job
                         | NodeKind::Event
@@ -724,7 +728,11 @@ fn endpoint_kinds_are_valid(
         EdgeKind::Tests => {
             matches!(
                 source.kind,
-                NodeKind::File | NodeKind::Function | NodeKind::Method | NodeKind::Class
+                NodeKind::File
+                    | NodeKind::Function
+                    | NodeKind::Closure
+                    | NodeKind::Method
+                    | NodeKind::Class
             ) && source.roles.contains(&NodeRole::Test)
                 && is_test_target(target.kind)
         }
@@ -767,6 +775,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -805,6 +814,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -846,6 +856,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -857,7 +868,11 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Annotation
                 | NodeKind::Component
         ) | (
-            NodeKind::Function | NodeKind::Method | NodeKind::Constructor | NodeKind::TypeAlias,
+            NodeKind::Function
+                | NodeKind::Closure
+                | NodeKind::Method
+                | NodeKind::Constructor
+                | NodeKind::TypeAlias,
             NodeKind::Class
                 | NodeKind::Struct
                 | NodeKind::Interface
@@ -866,6 +881,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property

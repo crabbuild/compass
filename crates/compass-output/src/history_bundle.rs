@@ -5,15 +5,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use compass_files::{write_bytes_atomic, write_json_atomic, write_text_atomic};
 use compass_graph::{
-    Communities, community_member_signatures, god_nodes, suggest_questions, surprising_connections,
+    BlindSpotReport, Communities, blind_spot_report, community_member_signatures, god_nodes,
+    suggest_questions, surprising_connections,
 };
 use compass_model::GraphDocument;
 use serde_json::Value;
 
 use crate::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, HtmlOptions, OrientationHealth, OutputError,
-    PublicationStatus, ReportOptions, TokenCost, TreeOptions, generate_report, write_html,
-    write_tree_html,
+    PublicationStatus, ReportOptions, TokenCost, TreeOptions, generate_report_with_blind_spots,
+    validate_blind_spot_report, write_html, write_tree_html,
 };
 
 pub const SUPPORTED_HISTORY_RENDERER: &str = "compass-output/v1";
@@ -136,7 +137,15 @@ fn render_v1(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), Outpu
             total_words: 0,
             warning: None,
         };
-        let report = generate_report(
+        let blind_spots =
+            if let Some(value) = input.analysis.and_then(|value| value.get("blindSpots")) {
+                let report = serde_json::from_value::<BlindSpotReport>(value.clone())?;
+                validate_blind_spot_report(&report)?;
+                report
+            } else {
+                blind_spot_report(input.document, &communities, &labels)
+            };
+        let report = generate_report_with_blind_spots(
             input.document,
             &communities,
             &BTreeMap::new(),
@@ -151,6 +160,7 @@ fn render_v1(staging: &Path, input: &HistoryBundleInput<'_>) -> Result<(), Outpu
                 &labels,
                 10,
             )),
+            Some(&blind_spots),
             None,
             &options,
         );

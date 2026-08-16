@@ -116,6 +116,11 @@ Relation names depend on the extractor and input type. Common families include:
 Do not assume every relation implies runtime execution. `imports_from` and
 `references` express different kinds of dependency from `calls`.
 
+In the canonical `compass.graph/1` vocabulary, anonymous functions are typed
+callable `closure` nodes. Trait or mixin composition is `mixes_in`; interface
+contract satisfaction remains `implements`. Both retain their exact source
+occurrence rather than being inferred from terminal-name similarity.
+
 Configuration keys preserve their source hierarchy: root keys are contained by
 the file or schema node, and nested keys are contained by their immediate
 parent key. Nested keys may also retain a `references` edge with

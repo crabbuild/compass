@@ -48,6 +48,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::Exports,
     EdgeKind::Extends,
     EdgeKind::Implements,
+    EdgeKind::MixesIn,
     EdgeKind::References,
     EdgeKind::TypeOf,
     EdgeKind::Returns,

@@ -547,6 +547,7 @@ fn declaration_details(source: &CodeQueryResponse) -> CodeQueryResponse {
         EdgeKind::Embeds,
         EdgeKind::Extends,
         EdgeKind::Implements,
+        EdgeKind::MixesIn,
         EdgeKind::TypeOf,
         EdgeKind::Returns,
         EdgeKind::Instantiates,
