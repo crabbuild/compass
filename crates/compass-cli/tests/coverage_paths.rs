@@ -1001,3 +1001,25 @@ fn semantic_provider_failures_are_formatted_after_ast_detection() -> Result<(), 
     );
     Ok(())
 }
+
+#[test]
+fn benchmark_without_matching_sample_questions_is_a_failure() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    write_diagnostic_graph(&graph, 1)?;
+
+    let outcome = invoke_owned(
+        Frontend::Compass,
+        &["benchmark".to_owned(), graph.to_string_lossy().into_owned()],
+    );
+    assert_eq!(outcome.code, 1);
+    assert!(
+        outcome
+            .stderr
+            .contains("Benchmark error: No matching nodes found"),
+        "{}",
+        outcome.stderr
+    );
+    assert!(outcome.stdout.is_empty());
+    Ok(())
+}
