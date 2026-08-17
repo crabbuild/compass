@@ -358,6 +358,14 @@ Advisory risk is never a merge gate. The Action supports only
 `GateResult::Fail` states rather than risk band, score, SARIF level, or prose.
 Its required `compass-version` input must name an exact released version
 containing `compass review`; there is no fallback binary version.
+On a fresh checkout, the Action explicitly materializes the target revision
+with the local `--code-only` history profile before invoking review; it does
+not silently downgrade a configured semantic profile.
+
+PR review finding statements now resolve retained entity identities to
+human-readable names. Stable entity identities remain in the canonical finding
+`source_entities` and `target_entities` fields, so this presentation change
+does not alter finding fingerprints or machine traceability.
 
 This is additive in the `0.3.x` line. Existing `compass prs`, graph, history,
 and MCP contracts are unchanged; `compass diff` gains only the optional typed

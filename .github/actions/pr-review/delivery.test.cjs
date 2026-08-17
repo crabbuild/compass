@@ -377,3 +377,15 @@ test("installer pins release identity, checksum, and archive layout", () => {
   assert.ok(installer.includes("$0 ~ /(^|\\/)\\.\\.(\\/|$)/"));
   assert.doesNotMatch(installer, /releases\/latest/);
 });
+
+test("analysis selects a code-only history profile before review", () => {
+  const action = fs.readFileSync(path.join(__dirname, "../../../action.yml"), "utf8");
+  const analysis = action.match(
+    /- name: Analyze exact candidate without write credentials([\s\S]*?)- name: Render bounded Markdown and SARIF/,
+  )?.[1] ?? "";
+  const profile = analysis.indexOf("compass history build \"$COMPASS_ACTION_BASE\" --code-only");
+  const review = analysis.indexOf('compass "${args[@]}"');
+  assert.ok(profile >= 0, "the action must select an explicit code-only profile");
+  assert.ok(review >= 0, "the action must invoke compass review");
+  assert.ok(profile < review, "the profile must be selected before review materialization");
+});
