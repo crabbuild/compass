@@ -192,6 +192,30 @@ const PAGES: &[Page] = &[
         "Options:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n  --output DIR             New backup directory\n  --from DIR               Backup directory to restore\n  --into DIR               New output directory for a restore\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store status --format json\n  compass store validate compass-out\n  compass store backup compass-out --output /safe/backups/project\n  compass store restore --from /safe/backups/project --into restored-out\n\nNotes:\n  Backup and restore are SQLite local operations. Stop writers before backup; restore only into a new or empty output directory. A stale or corrupt sidecar remains rebuildable with `compass update --force --store sqlite`. The optional redb adapter is library-only and is not selected by this command."
     ),
     page!(
+        "store status",
+        "Inspect graph and SQLite sidecar status",
+        ["compass store status [PATH] [OPTIONS]"],
+        "Arguments:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store status\n  compass store status compass-out --format json"
+    ),
+    page!(
+        "store validate",
+        "Validate graph and SQLite sidecar integrity",
+        ["compass store validate [PATH] [OPTIONS]"],
+        "Arguments:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store validate compass-out\n  compass store validate --format json"
+    ),
+    page!(
+        "store backup",
+        "Create a validated local graph-store backup",
+        ["compass store backup [PATH] --output DIR [OPTIONS]"],
+        "Arguments:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n  --output DIR             New backup directory\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store backup compass-out --output /safe/backups/project\n  compass store backup --output ./backup --format json\n\nNotes:\n  Stop graph writers before taking a backup."
+    ),
+    page!(
+        "store restore",
+        "Restore a validated graph-store backup into a new directory",
+        ["compass store restore --from DIR --into DIR [OPTIONS]"],
+        "Options:\n  --from DIR               Backup directory to restore\n  --into DIR               New or empty output directory\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store restore --from /safe/backups/project --into restored-out\n  compass store restore --from ./backup --into ./restored --format json\n\nNotes:\n  Restore never overwrites an existing output directory."
+    ),
+    page!(
         "extract",
         "Build a graph with optional semantic sources and model enrichment",
         [
@@ -298,6 +322,54 @@ const PAGES: &[Page] = &[
         "Inspect and query canonical Program IR",
         ["compass program <COMMAND> [OPTIONS]"],
         "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  call-graph                 Build a bounded caller/callee graph from --symbol or --at\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
+    ),
+    page!(
+        "program summary",
+        "Show Program IR artifact and evidence counts",
+        ["compass program summary [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program summary\n  compass program summary --format json"
+    ),
+    page!(
+        "program coverage",
+        "Show Program IR capability coverage and reasons",
+        ["compass program coverage [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program coverage --format json"
+    ),
+    page!(
+        "program functions",
+        "List functions from the canonical Program IR",
+        ["compass program functions [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --file <PATH>             Filter by source file\n  --language <LANG>         Filter by language\n  --name <NAME>             Filter by function name\n  --limit <N>               Maximum functions\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program functions\n  compass program functions --language rust --name build --format json"
+    ),
+    page!(
+        "program show",
+        "Show one Program IR function and its evidence",
+        ["compass program show <SYMBOL> [OPTIONS]"],
+        "Arguments:\n  <SYMBOL>                  Function symbol or stable identifier\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program show 0123abcd\n  compass program show 0123abcd --format json"
+    ),
+    page!(
+        "program callers",
+        "List resolved Program IR callers",
+        ["compass program callers <SYMBOL> [OPTIONS]"],
+        "Arguments:\n  <SYMBOL>                  Function symbol or stable identifier\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program callers 0123abcd\n  compass program callers 0123abcd --format json"
+    ),
+    page!(
+        "program explain-call",
+        "Explain Program IR calls at an exact source byte",
+        ["compass program explain-call <FILE:BYTE> [OPTIONS]"],
+        "Arguments:\n  <FILE:BYTE>               Repository-relative file and byte offset\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program explain-call src/lib.rs:240\n  compass program explain-call src/lib.rs:240 --format json"
+    ),
+    page!(
+        "program call-graph",
+        "Build a bounded Program IR caller/callee graph",
+        ["compass program call-graph [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --graph <PATH>            Optional structural graph for enrichment\n  --symbol <SYMBOL>         Start from a function symbol\n  --at <FILE:BYTE>          Start from an exact source byte\n  --direction <callers|callees|both> Traversal direction [default: both]\n  --depth <N>               Traversal depth [default: 2]\n  --max-nodes <N>           Maximum returned nodes [default: 250]\n  --max-edges <N>           Maximum returned edges [default: 500]\n  --format json             Required machine-readable output\n\nExamples:\n  compass program call-graph --symbol 0123abcd --format json\n  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json"
+    ),
+    page!(
+        "program query",
+        "Query the read-only Program IR graph projection",
+        ["compass program query <COMPASSQL> [OPTIONS]"],
+        "Arguments:\n  <COMPASSQL>               CompassQL query\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --file <PATH>             Read CompassQL from a file\n  --stdin                   Read CompassQL from standard input\n  --param <NAME=VALUE>      Bind a parameter; repeatable\n  --params-file <PATH>      Read parameters from JSON\n  --format <table|json|jsonl> Result format [default: table]\n  --output <PATH>           Write results to a file\n  --timeout-ms <N>          Query timeout\n  --max-rows <N>            Row limit [default: 10000]\n  --max-path-depth <N>      Path-depth limit [default: 32]\n  --max-expanded-relationships <N> Relationship expansion limit\n  --max-memory-bytes <N>   Query memory limit [default: 268435456]\n\nExamples:\n  compass program query \"MATCH (f) RETURN f LIMIT 10\"\n  compass program query \"MATCH (f) RETURN f LIMIT 10\" --format json\n\nNotes:\n  Program queries are offline and read-only. --graph, --at, and --repl are not supported."
     ),
     page!(
         "path",
@@ -414,6 +486,24 @@ const PAGES: &[Page] = &[
         "Options:\n  --prune-non-preferred    Include alternate realizations in the plan\n  --yes                    Apply non-preferred pruning; requires --prune-non-preferred\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history gc\n  compass history gc --prune-non-preferred\n  compass history gc --prune-non-preferred --yes\n\nNotes:\n  Non-preferred pruning is a dry run until repeated with --yes."
     ),
     page!(
+        "history cache",
+        "Inspect or reclaim derived history cache artifacts",
+        ["compass history cache <status|gc> [OPTIONS]"],
+        "Commands:\n  status                    Show cache file and byte counts\n  gc                        Inspect or apply bounded cache cleanup\n\nExamples:\n  compass history cache status\n  compass history cache status --format json\n  compass history cache gc --max-bytes 100000000\n\nNotes:\n  Cache cleanup never changes immutable history realizations."
+    ),
+    page!(
+        "history cache status",
+        "Show derived history cache file and byte counts",
+        ["compass history cache status [OPTIONS]"],
+        "Options:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history cache status\n  compass history cache status --format json"
+    ),
+    page!(
+        "history cache gc",
+        "Inspect or reclaim derived history cache artifacts",
+        ["compass history cache gc [OPTIONS]"],
+        "Options:\n  --max-bytes <N>          Retain at most this many bytes\n  --max-age-days <N>       Remove entries older than this age\n  --yes                    Apply the cleanup plan\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history cache gc\n  compass history cache gc --max-bytes 100000000 --yes\n\nNotes:\n  Without --yes, cleanup is a dry run."
+    ),
+    page!(
         "diff",
         "Review semantic changes between two Git revisions",
         ["compass diff <OLD> <NEW> [OPTIONS]"],
@@ -438,6 +528,24 @@ const PAGES: &[Page] = &[
         "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum overview or detail nodes [default: 5000]\n  --community <ID>        Export one complete community detail\n\nExamples:\n  compass export json\n  compass export json --community 7\n\nNotes:\n  The payload schema is compass.viewer.graph/1. viewer-json remains a deprecated compatibility alias."
     ),
     page!(
+        "export viewer-json",
+        "Export the graph presentation model using the compatibility alias",
+        ["compass export viewer-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum overview or detail nodes [default: 5000]\n  --community <ID>        Export one complete community detail\n\nExamples:\n  compass export viewer-json\n  compass export viewer-json --community 7\n\nNotes:\n  `viewer-json` is a deprecated compatibility alias for `export json`."
+    ),
+    page!(
+        "export workbench-json",
+        "Export the multi-view graph workbench contract",
+        ["compass export workbench-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum nodes rendered [default: 5000]\n  --view <SPEC>           Repeatable workbench view specification\n  --direction <callers|callees|both> Call-view direction\n  --depth <N>              View traversal depth\n  --max-nodes <N>          View node bound\n  --max-edges <N>          View edge bound\n  --relation <RELATION>    Repeatable affected-view relation\n  --include-heuristic     Include heuristic impact evidence\n  --program <PATH>         Program IR enrichment for call views\n\nExamples:\n  compass export workbench-json\n  compass export workbench-json --view code --view architecture\n\nNotes:\n  Views are emitted in request order as compass.viewer.workbench/1."
+    ),
+    page!(
+        "export orientation-json",
+        "Export the atomically published Agent Orientation",
+        ["compass export orientation-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n\nExamples:\n  compass export orientation-json\n  compass export orientation-json --graph compass-out/graph.json\n\nNotes:\n  The orientation is accepted only when its generation, graph digest, and publication metadata match the selected graph."
+    ),
+    page!(
         "export html",
         "Generate the interactive graph HTML report",
         ["compass export html [OPTIONS]"],
@@ -448,6 +556,12 @@ const PAGES: &[Page] = &[
         "Generate a sectioned call-flow report",
         ["compass export callflow-html [GRAPH_OR_DIR] [OPTIONS]"],
         "Arguments:\n  [GRAPH_OR_DIR]               Graph JSON or project/output directory\n\nOptions:\n  --graph <PATH>               Graph JSON\n  --labels <PATH>              Community-label JSON\n  --report <PATH>              GRAPH_REPORT.md path\n  --sections <PATH>            JSON section definitions\n  --output <HTML>              Output page\n  --lang <LANG>                Report language [default: auto]\n  --max-sections <N>           Maximum derived sections [default: 15]\n  --diagram-scale <NUMBER>     Mermaid scale [default: 1.0]\n  --max-diagram-nodes <N>      Nodes per diagram [default: 18]\n  --max-diagram-edges <N>      Edges per diagram [default: 24]\n\nExamples:\n  compass export callflow-html\n  compass export callflow-html ./compass-out --lang en --max-sections 10\n\nNotes:\n  Interactive terminals ask before opening the generated HTML; scripts never prompt or open a browser."
+    ),
+    page!(
+        "export callflow-json",
+        "Export the structured call-flow report",
+        ["compass export callflow-json [GRAPH_OR_DIR] [OPTIONS]"],
+        "Arguments:\n  [GRAPH_OR_DIR]               Graph JSON or project/output directory\n\nOptions:\n  --graph <PATH>               Graph JSON\n  --labels <PATH>              Community-label JSON\n  --report <PATH>              GRAPH_REPORT.md path\n  --sections <PATH>            JSON section definitions\n  --output <PATH>              Atomically write the JSON document\n  --lang <LANG>                Report language [default: auto]\n  --max-sections <N>           Maximum derived sections [default: 15]\n  --diagram-scale <NUMBER>     Mermaid scale [default: 1.0]\n  --max-diagram-nodes <N>      Nodes per diagram [default: 18]\n  --max-diagram-edges <N>      Edges per diagram [default: 24]\n\nExamples:\n  compass export callflow-json\n  compass export callflow-json --graph compass-out/graph.json --output callflow.json\n\nNotes:\n  The JSON output is the machine-readable counterpart to callflow-html."
     ),
     page!(
         "export obsidian",

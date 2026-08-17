@@ -546,5 +546,27 @@ fn callflow_json_exposes_the_shared_architecture_model() -> Result<(), Box<dyn E
             .as_array()
             .is_some_and(|sections| sections.len() >= 2)
     );
+
+    let output_path = directory.path().join("callflow.json");
+    let written = support::compass_command()
+        .args([
+            "export",
+            "callflow-json",
+            "--graph",
+            graph.to_string_lossy().as_ref(),
+            "--output",
+            output_path.to_string_lossy().as_ref(),
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        written.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&written.stderr)
+    );
+    assert!(String::from_utf8_lossy(&written.stdout).contains("Call-flow JSON written:"));
+    let written_value: Value = serde_json::from_slice(&std::fs::read(&output_path)?)?;
+    assert_eq!(written_value["schema"], "compass.viewer.callflow/1");
     Ok(())
 }

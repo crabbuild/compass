@@ -53,6 +53,7 @@ use compass_core::{
 };
 use compass_files::{
     BuildScope, DetectOptions, Detection, Manifest, ManifestKind, ProjectConfig, detect,
+    write_text_atomic,
 };
 use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
@@ -1581,10 +1582,11 @@ fn command_benchmark(args: &[String]) -> Outcome {
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .and_then(|value| value.get("total_words").and_then(serde_json::Value::as_u64))
         .and_then(|value| usize::try_from(value).ok());
-    Outcome::success(format_benchmark(
-        &run_benchmark(&document, corpus_words, None),
-        true,
-    ))
+    let result = run_benchmark(&document, corpus_words, None);
+    if result.error.is_some() {
+        return Outcome::failure(format_benchmark(&result, true));
+    }
+    Outcome::success(format_benchmark(&result, true))
 }
 
 fn command_build(frontend: Frontend, args: &[String], operation: BuildOperation) -> Outcome {
@@ -2996,6 +2998,7 @@ fn validate_export_options(
             "--labels",
             "--report",
             "--sections",
+            "--output",
             "--lang",
             "--max-sections",
             "--diagram-scale",
@@ -3721,7 +3724,17 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             max_diagram_nodes,
             max_diagram_edges,
         )
-        .map(ExportOutput::text),
+        .and_then(|json| {
+            if let Some(path) = output_path.clone() {
+                write_text_atomic(&path, &json)
+                    .map_err(|error| error.to_string())
+                    .map(|()| {
+                        ExportOutput::text(format!("Call-flow JSON written: {}", path.display()))
+                    })
+            } else {
+                Ok(ExportOutput::text(json))
+            }
+        }),
         "svg" => write_svg(
             &inputs.document,
             &inputs.communities,
@@ -4566,7 +4579,7 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
+    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output JSON]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
 }
 
 fn export_workbench_help(format: &str) -> String {
