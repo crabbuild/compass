@@ -152,11 +152,10 @@ file and publishes a file-only delta in 9.2387 s, and restore is byte-identical.
 On the full Rails checkout, the five-warm-sample report records a 267.941 s
 cold graph, a 2.9616 s unchanged-warm median, a 165.412 s fact-neutral edit,
 a 249.001 s semantic edit, and a 239.309 s restore with an exact cold hash
-match. The pinned Discourse Ruby-only run also restores byte-for-byte (cold
-205.703 s, warm 3.136 s, fact-neutral 143.805 s, semantic 220.642 s, restore
-228.594 s). RuboCop has five warm samples in the checked-in performance
-baseline; the Discourse report is a one-warm-sample large-corpus
-qualification. RSS remains non-blocking. Ruby therefore remains
+match. The pinned Discourse Ruby-only five-warm-sample run also restores
+byte-for-byte (cold 211.296 s, warm median 3.017 s with samples from 2.996–3.214
+s, fact-neutral 145.529 s, semantic 226.129 s, restore 226.958 s). RSS remains
+non-blocking. Ruby therefore remains
 `UniversalCandidate`.
 
 The fact-neutral delta also preserves unchanged files' extraction status,

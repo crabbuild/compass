@@ -89,13 +89,13 @@
     {
       "corpus": "discourse",
       "projection": "ruby-only",
-      "samples": 1,
-      "coldSeconds": 205.703310,
-      "warmSeconds": [3.136274],
-      "warmMedianSeconds": 3.136274,
-      "factNeutralSeconds": 143.804669,
-      "semanticSeconds": 220.642271,
-      "restoreSeconds": 228.593883,
+      "samples": 5,
+      "coldSeconds": 211.296212,
+      "warmSeconds": [3.047000, 2.996497, 3.214150, 3.014156, 3.017186],
+      "warmMedianSeconds": 3.017186,
+      "factNeutralSeconds": 145.529095,
+      "semanticSeconds": 226.129381,
+      "restoreSeconds": 226.958164,
       "changedFiles": 1,
       "reusedFiles": 10922,
       "graphSha256": "d4aec2370cf4bb78b30c312a7422873f64499849e45ff1695652f1d50bb72f98",
@@ -104,7 +104,6 @@
   ],
   "limitations": [
     "Discourse and RuboCop graph projections exclude non-Ruby files because their full mixed-language trees exceed the bounded Markdown parser resource envelope.",
-    "The large Discourse performance report currently records one warm sample; Rails and RuboCop have five-sample warm distributions.",
     "The quality audit now passes the fixed precision/recall thresholds, but Ruby remains a UniversalCandidate until a separate promotion decision is made."
   ]
 }
