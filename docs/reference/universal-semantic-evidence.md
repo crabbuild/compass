@@ -664,7 +664,7 @@ python3 benchmarks/performance/harness.py audit \
   --corpus path/to/pinned/corpus
 ```
 
-The manifest schema is `compass.quality-audit`. It records pinned corpus
+The manifest schema is `compass.quality-audit/2`. It records pinned corpus
 commits and graph hashes, exact source-oracle provider identities and inventory
 digests, advertised producer/framework capabilities, required relations, and
 records from three independent pools:
@@ -675,7 +675,7 @@ records from three independent pools:
 - `graphify_hypothesis` classifies Graphify-only facts without treating them
   as truth.
 
-Each record includes corpus, adapter, optional framework pack, capability,
+Each record includes corpus, producer, optional framework pack, capability,
 language, relation, confidence, target cluster, source and target
 expectations, exact occurrence range, normalized snippet SHA-256, judgment,
 and reason. `represented_elsewhere` also names the actual graph fact.

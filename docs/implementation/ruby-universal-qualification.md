@@ -3,7 +3,7 @@
 Plan 019 is implemented through a single Ruby evidence path and is currently
 kept at `Qualifying`. The producer identity is
 `compass.ruby` (producer version 1, evidence schema v2); the complete quality
-audit has not been claimed or used to promote the profile.
+audit has not been claimed or used to promote the pipeline to `Qualified`.
 
 ## Production contract
 
@@ -104,7 +104,7 @@ Ruby and Rails tests in that suite pass.
 
 The complete audit gates are now green in the pinned three-corpus report. Ruby
 is still intentionally `Qualifying`; passing qualification does not
-automatically promote a language profile.
+automatically promote a language pipeline.
 
 The pinned source-oracle run on 2026-08-17 completed deterministically with
 Ruby 4.0.6 / revision `03b6d3f8898a28604fe6cb00eae3226b821168f4`:

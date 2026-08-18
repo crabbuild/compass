@@ -22,7 +22,10 @@ extraction semantics identity is `compass.languages.extraction/3`. The envelope
 field is `pipeline` (with `qualification` and `emitter` metadata), replacing
 the provisional `adapter`/`profile`/`producer` shape. Compass intentionally
 does not translate or reuse pre-refactor universal evidence; run a forced
-update to regenerate one coherent artifact set.
+update to regenerate one coherent artifact set. Qualification manifests,
+candidate exports, and TypeScript scorecards likewise require their `/2`
+schemas and use `producer` for the language evidence identity; regenerate
+those audit inputs rather than trying to load the old field names.
 
 ## Install Compass
 

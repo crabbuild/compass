@@ -30,11 +30,11 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established extractors, and universal evidence schema version 2 (extraction semantics version 3) |
-| Available now | C#, Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are entries in the hard-cut `UniversalEvidenceRegistry`; each entry pairs a `UniversalEvidenceProducer` with a `UniversalEvidenceQualification` state |
+| Available now | C#, PHP, Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are entries in the hard-cut `UniversalEvidenceRegistry`; each entry pairs a `UniversalEvidenceProducer` with a `UniversalEvidenceQualification` state |
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; C#, PHP, Kotlin, Ruby, and the ECMAScript family use dedicated source-grounded producers, while TypeScript and JavaScript retain distinct producer identities |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust has passed Phase 2 qualification; C#, Java, Kotlin, Ruby, TypeScript, and JavaScript remain `Qualifying` while their independent audit gates run |
-| Planned | `GrammarProvider`, grammar provenance, and producer-registry validation |
+| Available now | Rust has passed its Phase 2 quality audit; all registered pipelines remain explicitly `Qualifying` until their complete independent audit gates promote them |
+| Planned | `GrammarProvider` and grammar provenance |
 | Planned | Independently qualified hard cuts for the remaining registered languages |
 
 Do not treat a planned interface as a shipped public API until its implementation and qualification commits land.
@@ -121,7 +121,9 @@ struct UniversalEvidencePipeline {
 }
 ```
 
-This shape is illustrative until the planned registry work lands. The implementation may use equivalent focused types.
+This is the shipped registry contract. Language-specific emitters are wired to
+the selected pipeline in the same change that registers the language and
+removes its replaced publisher or resolver path.
 
 Registry validation enforces:
 

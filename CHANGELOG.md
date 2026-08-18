@@ -9,6 +9,8 @@
   with `qualification`, and replaces the producer string with `emitter`.
   Universal evidence schema is now `/2` and extraction semantics is `/3`, so
   pre-refactor caches and evidence artifacts are intentionally rebuilt.
+  Qualification manifests, candidate exports, and TypeScript scorecards now
+  use version-2 schemas and call their language identity `producer`.
 
 - Hard-cut Ruby extraction to the version-1 `compass.ruby` universal
   evidence publisher and replace the Rails source detector with the

@@ -89,11 +89,11 @@ closed:
   `customConditions`; excluded or ambiguous admitted files remain unresolved.
   Package condition selection consumes the selected project's custom condition
   order rather than applying a repository-wide guess.
-- A qualification-only direct universal-evidence emitter now exists for the
+- A qualification-only direct universal-evidence producer now exists for the
   ECMAScript family. It emits source-grounded declarations, lexical scopes,
   value/type namespaces, imports/reexports, calls/constructors, base-type
   candidates, member access, decorators, JSX references, dynamic literal
-  imports, and CommonJS exports. Adapter identity preserves parser dialect
+  imports, and CommonJS exports. Pipeline identity preserves parser dialect
   (`ts`, `tsx`, `js`, `jsx`, `mts`, `cts`, and related extensions) separately
   from semantic language.
 - Regression coverage now includes same-directory config inheritance and
@@ -119,7 +119,7 @@ The following Phase 1/2 contract slice is now source-grounded and validated:
 
 - Universal evidence has an optional `SymbolNamespace` field on declarations
   and bindings (`value`, `type`, `namespace`, `value_and_type`). Existing
-  adapters continue to omit it, and their stable IDs remain byte-for-byte
+  established producers continue to omit it, and their stable IDs remain byte-for-byte
   compatible because the identity component is included only when explicitly
   emitted.
 - Import and re-export bindings can carry `type_only`; validation rejects the
@@ -689,7 +689,7 @@ checker as Compass runtime behavior:
   capability, and is bounded to 128 MiB. Normal native tests and builds do not
   write it.
 - `benchmarks/performance/compass/typescript_scorecard.py` validates the
-  reviewed `compass.typescript-target-scorecard/1` contract. Every record must
+  reviewed `compass.typescript-target-scorecard/2` contract. Every record must
   have an explicit `accepted`/`source_oracle` pool, a manually entered
   `judgmentSource: "manual"`, and a judgment (with a review reason for every
   non-correct label); missing labels, unsafe paths, duplicate or unsorted IDs,
@@ -1108,8 +1108,8 @@ suite is now 158 tests, including one positive imported-overload fixture and
 one ambiguity/mismatch/unknown negative fixture. Conditional/mapped modifier
 semantics, richer overload-aware generic substitution, alias escape/eval/proxy
 flow, framework/compiler tiers, accepted precision/Wilson gates, equivalent
-Graphify/SCIP scope, and the production hard cut remain open. The candidate
-adapter remains absent from `UNIVERSAL_EVIDENCE_PIPELINES`. Fixture qualification stays
+Graphify/SCIP scope, and the production hard cut remain open. The qualifying
+pipeline remains absent from `UNIVERSAL_EVIDENCE_PIPELINES`. Fixture qualification stays
 byte-stable at Compass revision `24f937360cc80d6b62b633f2fdd2a367eb6529c3`,
 with 57 languages, 980 coverage records, 1,565 invariants, 27 flows, and
 graph digest `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
@@ -1708,7 +1708,7 @@ Spread-free ES default object literals now publish a source-backed `default`
 value owner and retain their exact property declarations beneath the stable
 `<module>.default` qualified identity. Cross-file default imports can therefore
 resolve `value.member()` and `value.member` to the provider property or method
-declaration. The adapter emits an explicit default reexport binding for the
+declaration. The producer emits an explicit default reexport binding for the
 synthetic owner. Default objects containing spreads remain outside this path;
 their member resolution stays unresolved/external rather than assuming that a
 listed property survives an override. The candidate and resolver tests cover
@@ -1859,7 +1859,7 @@ equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
 The qualification-only CommonJS path now carries the same bounded owner
 contract as safe ES default/export-assignment objects. For
-`module.exports = { ...base, direct }`, the adapter emits the module's exact
+`module.exports = { ...base, direct }`, the producer emits the module's exact
 default reexport, a source-range-backed `Member("*")` alias for each proven
 local or static default-import object source, and ordinary named reexports for
 direct properties after the spread. The resolver treats the module declaration
@@ -1883,7 +1883,7 @@ kinds. The graph digest remains
 `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
 with 82 exact and 11 unresolved route resolutions; clean, warm, rebuild,
 restored, alternate-checkout, and source-fixture byte comparisons all pass.
-The unchanged digest is expected because this qualification-only adapter is
+The unchanged digest is expected because this qualification-only producer is
 not registered in production. The independent Axios diagnostic is unchanged
 at 3,054/3,167 exact local targets (113 missing, 0 wrong; 391/503 members,
 1,544/1,545 calls, and 228 accepted-candidate false positives); it is not a
@@ -1922,7 +1922,7 @@ diagnostics, 28 edge kinds, and 45 node kinds. The graph digest remains
 `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
 with 82 exact and 11 unresolved route resolutions; clean, warm, rebuild,
 restored, alternate-checkout, and source-fixture byte comparisons all pass.
-The unchanged digest is expected because the qualification-only adapter is not
+The unchanged digest is expected because the qualification-only producer is not
 registered in production. This remains correctness evidence, not a leadership
 claim.
 
@@ -1945,7 +1945,7 @@ resolver coverage now includes positive source inheritance, direct override,
 mutating `exports`, and unknown-source negatives; the focused suites are 102
 candidate tests and 176 universal resolver tests.
 
-Exact fixture qualification remains unchanged because this adapter is still
+Exact fixture qualification remains unchanged because this producer is still
 qualification-only and is not registered in production: 57 languages, 980
 coverage records, 1,565 invariants, 27 flows, 24 negatives, 25 diagnostics,
 28 edge kinds, 45 node kinds, graph digest
@@ -1981,7 +1981,7 @@ The CommonJS bridge now recognizes the source-proven barrel form
 contains the bounded TypeScript/Babel export-star guard shape or its binding
 comes from `tslib`; the require argument must be a static string and the
 destination must be the unshadowed `exports` or `module.exports` object. The
-adapter emits a source-range-backed `Member("*")` owner alias rather than
+producer emits a source-range-backed `Member("*")` owner alias rather than
 inventing one binding per unknown property.
 
 The shared resolver projects both named imports/destructured `require()`
@@ -1991,7 +1991,7 @@ arguments, wrong destinations, lookalike helpers, and unresolved source
 members remain unresolved. Candidate and resolver coverage now includes local
 and `tslib` helpers plus all negative forms; the focused suites are 104
 candidate tests and 178 universal resolver tests. Exact fixture qualification
-remains unchanged because the adapter is still qualification-only: 57
+remains unchanged because the producer is still qualification-only: 57
 languages, 980 coverage records, 1,565 invariants, 27 flows, 24 negatives,
 25 diagnostics, 28 edge kinds, 45 node kinds, graph digest
 `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
@@ -2021,7 +2021,7 @@ calls instead of treating the template body as an ordinary argument list:
   or oversized template cannot create an unbounded argument vector.
 
 Candidate and resolver coverage now stand at 105 and 179 focused tests. This
-remains qualification-only; the adapter is still not registered in
+remains qualification-only; the producer is still not registered in
 `UNIVERSAL_EVIDENCE_PIPELINES`, and compiler differential, framework, competitor, and
 production hard-cut gates remain open.
 
@@ -2147,7 +2147,7 @@ current mapping. The current implementation also has architectural ceilings:
 
 - TypeScript, TSX, and JavaScript still use the established direct extraction
   path in `crates/compass-languages/src/engine.rs`; only Go, Java, Python, and
-  Rust have registered universal evidence adapters.
+  Rust have registered universal evidence pipelines.
 - TypeScript parsing still uses byte-preserving masks for grammar gaps such as
   variance, `export type *`, and import-type syntax.
 - project evidence now accepts bounded JSONC and records alias markers, while
@@ -2209,7 +2209,7 @@ strata, require:
 
 - at least 2,000 independently accepted sampled relationships;
 - at least 400 accepted relationships per release-gate corpus;
-- at least 100 accepted relationships for each required relation and adapter
+- at least 100 accepted relationships for each required relation and producer
   capability;
 - no target cluster larger than 10% of accepted samples;
 - observed precision at least 99.5% and a 95% Wilson lower bound at least 99%;
@@ -2550,7 +2550,7 @@ the test-only universal path without duplicating config semantics.
 `crates/compass-languages/src/evidence/build.rs` currently dispatches direct
 universal extraction only for Python, Go, Java, and Rust. The TypeScript/JS
 extractor must emit typed evidence directly from the parser tree; translating
-legacy raw graph records is not an acceptable adapter.
+legacy raw graph records is not an acceptable producer.
 
 ### Actions
 
@@ -2582,7 +2582,7 @@ legacy raw graph records is not an acceptable adapter.
 5. Emit parser-recovery diagnostics with exact affected ranges and evidence
    completeness. Never publish a construct outside a source-backed range just
    because the root parser recovered.
-6. Expose the adapter only to focused tests/qualification at this phase. Do not
+6. Expose the producer only to focused tests/qualification at this phase. Do not
    add it to `UNIVERSAL_EVIDENCE_PIPELINES` yet.
 
 ### Verification
@@ -3017,7 +3017,7 @@ Stop and report rather than weakening the design if:
 
 ## Maintenance notes
 
-- Adapter, project-model, evidence, cache, and qualification versions are
+- Producer, project-model, evidence, cache, and qualification versions are
   contracts. Bump the narrowest version when meaning changes and reject unknown
   majors explicitly.
 - Keep historical corpus realizations and published scorecards immutable. Add a

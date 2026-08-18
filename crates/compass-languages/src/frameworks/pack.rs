@@ -323,14 +323,14 @@ fn validate_descriptor(
         }
     }
     for &language in descriptor.languages {
-        let Some(profile) = UniversalEvidenceRegistry::pipeline(language) else {
+        let Some(pipeline) = UniversalEvidenceRegistry::pipeline(language) else {
             return Err(FrameworkPackRegistryError::NonUniversalLanguage {
                 pack: descriptor.id,
                 language,
             });
         };
         for &capability in descriptor.required_capabilities {
-            if !profile.producer.capabilities.contains(&capability) {
+            if !pipeline.producer.capabilities.contains(&capability) {
                 return Err(FrameworkPackRegistryError::UnsupportedCapability {
                     pack: descriptor.id,
                     language,

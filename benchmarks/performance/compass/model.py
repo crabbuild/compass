@@ -220,7 +220,7 @@ class AuditGraphFact:
 
 @dataclass(frozen=True)
 class AuditCapabilityIdentity:
-    adapter: str
+    producer: str
     capability: str
     framework_pack: str | None = None
 
@@ -228,7 +228,7 @@ class AuditCapabilityIdentity:
 @dataclass(frozen=True)
 class AuditSourceOracle:
     corpus: str
-    adapter: str
+    producer: str
     provider: str
     scanned_files: int
     parsed_files: int
@@ -240,7 +240,7 @@ class AuditRecord:
     record_id: str
     corpus: str
     pool: str
-    adapter: str
+    producer: str
     framework_pack: str | None
     capability: str
     language: str

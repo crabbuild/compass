@@ -35,8 +35,8 @@ from .audit import (
 )
 
 
-SCORECARD_SCHEMA = "compass.typescript-target-scorecard/1"
-RESULT_SCHEMA = "compass.typescript-target-scorecard-result/1"
+SCORECARD_SCHEMA = "compass.typescript-target-scorecard/2"
+RESULT_SCHEMA = "compass.typescript-target-scorecard-result/2"
 PROVIDER = "typescript_checker_api_5_9_3"
 MIN_RELEASE_CORPORA = 4
 LEADERSHIP_PRECISION_GATE = 0.997
@@ -75,7 +75,7 @@ class TypeScriptScorecardError(ValueError):
 class ScorecardRecord:
     record_id: str
     corpus: str
-    adapter: str
+    producer: str
     framework_pack: str | None
     language: str
     capability: str
@@ -155,7 +155,7 @@ def _record(value: object, index: int) -> ScorecardRecord:
     required = {
         "id",
         "corpus",
-        "adapter",
+        "producer",
         "language",
         "capability",
         "relation",
@@ -228,7 +228,7 @@ def _record(value: object, index: int) -> ScorecardRecord:
     return ScorecardRecord(
         record_id=_text(item["id"], f"{context}.id", identity=True),
         corpus=_text(item["corpus"], f"{context}.corpus", identity=True),
-        adapter=_text(item["adapter"], f"{context}.adapter", identity=True),
+        producer=_text(item["producer"], f"{context}.producer", identity=True),
         framework_pack=(
             _text(item["frameworkPack"], f"{context}.frameworkPack", identity=True)
             if item.get("frameworkPack") is not None
@@ -265,14 +265,14 @@ def _corpus(value: object, index: int) -> tuple[str, str]:
 def _capability(value: object, index: int) -> tuple[str, str, str | None]:
     context = f"advertisedCapabilities[{index}]"
     item = _object(value, context)
-    allowed = {"adapter", "capability", "frameworkPack"}
-    if set(item) - allowed or not {"adapter", "capability"} <= set(item):
+    allowed = {"producer", "capability", "frameworkPack"}
+    if set(item) - allowed or not {"producer", "capability"} <= set(item):
         raise TypeScriptScorecardError(
-            f"{context} must contain adapter, capability, and optional frameworkPack"
+            f"{context} must contain producer, capability, and optional frameworkPack"
         )
     framework = item.get("frameworkPack")
     return (
-        _text(item["adapter"], f"{context}.adapter", identity=True),
+        _text(item["producer"], f"{context}.producer", identity=True),
         _text(item["capability"], f"{context}.capability", identity=True),
         (
             _text(framework, f"{context}.frameworkPack", identity=True)
@@ -314,7 +314,7 @@ def _load(path: Path) -> tuple[dict[str, Any], tuple[ScorecardRecord, ...]]:
         "mode",
         "provider",
         "oracleScriptSha256",
-        "candidateAdapter",
+        "producer",
         "corpora",
         "releaseGateCorpora",
         "advertisedCapabilities",
@@ -342,7 +342,7 @@ def _load(path: Path) -> tuple[dict[str, Any], tuple[ScorecardRecord, ...]]:
             f"scorecard.provider must be {PROVIDER!r}, got {item['provider']!r}"
         )
     _hex(item["oracleScriptSha256"], "scorecard.oracleScriptSha256", HEX_64)
-    _text(item["candidateAdapter"], "scorecard.candidateAdapter", identity=True)
+    _text(item["producer"], "scorecard.producer", identity=True)
     corpora = tuple(
         _corpus(value, index)
         for index, value in enumerate(_array(item["corpora"], "scorecard.corpora"))
@@ -395,7 +395,7 @@ def _load(path: Path) -> tuple[dict[str, Any], tuple[ScorecardRecord, ...]]:
             raise TypeScriptScorecardError(
                 f"record {record.record_id!r} references unknown corpus"
             )
-        if (record.adapter, record.capability, record.framework_pack) not in advertised:
+        if (record.producer, record.capability, record.framework_pack) not in advertised:
             raise TypeScriptScorecardError(
                 f"record {record.record_id!r} references unadvertised capability"
             )
@@ -442,7 +442,7 @@ def _contribution(record: ScorecardRecord) -> tuple[int, int, int, int]:
 def _strata(records: tuple[ScorecardRecord, ...]) -> dict[str, dict[str, dict[str, Any]]]:
     dimensions = {
         "corpus": lambda record: record.corpus,
-        "adapter": lambda record: record.adapter,
+        "producer": lambda record: record.producer,
         "frameworkPack": lambda record: record.framework_pack or "none",
         "language": lambda record: record.language,
         "relation": lambda record: record.relation,
@@ -522,20 +522,20 @@ def _failures(
         )
         recall_gate = LEADERSHIP_RECALL_GATE if leadership else CAPABILITY_RECALL_GATE
         for identity in item["advertisedCapabilities"]:
-            adapter = identity["adapter"]
+            producer = identity["producer"]
             capability = identity["capability"]
             framework = identity.get("frameworkPack")
             values = [
                 record
                 for record in records
-                if record.adapter == adapter
+                if record.producer == producer
                 and record.framework_pack == framework
                 and record.capability == capability
             ]
             accepted = sum(record.pool == "accepted" for record in values)
             if accepted < CAPABILITY_MINIMUM:
                 failures.append(
-                    f"capability {(adapter, framework, capability)!r} has {accepted} "
+                    f"capability {(producer, framework, capability)!r} has {accepted} "
                     f"accepted records; {CAPABILITY_MINIMUM} required"
                 )
             correct = sum(
@@ -545,7 +545,7 @@ def _failures(
             )
             if accepted and correct / accepted < capability_precision_gate:
                 failures.append(
-                    f"capability {(adapter, framework, capability)!r} precision "
+                    f"capability {(producer, framework, capability)!r} precision "
                     f"{correct / accepted:.6f} is below {capability_precision_gate:.3f}"
                 )
             recall_values = [
@@ -560,12 +560,12 @@ def _failures(
             )
             if recall_denominator == 0:
                 failures.append(
-                    f"capability {(adapter, framework, capability)!r} has no "
+                    f"capability {(producer, framework, capability)!r} has no "
                     "source-derived recall candidates"
                 )
             elif recall_numerator / recall_denominator < recall_gate:
                 failures.append(
-                    f"capability {(adapter, framework, capability)!r} recall "
+                    f"capability {(producer, framework, capability)!r} recall "
                     f"{recall_numerator / recall_denominator:.6f} is below {recall_gate:.3f}"
                 )
         precision_gate = LEADERSHIP_PRECISION_GATE if leadership else PRECISION_GATE
@@ -586,7 +586,7 @@ def _failures(
         for dimension, groups in strata.items():
             if dimension not in {
                 "corpus",
-                "adapter",
+                "producer",
                 "frameworkPack",
                 "language",
                 "relation",
@@ -600,7 +600,7 @@ def _failures(
                     if record.pool == "accepted"
                     and {
                         "corpus": record.corpus,
-                        "adapter": record.adapter,
+                        "producer": record.producer,
                         "frameworkPack": record.framework_pack or "none",
                         "language": record.language,
                         "relation": record.relation,
@@ -669,7 +669,7 @@ def scorecard_result(path: Path) -> dict[str, Any]:
         "passed": not failures,
         "eligibleForQualityClaim": item["mode"] != "diagnostic" and not failures,
         "provider": item["provider"],
-        "candidateAdapter": item["candidateAdapter"],
+        "producer": item["producer"],
         "releaseGateCorpora": list(item["releaseGateCorpora"]),
         "auditedRecords": len(records),
         "precision": precision,

@@ -231,7 +231,7 @@ pinned Prism-based oracle; do not reuse Tree-sitter as its own oracle and do not
 lower the recall gate.
 
 Graphify-only facts, if sampled, belong only in the
-`graphify_hypothesis` pool defined by `compass.quality-audit`. They are not
+`graphify_hypothesis` pool defined by `compass.quality-audit/2`. They are not
 truth and must never become runtime, fixture, fallback, or CI dependencies.
 
 ## Commands executors will need
@@ -766,7 +766,7 @@ without weakening them for Ruby's dynamic semantics.
   completion/release claim rather than changing thresholds.
 
 **Verify**: the checked-in audit validator exits 0 only when all thresholds
-above are met and emits a stable `compass.quality-audit` qualification summary.
+above are met and emits a stable `compass.quality-audit/2` qualification summary.
 
 ## Cross-phase test plan
 

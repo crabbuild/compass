@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the bounded, independent Ruby universal-candidate qualification.
+"""Run the bounded, independent Ruby universal-evidence qualification.
 
 This entry point deliberately keeps the Ripper oracle and Compass production
 build separate.  Fixture mode needs only Ruby and the standard library;
@@ -376,7 +376,7 @@ def quality_audit_mode(
         raise QualificationError(
             f"shared quality-audit evaluator emitted invalid JSON: {error}"
         ) from error
-    if result.get("schema") != "compass.quality-audit-result":
+    if result.get("schema") != "compass.quality-audit-result/2":
         raise QualificationError(
             f"unexpected quality-audit result schema: {result.get('schema')!r}"
         )
@@ -397,7 +397,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--root", type=Path, default=ROOT / "fixtures" / "code-graph" / "qualification")
     result.add_argument("--oracle", type=Path, default=DEFAULT_ORACLE)
     result.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    result.add_argument("--audit-manifest", type=Path, help="compass.quality-audit JSON")
+    result.add_argument("--audit-manifest", type=Path, help="compass.quality-audit/2 JSON")
     result.add_argument("--graph", type=Path, help="published graph for quality-audit mode")
     result.add_argument("--corpus", type=Path, help="pinned source corpus for quality-audit mode")
     result.add_argument("--repository", action="append", default=[], metavar="NAME=PATH")
