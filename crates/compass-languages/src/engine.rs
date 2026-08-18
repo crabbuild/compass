@@ -148,7 +148,10 @@ impl Engine {
     ) -> Result<crate::SemanticEvidenceBatch, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        if !matches!(spec.name, "typescript" | "tsx" | "javascript" | "kotlin" | "ruby") {
+        if !matches!(
+            spec.name,
+            "typescript" | "tsx" | "javascript" | "kotlin" | "ruby"
+        ) {
             return Err(ExtractError::Unsupported(path.to_path_buf()));
         }
         let tree = self.parse(path, spec, source)?;
