@@ -10,7 +10,7 @@
 >
 > **Drift check (run before each phase)**:
 > `git diff --stat a8a6a80aa7547f89cae97f127b7bd44512bcfaee..HEAD -- vendor/compass-tree-sitter-language-pack crates/compass-files crates/compass-languages crates/compass-resolve crates/compass-graph crates/compass-program crates/compass-core crates/compass-cli tests/qualification benchmarks/performance scripts docs PERFORMANCE.md COMPATIBILITY.md MIGRATION.md CHANGELOG.md Cargo.toml Cargo.lock package.json package-lock.json`
-> Reconcile renamed files, adapter versions, evidence schemas, and already
+> Reconcile renamed files, producer versions, evidence schemas, and already
 > shipped behavior before continuing. Do not mechanically apply stale line
 > numbers.
 
@@ -30,7 +30,7 @@
 
 The first implementation slice is intentionally below the phase-5 production
 cutover. It establishes independent measurement and removes one known
-precision hazard while the larger universal-adapter program remains gated:
+precision hazard while the larger universal-evidence program remains gated:
 
 - Phase 0 now has a pinned TypeScript 5.9.3 compiler-API source oracle with
   bounded Node/Python bridging, deterministic UTF-8 byte ranges, malformed-file
@@ -56,7 +56,7 @@ precision hazard while the larger universal-adapter program remains gated:
   pass. Existing qualification warnings about intentionally omitted partial
   fixture records remain unchanged and are not TypeScript/JavaScript failures.
 
-These changes do not register TypeScript/JavaScript universal adapters, do not
+These changes do not register TypeScript/JavaScript universal evidence pipelines, do not
 invoke Node or TypeScript during normal Compass builds, and do not claim that
 the full standards-correct module model or leadership gates are complete.
 
@@ -100,7 +100,7 @@ closed:
   cycles, relative named-import repointing, package `imports`, `exports`
   conditions, `typesVersions`, module suffixes/root directories, include /
   exclude ownership, `typeRoots`, custom conditions, import-kind metadata, JSX
-  occurrences, CommonJS exports, and direct candidate evidence. Targeted
+  occurrences, CommonJS exports, and direct universal evidence. Targeted
   language/resolver tests and resolver-wide tests pass; the full workspace
   baseline and independent oracle/fixture gates remain required before any
   phase exit.
@@ -109,9 +109,9 @@ This checkpoint is still below the Phase 2 universal-evidence and Phase 5
 production-hard-cut gates. `include`/`exclude` ownership, complete Node16/
 NodeNext/Bundler condition semantics, complete `typeRoots` package lookup,
 compiler-trace differential qualification, broad syntax/capability coverage,
-and direct TypeScript/JavaScript production adapter registration remain
-planned work. The candidate emitter is deliberately not in
-`UNIVERSAL_ADAPTERS`.
+and direct TypeScript/JavaScript production pipeline registration remain
+planned work. The universal evidence emitter is deliberately not in
+`UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, identity slice)
 
@@ -127,10 +127,10 @@ The following Phase 1/2 contract slice is now source-grounded and validated:
   `import type`, `export type`, namespace imports, normal dual-space imports,
   CommonJS bindings, and local re-exports are covered by direct candidate
   evidence tests.
-- Candidate adapter versions advanced to 2 for the new semantic identity
+- Qualifying evidence pipeline versions advanced to 2 for the new semantic identity
   contract. The shared evidence schema major remains `/1`; fields are optional
-  and omitted by legacy producers. The candidate path remains qualification
-  only and is not registered in `UNIVERSAL_ADAPTERS`.
+  and omitted by legacy producers. The evidence pipeline remains qualification
+  only and is not registered in `UNIVERSAL_EVIDENCE_PIPELINES`.
 - Contract documentation now describes symbol-space identity and the
   validation rule. Focused language tests cover serialization/validation,
   legacy omission, deterministic IDs, and TS/JS identity assertions.
@@ -237,7 +237,7 @@ records source-proven call-shape evidence without widening the production cut:
   unresolved.
 - The direct candidate suite still passes five tests and now covers namespace
   JSX members, `super` dispatch, fixed-arity negatives, and typed overload
-  selection. The candidate adapter remains unregistered; compiler differential
+  selection. The qualifying evidence pipeline remains unregistered; compiler differential
   qualification, broad syntax coverage, and release scorecard gates are still
   required.
 - Tree-sitter's dedicated `this` node is now treated as a nominal receiver,
@@ -253,7 +253,7 @@ records source-proven call-shape evidence without widening the production cut:
 
 ### Execution checkpoint (2026-08-06, unresolved-evidence and corpus slice)
 
-The candidate path now preserves source constructs even when it cannot prove a
+The evidence pipeline now preserves source constructs even when it cannot prove a
 target, without weakening the graph resolver:
 
 - Dynamic/ambiguous calls, nominally unknown members, unresolved type
@@ -298,8 +298,8 @@ target, without weakening the graph resolver:
 This closes a high-value evidence-loss and false-external-edge slice, but does
 not close the mandatory precision/Wilson gates, per-capability accepted-sample
 minimums, compiler target adjudication, Graphify/SCIP equivalent-scope audit,
-framework matrix, performance gate, or production hard cut. The candidate
-adapter remains unregistered in `UNIVERSAL_ADAPTERS`.
+framework matrix, performance gate, or production hard cut. The qualifying
+pipeline remains unregistered in `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, target-adjudication and JavaScript-shape slice)
 
@@ -327,7 +327,7 @@ accepted-sample and precision gates are frozen:
 - Dynamic/parenthesized/computed callees remain targetless when proof is not
   available; JavaScript `class_heritage` and TypeScript `import = require()`
   now retain exact module/base evidence. The candidate still is not registered
-  in `UNIVERSAL_ADAPTERS`.
+  in `UNIVERSAL_EVIDENCE_PIPELINES`.
 - Initial target adjudication is intentionally a failing diagnostic, not a
   release gate. On Axios, the candidate hit 2,923/3,167 same-file source
   targets (92.30% local recall) with 17 wrong-target cases and 564 local
@@ -346,7 +346,7 @@ scope, performance, and production hard-cut gates remain open.
 ### Execution checkpoint (2026-08-06, scope/flow/type/call quality slice)
 
 The qualification-only emitter now covers several high-impact target gaps
-without widening the production adapter registry:
+without widening the production evidence-pipeline registry:
 
 - Lexical block, switch, catch, and loop scopes are explicit; `var` bindings
   hoist to the nearest function/module scope while lexical bindings remain
@@ -390,7 +390,7 @@ adjudication measurements, not release precision: the candidate still has
 unresolved project/flow/framework members and a non-zero local false-positive
 count. Graphify, SCIP, Wilson intervals, accepted-sample minimums, framework
 matrix, performance, and the production hard cut remain open gates. The
-candidate emitter is still deliberately absent from `UNIVERSAL_ADAPTERS`.
+universal evidence emitter is still deliberately absent from `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Verification checkpoint (2026-08-06, repository gates)
 
@@ -418,7 +418,7 @@ Plan 013 scorecard is still open: the current same-file target diagnostics
 remain below the precision/recall thresholds, accepted-sample/Wilson evidence
 is not frozen, and Graphify/SCIP equivalent-scope, framework, performance,
 compiler-tier, and production hard-cut gates have not been run. Keep the
-candidate adapter out of `UNIVERSAL_ADAPTERS` until those gates pass.
+qualifying evidence pipeline out of `UNIVERSAL_EVIDENCE_PIPELINES` until those gates pass.
 
 ### Execution checkpoint (2026-08-06, typed-call and boundedness follow-up)
 
@@ -477,7 +477,7 @@ The next bounded resolution slice is now implemented and regression-tested:
   files and preventing a large-Zod stack overflow.
 - The direct candidate suite has 18 passing tests, including a constrained
   generic call regression. The target harness remains developer-only and
-  ignored; no candidate adapter was added to `UNIVERSAL_ADAPTERS`.
+  ignored; no qualifying evidence pipeline was added to `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 Updated pinned checker adjudication (oracle SHA unchanged) remains zero wrong
 local targets:
@@ -499,7 +499,7 @@ performance, and the production hard cut remain open.
 ### Execution checkpoint (2026-08-06, JavaScript prototype and wrapped-object slice)
 
 The next bounded JavaScript/TypeScript resolution slice is now implemented and
-measured without widening the production adapter registry:
+measured without widening the production evidence-pipeline registry:
 
 - Same-file function constructors now participate in nominal instance-member
   resolution only when source evidence proves constructor intent: a `new Ctor`
@@ -542,12 +542,12 @@ accepted-sample/manual adjudication before a precision claim. These remain
 diagnostic same-file results, not a release or leadership claim. Precision and
 recall thresholds, Wilson bounds, framework/compiler tiers, Graphify/SCIP
 equivalent-scope comparison, performance, and the production hard cut remain
-open, and the candidate emitter stays absent from `UNIVERSAL_ADAPTERS`.
+open, and the universal evidence emitter stays absent from `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, interface inheritance and optional-callable slice)
 
 The next source-proven TypeScript slice is implemented and measured without
-registering the candidate as a production universal adapter:
+registering the candidate as a production universal evidence pipeline:
 
 - Interface declarations now participate in the bounded `extends` hierarchy
   index used by member lookup. A member inherited through one local interface
@@ -591,7 +591,7 @@ The next actionable phases are deliberately still open:
    measure each stratum on Zod, Axios, and a third framework-heavy corpus.
 2. **Accepted precision gate:** hand-label a stratified sample of local,
    external, unresolved, dynamic, and ambiguous calls/members; compute Wilson
-   intervals and set release thresholds before enabling any adapter profile.
+   intervals and set release thresholds before enabling any evidence pipeline.
 3. **Framework/compiler tiers:** qualify React/JSX, Node, Express, Jest,
    Next/Vite, decorators, `const enum`, namespaces, and modern TS 5.x syntax;
    compare tree-sitter-only, optional compiler-oracle, and Graphify/SCIP
@@ -603,8 +603,8 @@ The next actionable phases are deliberately still open:
 
 ### Execution checkpoint (2026-08-06, callable/generic-flow and inline-anchor slices)
 
-The candidate-only implementation now covers several additional source-proven
-paths while remaining deliberately absent from `UNIVERSAL_ADAPTERS`:
+The qualification-only implementation now covers several additional source-proven
+paths while remaining deliberately absent from `UNIVERSAL_EVIDENCE_PIPELINES`:
 
 - Callable property signatures such as `getter: () => T` preserve their direct
   return type, including generic constraints, so a chain like
@@ -652,7 +652,7 @@ production artifacts were byte-identical; the qualification summary reported
 28 edge kinds, 45 node kinds, 57 languages, 27 flows, 980 coverage records, and
 the stable graph digest
 `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
-The focused 43-test candidate suite, package Clippy gate, formatting check,
+The focused 43-test universal-evidence suite, package Clippy gate, formatting check,
 product-boundary check, and 147-test benchmark suite pass. The broader
 `compass-languages --tests` run still exposes the pre-existing registry
 expectation mismatch (`Rust` reports 15 capabilities while that test expects
@@ -666,7 +666,7 @@ The next actionable phases remain open:
    measure each stratum on Zod, Axios, and a third framework-heavy corpus.
 2. **Accepted precision gate:** hand-label a stratified sample of local,
    external, unresolved, dynamic, and ambiguous calls/members; compute Wilson
-   intervals and set release thresholds before enabling any adapter profile.
+   intervals and set release thresholds before enabling any evidence pipeline.
 3. **Framework/compiler tiers:** qualify React/JSX, Node, Express, Jest,
    Next/Vite, decorators, `const enum`, namespaces, and modern TS 5.x syntax;
    compare tree-sitter-only, optional compiler-oracle, and Graphify/SCIP
@@ -708,8 +708,8 @@ checker as Compass runtime behavior:
 
 This closes the measurement contract but not the quality gate. The four-corpus
 release sample, hand-labeled accepted records, Graphify/SCIP equivalent-scope
-results, framework strata, and production hard cut remain open. The candidate
-adapter remains absent from `UNIVERSAL_ADAPTERS`.
+results, framework strata, and production hard cut remain open. The qualifying
+pipeline remains absent from `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, universal module-index and re-export slice)
 
@@ -740,8 +740,8 @@ universal index does not yet consume the full project resolver for `paths`,
 `rootDirs`, package `exports`/`imports`, `typesVersions`, or all Node16/
 NodeNext/Bundler conditions; declaration merging, generic instantiation,
 mapped/indexed shapes, framework tiers, compiler differential recall, and the
-accepted precision/leadership scorecard remain open. The candidate adapter is
-still not registered in `UNIVERSAL_ADAPTERS`.
+accepted precision/leadership scorecard remain open. The qualifying evidence pipeline is
+still not registered in `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, project-resolver handoff slice)
 
@@ -767,13 +767,13 @@ paths both pass the same project-edge handoff.
 This closes the first universal/project-module integration gap, not the Plan
 013 release gate. Declaration merging, generic instantiation, mapped/indexed
 shapes, framework/compiler strata, hand-labeled precision and recall, and the
-production hard cut remain open. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS` until those gates and the exact-release qualification
+production hard cut remain open. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES` until those gates and the exact-release qualification
 complete.
 
 ### Execution checkpoint (2026-08-06, imported declaration-merging slice)
 
-The TypeScript candidate path now preserves the source binding when a value is
+The TypeScript evidence pipeline now preserves the source binding when a value is
 annotated with an imported nominal type (`value: ImportedType`). The receiver
 proof no longer collapses to a bare qualified spelling, so member calls and
 accesses carry the imported binding identity and a qualified target such as
@@ -792,13 +792,13 @@ binding identity and member qualification.
 This advances declaration merging and imported nominal receiver quality but is
 not a full TypeScript type system. Generic instantiation beyond bounded source
 shapes, mapped/indexed conditional types, framework tiers, compiler
-differential recall, and the production hard cut remain open. The candidate
-adapter remains absent from `UNIVERSAL_ADAPTERS` until the mandatory quality
+differential recall, and the production hard cut remain open. The qualifying
+pipeline remains absent from `UNIVERSAL_EVIDENCE_PIPELINES` until the mandatory quality
 and exact-release qualification gates complete.
 
 ### Execution checkpoint (2026-08-06, bounded generic member-chain slice)
 
-The candidate adapter now publishes a bounded declaration-shape fragment in
+The qualifying evidence pipeline now publishes a bounded declaration-shape fragment in
 the existing `DeclarationFact.signature` field: generic class/interface
 parameter order and direct property nominal types. Imported generic receiver
 arguments are canonicalized to their proven module-qualified identities and
@@ -821,8 +821,8 @@ TypeScript candidate suite pass.
 This is a bounded generic propagation slice, not compiler-equivalent
 TypeScript. Nested mapped/conditional/indexed types, overload-aware generic
 substitution, framework tiers, compiler differential recall, and the
-production hard cut remain open. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release
+production hard cut remain open. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES` until the mandatory quality and exact-release
 qualification gates complete.
 
 ### Execution checkpoint (2026-08-06, recursive nested generic member-chain slice)
@@ -842,8 +842,8 @@ universal resolver suite is now 140 tests and the TypeScript candidate suite
 remains 44 tests. Unsupported structural, mapped, conditional, indexed,
 overload-dependent, or over-limit shapes still fail closed; framework tiers,
 compiler differential recall, project-corpus qualification, and the production
-hard cut remain open. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release
+hard cut remain open. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES` until the mandatory quality and exact-release
 qualification gates complete.
 
 ### Execution checkpoint (2026-08-06, generic alias and indexed-member slice)
@@ -869,7 +869,7 @@ bounded by the existing member/export candidate limits and type-shape byte and
 depth limits; mapped/conditional/indexed access beyond a direct index value,
 overload-dependent substitutions, framework tiers, compiler differential
 recall, project-corpus qualification, and the production hard cut remain
-open. The candidate adapter remains absent from `UNIVERSAL_ADAPTERS` until the
+open. The qualifying evidence pipeline remains absent from `UNIVERSAL_EVIDENCE_PIPELINES` until the
 mandatory quality and exact-release qualification gates complete.
 
 ### Execution checkpoint (2026-08-06, bounded local reassignment slice)
@@ -893,8 +893,8 @@ branch/unknown/compound negative cases, and a resolver-level exact-target
 assertion. The TypeScript/JavaScript candidate suite is now 52 tests and the
 universal resolver suite is now 147 tests. Alias escape, `eval`, proxy/dynamic
 property mutation, interprocedural flow, and compiler differential recall remain
-open Phase 4 work; the candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS` until the mandatory quality and exact-release gates pass.
+open Phase 4 work; the qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES` until the mandatory quality and exact-release gates pass.
 
 ### Execution checkpoint (2026-08-06, homomorphic mapped-alias slice)
 
@@ -921,7 +921,7 @@ This remains a bounded evidence slice, not compiler-equivalent mapped-type
 assignability: modifier-rich mapped types, conditional/infer transforms,
 indexed access beyond direct value shapes, alias escape, dynamic mutation,
 framework tiers, compiler differential recall, and the production hard cut
-remain open. The candidate adapter stays out of `UNIVERSAL_ADAPTERS` until the
+remain open. The qualifying evidence pipeline stays out of `UNIVERSAL_EVIDENCE_PIPELINES` until the
 mandatory precision, determinism, qualification, and exact-release gates pass.
 
 ### Execution checkpoint (2026-08-06, bounded sequence-index slice)
@@ -948,7 +948,7 @@ regression; the focused candidate suite is now 62 tests and the universal
 resolver suite is now 149 tests. Arbitrary structural indexed access,
 conditional/mapped modifier semantics, alias escape, dynamic mutation,
 framework tiers, compiler differential recall, and the production hard cut
-remain open. The candidate adapter remains absent from UNIVERSAL_ADAPTERS.
+remain open. The qualifying evidence pipeline remains absent from UNIVERSAL_EVIDENCE_PIPELINES.
 
 ### Execution checkpoint (2026-08-06, bounded generic callable-return slice)
 
@@ -971,8 +971,8 @@ uniquely determine its type parameters:
 
 The slice adds five direct candidate regressions and one resolver regression;
 the focused candidate suite is now 67 tests and the universal resolver suite
-is now 150 tests. The production candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS`; accepted precision/Wilson gates, cross-file callable
+is now 150 tests. The production qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES`; accepted precision/Wilson gates, cross-file callable
 return evidence, framework/compiler tiers, equivalent Graphify/SCIP scope,
 and the production hard cut remain open.
 
@@ -999,7 +999,7 @@ focused candidate suite is now 70 tests and the universal resolver suite is
 now 150 tests. Imported callable-return evidence, richer conditional/mapped
 modifier semantics, accepted precision/Wilson gates, framework/compiler tiers,
 equivalent Graphify/SCIP scope, and the production hard cut remain open. The
-candidate adapter remains absent from `UNIVERSAL_ADAPTERS`.
+qualifying evidence pipeline remains absent from `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, imported callable-return evidence slice)
 
@@ -1026,8 +1026,8 @@ resolver suite is now 152 tests. Imported callable member-method returns,
 explicit generic-call arguments without inferable value arguments, richer
 conditional/mapped modifier semantics, accepted precision/Wilson gates,
 framework/compiler tiers, equivalent Graphify/SCIP scope, and the production
-hard cut remain open. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS`.
+hard cut remain open. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, imported callable-member and explicit-generic slice)
 
@@ -1051,8 +1051,8 @@ resolver suite is now 154 tests. Conditional/mapped modifier semantics,
 framework/compiler tiers, accepted precision/Wilson gates, equivalent
 Graphify/SCIP scope, imported callable properties, alias escape/eval/proxy
 flow, overload-aware generic substitution beyond bounded source shapes, and
-the production hard cut remain open. The candidate adapter remains absent
-from `UNIVERSAL_ADAPTERS`.
+the production hard cut remain open. The qualifying evidence pipeline remains absent
+from `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, callable-property and typed-value slice)
 
@@ -1081,8 +1081,8 @@ byte-stable at Compass revision `0d051868` with graph digest
 Conditional/mapped modifier semantics, framework/compiler tiers, accepted
 precision/Wilson gates, equivalent Graphify/SCIP scope, alias escape/eval/
 proxy flow, overload-aware generic substitution beyond bounded source shapes,
-and the production hard cut remain open. The candidate adapter remains absent
-from `UNIVERSAL_ADAPTERS`.
+and the production hard cut remain open. The qualifying evidence pipeline remains absent
+from `UNIVERSAL_EVIDENCE_PIPELINES`.
 
 ### Execution checkpoint (2026-08-06, bounded imported-overload selection slice)
 
@@ -1103,13 +1103,13 @@ exact, bounded argument shape:
   limits; it emits no new external or deferred targets and preserves existing
   member-binding provenance for unique matches.
 
-The focused candidate suite remains at 73 tests and the universal resolver
+The focused universal-evidence suite remains at 73 tests and the universal resolver
 suite is now 158 tests, including one positive imported-overload fixture and
 one ambiguity/mismatch/unknown negative fixture. Conditional/mapped modifier
 semantics, richer overload-aware generic substitution, alias escape/eval/proxy
 flow, framework/compiler tiers, accepted precision/Wilson gates, equivalent
 Graphify/SCIP scope, and the production hard cut remain open. The candidate
-adapter remains absent from `UNIVERSAL_ADAPTERS`. Fixture qualification stays
+adapter remains absent from `UNIVERSAL_EVIDENCE_PIPELINES`. Fixture qualification stays
 byte-stable at Compass revision `24f937360cc80d6b62b633f2fdd2a367eb6529c3`,
 with 57 languages, 980 coverage records, 1,565 invariants, 27 flows, and
 graph digest `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`.
@@ -1133,8 +1133,8 @@ receiver identity through safe straight-line aliases:
 
 The focused candidate suite is now 75 tests and the universal resolver suite
 remains 158 tests; the overload fixture also proves an imported call-result can
-be aliased before its returned member is resolved. The candidate adapter remains
-absent from `UNIVERSAL_ADAPTERS`. Conditional/mapped modifier semantics, richer
+be aliased before its returned member is resolved. The qualifying evidence pipeline remains
+absent from `UNIVERSAL_EVIDENCE_PIPELINES`. Conditional/mapped modifier semantics, richer
 interprocedural flow, framework/compiler tiers, accepted precision/Wilson gates,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
 
@@ -1162,7 +1162,7 @@ TypeScript containers or unknown APIs:
 The focused candidate suite is now 77 tests and the universal resolver suite is
 159 tests, including resolver publication checks for callable references with
 no indirect-call edge and candidate checks for unique/ambiguous `in` guards.
-The candidate adapter remains absent from `UNIVERSAL_ADAPTERS`. Conditional and
+The qualifying evidence pipeline remains absent from `UNIVERSAL_EVIDENCE_PIPELINES`. Conditional and
 mapped modifier semantics beyond the bounded utility/union rules, richer
 interprocedural flow, framework/compiler tiers, accepted precision/Wilson gates,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
@@ -1184,8 +1184,8 @@ subset of utility receivers while preserving fail-closed behavior:
   source anchors, occurrence ranges, and member direction remain unchanged.
 
 The focused candidate suite is now 79 tests and the universal resolver suite
-remains 159 tests. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS`. Conditional and mapped modifier semantics beyond these
+remains 159 tests. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES`. Conditional and mapped modifier semantics beyond these
 bounded utility/union rules, richer interprocedural flow, framework/compiler
 tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
@@ -1209,8 +1209,8 @@ source-proven subset of conditional and mapped receiver types:
   occurrence multiplicity, and published declaration identities are unchanged.
 
 The focused candidate suite is now 81 tests and the universal resolver suite
-remains 160 tests. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS`. Broader distributive conditional semantics, indexed/keyof
+remains 160 tests. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES`. Broader distributive conditional semantics, indexed/keyof
 evaluation, richer interprocedural flow, framework/compiler tiers,
 accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
@@ -1238,8 +1238,8 @@ bounded project model before measuring source recall:
 
 The source oracle remains qualification-only and emits source constructs, not
 targets; its output is still a deterministic JSON payload rather than the final
-JSONL evidence stream described by Phase 0. The candidate adapter remains
-absent from `UNIVERSAL_ADAPTERS`. Project-manifest corpora, compiler-backed
+JSONL evidence stream described by Phase 0. The qualifying evidence pipeline remains
+absent from `UNIVERSAL_EVIDENCE_PIPELINES`. Project-manifest corpora, compiler-backed
 scope/declaration inventories, broader conditional/keyof semantics, framework
 tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP scope, and the
 production hard cut remain open.
@@ -1266,8 +1266,8 @@ property:
   anchors, direction, multiplicity, and deterministic ordering.
 
 The focused TypeScript candidate suite is now 83 tests and the universal
-resolver suite is now 162 tests. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS`. Broader `keyof`/mapped/indexed evaluation, distributive
+resolver suite is now 162 tests. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES`. Broader `keyof`/mapped/indexed evaluation, distributive
 conditional semantics, project-manifest corpora, compiler-backed scope and
 declaration inventories, framework tiers, accepted precision/Wilson gates,
 equivalent Graphify/SCIP scope, and the production hard cut remain open.
@@ -1293,8 +1293,8 @@ additional source-proven type shapes:
   `keyofItem` as ordinary names.
 
 The focused TypeScript candidate suite is now 86 tests and the universal
-resolver suite is now 162 tests. The candidate adapter remains absent from
-`UNIVERSAL_ADAPTERS`. Full `keyof` value-space evaluation, arbitrary
+resolver suite is now 162 tests. The qualifying evidence pipeline remains absent from
+`UNIVERSAL_EVIDENCE_PIPELINES`. Full `keyof` value-space evaluation, arbitrary
 mapped/indexed projections, distributive conditional semantics,
 project-manifest corpora, compiler-backed scope and declaration inventories,
 framework tiers, accepted precision/Wilson gates, equivalent Graphify/SCIP
@@ -1399,7 +1399,7 @@ precision/Wilson, framework, comparator, and production-hard-cut gates.
 
 ### Execution checkpoint (2026-08-07, bounded inline structural index receivers)
 
-The native TypeScript/JavaScript candidate path now carries one additional
+The native TypeScript/JavaScript evidence pipeline now carries one additional
 source-proven structural shape across dynamic member access:
 
 - Inline index signatures on parameters, variables, and properties cache their
@@ -1590,7 +1590,7 @@ were previously conflated:
   target. Ordinary ES namespace members continue through the same exact
   module/export path, while direct calls through non-callable ES namespaces
   remain unresolved.
-- The candidate adapter versions advanced to 3 for the binding identity
+- The qualifying evidence pipeline versions advanced to 3 for the binding identity
   change. Focused coverage is now 91 candidate tests and 168 universal
   resolver tests, including aliased named requires, namespace member calls,
   callable CommonJS defaults, and dynamic/nested negative patterns.
@@ -1791,7 +1791,7 @@ escape hatch:
   inherited spread properties remain unresolved until a dedicated member-alias
   contract preserves their original provider identity.
 - Unknown/imported/computed/conditional/mutable/ambiguous spread operands and
-  direct properties before an export spread remain unresolved. Candidate adapter
+  direct properties before an export spread remain unresolved. Qualifying evidence pipeline
   versions advanced to 4 to invalidate qualification-only evidence meaningfully.
 
 The focused candidate suite remains 99 tests and the universal resolver suite
@@ -1835,7 +1835,7 @@ the reverse) still require the same exact source proof.
 The focused candidate suite remains 99 tests and the universal resolver suite
 is now 172 tests. New regressions cover local and imported owner markers,
 cross-file inherited member publication, direct-property precedence, competing
-spread sources, and spreading a non-object default. Candidate adapter versions
+spread sources, and spreading a non-object default. Qualifying evidence pipeline versions
 advanced to 5 so the qualification-only evidence cache cannot reuse the prior
 owner-less spread realization.
 
@@ -1846,7 +1846,7 @@ graph digest
 `sha256:f13848fefa81b79c70ed9b50081c1cab8024f1ce84030064c8eb2d154ba4c160`,
 82 exact/11 unresolved route resolutions, and byte-equivalent clean, warm,
 rebuild, restored, and alternate-checkout outputs. The unchanged digest is
-expected because the candidate adapter remains unregistered in production.
+expected because the qualifying evidence pipeline remains unregistered in production.
 The read-only Axios target differential remains 3,054/3,167 exact local
 targets (113 missing, 0 wrong; 391/503 member targets and 1,544/1,545 call
 targets, 228 accepted-candidate false positives); it remains diagnostic and
@@ -1969,8 +1969,8 @@ Regression coverage now includes direct value exports, imported getter exports,
 the `__esModule` marker, dynamic keys/values, and shadowed globals, plus a
 cross-file `require()` consumer that resolves the exact value and getter
 targets while leaving an unknown export unresolved. The focused suites are
-103 candidate tests and 177 universal resolver tests. This remains a
-qualification-only correctness slice; the production adapter is still not
+103 universal-evidence tests and 177 universal resolver tests. This remains a
+qualification-only correctness slice; the production pipeline is still not
 registered and no release-leadership claim is implied.
 
 ### Execution checkpoint (2026-08-07, bounded CommonJS `__exportStar` barrels)
@@ -2022,12 +2022,12 @@ calls instead of treating the template body as an ordinary argument list:
 
 Candidate and resolver coverage now stand at 105 and 179 focused tests. This
 remains qualification-only; the adapter is still not registered in
-`UNIVERSAL_ADAPTERS`, and compiler differential, framework, competitor, and
+`UNIVERSAL_EVIDENCE_PIPELINES`, and compiler differential, framework, competitor, and
 production hard-cut gates remain open.
 
 ### Execution checkpoint (2026-08-07, bounded decorator-factory evidence)
 
-Decorator syntax now has a first-class, source-backed candidate path instead
+Decorator syntax now has a first-class, source-backed evidence pipeline instead
 of relying on the nested call traversal:
 
 - Direct decorators (`@Injectable`, `@Controller(...)`, and local decorator
@@ -2044,8 +2044,8 @@ of relying on the nested call traversal:
   cross-file through the shared resolver. Overload/arity/type mismatches and
   ambiguous members remain unresolved rather than being selected by spelling.
 
-Candidate and resolver coverage now stand at 107 and 180 focused tests. The
-adapter remains qualification-only and unregistered; compiler differential,
+Universal-evidence and resolver coverage now stand at 107 and 180 focused tests. The
+pipeline remains qualification-only and unregistered; compiler differential,
 framework-contract, competitor, production hard-cut, and leadership gates
 remain open.
 
@@ -2069,7 +2069,7 @@ were previously easy to lose during qualification:
 
 The candidate test suite is now 108 tests and the resolver suite remains 180;
 focused oracle correctness tests pass. This is still a qualification-only
-slice: the universal adapter is unregistered, the legacy/native hard cut is
+slice: the universal evidence pipeline is unregistered, the legacy/native hard cut is
 open, and compiler-differential, framework, competitor, release-corpus, and
 leadership gates remain required.
 
@@ -2249,7 +2249,7 @@ results as if they were the same product contract.
 | Concern | Current evidence | Owner / likely files |
 |---|---|---|
 | language and dialect registry | TS/TSX/JS share generic extraction | `crates/compass-languages/src/registry.rs`, `engine.rs` |
-| universal adapter registry | only Go/Java/Python/Rust | `crates/compass-languages/src/adapters.rs` |
+| universal evidence registry | C#, Go, Java, JavaScript, Kotlin, PHP, Python, Ruby, Rust, TypeScript | `crates/compass-languages/src/evidence_pipeline.rs` |
 | direct typed evidence | language switch has no TS/JS branch | `crates/compass-languages/src/evidence/build.rs`, `model.rs`, `validate.rs` |
 | project config markers | strict JSON and partial alias collection | `crates/compass-languages/src/project_evidence.rs`, `json_config.rs` |
 | module/package resolution | relative extensions, index, exports subset | `crates/compass-resolve/src/lib.rs` |
@@ -2274,7 +2274,7 @@ live code before implementation.
 `crates/compass-languages/src/evidence/build.rs` has no TS/JS universal branch:
 
 ```rust
-match profile.language {
+match pipeline.producer.language {
     "python" => state.extract_python(root)?,
     "go" => state.extract_go(root)?,
     "java" => state.extract_java(root)?,
@@ -2304,11 +2304,11 @@ its ambiguity behavior.
 
 ```rust
 .filter_map(|extraction| extraction.semantic_evidence.as_ref())
-.filter(|batch| batch.adapter.language == "java")
+.filter(|batch| batch.pipeline.language == "java")
 ```
 
 Phase 6 should generalize this exact-anchor contract only after TS/JS are
-hard-cut universal adapters; it should not add a second TS/JS graph path.
+hard-cut universal evidence pipelines; it should not add a second TS/JS graph path.
 
 ## Reference semantics
 
@@ -2583,7 +2583,7 @@ legacy raw graph records is not an acceptable adapter.
    completeness. Never publish a construct outside a source-backed range just
    because the root parser recovered.
 6. Expose the adapter only to focused tests/qualification at this phase. Do not
-   add it to `UNIVERSAL_ADAPTERS` yet.
+   add it to `UNIVERSAL_EVIDENCE_PIPELINES` yet.
 
 ### Verification
 
@@ -2600,7 +2600,7 @@ legacy raw graph records is not an acceptable adapter.
 
 ### Exit gate
 
-Every capability claimed in the future adapter profiles has direct validated
+Every capability claimed in the future evidence pipelines has direct validated
 evidence and a positive, ambiguity, negative, and boundary test. Do not register
 a capability that is merely inferred later from a legacy graph edge.
 
@@ -2733,8 +2733,8 @@ or conflicting graphs and conceal semantic drift.
 
 ### Actions
 
-1. Add separate `compass.typescript` and `compass.javascript` adapter profiles
-   with exact capability lists and new adapter versions. Map TSX/MTS/CTS and
+1. Add separate `compass.typescript` and `compass.javascript` producer pipelines
+   with exact capability lists and new producer versions. Map TSX/MTS/CTS and
    JSX/MJS/CJS through their semantic family while preserving dialect evidence.
 2. Switch production extraction to direct parser-tree universal evidence in one
    commit. Do not publish legacy raw and universal facts in the same build.
@@ -2961,8 +2961,8 @@ corpus minimum, exact-SHA check, or equivalent-configuration review fails.
 
 ## Done criteria
 
-- [ ] TypeScript and JavaScript have direct parser-tree universal adapters; no
-  production adapter translates legacy raw graph records.
+- [ ] TypeScript and JavaScript have direct parser-tree universal evidence pipelines; no
+  production publisher translates legacy raw graph records.
 - [ ] Parser dialect and semantic language family are distinct and exact JS/TS
   interop never enables generic cross-language matching.
 - [ ] The typed project model covers the supported TypeScript config, workspace,
@@ -3002,7 +3002,7 @@ Stop and report rather than weakening the design if:
   first-candidate selection, or an unbounded barrel/project/package traversal;
 - a normal build would require Node.js, a compiler, SCIP, credentials, network,
   runtime grammar downloads, or Graphify;
-- the universal adapter cannot pass mandatory gates before production cutover;
+- the universal evidence pipeline cannot pass mandatory gates before production cutover;
 - the hard cut requires dual production publication or an automatic legacy
   fallback;
 - an existing framework route/template contract regresses without an approved

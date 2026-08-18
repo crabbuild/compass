@@ -2,8 +2,9 @@ use std::error::Error;
 use std::path::Path;
 
 use compass_languages::{
-    AdapterRegistry, BindingKind, CandidateRelation, Engine, EvidenceLimits, LanguageCapability,
-    RawFrameworkFact, RawFrameworkOrigin, SemanticRole, UniversalAdapterProfile, validate_evidence,
+    BindingKind, CandidateRelation, Engine, EvidenceLimits, LanguageCapability, RawFrameworkFact,
+    RawFrameworkOrigin, SemanticRole, UniversalEvidenceQualification, UniversalEvidenceRegistry,
+    validate_evidence,
 };
 
 #[test]
@@ -85,11 +86,11 @@ function top(): \Closure
         .as_ref()
         .ok_or("missing PHP universal evidence")?;
     validate_evidence(evidence, EvidenceLimits::default())?;
-    assert_eq!(evidence.adapter.id, "compass.php");
-    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(evidence.pipeline.id, "compass.php");
+    assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
-        evidence.adapter.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        evidence.pipeline.qualification,
+        UniversalEvidenceQualification::Qualifying
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -104,7 +105,7 @@ function top(): \Closure
         LanguageCapability::Members,
         LanguageCapability::Receivers,
     ] {
-        assert!(evidence.adapter.capabilities.contains(&capability));
+        assert!(evidence.pipeline.capabilities.contains(&capability));
     }
 
     for (qualified_name, kind, source_name) in [
@@ -220,10 +221,13 @@ function top(): \Closure
 }
 
 #[test]
-fn php_profile_is_registered_in_sorted_universal_registry() -> Result<(), Box<dyn Error>> {
-    AdapterRegistry::validate()?;
-    let profile = AdapterRegistry::universal_profile("php").ok_or("missing PHP profile")?;
-    assert_eq!(profile.profile, UniversalAdapterProfile::UniversalCandidate);
+fn php_pipeline_is_registered_in_sorted_universal_registry() -> Result<(), Box<dyn Error>> {
+    UniversalEvidenceRegistry::validate()?;
+    let pipeline = UniversalEvidenceRegistry::pipeline("php").ok_or("missing PHP pipeline")?;
+    assert_eq!(
+        pipeline.qualification,
+        UniversalEvidenceQualification::Qualifying
+    );
     Ok(())
 }
 

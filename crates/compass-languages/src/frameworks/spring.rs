@@ -38,7 +38,7 @@ fn detect_language(
     language: &str,
     dependency_markers: &[&str],
 ) -> Vec<RawFrameworkFact> {
-    if context.evidence.adapter.language != language {
+    if context.evidence.pipeline.language != language {
         return Vec::new();
     }
     let declarations = context
@@ -258,7 +258,7 @@ fn unique_binding_map(context: &UniversalDetectionContext<'_, '_>) -> Map<String
 }
 
 fn constant_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
-    if context.evidence.adapter.language == "kotlin" {
+    if context.evidence.pipeline.language == "kotlin" {
         let mut values = BTreeMap::new();
         collect_kotlin_constant_values(context.root, context.source, &mut values);
         return context
@@ -447,7 +447,7 @@ fn producer_facts(
     candidates: &HashMap<&str, &crate::RelationshipCandidate>,
 ) -> Vec<RawFrameworkFact> {
     let mut call_nodes = BTreeMap::new();
-    if context.evidence.adapter.language == "kotlin" {
+    if context.evidence.pipeline.language == "kotlin" {
         collect_kotlin_call_nodes(context.root, &mut call_nodes);
     } else {
         collect_named_nodes(context.root, "method_invocation", "name", &mut call_nodes);
@@ -490,7 +490,7 @@ fn producer_facts(
                 call,
                 argument_index,
                 context.source,
-                context.evidence.adapter.language.as_str(),
+                context.evidence.pipeline.language.as_str(),
             )?;
             let mut detail = Map::new();
             detail.insert(
@@ -655,7 +655,7 @@ fn constructor_facts(
         .filter_map(|declaration| {
             let mut targets = injection_targets(context, declaration.id.as_str(), candidates);
             if targets.is_empty()
-                && context.evidence.adapter.language == "kotlin"
+                && context.evidence.pipeline.language == "kotlin"
                 && let Some(owner) = declaration
                     .qualified_name
                     .rsplit_once("::")

@@ -1,9 +1,9 @@
 {
   "schema": "compass.ruby-universal-baseline/1",
   "capturedAt": "2026-08-17",
-  "adapter": "compass.ruby.candidate",
-  "adapterVersion": 1,
-  "evidenceSchema": 1,
+  "producer": "compass.ruby",
+  "producerVersion": 1,
+  "evidenceSchema": "compass.languages.evidence/2",
   "buildTimeExcluded": true,
   "rssBlocking": false,
   "corpora": [
@@ -104,6 +104,6 @@
   ],
   "limitations": [
     "Discourse and RuboCop graph projections exclude non-Ruby files because their full mixed-language trees exceed the bounded Markdown parser resource envelope.",
-    "The quality audit now passes the fixed precision/recall thresholds, but Ruby remains a UniversalCandidate until a separate promotion decision is made."
+    "The quality audit now passes the fixed precision/recall thresholds, but Ruby remains Qualifying until a separate promotion decision is made."
   ]
 }

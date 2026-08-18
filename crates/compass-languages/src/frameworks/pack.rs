@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{AdapterRegistry, LanguageCapability, SemanticRole};
+use crate::{LanguageCapability, SemanticRole, UniversalEvidenceRegistry};
 
 use super::FrameworkLimits;
 
@@ -323,14 +323,14 @@ fn validate_descriptor(
         }
     }
     for &language in descriptor.languages {
-        let Some(profile) = AdapterRegistry::universal_profile(language) else {
+        let Some(profile) = UniversalEvidenceRegistry::pipeline(language) else {
             return Err(FrameworkPackRegistryError::NonUniversalLanguage {
                 pack: descriptor.id,
                 language,
             });
         };
         for &capability in descriptor.required_capabilities {
-            if !profile.capabilities.contains(&capability) {
+            if !profile.producer.capabilities.contains(&capability) {
                 return Err(FrameworkPackRegistryError::UnsupportedCapability {
                     pack: descriptor.id,
                     language,

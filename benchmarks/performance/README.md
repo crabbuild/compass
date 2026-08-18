@@ -225,7 +225,7 @@ The test compares exact source-byte coverage for a mixed TSX fixture. It is
 ignored by ordinary workspace tests so native Compass remains Node-free.
 
 For developer-only same-file target adjudication on a pinned real corpus, use
-the separate checker oracle and keep the candidate adapter out of production:
+the separate checker oracle and keep the qualifying producer out of production:
 
 ```bash
 RUST_MIN_STACK=33554432 \

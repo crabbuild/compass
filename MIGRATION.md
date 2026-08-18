@@ -5,15 +5,24 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
-## Ruby universal-candidate rebuild
+## Ruby universal evidence rebuild
 
 The current release publishes Ruby through the version-1 universal evidence
-candidate (`compass.ruby.candidate`) and the evidence-backed `rails-ruby`
-framework pack. Ruby graph output is therefore regenerated on the first build
-after upgrading; do not reuse a Ruby cache produced by an older Compass
-publisher. Ruby is still a candidate rather than a complete-quality claim,
-so retain review of ambiguous/dynamic Ruby relationships and do not treat
-unresolved dynamic dispatch as a missing deterministic fact.
+pipeline (`compass.ruby`) and the evidence-backed `rails-ruby` framework pack.
+Ruby graph output is therefore regenerated on the first build after upgrading;
+do not reuse a Ruby cache produced by an older Compass publisher. Ruby is still
+`Qualifying` rather than a complete-quality claim, so retain review of
+ambiguous/dynamic Ruby relationships and do not treat unresolved dynamic
+dispatch as a missing deterministic fact.
+
+## Universal evidence schema reset
+
+The universal evidence envelope is now `compass.languages.evidence/2` and the
+extraction semantics identity is `compass.languages.extraction/3`. The envelope
+field is `pipeline` (with `qualification` and `emitter` metadata), replacing
+the provisional `adapter`/`profile`/`producer` shape. Compass intentionally
+does not translate or reuse pre-refactor universal evidence; run a forced
+update to regenerate one coherent artifact set.
 
 ## Install Compass
 
@@ -220,7 +229,7 @@ queries use JSON by default; use `--engine store` to select a retained sidecar.
 
 Downgrades must validate the output with the target binary. Do not reuse a
 newer physical SQLite/redb file merely because its filename matches. Rebuild
-when the target binary reports an unsupported major or adapter.
+when the target binary reports an unsupported major or storage provider.
 
 ## Update node-trail direction handling
 

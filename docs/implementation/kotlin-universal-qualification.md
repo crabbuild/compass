@@ -1,22 +1,22 @@
 ---
 meta:
   contentType: Reference
-  title: Kotlin universal candidate qualification
+  title: Kotlin universal qualification
   navLabel: Kotlin Qualification
   category: Implementation
-  overview: Reproducible baseline and candidate evidence for the Kotlin hard cut.
-  goal: Record what the Kotlin candidate has proved and which completion gates remain open.
+  overview: Reproducible baseline and qualifying evidence for the Kotlin hard cut.
+  goal: Record what the Kotlin pipeline has proved and which audit gates remain open.
   audience:
     - Compass language contributors
     - release reviewers
   openQuestions: []
 ---
 
-# Kotlin universal candidate qualification
+# Kotlin universal qualification
 
 This record compares the established Kotlin publisher from Compass commit
-`2db60035` with the version-1 universal candidate. It does not promote Kotlin
-to `UniversalComplete`.
+`2db60035` with the version-1 universal pipeline. It does not promote Kotlin
+to `Qualified`.
 
 ## Pinned corpus
 
@@ -86,5 +86,5 @@ Spring Kotlin route fixture qualifies the universal framework pack.
 The independent quality audit is still required. In particular, no claim is
 made that the minimum 2,000 accepted-relationship pool, precision/recall
 thresholds, or zero-tolerance critical judgments have passed. Kotlin must
-remain `UniversalCandidate` until that audit and the remaining performance work
+remain `Qualifying` until that audit and the remaining performance work
 complete.

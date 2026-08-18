@@ -1,7 +1,7 @@
 //! Direct universal evidence for the ECMAScript family.
 //!
 //! TypeScript and JavaScript share the bounded source-grounded emitter while
-//! retaining distinct adapter identities. The production registry dispatches
+//! retaining distinct language identities. The production registry dispatches
 //! both languages here; qualification callers use the same entry point so
 //! there is no shadow implementation to drift from the shipped graph path.
 
@@ -18,7 +18,7 @@ use super::model::{
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
-use crate::{AdapterRegistry, make_id};
+use crate::{UniversalEvidenceRegistry, make_id};
 
 const MAX_TRAVERSAL_DEPTH: usize = 512;
 const MAX_INLINE_OBJECT_PROPERTIES: usize = 256;
@@ -298,7 +298,7 @@ struct CandidateState<'source, 'tree> {
     _tree: std::marker::PhantomData<Node<'tree>>,
 }
 
-pub(crate) fn extract_candidate_tree_evidence(
+pub(crate) fn emit_tree_evidence(
     path: &Path,
     source_file: &str,
     source: &[u8],
@@ -310,22 +310,22 @@ pub(crate) fn extract_candidate_tree_evidence(
         "javascript" => "javascript",
         _ => {
             return Err(EvidenceError::new(
-                EvidenceErrorCode::InvalidAdapter,
-                format!("unsupported ECMAScript candidate dialect {dialect:?}"),
+                EvidenceErrorCode::InvalidPipeline,
+                format!("unsupported ECMAScript dialect {dialect:?}"),
             ));
         }
     };
-    let profile = AdapterRegistry::universal_profile(language).ok_or_else(|| {
+    let pipeline = UniversalEvidenceRegistry::pipeline(language).ok_or_else(|| {
         EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            format!("ECMAScript universal adapter {language:?} is not registered"),
+            EvidenceErrorCode::InvalidPipeline,
+            format!("ECMAScript universal evidence pipeline {language:?} is not registered"),
         )
     })?;
     let module_name = module_name(path, source_file);
     let dialect_name = dialect_for_path(path, dialect);
     let mut builder = EvidenceBuilder::new_with_dialect(
-        profile,
-        format!("compass.languages.{language}.universal.candidate"),
+        pipeline,
+        format!("compass.languages.{language}.universal"),
         source_file,
         EvidenceLimits::default(),
         Some(&dialect_name),

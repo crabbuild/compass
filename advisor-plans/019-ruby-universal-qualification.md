@@ -1,4 +1,4 @@
-# Plan 019: Hard-cut Ruby to a qualified universal candidate
+# Plan 019: Hard-cut Ruby to a qualifying universal evidence pipeline
 
 > **Executor instructions**: Deliver this as a sequence of reviewable PRs. Read
 > this plan completely, then read `AGENTS.md`,
@@ -8,12 +8,12 @@
 > `docs/reference/universal-semantic-evidence.md` before changing source. Run
 > every verification gate and confirm its expected result before starting the
 > next phase. Ruby must not have production dual-running: keep the established
-> path active while the candidate is qualification-only, then switch the
+> path active while the pipeline is qualification-only, then switch the
 > registry, Ruby publisher, resolver, and Rails source pack atomically.
 >
 > **Drift check (run before every phase)**:
 > `git diff --stat b53c3ea2..HEAD -- crates/compass-files crates/compass-languages crates/compass-resolve crates/compass-model crates/compass-graph crates/compass-core fixtures/code-graph tests/qualification scripts benchmarks/performance docs PERFORMANCE.md COMPATIBILITY.md MIGRATION.md CHANGELOG.md advisor-plans`
-> Reconcile any changed adapter versions, evidence fields, Ruby/Rails paths,
+> Reconcile any changed producer versions, evidence fields, Ruby/Rails paths,
 > qualification thresholds, or cache contracts before proceeding. If live code
 > contradicts the “Current state” section, stop and update this plan first.
 
@@ -31,7 +31,7 @@
 ### Execution status (2026-08-17)
 
 The implementation has completed the semantic hard cut through Phase 5. Ruby
-is now published through `compass.ruby.candidate` and the `rails-ruby`
+is now published through `compass.ruby` and the `rails-ruby`
 universal pack, with the old Ruby publisher/resolver removed from production.
 Phase 0 source-oracle and pinned-commit evidence is complete. Phase 6 now has
 a corrected file-only incremental publication path plus copy-on-write snapshot
@@ -53,7 +53,7 @@ parser-recovery diagnostics, and coverage instead of reclassifying cached
 files as extracted; the strict fixture restore gate passes byte-for-byte.
 Phase 7 audit gates now pass: 89,981 accepted relationships, 100% observed
 precision, 98.5567% source-oracle recall, zero ambiguity, and zero critical
-violations. Ruby remains intentionally `UniversalCandidate`; promotion is a
+violations. Ruby remains intentionally `Qualifying`; promotion is a
 separate decision and has not been made here.
 
 ## Why this matters
@@ -73,7 +73,7 @@ anchors, limits, ambiguity, provenance, incremental caching, and framework
 facts are enforced consistently.
 
 The intended endpoint of this plan is a hard-cut version-1 Ruby
-`UniversalCandidate`, not `UniversalComplete`. Candidate promotion remains
+`Qualifying`, not `Qualified`. Promotion remains
 blocked on the independent 2,000-relationship quality audit and all precision,
 recall, and zero-tolerance gates in
 `docs/reference/universal-semantic-evidence.md`.
@@ -100,9 +100,9 @@ recall, and zero-tolerance gates in
   and otherwise resolves capitalized receivers or a missing `receiver_type`.
   It has no lexical constant path, require/load evidence, reopen handling, or
   separate singleton/instance member space.
-- `crates/compass-languages/src/adapters.rs:270+` has no Ruby adapter profile.
+- `crates/compass-languages/src/evidence_pipeline.rs:270+` has no Ruby evidence pipeline.
   The closest dedicated emitter is `evidence/php.rs`; the closest small
-  candidate and hard-cut tests are the Kotlin emitter/conformance/resolver
+  qualifying and hard-cut tests are the Kotlin emitter/conformance/resolver
   suites.
 - `crates/compass-resolve/src/evidence/languages/policy.rs:9-30` has no Ruby
   policy variant. Unknown languages use only generic resolution.
@@ -129,8 +129,8 @@ recall, and zero-tolerance gates in
 ### Post-implementation state
 
 The pre-change inventory above is retained as the rationale for the cut. The
-delivered tree now has a bounded `evidence/ruby.rs` emitter, a Ruby adapter
-profile (`compass.ruby.candidate`, version 1), Ruby method-space-aware
+delivered tree now has a bounded `evidence/ruby.rs` emitter, a Ruby producer
+and pipeline (`compass.ruby`, version 1, `Qualifying`), Ruby method-space-aware
 resolution, exact contained `require_relative` decisions, and a single
 `rails-ruby` universal framework pack. Ruby extraction has no production
 `RawCall` publisher, and the replaced Ruby member resolver and Rails line/regex
@@ -200,7 +200,7 @@ limit, and corpus evidence. The initial target set is:
 Do not advertise decorators, static type references, reexports, tests, macros,
 or complete hierarchy dispatch merely because a fixture contains a related
 syntax form. Literal `attr_reader`/`attr_writer`/`attr_accessor` and
-`define_method(:literal)` can land as declarations during the candidate phase,
+`define_method(:literal)` can land as declarations during the qualifying phase,
 but `Macros` becomes an advertised capability only after its own audit stratum
 passes.
 
@@ -298,7 +298,7 @@ performance modes without silently changing the production graph.
 - treating Gemfile gem names as require paths or local declarations;
 - broadening `compass.graph/1` endpoint validation to admit false Ruby edges;
 - adding a Ruby runtime dependency to the released Compass binary;
-- promoting Ruby to `UniversalComplete` before the complete audit gates pass.
+- promoting Ruby to `Qualified` before the complete audit gates pass.
 
 ## Git and delivery workflow
 
@@ -321,10 +321,10 @@ performance modes without silently changing the production graph.
 | 1 | Ruby identity and graph representation contract | No |
 | 2 | Qualification-only bounded evidence emitter | No |
 | 3 | Qualification-only project and resolver semantics | No |
-| 4 | Universal Rails pack ready behind candidate evidence | No |
-| 5 | Atomic hard cut to Ruby `UniversalCandidate` | Yes, once |
-| 6 | Measured cold/warm/incremental optimization | Candidate remains active |
-| 7 | Complete quality audit and release qualification | Candidate; promotion is separate |
+| 4 | Universal Rails pack ready behind qualifying evidence | No |
+| 5 | Atomic hard cut to Ruby `Qualifying` | Yes, once |
+| 6 | Measured cold/warm/incremental optimization | Qualifying remains active |
+| 7 | Complete quality audit and release qualification | Qualifying; promotion is separate |
 
 ## Phase 0: Freeze truth, established behavior, and performance
 
@@ -361,7 +361,7 @@ phase creates reproducible evidence before any production Ruby behavior moves.
    twice and require byte-identical canonical output.
 5. Create a small curated baseline of established correct, missing, ambiguous,
    and incorrect graph facts. Do not translate missing established facts into
-   candidate requirements unless the source oracle proves them.
+   qualification requirements unless the source oracle proves them.
 
 **Acceptance criteria**:
 
@@ -372,7 +372,7 @@ phase creates reproducible evidence before any production Ruby behavior moves.
 - the oracle fails closed on malformed/partial input and produces identical
   bytes on two runs;
 - build time is excluded from Compass timings and corpus trees remain clean;
-- no product source, adapter registration, or production Ruby graph changes in
+- no product source, producer registration, or production Ruby graph changes in
   this phase.
 
 **Verify**: the new oracle unit suite and baseline command both exit 0; rerun
@@ -429,7 +429,7 @@ canonical bytes in forward and reversed input order.
 ## Phase 2: Build the qualification-only Ruby evidence emitter
 
 **Context**: The emitter must be exercised without registering Ruby in
-`UNIVERSAL_ADAPTERS`. Production continues through the established generic
+`UNIVERSAL_EVIDENCE_PIPELINES`. Production continues through the established generic
 path during this phase.
 
 **Primary files to add or update**:
@@ -598,7 +598,7 @@ framework-pack contract as Spring, ASP.NET, and PHP frameworks.
 - current Rails symbol, hash-rocket, and namespace fixtures remain exact;
 - dynamic or ambiguous handler/path/controller forms publish no invented exact
   edge;
-- the universal pack runs only on validated Ruby candidate evidence and does
+- the universal pack runs only on validated Ruby qualifying evidence and does
   not rescan source lines with regex as its semantic authority;
 - the established `rails-routes` pack remains production-active until Phase 5,
   but qualification invokes only the universal pack—never both in one graph.
@@ -615,7 +615,7 @@ three corpora.
 
 **Primary files to update**:
 
-- `crates/compass-languages/src/adapters.rs`;
+- `crates/compass-languages/src/evidence_pipeline.rs`;
 - `crates/compass-languages/src/evidence/mod.rs` and `engine.rs`;
 - `crates/compass-resolve/src/members.rs`;
 - framework pack/expansion registries;
@@ -625,9 +625,9 @@ three corpora.
 
 **Steps**:
 
-1. Add sorted `RUBY_CAPABILITIES` and adapter profile
-   `id="compass.ruby.candidate"`, `language="ruby"`, `version=1`,
-   `profile=UniversalCandidate`.
+1. Add sorted `RUBY_CAPABILITIES` and producer/pipeline metadata
+   `id="compass.ruby"`, `language="ruby"`, `version=1`,
+   `qualification=Qualifying`.
 2. Route normal `.rb`, `.rake`, fixed filenames, and Ruby shebang extraction to
    the dedicated emitter. The same registered emitter must back the hidden
    qualification API.
@@ -636,14 +636,14 @@ three corpora.
    established languages that share `engine.rs` or `members.rs`.
 4. Replace the established `rails-routes` registration with `rails-ruby` and
    enable its matching expansion adapter in the same commit.
-5. Invalidate Ruby cache entries through adapter identity/version. Cached Ruby
+5. Invalidate Ruby cache entries through producer identity/version. Cached Ruby
    entries containing replaced raw nodes/edges/calls must fail compatibility
    and reextract; non-Ruby caches remain reusable.
 6. Expand strict fixture vocabulary/producer assertions for Ruby declarations,
    trait modules, calls, construction, inheritance, mixins, imports, aliases,
    and Rails routes. Require zero Ruby publication omissions and identity
    collisions.
-7. Update current-state docs to say hard-cut Ruby `UniversalCandidate`, and
+7. Update current-state docs to say hard-cut Ruby `Qualifying`, and
    explicitly state that complete audit gates remain pending.
 
 **Acceptance criteria**:
@@ -664,11 +664,11 @@ three corpora.
   intentionally includes the expanded vocabulary;
 - unknown-major/version validation, cache rejection, and atomic publication
   tests pass;
-- Ruby remains `UniversalCandidate` in code and documentation.
+- Ruby remains `Qualifying` in code and documentation.
 
 **Verify**: run every command in “Commands executors will need,” then run the
 three pinned-corpus qualification mode. Every command exits 0 and each corpus
-summary reports schema v1, Ruby adapter v1, zero validation errors, zero Ruby
+summary reports schema v1, Ruby producer v1, zero validation errors, zero Ruby
 publication omissions/collisions, and deterministic comparisons all true.
 
 ## Phase 6: Optimize cold, warm, and incremental Ruby builds
@@ -715,7 +715,7 @@ bytes before and after each change.
 - all limits, ambiguity, ordering, and fixture gates remain green.
 
 **Verify**: the Ruby performance mode emits a versioned JSON report containing
-raw samples, medians, corpus/graph digests, adapter version, changed/reused file
+raw samples, medians, corpus/graph digests, producer version, changed/reused file
 counts, and stage timings; its regression evaluator exits 0.
 
 ## Phase 7: Complete the quality audit and release qualification
@@ -740,8 +740,8 @@ without weakening them for Ruby's dynamic semantics.
 4. Add scheduled exact-commit qualification and a release gate only after the
    corpus process is reproducible on supported CI infrastructure. Generated
    graphs and private data remain outside the repository.
-5. Promote to `UniversalComplete` only in a separate reviewed change after
-   every threshold passes. Otherwise retain `UniversalCandidate` and publish
+5. Promote to `Qualified` only in a separate reviewed change after
+   every threshold passes. Otherwise retain `Qualifying` and publish
    the failing strata as actionable follow-up work.
 
 **Acceptance criteria**:
@@ -762,7 +762,7 @@ without weakening them for Ruby's dynamic semantics.
   forced, incremental restore, worker-count, input-order, and relocated-path
   permutations;
 - performance gates from Phase 6 pass;
-- a failing gate leaves Ruby explicitly `UniversalCandidate` and fails the
+- a failing gate leaves Ruby explicitly `Qualifying` and fails the
   completion/release claim rather than changing thresholds.
 
 **Verify**: the checked-in audit validator exits 0 only when all thresholds
@@ -804,9 +804,9 @@ Use `php_universal_conformance.rs`, `kotlin_universal_conformance.rs`,
   inventories, and an independent bounded Ruby source oracle.
 - [x] Ruby identity, reopen, module/trait, and method-space contracts are
   documented and tested before broad extraction.
-- [x] The candidate emitter has independent fixture/oracle coverage and is
-  the sole production Ruby publisher after the atomic cut; the profile remains
-  a candidate until the complete corpus gates pass.
+- [x] The evidence emitter has independent fixture/oracle coverage and is
+  the sole production Ruby publisher after the atomic cut; the pipeline remains
+  `Qualifying` until the complete corpus gates pass.
 - [x] Ruby resolution never uses terminal-name similarity as unique evidence.
 - [x] Rails is one universal pack consuming validated Ruby evidence.
 - [x] The atomic cut removes only Ruby's replaced publisher/resolver/framework
@@ -816,7 +816,7 @@ Use `php_universal_conformance.rs`, `kotlin_universal_conformance.rs`,
   audit has zero critical violations.
 - [x] Performance gates pass with reproducible reports; RSS is recorded but
   non-blocking.
-- [x] Ruby remains `UniversalCandidate` until every complete audit threshold
+- [x] Ruby remains `Qualifying` until every complete audit threshold
   passes.
 - [x] Docs, compatibility notes, migration guidance, changelog, and
   `advisor-plans/README.md` reflect the actual shipped state.
@@ -825,7 +825,7 @@ Use `php_universal_conformance.rs`, `kotlin_universal_conformance.rs`,
 
 Stop and report rather than improvising if:
 
-- live adapter/evidence/cache contracts differ from this plan's assumptions;
+- live producer/evidence/cache contracts differ from this plan's assumptions;
 - correct Ruby module or method-space representation requires a new public
   graph kind or weakening endpoint validation;
 - Ripper cannot provide exact complete source-oracle coverage for a required
@@ -856,7 +856,7 @@ Stop and report rather than improvising if:
 - Rails autoloading and inflection are configurable. Never assume path-to-
   constant equivalence from snake/camel conversion alone; add a bounded,
   versioned Zeitwerk evidence design if later qualification proves it necessary.
-- Adapter-version increments are required whenever meaning-affecting Ruby
+- Producer-version increments are required whenever meaning-affecting Ruby
   evidence changes. The shared evidence schema version changes only for a true
   contract-major change.
 - Reviewers should inspect ambiguity/negative tests before graph-count gains.
@@ -880,5 +880,5 @@ Stop and report rather than improvising if:
 - **Use Graphify as the qualification oracle**: rejected because it is a
   hypothesis source, not independent truth, and cannot become a Compass
   runtime/test/fallback dependency.
-- **Promote immediately to `UniversalComplete` after hard cut**: rejected
-  because candidate architecture and audited quality are separate gates.
+- **Promote immediately to `Qualified` after hard cut**: rejected
+  because pipeline architecture and audited quality are separate gates.

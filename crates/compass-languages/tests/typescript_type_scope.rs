@@ -12,12 +12,8 @@ type First<T> = { [K in keyof T]: T[K] };
 type Second<T> = { [K in keyof T]?: T[K] };
 "#;
     let batch = Engine::default()
-        .extract_source_universal_candidate_evidence(
-            Path::new("src/types.ts"),
-            "src/types.ts",
-            source,
-        )
-        .expect("candidate evidence");
+        .extract_source_universal_evidence(Path::new("src/types.ts"), "src/types.ts", source)
+        .expect("universal evidence");
 
     for (qualified_suffix, spelling) in [
         (".Intersection.I", "I"),
@@ -50,12 +46,8 @@ async function Page(props: { params: Promise<{ slug?: string[] }> }) {
 }
 "#;
     let batch = Engine::default()
-        .extract_source_universal_candidate_evidence(
-            Path::new("src/page.tsx"),
-            "src/page.tsx",
-            source,
-        )
-        .expect("candidate evidence");
+        .extract_source_universal_evidence(Path::new("src/page.tsx"), "src/page.tsx", source)
+        .expect("universal evidence");
     let property = batch
         .declarations
         .iter()

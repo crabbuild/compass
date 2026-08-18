@@ -1,5 +1,5 @@
 //! Developer-only real-corpus differential qualification for the
-//! TypeScript/JavaScript universal candidate.
+//! TypeScript/JavaScript universal evidence pipeline.
 //!
 //! This test intentionally remains ignored.  It runs the independent pinned
 //! TypeScript 5.9.3 compiler oracle over a read-only corpus supplied through
@@ -49,7 +49,7 @@ type SourceKey = (String, String, String, u64, u64);
 
 #[test]
 #[ignore = "developer-only real TypeScript/JavaScript corpus differential"]
-fn pinned_compiler_corpus_has_candidate_source_coverage() {
+fn pinned_compiler_corpus_has_universal_evidence_source_coverage() {
     let root = env::var_os("COMPASS_TS_QUALIFICATION_ROOT")
         .map(PathBuf::from)
         .expect("set COMPASS_TS_QUALIFICATION_ROOT to a read-only pinned corpus");
@@ -93,14 +93,14 @@ fn pinned_compiler_corpus_has_candidate_source_coverage() {
                 continue;
             }
         };
-        match engine.extract_source_universal_candidate_evidence(&path, &source_file, &source) {
-            Ok(batch) => observed.extend(candidate_source_keys(&batch)),
+        match engine.extract_source_universal_evidence(&path, &source_file, &source) {
+            Ok(batch) => observed.extend(evidence_source_keys(&batch)),
             Err(error) => extraction_errors.push(format!("{source_file}: {error}")),
         }
     }
     assert!(
         extraction_errors.is_empty(),
-        "candidate extraction failed for {} files: {}",
+        "universal evidence extraction failed for {} files: {}",
         extraction_errors.len(),
         extraction_errors
             .iter()
@@ -239,7 +239,7 @@ fn source_key(construct: &OracleConstruct) -> SourceKey {
     )
 }
 
-fn candidate_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<SourceKey> {
+fn evidence_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<SourceKey> {
     let mut keys = BTreeSet::new();
     for declaration in &batch.declarations {
         keys.insert((
@@ -261,7 +261,7 @@ fn candidate_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<SourceKey> {
         else {
             continue;
         };
-        let Some((relation, capability)) = candidate_key_names(candidate, occurrence) else {
+        let Some((relation, capability)) = evidence_key_names(candidate, occurrence) else {
             continue;
         };
         keys.insert((
@@ -275,7 +275,7 @@ fn candidate_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<SourceKey> {
     keys
 }
 
-fn candidate_key_names(
+fn evidence_key_names(
     candidate: &compass_languages::RelationshipCandidate,
     occurrence: &compass_languages::OccurrenceFact,
 ) -> Option<(&'static str, &'static str)> {

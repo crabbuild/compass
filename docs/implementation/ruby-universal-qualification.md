@@ -1,8 +1,8 @@
-# Ruby universal-candidate qualification
+# Ruby universal qualification
 
 Plan 019 is implemented through a single Ruby evidence path and is currently
-kept at `UniversalCandidate`. The adapter identity is
-`compass.ruby.candidate` (version 1, evidence schema v1); the complete quality
+kept at `Qualifying`. The producer identity is
+`compass.ruby` (producer version 1, evidence schema v2); the complete quality
 audit has not been claimed or used to promote the profile.
 
 ## Production contract
@@ -103,7 +103,7 @@ and `typescript_workspace_package_exports_follow_nodenext_reexports`); all
 Ruby and Rails tests in that suite pass.
 
 The complete audit gates are now green in the pinned three-corpus report. Ruby
-is still intentionally `UniversalCandidate`; passing qualification does not
+is still intentionally `Qualifying`; passing qualification does not
 automatically promote a language profile.
 
 The pinned source-oracle run on 2026-08-17 completed deterministically with
@@ -125,7 +125,7 @@ The generated audit population contains 89,981 accepted relationships across
 the three corpora, with 100% observed precision, a 99.9957% Wilson lower bound,
 98.5567% source-oracle recall, and zero critical violations. Every fixed
 qualification gate passes. Ruby is still intentionally kept at
-`UniversalCandidate`; promotion is a separate product decision.
+`Qualifying`; promotion is a separate product decision.
 
 | Capability | Accepted | Recall | Status |
 | --- | ---: | ---: | --- |
@@ -136,7 +136,7 @@ qualification gate passes. Ruby is still intentionally kept at
 
 The machine-readable result is produced by
 `benchmarks/performance/harness.py audit`; no Graphify facts are used as truth.
-Ruby remains `UniversalCandidate`.
+Ruby remains `Qualifying`.
 
 The current real-repository captures (cold, no build time) are:
 
@@ -156,7 +156,7 @@ match. The pinned Discourse Ruby-only five-warm-sample run also restores
 byte-for-byte (cold 211.296 s, warm median 3.017 s with samples from 2.996–3.214
 s, fact-neutral 145.529 s, semantic 226.129 s, restore 226.958 s). RSS remains
 non-blocking. Ruby therefore remains
-`UniversalCandidate`.
+`Qualifying`.
 
 The fact-neutral delta also preserves unchanged files' extraction status,
 parser-recovery diagnostics, and per-file coverage while refreshing the edited

@@ -420,9 +420,9 @@ fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<
         .collect::<Vec<_>>();
 
     assert_eq!(calls.len(), 2, "occurrences={:?}", evidence.occurrences);
-    assert_eq!(evidence.adapter.language, "rust");
+    assert_eq!(evidence.pipeline.language, "rust");
     assert_eq!(
-        evidence.adapter.producer,
+        evidence.pipeline.emitter,
         "compass.languages.rust.universal"
     );
 
@@ -929,7 +929,7 @@ class Service(Base[ExternalType]):
         value: Annotated[Optional[Union[InputType, None]], "meta"],
     ) -> tuple[OutputType, ...]:
         """A function rationale long enough to be indexed safely."""
-        # WHY: retain this adapter for compatibility with old callers
+        # WHY: retain this evidence path for compatibility with old callers
         local = callback
         assigned = (external_factory, local)
         consume(external_argument, named=external_keyword)

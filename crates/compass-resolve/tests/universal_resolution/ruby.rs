@@ -2,7 +2,7 @@ use compass_resolve::evidence::{ResolutionDecision, ResolutionRule};
 
 fn extract_ruby(path: &str, source: &[u8]) -> compass_languages::SemanticEvidenceBatch {
     Engine::default()
-        .extract_source_universal_candidate_evidence(Path::new(path), path, source)
+        .extract_source_universal_evidence(Path::new(path), path, source)
         .expect("Ruby universal evidence")
 }
 

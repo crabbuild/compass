@@ -538,15 +538,17 @@ fn augment_universal_project_inventory(
 ) {
     let mut source_languages = BTreeMap::<String, String>::new();
     let mut source_evidence_lengths = BTreeMap::<String, usize>::new();
-    for batch in evidence_batches
-        .iter()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    {
+    for batch in evidence_batches.iter().filter(|batch| {
+        matches!(
+            batch.pipeline.language.as_str(),
+            "javascript" | "typescript"
+        )
+    }) {
         for declaration in &batch.declarations {
             if !declaration.range.source_file.is_empty() {
                 source_languages
                     .entry(declaration.range.source_file.clone())
-                    .or_insert_with(|| batch.adapter.language.clone());
+                    .or_insert_with(|| batch.pipeline.language.clone());
                 let normalized_source = source_key(&declaration.range.source_file, root);
                 let length = source_evidence_lengths
                     .entry(normalized_source)
@@ -631,7 +633,12 @@ fn augment_universal_project_inventory(
 
     let declaration_ids = evidence_batches
         .iter()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+        .filter(|batch| {
+            matches!(
+                batch.pipeline.language.as_str(),
+                "javascript" | "typescript"
+            )
+        })
         .flat_map(|batch| {
             batch
                 .declarations
@@ -650,10 +657,12 @@ fn augment_universal_project_inventory(
                 .to_owned()
         })
         .collect::<HashSet<_>>();
-    for batch in evidence_batches
-        .iter()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    {
+    for batch in evidence_batches.iter().filter(|batch| {
+        matches!(
+            batch.pipeline.language.as_str(),
+            "javascript" | "typescript"
+        )
+    }) {
         let occurrences_by_id = batch
             .occurrences
             .iter()

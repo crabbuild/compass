@@ -1,6 +1,6 @@
 //! Direct universal evidence for C# and .NET source.
 //!
-//! The adapter is deliberately AST-first and project-neutral. It emits exact
+//! The producer is deliberately AST-first and project-neutral. It emits exact
 //! declarations, scopes, bindings, occurrences, and constrained relationship
 //! candidates; cross-file target choice remains owned by `compass-resolve`.
 
@@ -15,7 +15,7 @@ use super::model::{
     ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
-use crate::{AdapterRegistry, file_stem, make_id};
+use crate::{UniversalEvidenceRegistry, file_stem, make_id};
 
 const PRODUCER: &str = "compass.languages.csharp.universal";
 const MAX_TRAVERSAL_DEPTH: usize = 512;
@@ -70,20 +70,20 @@ struct State<'source> {
     direct_class_bases: BTreeMap<String, Vec<String>>,
 }
 
-pub(super) fn extract_candidate_tree_evidence(
+pub(super) fn emit_tree_evidence(
     path: &Path,
     source_file: &str,
     source: &[u8],
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    let profile = AdapterRegistry::universal_profile("csharp").ok_or_else(|| {
+    let pipeline = UniversalEvidenceRegistry::pipeline("csharp").ok_or_else(|| {
         EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            "C# universal adapter is not registered",
+            EvidenceErrorCode::InvalidPipeline,
+            "C# universal evidence pipeline is not registered",
         )
     })?;
     let mut builder =
-        EvidenceBuilder::new(profile, PRODUCER, source_file, EvidenceLimits::default());
+        EvidenceBuilder::new(pipeline, PRODUCER, source_file, EvidenceLimits::default());
     let file_graph_id = make_id(&[source_file]);
     let file_module = file_stem(Path::new(source_file));
     let file_id = builder.declare(

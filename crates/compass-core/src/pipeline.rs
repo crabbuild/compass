@@ -284,7 +284,7 @@ fn compact_extraction(extraction: &mut Extraction) {
         }
     }
     if let Some(evidence) = extraction.semantic_evidence.as_mut() {
-        compact_vec(&mut evidence.adapter.capabilities);
+        compact_vec(&mut evidence.pipeline.capabilities);
         compact_vec(&mut evidence.declarations);
         compact_vec(&mut evidence.scopes);
         compact_vec(&mut evidence.bindings);
@@ -1279,7 +1279,7 @@ impl Serialize for FactDigestSemanticEvidence<'_> {
                 })
         });
         let mut map = serializer.serialize_map(Some(7))?;
-        map.serialize_entry("adapter", &self.batch.adapter)?;
+        map.serialize_entry("pipeline", &self.batch.pipeline)?;
         map.serialize_entry(
             "declarations",
             &FactDigestDeclarations {
@@ -7335,17 +7335,17 @@ fn cached_framework_evidence_matches(
 }
 
 fn cached_universal_evidence_matches(extraction: &Extraction, path: &Path) -> bool {
-    let Some(profile) = Registry::universal_adapter(path) else {
+    let Some(pipeline) = Registry::universal_evidence_pipeline(path) else {
         return true;
     };
     extraction.raw_calls.is_none()
         && extraction.semantic_evidence.as_ref().is_some_and(|batch| {
-            batch.adapter.id == profile.id
-                && batch.adapter.language == profile.language
-                && batch.adapter.version == profile.version
-                && batch.adapter.evidence_schema == profile.evidence_schema
-                && batch.adapter.profile == profile.profile
-                && batch.adapter.capabilities.as_slice() == profile.capabilities
+            batch.pipeline.id == pipeline.producer.id
+                && batch.pipeline.language == pipeline.producer.language
+                && batch.pipeline.version == pipeline.producer.version
+                && batch.pipeline.evidence_schema == pipeline.producer.evidence_schema
+                && batch.pipeline.qualification == pipeline.qualification
+                && batch.pipeline.capabilities.as_slice() == pipeline.producer.capabilities
                 && compass_languages::validate_evidence(
                     batch,
                     compass_languages::EvidenceLimits::default(),
@@ -8079,7 +8079,7 @@ mod tests {
     }
 
     #[test]
-    fn universal_adapter_cache_requires_current_valid_evidence() -> Result<(), Box<dyn Error>> {
+    fn universal_evidence_cache_requires_current_valid_evidence() -> Result<(), Box<dyn Error>> {
         let python = Path::new("src/example.py");
         let rust = Path::new("src/example.rs");
         assert!(!cached_universal_evidence_matches(
@@ -8107,7 +8107,7 @@ mod tests {
             .semantic_evidence
             .as_mut()
             .ok_or_else(|| std::io::Error::other("universal evidence is missing"))?
-            .adapter
+            .pipeline
             .capabilities
             .clear();
         assert!(!cached_universal_evidence_matches(&invalid, python));

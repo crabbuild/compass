@@ -220,7 +220,7 @@ fn universal_framework_targets_are_materialized(
 ) -> bool {
     let Some(batch) = extraction.semantic_evidence.as_ref().filter(|batch| {
         matches!(
-            batch.adapter.language.as_str(),
+            batch.pipeline.language.as_str(),
             "csharp" | "javascript" | "php" | "ruby" | "typescript"
         )
     }) else {
@@ -261,7 +261,7 @@ pub(super) fn materialize_universal_framework_targets(
 ) -> compass_languages::Extraction {
     let Some(batches) = extraction.semantic_evidence.as_ref().filter(|batch| {
         matches!(
-            batch.adapter.language.as_str(),
+            batch.pipeline.language.as_str(),
             "csharp" | "javascript" | "php" | "ruby" | "typescript"
         )
     }) else {

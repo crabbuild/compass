@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{AdapterProfile, AdapterRegistry};
+use crate::{UniversalEvidencePipeline, UniversalEvidenceRegistry};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtractorKind {
@@ -70,24 +70,26 @@ impl Registry {
         REGISTRY_CASES
     }
 
-    /// Resolve a path only when its language has hard-cut to universal evidence.
+    /// Resolve a path only when its language has hard-cut to the evidence pipeline.
     #[must_use]
-    pub fn universal_adapter(path: &Path) -> Option<&'static AdapterProfile> {
-        Self::resolve(path).and_then(Self::universal_profile_for_spec)
+    pub fn universal_evidence_pipeline(path: &Path) -> Option<&'static UniversalEvidencePipeline> {
+        Self::resolve(path).and_then(Self::universal_evidence_pipeline_for_spec)
     }
 
-    /// Return the hard-cut adapter associated with a resolved language.
+    /// Return the evidence pipeline associated with a resolved language.
     ///
-    /// TSX is a parser dialect of the canonical TypeScript universal adapter;
+    /// TSX is a parser dialect of the canonical TypeScript evidence pipeline;
     /// keep the registry's `tsx` grammar name while publishing one stable
     /// semantic language identity for resolution and cache invalidation.
     #[must_use]
-    pub fn universal_profile_for_spec(spec: LanguageSpec) -> Option<&'static AdapterProfile> {
+    pub fn universal_evidence_pipeline_for_spec(
+        spec: LanguageSpec,
+    ) -> Option<&'static UniversalEvidencePipeline> {
         let language = match spec.name {
             "tsx" => "typescript",
             language => language,
         };
-        AdapterRegistry::universal_profile(language)
+        UniversalEvidenceRegistry::pipeline(language)
     }
 
     #[must_use]

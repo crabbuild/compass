@@ -19,7 +19,7 @@ struct LanguagePresence {
 impl LanguagePresence {
     fn detect(batches: &[SemanticEvidenceBatch], inventory_nodes: &[NodeRecord]) -> Self {
         let mut presence = Self::default();
-        for language in batches.iter().map(|batch| batch.adapter.language.as_str()) {
+        for language in batches.iter().map(|batch| batch.pipeline.language.as_str()) {
             presence.observe(language);
         }
         for node in inventory_nodes {
@@ -683,7 +683,7 @@ impl IndexBuilder<'_> {
             }
         }
         // Object-literal members are deliberately collected in their lexical
-        // binding scope by the TypeScript adapter: unlike a class/interface,
+        // binding scope by the TypeScript producer: unlike a class/interface,
         // an object value has no syntax-level scope owner.  Recover the
         // source-qualified object variable as an additional owner so imported
         // chains such as `api.make(value).inspect()` can traverse the

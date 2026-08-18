@@ -25,7 +25,7 @@ struct LaravelCall {
 }
 
 pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
-    if context.evidence.adapter.language != "php" {
+    if context.evidence.pipeline.language != "php" {
         return Vec::new();
     }
     let route_calls = universal_laravel_call_sites(context);

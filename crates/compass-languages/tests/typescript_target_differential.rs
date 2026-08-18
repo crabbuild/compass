@@ -1,5 +1,5 @@
 //! Developer-only compiler-checker target adjudication for the
-//! TypeScript/JavaScript universal candidate.
+//! TypeScript/JavaScript universal evidence pipeline.
 //!
 //! The test is intentionally ignored. It compares exact local declaration
 //! anchors from an independent TypeScript 5.9.3 checker oracle with candidate
@@ -115,7 +115,7 @@ struct TargetAdjudicationStratum {
 struct TargetAdjudicationReport {
     schema: &'static str,
     provider: &'static str,
-    candidate_adapter: &'static str,
+    producer_id: &'static str,
     metadata: Option<OracleMetadata>,
     scanned_files: usize,
     parsed_files: usize,
@@ -135,7 +135,7 @@ struct TargetAdjudicationReport {
 
 #[test]
 #[ignore = "developer-only real TypeScript/JavaScript target adjudication"]
-fn checker_oracle_adjudicates_local_candidate_targets() {
+fn checker_oracle_adjudicates_local_evidence_targets() {
     let root = env::var_os("COMPASS_TS_QUALIFICATION_ROOT")
         .map(PathBuf::from)
         .expect("set COMPASS_TS_QUALIFICATION_ROOT to a read-only pinned corpus");
@@ -193,14 +193,14 @@ fn checker_oracle_adjudicates_local_candidate_targets() {
         // files; a fresh engine preserves bounded default-stack runs without
         // changing production parser/cache behavior.
         let mut engine = Engine::default();
-        match engine.extract_source_universal_candidate_evidence(&path, &source_file, &source) {
-            Ok(batch) => merge_candidate_targets(&mut observed, &batch),
+        match engine.extract_source_universal_evidence(&path, &source_file, &source) {
+            Ok(batch) => merge_evidence_targets(&mut observed, &batch),
             Err(error) => extraction_errors.push(format!("{source_file}: {error}")),
         }
     }
     assert!(
         extraction_errors.is_empty(),
-        "candidate extraction failed: {}",
+        "universal evidence extraction failed: {}",
         extraction_errors
             .iter()
             .take(20)
@@ -415,7 +415,7 @@ fn checker_oracle_adjudicates_local_candidate_targets() {
             &TargetAdjudicationReport {
                 schema: TARGET_REPORT_SCHEMA,
                 provider: ORACLE_PROVIDER,
-                candidate_adapter: "compass.ecmascript.candidate",
+                producer_id: "compass.typescript",
                 metadata: oracle.metadata.clone(),
                 scanned_files: oracle.scanned_files,
                 parsed_files: oracle.parsed_files,
@@ -549,7 +549,7 @@ fn is_supported_construct(construct: &OracleConstruct) -> bool {
     )
 }
 
-fn merge_candidate_targets(
+fn merge_evidence_targets(
     observed: &mut BTreeMap<SourceKey, Vec<CandidateTarget>>,
     batch: &SemanticEvidenceBatch,
 ) {

@@ -5,7 +5,7 @@ meta:
   navLabel: Universal Evidence
   category: Implementation
   overview: Reference for the contracts that connect source extraction to normalized graph publication.
-  goal: Define the implementation boundaries and invariants for universal language adapters.
+  goal: Define the implementation boundaries and invariants for universal evidence pipelines.
   audience:
     - Compass language contributors
     - resolver contributors
@@ -29,11 +29,11 @@ future work.
 
 | Status | Implementation |
 | --- | --- |
-| Available now | `compass-languages` owns the source registry, parsers, established adapters, and semantic evidence version 1 |
-| Available now | C#, Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are entries in the hard-cut `AdapterRegistry`; C#, Kotlin, and Ruby are at adapter version 1, Go and Java are at version 3, Python is at version 11, Rust is at version 15, and the ECMAScript candidates are at version 5 |
-| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; C#, PHP, Kotlin, Ruby, and the ECMAScript family use dedicated source-grounded emitters, while TypeScript and JavaScript retain distinct adapter identities |
+| Available now | `compass-languages` owns the source registry, parsers, established extractors, and universal evidence schema version 2 (extraction semantics version 3) |
+| Available now | C#, Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are entries in the hard-cut `UniversalEvidenceRegistry`; each entry pairs a `UniversalEvidenceProducer` with a `UniversalEvidenceQualification` state |
+| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; C#, PHP, Kotlin, Ruby, and the ECMAScript family use dedicated source-grounded producers, while TypeScript and JavaScript retain distinct producer identities |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust has passed Phase 2 qualification; C#, Java, Kotlin, Ruby, TypeScript, and JavaScript remain `UniversalCandidate` while their respective completion gates run |
+| Available now | Rust has passed Phase 2 qualification; C#, Java, Kotlin, Ruby, TypeScript, and JavaScript remain `Qualifying` while their independent audit gates run |
 | Planned | `GrammarProvider`, grammar provenance, and producer-registry validation |
 | Planned | Independently qualified hard cuts for the remaining registered languages |
 
@@ -46,10 +46,10 @@ Each crate has one primary responsibility in the language pipeline.
 | Crate or package | Responsibility |
 | --- | --- |
 | `vendor/compass-tree-sitter-language-pack` | Pinned grammars, static linkage, parser creation, and grammar metadata |
-| `compass-languages::registry` | Source recognition, producer selection, adapter descriptors, capabilities, and budgets |
+| `compass-languages::registry` | Source recognition, producer selection, evidence pipelines, capabilities, and budgets |
 | `compass-languages::evidence` | Hard-cut semantic evidence model and bounded AST-backed builder |
-| `compass-languages::adapters` | Hard-cut adapter profiles, version-1 capability declarations, and registry validation |
-| Adapter modules | Language-specific syntax classification and identity normalization |
+| `compass-languages::evidence_pipeline` | Universal evidence producers, qualification states, capability declarations, and registry validation |
+| Evidence producers | Language-specific syntax classification and identity normalization |
 | `compass-resolve::evidence` | Collection indexes, fail-closed target selection, and shared graph projection |
 | Framework modules | Activation evidence, target constraints, occurrence policy, and framework relations |
 | `compass-graph` | Normalized graph construction, deduplication, clustering, and analysis |
@@ -64,19 +64,19 @@ These files define the current implementation.
 | --- | --- |
 | [`vendor/compass-tree-sitter-language-pack/README.md`](../../vendor/compass-tree-sitter-language-pack/README.md) | Compass grammar-pack policy |
 | [`vendor/compass-tree-sitter-language-pack/build.rs`](../../vendor/compass-tree-sitter-language-pack/build.rs) | Static grammar selection and compilation |
-| [`crates/compass-languages/src/registry.rs`](../../crates/compass-languages/src/registry.rs) | Source recognition and adapter profiles |
-| [`crates/compass-languages/src/adapters.rs`](../../crates/compass-languages/src/adapters.rs) | Hard-cut language registry and capability declarations |
-| [`crates/compass-languages/src/engine.rs`](../../crates/compass-languages/src/engine.rs) | Parsing, mutually exclusive adapter dispatch, and framework detection |
+| [`crates/compass-languages/src/registry.rs`](../../crates/compass-languages/src/registry.rs) | Source recognition and evidence-pipeline selection |
+| [`crates/compass-languages/src/evidence_pipeline.rs`](../../crates/compass-languages/src/evidence_pipeline.rs) | Hard-cut producer registry, qualification states, and capability declarations |
+| [`crates/compass-languages/src/engine.rs`](../../crates/compass-languages/src/engine.rs) | Parsing, mutually exclusive evidence-pipeline dispatch, and framework detection |
 | [`crates/compass-languages/src/evidence/`](../../crates/compass-languages/src/evidence/) | Hard-cut evidence model, validation, limits, and AST builder |
 | [`crates/compass-languages/src/evidence/build.rs`](../../crates/compass-languages/src/evidence/build.rs) | AST-to-evidence policy for the hard-cut language set |
 | [`crates/compass-languages/src/facts.rs`](../../crates/compass-languages/src/facts.rs) | Per-file extraction container |
 | [`crates/compass-resolve/src/lib.rs`](../../crates/compass-resolve/src/lib.rs) | Collection merge and current resolution sequence |
 | [`crates/compass-resolve/src/evidence.rs`](../../crates/compass-resolve/src/evidence.rs) | Universal indexes, resolution rules, and shared materialization |
-| [`crates/compass-resolve/src/members.rs`](../../crates/compass-resolve/src/members.rs) | Current direct-adapter member-call resolution |
+| [`crates/compass-resolve/src/members.rs`](../../crates/compass-resolve/src/members.rs) | Current direct-extractor member-call resolution |
 
 ## Grammar provider boundary
 
-The Compass-side grammar provider isolates adapters from the vendored implementation.
+The Compass-side grammar provider isolates evidence producers from the vendored implementation.
 
 The provider must:
 
@@ -88,7 +88,7 @@ The provider must:
 
 The provider returns immutable grammar provenance with the prepared parse tree. Grammar provenance participates in extraction cache identity.
 
-An AST-backed adapter consumes:
+An AST-backed producer consumes:
 
 ```text
 source path
@@ -98,21 +98,26 @@ immutable grammar provenance
 producer descriptor
 ```
 
-A source-driven adapter consumes the path, source bytes, and producer descriptor without a grammar or tree.
+A source-driven producer consumes the path, source bytes, and producer descriptor without a grammar or tree.
 
-## Producer descriptor boundary
+## Universal evidence producer and pipeline boundary
 
 The producer descriptor binds source recognition to extraction policy without putting semantics into the grammar pack.
 
 Its conceptual shape is:
 
 ```rust
-struct ProducerDescriptor {
-    source_id: &'static str,
-    extractor_kind: ExtractorKind,
-    grammar: Option<GrammarRequirement>,
-    adapter: AdapterDescriptor,
-    limits: EvidenceLimits,
+struct UniversalEvidenceProducer {
+    id: &'static str,
+    language: &'static str,
+    version: u32,
+    evidence_schema: &'static str,
+    capabilities: &'static [LanguageCapability],
+}
+
+struct UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer,
+    qualification: UniversalEvidenceQualification,
 }
 ```
 
@@ -123,23 +128,33 @@ Registry validation enforces:
 - one grammar requirement for every AST-backed producer
 - no grammar requirement for source-driven producers
 - static availability for every required grammar
-- evidence schema version 1 for universal profiles
-- unique source and adapter identities
+- evidence schema version 2 for universal pipelines
+- unique source and producer identities
 - bounded resource policies
 
-## Adapter descriptor boundary
+The producer owns language-specific metadata. The pipeline is the runtime
+selection unit and carries the lifecycle state separately from producer
+identity. This separation makes it possible to promote a producer from
+`Qualifying` to `Qualified` without changing the extraction API or inventing a
+second extractor name.
 
-The adapter descriptor records semantic capability, not parser availability.
+## Producer metadata boundary
 
-Version-1 descriptors contain:
+The producer metadata records semantic capability, not parser availability.
 
-- adapter ID
+Producer metadata contains:
+
+- producer ID
 - source language
-- optional parser dialect provenance (for example `ts` or `tsx`)
-- adapter version
+- producer version
 - evidence schema
-- publication profile
 - capability claims
+
+The emitted pipeline identity may additionally preserve parser dialect
+provenance (for example `ts` or `tsx`).
+
+The enclosing pipeline adds the qualification state (`Qualifying` or
+`Qualified`) without changing producer identity.
 
 The shared fact model also has additive optional identity metadata for
 TypeScript/JavaScript qualification: declarations and bindings may carry a
@@ -148,27 +163,29 @@ value/type/namespace symbol-space tag, and import/re-export bindings may mark
 identity component until a producer explicitly emits one. A type-only binding
 must use the type or namespace space and is rejected otherwise.
 
-The TypeScript/JavaScript candidate also records exact module-specifier and
+The TypeScript/JavaScript producer also records exact module-specifier and
 binding anchors for imports, resolves JSX member tags through proven namespace
 receivers, treats `this` and private member identifiers as nominal source
 evidence, and accepts only literal computed members. Dynamic member keys and
 unproven `super` receivers remain unresolved; these semantics are production
-candidate evidence and remain subject to the completion qualification gates.
+evidence and remain subject to the independent audit gates.
 
-The architectural profile names are `Direct`, `UniversalCandidate`, and
-`UniversalComplete`. A historical compatibility evidence type still serializes
-an internal `legacy` variant. Treat it as an old wire identifier, not the name
-or quality status of an established adapter.
+The architecture names are `Direct` (the established language-specific route)
+and `UniversalEvidencePipeline` (the shared route). The pipeline lifecycle
+states are `Qualifying` and `Qualified`; neither state creates a second
+extractor. A historical compatibility evidence type still serializes an
+internal `legacy` variant. Treat it as an old wire identifier, not a current
+pipeline state.
 
-Go and Java are at adapter version 3, Python is at version 11, and Rust is at
-version 15. Adapter versions advance when a semantic evidence change
+Go and Java are at producer version 3, Python is at version 11, and Rust is at
+version 15. Producer versions advance when a semantic evidence change
 requires language-local cache invalidation; grammar provenance and the
 extraction-semantics identity remain independent cache inputs.
 
 ## Evidence contract
 
 Each successfully prepared hard-cut source produces one
-`SemanticEvidenceBatch`. Hard cutover alone does not increment an adapter
+`SemanticEvidenceBatch`. Hard cutover alone does not increment a producer
 version, but later evidence-contract changes may do so to invalidate only that
 language's cached facts.
 
@@ -191,7 +208,8 @@ The builder must:
 - deduplicate exact facts
 - mark incomplete batches
 
-Adapters do not create graph nodes, graph edges, or `RawCall` records after their universal transition.
+Universal evidence producers do not create graph nodes, graph edges, or
+`RawCall` records after their pipeline is selected.
 
 ## End-to-end ownership map
 
@@ -206,22 +224,22 @@ compass-files discovers and fingerprints source
             v
 compass-languages::Registry selects LanguageSpec
             |
-            +--> AdapterRegistry miss ------------------------------+
+            +--> UniversalEvidenceRegistry miss ------------------------------+
             |                                                       |
             |                                                       v
             |                                             established extractor
             |                                                       |
             v                                                       v
-AdapterRegistry hit                                      graph/raw/language facts
+UniversalEvidenceRegistry hit                                      graph/raw/language facts
             |
             v
 vendored grammar -> one Tree-sitter AST
             |
             v
-adapter-local AST policy
+producer-local AST policy
             |
             v
-EvidenceBuilder -> SemanticEvidenceBatch v1
+EvidenceBuilder -> SemanticEvidenceBatch v2
             |
             +--------------------------+----------------------------+
                                        v
@@ -242,7 +260,6 @@ EvidenceBuilder -> SemanticEvidenceBatch v1
                                        v
                               compass-graph
 ```
-
 The two routes meet only after each has produced project-resolvable facts.
 The universal route never reconstructs evidence from graph rows, and the
 established route is not forced through a compatibility translator.
@@ -261,7 +278,7 @@ validate ProducerDescriptor
 GrammarProvider::parse once
         |
         v
-adapter policy emits evidence
+producer policy emits evidence
         |
         v
 EvidenceBuilder::finish
@@ -272,7 +289,9 @@ EvidenceBuilder::finish
 retain batch for collection resolution
 ```
 
-Adapters may make bounded subpasses over the prepared tree. They may not reparse source, invoke the language pack's `process()` pipeline, or derive evidence from direct graph records.
+Evidence producers may make bounded subpasses over the prepared tree. They may
+not reparse source, invoke the language pack's `process()` pipeline, or derive
+evidence from direct graph records.
 
 ## Collection lifecycle
 
@@ -297,7 +316,7 @@ project normalized graph records
 resolve framework facts
 ```
 
-Established adapters continue through their current resolution paths until
+Established extractors continue through their current resolution paths until
 their own transition. The universal resolver ignores language names and
 operates only on evidence fields. The merge discards replaced code relations
 for evidence-backed extractions, retains source inventory and framework facts,
@@ -328,12 +347,13 @@ It must:
 - map declaration kinds to stable normalized symbol kinds
 - derive containment from ownership and scope parentage
 - preserve exact occurrence source anchors
-- stamp adapter and grammar provenance
+- stamp producer and grammar provenance
 - avoid edges for ambiguous candidates
 - avoid terminal-name fallback
 - produce deterministic record ordering
 
-Single-file and collection APIs use the same projection rules. A language adapter cannot maintain a second private publisher.
+Single-file and collection APIs use the same projection rules. A language
+producer cannot maintain a second private publisher.
 
 ## Failure classes
 
@@ -365,34 +385,37 @@ Qualification records parse, evidence, resolution, projection, persistence, tota
 
 ## Language transition contract
 
-A language transition starts from its established direct adapter as the production baseline.
+A language transition starts from its established direct extractor as the
+production baseline.
 
 The transition sequence is:
 
 1. capture deterministic fixture and pinned-corpus baseline evidence
-2. implement adapter-local universal evidence without production dual-running
+2. implement producer-local universal evidence without production dual-running
 3. add post-implementation contract and language conformance tests
 4. compare normalized graph output and relation-family coverage
 5. measure cold, warm, incremental, restore, and RSS behavior
 6. hard-transition only after every blocking gate passes
 7. remove only that language's replaced direct publisher and resolver branches
 
-A failed gate returns work to the candidate implementation. It does not weaken the direct adapter's baseline or force other languages to transition.
+A failed gate leaves the pipeline `Qualifying`. It does not weaken the direct
+extractor baseline or force other languages to transition.
 
-## Current language profiles
+## Current language pipeline states
 
 This table describes the current branch.
 
-| Language | Profile | Publication path |
+| Language | Pipeline state | Publication path |
 | --- | --- | --- |
 | Python | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
 | Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
-| Rust | Hard-cut `UniversalCandidate` | Version-15 adapter evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
-| Java | Hard-cut `UniversalCandidate` | Version-3 evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
-| Kotlin | Hard-cut `UniversalCandidate` | Version-1 evidence plus shared resolution and projection; exact Kotlin-only source resolution, named/default arguments and extensions, replaced Kotlin paths removed, and complete quality-audit gates still pending |
-| TypeScript | Hard-cut `UniversalCandidate` | Version-5 evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
-| JavaScript | Hard-cut `UniversalCandidate` | Version-5 evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
-| Remaining registered languages | Established direct adapters | Current language-specific or generic extraction paths |
+| Rust | Hard-cut `Qualifying` | Version-15 producer evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
+| Java | Hard-cut `Qualifying` | Version-3 producer evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
+| Kotlin | Hard-cut `Qualifying` | Version-1 producer evidence plus shared resolution and projection; exact Kotlin-only source resolution, named/default arguments and extensions, replaced Kotlin paths removed, and complete quality-audit gates still pending |
+| Ruby | Hard-cut `Qualifying` | Version-1 producer evidence plus shared resolution and projection; method-space-aware dispatch and Rails pack use the same pipeline while audit gates remain open |
+| TypeScript | Hard-cut `Qualifying` | Version-5 producer evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
+| JavaScript | Hard-cut `Qualifying` | Version-5 producer evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
+| Remaining registered languages | Established direct extractors | Current language-specific or generic extraction paths |
 
 Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are hard-cut on this branch.
 Each later language
@@ -401,10 +424,10 @@ without adding language cases to the central publisher. A language's
 transition does not alter the publication route of any other language.
 The pinned Kotlin baseline, coverage deltas, performance results, and open
 audit gates are recorded in
-[Kotlin universal candidate qualification](kotlin-universal-qualification.md).
+[Kotlin universal qualification](kotlin-universal-qualification.md).
 Ruby's pinned three-corpus baseline, independent Ripper oracle, performance
-samples, and candidate-only audit boundary are recorded in
-[Ruby universal candidate qualification](ruby-universal-qualification.md).
+samples, and qualifying-only audit boundary are recorded in
+[Ruby universal qualification](ruby-universal-qualification.md).
 
 ## Framework-pack status
 
@@ -444,14 +467,14 @@ Every universal transition verifies:
 - resource limits
 - malformed-source behavior
 - declared capability coverage
-- absence of adapter-emitted graph records
+- absence of producer-emitted graph records
 - full language and resolver regression suites
 - framework targeting
 - repeated fixture determinism
 - pinned real-corpus graph quality
 - cold and warm performance
 
-Run `graphify update .` after code changes so the repository knowledge graph reflects the final architecture.
+Run `compass update .` after code changes so the repository knowledge graph reflects the final architecture.
 
 ## Related pages
 

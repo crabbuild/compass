@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
 
-use crate::{AdapterProfile, EXTRACTION_SEMANTICS_VERSION, file_stem, make_id};
+use crate::{EXTRACTION_SEMANTICS_VERSION, UniversalEvidencePipeline, file_stem, make_id};
 
 use super::model::{
-    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact,
-    ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceDiagnostic,
+    EvidenceRange, HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy,
+    RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
+    SymbolNamespace, UniversalEvidenceIdentity,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
@@ -21,7 +21,7 @@ use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate
 // unresolved method.
 const GO_TYPE_INFERENCE_DEPTH_LIMIT: usize = 16;
 
-/// Bounded direct-construction API shared by hard-cut language adapters.
+/// Bounded direct-construction API shared by hard-cut language producers.
 pub struct EvidenceBuilder {
     batch: SemanticEvidenceBatch,
     source_file: String,
@@ -43,33 +43,33 @@ struct DeclarationMetadata {
 impl EvidenceBuilder {
     #[must_use]
     pub fn new(
-        profile: &'static AdapterProfile,
-        producer: impl Into<String>,
+        pipeline: &'static UniversalEvidencePipeline,
+        emitter: impl Into<String>,
         source_file: impl Into<String>,
         limits: EvidenceLimits,
     ) -> Self {
-        Self::new_with_dialect(profile, producer, source_file, limits, None)
+        Self::new_with_dialect(pipeline, emitter, source_file, limits, None)
     }
 
     #[must_use]
     pub fn new_with_dialect(
-        profile: &'static AdapterProfile,
-        producer: impl Into<String>,
+        pipeline: &'static UniversalEvidencePipeline,
+        emitter: impl Into<String>,
         source_file: impl Into<String>,
         limits: EvidenceLimits,
         dialect: Option<&str>,
     ) -> Self {
         Self {
             batch: SemanticEvidenceBatch {
-                adapter: AdapterIdentity {
-                    id: profile.id.to_owned(),
-                    language: profile.language.to_owned(),
+                pipeline: UniversalEvidenceIdentity {
+                    id: pipeline.producer.id.to_owned(),
+                    language: pipeline.producer.language.to_owned(),
                     dialect: dialect.map(str::to_owned),
-                    version: profile.version,
-                    evidence_schema: profile.evidence_schema.to_owned(),
-                    profile: profile.profile,
-                    producer: producer.into(),
-                    capabilities: profile.capabilities.to_vec(),
+                    version: pipeline.producer.version,
+                    evidence_schema: pipeline.producer.evidence_schema.to_owned(),
+                    qualification: pipeline.qualification,
+                    emitter: emitter.into(),
+                    capabilities: pipeline.producer.capabilities.to_vec(),
                 },
                 declarations: Vec::new(),
                 scopes: Vec::new(),
@@ -134,10 +134,10 @@ impl EvidenceBuilder {
 
     /// Add a declaration with a bounded source-level signature fragment.
     ///
-    /// Candidate adapters use this for type-shape facts that the shared
+    /// Qualifying producers use this for type-shape facts that the shared
     /// resolver can consume without inventing a target from a terminal name.
     /// Keeping the entry point crate-private avoids expanding the public
-    /// builder surface while allowing adapters implemented in sibling
+    /// builder surface while allowing producers implemented in sibling
     /// modules to publish the existing, versioned `signature` field.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn declare_with_signature(
@@ -172,7 +172,7 @@ impl EvidenceBuilder {
     /// Add a callable declaration with the source-proven signature shape used
     /// by deterministic overload selection.
     ///
-    /// Language adapters retain responsibility for canonicalizing their own
+    /// Language producers retain responsibility for canonicalizing their own
     /// parameter spellings. The builder only publishes the bounded, typed
     /// fields already present in the universal evidence schema.
     #[allow(clippy::too_many_arguments)]
@@ -310,7 +310,7 @@ impl EvidenceBuilder {
         let id = self.stable_id("declaration", &identity);
         self.batch.declarations.push(DeclarationFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             graph_node_id: graph_node_id.to_owned(),
             kind: kind.to_owned(),
             name: name.to_owned(),
@@ -352,7 +352,7 @@ impl EvidenceBuilder {
         );
         self.batch.scopes.push(ScopeFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             kind: kind.to_owned(),
             owner_declaration_id: owner_declaration_id.map(str::to_owned),
             parent_scope_id: parent_scope_id.map(str::to_owned),
@@ -510,7 +510,7 @@ impl EvidenceBuilder {
         let id = self.stable_id("binding", &identity);
         self.batch.bindings.push(BindingFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             kind,
             spelling: spelling.to_owned(),
             qualified_target: qualified_target.to_owned(),
@@ -579,7 +579,7 @@ impl EvidenceBuilder {
         );
         self.batch.occurrences.push(OccurrenceFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             role,
             owner_declaration_id: owner_declaration_id.to_owned(),
             spelling: spelling.to_owned(),
@@ -675,7 +675,7 @@ impl EvidenceBuilder {
         let id = self.stable_id("candidate", &identity);
         self.batch.candidates.push(RelationshipCandidate {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             relation,
             source_declaration_id: source_declaration_id.to_owned(),
             occurrence_id: occurrence_id.map(str::to_owned),
@@ -709,7 +709,7 @@ impl EvidenceBuilder {
         }
         self.batch.diagnostics.push(EvidenceDiagnostic {
             code: code.to_owned(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             fact_id: fact_id.map(str::to_owned),
             range,
             message: message.to_owned(),
@@ -718,8 +718,8 @@ impl EvidenceBuilder {
     }
 
     pub fn finish(mut self) -> Result<SemanticEvidenceBatch, EvidenceError> {
-        self.batch.adapter.capabilities.sort_unstable();
-        self.batch.adapter.capabilities.dedup();
+        self.batch.pipeline.capabilities.sort_unstable();
+        self.batch.pipeline.capabilities.dedup();
         self.batch
             .declarations
             .sort_unstable_by(|left, right| left.id.cmp(&right.id));
@@ -755,8 +755,8 @@ impl EvidenceBuilder {
         let mut digest = Sha256::new();
         for part in [
             EXTRACTION_SEMANTICS_VERSION,
-            self.batch.adapter.language.as_str(),
-            self.batch.adapter.producer.as_str(),
+            self.batch.pipeline.language.as_str(),
+            self.batch.pipeline.emitter.as_str(),
             self.source_file.as_str(),
             category,
         ]
@@ -823,47 +823,47 @@ pub(crate) fn extract_tree_evidence(
     source_file: &str,
     source: &[u8],
     root: Node<'_>,
-    profile: &'static AdapterProfile,
+    pipeline: &'static UniversalEvidencePipeline,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    if profile.language == "csharp" {
-        return super::csharp::extract_candidate_tree_evidence(path, source_file, source, root);
+    if pipeline.producer.language == "csharp" {
+        return super::csharp::emit_tree_evidence(path, source_file, source, root);
     }
-    if profile.language == "php" {
-        return super::php::extract_candidate_tree_evidence(path, source_file, source, root);
+    if pipeline.producer.language == "php" {
+        return super::php::emit_tree_evidence(path, source_file, source, root);
     }
-    if profile.language == "kotlin" {
-        return super::kotlin::extract_candidate_tree_evidence(path, source_file, source, root);
+    if pipeline.producer.language == "kotlin" {
+        return super::kotlin::emit_tree_evidence(path, source_file, source, root);
     }
-    if profile.language == "ruby" {
-        return super::ruby::extract_candidate_tree_evidence(path, source_file, source, root);
+    if pipeline.producer.language == "ruby" {
+        return super::ruby::emit_tree_evidence(path, source_file, source, root);
     }
-    if matches!(profile.language, "javascript" | "typescript") {
-        return super::typescript::extract_candidate_tree_evidence(
+    if matches!(pipeline.producer.language, "javascript" | "typescript") {
+        return super::typescript::emit_tree_evidence(
             path,
             source_file,
             source,
             root,
-            profile.language,
+            pipeline.producer.language,
         );
     }
-    let mut state = DirectAdapterState::new(path, source_file, source, root, profile);
+    let mut state = DirectEvidenceState::new(path, source_file, source, root, pipeline);
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
-        let DirectAdapterState { builder, .. } = state;
+        let DirectEvidenceState { builder, .. } = state;
         return builder.finish();
     }
     state.capture_parser_errors(root);
-    match profile.language {
+    match pipeline.producer.language {
         "python" => state.extract_python(root)?,
         "go" => state.extract_go(root)?,
         "java" => state.extract_java(root)?,
         "rust" => state.extract_rust(root)?,
         _ => {
             return Err(EvidenceError::new(
-                EvidenceErrorCode::InvalidAdapter,
+                EvidenceErrorCode::InvalidPipeline,
                 format!(
                     "language {:?} has no direct universal extractor",
-                    profile.language
+                    pipeline.producer.language
                 ),
             ));
         }
@@ -876,7 +876,7 @@ pub(crate) fn extract_tree_evidence(
             "parser recovered from malformed source; emitted evidence remains source-bounded",
         )?;
     }
-    let DirectAdapterState { builder, .. } = state;
+    let DirectEvidenceState { builder, .. } = state;
     builder.finish()
 }
 
@@ -924,7 +924,7 @@ enum RustPlatformCfg {
     Windows,
 }
 
-struct DirectAdapterState<'source> {
+struct DirectEvidenceState<'source> {
     path: &'source Path,
     source_file: &'source str,
     source: &'source [u8],
@@ -980,22 +980,22 @@ struct DirectAdapterState<'source> {
     builder: EvidenceBuilder,
 }
 
-impl<'source> DirectAdapterState<'source> {
+impl<'source> DirectEvidenceState<'source> {
     fn new(
         path: &'source Path,
         source_file: &'source str,
         source: &'source [u8],
         root: Node<'_>,
-        profile: &'static AdapterProfile,
+        pipeline: &'static UniversalEvidencePipeline,
     ) -> Self {
         let stem = file_stem(path);
-        let module_or_package = if profile.language == "python" {
+        let module_or_package = if pipeline.producer.language == "python" {
             python_module_identity(path, source_file)
-        } else if profile.language == "go" {
+        } else if pipeline.producer.language == "go" {
             go_package_identity(path, source_file, source, root)
-        } else if profile.language == "java" {
+        } else if pipeline.producer.language == "java" {
             java_package_identity(source).unwrap_or_else(|| "<default>".to_owned())
-        } else if profile.language == "rust" {
+        } else if pipeline.producer.language == "rust" {
             rust_module_identity(path, source_file)
         } else {
             path.parent()
@@ -1008,9 +1008,9 @@ impl<'source> DirectAdapterState<'source> {
             path,
             source_file,
             source,
-            language: profile.language,
+            language: pipeline.producer.language,
             module_or_package,
-            rust_namespace_aliases: if profile.language == "rust" {
+            rust_namespace_aliases: if pipeline.producer.language == "rust" {
                 rust_manifest_dependency_aliases(path)
             } else {
                 HashMap::new()
@@ -1062,8 +1062,8 @@ impl<'source> DirectAdapterState<'source> {
             graph_ids: HashSet::new(),
             parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
-                profile,
-                format!("compass.languages.{}.universal", profile.language),
+                pipeline,
+                format!("compass.languages.{}.universal", pipeline.producer.language),
                 source_file,
                 EvidenceLimits::default(),
             ),
@@ -8674,7 +8674,7 @@ fn rust_qualify_local_path(module: &str, raw: &str) -> String {
 }
 
 fn rust_qualify_imported_path(
-    state: &DirectAdapterState<'_>,
+    state: &DirectEvidenceState<'_>,
     owner: &DeclarationContext,
     raw: &str,
     use_start: usize,
@@ -8696,7 +8696,7 @@ fn rust_qualify_imported_path(
 }
 
 fn rust_qualify_evidence_path(
-    state: &DirectAdapterState<'_>,
+    state: &DirectEvidenceState<'_>,
     owner: &DeclarationContext,
     raw: &str,
     use_start: usize,
@@ -9213,7 +9213,7 @@ fn python_super_call_is_builtin(
     receiver: Node<'_>,
     call: Node<'_>,
     owner: &DeclarationContext,
-    state: &DirectAdapterState<'_>,
+    state: &DirectEvidenceState<'_>,
 ) -> bool {
     if owner.kind != "method" || owner.enclosing_type_qualified_name.is_none() {
         return false;

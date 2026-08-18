@@ -34,14 +34,14 @@ advisory risk separate from deterministic merge gates.
 Plans 015–018 are self-contained notebook, PHP framework, execution-flow, and
 MCP workflow programs planned at Compass commit `6680842c` on 2026-08-10.
 
-Plan 019 is the Ruby universal-candidate program. It was planned at Compass
+Plan 019 is the Ruby universal-evidence program. It was planned at Compass
 commit `b53c3ea2` on 2026-08-16. It freezes established Ruby evidence, builds an
-independent Ripper oracle and qualification-only adapter, adds conservative
+independent Ripper oracle and qualification-only producer, adds conservative
 Ruby project/resolution semantics, converts Rails to a universal framework
 pack, performs one atomic hard cut, and then measures optimization and complete
 quality gates. The pinned three-corpus audit now passes (89,981 accepted
 relationships, 100% observed precision, 98.5567% recall); Ruby remains
-`UniversalCandidate` until a separate promotion decision.
+`Qualifying` until a separate promotion decision.
 
 ## Execution order and status
 
@@ -65,7 +65,7 @@ relationships, 100% observed precision, 98.5567% recall); Ruby remains
 | 016 | Complete Composer, Blade, and Eloquent framework resolution | P1 | L | — | TODO |
 | 017 | Derive bounded, ranked execution flows from entry points | P2 | L | Existing universal call graph | TODO |
 | 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
-| 019 | Hard-cut Ruby to a qualified universal candidate | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
+| 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -91,7 +91,7 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 - Plan 012 complements plan 005 rather than depending on it: plan 005 owns the
   broad production release gate; plan 012 owns document-specific evidence.
 - Plan 013 is deliberately staged: independent truth and project semantics land
-  before a test-only universal adapter, production changes in one hard cut, and
+  before a test-only universal evidence pipeline, production changes in one hard cut, and
   compiler/framework enhancements follow only after the native graph qualifies.
   Its final public claim should consume plan 005's exact-production-evidence
   model or an equivalent release-candidate gate.

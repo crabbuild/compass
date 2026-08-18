@@ -26,10 +26,10 @@ use crate::make_id;
 const MAX_TRAVERSAL_DEPTH: usize = 32;
 const MAX_LITERAL_BYTES: usize = 4 * 1024;
 
-/// Ruby remains a candidate until the independent corpus audit is complete;
-/// the production registry intentionally exposes the candidate identity so the
-/// hard-cut path and qualification tooling exercise the same emitter.
-use crate::adapters::RUBY_ADAPTER_PROFILE;
+/// Ruby remains in qualification while the independent corpus audit is
+/// complete; the production registry intentionally exposes the same pipeline
+/// used by qualification tooling so the two paths cannot drift.
+use crate::evidence_pipeline::RUBY_EVIDENCE_PIPELINE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MethodSpace {
@@ -89,7 +89,7 @@ struct RubyState<'source> {
     emitted_diagnostics: HashSet<String>,
 }
 
-pub(crate) fn extract_candidate_tree_evidence(
+pub(crate) fn emit_tree_evidence(
     path: &Path,
     source_file: &str,
     source: &[u8],
@@ -108,8 +108,8 @@ impl<'source> RubyState<'source> {
         root: Node<'_>,
     ) -> Result<Self, EvidenceError> {
         let mut builder = EvidenceBuilder::new_with_dialect(
-            &RUBY_ADAPTER_PROFILE,
-            "compass.languages.ruby.universal.candidate",
+            &RUBY_EVIDENCE_PIPELINE,
+            "compass.languages.ruby.universal",
             source_file,
             EvidenceLimits::default(),
             Some("ruby"),

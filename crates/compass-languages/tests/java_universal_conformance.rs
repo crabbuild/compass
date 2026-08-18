@@ -4,7 +4,7 @@ use std::path::Path;
 
 use compass_languages::{
     BindingKind, CandidateRelation, Engine, EvidenceLimits, LanguageCapability, SemanticRole,
-    UniversalAdapterProfile, validate_evidence,
+    UniversalEvidenceQualification, validate_evidence,
 };
 
 #[test]
@@ -68,14 +68,14 @@ enum Status {
 
     let evidence = extraction.graph.semantic_evidence.expect("Java evidence");
     validate_evidence(&evidence, EvidenceLimits::default()).expect("valid Java evidence");
-    assert_eq!(evidence.adapter.version, 3);
+    assert_eq!(evidence.pipeline.version, 3);
     assert_eq!(
-        evidence.adapter.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        evidence.pipeline.qualification,
+        UniversalEvidenceQualification::Qualifying
     );
     assert!(
         evidence
-            .adapter
+            .pipeline
             .capabilities
             .contains(&LanguageCapability::Namespaces)
     );

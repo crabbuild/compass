@@ -121,7 +121,7 @@ struct TypeScriptMemberPath {
 }
 
 /// A source-proven object spread emitted by the TypeScript/JavaScript
-/// candidate adapter. The `*` member spelling is an owner alias marker, not a
+/// evidence producer. The `*` member spelling is an owner alias marker, not a
 /// wildcard export: the destination object inherits only members that the
 /// resolver can prove on this source owner.
 #[derive(Clone, Debug)]

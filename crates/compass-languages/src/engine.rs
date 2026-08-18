@@ -130,17 +130,16 @@ impl Engine {
         Ok(extraction)
     }
 
-    /// Extract qualification-only Ruby/TypeScript/JavaScript universal evidence
-    /// directly from source. The same source-backed emitters are used by the
-    /// production registry after the language cutover so qualification cannot
-    /// drift from published output.
+    /// Extract qualification-only universal evidence directly from source.
+    /// The same source-backed emitters are used by the production registry so
+    /// qualification cannot drift from published output.
     ///
-    /// This hidden API remains useful for qualification fixtures, but it now
-    /// calls the same registered candidate emitter used by normal Compass
+    /// This hidden API remains useful for qualification fixtures, but it calls
+    /// the same registered evidence pipeline used by normal Compass
     /// extraction. Keeping both paths on one implementation prevents a
     /// qualification-only graph from diverging from production output.
     #[doc(hidden)]
-    pub fn extract_source_universal_candidate_evidence(
+    pub fn extract_source_universal_evidence(
         &mut self,
         path: &Path,
         source_file: &str,
@@ -148,32 +147,16 @@ impl Engine {
     ) -> Result<crate::SemanticEvidenceBatch, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        if !matches!(
-            spec.name,
-            "typescript" | "tsx" | "javascript" | "kotlin" | "ruby"
-        ) {
-            return Err(ExtractError::Unsupported(path.to_path_buf()));
-        }
+        let pipeline = Registry::universal_evidence_pipeline_for_spec(spec)
+            .ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         let tree = self.parse(path, spec, source)?;
-        let evidence = if matches!(spec.name, "kotlin" | "ruby") {
-            let profile = Registry::universal_profile_for_spec(spec)
-                .ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-            crate::evidence::extract_tree_evidence(
-                path,
-                source_file,
-                source,
-                tree.root_node(),
-                profile,
-            )
-        } else {
-            crate::evidence::extract_candidate_tree_evidence(
-                path,
-                source_file,
-                source,
-                tree.root_node(),
-                spec.name,
-            )
-        };
+        let evidence = crate::evidence::extract_tree_evidence(
+            path,
+            source_file,
+            source,
+            tree.root_node(),
+            pipeline,
+        );
         evidence.map_err(|error| ExtractError::InvalidProgramEvidence {
             path: path.to_path_buf(),
             detail: error.to_string(),
@@ -231,9 +214,9 @@ impl Engine {
                 program: None,
             });
         }
-        let universal_profile = Registry::universal_profile_for_spec(spec);
+        let pipeline = Registry::universal_evidence_pipeline_for_spec(spec);
         if spec.kind == ExtractorKind::Generic
-            && universal_profile.is_some()
+            && pipeline.is_some()
             && !crate::program::supports_language(spec.name)
         {
             let tree = self.parse(path, spec, source)?;
@@ -382,8 +365,8 @@ impl Engine {
         root: Node<'_>,
     ) -> Extraction {
         let config = generic_config(spec);
-        let universal_profile = Registry::universal_profile_for_spec(spec);
-        let mut extraction = if universal_profile.is_some() {
+        let pipeline = Registry::universal_evidence_pipeline_for_spec(spec);
+        let mut extraction = if pipeline.is_some() {
             Extraction::default()
         } else {
             match spec.name {
@@ -403,17 +386,17 @@ impl Engine {
         if spec.name == "python" {
             add_python_rationale(path, source, root, &mut extraction);
         }
-        if universal_profile.is_none() {
+        if pipeline.is_none() {
             attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
             crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
         }
-        if let Some(profile) = universal_profile {
+        if let Some(pipeline) = pipeline {
             match crate::evidence::extract_tree_evidence(
                 path,
                 evidence_source_file,
                 source,
                 root,
-                profile,
+                pipeline,
             ) {
                 Ok(evidence) => {
                     extraction.semantic_evidence = Some(evidence);
@@ -431,7 +414,7 @@ impl Engine {
         // (for example `src/routes/**`, `app/routes/**`, and `src/app/**`) to
         // classify a file. Pipeline callers supply that authoritative identity;
         // direct extraction derives a bounded portable fallback from the path.
-        let framework_source = universal_profile.map(|_| {
+        let framework_source = pipeline.map(|_| {
             if evidence_source_is_explicit
                 && !evidence_source_file.is_empty()
                 && Path::new(evidence_source_file).is_relative()
@@ -450,7 +433,7 @@ impl Engine {
             self.project_evidence(path),
             &mut extraction,
         );
-        if universal_profile.is_some() && extraction.semantic_evidence.is_some() {
+        if pipeline.is_some() && extraction.semantic_evidence.is_some() {
             extraction.raw_calls = None;
         }
         if root.has_error() {
@@ -4559,7 +4542,7 @@ public class OrdersController : ControllerBase {
             })
             .ok_or("missing prototype method")?;
         assert_eq!(method.kind, "property");
-        let direct = Engine::default().extract_source_universal_candidate_evidence(
+        let direct = Engine::default().extract_source_universal_evidence(
             &source,
             "widget.js",
             &source_bytes,

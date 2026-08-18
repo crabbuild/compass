@@ -6,8 +6,8 @@ use compass_languages::{CandidateRelation, Engine, SemanticRole, validate_eviden
 
 fn extract(source: &[u8]) -> compass_languages::SemanticEvidenceBatch {
     Engine::default()
-        .extract_source_universal_candidate_evidence(Path::new("fixture.rb"), "fixture.rb", source)
-        .expect("Ruby candidate evidence")
+        .extract_source_universal_evidence(Path::new("fixture.rb"), "fixture.rb", source)
+        .expect("Ruby universal evidence")
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn deep_recovery_is_bounded_and_reports_a_typed_limit() {
 }
 
 #[test]
-fn candidate_is_deterministic_under_repeated_extraction() {
+fn universal_evidence_is_deterministic_under_repeated_extraction() {
     let source = "class Café\n  def naïve(value = 1)\n    value\n  end\nend\n".as_bytes();
     let left = extract(source);
     let right = extract(source);
@@ -276,8 +276,8 @@ end
         extraction
             .semantic_evidence
             .as_ref()
-            .map(|evidence| evidence.adapter.id.as_str()),
-        Some("compass.ruby.candidate")
+            .map(|evidence| evidence.pipeline.id.as_str()),
+        Some("compass.ruby")
     );
     assert!(extraction.raw_calls.is_none());
     assert!(extraction.framework_facts.iter().any(|fact| {

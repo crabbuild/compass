@@ -1,104 +1,121 @@
 use crate::LanguageCapability;
 
-/// Publication maturity of one hard-cut universal adapter.
+/// Qualification state of one universal evidence pipeline.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum UniversalAdapterProfile {
-    UniversalCandidate,
-    UniversalComplete,
+pub enum UniversalEvidenceQualification {
+    /// The shared evidence route is production-active while its audit runs.
+    Qualifying,
+    /// The shared evidence route passed the complete audit gates.
+    Qualified,
 }
 
-/// The universal evidence capabilities implemented by one hard-cut adapter.
+/// Language-specific metadata for a universal evidence producer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct AdapterProfile {
+pub struct UniversalEvidenceProducer {
     pub id: &'static str,
     pub language: &'static str,
     pub version: u32,
     pub evidence_schema: &'static str,
-    pub profile: UniversalAdapterProfile,
     pub capabilities: &'static [LanguageCapability],
 }
 
+/// The shared evidence pipeline and the qualification state of its producer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UniversalEvidencePipeline {
+    pub producer: UniversalEvidenceProducer,
+    pub qualification: UniversalEvidenceQualification,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum AdapterRegistryError {
-    #[error("universal adapter id must not be empty")]
+pub enum UniversalEvidenceRegistryError {
+    #[error("universal evidence producer id must not be empty")]
     EmptyId,
-    #[error("universal adapter language must not be empty")]
+    #[error("universal evidence producer language must not be empty")]
     EmptyLanguage,
-    #[error("duplicate universal adapter id {0:?}")]
+    #[error("duplicate universal evidence producer id {0:?}")]
     DuplicateId(&'static str),
-    #[error("universal adapter {0:?} must declare at least one capability")]
+    #[error("universal evidence producer {0:?} must declare at least one capability")]
     EmptyCapabilities(&'static str),
-    #[error("duplicate universal adapter language {0:?}")]
+    #[error("duplicate universal evidence producer language {0:?}")]
     DuplicateLanguage(&'static str),
-    #[error("universal adapter languages must be sorted before {0:?}")]
+    #[error("universal evidence producer languages must be sorted before {0:?}")]
     UnsortedLanguages(&'static str),
-    #[error("universal adapter {0:?} capabilities must be sorted and unique")]
+    #[error("universal evidence producer {0:?} capabilities must be sorted and unique")]
     InvalidCapabilityOrder(&'static str),
-    #[error("universal adapter {0:?} must declare a positive adapter version")]
+    #[error("universal evidence producer {0:?} must declare a positive producer version")]
     InvalidVersion(&'static str),
-    #[error("universal adapter {0:?} declares an unsupported evidence schema")]
+    #[error("universal evidence producer {0:?} declares an unsupported evidence schema")]
     InvalidEvidenceSchema(&'static str),
 }
 
-/// Registry of languages that have atomically hard-cut to universal evidence.
+/// Registry of languages that have atomically hard-cut to the shared evidence pipeline.
 #[derive(Debug, Default)]
-pub struct AdapterRegistry;
+pub struct UniversalEvidenceRegistry;
 
-impl AdapterRegistry {
+impl UniversalEvidenceRegistry {
     #[must_use]
-    pub fn universal_profile(language: &str) -> Option<&'static AdapterProfile> {
-        UNIVERSAL_ADAPTERS
-            .binary_search_by_key(&language, |profile| profile.language)
+    pub fn pipeline(language: &str) -> Option<&'static UniversalEvidencePipeline> {
+        UNIVERSAL_EVIDENCE_PIPELINES
+            .binary_search_by_key(&language, |pipeline| pipeline.producer.language)
             .ok()
-            .map(|index| &UNIVERSAL_ADAPTERS[index])
+            .map(|index| &UNIVERSAL_EVIDENCE_PIPELINES[index])
     }
 
     #[must_use]
-    pub const fn universal_profiles() -> &'static [AdapterProfile] {
-        UNIVERSAL_ADAPTERS
+    pub const fn pipelines() -> &'static [UniversalEvidencePipeline] {
+        UNIVERSAL_EVIDENCE_PIPELINES
     }
 
-    pub fn validate() -> Result<(), AdapterRegistryError> {
+    pub fn validate() -> Result<(), UniversalEvidenceRegistryError> {
         let mut previous_language = None;
         let mut ids = std::collections::BTreeSet::new();
-        for profile in UNIVERSAL_ADAPTERS {
-            if profile.id.is_empty() {
-                return Err(AdapterRegistryError::EmptyId);
+        for pipeline in UNIVERSAL_EVIDENCE_PIPELINES {
+            let producer = pipeline.producer;
+            if producer.id.is_empty() {
+                return Err(UniversalEvidenceRegistryError::EmptyId);
             }
-            if profile.language.is_empty() {
-                return Err(AdapterRegistryError::EmptyLanguage);
+            if producer.language.is_empty() {
+                return Err(UniversalEvidenceRegistryError::EmptyLanguage);
             }
-            if !ids.insert(profile.id) {
-                return Err(AdapterRegistryError::DuplicateId(profile.id));
+            if !ids.insert(producer.id) {
+                return Err(UniversalEvidenceRegistryError::DuplicateId(producer.id));
             }
-            if profile.version == 0 {
-                return Err(AdapterRegistryError::InvalidVersion(profile.language));
-            }
-            if profile.evidence_schema != crate::UNIVERSAL_EVIDENCE_SCHEMA {
-                return Err(AdapterRegistryError::InvalidEvidenceSchema(
-                    profile.language,
+            if producer.version == 0 {
+                return Err(UniversalEvidenceRegistryError::InvalidVersion(
+                    producer.language,
                 ));
             }
-            if profile.capabilities.is_empty() {
-                return Err(AdapterRegistryError::EmptyCapabilities(profile.language));
+            if producer.evidence_schema != crate::UNIVERSAL_EVIDENCE_SCHEMA {
+                return Err(UniversalEvidenceRegistryError::InvalidEvidenceSchema(
+                    producer.language,
+                ));
             }
-            if previous_language == Some(profile.language) {
-                return Err(AdapterRegistryError::DuplicateLanguage(profile.language));
+            if producer.capabilities.is_empty() {
+                return Err(UniversalEvidenceRegistryError::EmptyCapabilities(
+                    producer.language,
+                ));
             }
-            if previous_language.is_some_and(|previous| previous > profile.language) {
-                return Err(AdapterRegistryError::UnsortedLanguages(profile.language));
+            if previous_language == Some(producer.language) {
+                return Err(UniversalEvidenceRegistryError::DuplicateLanguage(
+                    producer.language,
+                ));
             }
-            if profile
+            if previous_language.is_some_and(|previous| previous > producer.language) {
+                return Err(UniversalEvidenceRegistryError::UnsortedLanguages(
+                    producer.language,
+                ));
+            }
+            if producer
                 .capabilities
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
             {
-                return Err(AdapterRegistryError::InvalidCapabilityOrder(
-                    profile.language,
+                return Err(UniversalEvidenceRegistryError::InvalidCapabilityOrder(
+                    producer.language,
                 ));
             }
-            previous_language = Some(profile.language);
+            previous_language = Some(producer.language);
         }
         Ok(())
     }
@@ -285,87 +302,107 @@ pub(crate) const RUBY_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
-pub(crate) const RUBY_ADAPTER_PROFILE: AdapterProfile = AdapterProfile {
-    id: "compass.ruby.candidate",
-    language: "ruby",
-    version: 1,
-    evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-    profile: UniversalAdapterProfile::UniversalCandidate,
-    capabilities: RUBY_CAPABILITIES,
+pub(crate) const RUBY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer {
+        id: "compass.ruby",
+        language: "ruby",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        capabilities: RUBY_CAPABILITIES,
+    },
+    qualification: UniversalEvidenceQualification::Qualifying,
 };
 
-const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
-    AdapterProfile {
-        id: "compass.csharp.candidate",
-        language: "csharp",
-        version: 1,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: CSHARP_CAPABILITIES,
+const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.csharp",
+            language: "csharp",
+            version: 1,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: CSHARP_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.go",
-        language: "go",
-        version: 3,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: GO_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.go",
+            language: "go",
+            version: 3,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: GO_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.java",
-        language: "java",
-        version: 3,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: JAVA_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.java",
+            language: "java",
+            version: 3,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: JAVA_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.javascript.candidate",
-        language: "javascript",
-        version: 5,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: JAVASCRIPT_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.javascript",
+            language: "javascript",
+            version: 5,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: JAVASCRIPT_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.kotlin.candidate",
-        language: "kotlin",
-        version: 1,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: KOTLIN_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.kotlin",
+            language: "kotlin",
+            version: 1,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: KOTLIN_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.php",
-        language: "php",
-        version: 1,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: PHP_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.php",
+            language: "php",
+            version: 1,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: PHP_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.python",
-        language: "python",
-        version: 11,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: PYTHON_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.python",
+            language: "python",
+            version: 11,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: PYTHON_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    RUBY_ADAPTER_PROFILE,
-    AdapterProfile {
-        id: "compass.rust",
-        language: "rust",
-        version: 15,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: RUST_CAPABILITIES,
+    RUBY_EVIDENCE_PIPELINE,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.rust",
+            language: "rust",
+            version: 15,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: RUST_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
-    AdapterProfile {
-        id: "compass.typescript.candidate",
-        language: "typescript",
-        version: 5,
-        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
-        profile: UniversalAdapterProfile::UniversalCandidate,
-        capabilities: TYPESCRIPT_CAPABILITIES,
+    UniversalEvidencePipeline {
+        producer: UniversalEvidenceProducer {
+            id: "compass.typescript",
+            language: "typescript",
+            version: 5,
+            evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+            capabilities: TYPESCRIPT_CAPABILITIES,
+        },
+        qualification: UniversalEvidenceQualification::Qualifying,
     },
 ];
