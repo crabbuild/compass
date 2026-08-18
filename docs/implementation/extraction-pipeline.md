@@ -126,9 +126,10 @@ local/project metadata:
 It should not pick one arbitrary project-wide target when evidence is
 ambiguous.
 
-Established direct adapters publish their current graph records and unresolved
-facts through this boundary. Independently qualified universal adapters emit
-the versioned evidence contract and use shared projection instead. See
+Established direct publishers publish their current graph records and
+unresolved facts through this boundary. Independently qualified universal
+evidence producers emit the versioned evidence contract and use shared
+projection instead. See
 [Universal evidence implementation architecture](universal-evidence.md) for
 the current and planned boundaries.
 

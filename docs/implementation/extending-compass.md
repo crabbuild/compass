@@ -29,7 +29,7 @@ graph/result verification       compass-graph / CLI fixtures
 ```
 
 Read [Language architecture](../design/language-architecture.md) before
-changing parser ownership or adapter profiles. Read
+changing parser ownership or evidence pipeline registration. Read
 [Universal evidence implementation](universal-evidence.md) before starting an
 independently qualified language transition.
 Read [Evidence resolution framework technical design](evidence-resolution-framework-technical-design.md)

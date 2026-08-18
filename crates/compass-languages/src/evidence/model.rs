@@ -1,21 +1,21 @@
 use serde::{Deserialize, Serialize};
 
-use crate::UniversalAdapterProfile;
+use crate::UniversalEvidenceQualification;
 
-/// Identity and truthful capability declaration for one semantic adapter.
+/// Identity and truthful capability declaration for one evidence pipeline.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AdapterIdentity {
+pub struct UniversalEvidenceIdentity {
     pub id: String,
     pub language: String,
     /// Parser dialect preserved separately from the semantic language family.
-    /// `None` is retained for legacy adapters that predate dialect metadata.
+    /// `None` is retained for legacy producers that predate dialect metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialect: Option<String>,
     pub version: u32,
     pub evidence_schema: String,
-    pub profile: UniversalAdapterProfile,
-    pub producer: String,
+    pub qualification: UniversalEvidenceQualification,
+    pub emitter: String,
     pub capabilities: Vec<LanguageCapability>,
 }
 
@@ -32,7 +32,7 @@ pub struct EvidenceRange {
     pub end_column: u32,
 }
 
-/// Semantic operations that an adapter may truthfully advertise.
+/// Semantic operations that an evidence producer may truthfully advertise.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LanguageCapability {
@@ -213,7 +213,7 @@ pub struct DeclarationFact {
     pub name: String,
     pub qualified_name: String,
     /// Optional value/type/namespace identity. `None` preserves legacy
-    /// adapters that predate explicit symbol-space evidence.
+    /// producers that predate explicit symbol-space evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub namespace: Option<SymbolNamespace>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -289,7 +289,7 @@ pub struct BindingFact {
     /// Zero-based result selected by a source-level destructuring assignment.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_index: Option<u32>,
-    /// Exact nominal result type proven by the adapter for this call result.
+    /// Exact nominal result type proven by the producer for this call result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_type_qualified_name: Option<String>,
     /// Earlier call result whose nominal type receives this method call.
@@ -323,7 +323,7 @@ pub struct OccurrenceFact {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolutionConstraint {
-    /// Exact declaration proven by the adapter from the same source construct.
+    /// Exact declaration proven by the producer from the same source construct.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exact_target_declaration_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -406,11 +406,11 @@ pub struct EvidenceDiagnostic {
     pub message: String,
 }
 
-/// Direct output of one universal semantic adapter.
+/// Direct output of one universal semantic evidence pipeline.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SemanticEvidenceBatch {
-    pub adapter: AdapterIdentity,
+    pub pipeline: UniversalEvidenceIdentity,
     pub declarations: Vec<DeclarationFact>,
     pub scopes: Vec<ScopeFact>,
     pub bindings: Vec<BindingFact>,

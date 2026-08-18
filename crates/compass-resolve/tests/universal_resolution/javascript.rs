@@ -549,8 +549,8 @@ spread.isNumber(1);
         .iter()
         .map(|(relative, source)| {
             Engine::default()
-                .extract_source_universal_candidate_evidence(&root.join(relative), relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&root.join(relative), relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let utils_number = batches[0]
@@ -731,8 +731,8 @@ functionSpread.callable(1);
         .iter()
         .map(|(relative, source)| {
             Engine::default()
-                .extract_source_universal_candidate_evidence(&root.join(relative), relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&root.join(relative), relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let ambiguous_call = batches[7]
@@ -861,8 +861,8 @@ api.run();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let run = batches[0]
@@ -969,8 +969,8 @@ api.conflict();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let base = batches[0]
@@ -1088,8 +1088,8 @@ nonObject.missing();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let calls = batches[5]
@@ -1172,8 +1172,8 @@ api.cjsPrivate();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let esm_published = batches[0]
@@ -1291,8 +1291,8 @@ unknown.direct();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let base_inherited = batches[0]
@@ -1408,8 +1408,8 @@ api.unknown();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let run = batches[1]
@@ -1504,8 +1504,8 @@ api.inherited();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let inherited = batches[0]
@@ -1568,12 +1568,12 @@ fn();
         fs::write(path, source)?;
     }
     let batches = [
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             &provider,
             "lib/callable.cjs",
             provider_source,
         )?,
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             &consumer,
             "app/consumer.js",
             consumer_source,

@@ -1,11 +1,12 @@
 #![allow(clippy::expect_used)]
 
 use compass_languages::{
-    AdapterIdentity, AdapterRegistry, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    Engine, EvidenceErrorCode, EvidenceLimits, EvidenceRange, Extraction, HierarchyConstraint,
-    LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate,
-    ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
-    UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile, validate_evidence,
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, Engine, EvidenceErrorCode,
+    EvidenceLimits, EvidenceRange, Extraction, HierarchyConstraint, LanguageCapability,
+    OccurrenceFact, ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint,
+    ScopeFact, SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA,
+    UniversalEvidenceIdentity, UniversalEvidenceQualification, UniversalEvidenceRegistry,
+    validate_evidence,
 };
 
 fn range(start: u64, end: u64) -> EvidenceRange {
@@ -22,14 +23,14 @@ fn range(start: u64, end: u64) -> EvidenceRange {
 
 fn valid_batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
-        adapter: AdapterIdentity {
+        pipeline: UniversalEvidenceIdentity {
             id: "compass.python".to_owned(),
             language: "python".to_owned(),
             dialect: None,
             version: 1,
             evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-            profile: UniversalAdapterProfile::UniversalCandidate,
-            producer: "tree-sitter-python".to_owned(),
+            qualification: UniversalEvidenceQualification::Qualifying,
+            emitter: "tree-sitter-python".to_owned(),
             capabilities: vec![
                 LanguageCapability::Declarations,
                 LanguageCapability::LexicalScopes,
@@ -136,7 +137,7 @@ fn evidence_round_trips_with_closed_camel_case_schema() {
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid fixture");
 
     let encoded = serde_json::to_value(&batch).expect("serialize evidence");
-    assert_eq!(encoded["adapter"]["language"], "python");
+    assert_eq!(encoded["pipeline"]["language"], "python");
     assert_eq!(
         encoded["occurrences"][0]["ownerDeclarationId"],
         "decl:caller"
@@ -159,7 +160,7 @@ fn evidence_round_trips_with_closed_camel_case_schema() {
 #[test]
 fn unknown_fields_are_rejected_at_nested_boundaries() {
     let mut encoded = serde_json::to_value(valid_batch()).expect("serialize evidence");
-    encoded["adapter"]["compatibilityMode"] = serde_json::json!(true);
+    encoded["pipeline"]["compatibilityMode"] = serde_json::json!(true);
     let error =
         serde_json::from_value::<SemanticEvidenceBatch>(encoded).expect_err("unknown field");
     assert!(error.to_string().contains("unknown field"));
@@ -206,7 +207,7 @@ fn call_result_chain_references_are_typed_and_acyclic() {
 
     let mut missing = valid_batch();
     missing
-        .adapter
+        .pipeline
         .capabilities
         .push(LanguageCapability::TypeReferences);
     missing.bindings[0].kind = BindingKind::CallResult;
@@ -215,7 +216,7 @@ fn call_result_chain_references_are_typed_and_acyclic() {
 
     let mut receiver_cycle = valid_batch();
     receiver_cycle
-        .adapter
+        .pipeline
         .capabilities
         .push(LanguageCapability::TypeReferences);
     receiver_cycle.bindings[0].kind = BindingKind::CallResult;
@@ -224,7 +225,7 @@ fn call_result_chain_references_are_typed_and_acyclic() {
 
     let mut call_result_fallback = valid_batch();
     call_result_fallback
-        .adapter
+        .pipeline
         .capabilities
         .push(LanguageCapability::TypeReferences);
     call_result_fallback.bindings[0].kind = BindingKind::CallResult;
@@ -296,7 +297,7 @@ fn behavioral_candidates_require_occurrences() {
 fn capabilities_and_language_constraints_fail_closed() {
     let mut undeclared = valid_batch();
     undeclared
-        .adapter
+        .pipeline
         .capabilities
         .retain(|capability| *capability != LanguageCapability::Calls);
     assert_code(&undeclared, EvidenceErrorCode::UndeclaredCapability);
@@ -307,7 +308,7 @@ fn capabilities_and_language_constraints_fail_closed() {
 
     let mut undeclared_external = valid_batch();
     undeclared_external
-        .adapter
+        .pipeline
         .capabilities
         .retain(|capability| *capability != LanguageCapability::ExternalReferences);
     assert_code(
@@ -331,7 +332,7 @@ fn capabilities_and_language_constraints_fail_closed() {
 
     let mut invalid_hierarchy_relation = undeclared_hierarchy;
     invalid_hierarchy_relation
-        .adapter
+        .pipeline
         .capabilities
         .push(LanguageCapability::HierarchyDispatch);
     invalid_hierarchy_relation.candidates[0]
@@ -394,10 +395,10 @@ fn complete_direct_base_sets_reject_unsupported_declaration_kinds() {
 #[test]
 fn rust_associated_type_constraints_require_an_exact_receiver_identity() {
     let mut batch = valid_batch();
-    batch.adapter.id = "compass.rust".to_owned();
-    batch.adapter.language = "rust".to_owned();
-    batch.adapter.version = 6;
-    batch.adapter.capabilities.extend([
+    batch.pipeline.id = "compass.rust".to_owned();
+    batch.pipeline.language = "rust".to_owned();
+    batch.pipeline.version = 6;
+    batch.pipeline.capabilities.extend([
         LanguageCapability::TypeReferences,
         LanguageCapability::HierarchyDispatch,
     ]);
@@ -463,13 +464,13 @@ fn first_fact_error_is_independent_of_input_order() {
 }
 
 #[test]
-fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
-    AdapterRegistry::validate().expect("production registry must be valid");
-    let profiles = AdapterRegistry::universal_profiles();
+fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
+    UniversalEvidenceRegistry::validate().expect("production registry must be valid");
+    let pipelines = UniversalEvidenceRegistry::pipelines();
     assert_eq!(
-        profiles
+        pipelines
             .iter()
-            .map(|profile| profile.language)
+            .map(|pipeline| pipeline.producer.language)
             .collect::<Vec<_>>(),
         [
             "csharp",
@@ -485,51 +486,52 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
         ]
     );
     assert!(
-        profiles
+        pipelines
             .iter()
-            .all(|profile| !profile.capabilities.is_empty())
+            .all(|pipeline| !pipeline.producer.capabilities.is_empty())
     );
-    assert!(profiles.iter().all(|profile| {
-        !profile.id.is_empty()
-            && profile.version > 0
-            && profile.evidence_schema == UNIVERSAL_EVIDENCE_SCHEMA
+    assert!(pipelines.iter().all(|pipeline| {
+        !pipeline.producer.id.is_empty()
+            && pipeline.producer.version > 0
+            && pipeline.producer.evidence_schema == UNIVERSAL_EVIDENCE_SCHEMA
     }));
     assert_eq!(
-        AdapterRegistry::universal_profile("go").map(|profile| profile.version),
+        UniversalEvidenceRegistry::pipeline("go").map(|pipeline| pipeline.producer.version),
         Some(3)
     );
     assert_eq!(
-        profiles
+        pipelines
             .iter()
-            .map(|profile| profile.id)
+            .map(|pipeline| pipeline.producer.id)
             .collect::<std::collections::BTreeSet<_>>()
             .len(),
-        profiles.len()
+        pipelines.len()
     );
-    assert!(profiles.iter().all(|profile| {
-        profile
+    assert!(pipelines.iter().all(|pipeline| {
+        pipeline
+            .producer
             .capabilities
             .windows(2)
             .all(|pair| pair[0] < pair[1])
     }));
     assert_eq!(
-        AdapterRegistry::universal_profile("java")
-            .map(|profile| (profile.version, profile.profile)),
-        Some((3, UniversalAdapterProfile::UniversalCandidate))
+        UniversalEvidenceRegistry::pipeline("java")
+            .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
+        Some((3, UniversalEvidenceQualification::Qualifying))
     );
     assert_eq!(
-        AdapterRegistry::universal_profile("rust").map(|profile| profile.version),
+        UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
         Some(15)
     );
     assert_eq!(
-        AdapterRegistry::universal_profile("javascript")
-            .map(|profile| (profile.version, profile.profile)),
-        Some((5, UniversalAdapterProfile::UniversalCandidate))
+        UniversalEvidenceRegistry::pipeline("javascript")
+            .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
+        Some((5, UniversalEvidenceQualification::Qualifying))
     );
     assert_eq!(
-        AdapterRegistry::universal_profile("typescript")
-            .map(|profile| (profile.version, profile.profile)),
-        Some((5, UniversalAdapterProfile::UniversalCandidate))
+        UniversalEvidenceRegistry::pipeline("typescript")
+            .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
+        Some((5, UniversalEvidenceQualification::Qualifying))
     );
 }
 
@@ -556,7 +558,7 @@ fn empty_hard_cut_sources_emit_zero_width_file_inventory_evidence() {
             .expect("empty source evidence");
         validate_evidence(&evidence, EvidenceLimits::default()).expect("valid empty evidence");
 
-        assert_eq!(evidence.adapter.language, language);
+        assert_eq!(evidence.pipeline.language, language);
         assert_eq!(evidence.declarations.len(), 1);
         assert_eq!(evidence.declarations[0].kind, "file");
         assert_eq!(evidence.declarations[0].range.source_file, source_file);
@@ -596,7 +598,7 @@ fn trivia_only_hard_cut_sources_anchor_file_inventory_to_source_bytes() {
         validate_evidence(&evidence, EvidenceLimits::default())
             .expect("valid trivia-only evidence");
 
-        assert_eq!(evidence.adapter.language, language);
+        assert_eq!(evidence.pipeline.language, language);
         assert_eq!(evidence.declarations.len(), 1);
         assert_eq!(evidence.declarations[0].range.start_byte, 0);
         assert_eq!(evidence.declarations[0].range.end_byte, 1);
@@ -607,7 +609,7 @@ fn trivia_only_hard_cut_sources_anchor_file_inventory_to_source_bytes() {
 }
 
 #[test]
-fn typescript_javascript_candidate_is_wired_into_production_extraction() {
+fn typescript_javascript_pipeline_is_wired_into_production_extraction() {
     for (path, source_file, language, dialect, source) in [
         (
             "/repo/src/app.ts",
@@ -648,13 +650,13 @@ fn typescript_javascript_candidate_is_wired_into_production_extraction() {
             .semantic_evidence
             .expect("production universal evidence");
         validate_evidence(&evidence, EvidenceLimits::default()).expect("valid ECMAScript evidence");
-        assert_eq!(evidence.adapter.language, language);
-        assert_eq!(evidence.adapter.dialect.as_deref(), Some(dialect));
+        assert_eq!(evidence.pipeline.language, language);
+        assert_eq!(evidence.pipeline.dialect.as_deref(), Some(dialect));
         assert_eq!(
-            evidence.adapter.profile,
-            UniversalAdapterProfile::UniversalCandidate
+            evidence.pipeline.qualification,
+            UniversalEvidenceQualification::Qualifying
         );
-        assert_eq!(evidence.adapter.id, format!("compass.{language}.candidate"));
+        assert_eq!(evidence.pipeline.id, format!("compass.{language}"));
     }
 }
 
@@ -690,7 +692,7 @@ class Derived(Base):
         .expect("python universal evidence");
     validate_evidence(&evidence, EvidenceLimits::default()).expect("valid python evidence");
 
-    assert_eq!(evidence.adapter.language, "python");
+    assert_eq!(evidence.pipeline.language, "python");
     assert!(
         evidence
             .bindings
@@ -1501,7 +1503,7 @@ func (d *Derived) Handle(value alias.Input) alias.Output {
         .expect("go universal evidence");
     validate_evidence(&evidence, EvidenceLimits::default()).expect("valid go evidence");
 
-    assert_eq!(evidence.adapter.language, "go");
+    assert_eq!(evidence.pipeline.language, "go");
     assert!(evidence.bindings.iter().any(|binding| {
         binding.spelling == "alias" && binding.qualified_target == "example.com/tools"
     }));
@@ -1831,7 +1833,7 @@ func invoke(value interface{}) {
 }
 
 #[test]
-fn direct_adapter_ids_and_partial_diagnostics_are_deterministic() {
+fn direct_evidence_ids_and_partial_diagnostics_are_deterministic() {
     let path = std::path::Path::new("/repo/src/example.py");
     let source_file = "src/example.py";
     let source = b"def broken(value:\n    helper(value)\n";

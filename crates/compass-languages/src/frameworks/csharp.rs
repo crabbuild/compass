@@ -19,7 +19,7 @@ const FRAMEWORK: &str = "aspnet";
 const MVC_NAMESPACE: &str = "Microsoft.AspNetCore.Mvc";
 
 pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
-    if context.evidence.adapter.language != "csharp" {
+    if context.evidence.pipeline.language != "csharp" {
         return Vec::new();
     }
     let activated = context.project.is_some_and(|project| {

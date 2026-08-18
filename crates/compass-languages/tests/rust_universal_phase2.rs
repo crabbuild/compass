@@ -168,7 +168,7 @@ fn rust_phase2_emits_direct_test_relationship_candidates() -> Result<(), Box<dyn
     validate_evidence(evidence, EvidenceLimits::default())?;
     assert!(
         evidence
-            .adapter
+            .pipeline
             .capabilities
             .contains(&compass_languages::LanguageCapability::Tests)
     );

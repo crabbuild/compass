@@ -1,6 +1,5 @@
 //! Statically linked deterministic language extraction for Compass.
 
-mod adapters;
 mod apex;
 mod bash;
 mod builtins;
@@ -12,12 +11,13 @@ mod dotnet_project;
 mod elixir;
 mod engine;
 pub mod evidence;
+mod evidence_pipeline;
 mod facts;
 mod fortran;
 pub mod frameworks;
 
 /// Version of the extraction contract consumed by graph publication.
-pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/2";
+pub const EXTRACTION_SEMANTICS_VERSION: &str = "compass.languages.extraction/3";
 mod go;
 mod groovy;
 mod html;
@@ -46,17 +46,19 @@ mod verilog;
 mod xaml;
 mod zig;
 
-pub use adapters::{
-    AdapterProfile, AdapterRegistry, AdapterRegistryError, UniversalAdapterProfile,
-};
 #[doc(hidden)]
 pub use builtins::{is_language_builtin_global, is_language_builtin_qualified_target};
 pub use evidence::{
-    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceBuilder,
     EvidenceDiagnostic, EvidenceError, EvidenceErrorCode, EvidenceLimits, EvidenceRange,
     HierarchyConstraint, LanguageCapability, OccurrenceFact, ReceiverDispatchStrategy,
     RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
-    SymbolNamespace, UNIVERSAL_EVIDENCE_SCHEMA, range_for_node, validate_evidence,
+    SymbolNamespace, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidenceIdentity, range_for_node,
+    validate_evidence,
+};
+pub use evidence_pipeline::{
+    UniversalEvidencePipeline, UniversalEvidenceProducer, UniversalEvidenceQualification,
+    UniversalEvidenceRegistry, UniversalEvidenceRegistryError,
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{

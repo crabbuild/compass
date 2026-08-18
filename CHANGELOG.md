@@ -2,12 +2,22 @@
 
 ## Unreleased
 
-- Hard-cut Ruby extraction to the version-1 `compass.ruby.candidate` universal
+- Refactor universal language metadata around `UniversalEvidenceProducer` and
+  `UniversalEvidencePipeline`. `UniversalCandidate`/`UniversalComplete` are
+  now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized
+  evidence envelope moves from `adapter` to `pipeline`, replaces `profile`
+  with `qualification`, and replaces the producer string with `emitter`.
+  Universal evidence schema is now `/2` and extraction semantics is `/3`, so
+  pre-refactor caches and evidence artifacts are intentionally rebuilt.
+  Qualification manifests, candidate exports, and TypeScript scorecards now
+  use version-2 schemas and call their language identity `producer`.
+
+- Hard-cut Ruby extraction to the version-1 `compass.ruby` universal
   evidence publisher and replace the Rails source detector with the
   evidence-backed `rails-ruby` universal pack. Reopened constants coalesce by
   exact graph identity, instance/singleton method spaces stay distinct,
   dynamic dispatch/load/eval forms fail closed, and Ruby remains explicitly
-  `UniversalCandidate` pending the independent precision/recall audit.
+  `Qualifying` pending the independent precision/recall audit.
 
 - Preserve anonymous PHP functions and arrow functions as typed callable
   `closure` nodes, and publish exact PHP trait composition as `mixes_in`
@@ -36,7 +46,7 @@
   records, and amortize bounded snapshot garbage collection. Exact preflights
   fall back to full publication whenever topology or secondary indexes change.
 
-- Hard-cut Kotlin onto a version-1 universal candidate adapter with packages,
+- Hard-cut Kotlin onto a version-1 qualifying universal pipeline with packages,
   declarations, extension functions, annotations, generic/nullable types, and
   named/default argument resolution; convert Spring Kotlin to the universal
   framework pack and require exact compiler evidence for Java/Kotlin calls.
@@ -88,7 +98,7 @@
   the historical realization. Materialization also verifies the requested
   profile before reusing a preferred realization.
 
-- Hard-cut PHP production extraction to the version-1 universal candidate with
+- Hard-cut PHP production extraction to the version-1 universal evidence pipeline with
   modern declarations, namespaces, grouped and aliased imports, traits,
   attributes, enum cases, promoted properties, calls, construction, typed
   receivers, and source-backed ownership. Resolve PHP type and callable names
@@ -98,7 +108,7 @@
   Laravel routes and Drupal hooks to universal source evidence while retaining
   Drupal routing configuration and Blade template extraction.
 
-- Hard-cut C# production extraction to the version-1 universal candidate with
+- Hard-cut C# production extraction to the version-1 universal evidence pipeline with
   bounded AST-backed declarations, namespaces, imports and aliases, overload
   signatures, typed members and parameters, construction and call evidence,
   base types, ownership, and explicit overrides. Remove the replaced C# raw

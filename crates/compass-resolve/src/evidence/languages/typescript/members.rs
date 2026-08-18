@@ -122,7 +122,7 @@ impl ResolutionDb<'_> {
         }
         // CommonJS object exports retain the file module as their owner. A
         // `Member("*")` alias is emitted for that owner only after the
-        // adapter proves every spread source, so treating a module owner as a
+        // producer proves every spread source, so treating a module owner as a
         // structural object here does not widen arbitrary module lookups.
         if owner.kind == "module" {
             return true;

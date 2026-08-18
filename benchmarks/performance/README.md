@@ -225,7 +225,7 @@ The test compares exact source-byte coverage for a mixed TSX fixture. It is
 ignored by ordinary workspace tests so native Compass remains Node-free.
 
 For developer-only same-file target adjudication on a pinned real corpus, use
-the separate checker oracle and keep the candidate adapter out of production:
+the separate checker oracle and keep the qualifying producer out of production:
 
 ```bash
 RUST_MIN_STACK=33554432 \
@@ -239,12 +239,12 @@ The report separates exact local targets, missing targets, wrong targets,
 external positives, and unresolved/ambiguous outcomes by capability. It is an
 adjudication instrument rather than a release claim: accepted labels, Wilson
 intervals, cross-file/project strata, framework tiers, and an equivalent
-Graphify/SCIP comparison must be frozen before an adapter can be registered.
+Graphify/SCIP comparison must be frozen before a producer can be registered.
 
 The target harness can persist its source-backed observations with
 `COMPASS_TS_TARGET_REPORT`; see
 `benchmarks/performance/oracles/README.md` for the report and reviewed
-`compass.typescript-target-scorecard/1` workflow. The scorecard evaluator is
+`compass.typescript-target-scorecard/2` workflow. The scorecard evaluator is
 deliberately separate from the checker oracle: automatic checker outcomes are
 not accepted precision labels, and diagnostic scorecards are never eligible for
 a public quality claim.
@@ -258,7 +258,7 @@ python3 benchmarks/performance/harness.py audit-candidates \
   --graph /path/to/pinned/compass/graph.json \
   --corpus /path/to/pinned/django \
   --name django \
-  --adapter python \
+  --producer python \
   --output target/performance/audits/django-candidates.json
 ```
 

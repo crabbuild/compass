@@ -608,7 +608,7 @@ def audit_candidates(args: argparse.Namespace) -> int:
         args.graph,
         args.corpus,
         args.name,
-        args.adapter,
+        args.producer,
         args.output,
     )
     print(destination)
@@ -708,7 +708,7 @@ def build_parser() -> argparse.ArgumentParser:
     candidate_parser.add_argument("--graph", type=Path, required=True)
     candidate_parser.add_argument("--corpus", type=Path, required=True)
     candidate_parser.add_argument("--name", required=True)
-    candidate_parser.add_argument("--adapter", required=True)
+    candidate_parser.add_argument("--producer", required=True)
     candidate_parser.add_argument("--output", type=Path, required=True)
     scorecard_parser = subparsers.add_parser(
         "typescript-scorecard",

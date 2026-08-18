@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use compass_languages::{CandidateRelation, Engine, SemanticRole, UniversalAdapterProfile};
+use compass_languages::{CandidateRelation, Engine, SemanticRole, UniversalEvidenceQualification};
 
 const SOURCE: &[u8] = br#"
 package demo.api
@@ -47,17 +47,17 @@ fn kotlin_emits_modern_universal_evidence_with_exact_anchors()
         .semantic_evidence
         .as_ref()
         .ok_or_else(|| format!("missing Kotlin evidence: {:?}", extraction.error))?;
-    let qualification = Engine::default().extract_source_universal_candidate_evidence(
+    let qualification = Engine::default().extract_source_universal_evidence(
         Path::new("src/main/kotlin/demo/api/Controller.kt"),
         "src/main/kotlin/demo/api/Controller.kt",
         SOURCE,
     )?;
     assert_eq!(evidence, &qualification);
-    assert_eq!(evidence.adapter.language, "kotlin");
-    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(evidence.pipeline.language, "kotlin");
+    assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
-        evidence.adapter.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        evidence.pipeline.qualification,
+        UniversalEvidenceQualification::Qualifying
     );
     for (kind, qualified) in [
         ("annotation_type", "demo.api.Audit"),

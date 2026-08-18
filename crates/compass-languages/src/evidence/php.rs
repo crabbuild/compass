@@ -1,7 +1,7 @@
 //! Direct universal semantic evidence for PHP.
 //!
 //! PHP class, interface, trait, enum, function, and method lookup is
-//! case-insensitive. The adapter therefore retains source spelling in
+//! case-insensitive. The producer therefore retains source spelling in
 //! declaration names while using case-folded qualified identities for those
 //! symbol families. Properties, variables, and constants keep source case.
 
@@ -16,7 +16,7 @@ use super::model::{
     ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
-use crate::{AdapterRegistry, make_id};
+use crate::{UniversalEvidenceRegistry, make_id};
 
 const PRODUCER: &str = "compass.languages.php.universal";
 const MAX_TRAVERSAL_DEPTH: usize = 512;
@@ -77,20 +77,20 @@ struct State<'source> {
     value_types: HashMap<(String, String), String>,
 }
 
-pub(super) fn extract_candidate_tree_evidence(
+pub(super) fn emit_tree_evidence(
     path: &Path,
     source_file: &str,
     source: &[u8],
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    let profile = AdapterRegistry::universal_profile("php").ok_or_else(|| {
+    let pipeline = UniversalEvidenceRegistry::pipeline("php").ok_or_else(|| {
         EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            "PHP universal adapter is not registered",
+            EvidenceErrorCode::InvalidPipeline,
+            "PHP universal evidence pipeline is not registered",
         )
     })?;
     let mut builder =
-        EvidenceBuilder::new(profile, PRODUCER, source_file, EvidenceLimits::default());
+        EvidenceBuilder::new(pipeline, PRODUCER, source_file, EvidenceLimits::default());
     let file_range = range_for_file(source_file, source);
     // Tree-sitter represents an empty source file with a zero-width root. The
     // universal inventory contract admits that exact range for file/module

@@ -15,7 +15,7 @@ use super::{
 pub(super) fn detect_universal(
     context: &UniversalDetectionContext<'_, '_>,
 ) -> Vec<RawFrameworkFact> {
-    if context.evidence.adapter.language != "ruby" {
+    if context.evidence.pipeline.language != "ruby" {
         return Vec::new();
     }
     let source_file = context

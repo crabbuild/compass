@@ -15,7 +15,7 @@ use super::model::{
     ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
-use crate::{AdapterRegistry, file_stem, make_id};
+use crate::{UniversalEvidenceRegistry, file_stem, make_id};
 
 const PRODUCER: &str = "compass.languages.kotlin.universal";
 const MAX_TRAVERSAL_DEPTH: usize = 128;
@@ -52,20 +52,20 @@ struct State<'source> {
     parser_errors: Vec<(usize, usize)>,
 }
 
-pub(super) fn extract_candidate_tree_evidence(
+pub(super) fn emit_tree_evidence(
     path: &Path,
     source_file: &str,
     source: &[u8],
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    let profile = AdapterRegistry::universal_profile("kotlin").ok_or_else(|| {
+    let pipeline = UniversalEvidenceRegistry::pipeline("kotlin").ok_or_else(|| {
         EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            "Kotlin universal adapter is not registered",
+            EvidenceErrorCode::InvalidPipeline,
+            "Kotlin universal evidence pipeline is not registered",
         )
     })?;
     let mut builder =
-        EvidenceBuilder::new(profile, PRODUCER, source_file, EvidenceLimits::default());
+        EvidenceBuilder::new(pipeline, PRODUCER, source_file, EvidenceLimits::default());
     let file_range = range_for_file(source_file, source);
     let file_graph_id = make_id(&[source_file]);
     let file_id = builder.declare(

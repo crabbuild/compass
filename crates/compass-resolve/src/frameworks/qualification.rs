@@ -118,7 +118,7 @@ pub fn qualify_framework_case(
     limits: FrameworkLimits,
     case: &FrameworkQualificationCase,
 ) -> Result<FrameworkQualificationReport, FrameworkQualificationError> {
-    // A universal candidate intentionally keeps the per-file extraction
+    // A qualifying universal pipeline intentionally keeps the per-file extraction
     // evidence-only: declaration nodes are projected by the collection
     // resolver. Qualification fixtures also exercise a single extracted file,
     // so provide the target index with the same source-backed declaration

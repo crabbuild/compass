@@ -144,9 +144,10 @@ publication evidence  compass-graph + fixtures/qualification
 
 Read `docs/design/language-architecture.md` and
 `docs/reference/universal-semantic-evidence.md` before changing universal
-adapters, evidence facts, resolution rules, or language cutovers. Do not add a
-universal adapter profile without direct evidence emission, validation,
-resolution, and qualification in the same change.
+evidence producers or pipelines, evidence facts, resolution rules, or
+language cutovers. Do not add a universal evidence pipeline without direct
+evidence emission, validation, resolution, and qualification in the same
+change.
 
 ## Rust conventions
 

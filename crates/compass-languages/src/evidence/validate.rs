@@ -10,7 +10,7 @@ use super::model::{
     SemanticRole, SymbolNamespace,
 };
 
-/// Hard resource ceilings for a single adapter evidence batch.
+/// Hard resource ceilings for a single semantic evidence batch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EvidenceLimits {
     pub declarations: usize,
@@ -45,7 +45,7 @@ impl Default for EvidenceLimits {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceErrorCode {
-    InvalidAdapter,
+    InvalidPipeline,
     ResourceLimit,
     DuplicateId,
     InvalidPath,
@@ -90,14 +90,14 @@ pub fn validate_evidence(
     batch: &SemanticEvidenceBatch,
     limits: EvidenceLimits,
 ) -> Result<(), EvidenceError> {
-    validate_adapter(batch)?;
+    validate_pipeline(batch)?;
     validate_limits(batch, limits)?;
 
-    let capabilities: BTreeSet<_> = batch.adapter.capabilities.iter().copied().collect();
-    if capabilities.len() != batch.adapter.capabilities.len() {
+    let capabilities: BTreeSet<_> = batch.pipeline.capabilities.iter().copied().collect();
+    if capabilities.len() != batch.pipeline.capabilities.len() {
         return Err(EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            "adapter capabilities must be unique",
+            EvidenceErrorCode::InvalidPipeline,
+            "pipeline capabilities must be unique",
         ));
     }
 
@@ -182,7 +182,7 @@ pub fn validate_evidence(
     for fact in facts {
         validate_fact(
             fact,
-            batch.adapter.language.as_str(),
+            batch.pipeline.language.as_str(),
             &capabilities,
             &declarations,
             &scopes,
@@ -201,10 +201,10 @@ pub fn validate_evidence(
             .then_with(|| left.message.cmp(&right.message))
     });
     for diagnostic in diagnostics {
-        if diagnostic.code.is_empty() || diagnostic.language != batch.adapter.language {
+        if diagnostic.code.is_empty() || diagnostic.language != batch.pipeline.language {
             return Err(EvidenceError::new(
                 EvidenceErrorCode::InvalidFact,
-                "diagnostic code and adapter language must be valid",
+                "diagnostic code and pipeline language must be valid",
             ));
         }
         if diagnostic.message.len() > limits.diagnostic_message_bytes {
@@ -232,11 +232,11 @@ pub fn validate_evidence(
     Ok(())
 }
 
-fn validate_adapter(batch: &SemanticEvidenceBatch) -> Result<(), EvidenceError> {
-    if batch.adapter.language.trim().is_empty() || batch.adapter.producer.trim().is_empty() {
+fn validate_pipeline(batch: &SemanticEvidenceBatch) -> Result<(), EvidenceError> {
+    if batch.pipeline.language.trim().is_empty() || batch.pipeline.emitter.trim().is_empty() {
         return Err(EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            "adapter language and producer must not be empty",
+            EvidenceErrorCode::InvalidPipeline,
+            "pipeline language and emitter must not be empty",
         ));
     }
     Ok(())
@@ -291,7 +291,7 @@ impl<'a> Fact<'a> {
 #[allow(clippy::too_many_arguments)]
 fn validate_fact(
     fact: Fact<'_>,
-    adapter_language: &str,
+    pipeline_language: &str,
     capabilities: &BTreeSet<LanguageCapability>,
     declarations: &AHashMap<&str, &DeclarationFact>,
     scopes: &AHashMap<&str, &ScopeFact>,
@@ -301,7 +301,7 @@ fn validate_fact(
 ) -> Result<(), EvidenceError> {
     match fact {
         Fact::Declaration(fact) => {
-            validate_language(&fact.id, &fact.language, adapter_language)?;
+            validate_language(&fact.id, &fact.language, pipeline_language)?;
             validate_range(&fact.range, &fact.id, fact.kind == "file")?;
             require_capability(&fact.id, LanguageCapability::Declarations, capabilities)?;
             if fact.graph_node_id.is_empty()
@@ -345,7 +345,7 @@ fn validate_fact(
             }
         }
         Fact::Scope(fact) => {
-            validate_language(&fact.id, &fact.language, adapter_language)?;
+            validate_language(&fact.id, &fact.language, pipeline_language)?;
             let empty_file_scope = fact.kind == "module"
                 && fact
                     .owner_declaration_id
@@ -371,7 +371,7 @@ fn validate_fact(
             )?;
         }
         Fact::Binding(fact) => {
-            validate_language(&fact.id, &fact.language, adapter_language)?;
+            validate_language(&fact.id, &fact.language, pipeline_language)?;
             validate_range(&fact.range, &fact.id, false)?;
             require_capability(&fact.id, fact.kind.required_capability(), capabilities)?;
             if fact.spelling.is_empty() || fact.qualified_target.is_empty() {
@@ -471,7 +471,7 @@ fn validate_fact(
             require_optional_reference(&fact.id, "scope", fact.scope_id.as_deref(), scopes)?;
         }
         Fact::Occurrence(fact) => {
-            validate_language(&fact.id, &fact.language, adapter_language)?;
+            validate_language(&fact.id, &fact.language, pipeline_language)?;
             validate_range(&fact.range, &fact.id, false)?;
             require_capability(&fact.id, fact.role.required_capability(), capabilities)?;
             if fact.spelling.is_empty() {
@@ -486,7 +486,7 @@ fn validate_fact(
             require_optional_reference(&fact.id, "scope", fact.scope_id.as_deref(), scopes)?;
         }
         Fact::Candidate(fact) => {
-            validate_language(&fact.id, &fact.language, adapter_language)?;
+            validate_language(&fact.id, &fact.language, pipeline_language)?;
             require_capability(&fact.id, fact.relation.required_capability(), capabilities)?;
             require_reference(
                 &fact.id,
@@ -797,12 +797,14 @@ fn validate_callable_types<T: CallableTypeValue>(
 fn validate_language(
     id: &str,
     language: &str,
-    adapter_language: &str,
+    pipeline_language: &str,
 ) -> Result<(), EvidenceError> {
-    if language != adapter_language {
+    if language != pipeline_language {
         return Err(EvidenceError::new(
             EvidenceErrorCode::LanguageMismatch,
-            format!("fact {id:?} language {language:?} differs from adapter {adapter_language:?}"),
+            format!(
+                "fact {id:?} language {language:?} differs from pipeline {pipeline_language:?}"
+            ),
         ));
     }
     Ok(())

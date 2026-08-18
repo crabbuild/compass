@@ -16,12 +16,12 @@ class Child extends Base {
 }
 "#;
     let batch = Engine::default()
-        .extract_source_universal_candidate_evidence(
+        .extract_source_universal_evidence(
             Path::new("src/inherited.ts"),
             "src/inherited.ts",
             source,
         )
-        .expect("candidate evidence");
+        .expect("universal evidence");
     let declaration = batch
         .declarations
         .iter()

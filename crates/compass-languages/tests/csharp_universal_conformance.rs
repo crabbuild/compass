@@ -2,8 +2,8 @@ use std::error::Error;
 use std::path::Path;
 
 use compass_languages::{
-    AdapterRegistry, BindingKind, CandidateRelation, Engine, EvidenceLimits, LanguageCapability,
-    SemanticRole, UniversalAdapterProfile, validate_evidence,
+    BindingKind, CandidateRelation, Engine, EvidenceLimits, LanguageCapability, SemanticRole,
+    UniversalEvidenceQualification, UniversalEvidenceRegistry, validate_evidence,
 };
 
 #[test]
@@ -63,11 +63,11 @@ public partial class UsersController : ControllerBase, IWorker
         .as_ref()
         .ok_or("missing C# universal evidence")?;
     validate_evidence(evidence, EvidenceLimits::default())?;
-    assert_eq!(evidence.adapter.id, "compass.csharp.candidate");
-    assert_eq!(evidence.adapter.version, 1);
+    assert_eq!(evidence.pipeline.id, "compass.csharp");
+    assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
-        evidence.adapter.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        evidence.pipeline.qualification,
+        UniversalEvidenceQualification::Qualifying
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -81,7 +81,7 @@ public partial class UsersController : ControllerBase, IWorker
         LanguageCapability::Members,
         LanguageCapability::Receivers,
     ] {
-        assert!(evidence.adapter.capabilities.contains(&capability));
+        assert!(evidence.pipeline.capabilities.contains(&capability));
     }
     let controller = evidence
         .declarations
@@ -218,8 +218,11 @@ fn csharp_evidence_identity_is_independent_of_checkout_root() -> Result<(), Box<
 }
 
 #[test]
-fn csharp_profile_is_registered_as_a_universal_candidate() -> Result<(), Box<dyn Error>> {
-    let profile = AdapterRegistry::universal_profile("csharp").ok_or("missing C# profile")?;
-    assert_eq!(profile.profile, UniversalAdapterProfile::UniversalCandidate);
+fn csharp_pipeline_is_registered_as_qualifying() -> Result<(), Box<dyn Error>> {
+    let pipeline = UniversalEvidenceRegistry::pipeline("csharp").ok_or("missing C# pipeline")?;
+    assert_eq!(
+        pipeline.qualification,
+        UniversalEvidenceQualification::Qualifying
+    );
     Ok(())
 }

@@ -36,7 +36,7 @@ pub fn collect_program_projection_sites(extractions: &[Extraction]) -> ProgramPr
     for batch in extractions
         .iter()
         .filter_map(|extraction| extraction.semantic_evidence.as_ref())
-        .filter(|batch| batch.adapter.language == "java")
+        .filter(|batch| batch.pipeline.language == "java")
     {
         for declaration in &batch.declarations {
             sites

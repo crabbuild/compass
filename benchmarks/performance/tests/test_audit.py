@@ -9,6 +9,7 @@ import tempfile
 import unittest
 
 from benchmarks.performance.compass.audit import (
+    AUDIT_RESULT_SCHEMA,
     AuditError,
     audit_result_json_value,
     export_comparison_candidates,
@@ -56,6 +57,7 @@ class AuditTests(unittest.TestCase):
         second = run_audit(BASE_MANIFEST, BASE_GRAPH, BASE_CORPUS)
         self.assertEqual(first, second)
         payload = audit_result_json_value(first)
+        self.assertEqual(payload["schema"], AUDIT_RESULT_SCHEMA)
         self.assertFalse(payload["eligibleForQualityClaim"])
         self.assertEqual(6, payload["auditedAcceptedEdges"])
         self.assertEqual(2, payload["precision"]["numerator"])
@@ -315,7 +317,8 @@ class AuditTests(unittest.TestCase):
             )
             self.assertEqual(first.read_bytes(), second.read_bytes())
             payload = json.loads(first.read_text(encoding="utf-8"))
-            self.assertEqual(payload["schema"], "compass.quality-audit-candidates")
+            self.assertEqual(payload["schema"], "compass.quality-audit-candidates/2")
+            self.assertEqual(payload["producer"], "python")
             self.assertTrue(payload["recordsAreUnjudged"])
             self.assertEqual(payload["corpus"]["commit"], "1" * 40)
             self.assertEqual(
@@ -343,6 +346,9 @@ class AuditTests(unittest.TestCase):
             self.assertEqual(len(payload["candidates"]), 5)
             self.assertTrue(
                 all(candidate["judgment"] is None for candidate in payload["candidates"])
+            )
+            self.assertTrue(
+                all(candidate["producer"] == "python" for candidate in payload["candidates"])
             )
             accepted = [
                 candidate

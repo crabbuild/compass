@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a deterministic Ruby universal-candidate quality-audit manifest.
+"""Build a deterministic Ruby universal-evidence quality-audit manifest.
 
 The manifest is qualification data, never product input.  It joins exact
 Tree-sitter graph anchors with the independently pinned Ripper inventory and
@@ -33,7 +33,7 @@ from benchmarks.performance.compass.occurrences import (
 )
 
 
-ADAPTER = "ruby"
+PRODUCER = "ruby"
 PROVIDER = "ruby_ripper_4_0_6"
 CAPABILITY_BY_RELATION = {
     "aliases": "aliases",
@@ -122,7 +122,7 @@ def _graph_edges(path: Path, nodes: dict[str, dict[str, Any]]) -> tuple[list[dic
         target_node = nodes.get(target)
         if source_node is None or target_node is None:
             continue
-        if source_node["language"] != ADAPTER or target_node["language"] != ADAPTER:
+        if source_node["language"] != PRODUCER or target_node["language"] != PRODUCER:
             continue
         anchor = _edge_anchor(raw)
         if anchor is None:
@@ -354,14 +354,14 @@ def _candidate(
         "id": _record_id(kind, corpus, construct, target_id),
         "corpus": corpus,
         "pool": "accepted" if kind == "accepted" else "source_oracle",
-        "adapter": ADAPTER,
+        "producer": PRODUCER,
         "capability": capability,
-        "language": ADAPTER,
+        "language": PRODUCER,
         "relation": construct.relation,
         "confidence": confidence,
         "targetCluster": _target_cluster(target_label, target_id),
-        "source": {"nodeId": source_id, "language": ADAPTER},
-        "target": {"nodeId": target_id, "language": ADAPTER},
+        "source": {"nodeId": source_id, "language": PRODUCER},
+        "target": {"nodeId": target_id, "language": PRODUCER},
         "occurrence": {
             "file": construct.source_file,
             "startByte": construct.start_byte,
@@ -481,8 +481,8 @@ def build_corpus(name: str, root: Path, graph: Path, *, max_accepted: int, max_s
     graph = graph.resolve()
     nodes, node_count = _graph_nodes(graph)
     edges, edge_count = _graph_edges(graph, nodes)
-    inventory = independent_source_inventory(root, ADAPTER)
-    if independent_source_provider_identity(ADAPTER) != PROVIDER:
+    inventory = independent_source_inventory(root, PRODUCER)
+    if independent_source_provider_identity(PRODUCER) != PROVIDER:
         raise RuntimeError("the pinned Ruby source provider identity changed")
     by_anchor: dict[tuple[str, str, int, int], list[dict[str, Any]]] = defaultdict(list)
     for edge in edges:
@@ -491,12 +491,12 @@ def build_corpus(name: str, root: Path, graph: Path, *, max_accepted: int, max_s
     file_nodes = {
         node["sourceFile"]: node
         for node in nodes.values()
-        if node["language"] == ADAPTER and node["kind"] == "file" and node["sourceFile"]
+        if node["language"] == PRODUCER and node["kind"] == "file" and node["sourceFile"]
     }
     qualified_nodes: dict[str, list[dict[str, Any]]] = defaultdict(list)
     source_nodes: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for node in nodes.values():
-        if node["language"] != ADAPTER:
+        if node["language"] != PRODUCER:
             continue
         qualified_nodes[node["qualifiedName"]].append(node)
         if node["sourceFile"]:
@@ -657,11 +657,11 @@ def build_corpus(name: str, root: Path, graph: Path, *, max_accepted: int, max_s
     }
     coverage = {
         "corpus": name,
-        "adapter": ADAPTER,
+        "producer": PRODUCER,
         "provider": PROVIDER,
         "scannedFiles": inventory.scanned_files,
         "parsedFiles": inventory.parsed_files,
-        "inventorySha256": source_construct_inventory_sha256(ADAPTER, inventory),
+        "inventorySha256": source_construct_inventory_sha256(PRODUCER, inventory),
         "graphNodes": node_count,
         "graphEdges": edge_count,
         "acceptedBeforeSampling": sum(capability_counts.values()),
@@ -722,13 +722,13 @@ def main() -> int:
     capability_counts = Counter(record["capability"] for record in accepted)
     accepted_capabilities = sorted(capability_counts)
     advertised = [
-        {"adapter": ADAPTER, "capability": capability}
+        {"producer": PRODUCER, "capability": capability}
         for capability in accepted_capabilities
         if capability_counts[capability] >= 100
     ]
-    advertised_keys = {(entry["adapter"], entry["capability"]) for entry in advertised}
-    accepted = [record for record in accepted if (record["adapter"], record["capability"]) in advertised_keys]
-    source_records = [record for record in source_records if (record["adapter"], record["capability"]) in advertised_keys]
+    advertised_keys = {(entry["producer"], entry["capability"]) for entry in advertised}
+    accepted = [record for record in accepted if (record["producer"], record["capability"]) in advertised_keys]
+    source_records = [record for record in source_records if (record["producer"], record["capability"]) in advertised_keys]
     relation_counts = Counter(record["relation"] for record in accepted)
     relations = sorted(
         relation for relation, count in relation_counts.items() if count >= 100
@@ -738,14 +738,14 @@ def main() -> int:
     source_records = [record for record in source_records if record["relation"] in allowed_relations]
     records = sorted(accepted + source_records, key=lambda item: item["id"])
     manifest = {
-        "schema": "compass.quality-audit",
+        "schema": "compass.quality-audit/2",
         "mode": "qualification",
         "corpora": sorted(corpora, key=lambda item: item["name"]),
         "sourceOracles": sorted(
             [
                 {
                     "corpus": item["corpus"],
-                    "adapter": ADAPTER,
+                    "producer": PRODUCER,
                     "provider": PROVIDER,
                     "scannedFiles": item["scannedFiles"],
                     "parsedFiles": item["parsedFiles"],
@@ -753,16 +753,16 @@ def main() -> int:
                 }
                 for item in coverage
             ],
-            key=lambda item: (item["corpus"], item["adapter"]),
+            key=lambda item: (item["corpus"], item["producer"]),
         ),
-        "advertisedCapabilities": sorted(advertised, key=lambda item: (item["adapter"], item["capability"])),
+        "advertisedCapabilities": sorted(advertised, key=lambda item: (item["producer"], item["capability"])),
         "requiredRelations": relations,
         "records": records,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
     report = {
-        "schema": "compass.ruby-quality-audit-build/1",
+        "schema": "compass.ruby-quality-audit-build/2",
         "manifest": str(args.output),
         "corpora": coverage,
         "advertisedCapabilities": advertised,

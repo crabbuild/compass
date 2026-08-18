@@ -1,5 +1,5 @@
 //! Developer-only differential qualification for the TypeScript/JavaScript
-//! universal candidate.
+//! universal evidence pipeline.
 //!
 //! The test is deliberately ignored in the normal Rust suite: the production
 //! boundary must not require Node.js or the TypeScript compiler. Run it with
@@ -37,7 +37,7 @@ struct OracleConstruct {
 
 #[test]
 #[ignore = "developer-only TypeScript compiler differential"]
-fn pinned_compiler_constructs_have_candidate_source_coverage() {
+fn pinned_compiler_constructs_have_universal_evidence_source_coverage() {
     let root = tempdir().expect("temporary differential root");
     let main = root.path().join("src/main.tsx");
     let ui = root.path().join("src/ui.ts");
@@ -77,9 +77,9 @@ fn pinned_compiler_constructs_have_candidate_source_coverage() {
     let mut engine = Engine::default();
     let source = fs::read(&main).expect("main source");
     let batch = engine
-        .extract_source_universal_candidate_evidence(&main, "src/main.tsx", &source)
-        .expect("candidate evidence");
-    let observed = candidate_source_keys(&batch);
+        .extract_source_universal_evidence(&main, "src/main.tsx", &source)
+        .expect("universal evidence");
+    let observed = evidence_source_keys(&batch);
     let expected = oracle
         .constructs
         .iter()
@@ -144,7 +144,7 @@ fn supported_construct(construct: &OracleConstruct) -> bool {
     )
 }
 
-fn candidate_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<(String, String, u64, u64)> {
+fn evidence_source_keys(batch: &SemanticEvidenceBatch) -> BTreeSet<(String, String, u64, u64)> {
     let mut keys = BTreeSet::new();
     for declaration in &batch.declarations {
         keys.insert((

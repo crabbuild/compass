@@ -6,14 +6,14 @@ use compass_languages::{
     CandidateRelation, Engine, EvidenceLimits, SemanticRole, SymbolNamespace, validate_evidence,
 };
 
-fn candidate(path: &str, source: &[u8]) -> compass_languages::SemanticEvidenceBatch {
+fn universal_evidence(path: &str, source: &[u8]) -> compass_languages::SemanticEvidenceBatch {
     Engine::default()
-        .extract_source_universal_candidate_evidence(Path::new(path), path, source)
-        .expect("candidate evidence")
+        .extract_source_universal_evidence(Path::new(path), path, source)
+        .expect("universal evidence")
 }
 
 #[test]
-fn typescript_candidate_emits_direct_declarations_scopes_imports_and_calls() {
+fn universal_evidence_emits_direct_declarations_scopes_imports_and_calls() {
     let source = br#"import type { User as UserType } from "./types";
 import Widget, * as widgets from "./widget";
 interface User { id: string }
@@ -26,11 +26,11 @@ const helper = (value: User): ID => value.id;
 export { App, helper };
 new App();
 "#;
-    let batch = candidate("src/app.ts", source);
+    let batch = universal_evidence("src/app.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
-    assert_eq!(batch.adapter.language, "typescript");
-    assert_eq!(batch.adapter.version, 5);
-    assert_eq!(batch.adapter.dialect.as_deref(), Some("ts"));
+    assert_eq!(batch.pipeline.language, "typescript");
+    assert_eq!(batch.pipeline.version, 5);
+    assert_eq!(batch.pipeline.dialect.as_deref(), Some("ts"));
     assert!(
         batch
             .declarations
@@ -111,7 +111,7 @@ new App();
 }
 
 #[test]
-fn typescript_candidate_emits_using_resource_bindings_and_initializer_calls() {
+fn universal_evidence_emits_using_resource_bindings_and_initializer_calls() {
     let source = br#"interface Resource { close(): void }
 declare function acquire(): Resource;
 declare function acquireAsync(): Promise<Resource>;
@@ -122,7 +122,7 @@ export function run() {
     asyncResource.close();
 }
 "#;
-    let batch = candidate("src/resources.ts", source);
+    let batch = universal_evidence("src/resources.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("using evidence");
     assert!(
         !batch
@@ -165,7 +165,7 @@ export function run() {
 }
 
 #[test]
-fn javascript_candidate_emits_jsx_commonjs_and_dynamic_import_evidence() {
+fn universal_evidence_emits_jsx_commonjs_and_dynamic_import_evidence() {
     let source = br#"const Button = () => null;
 const title = "Hello";
 const props = { title };
@@ -174,10 +174,10 @@ const helper = require("./helper");
 module.exports = render;
 export async function load() { return import("./lazy.js"); }
 "#;
-    let batch = candidate("src/render.jsx", source);
-    assert_eq!(batch.adapter.language, "javascript");
-    assert_eq!(batch.adapter.version, 5);
-    assert_eq!(batch.adapter.dialect.as_deref(), Some("jsx"));
+    let batch = universal_evidence("src/render.jsx", source);
+    assert_eq!(batch.pipeline.language, "javascript");
+    assert_eq!(batch.pipeline.version, 5);
+    assert_eq!(batch.pipeline.dialect.as_deref(), Some("jsx"));
     assert!(
         batch
             .bindings
@@ -226,7 +226,7 @@ export async function load() { return import("./lazy.js"); }
         candidate.relation == compass_languages::CandidateRelation::Reexports
     }));
 
-    let import_equals = candidate(
+    let import_equals = universal_evidence(
         "src/cjs-types.ts",
         br#"import axios = require("axios");
 axios.get("/items");
@@ -247,7 +247,7 @@ axios.get("/items");
                 .is_some_and(|occurrence| occurrence.context.as_deref() == Some("import_equals"))
     }));
 
-    let javascript_inheritance = candidate(
+    let javascript_inheritance = universal_evidence(
         "src/canceled.js",
         br#"import AxiosError from "./AxiosError.js";
 class CanceledError extends AxiosError {}
@@ -259,7 +259,7 @@ class CanceledError extends AxiosError {}
             && candidate.constraints.qualified_name.as_deref() == Some("./AxiosError.js::default")
     }));
 
-    let namespace_jsx = candidate(
+    let namespace_jsx = universal_evidence(
         "src/components.tsx",
         br#"import * as UI from "./ui";
 export function render() { return <UI.Button />; }
@@ -282,8 +282,8 @@ export function render() { return <UI.Button />; }
 }
 
 #[test]
-fn typescript_candidate_keeps_named_imports_used_as_object_values() {
-    let batch = candidate(
+fn universal_evidence_keeps_named_imports_used_as_object_values() {
+    let batch = universal_evidence(
         "src/routes.tsx",
         br#"import { UserPage } from "./UserPage";
 export const routes = [{ path: "/users", Component: UserPage }];
@@ -308,7 +308,7 @@ export const routes = [{ path: "/users", Component: UserPage }];
 }
 
 #[test]
-fn typescript_candidate_emits_jsx_value_and_spread_references() {
+fn universal_evidence_emits_jsx_value_and_spread_references() {
     let source = br#"interface Props { title: string; onClick: () => void }
 const title = "Hello";
 const props = { title };
@@ -317,7 +317,7 @@ export function View(label: string) {
     return <Button title={title} onClick={() => handle(label)} data={user.name} {...props}>{title}</Button>;
 }
 "#;
-    let batch = candidate("src/view.tsx", source);
+    let batch = universal_evidence("src/view.tsx", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("JSX value evidence");
 
     let declaration_id = |name: &str, kind: &str| {
@@ -390,7 +390,7 @@ export function View(label: string) {
 }
 
 #[test]
-fn typescript_candidate_emits_call_and_member_decorator_evidence() {
+fn universal_evidence_emits_call_and_member_decorator_evidence() {
     let source = br#"import { Injectable, Controller as C } from "@nestjs/common";
 import * as decorators from "./decorators";
 function Local(value: string) {}
@@ -402,7 +402,7 @@ class Service {}
 @unknownFactory(makePath())
 class Dynamic {}
 "#;
-    let batch = candidate("src/service.ts", source);
+    let batch = universal_evidence("src/service.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("decorator evidence");
     let decorators = batch
         .candidates
@@ -465,8 +465,8 @@ class Dynamic {}
 }
 
 #[test]
-fn typescript_candidate_keeps_recovered_computed_decorator_unresolved() {
-    let batch = candidate(
+fn universal_evidence_keeps_recovered_computed_decorator_unresolved() {
+    let batch = universal_evidence(
         "src/recovered-decorator.ts",
         br#"@decorators[factoryKey]()
 class Computed {}
@@ -499,8 +499,8 @@ class Computed {}
 }
 
 #[test]
-fn javascript_candidate_publishes_spread_free_default_object_members() {
-    let batch = candidate(
+fn universal_evidence_publishes_spread_free_default_object_members() {
+    let batch = universal_evidence(
         "src/utils.js",
         br#"const isNumber = value => typeof value === 'number';
 const isString = value => typeof value === 'string';
@@ -526,7 +526,7 @@ export default { isNumber, isString };
             && binding.target_declaration_id.as_deref() == Some(default_object.id.as_str())
     }));
 
-    let spread = candidate(
+    let spread = universal_evidence(
         "src/spread-default.js",
         br#"const base = { isNumber: value => true };
 export default { ...base, isString: value => true };
@@ -575,7 +575,7 @@ export default { ...base, isString: value => true };
             })
     }));
 
-    let imported = candidate(
+    let imported = universal_evidence(
         "src/imported-spread-default.js",
         br#"import base from './base.js';
 export default { ...base, isString: value => true };
@@ -590,7 +590,7 @@ export default { ...base, isString: value => true };
             && binding.target_declaration_id.is_none()
     }));
 
-    let unknown = candidate(
+    let unknown = universal_evidence(
         "src/unknown-spread-default.js",
         br#"const base = getBase();
 export default { ...base, isString: value => true };
@@ -608,8 +608,8 @@ export default { ...base, isString: value => true };
 }
 
 #[test]
-fn typescript_candidate_publishes_wildcard_barrel_reexports() {
-    let batch = candidate(
+fn universal_evidence_publishes_wildcard_barrel_reexports() {
+    let batch = universal_evidence(
         "src/index.ts",
         br#"export * from "./values";
 export * as values from "./values";
@@ -685,8 +685,8 @@ export type * from "./types";
 }
 
 #[test]
-fn typescript_candidate_publishes_export_assignment_default() {
-    let batch = candidate(
+fn universal_evidence_publishes_export_assignment_default() {
+    let batch = universal_evidence(
         "src/api.ts",
         br#"export function run() {}
 export = run;
@@ -716,7 +716,7 @@ export = run;
             && candidate.target_spelling == "default"
     }));
 
-    let object = candidate(
+    let object = universal_evidence(
         "src/object-api.ts",
         br#"export = { run: (value: number) => value };
 "#,
@@ -746,7 +746,7 @@ api.run();
 execute();
 method();
 "#;
-    let batch = candidate("src/consumer.js", source);
+    let batch = universal_evidence("src/consumer.js", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid require evidence");
 
     let api = batch
@@ -792,7 +792,7 @@ module.exports = {
     literal: true,
 };
 "#;
-    let batch = candidate("src/object-export.js", source);
+    let batch = universal_evidence("src/object-export.js", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("CommonJS object evidence");
 
     let reexports = batch
@@ -842,7 +842,7 @@ module.exports = {
         Some(method.id.as_str())
     );
 
-    let spread = candidate(
+    let spread = universal_evidence(
         "src/object-export-spread.js",
         br#"const other = getOther();
 module.exports = { run, ...other };
@@ -860,7 +860,7 @@ module.exports = { run, ...other };
 }
 
 #[test]
-fn typescript_candidate_preserves_typeof_import_queries_without_dynamic_calls() {
+fn universal_evidence_preserves_typeof_import_queries_without_dynamic_calls() {
     let source = br#"const load = () => import("./runtime");
 // typeof import("./ignored");
 const text = "typeof import('./ignored-string')";
@@ -868,7 +868,7 @@ type Item = (typeof import("./items").items)[number];
 type Simple = typeof import("./simple").items;
 type Plain = import("./plain").Item;
 "#;
-    let batch = candidate("src/import-type.ts", source);
+    let batch = universal_evidence("src/import-type.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
 
     let type_imports = batch
@@ -920,7 +920,7 @@ type Plain = import("./plain").Item;
 
 #[test]
 fn javascript_typeof_import_remains_a_dynamic_import() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/runtime-probe.js",
         br#"const probe = typeof import("./runtime");
 "#,
@@ -952,7 +952,7 @@ fn typescript_import_type_query_inventory_is_bounded_and_diagnosed() {
             "type Item{index} = typeof import(\"./module{index}\").Item;\n"
         ));
     }
-    let batch = candidate("src/import-type-limit.ts", source.as_bytes());
+    let batch = universal_evidence("src/import-type-limit.ts", source.as_bytes());
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid bounded evidence");
     assert!(
         batch
@@ -975,7 +975,7 @@ fn javascript_commonjs_object_spread_publishes_bounded_owner_aliases() {
     let source = br#"const base = { inherited() {} };
 module.exports = { ...base, direct() {} };
 "#;
-    let batch = candidate("src/object-export-spread-safe.js", source);
+    let batch = universal_evidence("src/object-export-spread-safe.js", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("CommonJS spread evidence");
 
     let alias = batch
@@ -1011,7 +1011,7 @@ fn javascript_namespace_and_require_spreads_publish_module_owner_aliases() {
 const cjs = require("./cjs");
 module.exports = { ...esm, ...cjs };
 "#;
-    let batch = candidate("src/namespace-spread.cjs", source);
+    let batch = universal_evidence("src/namespace-spread.cjs", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("namespace spread evidence");
 
     let aliases = batch
@@ -1033,7 +1033,7 @@ fn javascript_commonjs_object_assign_publishes_bounded_owner_aliases() {
     let source = br#"const base = { inherited() {} };
 module.exports = Object.assign({}, base, { direct() {} });
 "#;
-    let batch = candidate("src/object-assign-export.js", source);
+    let batch = universal_evidence("src/object-assign-export.js", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("Object.assign evidence");
 
     assert!(batch.bindings.iter().any(|binding| {
@@ -1048,7 +1048,7 @@ module.exports = Object.assign({}, base, { direct() {} });
         binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "direct"
     }));
 
-    let mutation = candidate(
+    let mutation = universal_evidence(
         "src/object-assign-mutation.js",
         br#"const base = { inherited() {} };
 Object.assign(exports, base);
@@ -1062,7 +1062,7 @@ Object.assign(exports, base);
             && binding.qualified_target == "object-assign-mutation.base"
     }));
 
-    let unknown = candidate(
+    let unknown = universal_evidence(
         "src/object-assign-unknown.js",
         br#"const base = getBase();
 module.exports = Object.assign({}, base, { direct() {} });
@@ -1088,7 +1088,7 @@ Object.defineProperty(exports, 'imported', {
 Object.defineProperty(exports, '__esModule', { value: true });
 Object.defineProperty(exports, dynamic, { value: run });
 "#;
-    let batch = candidate("src/define-property.cjs", source);
+    let batch = universal_evidence("src/define-property.cjs", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("defineProperty export evidence");
 
     let reexports = batch
@@ -1102,7 +1102,7 @@ Object.defineProperty(exports, dynamic, { value: run });
     assert!(!reexports.contains("__esModule"));
     assert!(!reexports.contains("dynamic"));
 
-    let shadowed = candidate(
+    let shadowed = universal_evidence(
         "src/define-property-shadowed.cjs",
         br#"function Object() {}
 function run() {}
@@ -1113,7 +1113,7 @@ Object.defineProperty(exports, 'run', { value: run });
         binding.kind == compass_languages::BindingKind::Reexport && binding.spelling == "run"
     }));
 
-    let dynamic = candidate(
+    let dynamic = universal_evidence(
         "src/define-property-dynamic.cjs",
         br#"function run() {}
 Object.defineProperty(exports, 'run', { value: getRun() });
@@ -1146,7 +1146,7 @@ __exportStar(require("./wrong-target"), other);
     __exportStar(require("./lookalike"), exports);
 }
 "#;
-    let batch = candidate("src/barrel.cjs", source);
+    let batch = universal_evidence("src/barrel.cjs", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("exportStar evidence");
     let aliases = batch
         .bindings
@@ -1170,7 +1170,7 @@ tag`hello ${42}`;
 tag`hello ${"x"} ${'y'}`;
 getTag()`dynamic ${name}`;
 "#;
-    let batch = candidate("src/tagged.ts", source);
+    let batch = universal_evidence("src/tagged.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("tagged template evidence");
     let tag = batch
         .declarations
@@ -1243,7 +1243,7 @@ getTag()`dynamic ${name}`;
 
 #[test]
 fn javascript_static_this_factory_tracks_new_instance_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/factory.js",
         br#"class Factory {
   static create() {
@@ -1283,7 +1283,7 @@ Factory.create();
 
 #[test]
 fn javascript_function_constructor_prototypes_resolve_instance_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/prototype.js",
         br#"function Legacy(value) { this.value = value; }
 Legacy.prototype.helper = function helper() { return this.value; };
@@ -1386,7 +1386,7 @@ unknown.prototype.run = function() {};
 
 #[test]
 fn typescript_source_compatible_object_arguments_keep_exact_call_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/calls.ts",
         br#"type SourceLine = { text: string };
 interface Options { enabled: boolean }
@@ -1414,7 +1414,7 @@ select(options);
 
 #[test]
 fn typescript_constrained_generic_calls_keep_exact_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generics.ts",
         br#"const arrayToEnum = <T extends string, U extends [T, ...T[]]>(items: U) => items[0];
 arrayToEnum(["one", "two"]);
@@ -1435,7 +1435,7 @@ arrayToEnum(["one", "two"]);
 
 #[test]
 fn typescript_constrained_generic_member_chains_resolve_exact_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic_members.ts",
         br#"interface Shape { name: string }
 class Box<T extends Shape> {
@@ -1459,7 +1459,7 @@ class Box<T extends Shape> {
 
 #[test]
 fn typescript_unconstrained_generic_member_chains_fail_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic_unconstrained.ts",
         br#"function read<T>(value: T) {
     return value.name;
@@ -1475,7 +1475,7 @@ fn typescript_unconstrained_generic_member_chains_fail_closed() {
 
 #[test]
 fn typescript_callable_property_members_accept_rest_calls() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/callable_property.ts",
         br#"class Mocker {
     pick = (...args: any[]): any => args[0];
@@ -1498,7 +1498,7 @@ fn typescript_callable_property_members_accept_rest_calls() {
 
 #[test]
 fn typescript_contextual_callback_member_types_resolve_exact_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/contextual_callback.ts",
         br#"interface Common { issues: string[] }
 type Callback = { run: (value: string, ctx: Common) => void };
@@ -1532,7 +1532,7 @@ use((value, ctx) => ctx.issues);
 
 #[test]
 fn typescript_literal_indexed_type_aliases_resolve_nominal_receivers() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/indexed-alias.ts",
         br#"interface Nested { run(): void }
 interface Item { nested: Nested; inspect(): void }
@@ -1566,7 +1566,7 @@ function dynamic<T>(value: Item, key: T) {
 
 #[test]
 fn typescript_indexed_type_alias_ambiguity_does_not_choose_a_union_member() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/indexed-ambiguous.ts",
         br#"interface First { run(): void }
 interface Second { run(): void }
@@ -1599,7 +1599,7 @@ function use(value: Maybe) {
 
 #[test]
 fn typescript_member_call_return_types_resolve_chained_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/member_return.ts",
         br#"class Maybe {
     optional() { return this; }
@@ -1637,7 +1637,7 @@ class Box {
 
 #[test]
 fn typescript_member_call_return_types_resolve_inherited_methods() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/member_return_inherited.ts",
         br#"class Base { optional() { return this; } }
 class Child extends Base {}
@@ -1662,7 +1662,7 @@ class Box {
 
 #[test]
 fn typescript_inherited_generic_member_types_resolve_exact_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/inherited_generic.ts",
         br#"interface Def { flag: boolean }
 class Base<T> { value!: T; }
@@ -1684,7 +1684,7 @@ class Child extends Base<Def> { read() { const value = this.value; return value.
 
 #[test]
 fn typescript_interface_extends_members_resolve_exact_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/interface-extends.ts",
         br#"type Callback = (issue: string) => string;
 interface BaseDef { errorMap?: Callback | undefined }
@@ -1709,7 +1709,7 @@ function read(def: ObjectDef) {
 
 #[test]
 fn typescript_generic_instantiated_member_chains_resolve_constraint_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-member-chain.ts",
         br#"class Schema { _parseAsync() {} }
 interface Definition<T extends Schema> { left: T }
@@ -1734,7 +1734,7 @@ class Intersection<T extends Schema> {
 
 #[test]
 fn typescript_callable_property_return_types_resolve_generic_member_chains() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/callable-property-return.ts",
         br#"class Schema { _parse() {} }
 interface Definition<T extends Schema> { getter: () => T }
@@ -1759,7 +1759,7 @@ class Lazy<T extends Schema> {
 
 #[test]
 fn typescript_static_callable_aliases_resolve_exact_property_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/static-callable-alias.ts",
         br#"function createSchema(value: string) { return value; }
 class SchemaFactory {
@@ -1787,7 +1787,7 @@ class SchemaFactory {
 
 #[test]
 fn typescript_variable_factory_aliases_preserve_declared_return_receivers() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/variable-factory-alias.ts",
         br#"class Schema {
     optional() {}
@@ -1812,7 +1812,7 @@ function run() { create().optional(); }
 
 #[test]
 fn typescript_type_assertion_receivers_preserve_exact_generic_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/type-assertion-receiver.ts",
         br#"class Schema { parseAsync() {} }
 interface Definition<T extends Schema> { value: T }
@@ -1837,7 +1837,7 @@ class Holder<T extends Schema> {
 
 #[test]
 fn typescript_destructured_inline_object_types_resolve_exact_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/featured.tsx",
         br#"type FeatureData = { name: string; link: string; lightImage: string; darkImage: string };
 function Featured(props: { data: FeatureData }) {
@@ -1868,7 +1868,7 @@ function Featured(props: { data: FeatureData }) {
 
 #[test]
 fn typescript_generic_member_call_returns_preserve_inherited_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-member-return.ts",
         br#"class Base<T> { optional() {} }
 class Nullable<T> extends Base<T> {}
@@ -1893,7 +1893,7 @@ class Schema<T> {
 
 #[test]
 fn typescript_nominal_parameter_annotations_resolve_exact_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/context.ts",
         br#"interface Common { issues: string[]; contextualErrorMap?: string }
 interface ParseContext { common: Common; path: string[]; data: unknown }
@@ -1945,7 +1945,7 @@ function report(ctx: ParseContext) {
 
 #[test]
 fn typescript_discriminated_union_guards_resolve_exact_branch_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/discriminated.ts",
         br#"type Success = { success: true; data: string };
 type Failure = { success: false; error: Error };
@@ -1971,7 +1971,7 @@ function read(result: Result) {
 
 #[test]
 fn typescript_in_guards_resolve_the_unique_union_member_owner() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/in-guard.ts",
         br#"type Ready = { run(): void };
 type Pending = { wait(): void };
@@ -2006,7 +2006,7 @@ function use(state: State) {
 
 #[test]
 fn typescript_string_discriminant_guards_resolve_exact_branch_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/string-discriminated.ts",
         br#"class ReadySchema { parse() {} }
 class OtherSchema { other() {} }
@@ -2039,7 +2039,7 @@ function read(state: State) {
 
 #[test]
 fn typescript_string_discriminant_guards_resolve_callable_union_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/callable-discriminated.ts",
         br#"type Transform = { kind: "transform"; transform: (value: string) => void };
 type Refinement = { kind: "refinement"; refinement: (value: string) => void };
@@ -2070,7 +2070,7 @@ function run(effect: Effect) {
 
 #[test]
 fn typescript_string_discriminant_guards_follow_nullable_member_values() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/nullable-callable-discriminated.ts",
         br#"type Transform = { kind: "transform"; transform: (value: string) => void };
 type Refinement = { kind: "refinement"; refinement: (value: string) => void };
@@ -2100,7 +2100,7 @@ class Holder {
 
 #[test]
 fn typescript_union_inline_object_parameters_resolve_optional_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/inline-union.ts",
         br#"class Schema {
     datetime(options?: string | { precision?: number | null; offset?: boolean }) {
@@ -2126,7 +2126,7 @@ fn typescript_union_inline_object_parameters_resolve_optional_members() {
 
 #[test]
 fn typescript_implements_arguments_match_source_declared_interfaces() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/implements-assignability.ts",
         br#"interface Input { value: string }
 class Lazy implements Input { value = "ok"; }
@@ -2150,7 +2150,7 @@ consumer.run(lazy);
 
 #[test]
 fn typescript_index_signature_values_resolve_nominal_member_calls() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/index-signature.ts",
         br#"class Schema { run() {} }
 interface Shape { [key: string]: Schema }
@@ -2174,7 +2174,7 @@ function use(shape: Shape, key: string) {
 
 #[test]
 fn typescript_flow_sensitive_reassignment_selects_latest_nominal_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/reassignment.ts",
         br#"class First { run() {} }
 class Second { run() {} }
@@ -2215,7 +2215,7 @@ current.run();
 
 #[test]
 fn typescript_flow_sensitive_branch_assignment_fails_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/branch-reassignment.ts",
         br#"class First { run() {} }
 class Second { run() {} }
@@ -2235,7 +2235,7 @@ current.run();
 
 #[test]
 fn typescript_flow_sensitive_unknown_assignment_blocks_stale_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/unknown-reassignment.ts",
         br#"class First { run() {} }
 let current = new First();
@@ -2252,7 +2252,7 @@ current.run();
 
 #[test]
 fn javascript_flow_sensitive_reassignment_selects_latest_nominal_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/reassignment.js",
         br#"class First { run() {} }
 class Second { run() {} }
@@ -2276,7 +2276,7 @@ current.run();
 
 #[test]
 fn javascript_flow_sensitive_var_reassignment_inside_function_selects_latest_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/var-reassignment.js",
         br#"class First { run() {} }
 class Second { run() {} }
@@ -2302,7 +2302,7 @@ function use() {
 
 #[test]
 fn typescript_flow_sensitive_reassignment_is_ordered_by_use_site() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/ordered-reassignment.ts",
         br#"class First { run() {} }
 class Second { run() {} }
@@ -2354,7 +2354,7 @@ current.run();
 
 #[test]
 fn typescript_flow_sensitive_compound_assignment_blocks_stale_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/compound-reassignment.ts",
         br#"class First { run() {} }
 let current = new First();
@@ -2371,7 +2371,7 @@ current.run();
 
 #[test]
 fn typescript_flow_sensitive_typed_call_assignment_uses_return_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/call-reassignment.ts",
         br#"class First { run() {} }
 class Second { run() {} }
@@ -2396,7 +2396,7 @@ current.run();
 
 #[test]
 fn typescript_flow_sensitive_local_alias_preserves_source_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/local-alias.ts",
         br#"class First { run() {} }
 let current = new First();
@@ -2484,7 +2484,7 @@ current.run();
         ),
     ];
     for (path, source) in cases {
-        let batch = candidate(path, source);
+        let batch = universal_evidence(path, source);
         assert!(
             !batch.candidates.iter().any(|candidate| {
                 candidate.relation == compass_languages::CandidateRelation::Calls
@@ -2498,7 +2498,7 @@ current.run();
 
 #[test]
 fn javascript_const_this_alias_survives_a_closure_capture() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/const-this-alias.js",
         br#"class CancelToken {
     constructor() {
@@ -2531,7 +2531,7 @@ new CancelToken();
 
 #[test]
 fn javascript_const_structural_alias_uses_property_scoped_mutation_barriers() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/const-structural-closure.js",
         br#"const config = {
     inspect() {}
@@ -2553,7 +2553,7 @@ later();
                 == Some(inspect.id.as_str())
     }));
 
-    let overwritten = candidate(
+    let overwritten = universal_evidence(
         "src/const-structural-overwrite.js",
         br#"const config = { inspect() {} };
 config.inspect = replacement;
@@ -2566,7 +2566,7 @@ config.inspect();
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 
-    let spread = candidate(
+    let spread = universal_evidence(
         "src/const-structural-spread.js",
         br#"const base = { inspect() {} };
 const config = { ...base };
@@ -2580,7 +2580,7 @@ later();
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 
-    let proven_spread = candidate(
+    let proven_spread = universal_evidence(
         "src/const-structural-proven-spread.js",
         br#"const base = { inspect() {} };
 const config = { ...base };
@@ -2601,7 +2601,7 @@ config.inspect();
                 == Some(base_inspect.id.as_str())
     }));
 
-    let overridden = candidate(
+    let overridden = universal_evidence(
         "src/const-structural-spread-order.js",
         br#"const base = { inspect() {} };
 const config = { inspect() { return 'local'; }, ...base };
@@ -2635,7 +2635,7 @@ config.inspect();
                 == Some(config_target.id.as_str())
     }));
 
-    let unknown = candidate(
+    let unknown = universal_evidence(
         "src/const-structural-unknown-spread.js",
         br#"const base = getBase();
 const config = { ...base };
@@ -2648,7 +2648,7 @@ config.inspect();
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 
-    let ambiguous = candidate(
+    let ambiguous = universal_evidence(
         "src/const-structural-ambiguous-spread.js",
         br#"const base = { inspect() {}, inspect(value) {} };
 const config = { ...base };
@@ -2661,7 +2661,7 @@ config.inspect();
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 
-    let inline = candidate(
+    let inline = universal_evidence(
         "src/inline-structural-closure.js",
         br#"const key = Symbol('state');
 class Service {
@@ -2692,7 +2692,7 @@ new Service();
                 == Some(inline_inspect.id.as_str())
     }));
 
-    let inline_overwritten = candidate(
+    let inline_overwritten = universal_evidence(
         "src/inline-structural-overwrite.js",
         br#"const key = Symbol('state');
 class Service {
@@ -2711,7 +2711,7 @@ new Service();
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 
-    let separate = candidate(
+    let separate = universal_evidence(
         "src/inline-structural-separate.js",
         br#"const firstKey = Symbol('first');
 const secondKey = Symbol('second');
@@ -2760,7 +2760,7 @@ new Service();
             == Some(second_inspect.id.as_str())
     }));
 
-    let chained = candidate(
+    let chained = universal_evidence(
         "src/inline-structural-chained.js",
         br#"const key = Symbol('state');
 class Service {
@@ -2791,7 +2791,7 @@ new Service();
                 == Some(chained_inspect.id.as_str())
     }));
 
-    let chained_compound = candidate(
+    let chained_compound = universal_evidence(
         "src/inline-structural-chained-compound.js",
         br#"const key = Symbol('state');
 class Service {
@@ -2821,7 +2821,7 @@ fn javascript_nominal_member_writes_keep_exact_source_targets() {
 const service = new Service();
 service.kind = 'updated';
 "#;
-    let batch = candidate("src/nominal-member-write.js", source);
+    let batch = universal_evidence("src/nominal-member-write.js", source);
     let write_start = source
         .windows(b"service.kind".len())
         .rposition(|window| window == b"service.kind")
@@ -2856,7 +2856,7 @@ service.kind = 'updated';
 const service = new Service();
 service.kind += 1;
 "#;
-    let compound = candidate("src/nominal-member-compound.js", compound_source);
+    let compound = universal_evidence("src/nominal-member-compound.js", compound_source);
     let compound_start = compound_source
         .windows(b"service.kind".len())
         .rposition(|window| window == b"service.kind")
@@ -2890,7 +2890,7 @@ service.kind += 1;
 }
 Service.from();
 "#;
-    let static_batch = candidate("src/nominal-static-write.js", static_source);
+    let static_batch = universal_evidence("src/nominal-static-write.js", static_source);
     let static_start = static_source
         .windows(b"service.kind".len())
         .rposition(|window| window == b"service.kind")
@@ -2924,7 +2924,7 @@ const service = new Service();
 consume(service);
 service.kind;
 "#;
-    let escaped = candidate("src/nominal-escape-read.js", escaped_source);
+    let escaped = universal_evidence("src/nominal-escape-read.js", escaped_source);
     let escaped_start = escaped_source
         .windows(b"service.kind".len())
         .rposition(|window| window == b"service.kind")
@@ -2958,7 +2958,7 @@ const service = new Service();
 consume(service);
 service.nested.kind = 'unknown';
 "#;
-    let nested = candidate("src/nominal-nested-escape-write.js", nested_source);
+    let nested = universal_evidence("src/nominal-nested-escape-write.js", nested_source);
     let nested_start = nested_source
         .windows(b"service.nested.kind".len())
         .rposition(|window| window == b"service.nested.kind")
@@ -2983,7 +2983,7 @@ service.nested.kind = 'unknown';
 
 #[test]
 fn typescript_homomorphic_mapped_alias_preserves_nominal_member_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/mapped-alias.ts",
         br#"interface Item { inspect(): void }
 type Copy = { [K in keyof Item]: Item[K] };
@@ -3010,7 +3010,7 @@ function use(value: Copy) { value.inspect(); }
 
 #[test]
 fn typescript_generic_homomorphic_mapped_alias_substitutes_nominal_target() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-mapped-alias.ts",
         br#"interface Item { inspect(): void }
 type Copy<T> = { [K in keyof T]: T[K] };
@@ -3037,7 +3037,7 @@ function use(value: Copy<Item>) { value.inspect(); }
 
 #[test]
 fn typescript_generic_literal_indexed_alias_substitutes_nominal_target() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-indexed-alias.ts",
         br#"interface Nested { run(): void }
 interface Item { nested: Nested }
@@ -3059,7 +3059,7 @@ function use(value: NestedOf<Item>) { value.run(); }
 
 #[test]
 fn typescript_keyof_identity_projection_preserves_nominal_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/keyof-identity.ts",
         br#"interface Item { inspect(): void }
 type Copy<T> = Pick<T, keyof T>;
@@ -3093,7 +3093,7 @@ function rejected(value: Empty<Item>) { value.inspect(); }
 
 #[test]
 fn typescript_keyof_projection_with_competing_base_fails_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/keyof-ambiguous.ts",
         br#"interface First { inspect(): void }
 interface Second { inspect(): void }
@@ -3111,7 +3111,7 @@ function use(value: Picked) { value.inspect(); }
 
 #[test]
 fn typescript_non_homomorphic_mapped_alias_fails_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/non-homomorphic-mapped-alias.ts",
         br#"interface Item { inspect(): void }
 type Getters<T> = { [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K] };
@@ -3132,7 +3132,7 @@ function use(value: Getters<Item>) { value.inspect(); }
 
 #[test]
 fn typescript_nested_mapped_member_does_not_promote_outer_alias() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/nested-mapped-alias.ts",
         br#"interface Item { inspect(): void }
 type Nested = { nested: { [K in keyof Item]: Item[K] } };
@@ -3148,7 +3148,7 @@ function use(value: Nested) { value.inspect(); }
 
 #[test]
 fn typescript_array_index_receiver_preserves_nominal_element_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/array-index.ts",
         br#"interface Item { inspect(): void }
 function use(values: Item[]) { values[0].inspect(); }
@@ -3169,7 +3169,7 @@ function use(values: Item[]) { values[0].inspect(); }
 
 #[test]
 fn typescript_tuple_index_receiver_preserves_nominal_element_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/tuple-index.ts",
         br#"interface Item { inspect(): void }
 type Pair = [Item, string];
@@ -3191,7 +3191,7 @@ function use(pair: Pair) { pair[0].inspect(); }
 
 #[test]
 fn typescript_generic_array_member_chain_substitutes_element_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-array-index.ts",
         br#"interface Item { inspect(): void }
 interface Box<T> { values: T[] }
@@ -3213,7 +3213,7 @@ function use(box: Box<Item>) { box.values[0].inspect(); }
 
 #[test]
 fn typescript_standard_array_container_preserves_nominal_element_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/readonly-array-index.ts",
         br#"interface Item { inspect(): void }
 function use(values: ReadonlyArray<Item>) { values[0].inspect(); }
@@ -3234,7 +3234,7 @@ function use(values: ReadonlyArray<Item>) { values[0].inspect(); }
 
 #[test]
 fn typescript_dynamic_tuple_index_fails_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/dynamic-tuple-index.ts",
         br#"interface Item { inspect(): void }
 function use(pair: [Item, string], index: number) { pair[index].inspect(); }
@@ -3249,7 +3249,7 @@ function use(pair: [Item, string], index: number) { pair[index].inspect(); }
 
 #[test]
 fn typescript_generic_tuple_member_chain_substitutes_element_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-tuple-index.ts",
         br#"interface Item { inspect(): void }
 interface Box<T> { pair: [T, string] }
@@ -3271,7 +3271,7 @@ function use(box: Box<Item>) { box.pair[0].inspect(); }
 
 #[test]
 fn typescript_generic_function_return_substitutes_nominal_argument() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-return.ts",
         br#"class Item { inspect(): void {} }
 function identity<T>(value: T): T { return value; }
@@ -3304,7 +3304,7 @@ function use() {
 
 #[test]
 fn typescript_imported_callable_return_publishes_bounded_marker() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/imported-call.ts",
         br#"import { make } from "./factory";
 class Item { inspect(): void {} }
@@ -3350,7 +3350,7 @@ function use(value: Item) { make(value).inspect(); }
 
 #[test]
 fn typescript_imported_callable_return_preserves_explicit_generic_marker() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/imported-explicit-call.ts",
         br#"import { identity } from "./factory";
 class Item { inspect(): void {} }
@@ -3375,7 +3375,7 @@ function use(value: Item) { identity<Item>(value).inspect(); }
 
 #[test]
 fn typescript_imported_callable_properties_publish_bounded_markers() {
-    let api_batch = candidate(
+    let api_batch = universal_evidence(
         "src/api.ts",
         br#"import type { Item } from "./item";
 interface TypedApi { make: (value: Item) => Item }
@@ -3398,7 +3398,7 @@ export const api = {
         .find(|declaration| declaration.qualified_name.ends_with(".typed"))
         .expect("typed object declaration");
     assert_eq!(typed.signature.as_deref(), Some("|type:TypedApi"));
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/imported-properties.ts",
         br#"import { api, typed } from "./api";
 import type { Item } from "./item";
@@ -3436,7 +3436,7 @@ export function use(value: Item) {
 
 #[test]
 fn typescript_generic_function_array_return_preserves_element_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-return-array.ts",
         br#"class Item { inspect(): void {} }
 function collect<T>(value: T): T[] { return [value]; }
@@ -3458,7 +3458,7 @@ function use() { collect(new Item())[0].inspect(); }
 
 #[test]
 fn typescript_generic_function_nominal_container_return_preserves_member_receiver() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-return-container.ts",
         br#"class Item { inspect(): void {} }
 interface Box<T> { value: T }
@@ -3481,7 +3481,7 @@ function use() { box(new Item()).value.inspect(); }
 
 #[test]
 fn typescript_generic_function_return_fails_closed_without_inference() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-return-unknown.ts",
         br#"declare function identity<T>(): T;
 function use() { identity().inspect(); }
@@ -3496,7 +3496,7 @@ function use() { identity().inspect(); }
 
 #[test]
 fn typescript_generic_function_return_fails_closed_on_conflicting_inference() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-return-conflict.ts",
         br#"class Item { inspect(): void {} }
 class Other {}
@@ -3513,7 +3513,7 @@ function use() { choose(new Item(), new Other()).inspect(); }
 
 #[test]
 fn typescript_non_nullable_receiver_preserves_nominal_member_target() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/non-nullable-receiver.ts",
         br#"class Item { inspect(): void {} }
 function use(value: NonNullable<Item | undefined>) { value.inspect(); }
@@ -3534,7 +3534,7 @@ function use(value: NonNullable<Item | undefined>) { value.inspect(); }
 
 #[test]
 fn typescript_awaited_and_readonly_receivers_preserve_nominal_member_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/utility-receivers.ts",
         br#"class Item { inspect(): void {} }
 function useAwaited(value: Awaited<Promise<Item>>) { value.inspect(); }
@@ -3562,7 +3562,7 @@ function useReadonly(value: Readonly<Item>) { value.inspect(); }
 
 #[test]
 fn typescript_pick_and_omit_receivers_project_exact_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/pick-omit-receivers.ts",
         br#"interface Options { enabled(): void; debug(): void }
 function use(picked: Pick<Options, "enabled">, omitted: Omit<Options, "debug">) {
@@ -3610,7 +3610,7 @@ function use(picked: Pick<Options, "enabled">, omitted: Omit<Options, "debug">) 
             .all(|candidate| candidate.constraints.exact_target_declaration_id.is_none())
     );
 
-    let unknown = candidate(
+    let unknown = universal_evidence(
         "src/pick-unknown-key.ts",
         br#"interface Options { enabled(): void }
 type Key = string;
@@ -3626,7 +3626,7 @@ function use(value: Pick<Options, Key>) { value.enabled(); }
 
 #[test]
 fn typescript_exclude_and_extract_narrow_nominal_union_receivers() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/exclude-extract-receivers.ts",
         br#"class Item { inspect(): void {} }
 class Other { other(): void {} }
@@ -3667,7 +3667,7 @@ function ambiguous(value: Exclude<Item | Other, undefined>) { value.inspect(); }
 
 #[test]
 fn typescript_conditional_receivers_select_unique_nominal_branch() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/conditional-receivers.ts",
         br#"class Item { inspect(): void {} }
 class Other { other(): void {} }
@@ -3714,7 +3714,7 @@ function object(value: ChooseObject<Item>) { value.inspect(); }
 
 #[test]
 fn typescript_mapped_modifier_aliases_preserve_nominal_member_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/mapped-modifiers.ts",
         br#"class Item { inspect(): void {} }
 type MutableRequired<T> = { -readonly [K in keyof T]-?: T[K] };
@@ -3745,7 +3745,7 @@ function use(mutable: MutableRequired<Item>, readonlyValue: ReadonlyOptional<Ite
 
 #[test]
 fn typescript_non_nullable_multi_nominal_union_fails_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/non-nullable-ambiguous.ts",
         br#"class First { inspect(): void {} }
 class Second { inspect(): void {} }
@@ -3771,7 +3771,7 @@ function use(value: NonNullable<First | Second | undefined>) { value.inspect(); 
 
 #[test]
 fn typescript_generic_index_signature_values_resolve_member_calls() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/generic-index-signature.ts",
         br#"class Schema { optional() {} }
 type Shape = { [key: string]: Schema };
@@ -3799,7 +3799,7 @@ class ObjectHolder<T extends Shape> {
 
 #[test]
 fn typescript_callable_member_aliases_resolve_property_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/callable-alias.ts",
         br#"class Service {
     run(value: string) {}
@@ -3823,7 +3823,7 @@ fn typescript_callable_member_aliases_resolve_property_targets() {
 
 #[test]
 fn typescript_optional_callable_union_properties_resolve_exact_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/optional-callable.ts",
         br#"type Callback = (value: string) => string;
 interface Hooks { callback?: Callback | undefined }
@@ -3846,8 +3846,8 @@ function use(hooks: Hooks) {
 }
 
 #[test]
-fn candidate_preserves_named_and_anonymous_default_exports() {
-    let anonymous = candidate(
+fn universal_evidence_preserves_named_and_anonymous_default_exports() {
+    let anonymous = universal_evidence(
         "src/default.ts",
         b"export default function() { return 1; }\n",
     );
@@ -3861,17 +3861,17 @@ fn candidate_preserves_named_and_anonymous_default_exports() {
         binding.spelling == "default" && binding.kind == compass_languages::BindingKind::Reexport
     }));
 
-    let named = candidate("src/named.ts", b"function run() {}\nexport default run;\n");
+    let named = universal_evidence("src/named.ts", b"function run() {}\nexport default run;\n");
     assert!(named.bindings.iter().any(|binding| {
         binding.spelling == "default" && binding.kind == compass_languages::BindingKind::Reexport
     }));
 }
 
 #[test]
-fn candidate_evidence_is_deterministic_and_parser_recovery_is_diagnosed() {
+fn universal_evidence_is_deterministic_and_parser_recovery_is_diagnosed() {
     let source = b"export function broken( { return 1;\n";
-    let first = candidate("src/broken.ts", source);
-    let second = candidate("src/broken.ts", source);
+    let first = universal_evidence("src/broken.ts", source);
+    let second = universal_evidence("src/broken.ts", source);
     assert_eq!(first, second);
     assert!(
         first
@@ -3886,7 +3886,7 @@ fn candidate_evidence_is_deterministic_and_parser_recovery_is_diagnosed() {
 }
 
 #[test]
-fn candidate_resolves_only_proven_nominal_receivers_and_exact_members() {
+fn universal_evidence_resolves_only_proven_nominal_receivers_and_exact_members() {
     let source = br#"class Widget {
     field = 1;
     run() { this.field; }
@@ -3902,7 +3902,7 @@ object[key];
 function run() {}
 unknown.run();
 "#;
-    let batch = candidate("src/widget.ts", source);
+    let batch = universal_evidence("src/widget.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
 
     let run = batch
@@ -3953,7 +3953,7 @@ unknown.run();
             && candidate.target_spelling == "key"
     }));
 
-    let imported = candidate(
+    let imported = universal_evidence(
         "src/imported.ts",
         b"import * as api from \"./api\";\napi.run();\n",
     );
@@ -3971,7 +3971,7 @@ unknown.run();
     );
     assert!(imported_call.binding_id.is_some());
 
-    let overloads = candidate(
+    let overloads = universal_evidence(
         "src/overloads.ts",
         b"function run() {}\nfunction run(value: string) {}\nrun();\nrun(\"x\");\n",
     );
@@ -3993,7 +3993,7 @@ unknown.run();
             && candidate.constraints.exact_target_declaration_id.is_some()
     }));
 
-    let typed_overloads = candidate(
+    let typed_overloads = universal_evidence(
         "src/typed-overloads.ts",
         b"function parse(value: string) {}\nfunction parse(value: number) {}\nparse(\"text\");\nparse(42);\n",
     );
@@ -4030,7 +4030,7 @@ unknown.run();
         number_parse.constraints.exact_target_declaration_id
     );
 
-    let constructed = candidate(
+    let constructed = universal_evidence(
         "src/constructed.ts",
         b"class Constructed { constructor(value: string) {} }\nnew Constructed(\"ok\");\n",
     );
@@ -4044,7 +4044,7 @@ unknown.run();
             && candidate.constraints.argument_types == [Some("string".to_owned())]
     }));
 
-    let hierarchy = candidate(
+    let hierarchy = universal_evidence(
         "src/hierarchy.ts",
         b"class Base { run() {} }\nclass Child extends Base { call() { super.run(); } }\n",
     );
@@ -4060,7 +4060,7 @@ unknown.run();
                 == Some(base_run.id.as_str())
     }));
 
-    let imported_hierarchy = candidate(
+    let imported_hierarchy = universal_evidence(
         "src/imported-hierarchy.ts",
         b"import * as bases from \"./bases\";\nclass Child extends bases.Base { call() { super.run(); } }\n",
     );
@@ -4089,7 +4089,7 @@ unknown.run();
         Some("./bases::Base.run")
     );
 
-    let inherited_constructor = candidate(
+    let inherited_constructor = universal_evidence(
         "src/inherited-constructor.ts",
         b"class Base { constructor(value: string, count: number) {} }\nclass Child extends Base {}\nnew Child(\"ok\", 1);\nnew Child();\n",
     );
@@ -4111,7 +4111,7 @@ unknown.run();
             && candidate.constraints.exact_target_declaration_id.is_none()
     }));
 
-    let arity_negative = candidate(
+    let arity_negative = universal_evidence(
         "src/arity.ts",
         b"function exact(value: string) {}\nexact();\nexact(\"ok\");\nfunction optional(value?: string) {}\noptional(\"ok\");\n",
     );
@@ -4142,7 +4142,7 @@ unknown.run();
             && candidate.constraints.argument_count == Some(1)
     }));
 
-    let private = candidate(
+    let private = universal_evidence(
         "src/private.ts",
         b"class Secret { #run() {} call() { this.#run(); } }\nnew Secret().call();\n",
     );
@@ -4160,7 +4160,7 @@ unknown.run();
 }
 
 #[test]
-fn javascript_candidate_infers_object_literal_members_and_lexical_calls() {
+fn universal_evidence_infers_object_literal_members_and_lexical_calls() {
     let source = br#"const config = {
     legacyAgreements: { Stytch: "gold" },
     sponsorsToIgnore: ["axios"],
@@ -4175,7 +4175,7 @@ config.legacyAgreements;
 config.sponsorsToIgnore;
 frozen.active;
 "#;
-    let batch = candidate("src/server.js", source);
+    let batch = universal_evidence("src/server.js", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
 
     let agreements = batch
@@ -4235,7 +4235,7 @@ frozen.active;
 
 #[test]
 fn javascript_flow_assignment_object_literal_selects_exact_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/object-reassignment.js",
         br#"function read(flag) {
     let auth = undefined;
@@ -4256,7 +4256,7 @@ fn javascript_flow_assignment_object_literal_selects_exact_members() {
                 == Some(username.id.as_str())
     }));
 
-    let spread = candidate(
+    let spread = universal_evidence(
         "src/object-spread-reassignment.js",
         br#"const base = { username: 'user' };
 let auth;
@@ -4281,7 +4281,7 @@ auth.username;
 
 #[test]
 fn javascript_flow_assignment_object_literal_branch_fails_closed() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/object-branch-reassignment.js",
         br#"function read(flag) {
     let auth = undefined;
@@ -4301,7 +4301,7 @@ fn javascript_flow_assignment_object_literal_branch_fails_closed() {
 
 #[test]
 fn javascript_object_literal_methods_resolve_this_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/object-this.js",
         br#"const api = {
     write() {},
@@ -4322,7 +4322,7 @@ api.remove();
                 == Some(write.id.as_str())
     }));
 
-    let spread = candidate(
+    let spread = universal_evidence(
         "src/object-this-spread.js",
         br#"const base = { write() {} };
 const api = {
@@ -4341,7 +4341,7 @@ api.remove();
 
 #[test]
 fn javascript_object_flow_member_reads_and_literal_writes_resolve_exact_targets() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/object-flow.js",
         br#"const response = { request: requestValue, data: null };
 const later = () => {
@@ -4396,7 +4396,7 @@ new Stream();
         2
     );
 
-    let nested = candidate(
+    let nested = universal_evidence(
         "src/object-flow-nested.js",
         br#"function register(transport, data) {
     transport.request({}, function handleResponse(res) {
@@ -4436,7 +4436,7 @@ new Stream();
                 == Some(nested_request.id.as_str())
     }));
 
-    let escaped = candidate(
+    let escaped = universal_evidence(
         "src/object-flow-escape.js",
         br#"const response = { request: requestValue };
 consume(response);
@@ -4455,7 +4455,7 @@ response.request;
                 == Some(escaped_request.id.as_str())
     }));
 
-    let nested_escape = candidate(
+    let nested_escape = universal_evidence(
         "src/object-flow-nested-escape.js",
         br#"const response = { request: requestValue };
 const later = () => consume(response);
@@ -4480,7 +4480,7 @@ response.request;
 
 #[test]
 fn javascript_stable_object_property_assignments_resolve_exact_members() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/stable-object-assignment.js",
         br#"const validators = {};
 validators.transitional = function transitional() {};
@@ -4520,8 +4520,8 @@ validators.spelling('value');
 }
 
 #[test]
-fn candidate_emits_curated_external_builtin_evidence_and_respects_shadowing() {
-    let batch = candidate(
+fn universal_evidence_emits_curated_external_builtin_evidence_and_respects_shadowing() {
+    let batch = universal_evidence(
         "src/builtins.ts",
         br#"Array.from(items);
 console.log("ready");
@@ -4578,7 +4578,7 @@ Error("broken");
         "Error",
         "global::Error"
     ));
-    let invalid_instance_member = candidate(
+    let invalid_instance_member = universal_evidence(
         "src/invalid-builtin-member.ts",
         b"new ArrayBuffer().add(1);\nnew WeakMap().values();\n",
     );
@@ -4587,7 +4587,7 @@ Error("broken");
             && (candidate.target_spelling == "add" || candidate.target_spelling == "values")
     }));
 
-    let shadowed = candidate(
+    let shadowed = universal_evidence(
         "src/shadowed-builtins.ts",
         b"const Array = { from() {} };\nArray.from(items);\n",
     );
@@ -4597,8 +4597,8 @@ Error("broken");
 }
 
 #[test]
-fn candidate_declares_for_of_bindings_with_exact_source_anchors() {
-    let batch = candidate(
+fn universal_evidence_declares_for_of_bindings_with_exact_source_anchors() {
+    let batch = universal_evidence(
         "src/loops.ts",
         b"for (const _ of DATA) consume(_);\nfor (const { id } of rows) consume(id);\n",
     );
@@ -4620,7 +4620,7 @@ fn candidate_declares_for_of_bindings_with_exact_source_anchors() {
                 == b"for (const _ of DATA) consume(_);\nfor (const { ".len() as u64
     }));
 
-    let callbacks = candidate(
+    let callbacks = universal_evidence(
         "src/callbacks.js",
         b"rows.find((activeSponsor) => activeSponsor.slug === target);\n",
     );
@@ -4628,7 +4628,7 @@ fn candidate_declares_for_of_bindings_with_exact_source_anchors() {
         declaration.kind == "parameter" && declaration.name == "activeSponsor"
     }));
 
-    let unparenthesized = candidate(
+    let unparenthesized = universal_evidence(
         "src/unparenthesized.js",
         b"rows.find(activeSponsor => activeSponsor.slug === target);\n",
     );
@@ -4636,7 +4636,7 @@ fn candidate_declares_for_of_bindings_with_exact_source_anchors() {
         declaration.kind == "parameter" && declaration.name == "activeSponsor"
     }));
 
-    let caught = candidate(
+    let caught = universal_evidence(
         "src/catch.js",
         b"try { run(); } catch (error) { log(error); }\n",
     );
@@ -4664,7 +4664,7 @@ consume(nonCallable);
 const maybe = Math.random() ? onValue : nonCallable;
 consume(maybe);
 "#;
-    let batch = candidate("src/callback-values.js", source);
+    let batch = universal_evidence("src/callback-values.js", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("callback value evidence");
 
     let on_value = batch
@@ -4708,8 +4708,8 @@ consume(maybe);
 }
 
 #[test]
-fn candidate_resolves_qualified_and_builtin_type_references_without_fallback_guesses() {
-    let batch = candidate(
+fn universal_evidence_resolves_qualified_and_builtin_type_references_without_fallback_guesses() {
+    let batch = universal_evidence(
         "src/types.ts",
         br#"import * as Benchmark from "benchmark";
 type Event = Benchmark.Event;
@@ -4802,7 +4802,7 @@ const typed: (_params?: string) => void = (_value) => {};
         })
     );
 
-    let shadowed = candidate(
+    let shadowed = universal_evidence(
         "src/shadowed-type.ts",
         b"type Promise = { then(): void };\ntype Local = Promise;\n",
     );
@@ -4820,8 +4820,8 @@ const typed: (_params?: string) => void = (_value) => {};
 }
 
 #[test]
-fn candidate_preserves_dynamic_calls_and_proven_super_and_type_member_evidence() {
-    let batch = candidate(
+fn universal_evidence_preserves_dynamic_calls_and_proven_super_and_type_member_evidence() {
+    let batch = universal_evidence(
         "src/advanced.ts",
         br#"import * as schemas from "./schemas";
 interface Coerced extends schemas._ZodString {}
@@ -4891,8 +4891,8 @@ const dynamicConstructor = new (factory || Base)();
 }
 
 #[test]
-fn javascript_candidate_keeps_block_bindings_distinct_and_hoists_var() {
-    let batch = candidate(
+fn universal_evidence_keeps_block_bindings_distinct_and_hoists_var() {
+    let batch = universal_evidence(
         "src/blocks.js",
         br#"function run(flag) {
   if (flag) {
@@ -4932,7 +4932,7 @@ fn javascript_candidate_keeps_block_bindings_distinct_and_hoists_var() {
 
 #[test]
 fn object_literal_properties_do_not_shadow_unqualified_calls() {
-    let batch = candidate(
+    let batch = universal_evidence(
         "src/object-shadow.js",
         br#"const object = { run: () => 1 };
 run();
@@ -4945,7 +4945,7 @@ run();
 }
 
 #[test]
-fn candidate_tracks_type_alias_enum_and_string_named_members() {
+fn universal_evidence_tracks_type_alias_enum_and_string_named_members() {
     let source = br#"type Config = { name: string };
 function makeConfig(): Config { return { name: "ready" }; }
 const config = makeConfig();
@@ -4961,7 +4961,7 @@ class Box {
 
 new Box().read();
 "#;
-    let batch = candidate("src/typed-members.ts", source);
+    let batch = universal_evidence("src/typed-members.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("typed member evidence");
 
     let config_name = batch
@@ -5005,8 +5005,8 @@ new Box().read();
 }
 
 #[test]
-fn typescript_candidate_preserves_imported_type_receiver_for_member_evidence() {
-    let batch = candidate(
+fn universal_evidence_preserves_imported_type_receiver_for_member_evidence() {
+    let batch = universal_evidence(
         "src/consumer.ts",
         br#"import type { Config } from "./types";
 export function use(config: Config) { config.inspect(); }
