@@ -504,6 +504,34 @@ pub(super) const SPRING_KOTLIN_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPa
     },
 };
 
+pub(super) const RAILS_RUBY_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "rails-ruby",
+    kind: FrameworkPackKind::Source,
+    languages: &["ruby"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Traits,
+        LanguageCapability::Calls,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["rails"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["rails-routes-draw"],
+    accepted_roles: &[SemanticRole::Call, SemanticRole::Ownership],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 20,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+    },
+};
+
 pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "aspnet-csharp",
     kind: FrameworkPackKind::Source,
@@ -578,4 +606,5 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     PHP_FRAMEWORKS_DESCRIPTOR,
     SPRING_JAVA_DESCRIPTOR,
     SPRING_KOTLIN_DESCRIPTOR,
+    RAILS_RUBY_DESCRIPTOR,
 ];

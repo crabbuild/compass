@@ -12,6 +12,7 @@ pub(in crate::evidence) enum LanguagePolicyKind {
     Java,
     Kotlin,
     Php,
+    Ruby,
     Rust,
     Generic,
 }
@@ -24,6 +25,7 @@ impl LanguagePolicyKind {
             "java" => Self::Java,
             "kotlin" => Self::Kotlin,
             "php" => Self::Php,
+            "ruby" => Self::Ruby,
             "rust" => Self::Rust,
             _ => Self::Generic,
         }
@@ -58,7 +60,7 @@ impl LanguagePolicyKind {
             }
             Self::Java => db.resolve_java_same_package_builtin_collision(candidate),
             Self::Kotlin => db.resolve_kotlin_candidate(candidate),
-            Self::Generic => None,
+            Self::Ruby | Self::Generic => None,
         }
     }
 
@@ -73,6 +75,7 @@ impl LanguagePolicyKind {
             Self::CSharp
             | Self::Kotlin
             | Self::Php
+            | Self::Ruby
             | Self::TypeScript
             | Self::Rust
             | Self::Generic => None,
@@ -109,6 +112,10 @@ mod tests {
         assert_eq!(
             LanguagePolicyKind::for_language("php"),
             LanguagePolicyKind::Php
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("ruby"),
+            LanguagePolicyKind::Ruby
         );
         assert_eq!(
             LanguagePolicyKind::for_language("future-language"),

@@ -90,6 +90,10 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
         id: "spring-kotlin",
         expand: spring::expand_kotlin,
     },
+    UniversalFrameworkPack {
+        id: "rails-ruby",
+        expand: ruby::expand,
+    },
 ];
 
 pub use domain::{
@@ -217,7 +221,7 @@ fn universal_framework_targets_are_materialized(
     let Some(batch) = extraction.semantic_evidence.as_ref().filter(|batch| {
         matches!(
             batch.adapter.language.as_str(),
-            "csharp" | "javascript" | "php" | "typescript"
+            "csharp" | "javascript" | "php" | "ruby" | "typescript"
         )
     }) else {
         return true;
@@ -258,7 +262,7 @@ pub(super) fn materialize_universal_framework_targets(
     let Some(batches) = extraction.semantic_evidence.as_ref().filter(|batch| {
         matches!(
             batch.adapter.language.as_str(),
-            "csharp" | "javascript" | "php" | "typescript"
+            "csharp" | "javascript" | "php" | "ruby" | "typescript"
         )
     }) else {
         return extraction.clone();

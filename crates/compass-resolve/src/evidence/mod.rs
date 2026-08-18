@@ -277,6 +277,33 @@ impl ResolutionDb<'_> {
             .take(self.budget.candidates_per_lookup().saturating_add(1))
             .copied()
             .collect::<Vec<_>>();
+        if candidate.language == "ruby"
+            && eligible.len() > 1
+            && eligible.iter().all(|slot| {
+                self.declaration(*slot).is_some_and(|declaration| {
+                    matches!(declaration.kind.as_str(), "class" | "trait")
+                })
+            })
+        {
+            let graph_ids = eligible
+                .iter()
+                .filter_map(|slot| {
+                    self.declaration(*slot)
+                        .map(|declaration| &declaration.graph_node_id)
+                })
+                .collect::<BTreeSet<_>>();
+            if graph_ids.len() == 1 {
+                return self.declaration_id(eligible[0]).map(|declaration_id| {
+                    ResolutionDecision::Resolved {
+                        declaration_id: declaration_id.to_owned(),
+                        evidence: ResolutionEvidence {
+                            rule,
+                            candidate_count: 1,
+                        },
+                    }
+                });
+            }
+        }
         if candidate.language == "rust"
             && matches!(
                 candidate.relation,
@@ -436,10 +463,14 @@ fn wildcard_qualified_names(
     vec![parts.join(separator)]
 }
 
-fn split_qualified_member(qualified: &str) -> Option<(&str, &str)> {
-    qualified
-        .rsplit_once("::")
-        .or_else(|| qualified.rsplit_once('.'))
+fn split_qualified_member<'a>(language: &str, qualified: &'a str) -> Option<(&'a str, &'a str)> {
+    if language == "ruby" {
+        languages::ruby::split_method_space(qualified)
+    } else {
+        qualified
+            .rsplit_once("::")
+            .or_else(|| qualified.rsplit_once('.'))
+    }
 }
 
 fn qualified_root(qualified: &str) -> &str {

@@ -3,6 +3,7 @@ mod csharp;
 mod kotlin;
 mod model;
 mod php;
+mod ruby;
 mod typescript;
 mod validate;
 

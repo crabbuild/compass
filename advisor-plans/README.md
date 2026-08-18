@@ -31,6 +31,18 @@ Plan 014 ships a typed pull-request risk review report and a reusable GitHub
 Action. It consumes immutable history and semantic diff evidence while keeping
 advisory risk separate from deterministic merge gates.
 
+Plans 015–018 are self-contained notebook, PHP framework, execution-flow, and
+MCP workflow programs planned at Compass commit `6680842c` on 2026-08-10.
+
+Plan 019 is the Ruby universal-candidate program. It was planned at Compass
+commit `b53c3ea2` on 2026-08-16. It freezes established Ruby evidence, builds an
+independent Ripper oracle and qualification-only adapter, adds conservative
+Ruby project/resolution semantics, converts Rails to a universal framework
+pack, performs one atomic hard cut, and then measures optimization and complete
+quality gates. The pinned three-corpus audit now passes (89,981 accepted
+relationships, 100% observed precision, 98.5567% recall); Ruby remains
+`UniversalCandidate` until a separate promotion decision.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -49,6 +61,11 @@ advisory risk separate from deterministic merge gates.
 | 012 | Qualify document graphs across formats, limits, and determinism | P1 | M | 009, 010, 011 | TODO |
 | 013 | Make TypeScript and JavaScript code graphs best in class | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 | 014 | Ship typed pull-request risk review and a reusable GitHub Action | P1 | L | Immutable history and semantic diff; coordinate with Compass Guard | DONE |
+| 015 | Add bounded Jupyter and Databricks notebook extraction | P1 | L | — | TODO |
+| 016 | Complete Composer, Blade, and Eloquent framework resolution | P1 | L | — | TODO |
+| 017 | Derive bounded, ranked execution flows from entry points | P2 | L | Existing universal call graph | TODO |
+| 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
+| 019 | Hard-cut Ruby to a qualified universal candidate | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -81,6 +98,14 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 - Plan 014 consumes immutable history and semantic diff evidence, preserves the
   boundary between advisory risk and deterministic gates, and ships the
   reusable GitHub review Action.
+- Plans 015 and 016 are independent language/framework enrichments. Plan 017
+  can consume their facts later but does not depend on them. Plan 018 is an
+  independent MCP/DX addition.
+- Plan 019 is deliberately staged: established behavior and independent truth
+  are frozen first; identity precedes extraction; the emitter, resolver, and
+  Rails pack stay qualification-only until one atomic production hard cut;
+  optimization follows semantic parity; and complete promotion remains gated
+  by the 2,000-record quality audit.
 
 ## Direction options not promoted to implementation plans
 

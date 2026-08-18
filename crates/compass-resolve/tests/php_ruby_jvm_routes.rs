@@ -262,6 +262,58 @@ fn rails_routes_resolve_to_controller_actions_and_compose_namespaces() -> Result
 }
 
 #[test]
+fn rails_universal_pack_is_ast_grounded_and_fails_closed() -> Result<(), Box<dyn Error>> {
+    let source = br#"class Admin::ReportsController
+  def index; end
+end
+
+Rails.application.routes.draw do
+  namespace :admin do
+    get "/reports", to: "reports#index"
+  end
+  match "/search", via: [:get, :post], to: "search#show"
+  get dynamic_path, to: dynamic_handler
+end
+
+Application.routes.draw do
+  get "/lookalike", to: "reports#index"
+end
+"#;
+    let extraction = Engine::default().extract_source(Path::new("config/routes.rb"), source)?;
+    let routes = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Route(route) => Some(route),
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(routes.len(), 3, "routes={routes:#?}");
+    assert!(routes.iter().all(|route| {
+        route
+            .detail
+            .get("frameworkPack")
+            .and_then(serde_json::Value::as_str)
+            == Some("rails-ruby")
+    }));
+    assert!(routes.iter().any(|route| {
+        route.operation == "GET"
+            && route.normalized_path == "/admin/reports"
+            && route.handler_reference == "Admin.ReportsController.index"
+    }));
+    assert!(
+        routes
+            .iter()
+            .any(|route| { route.operation == "POST" && route.normalized_path == "/search" })
+    );
+    assert!(routes.iter().all(|route| {
+        !route.normalized_path.contains("dynamic") && !route.normalized_path.contains("lookalike")
+    }));
+    assert!(extraction.raw_calls.is_none());
+    Ok(())
+}
+
+#[test]
 fn spring_composes_class_and_method_mappings_without_custom_annotation_matches()
 -> Result<(), Box<dyn Error>> {
     let mut extraction = extract_and_resolve(&["jvm/SpringController.java"])?;

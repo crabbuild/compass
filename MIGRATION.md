@@ -5,6 +5,16 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Ruby universal-candidate rebuild
+
+The current release publishes Ruby through the version-1 universal evidence
+candidate (`compass.ruby.candidate`) and the evidence-backed `rails-ruby`
+framework pack. Ruby graph output is therefore regenerated on the first build
+after upgrading; do not reuse a Ruby cache produced by an older Compass
+publisher. Ruby is still a candidate rather than a complete-quality claim,
+so retain review of ambiguous/dynamic Ruby relationships and do not treat
+unresolved dynamic dispatch as a missing deterministic fact.
+
 ## Install Compass
 
 Install the latest macOS release:

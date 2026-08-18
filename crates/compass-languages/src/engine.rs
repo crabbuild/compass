@@ -130,7 +130,10 @@ impl Engine {
         Ok(extraction)
     }
 
-    /// Extract universal-candidate evidence directly from source.
+    /// Extract qualification-only Ruby/TypeScript/JavaScript universal evidence
+    /// directly from source. The same source-backed emitters are used by the
+    /// production registry after the language cutover so qualification cannot
+    /// drift from published output.
     ///
     /// This hidden API remains useful for qualification fixtures, but it now
     /// calls the same registered candidate emitter used by normal Compass
@@ -145,11 +148,14 @@ impl Engine {
     ) -> Result<crate::SemanticEvidenceBatch, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        if !matches!(spec.name, "typescript" | "tsx" | "javascript" | "kotlin") {
+        if !matches!(
+            spec.name,
+            "typescript" | "tsx" | "javascript" | "kotlin" | "ruby"
+        ) {
             return Err(ExtractError::Unsupported(path.to_path_buf()));
         }
         let tree = self.parse(path, spec, source)?;
-        let evidence = if spec.name == "kotlin" {
+        let evidence = if matches!(spec.name, "kotlin" | "ruby") {
             let profile = Registry::universal_profile_for_spec(spec)
                 .ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
             crate::evidence::extract_tree_evidence(
@@ -1665,8 +1671,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "ruby" {
-                self.add_ruby_parent_edge(node, &id);
             } else if self.language == "scala" {
                 self.add_scala_class_references(node, &id);
             }
@@ -2200,7 +2204,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     source_file: self.source_file.clone(),
                     source_location: format!("L{}", line(node)),
                     receiver: Some(call.receiver),
-                    receiver_type: (self.language == "ruby" && call.member).then_some(None),
+                    receiver_type: None,
                     lang: None,
                     extensions,
                 });
@@ -2338,21 +2342,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn call_name(&self, node: Node<'tree>) -> Option<CallName> {
-        if self.language == "ruby" {
-            let name = node
-                .child_by_field_name("method")
-                .and_then(|method| self.node_text(method))
-                .map(clean_name)?;
-            let receiver = node
-                .child_by_field_name("receiver")
-                .and_then(|receiver| self.node_text(receiver))
-                .map(|receiver| receiver.rsplit("::").next().unwrap_or_default().to_owned());
-            return Some(CallName {
-                name,
-                member: receiver.is_some(),
-                receiver,
-            });
-        }
         let function = if self.config.call_function_field.is_empty() {
             None
         } else {
@@ -3211,20 +3200,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 crate::facts::stamp_node_range(&mut edge.attributes, decorator);
             }
         }
-    }
-
-    fn add_ruby_parent_edge(&mut self, node: Node<'tree>, class_id: &str) {
-        let Some(superclass) = node.child_by_field_name("superclass") else {
-            return;
-        };
-        let Some(name_node) = first_descendant(superclass, "constant") else {
-            return;
-        };
-        let Some(name) = self.node_text(name_node).map(clean_name) else {
-            return;
-        };
-        let target = self.ensure_type_node(&name, true);
-        self.add_edge(class_id, &target, "inherits", line(node), None);
     }
 
     fn add_scala_class_references(&mut self, node: Node<'tree>, class_id: &str) {

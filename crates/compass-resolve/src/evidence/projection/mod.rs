@@ -808,8 +808,19 @@ fn materialized_declaration_ids<'a>(
     }
     let mut ids = AHashMap::new();
     for (graph_node_id, declarations) in groups {
-        if declarations.len() == 1 {
-            ids.insert(declarations[0].id.clone(), graph_node_id);
+        if declarations.len() == 1
+            || declarations.iter().all(|declaration| {
+                declaration.language == "ruby"
+                    && matches!(declaration.kind.as_str(), "class" | "trait")
+                    && declaration.qualified_name == declarations[0].qualified_name
+            })
+        {
+            ids.insert(declarations[0].id.clone(), graph_node_id.clone());
+            if declarations.len() > 1 {
+                for declaration in declarations.iter().skip(1) {
+                    ids.insert(declaration.id.clone(), graph_node_id.clone());
+                }
+            }
             continue;
         }
         for declaration in declarations {

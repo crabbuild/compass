@@ -3,6 +3,71 @@
 use super::super::*;
 
 impl ResolutionDb<'_> {
+    pub(in crate::evidence) fn ruby_import_decision(
+        &self,
+        candidate: &RelationshipCandidate,
+        requested: &str,
+    ) -> Option<ResolutionDecision> {
+        if candidate.language != "ruby" || candidate.relation != CandidateRelation::Imports {
+            return None;
+        }
+        let occurrence = self.occurrence(candidate)?;
+        let source_file = normalize_ruby_path(&occurrence.range().source_file);
+        let operation = occurrence.context().unwrap_or_default();
+        let target = normalize_ruby_path(requested);
+        if target.is_empty()
+            || target.starts_with('/')
+            || target.split('/').any(|part| part == "..")
+        {
+            return None;
+        }
+        let base = if operation == "require_relative" {
+            source_file
+                .rsplit_once('/')
+                .map_or_else(String::new, |(parent, _)| parent.to_owned())
+        } else {
+            String::new()
+        };
+        let joined = if base.is_empty() {
+            target
+        } else if target.starts_with("./") {
+            format!("{base}/{}", target.trim_start_matches("./"))
+        } else {
+            format!("{base}/{target}")
+        };
+        let candidates = [
+            joined.clone(),
+            format!("{joined}.rb"),
+            format!("{joined}.rake"),
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+        let declarations = self
+            .facts
+            .declarations
+            .values()
+            .filter(|declaration| {
+                declaration.language == "ruby"
+                    && declaration.kind == "file"
+                    && candidates.contains(&normalize_ruby_path(&declaration.range.source_file))
+                    && self.declaration_allowed(&declaration.id, candidate)
+            })
+            .collect::<Vec<_>>();
+        match declarations.as_slice() {
+            [declaration] => Some(ResolutionDecision::ResolvedInventory {
+                graph_node_id: declaration.graph_node_id.clone(),
+                evidence: ResolutionEvidence {
+                    rule: ResolutionRule::ExactSourceInventory,
+                    candidate_count: 1,
+                },
+            }),
+            [] => None,
+            many => Some(ResolutionDecision::Ambiguous {
+                candidate_count: many.len(),
+            }),
+        }
+    }
+
     pub(in crate::evidence) fn inventory_decision(
         &self,
         language: &str,
@@ -318,7 +383,8 @@ impl ResolutionDb<'_> {
         if language != "rust" || call_result_binding.receiver_binding_id.is_some() {
             return Ok(BTreeSet::new());
         }
-        let Some((qualifier, spelling)) = split_qualified_member(qualified_callable) else {
+        let Some((qualifier, spelling)) = split_qualified_member(language, qualified_callable)
+        else {
             return Ok(BTreeSet::new());
         };
 
@@ -496,7 +562,7 @@ impl ResolutionDb<'_> {
         if language != "rust" {
             return Ok(Vec::new());
         }
-        let Some((receiver, member)) = split_qualified_member(qualified) else {
+        let Some((receiver, member)) = split_qualified_member(language, qualified) else {
             return Ok(Vec::new());
         };
         let receiver_slots = self
@@ -668,7 +734,7 @@ impl ResolutionDb<'_> {
         qualified: &str,
         candidate: &RelationshipCandidate,
     ) -> Option<Vec<DeclarationSlot>> {
-        let (owner, spelling) = split_qualified_member(qualified)?;
+        let (owner, spelling) = split_qualified_member(language, qualified)?;
         let targets = self.indexes.members.members.get(&(
             language.to_owned(),
             owner.to_owned(),
@@ -842,4 +908,8 @@ impl ResolutionDb<'_> {
         }
         Err(MAX_ALIAS_DEPTH)
     }
+}
+
+fn normalize_ruby_path(path: &str) -> String {
+    path.replace('\\', "/").trim_start_matches("./").to_owned()
 }

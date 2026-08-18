@@ -289,7 +289,7 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::universal(&pack::SPRING_KOTLIN_DESCRIPTOR, spring::detect_kotlin),
     FrameworkPack::source("python-web", &["python"], &[], detect_python),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
-    FrameworkPack::source("rails-routes", &["ruby"], &["rails"], detect_ruby),
+    FrameworkPack::universal(&pack::RAILS_RUBY_DESCRIPTOR, ruby::detect_universal),
     FrameworkPack::source("go-web", &["go"], &[], detect_go),
     FrameworkPack::source("axum-web", &["rust"], &["axum"], detect_axum),
     FrameworkPack::source("rust-web", &["rust"], &[], detect_rust),
@@ -526,13 +526,6 @@ fn detect_python(
     python::detect(context.path, context.source, context.root)
 }
 
-fn detect_ruby(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
-    ruby::detect(context.path, context.source, context.root)
-}
-
 fn detect_go(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
@@ -667,7 +660,7 @@ mod tests {
             "spring-java",
             "python-web",
             "php-frameworks",
-            "rails-routes",
+            "rails-ruby",
             "spring-kotlin",
             "go-web",
             "axum-web",

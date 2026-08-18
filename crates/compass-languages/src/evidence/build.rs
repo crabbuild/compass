@@ -834,6 +834,9 @@ pub(crate) fn extract_tree_evidence(
     if profile.language == "kotlin" {
         return super::kotlin::extract_candidate_tree_evidence(path, source_file, source, root);
     }
+    if profile.language == "ruby" {
+        return super::ruby::extract_candidate_tree_evidence(path, source_file, source, root);
+    }
     if matches!(profile.language, "javascript" | "typescript") {
         return super::typescript::extract_candidate_tree_evidence(
             path,

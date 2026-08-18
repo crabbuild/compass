@@ -79,7 +79,10 @@ impl ResolutionDb<'_> {
             };
             let eligible = members
                 .iter()
-                .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                .filter(|slot| {
+                    self.declaration_allowed_slot(**slot, candidate)
+                        && self.ruby_member_space_allowed(**slot, candidate)
+                })
                 .take(self.budget.candidates_per_lookup().saturating_add(1))
                 .cloned()
                 .collect::<Vec<_>>();
@@ -417,7 +420,10 @@ impl ResolutionDb<'_> {
             eligible.extend(
                 members
                     .iter()
-                    .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                    .filter(|slot| {
+                        self.declaration_allowed_slot(**slot, candidate)
+                            && self.ruby_member_space_allowed(**slot, candidate)
+                    })
                     .copied(),
             );
         }
@@ -434,7 +440,10 @@ impl ResolutionDb<'_> {
                 eligible.extend(
                     declarations
                         .iter()
-                        .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+                        .filter(|slot| {
+                            self.declaration_allowed_slot(**slot, candidate)
+                                && self.ruby_member_space_allowed(**slot, candidate)
+                        })
                         .copied(),
                 );
             }
@@ -562,7 +571,10 @@ impl ResolutionDb<'_> {
         ))?;
         let eligible = members
             .iter()
-            .filter(|slot| self.declaration_allowed_slot(**slot, candidate))
+            .filter(|slot| {
+                self.declaration_allowed_slot(**slot, candidate)
+                    && self.ruby_member_space_allowed(**slot, candidate)
+            })
             .take(self.budget.candidates_per_lookup().saturating_add(1))
             .cloned()
             .collect::<Vec<_>>();
@@ -649,7 +661,26 @@ impl ResolutionDb<'_> {
             .indexes
             .names
             .by_qualified
-            .get(&(language.to_owned(), qualified_name))?;
+            .get(&(language.to_owned(), qualified_name.clone()))?;
+        if language == "ruby" {
+            // Reopened Ruby classes share one graph identity.  Check that
+            // identity directly and return the already canonical qualified
+            // name; building a temporary set for every receiver call makes
+            // Rails-scale dispatch unnecessarily allocation-heavy.
+            let mut graph_node_id = None;
+            for declaration in declarations
+                .iter()
+                .filter_map(|slot| self.declaration(*slot))
+                .filter(|declaration| matches!(declaration.kind.as_str(), "class" | "trait"))
+            {
+                match graph_node_id {
+                    None => graph_node_id = Some(declaration.graph_node_id.as_str()),
+                    Some(previous) if previous == declaration.graph_node_id.as_str() => {}
+                    Some(_) => return None,
+                }
+            }
+            return graph_node_id.map(|_| qualified_name);
+        }
         let eligible = declarations
             .iter()
             .filter_map(|slot| self.declaration(*slot))
@@ -661,9 +692,37 @@ impl ResolutionDb<'_> {
             })
             .take(2)
             .collect::<Vec<_>>();
-        let [declaration] = eligible.as_slice() else {
-            return None;
+        if let [declaration] = eligible.as_slice() {
+            return Some(declaration.qualified_name.clone());
+        }
+        None
+    }
+
+    fn ruby_member_space_allowed(
+        &self,
+        slot: DeclarationSlot,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        if candidate.language != "ruby" {
+            return true;
+        }
+        let Some(context) = self.occurrence(candidate).and_then(OccurrenceRef::context) else {
+            return true;
         };
-        Some(declaration.qualified_name.clone())
+        let Some(declaration) = self.declaration(slot) else {
+            return false;
+        };
+        if declaration.kind != "method" {
+            return true;
+        }
+        let separator = match context {
+            "instance" => '#',
+            "singleton" => '.',
+            _ => return true,
+        };
+        declaration
+            .qualified_name
+            .strip_suffix(&format!("{separator}{}", candidate.target_spelling))
+            .is_some()
     }
 }

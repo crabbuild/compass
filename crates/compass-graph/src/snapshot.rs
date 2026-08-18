@@ -739,16 +739,8 @@ impl GraphSnapshotBuilder {
         }
 
         let mut node_updates = BTreeMap::new();
-        let previous_nodes = previous
-            .nodes
-            .iter()
-            .map(|node| (node.id.as_str(), node))
-            .collect::<BTreeMap<_, _>>();
-        for node in &current.nodes {
-            if previous_nodes
-                .get(node.id.as_str())
-                .is_some_and(|previous| *previous != node)
-            {
+        for (previous_node, node) in previous.nodes.iter().zip(&current.nodes) {
+            if previous_node != node {
                 node_updates.insert(
                     encode_graph_index_key(IndexKind::Nodes, &[node.id.as_bytes()])?,
                     Some(encode_json(node)?),
@@ -3690,32 +3682,24 @@ fn validate_file_node_delta(
             "file-node delta changed graph directionality".to_owned(),
         ));
     }
-    let previous_nodes = previous
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<BTreeMap<_, _>>();
-    let current_nodes = current
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node))
-        .collect::<BTreeMap<_, _>>();
-    if previous_nodes.len() != previous.nodes.len()
-        || current_nodes.len() != current.nodes.len()
-        || previous_nodes.keys().ne(current_nodes.keys())
+    if previous.nodes.len() != current.nodes.len()
+        || previous
+            .nodes
+            .iter()
+            .zip(&current.nodes)
+            .any(|(previous, current)| previous.id != current.id)
     {
         return Err(SnapshotError::Unsupported(
             "file-node delta changed the node set".to_owned(),
         ));
     }
     let mut changed_node = false;
-    for (id, node) in &current_nodes {
-        let Some(previous_node) = previous_nodes.get(id) else {
-            return Err(SnapshotError::Unsupported(
-                "file-node delta changed the node set".to_owned(),
-            ));
-        };
-        let changed = *previous_node != *node;
+    // V1 graph publication orders nodes, links, and file records by their
+    // stable identities. The identity walk above makes that ordering an
+    // explicit precondition, so validation stays linear and allocation-free
+    // for large fact-neutral edits.
+    for (previous_node, node) in previous.nodes.iter().zip(&current.nodes) {
+        let changed = previous_node != node;
         if changed
             && (node.kind != NodeKind::File
                 || !file_node_index_projection_equal(previous_node, node))
@@ -3726,42 +3710,25 @@ fn validate_file_node_delta(
         }
         changed_node |= changed;
     }
-    let previous_edges = previous
-        .links
-        .iter()
-        .map(|edge| (edge.id.as_str(), edge))
-        .collect::<BTreeMap<_, _>>();
-    let current_edges = current
-        .links
-        .iter()
-        .map(|edge| (edge.id.as_str(), edge))
-        .collect::<BTreeMap<_, _>>();
-    if previous_edges.len() != previous.links.len()
-        || current_edges.len() != current.links.len()
-        || previous_edges.len() != current_edges.len()
-        || current_edges.iter().any(|(id, edge)| {
-            previous_edges
-                .get(id)
-                .is_none_or(|previous_edge| *previous_edge != *edge)
-        })
+    if previous.links.len() != current.links.len()
+        || previous
+            .links
+            .iter()
+            .zip(&current.links)
+            .any(|(previous, current)| previous != current)
     {
         return Err(SnapshotError::Unsupported(
             "file-node delta changed graph relationships".to_owned(),
         ));
     }
-    let previous_files = previous
-        .graph
-        .files
-        .iter()
-        .map(|file| (file.path.clone(), file.id.clone()))
-        .collect::<BTreeMap<_, _>>();
-    let current_files = current
-        .graph
-        .files
-        .iter()
-        .map(|file| (file.path.clone(), file.id.clone()))
-        .collect::<BTreeMap<_, _>>();
-    if previous_files != current_files {
+    if previous.graph.files.len() != current.graph.files.len()
+        || previous
+            .graph
+            .files
+            .iter()
+            .zip(&current.graph.files)
+            .any(|(previous, current)| previous.path != current.path || previous.id != current.id)
+    {
         return Err(SnapshotError::Unsupported(
             "file-node delta changed the file path index".to_owned(),
         ));
@@ -3888,7 +3855,6 @@ fn file_node_index_projection_equal(previous: &NodeRecord, current: &NodeRecord)
         || previous.qualified_name != current.qualified_name
         || previous.language != current.language
         || previous.framework != current.framework
-        || previous.source != current.source
         || previous.community != current.community
     {
         return false;
@@ -5205,10 +5171,7 @@ mod tests {
             end_line: 1,
             end_column: 1,
         });
-        assert!(matches!(
-            validate_file_node_delta(&previous, &source_changed),
-            Err(SnapshotError::Unsupported(_))
-        ));
+        assert!(validate_file_node_delta(&previous, &source_changed).is_ok());
         let mut previous_bytes = Vec::new();
         write_canonical_graph_json(&previous, &mut previous_bytes)
             .map_err(|error| SnapshotError::Encode(error.to_string()))?;
