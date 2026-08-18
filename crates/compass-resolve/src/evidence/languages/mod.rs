@@ -5,5 +5,6 @@ pub(in crate::evidence) mod java;
 pub(in crate::evidence) mod kotlin;
 pub(in crate::evidence) mod php;
 pub(in crate::evidence) mod policy;
+pub(in crate::evidence) mod ruby;
 pub(in crate::evidence) mod rust;
 pub(in crate::evidence) mod typescript;

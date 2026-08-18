@@ -431,8 +431,46 @@ fn copy_snapshot(
             fs::create_dir(&to).map_err(|error| io_error(&to, error))?;
             copy_snapshot(&from, &to, excluded_artifacts, false)?;
         } else if file_type.is_file() {
-            fs::copy(&from, &to).map_err(|error| io_error(&to, error))?;
+            // Snapshot files are immutable after publication and Compass
+            // replaces mutable artifacts through the atomic writers. A
+            // same-filesystem hard link therefore gives the staging snapshot
+            // copy-on-write behavior without reading large graphs again. If
+            // links are unavailable (for example across filesystems or on a
+            // restricted volume), retain the portable copy fallback.
+            if fs::hard_link(&from, &to).is_err() {
+                fs::copy(&from, &to).map_err(|error| io_error(&to, error))?;
+            }
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_staging_keeps_published_files_when_replaced_atomically() -> Result<(), FileError> {
+        let directory = tempfile::tempdir().map_err(|source| io_error("tempdir", source))?;
+        let source = directory.path().join("source");
+        let destination = directory.path().join("destination");
+        fs::create_dir(&source).map_err(|error| io_error(&source, error))?;
+        fs::create_dir(&destination).map_err(|error| io_error(&destination, error))?;
+        let published = source.join("graph.json");
+        fs::write(&published, b"published").map_err(|source| io_error(&published, source))?;
+
+        copy_snapshot(&source, &destination, &[], true)?;
+        let staged = destination.join("graph.json");
+        write_text_atomic(&staged, "staged")?;
+
+        assert_eq!(
+            fs::read(&published).map_err(|error| io_error(&published, error))?,
+            b"published"
+        );
+        assert_eq!(
+            fs::read(&staged).map_err(|error| io_error(&staged, error))?,
+            b"staged"
+        );
+        Ok(())
+    }
 }

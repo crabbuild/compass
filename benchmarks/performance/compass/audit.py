@@ -128,7 +128,9 @@ def _source_line_range(root: Path, source_file: str, location: str) -> tuple[int
     return start, end, hashlib.sha256(normalized).hexdigest()
 
 
-def _capability_for_relation(relation: str) -> str:
+def _capability_for_relation(relation: str, adapter: str | None = None) -> str:
+    if adapter == "ruby" and relation == "implements":
+        return "traits"
     return {
         "accesses": "members",
         "calls": "calls",
@@ -294,7 +296,7 @@ def _compass_accepted_candidates(
                 "candidateSource": "compass_graph",
                 "suggestedPool": "accepted",
                 "adapter": adapter,
-                "capability": _capability_for_relation(relation),
+                "capability": _capability_for_relation(relation, adapter),
                 "language": source_node.language,
                 "relation": relation,
                 "confidence": confidence,

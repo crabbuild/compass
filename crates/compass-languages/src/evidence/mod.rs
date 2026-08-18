@@ -3,6 +3,7 @@ mod csharp;
 mod kotlin;
 mod model;
 mod php;
+mod ruby;
 mod typescript;
 mod validate;
 
@@ -16,5 +17,6 @@ pub use model::{
     ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
+pub(crate) use ruby::extract_candidate_tree_evidence as extract_ruby_candidate_tree_evidence;
 pub(crate) use typescript::extract_candidate_tree_evidence;
 pub use validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};

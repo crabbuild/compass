@@ -112,6 +112,25 @@ class CorrectnessTests(unittest.TestCase):
             source_construct_inventory_sha256("typescript", inventory),
         )
 
+    def test_ruby_ripper_provider_is_pinned_byte_deterministic_and_typed(self) -> None:
+        root = Path(__file__).resolve().parents[3] / "fixtures" / "code-graph" / "qualification"
+        first = independent_source_inventory(root, "ruby")
+        second = independent_source_inventory(root, "ruby")
+        self.assertEqual(first.scanned_files, 1)
+        self.assertEqual(first.parsed_files, 1)
+        self.assertEqual(first.rejected_files, ())
+        self.assertEqual(first.provider_metadata, second.provider_metadata)
+        self.assertEqual(
+            source_construct_inventory_sha256("ruby", first),
+            source_construct_inventory_sha256("ruby", second),
+        )
+        self.assertIn(("rubyVersion", "4.0.6"), first.provider_metadata)
+        self.assertIn(("rubyRevision", "03b6d3f8898a28604fe6cb00eae3226b821168f4"), first.provider_metadata)
+        self.assertGreaterEqual(len(first.constructs), 20)
+        trait = next(construct for construct in first.constructs if construct.relation == "implements")
+        source = (root / trait.source_file).read_bytes()
+        self.assertEqual(source[trait.start_byte : trait.end_byte], b"Auditable")
+
     def test_typescript_oracle_payload_rejects_incomplete_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

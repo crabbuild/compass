@@ -35,6 +35,7 @@ This architecture is transitioning one language at a time. The status labels bel
 | Available now | TypeScript and JavaScript are hard-cut `UniversalCandidate` adapters; TSX uses the TypeScript identity, both share the bounded ECMAScript evidence emitter, and their replaced generic publisher is removed |
 | Available now | PHP is a hard-cut version-1 `UniversalCandidate` with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
 | Available now | Kotlin is a hard-cut version-1 `UniversalCandidate` with packages, imports, nominal and companion declarations, constructors, functions and extensions, properties, annotations, generic and nullable types, and named/default argument evidence; its complete quality audit remains open |
+| Available now | Ruby is a hard-cut version-1 `UniversalCandidate`; its dedicated evidence emitter, method-space-aware resolver policy, replaced Ruby member publisher, and Rails `rails-ruby` universal pack are active while Plan 019 audit gates remain open |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 

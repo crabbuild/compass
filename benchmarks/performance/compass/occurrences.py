@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import selectors
 import subprocess
+import tempfile
 import time
 import tokenize
 
@@ -289,6 +290,11 @@ _TYPESCRIPT_ORACLE_SCRIPT = (
 _TYPESCRIPT_ORACLE_TIMEOUT_SECONDS = 90.0
 _TYPESCRIPT_ORACLE_OUTPUT_BYTES = 64 * 1024 * 1024
 _TYPESCRIPT_ORACLE_MAX_TYPED_FACTS = 500_000
+_RUBY_ORACLE_SCHEMA = "compass.ruby-source-oracle/1"
+_RUBY_ORACLE_PROVIDER = "ruby_ripper_4_0_6"
+_RUBY_ORACLE_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "ruby_source_oracle.rb"
+_RUBY_ORACLE_TIMEOUT_SECONDS = 600.0
+_RUBY_ORACLE_OUTPUT_BYTES = 512 * 1024 * 1024
 
 
 def _bounded_node_oracle(root: Path) -> bytes:
@@ -1401,6 +1407,235 @@ def _typescript_compiler_inventory(root: Path) -> SourceConstructInventory:
     return _typescript_inventory_from_payload(payload, root)
 
 
+def _bounded_ruby_oracle(root: Path) -> tuple[bytes, dict[str, object]]:
+    """Run the Ripper oracle with explicit duration and output bounds."""
+
+    if not _RUBY_ORACLE_SCRIPT.is_file():
+        raise RuntimeError(f"Ruby source oracle is missing: {_RUBY_ORACLE_SCRIPT}")
+    with tempfile.TemporaryDirectory(prefix="compass-ruby-source-oracle-") as directory:
+        output = Path(directory) / "ruby-source-oracle.json"
+        command = (
+            "ruby",
+            str(_RUBY_ORACLE_SCRIPT),
+            "--root",
+            str(root),
+            "--output",
+            str(output),
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=_RUBY_ORACLE_SCRIPT.parents[1],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+                timeout=_RUBY_ORACLE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"Ruby source oracle exceeded {_RUBY_ORACLE_TIMEOUT_SECONDS:.0f}s"
+            ) from error
+        if completed.returncode != 0:
+            detail = completed.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                "Ruby source oracle failed"
+                + (f": {detail[:2_000]}" if detail else "")
+            )
+        try:
+            raw = output.read_bytes()
+        except OSError as error:
+            raise RuntimeError(f"Ruby source oracle did not write output: {error}") from error
+    if len(raw) > _RUBY_ORACLE_OUTPUT_BYTES:
+        raise RuntimeError(
+            "Ruby source oracle output exceeds "
+            f"{_RUBY_ORACLE_OUTPUT_BYTES} bytes"
+        )
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"invalid Ruby source oracle JSON: {error}") from error
+    if not isinstance(payload, dict) or payload.get("schema") != _RUBY_ORACLE_SCHEMA:
+        raise RuntimeError("Ruby source oracle schema is invalid")
+    return raw, payload
+
+
+def _ruby_inventory_from_payload(
+    root: Path,
+    payload: Mapping[str, object],
+) -> SourceConstructInventory:
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise RuntimeError("Ruby source oracle files must be an array")
+    constructs: list[SourceConstruct] = []
+    rejected: list[str] = []
+    parsed = 0
+    relation_capabilities = {
+        "aliases": "aliases",
+        "calls": "calls",
+        "constructs": "construction",
+        "extends": "base_types",
+        "imports": "imports",
+        "uses_trait": "traits",
+    }
+    for file_index, item in enumerate(files):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Ruby oracle files[{file_index}] must be an object")
+        relative = item.get("path")
+        status = item.get("status")
+        if not isinstance(relative, str) or not relative:
+            raise RuntimeError(f"Ruby oracle files[{file_index}].path is invalid")
+        safe_relative = _safe_oracle_file(relative, f"Ruby oracle files[{file_index}].path")
+        if status not in {"ok", "partial"}:
+            raise RuntimeError(f"Ruby oracle files[{file_index}].status is invalid")
+        source_path = (root / safe_relative).resolve()
+        try:
+            source_path.relative_to(root)
+        except ValueError as error:
+            raise RuntimeError(f"Ruby oracle file escapes the source root: {relative}") from error
+        if not source_path.is_file():
+            raise RuntimeError(f"Ruby oracle file is missing: {relative}")
+        if status != "ok":
+            rejected.append(safe_relative)
+            continue
+        parsed += 1
+        contents = source_path.read_bytes()
+        declarations = item.get("declarations", [])
+        if not isinstance(declarations, list):
+            raise RuntimeError(f"Ruby oracle {relative}.declarations is invalid")
+        for declaration_index, declaration in enumerate(declarations):
+            context = f"Ruby oracle {relative}.declarations[{declaration_index}]"
+            if not isinstance(declaration, dict):
+                raise RuntimeError(f"{context} must be an object")
+            kind = declaration.get("kind")
+            qualified_name = declaration.get("qualifiedName")
+            anchor = declaration.get("anchor")
+            if (
+                not isinstance(kind, str)
+                or kind not in {"class", "module", "method"}
+                or not isinstance(qualified_name, str)
+                or not qualified_name
+                or not isinstance(anchor, dict)
+            ):
+                raise RuntimeError(f"{context} has invalid identity fields")
+            start = anchor.get("startByte")
+            end = anchor.get("endByte")
+            line = anchor.get("startLine")
+            if (
+                isinstance(start, bool)
+                or not isinstance(start, int)
+                or isinstance(end, bool)
+                or not isinstance(end, int)
+                or isinstance(line, bool)
+                or not isinstance(line, int)
+                or start < 0
+                or end <= start
+                or line <= 0
+                or end > len(contents)
+            ):
+                raise RuntimeError(f"{context}.anchor is invalid")
+            if "#" in qualified_name:
+                owner = qualified_name.rsplit("#", 1)[0]
+            elif "." in qualified_name and kind == "method":
+                owner = qualified_name.rsplit(".", 1)[0]
+            elif "::" in qualified_name:
+                owner = qualified_name.rsplit("::", 1)[0]
+            else:
+                owner = safe_relative
+            constructs.append(
+                SourceConstruct(
+                    safe_relative,
+                    "contains",
+                    "ownership",
+                    owner,
+                    qualified_name,
+                    kind,
+                    start,
+                    end,
+                    line,
+                )
+            )
+        relations = item.get("relations", [])
+        if not isinstance(relations, list):
+            raise RuntimeError(f"Ruby oracle {relative}.relations is invalid")
+        for relation_index, relation in enumerate(relations):
+            context = f"Ruby oracle {relative}.relations[{relation_index}]"
+            if not isinstance(relation, dict):
+                raise RuntimeError(f"{context} must be an object")
+            relation_name = relation.get("relation")
+            source = relation.get("source")
+            target = relation.get("target")
+            anchor = relation.get("anchor")
+            if (
+                not isinstance(relation_name, str)
+                or relation_name not in relation_capabilities
+                or not isinstance(source, str)
+                or not source
+                or not isinstance(target, str)
+                or not target
+                or not isinstance(anchor, dict)
+            ):
+                raise RuntimeError(f"{context} has invalid identity fields")
+            start = anchor.get("startByte")
+            end = anchor.get("endByte")
+            line = anchor.get("startLine")
+            if (
+                isinstance(start, bool)
+                or not isinstance(start, int)
+                or isinstance(end, bool)
+                or not isinstance(end, int)
+                or isinstance(line, bool)
+                or not isinstance(line, int)
+                or start < 0
+                or end <= start
+                or line <= 0
+                or end > len(contents)
+            ):
+                raise RuntimeError(f"{context}.anchor is invalid")
+            # The oracle's anchor is a byte range, not a line approximation.
+            if not contents[start:end]:
+                raise RuntimeError(f"{context}.anchor is empty")
+            normalized_relation = (
+                "instantiates" if relation_name == "constructs" else relation_name
+            )
+            if normalized_relation == "uses_trait":
+                normalized_relation = "implements"
+            constructs.append(
+                SourceConstruct(
+                    safe_relative,
+                    normalized_relation,
+                    relation_capabilities[relation_name],
+                    source,
+                    target,
+                    relation.get("operation")
+                    if isinstance(relation.get("operation"), str)
+                    else None,
+                    start,
+                    end,
+                    line,
+                )
+            )
+    ruby_version = payload.get("rubyVersion")
+    ruby_revision = payload.get("rubyRevision")
+    metadata = []
+    if isinstance(ruby_version, str) and ruby_version:
+        metadata.append(("rubyVersion", ruby_version))
+    if isinstance(ruby_revision, str) and ruby_revision:
+        metadata.append(("rubyRevision", ruby_revision))
+    return SourceConstructInventory(
+        tuple(sorted(set(constructs), key=_source_construct_key)),
+        len(files),
+        parsed,
+        tuple(sorted(rejected)),
+        tuple(sorted(metadata)),
+    )
+
+
+def _ruby_ripper_inventory(root: Path) -> SourceConstructInventory:
+    _raw, payload = _bounded_ruby_oracle(root)
+    return _ruby_inventory_from_payload(root, payload)
+
+
 def _collector_only_construct_parser(
     _root: Path,
     _path: Path,
@@ -1427,6 +1662,12 @@ DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
         (".js", ".jsx", ".mjs", ".cjs"),
         _collector_only_construct_parser,
         _typescript_compiler_inventory,
+    ),
+    "ruby": ConstructProvider(
+        _RUBY_ORACLE_PROVIDER,
+        (".rb", ".rake"),
+        _collector_only_construct_parser,
+        _ruby_ripper_inventory,
     ),
 }
 

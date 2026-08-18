@@ -1614,7 +1614,7 @@ fn fact_neutral_incremental_candidate(
     detected_files: &BTreeMap<String, Vec<String>>,
     missing: &[PathBuf],
     source_removed: bool,
-    root: &Path,
+    _root: &Path,
 ) -> bool {
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
@@ -1632,17 +1632,18 @@ fn fact_neutral_incremental_candidate(
     let Some(prior_state) = prior_state else {
         return false;
     };
-    if prior_state.profile_digest != current_state.profile_digest
-        || prior_state.project_evidence_digest != current_state.project_evidence_digest
-        || prior_state.entries.len() != current_state.entries.len()
-        || prior_state.entries.keys().ne(current_state.entries.keys())
-    {
-        return false;
-    }
-    missing.iter().all(|path| {
-        let key = relative_fact_path(path, root);
-        prior_state.entries.get(&key) == current_state.entries.get(&key)
-    })
+    // A changed source can still have a valid content-addressed cache entry
+    // after an edit/restore cycle. Comparing only cache misses can therefore
+    // admit a stale prior graph. The complete bounded fact state is already
+    // materialized for this decision; require it to match exactly.
+    fact_digest_state_matches(prior_state, current_state)
+}
+
+fn fact_digest_state_matches(prior: &AstFactDigestState, current: &AstFactDigestState) -> bool {
+    prior.schema == current.schema
+        && prior.profile_digest == current.profile_digest
+        && prior.project_evidence_digest == current.project_evidence_digest
+        && prior.entries == current.entries
 }
 
 const fn supports_fact_neutral_incremental(purpose: BuildPurpose) -> bool {
@@ -8751,6 +8752,30 @@ mod tests {
             implementation_hash(&semantic_graph),
             implementation_hash(&changed_graph)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn fact_digest_match_requires_all_cached_source_facts() -> Result<(), Box<dyn Error>> {
+        let mut entries = BTreeMap::new();
+        entries.insert("changed.rb".to_owned(), "old".to_owned());
+        entries.insert("cached.rb".to_owned(), "same".to_owned());
+        let prior_state = AstFactDigestState {
+            schema: AST_FACT_DIGESTS_SCHEMA.to_owned(),
+            profile_digest: "profile".to_owned(),
+            project_evidence_digest: "evidence".to_owned(),
+            entries,
+        };
+        let mut current_state = prior_state.clone();
+        current_state
+            .entries
+            .insert("changed.rb".to_owned(), "new".to_owned());
+        assert!(!fact_digest_state_matches(&prior_state, &current_state));
+
+        current_state
+            .entries
+            .insert("changed.rb".to_owned(), "old".to_owned());
+        assert!(fact_digest_state_matches(&prior_state, &current_state));
         Ok(())
     }
 

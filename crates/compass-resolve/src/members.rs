@@ -104,7 +104,6 @@ pub(crate) fn resolve_language_call_facts_additions(
             &mut edges,
         );
         resolve_python_members(&facts.calls, &indexes, &mut existing, &mut edges);
-        resolve_ruby_members(&facts.calls, &indexes, &mut existing, &mut edges);
         resolve_pascal_inherited(&facts.calls, &indexes, &mut existing, &mut edges);
         if admission.admits_qualified_external() {
             retain_qualified_python_external_calls(&facts.calls, &mut existing, &mut edges)
@@ -608,73 +607,6 @@ fn valid_python_qualified_name(value: &str) -> bool {
     count >= 2
 }
 
-fn resolve_ruby_members(
-    calls: &[RawCall],
-    indexes: &Indexes,
-    existing: &mut HashSet<(String, String, String)>,
-    edges: &mut Vec<EdgeRecord>,
-) {
-    let mut ruby_types = HashMap::new();
-    for node in indexes.nodes.values() {
-        if matches!(
-            extension(&node.string("source_file")).as_str(),
-            "rb" | "rake"
-        ) && is_bare_constant(node.label())
-        {
-            push_unique(&mut ruby_types, key(node.label()), &node.id);
-        }
-    }
-    for call in calls {
-        if !matches!(extension(&call.source_file).as_str(), "rb" | "rake") {
-            continue;
-        }
-        if call.extensions.get("is_mixin").and_then(Value::as_bool) == Some(true) {
-            if let Some(target) = unique(ruby_types.get(&key(&call.callee))) {
-                emit(
-                    call,
-                    target,
-                    "mixes_in",
-                    "mixin",
-                    ("EXTRACTED", 1.0),
-                    existing,
-                    edges,
-                );
-            }
-            continue;
-        }
-        if call.is_member_call != Some(true) {
-            continue;
-        }
-        let Some(receiver) = receiver(call) else {
-            continue;
-        };
-        let type_name = if starts_upper(receiver) {
-            Some(receiver)
-        } else {
-            call.receiver_type
-                .as_ref()
-                .and_then(|value| value.as_deref())
-        };
-        let Some(owner) = type_name.and_then(|name| unique(ruby_types.get(&key(name)))) else {
-            continue;
-        };
-        let target = if starts_upper(receiver) && call.callee == "new" {
-            owner
-        } else {
-            indexes.unique_method(owner, &call.callee).unwrap_or(owner)
-        };
-        emit(
-            call,
-            target,
-            "calls",
-            "call",
-            ("EXTRACTED", 1.0),
-            existing,
-            edges,
-        );
-    }
-}
-
 fn resolve_pascal_inherited(
     calls: &[RawCall],
     indexes: &Indexes,
@@ -917,6 +849,7 @@ fn module_stem(node: Option<&NodeRecord>) -> String {
     key(stem)
 }
 
+#[cfg(test)]
 fn is_bare_constant(label: &str) -> bool {
     let mut chars = label.chars();
     chars.next().is_some_and(|first| first.is_ascii_uppercase())

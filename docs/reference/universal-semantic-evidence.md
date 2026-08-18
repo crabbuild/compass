@@ -186,8 +186,9 @@ orders return the same first error.
 
 `AdapterRegistry::universal_profile(language)` is the authority for universal
 cutover. A returned `AdapterProfile` means universal evidence is mandatory.
-Python, Go, Rust, Java, TypeScript, and JavaScript are currently registered;
-TSX resolves to the canonical TypeScript profile. An unregistered language
+Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are currently
+registered. TSX resolves to the canonical TypeScript profile.
+An unregistered language
 does not silently claim universal behavior.
 
 An adapter profile must:
@@ -699,16 +700,18 @@ Python or Go has met the production qualification gates.
 ## Current qualification boundary
 
 Python and Go are hard-cut universal language adapters. C#, PHP, Rust, Java,
-Kotlin, TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
+Kotlin, Ruby, TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
 bounded ECMAScript emitter but retain distinct adapter identities. TSX uses the
 TypeScript candidate profile. C# and PHP use dedicated bounded AST emitters and
 no longer publish or resolve through their replaced raw extraction paths.
 Candidate status means the universal route is active while complete capability
-and corpus qualification remain in progress. `spring-java`, `spring-kotlin`, and
-`aspnet-csharp` are production universal framework packs. The
+and corpus qualification remain in progress. `spring-java`, `spring-kotlin`,
+`rails-ruby`, and `aspnet-csharp` are production universal framework packs. The
 `php-frameworks` pack consumes exact PHP call/import/ownership evidence for
 Laravel routes and Drupal hooks while configuration and template extraction
-remain separate. Spring advertises
+remain separate. The `rails-ruby` pack consumes exact Ruby call occurrences and
+bounded route DSL literals; dynamic Rails routing remains unresolved. Spring
+advertises
 typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
 and security capabilities; ASP.NET consumes exact C# imports, attributes,
 ownership, callable signatures, and source ranges to derive MVC routes. The

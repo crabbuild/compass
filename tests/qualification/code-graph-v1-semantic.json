@@ -225,7 +225,7 @@
       "path": "/users/:id",
       "routeSource": "fixtures/code-graph/routes/ruby/rails.rb",
       "handler": {
-        "qualifiedName": "UsersController::show"
+        "qualifiedName": "UsersController#show"
       },
       "handlerSource": "fixtures/code-graph/routes/ruby/rails.rb",
       "relationship": "routes_to",

@@ -267,6 +267,33 @@ const KOTLIN_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+pub(crate) const RUBY_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Traits,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
+pub(crate) const RUBY_ADAPTER_PROFILE: AdapterProfile = AdapterProfile {
+    id: "compass.ruby.candidate",
+    language: "ruby",
+    version: 1,
+    evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+    profile: UniversalAdapterProfile::UniversalCandidate,
+    capabilities: RUBY_CAPABILITIES,
+};
+
 const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
     AdapterProfile {
         id: "compass.csharp.candidate",
@@ -324,6 +351,7 @@ const UNIVERSAL_ADAPTERS: &[AdapterProfile] = &[
         profile: UniversalAdapterProfile::UniversalCandidate,
         capabilities: PYTHON_CAPABILITIES,
     },
+    RUBY_ADAPTER_PROFILE,
     AdapterProfile {
         id: "compass.rust",
         language: "rust",

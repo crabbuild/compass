@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Hard-cut Ruby extraction to the version-1 `compass.ruby.candidate` universal
+  evidence publisher and replace the Rails source detector with the
+  evidence-backed `rails-ruby` universal pack. Reopened constants coalesce by
+  exact graph identity, instance/singleton method spaces stay distinct,
+  dynamic dispatch/load/eval forms fail closed, and Ruby remains explicitly
+  `UniversalCandidate` pending the independent precision/recall audit.
+
 - Preserve anonymous PHP functions and arrow functions as typed callable
   `closure` nodes, and publish exact PHP trait composition as `mixes_in`
   instead of collapsing it into `implements`. These additions eliminate

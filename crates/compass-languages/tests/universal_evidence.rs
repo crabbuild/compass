@@ -479,6 +479,7 @@ fn universal_adapter_profiles_are_unique_sorted_and_truthful() {
             "kotlin",
             "php",
             "python",
+            "ruby",
             "rust",
             "typescript",
         ]

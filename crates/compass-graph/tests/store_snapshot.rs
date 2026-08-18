@@ -672,6 +672,11 @@ fn file_node_delta_reuses_unaffected_index_trees() -> Result<(), Box<dyn Error>>
         byte_size: 2,
         generated: false,
     }));
+    file_node
+        .source
+        .as_mut()
+        .ok_or("file node source anchor missing")?
+        .end_byte = 2;
 
     let content = builder.prepare_file_node_delta(&store, &previous, &current)?;
     let graph_bytes = canonical_graph_json(&current)?;

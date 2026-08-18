@@ -1,0 +1,19 @@
+schema = "compass.ruby-universal-qualification/1"
+
+[[repository]]
+name = "rails"
+url = "https://github.com/rails/rails.git"
+commit = "cc7d47f4419ba983fc9d06bffece57778fa671c5"
+purpose = "framework internals, concerns, reopenings, and DSL-heavy Ruby"
+
+[[repository]]
+name = "discourse"
+url = "https://github.com/discourse/discourse.git"
+commit = "699ad46536f619396e73720c7652dbfc7a1f86c0"
+purpose = "large Rails application, controllers, models, jobs, and plugins"
+
+[[repository]]
+name = "rubocop"
+url = "https://github.com/rubocop/rubocop.git"
+commit = "c034d8b6804788856321d78c480f9f007bd85a8d"
+purpose = "non-Rails gem with nested modules, visitors, aliases, and tests"
