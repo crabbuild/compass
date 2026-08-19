@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Prevent standalone HTML exports from publishing dead forge source links for
+  local-only graph commits. Immutable links now require the recorded commit to
+  be reachable from a local `origin` remote-tracking ref.
+
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,
