@@ -4235,7 +4235,26 @@ fn export_source_navigation(inputs: &ExportInputs, graph_path: &Path) -> Option<
     if remote.code != 0 {
         return None;
     }
-    SourceNavigation::from_git_remote(remote.stdout.trim(), revision)
+    let navigation = SourceNavigation::from_git_remote(remote.stdout.trim(), revision)?;
+    let remote_reachability = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                root.to_owned(),
+                "for-each-ref".to_owned(),
+                "--count=1".to_owned(),
+                "--format=%(refname)".to_owned(),
+                format!("--contains={revision}"),
+                "refs/remotes/origin".to_owned(),
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if remote_reachability.code != 0 || remote_reachability.stdout.trim().is_empty() {
+        return None;
+    }
+    Some(navigation)
 }
 
 #[allow(clippy::too_many_arguments)]
