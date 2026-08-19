@@ -42,7 +42,7 @@ pub(crate) fn verify_reader(
             .map_err(ProviderError::Io)?;
         remaining = remaining.saturating_sub(count as u64);
     }
-    let actual_digest = hex_digest(digest.finalize().as_slice());
+    let actual_digest = hex_digest(digest.finalize().as_ref());
     if actual_digest != expected_digest {
         return Err(ProviderError::InvalidInput(
             "artifact content digest mismatch".to_owned(),

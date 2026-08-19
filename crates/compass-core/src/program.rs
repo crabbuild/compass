@@ -657,7 +657,7 @@ fn hash_file(path: &Path) -> Result<(String, u64), CoreError> {
         }
         digest.update(&buffer[..count]);
     }
-    Ok((hex_sha256_bytes(digest.finalize().as_slice()), byte_len))
+    Ok((hex_sha256_bytes(digest.finalize().as_ref()), byte_len))
 }
 
 fn hex_sha256_bytes(bytes: &[u8]) -> String {
