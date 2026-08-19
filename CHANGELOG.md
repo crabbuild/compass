@@ -67,6 +67,19 @@
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
 
+## 0.3.17 - 2026-08-19
+
+- Stabilize code-graph interactions in exported HTML and VS Code so rendered
+  nodes remain stationary and explicit layouts pause immediately when users
+  hover, focus, click, or drag.
+
+- Improve community-detail graph readability with semantic node families,
+  purpose-colored edges, confidence-preserving strokes, and an accessible
+  theme-aware legend shared by the embedded viewer and minimap.
+
+- Harden source navigation by refusing forge permalinks for local-only graph
+  commits that cannot be proven reachable from the repository's origin.
+
 ## 0.3.16 - 2026-08-18
 
 - Refactor universal evidence around explicit producer and pipeline lifecycles,
