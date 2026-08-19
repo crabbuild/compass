@@ -19,12 +19,12 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
-compass-cypher = { path = "../compass-cypher", version = "0.3.16" }
-compass-model = { path = "../compass-model", version = "0.3.16" }
-compass-analysis = { path = "../compass-analysis", version = "0.3.16" }
-compass-ir = { path = "../compass-ir", version = "0.3.16" }
-compass-store = { path = "../compass-store", version = "0.3.16" }
-compass-graph = { path = "../compass-graph", version = "0.3.16" }
+compass-cypher = { path = "../compass-cypher", version = "0.3.17" }
+compass-model = { path = "../compass-model", version = "0.3.17" }
+compass-analysis = { path = "../compass-analysis", version = "0.3.17" }
+compass-ir = { path = "../compass-ir", version = "0.3.17" }
+compass-store = { path = "../compass-store", version = "0.3.17" }
+compass-graph = { path = "../compass-graph", version = "0.3.17" }
 unicode-normalization.workspace = true
 
 [target.'cfg(unix)'.dependencies]
@@ -32,9 +32,9 @@ libc = "0.2"
 rustix.workspace = true
 
 [dev-dependencies]
-compass-graphdb = { path = "../compass-graphdb", version = "0.3.16" }
-compass-languages = { path = "../compass-languages", version = "0.3.16" }
-compass-store-redb = { path = "../compass-store-redb", version = "0.3.16" }
+compass-graphdb = { path = "../compass-graphdb", version = "0.3.17" }
+compass-languages = { path = "../compass-languages", version = "0.3.17" }
+compass-store-redb = { path = "../compass-store-redb", version = "0.3.17" }
 tempfile.workspace = true
 
 [lints]

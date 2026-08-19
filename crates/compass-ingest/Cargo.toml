@@ -19,8 +19,8 @@ sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 time.workspace = true
-compass-files = { path = "../compass-files", version = "0.3.16" }
-compass-languages = { path = "../compass-languages", version = "0.3.16" }
+compass-files = { path = "../compass-files", version = "0.3.17" }
+compass-languages = { path = "../compass-languages", version = "0.3.17" }
 ureq.workspace = true
 url.workspace = true
 wait-timeout.workspace = true
