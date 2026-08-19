@@ -9,6 +9,10 @@ export const SourceNavigationSchema = z.strictObject({
 
 export type SourceNavigation = z.infer<typeof SourceNavigationSchema>;
 
+export type ExportSourceOpenResult =
+  | { kind: "opened"; url: string }
+  | { kind: "unavailable" };
+
 export function remoteSourceUrl(
   navigation: SourceNavigation,
   source: SourceLocation,
@@ -32,18 +36,19 @@ export function openExportSource(
   navigation: SourceNavigation | undefined,
   source: SourceLocation,
   revision?: string
-): void {
+): ExportSourceOpenResult {
   window.dispatchEvent(new CustomEvent("compass:open-source", {
     detail: source
   }));
-  if (!navigation) return;
+  if (!navigation) return { kind: "unavailable" };
   const url = remoteSourceUrl(navigation, source, revision ?? navigation.revision);
-  if (!url) return;
+  if (!url) return { kind: "unavailable" };
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.target = "_blank";
   anchor.rel = "noopener noreferrer";
   anchor.click();
+  return { kind: "opened", url };
 }
 
 function isImmutableRevision(value: string): boolean {

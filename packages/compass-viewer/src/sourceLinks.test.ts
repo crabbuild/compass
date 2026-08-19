@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { remoteSourceUrl, type SourceNavigation } from "./sourceLinks";
+import { describe, expect, it, vi } from "vitest";
+import {
+  openExportSource,
+  remoteSourceUrl,
+  type SourceNavigation
+} from "./sourceLinks";
 
 const commit = "0123456789abcdef0123456789abcdef01234567";
 
@@ -44,5 +48,17 @@ describe("remote source links", () => {
       { file: "src/lib.rs", startLine: 1 },
       "main"
     )).toBeUndefined();
+  });
+
+  it("reports when a standalone export has no safe source target", () => {
+    const opened = vi.fn();
+    window.addEventListener("compass:open-source", opened, { once: true });
+
+    expect(openExportSource(undefined, {
+      file: "src/lib.rs",
+      startLine: 4,
+      endLine: 8
+    })).toEqual({ kind: "unavailable" });
+    expect(opened).toHaveBeenCalledOnce();
   });
 });

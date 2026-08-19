@@ -144,6 +144,22 @@ body.vscode-high-contrast {
   color-scheme: dark;
 }
 
+.compass-source-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--compass-warning) 55%, var(--compass-line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--compass-panel) 96%, transparent);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 28%, transparent);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* Multi-lens visualization workbench */
 .visualization-workbench {
   display: grid;

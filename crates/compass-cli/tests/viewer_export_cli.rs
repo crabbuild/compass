@@ -526,6 +526,53 @@ fn html_export_omits_dead_links_for_local_only_commits() -> Result<(), Box<dyn E
         .current_dir(directory.path())
         .status()?;
     assert!(committed.success());
+    let published_commit = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(directory.path())
+        .output()?;
+    assert!(published_commit.status.success());
+    let published_commit = String::from_utf8(published_commit.stdout)?;
+    let remote_ref = Command::new("git")
+        .args([
+            "update-ref",
+            "refs/remotes/origin/main",
+            published_commit.trim(),
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(remote_ref.success());
+    let remote_head = Command::new("git")
+        .args([
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(remote_head.success());
+    std::fs::write(
+        directory.path().join("src/lib.rs"),
+        "fn caller() { local(); }\n",
+    )?;
+    let added = Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(added.success());
+    let committed = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Compass Test",
+            "-c",
+            "user.email=compass@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "local source change",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(committed.success());
     let source_commit = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(directory.path())
@@ -572,6 +619,143 @@ fn html_export_omits_dead_links_for_local_only_commits() -> Result<(), Box<dyn E
     assert!(!document.contains(&format!(
         "https://github.com/acme/compass/blob/{source_commit}/"
     )));
+    Ok(())
+}
+
+#[test]
+fn html_export_uses_published_ancestor_when_rendered_sources_are_unchanged()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let initialized = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(initialized.success());
+    let remote = Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/acme/compass.git",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(remote.success());
+    std::fs::create_dir_all(directory.path().join("src"))?;
+    std::fs::write(directory.path().join("src/lib.rs"), "fn caller() {}\n")?;
+    let added = Command::new("git")
+        .args(["add", "src/lib.rs"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(added.success());
+    let committed = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Compass Test",
+            "-c",
+            "user.email=compass@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "published fixture",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(committed.success());
+    let published_commit = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(directory.path())
+        .output()?;
+    assert!(published_commit.status.success());
+    let published_commit = String::from_utf8(published_commit.stdout)?
+        .trim()
+        .to_owned();
+    let remote_ref = Command::new("git")
+        .args(["update-ref", "refs/remotes/origin/main", &published_commit])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(remote_ref.success());
+    let remote_head = Command::new("git")
+        .args([
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/main",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(remote_head.success());
+
+    std::fs::write(directory.path().join("local-only.txt"), "not rendered\n")?;
+    let added = Command::new("git")
+        .args(["add", "local-only.txt"])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(added.success());
+    let committed = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Compass Test",
+            "-c",
+            "user.email=compass@example.com",
+            "commit",
+            "--quiet",
+            "-m",
+            "local metadata",
+        ])
+        .current_dir(directory.path())
+        .status()?;
+    assert!(committed.success());
+    let source_commit = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(directory.path())
+        .output()?;
+    assert!(source_commit.status.success());
+    let source_commit = String::from_utf8(source_commit.stdout)?.trim().to_owned();
+
+    let graph = directory.path().join("graph.json");
+    let html = directory.path().join("review.html");
+    std::fs::write(
+        &graph,
+        serde_json::to_vec(&json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {
+                "schema":"compass.graph/1",
+                "build":{"sourceCommit":source_commit}
+            },
+            "nodes": [{
+                "id":"caller",
+                "label":"caller",
+                "kind":"function",
+                "community":0,
+                "source_file":"src/lib.rs",
+                "line_start":1
+            }],
+            "links": []
+        }))?,
+    )?;
+    let output = support::compass_command()
+        .args([
+            "export",
+            "html",
+            "--graph",
+            graph.to_string_lossy().as_ref(),
+            "--output",
+            html.to_string_lossy().as_ref(),
+            "--code-graph",
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = std::fs::read_to_string(html)?;
+    assert!(document.contains("id=\"compass-source-navigation\""));
+    assert!(document.contains(&format!("\"revision\":\"{published_commit}\"")));
+    assert!(!document.contains(&format!("\"revision\":\"{source_commit}\"")));
     Ok(())
 }
 

@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- Prevent standalone HTML exports from publishing dead forge source links for
-  local-only graph commits. Immutable links now require the recorded commit to
-  be reachable from a local `origin` remote-tracking ref.
+- Keep standalone HTML source navigation usable and exact for local-only graph
+  commits. Exports use the recorded commit when it is published, or a
+  published common ancestor only after proving every rendered source path has
+  identical Git content; otherwise the viewer explains why no safe link is
+  available instead of silently ignoring the action.
 
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,

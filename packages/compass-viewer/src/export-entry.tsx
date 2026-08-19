@@ -29,7 +29,7 @@ function mount() {
         workbench={workbench.data}
         host={{
           openSource(source, revision) {
-            openExportSource(sourceNavigation, source, revision);
+            openStandaloneSource(sourceNavigation, source, revision);
           }
         }}
       />
@@ -56,7 +56,7 @@ function mount() {
         } : undefined}
         host={{
           openSource(source, revision) {
-            openExportSource(sourceNavigation, source, revision);
+            openStandaloneSource(sourceNavigation, source, revision);
           },
           openCommunity(communityId) {
             if (communityLoading !== null) return;
@@ -102,6 +102,30 @@ function parseSourceNavigation(): SourceNavigation | undefined {
   if (!element?.textContent) return undefined;
   const parsed = SourceNavigationSchema.safeParse(JSON.parse(element.textContent));
   return parsed.success ? parsed.data : undefined;
+}
+
+function openStandaloneSource(
+  navigation: SourceNavigation | undefined,
+  source: Parameters<typeof openExportSource>[1],
+  revision?: string
+): void {
+  const result = openExportSource(navigation, source, revision);
+  if (result.kind === "unavailable") showSourceUnavailable(source.file);
+}
+
+function showSourceUnavailable(file: string): void {
+  const existing = document.getElementById("compass-source-notice");
+  const notice = existing ?? document.createElement("div");
+  notice.id = "compass-source-notice";
+  notice.className = "compass-source-notice";
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "polite");
+  notice.textContent = [
+    "Source link unavailable.",
+    `The exported revision for ${file} is not published by the configured remote.`,
+    "Open this graph in VS Code to navigate to the local source."
+  ].join(" ");
+  if (!existing) document.body.append(notice);
 }
 
 if (document.readyState === "loading") {
