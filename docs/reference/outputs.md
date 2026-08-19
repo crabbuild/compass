@@ -333,11 +333,15 @@ file and highlights its recorded lines in the VS Code extension. A standalone
 HTML export instead opens an immutable forge permalink when all required
 evidence is available: the graph records a full source commit, the graph is
 inside a Git worktree with a recognized `origin`, and that origin is GitHub,
-GitLab, or Bitbucket. The recorded commit must also be reachable from a local
-`origin` remote-tracking ref, preventing a local-only object from becoming a
-dead forge URL. The link uses the graph's commit rather than a mutable branch;
-historical comparisons use the commit for the selected side. If any part of
-that evidence is absent or unsafe, the viewer does not invent a link.
+GitLab, or Bitbucket. Compass uses the recorded commit when it is reachable
+from a local `origin` remote-tracking ref. For a local-only commit, Compass may
+instead use an immutable published common ancestor, but only after a bounded
+Git comparison proves every source path represented by the graph has identical
+content at both commits. This preserves exact files and line anchors while
+avoiding dead forge URLs for local metadata-only commits. Historical
+comparisons use the commit for the selected side. If any evidence is absent,
+unsafe, or source content differs, the viewer does not invent a link and
+explains that the local source can be opened from the VS Code extension.
 No repository URL is added to `compass.viewer.workbench/1` or
 `workbench-json`; standalone HTML carries the optional presentation metadata
 separately.

@@ -46,6 +46,9 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource
   )).toEqual({ file: "src/lib.rs", startLine: 5, endLine: 7 });
+  await expect(page.getByText(
+    "Source link unavailable. The exported revision for src/lib.rs is not published by the configured remote. Open this graph in VS Code to navigate to the local source."
+  )).toBeVisible();
   expect(external).toEqual([]);
 });
 

@@ -28,7 +28,7 @@ mod store_commands;
 mod task_context_commands;
 mod upgrade_commands;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Write};
@@ -4235,8 +4235,24 @@ fn export_source_navigation(inputs: &ExportInputs, graph_path: &Path) -> Option<
     if remote.code != 0 {
         return None;
     }
-    let navigation = SourceNavigation::from_git_remote(remote.stdout.trim(), revision)?;
-    let remote_reachability = SystemRunner
+    let remote_revision = published_source_revision(
+        &SystemRunner,
+        root,
+        revision,
+        &inputs.document,
+        GIT_SOURCE_LINK_TIMEOUT,
+    )?;
+    SourceNavigation::from_git_remote(remote.stdout.trim(), &remote_revision)
+}
+
+fn published_source_revision(
+    runner: &dyn ProcessRunner,
+    root: &str,
+    revision: &str,
+    document: &compass_model::GraphDocument,
+    timeout: Duration,
+) -> Option<String> {
+    let remote_reachability = runner
         .run(
             "git",
             &[
@@ -4248,13 +4264,159 @@ fn export_source_navigation(inputs: &ExportInputs, graph_path: &Path) -> Option<
                 format!("--contains={revision}"),
                 "refs/remotes/origin".to_owned(),
             ],
-            GIT_SOURCE_LINK_TIMEOUT,
+            timeout,
         )
         .ok()?;
-    if remote_reachability.code != 0 || remote_reachability.stdout.trim().is_empty() {
+    if remote_reachability.code == 0 && !remote_reachability.stdout.trim().is_empty() {
+        return Some(revision.to_ascii_lowercase());
+    }
+
+    let source_files = rendered_source_files(document)?;
+    for remote_ref in [
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        "refs/remotes/origin/master",
+    ] {
+        let merge_base = runner
+            .run(
+                "git",
+                &[
+                    "-C".to_owned(),
+                    root.to_owned(),
+                    "merge-base".to_owned(),
+                    revision.to_owned(),
+                    remote_ref.to_owned(),
+                ],
+                timeout,
+            )
+            .ok()?;
+        if merge_base.code != 0 {
+            continue;
+        }
+        let candidate = merge_base.stdout.trim();
+        if !is_full_git_revision(candidate)
+            || !rendered_sources_match(runner, root, revision, candidate, &source_files, timeout)
+        {
+            continue;
+        }
+        return Some(candidate.to_ascii_lowercase());
+    }
+    None
+}
+
+fn rendered_source_files(document: &compass_model::GraphDocument) -> Option<Vec<String>> {
+    const MAX_RENDERED_SOURCE_FILES: usize = 4_096;
+    const MAX_SOURCE_METADATA_VALUES: usize = 1_000_000;
+    let mut files = BTreeSet::new();
+    let mut remaining_values = MAX_SOURCE_METADATA_VALUES;
+    for node in &document.nodes {
+        insert_rendered_source_file(&mut files, node.source_file(), MAX_RENDERED_SOURCE_FILES)?;
+        insert_rendered_source_file(
+            &mut files,
+            Some(&node.string("wiring_file")),
+            MAX_RENDERED_SOURCE_FILES,
+        )?;
+        collect_nested_source_files(
+            &node.attributes,
+            &mut files,
+            &mut remaining_values,
+            MAX_RENDERED_SOURCE_FILES,
+        )?;
+    }
+    for edge in &document.links {
+        insert_rendered_source_file(&mut files, edge.source_file(), MAX_RENDERED_SOURCE_FILES)?;
+        collect_nested_source_files(
+            &edge.attributes,
+            &mut files,
+            &mut remaining_values,
+            MAX_RENDERED_SOURCE_FILES,
+        )?;
+    }
+    (!files.is_empty()).then(|| files.into_iter().collect())
+}
+
+fn collect_nested_source_files(
+    value: &serde_json::Map<String, serde_json::Value>,
+    files: &mut BTreeSet<String>,
+    remaining_values: &mut usize,
+    max_source_files: usize,
+) -> Option<()> {
+    let mut pending = value.values().collect::<Vec<_>>();
+    while let Some(value) = pending.pop() {
+        *remaining_values = remaining_values.checked_sub(1)?;
+        match value {
+            serde_json::Value::Object(object) => {
+                for (key, value) in object {
+                    if key == "file" {
+                        insert_rendered_source_file(files, value.as_str(), max_source_files)?;
+                    }
+                    pending.push(value);
+                }
+            }
+            serde_json::Value::Array(values) => pending.extend(values),
+            _ => {}
+        }
+    }
+    Some(())
+}
+
+fn insert_rendered_source_file(
+    files: &mut BTreeSet<String>,
+    source_file: Option<&str>,
+    max_source_files: usize,
+) -> Option<()> {
+    let Some(source_file) = source_file.filter(|value| !value.is_empty()) else {
+        return Some(());
+    };
+    if source_file.len() > 4_096
+        || source_file.starts_with('/')
+        || source_file.starts_with('\\')
+        || source_file.contains('\0')
+    {
         return None;
     }
-    Some(navigation)
+    let normalized = source_file.replace('\\', "/");
+    if normalized
+        .split('/')
+        .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
+    {
+        return None;
+    }
+    if !files.contains(&normalized) && files.len() >= max_source_files {
+        return None;
+    }
+    files.insert(normalized);
+    Some(())
+}
+
+fn rendered_sources_match(
+    runner: &dyn ProcessRunner,
+    root: &str,
+    revision: &str,
+    candidate: &str,
+    source_files: &[String],
+    timeout: Duration,
+) -> bool {
+    const SOURCE_PATHS_PER_GIT_DIFF: usize = 128;
+    source_files.chunks(SOURCE_PATHS_PER_GIT_DIFF).all(|paths| {
+        let mut arguments = vec![
+            "-C".to_owned(),
+            root.to_owned(),
+            "diff".to_owned(),
+            "--quiet".to_owned(),
+            candidate.to_owned(),
+            revision.to_owned(),
+            "--".to_owned(),
+        ];
+        arguments.extend(paths.iter().map(|path| format!(":(literal){path}")));
+        runner
+            .run("git", &arguments, timeout)
+            .is_ok_and(|output| output.code == 0)
+    })
+}
+
+fn is_full_git_revision(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 #[allow(clippy::too_many_arguments)]
