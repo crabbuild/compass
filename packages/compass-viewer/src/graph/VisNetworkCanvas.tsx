@@ -28,6 +28,13 @@ import {
   GraphMinimap,
   type GraphMinimapSnapshot
 } from "./GraphMinimap";
+import {
+  edgeSemanticCategory,
+  nodeSemanticCategory,
+  nodeSemanticShape,
+  type EdgeSemanticCategory,
+  type NodeSemanticCategory
+} from "./semanticAppearance";
 
 export type GraphCanvasHandle = {
   fit(): void;
@@ -55,6 +62,7 @@ type Props = {
   isolatedEdgeIds?: ReadonlySet<string> | undefined;
   layoutSpacing?: GraphLayoutSpacing;
   showMinimap?: boolean;
+  semanticDetail?: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
@@ -73,12 +81,28 @@ type ComparisonColor = {
 };
 
 type ComparisonPalette = Record<GraphChangeType, ComparisonColor>;
+type SemanticNodePalette = Record<NodeSemanticCategory, ComparisonColor>;
+type SemanticEdgePalette = Record<EdgeSemanticCategory, string>;
 
 const fallbackComparisonPalette: ComparisonPalette = {
   added: { background: "#163d24", border: "#56d364" },
   removed: { background: "#4b1f24", border: "#ff7b72" },
   changed: { background: "#3d3015", border: "#d7a72b" },
   unchanged: { background: "#29313b", border: "#8b949e" }
+};
+const fallbackSemanticNodePalette: SemanticNodePalette = {
+  callable: { background: "#193652", border: "#5fa8ff" },
+  type: { background: "#3d341b", border: "#e3b341" },
+  module: { background: "#193b38", border: "#56d4b4" },
+  boundary: { background: "#432b29", border: "#ff9b87" },
+  other: { background: "#29313b", border: "#8b949e" }
+};
+const fallbackSemanticEdgePalette: SemanticEdgePalette = {
+  execution: "#5fa8ff",
+  dependency: "#56d4b4",
+  structure: "#e3b341",
+  flow: "#ff9b87",
+  other: "#60728b"
 };
 const STATIC_VISIBLE_LABEL_LIMIT = 200;
 const MINIMAP_POSITION_LIMIT = 1_500;
@@ -233,20 +257,27 @@ export function graphNodeColor(
   node: GraphNode,
   contrastBorder?: string,
   comparisonPalette?: ComparisonPalette,
-  communityColors?: ReadonlyMap<number, string>
+  communityColors?: ReadonlyMap<number, string>,
+  semanticPalette?: SemanticNodePalette
 ) {
   const comparisonColor = node.change && comparisonPalette
     ? comparisonPalette[node.change]
     : undefined;
+  const semanticColor = semanticPalette?.[nodeSemanticCategory(node.kind)];
   const background = comparisonColor
     ? comparisonColor.background
-    : node.color?.background
+    : semanticColor?.background
+    ?? node.color?.background
     ?? communityColors?.get(node.community)
     ?? model.communities.find((candidate) => candidate.id === node.community)?.color
     ?? "#6688aa";
   return {
     background,
-    border: contrastBorder ?? comparisonColor?.border ?? node.color?.border ?? background
+    border: contrastBorder
+      ?? comparisonColor?.border
+      ?? semanticColor?.border
+      ?? node.color?.border
+      ?? background
   };
 }
 
@@ -411,6 +442,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     isolatedEdgeIds,
     layoutSpacing = 1,
     showMinimap = false,
+    semanticDetail = false,
     hiddenCommunities,
     hiddenChanges,
     onFocus,
@@ -566,6 +598,34 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         )
       };
     }, [themeRevision]);
+    const semanticNodePalette = useMemo<SemanticNodePalette>(() => {
+      const background = cssColor(
+        "--vscode-editor-background",
+        cssColor("--background", "#08111f")
+      );
+      const dark = isDarkColor(background);
+      const semanticColor = (name: string, darkFallback: string, lightFallback: string) =>
+        comparisonColor(background, cssColor(name, dark ? darkFallback : lightFallback), dark);
+      return {
+        callable: semanticColor("--vscode-symbolIcon-functionForeground", "#5fa8ff", "#0969da"),
+        type: semanticColor("--vscode-symbolIcon-classForeground", "#e3b341", "#9a6700"),
+        module: semanticColor("--vscode-symbolIcon-moduleForeground", "#56d4b4", "#168b76"),
+        boundary: semanticColor("--vscode-symbolIcon-eventForeground", "#ff9b87", "#cf4c35"),
+        other: comparisonColor(
+          background,
+          cssColor("--vscode-descriptionForeground", dark ? "#8b949e" : "#656d76"),
+          dark,
+          true
+        )
+      };
+    }, [themeRevision]);
+    const semanticEdgePalette = useMemo<SemanticEdgePalette>(() => ({
+      execution: cssColor("--vscode-symbolIcon-functionForeground", "#5fa8ff"),
+      dependency: cssColor("--vscode-symbolIcon-moduleForeground", "#56d4b4"),
+      structure: cssColor("--vscode-symbolIcon-classForeground", "#e3b341"),
+      flow: cssColor("--vscode-symbolIcon-eventForeground", "#ff9b87"),
+      other: edgeColor
+    }), [edgeColor, themeRevision]);
     const comparisonMode = useMemo(
       () => model.nodes.some((node) => node.change !== undefined)
         || model.edges.some((edge) => edge.change !== undefined),
@@ -642,8 +702,12 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             node,
             undefined,
             fallbackComparisonPalette,
-            communityColors
+            communityColors,
+            semanticDetail ? fallbackSemanticNodePalette : undefined
           ),
+          shape: semanticDetail
+            ? nodeSemanticShape(nodeSemanticCategory(node.kind))
+            : "dot",
           size,
           ...(spacedPosition ?? {}),
           opacity: node.change === "unchanged" ? 0.58 : 1,
@@ -670,6 +734,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       maxDegree,
       model,
       renderingProfile,
+      semanticDetail,
       selectedLayoutPositions,
       staticPositions
     ]);
@@ -678,7 +743,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         const appearance = comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
-          "#60728b",
+          semanticDetail
+            ? fallbackSemanticEdgePalette[edgeSemanticCategory(edge.relation)]
+            : "#60728b",
           fallbackComparisonPalette
         );
         return {
@@ -693,7 +760,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
-    ), [comparisonMode, renderedEdges, renderingProfile]);
+    ), [comparisonMode, renderedEdges, renderingProfile, semanticDetail]);
     useEffect(() => {
       const container = containerRef.current;
       if (!container) return;
@@ -852,16 +919,19 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             node,
             contrastBorder,
             comparisonPalette,
-            communityColors
+            communityColors,
+            semanticDetail ? semanticNodePalette : undefined
           ),
           shadow: isFocused
             ? {
                 enabled: true,
                 color: node.change
                   ? comparisonPalette[node.change].border
-                  : node.color?.background
-                    ?? communityColors.get(node.community)
-                    ?? "#76b7ff",
+                  : semanticDetail
+                    ? semanticNodePalette[nodeSemanticCategory(node.kind)].border
+                    : node.color?.background
+                      ?? communityColors.get(node.community)
+                      ?? "#76b7ff",
                 size: 24,
                 x: 0,
                 y: 0
@@ -873,7 +943,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         const appearance = comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
-          edgeColor,
+          semanticDetail
+            ? semanticEdgePalette[edgeSemanticCategory(edge.relation)]
+            : edgeColor,
           comparisonPalette
         );
         const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
@@ -914,7 +986,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       focusedNodeId,
       model,
       nodeData,
-      renderedEdges
+      renderedEdges,
+      semanticDetail,
+      semanticEdgePalette,
+      semanticNodePalette
     ]);
 
     useEffect(() => {
@@ -1040,6 +1115,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             visibleNodeIds={visibleNodeIds}
             visibleEdgeIds={visibleEdgeIds}
             focusedNodeId={focusedNodeId}
+            semanticDetail={semanticDetail}
             onNavigate={(position) => networkRef.current?.moveTo({
               position,
               animation: cameraAnimation(180)

@@ -197,8 +197,14 @@ export default async function generate(): Promise<void> {
     ...graph,
     title: "Core detail",
     stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
-    nodes: graph.nodes.slice(0, 2),
-    edges: graph.edges.slice(0, 1),
+    nodes: [graph.nodes[0]!, { ...graph.nodes[3]!, community: 0 }],
+    edges: [{
+      id: "detail-edge",
+      source: "run",
+      target: "store",
+      relation: "uses",
+      confidence: "extracted"
+    }],
     communities: graph.communities.slice(0, 1)
   };
   await writeFile(

@@ -14,6 +14,7 @@ import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { GraphInspector } from "./GraphInspector";
 import { GraphTransitionScreen } from "./GraphTransitionScreen";
 import { GraphToolbar } from "./GraphToolbar";
+import { GraphSemanticLegend } from "./GraphSemanticLegend";
 import { InspectorResizeHandle } from "./InspectorResizeHandle";
 import {
   normalizeInspectorLayout,
@@ -475,6 +476,7 @@ function CompassGraphView({
               : undefined}
             layoutSpacing={state.layoutSpacing}
             showMinimap={state.showMinimap}
+            semanticDetail={detailCommunityId !== undefined && !comparisonMode}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
@@ -583,6 +585,9 @@ function CompassGraphView({
                 })}
             </div>
           )}
+          {detailCommunityId !== undefined && !comparisonMode ? (
+            <GraphSemanticLegend model={model} />
+          ) : null}
           {communityError && (
             <div
               className="absolute bottom-4 left-4 z-20 max-w-md rounded-md border border-destructive/50 bg-background/95 px-3 py-2 text-sm text-destructive shadow-lg"

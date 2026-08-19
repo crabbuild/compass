@@ -22,8 +22,8 @@ const model: GraphViewModel = {
   title: "Minimap fixture",
   stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
   nodes: [
-    { id: "a", label: "A", community: 0 },
-    { id: "b", label: "B", community: 0 }
+    { id: "a", label: "A", community: 0, kind: "function" },
+    { id: "b", label: "B", community: 0, kind: "class" }
   ],
   edges: [{ id: "a-b", source: "a", target: "b", relation: "calls" }],
   communities: [{ id: 0, label: "Core", color: "#4e79a7", hidden: false }],
@@ -67,5 +67,17 @@ describe("GraphMinimap", () => {
     expect(onNavigate).toHaveBeenCalledOnce();
     expect(minimap.querySelectorAll("circle")).toHaveLength(2);
     expect(minimap.querySelectorAll("line")).toHaveLength(1);
+  });
+
+  it("mirrors semantic node categories in a community detail minimap", () => {
+    const { container } = render(<GraphMinimap
+      model={model}
+      snapshot={snapshot}
+      focusedNodeId={null}
+      semanticDetail
+      onNavigate={vi.fn()}
+    />);
+    expect(container.querySelector('[data-node-category="callable"]')).toBeTruthy();
+    expect(container.querySelector('[data-node-category="type"]')).toBeTruthy();
   });
 });

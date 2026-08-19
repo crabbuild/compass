@@ -259,6 +259,11 @@ test("community double-click enters lazy detail, source opens, and Back restores
     () => (window as typeof window & { openedCommunity?: number }).openedCommunity
   )).toBe(0);
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
+  const visualLegend = page.getByRole("complementary", { name: "Graph visual legend" });
+  await expect(visualLegend).toBeVisible();
+  await expect(visualLegend.getByText("Callable")).toBeVisible();
+  await expect(visualLegend.getByText("Type")).toBeVisible();
+  await expect(visualLegend.getByText("Dependency")).toBeVisible();
 
   const runLayout = page.getByRole("button", { name: "Run layout" });
   await expect(runLayout).toBeVisible();
@@ -323,6 +328,7 @@ test("self-contained HTML export double-clicks from community overview into exac
   )).toEqual({ communityId: 0 });
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
   await expect(page.locator(".compass-graph-stats")).toContainText("2 nodes");
+  await expect(page.getByRole("complementary", { name: "Graph visual legend" })).toBeVisible();
 
   await page.getByRole("button", { name: "Back to community overview" }).click();
   await expect(page.getByRole("heading", { name: "Communities" })).toBeVisible();
