@@ -58,6 +58,28 @@
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
 
+## 0.3.16 - 2026-08-18
+
+- Refactor universal evidence around explicit producer and pipeline lifecycles,
+  with typed `Qualifying`/`Qualified` states, renamed envelope fields, and
+  versioned schema/extraction semantics that rebuild pre-refactor caches safely.
+
+- Hard-cut Ruby production extraction onto the version-1 universal evidence
+  pipeline with a Rails universal pack, exact ownership and member resolution,
+  bounded qualification, and fail-closed handling for dynamic dispatch, load,
+  and eval forms.
+
+- Publish bounded, typed graph blind-spot evidence in reports, orientation,
+  MCP, and history comparisons, retaining witnesses, multiplicity, omission
+  counts, and explicit limits instead of inferring missing relationships.
+
+- Preserve PHP closures and arrow functions as callable nodes, publish exact
+  trait composition as `mixes_in`, and canonicalize portable file identities
+  before graph coalescing so sparse evidence cannot collide.
+
+- Harden CLI help and export contracts and improve pull-request review
+  readability with clearer bounded reports and contract coverage.
+
 ## 0.3.15 - 2026-08-15
 
 - Hard-cut Kotlin onto the version-1 universal evidence adapter with bounded
