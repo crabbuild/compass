@@ -2187,6 +2187,145 @@ button:not(:disabled),
   font: 9px/1 var(--compass-font-mono);
 }
 
+.compass-semantic-legend {
+  position: absolute;
+  z-index: 4;
+  top: 64px;
+  left: 12px;
+  display: flex;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  padding: 7px 8px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.compass-semantic-legend section {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+}
+
+.compass-semantic-legend section + section {
+  padding-left: 12px;
+  border-left: 1px solid var(--compass-line);
+}
+
+.compass-semantic-legend strong {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compass-semantic-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.compass-semantic-legend-item small {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.compass-semantic-legend-item i[data-node-category] {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--vscode-descriptionForeground, #8b949e);
+  background: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #8b949e) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+}
+
+.compass-semantic-legend-item i[data-node-category="callable"] {
+  border-color: var(--vscode-symbolIcon-functionForeground, #5fa8ff);
+  border-radius: 50%;
+  background: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-functionForeground, #5fa8ff) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+}
+
+.compass-semantic-legend-item i[data-node-category="type"] {
+  border-color: var(--vscode-symbolIcon-classForeground, #e3b341);
+  background: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-classForeground, #e3b341) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+  transform: rotate(45deg) scale(0.82);
+}
+
+.compass-semantic-legend-item i[data-node-category="module"] {
+  border-color: var(--vscode-symbolIcon-moduleForeground, #56d4b4);
+  border-radius: 1px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-moduleForeground, #56d4b4) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+}
+
+.compass-semantic-legend-item i[data-node-category="boundary"] {
+  width: 11px;
+  height: 10px;
+  border: 0;
+  background: var(--vscode-symbolIcon-eventForeground, #ff9b87);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.compass-semantic-legend-item i[data-edge-category] {
+  position: relative;
+  display: inline-block;
+  width: 16px;
+  height: 2px;
+  background: var(--vscode-descriptionForeground, #8b949e);
+}
+
+.compass-semantic-legend-item i[data-edge-category]::after {
+  position: absolute;
+  top: -2px;
+  right: -1px;
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+  content: "";
+}
+
+.compass-semantic-legend-item i[data-edge-category="execution"] {
+  background: var(--vscode-symbolIcon-functionForeground, #5fa8ff);
+  color: var(--vscode-symbolIcon-functionForeground, #5fa8ff);
+}
+
+.compass-semantic-legend-item i[data-edge-category="dependency"] {
+  background: var(--vscode-symbolIcon-moduleForeground, #56d4b4);
+  color: var(--vscode-symbolIcon-moduleForeground, #56d4b4);
+}
+
+.compass-semantic-legend-item i[data-edge-category="structure"] {
+  background: var(--vscode-symbolIcon-classForeground, #e3b341);
+  color: var(--vscode-symbolIcon-classForeground, #e3b341);
+}
+
+.compass-semantic-legend-item i[data-edge-category="flow"] {
+  background: var(--vscode-symbolIcon-eventForeground, #ff9b87);
+  color: var(--vscode-symbolIcon-eventForeground, #ff9b87);
+}
+
 .compass-inspector-resizer {
   position: relative;
   z-index: 6;
@@ -5524,6 +5663,8 @@ body.vscode-high-contrast-light .history-comparison-control select {
 
 body.vscode-high-contrast .compass-change-legend,
 body.vscode-high-contrast-light .compass-change-legend,
+body.vscode-high-contrast .compass-semantic-legend,
+body.vscode-high-contrast-light .compass-semantic-legend,
 body.vscode-high-contrast .compass-change-badge,
 body.vscode-high-contrast-light .compass-change-badge {
   border-color: var(--vscode-contrastBorder, var(--ring));

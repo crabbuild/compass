@@ -46,6 +46,21 @@ describe("graphNodeColor", () => {
     });
   });
 
+  it("uses the semantic detail palette ahead of the export community color", () => {
+    const semanticPalette = {
+      callable: { background: "#112233", border: "#5fa8ff" },
+      type: { background: "#332211", border: "#e3b341" },
+      module: { background: "#113322", border: "#56d4b4" },
+      boundary: { background: "#331111", border: "#ff9b87" },
+      other: { background: "#222222", border: "#8b949e" }
+    };
+    expect(graphNodeColor(model, { ...node, kind: "function" }, undefined, undefined, undefined,
+      semanticPalette)).toEqual({
+      background: "#112233",
+      border: "#5fa8ff"
+    });
+  });
+
   it("derives relationship labels for rich hover content", () => {
     const edge = {
       id: "run-helper",

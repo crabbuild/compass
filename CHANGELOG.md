@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make community detail graphs easier to scan in both exported HTML and VS
+  Code by grouping node kinds into accessible color-and-shape families,
+  coloring edges by relationship purpose while retaining confidence strokes,
+  and showing a compact legend for the categories present in the subgraph.
+
 - Refactor universal language metadata around `UniversalEvidenceProducer` and
   `UniversalEvidencePipeline`. `UniversalCandidate`/`UniversalComplete` are
   now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized

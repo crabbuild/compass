@@ -94,8 +94,8 @@ const model: GraphViewModel = {
   title: "Fixture",
   stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
   nodes: [
-    { id: "caller", label: "caller", community: 0 },
-    { id: "callee", label: "callee", community: 0 }
+    { id: "caller", label: "caller", community: 0, kind: "function" },
+    { id: "callee", label: "callee", community: 0, kind: "class" }
   ],
   edges: [{
     id: "caller-callee",
@@ -152,6 +152,32 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     />);
 
     expect(mock.dataSets[1]?.[0]).not.toHaveProperty("title");
+  });
+
+  it("uses semantic node shapes and relationship colors in community detail", () => {
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      semanticDetail
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    expect(mock.dataSets[0]?.map((node) => [node.id, node.shape])).toEqual([
+      ["caller", "dot"],
+      ["callee", "diamond"]
+    ]);
+    expect(mock.dataSets[1]?.[0]?.color).toEqual({ color: "#5fa8ff", opacity: 0.35 });
   });
 
   it("clears transient hover when the pointer leaves the graph region", () => {
