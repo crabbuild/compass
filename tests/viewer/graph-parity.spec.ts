@@ -49,6 +49,22 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   expect(external).toEqual([]);
 });
 
+test("HTML export graph stays still once it becomes interactive", async ({ page }) => {
+  await page.goto("/graph.html");
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeVisible();
+  const canvas = page.locator(".compass-canvas canvas").first();
+
+  await page.waitForTimeout(100);
+  const firstInteractiveFrame = await canvas.evaluate(
+    (element: HTMLCanvasElement) => element.toDataURL()
+  );
+  await page.waitForTimeout(250);
+
+  await expect(canvas.evaluate(
+    (element: HTMLCanvasElement) => element.toDataURL()
+  )).resolves.toBe(firstInteractiveFrame);
+});
+
 test("file-only graph nodes stay inspectable without source navigation", async ({ page }) => {
   await page.goto("/graph.html");
   await page.evaluate(() => {
@@ -264,6 +280,18 @@ test("community double-click enters lazy detail, source opens, and Back restores
   await search.fill("run");
   await page.getByRole("option", { name: /^run/i }).click();
   await page.waitForTimeout(300);
+  await runLayout.click();
+  await expect(page.getByRole("button", { name: "Stop layout" })).toBeVisible();
+  await graphCanvas.hover();
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeVisible();
+  await page.waitForTimeout(100);
+  const interactionFrame = await graphCanvas.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.toDataURL()
+  );
+  await page.waitForTimeout(250);
+  await expect(graphCanvas.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.toDataURL()
+  )).resolves.toBe(interactionFrame);
   await page.locator("canvas").dblclick();
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource

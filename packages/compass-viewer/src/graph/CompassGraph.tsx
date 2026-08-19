@@ -315,6 +315,11 @@ function CompassGraphView({
     setEdgeHover(null);
     dispatch({ type: "focus", nodeId });
   }, []);
+  const pauseForInteraction = useCallback(() => {
+    if (state.physicsRunning) {
+      dispatch({ type: "setPhysics", running: false });
+    }
+  }, [state.physicsRunning]);
   const clear = useCallback(() => {
     setHover(null);
     setEdgeHover(null);
@@ -475,6 +480,7 @@ function CompassGraphView({
             onFocus={focus}
             onOpenSource={activateNode}
             onOpenRelationshipSource={activateRelationship}
+            onInteractionStart={pauseForInteraction}
             onHover={setHover}
             onHoverEdge={setEdgeHover}
             onClear={clear}

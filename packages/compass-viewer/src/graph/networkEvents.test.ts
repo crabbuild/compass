@@ -16,6 +16,7 @@ function fixture() {
     onFocus: vi.fn(),
     onOpenSource: vi.fn(),
     onOpenRelationshipSource: vi.fn(),
+    onInteractionStart: vi.fn(),
     onHover: vi.fn(),
     onHoverEdge: vi.fn(),
     onClear: vi.fn()
@@ -105,6 +106,7 @@ describe("bindGraphNetworkEvents", () => {
 
     expect(handlers.onHover).toHaveBeenCalledWith(null);
     expect(handlers.onHoverEdge).toHaveBeenCalledWith(null);
+    expect(handlers.onInteractionStart).toHaveBeenCalledTimes(1);
   });
 
   it("clears an edge card before showing a node card", () => {
@@ -116,5 +118,6 @@ describe("bindGraphNetworkEvents", () => {
 
     expect(handlers.onHoverEdge).toHaveBeenCalledWith(null);
     expect(handlers.onHover).toHaveBeenCalledWith({ nodeId: "run", x: 10, y: 20 });
+    expect(handlers.onInteractionStart).toHaveBeenCalledTimes(1);
   });
 });

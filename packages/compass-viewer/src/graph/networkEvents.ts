@@ -18,6 +18,7 @@ export type GraphNetworkHandlers = {
   onFocus(nodeId: string): void;
   onOpenSource(nodeId: string): void;
   onOpenRelationshipSource(edgeId: string): void;
+  onInteractionStart(): void;
   onHover(change: GraphHover | null): void;
   onHoverEdge(change: GraphEdgeHover | null): void;
   onClear(): void;
@@ -48,6 +49,7 @@ export function bindGraphNetworkEvents(
   });
   network.on("hoverNode", (parameters) => {
     if (parameters.node === undefined) return;
+    handlers.onInteractionStart();
     handlers.onHoverEdge(null);
     handlers.onHover({
       nodeId: String(parameters.node),
@@ -68,6 +70,7 @@ export function bindGraphNetworkEvents(
   });
   network.on("blurEdge", () => handlers.onHoverEdge(null));
   network.on("dragStart", () => {
+    handlers.onInteractionStart();
     handlers.onHover(null);
     handlers.onHoverEdge(null);
   });
