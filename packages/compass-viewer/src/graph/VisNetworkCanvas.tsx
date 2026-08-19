@@ -60,6 +60,7 @@ type Props = {
   onFocus(nodeId: string): void;
   onOpenSource(nodeId: string): void;
   onOpenRelationshipSource(edgeId: string): void;
+  onInteractionStart?(): void;
   onHover(change: GraphHover | null): void;
   onHoverEdge(change: GraphEdgeHover | null): void;
   onClear(): void;
@@ -415,6 +416,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     onFocus,
     onOpenSource,
     onOpenRelationshipSource,
+    onInteractionStart = () => undefined,
     onHover,
     onHoverEdge,
     onClear,
@@ -430,6 +432,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFocus,
       onOpenSource,
       onOpenRelationshipSource,
+      onInteractionStart,
       onHover,
       onHoverEdge,
       onClear
@@ -438,6 +441,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       onFocus,
       onOpenSource,
       onOpenRelationshipSource,
+      onInteractionStart,
       onHover,
       onHoverEdge,
       onClear
@@ -707,11 +711,19 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         onFocus: (nodeId) => eventHandlersRef.current.onFocus(nodeId),
         onOpenSource: (nodeId) => eventHandlersRef.current.onOpenSource(nodeId),
         onOpenRelationshipSource: (edgeId) => eventHandlersRef.current.onOpenRelationshipSource(edgeId),
+        onInteractionStart: () => {
+          if (physicsRunningRef.current) network.stopSimulation();
+          eventHandlersRef.current.onInteractionStart();
+        },
         onHover: (change) => eventHandlersRef.current.onHover(change),
         onHoverEdge: (change) => eventHandlersRef.current.onHoverEdge(change),
         onClear: () => eventHandlersRef.current.onClear()
       });
       network.on("stabilizationIterationsDone", () => {
+        // vis-network can continue its dynamic phase after the configured
+        // stabilization iterations. Freeze synchronously before React removes
+        // the loading screen so the first interactive frame cannot drift.
+        network.stopSimulation();
         initialViewRef.current = {
           position: network.getViewPosition(),
           scale: network.getScale()

@@ -306,6 +306,35 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     expect(onStabilized).toHaveBeenCalledTimes(2);
   });
 
+  it("stops layout motion before publishing the stabilized canvas", () => {
+    const onStabilized = vi.fn();
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={true}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onInteractionStart={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={onStabilized}
+    />);
+
+    const stopsBeforeStabilizing = mock.simulationStops;
+    for (const handler of [...mock.eventHandlers.get("stabilizationIterationsDone") ?? []]) {
+      handler();
+    }
+
+    expect(mock.simulationStops).toBeGreaterThan(stopsBeforeStabilizing);
+    expect(onStabilized).toHaveBeenCalledTimes(1);
+  });
+
   it("scales the reheat so motion stays visible when a large graph is fit", () => {
     const callbacks = {
       onFocus: vi.fn(),

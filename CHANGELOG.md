@@ -279,7 +279,10 @@
   labels. Add bounded 1–4-hop selection isolation with incoming/outgoing edge
   filtering, layout spacing, a navigable minimap, and discoverable keyboard
   shortcuts. Resuming a settled nested community graph now reheats its layout
-  so pause/resume produces visible physics movement. Consolidate workbench
+  so pause/resume produces visible physics movement. Freeze the force layout
+  before the canvas becomes interactive and automatically pause it when a user
+  hovers a node or starts dragging, keeping click targets stable in both HTML
+  exports and VS Code. Consolidate workbench
   filters into the top graph-control rail, allow neighborhood settings to be
   prepared before selection, keep filters scoped to the visible overview or
   community detail, fit newly isolated neighborhoods, and scale layout reheating
