@@ -33,6 +33,32 @@ export function buildExplainArgs(options: {
   ];
 }
 
+export function buildCompletionArgs(options: {
+  term: string;
+} & GraphSelection): string[] {
+  return [
+    "search",
+    options.term,
+    "--max-depth",
+    "1",
+    "--max-nodes",
+    "8",
+    "--max-edges",
+    "1",
+    "--max-paths",
+    "1",
+    "--max-candidates",
+    "8",
+    "--max-source-bytes",
+    "1",
+    "--max-response-bytes",
+    "1048576",
+    ...graphSelection(options),
+    "--format",
+    "json"
+  ];
+}
+
 export function buildCqlArgs(options: {
   query: string;
   params: Record<string, string>;

@@ -784,6 +784,7 @@ function queryHarness(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass query fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.queryHostMessages=[];
 window.queryTimers=new Map();
+window.queryCompletionTimers=new Map();
 const queryLimits={
   maxDepth:8,maxNodes:500,maxEdges:1000,maxPaths:100,maxCandidates:20,
   maxSourceBytes:1048576,maxResponseBytes:8388608
@@ -810,6 +811,38 @@ const typedQueryResult=(diagnostic=false)=>({
 });
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.queryHostMessages.push(message);
+  if(message.type==="complete") {
+    const params=new URLSearchParams(window.location.search);
+    const requestId=message.request.id;
+    const timer=setTimeout(()=>{
+      window.queryCompletionTimers.delete(requestId);
+      if(params.has("completionError")) {
+        window.postMessage({
+          type:"completionError",requestId,message:"Fixture graph search failed"
+        },"*");
+        return;
+      }
+      const term=message.request.term.toLocaleLowerCase();
+      const matches=[queryNode.name,queryNode.qualifiedName,queryNode.id]
+        .some(value=>value.toLocaleLowerCase().includes(term));
+      window.postMessage({
+        type:"completions",requestId,
+        items:matches?[{
+          nodeId:queryNode.id,label:queryNode.qualifiedName,
+          insertText:queryNode.qualifiedName,
+          detail:"function · caching/util/src/Pipeline.scala:154"
+        }]:[]
+      },"*");
+    },params.has("completionDelay")?800:20);
+    window.queryCompletionTimers.set(requestId,timer);
+    return;
+  }
+  if(message.type==="cancelCompletion") {
+    clearTimeout(window.queryCompletionTimers.get(message.requestId));
+    window.queryCompletionTimers.delete(message.requestId);
+    window.postMessage({type:"completionCancelled",requestId:message.requestId},"*");
+    return;
+  }
   if(message.type==="openSource") {
     window.openedQuerySource=message.source;
     return;

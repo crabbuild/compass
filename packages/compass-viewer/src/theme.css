@@ -3970,12 +3970,24 @@ body.vscode-high-contrast-light .compass-load-logo {
   gap: 8px;
   padding: 7px 12px 8px;
   border: 0;
-  border-top: 2px solid transparent;
+  border-top: 0;
   border-radius: 0;
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
   text-align: left;
+}
+
+.query-mode-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--query-accent);
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--query-accent) 35%, transparent);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .query-mode button:hover {
@@ -3984,12 +3996,15 @@ body.vscode-high-contrast-light .compass-load-logo {
 }
 
 .query-mode button[aria-selected="true"] {
-  border-top-color: var(--vscode-tab-activeBorder, var(--query-accent));
   background: var(--vscode-tab-activeBackground, var(--query-surface-raised));
   box-shadow:
     inset 1px 0 var(--query-border),
     inset -1px 0 var(--query-border);
   color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.query-mode button[aria-selected="true"] .query-mode-indicator {
+  opacity: 1;
 }
 
 .query-mode button[aria-selected="true"] svg,
@@ -4086,6 +4101,99 @@ body.vscode-high-contrast-light .compass-load-logo {
 .query-editor textarea::placeholder,
 .query-params input::placeholder {
   color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.query-suggestions {
+  display: grid;
+  max-height: 210px;
+  overflow-y: auto;
+  border-top: 1px solid var(--query-border);
+  background: var(--vscode-editorSuggestWidget-background, var(--query-surface-raised));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--foreground));
+}
+
+.query-suggestions-label,
+.query-suggestions-hint {
+  padding: 6px 10px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.2 var(--compass-font-sans);
+}
+
+.query-suggestions-label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.query-suggestions-hint {
+  border-top: 1px solid var(--query-border);
+  text-align: right;
+}
+
+.query-suggestions button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.query-suggestions button[aria-selected="true"],
+.query-suggestions button:hover {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--accent));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--foreground));
+}
+
+.query-suggestions button > span {
+  overflow: hidden;
+  font: 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-suggestions button > small {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.query-completion-status {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 7px;
+  padding-inline: 10px;
+  border-top: 1px solid var(--query-border);
+  background: var(--vscode-editorSuggestWidget-background, var(--query-surface-raised));
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.query-completion-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.query-completion-status button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--vscode-button-border, var(--query-border));
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: inherit;
+}
+
+.query-completion-status button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
 }
 
 .query-params input:focus-visible {
@@ -4862,7 +4970,11 @@ body.vscode-high-contrast-light .query-explanation-card,
 body.vscode-high-contrast .query-connections,
 body.vscode-high-contrast-light .query-connections,
 body.vscode-high-contrast .query-object-result,
-body.vscode-high-contrast-light .query-object-result {
+body.vscode-high-contrast-light .query-object-result,
+body.vscode-high-contrast .query-suggestions,
+body.vscode-high-contrast-light .query-suggestions,
+body.vscode-high-contrast .query-completion-status,
+body.vscode-high-contrast-light .query-completion-status {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
@@ -6030,6 +6142,16 @@ body.vscode-high-contrast-light .compass-change-badge {
   }
 
   .query-mode small {
+    display: none;
+  }
+
+  .query-suggestions button {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .query-suggestions button > small,
+  .query-suggestions-hint {
     display: none;
   }
 
@@ -8171,6 +8293,7 @@ body.vscode-high-contrast-light .architecture-map-panel {
 }
 
 .call-guide-lookup {
+  position: relative;
   max-width: 620px;
   margin-top: 26px;
 }
@@ -8262,6 +8385,115 @@ body.vscode-high-contrast-light .architecture-map-panel {
 .call-guide-lookup-row > button svg {
   width: 13px;
   height: 13px;
+}
+
+.call-guide-suggestions {
+  display: grid;
+  max-height: 230px;
+  margin-top: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border, var(--border)));
+  border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, var(--card));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--foreground));
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 16%, transparent);
+}
+
+.call-guide-suggestions-label,
+.call-guide-suggestions-hint {
+  padding-block: 6px;
+  padding-inline: 10px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.25 var(--compass-font-mono);
+}
+
+.call-guide-suggestions-label {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.call-guide-suggestions-hint {
+  border-top: 1px solid var(--vscode-editorSuggestWidget-border, var(--border));
+  text-align: end;
+}
+
+.call-guide-suggestions > button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding-block: 8px;
+  padding-inline: 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+
+.call-guide-suggestions > button:hover,
+.call-guide-suggestions > button[aria-selected="true"] {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--accent));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--foreground));
+}
+
+.call-guide-suggestions > button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -2px;
+}
+
+.call-guide-suggestions > button > span {
+  min-width: 0;
+  overflow: hidden;
+  font: 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-guide-suggestions > button > small {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-guide-completion-status {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding-block: 7px;
+  padding-inline: 10px;
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border, var(--border)));
+  border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, var(--card));
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.call-guide-completion-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.call-guide-completion-status > button {
+  flex: 0 0 auto;
+  padding-block: 3px;
+  padding-inline: 7px;
+  border: 1px solid var(--vscode-button-border, var(--border));
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: inherit;
+}
+
+.call-guide-completion-status > button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
 }
 
 .call-guide-lookup-directions {
@@ -8877,7 +9109,11 @@ body.vscode-high-contrast-light .call-guide-action {
 }
 
 body.vscode-high-contrast .call-guide-lookup-row,
-body.vscode-high-contrast-light .call-guide-lookup-row {
+body.vscode-high-contrast-light .call-guide-lookup-row,
+body.vscode-high-contrast .call-guide-suggestions,
+body.vscode-high-contrast-light .call-guide-suggestions,
+body.vscode-high-contrast .call-guide-completion-status,
+body.vscode-high-contrast-light .call-guide-completion-status {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
@@ -8960,6 +9196,15 @@ body.vscode-high-contrast-light .call-guide-lookup-row {
   .call-guide-lookup-directions > span {
     width: 100%;
     margin: 5px 0 0;
+  }
+
+  .call-guide-suggestions > button {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .call-guide-suggestions > button > small {
+    white-space: normal;
   }
 
   .call-guide-route-stage {

@@ -768,6 +768,43 @@ fn explain_requires_an_exact_id_for_ambiguous_typed_nodes() -> Result<(), Box<dy
 }
 
 #[test]
+fn explain_resolves_a_unique_qualified_name_from_the_traversal_projection()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    let node_id = format!("sha256:{}", "c".repeat(64));
+    std::fs::write(
+        &graph,
+        format!(
+            r#"{{
+                "directed": true, "multigraph": true, "nodes": [
+                    {{"id":"{node_id}","kind":"function","name":"start()","qualifiedName":"cmd/daemon.start","source":{{"file":"cmd/daemon/start.go","startLine":12,"startColumn":1,"endLine":18,"endColumn":2}}}}
+                ], "links": []
+            }}"#
+        ),
+    )?;
+
+    let explained = run(
+        Frontend::Compass,
+        [
+            OsString::from("explain"),
+            OsString::from("cmd/daemon.start"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+        ],
+    );
+
+    assert_eq!(explained.code, 0, "{}", explained.stderr);
+    assert!(explained.stdout.contains(&node_id));
+    assert!(
+        explained
+            .stdout
+            .contains("Source:    cmd/daemon/start.go L12:1-L18:2")
+    );
+    Ok(())
+}
+
+#[test]
 fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

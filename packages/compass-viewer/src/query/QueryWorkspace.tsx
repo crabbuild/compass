@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -21,6 +21,7 @@ export type QueryCommand = "ask" | "explain" | "cql";
 export type QuerySubmission = {
   command: QueryCommand;
   query: string;
+  resolvedNodeId?: string | undefined;
   params: Record<string, string>;
   timeoutMs: number;
   maxRows: number;
@@ -37,7 +38,21 @@ export type QueryRun = {
   output?: QueryOutput | undefined;
   error?: string | undefined;
 };
+export type QueryCompletion = {
+  nodeId: string;
+  label: string;
+  insertText: string;
+  detail: string;
+};
+export type QueryCompletionRequest = {
+  command: QueryCommand;
+  term: string;
+};
 export type QueryHost = {
+  complete(
+    request: QueryCompletionRequest,
+    signal?: AbortSignal
+  ): Promise<QueryCompletion[]>;
   execute(request: QuerySubmission): void;
   cancel(runId: string): void;
   selectRun(runId: string): void;
@@ -85,6 +100,15 @@ const EXAMPLES: Record<QueryCommand, string[]> = {
   ]
 };
 
+type QuerySuggestion = {
+  nodeId: string;
+  value: string;
+  label: string;
+  detail: string;
+};
+
+type CompletionStatus = "idle" | "waiting" | "loading" | "ready" | "error";
+
 export function QueryWorkspace({
   runs,
   activeRunId,
@@ -97,6 +121,10 @@ export function QueryWorkspace({
   host: QueryHost;
 }) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editorShellRef = useRef<HTMLDivElement>(null);
+  const completeRef = useRef(host.complete);
+  const completionGeneration = useRef(0);
+  completeRef.current = host.complete;
   const [command, setCommand] = useState<QueryCommand>("ask");
   const [drafts, setDrafts] = useState<Record<QueryCommand, string>>({
     ask: "",
@@ -104,17 +132,96 @@ export function QueryWorkspace({
     cql: ""
   });
   const [params, setParams] = useState("");
+  const [suggestionsVisible, setSuggestionsVisible] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const [suggestions, setSuggestions] = useState<QuerySuggestion[]>([]);
+  const [explainSelection, setExplainSelection] = useState<{
+    value: string;
+    nodeId: string;
+  }>();
+  const [completionStatus, setCompletionStatus] = useState<CompletionStatus>("idle");
+  const [completionRetry, setCompletionRetry] = useState(0);
   const parsedParams = useMemo(() => parseParams(params), [params]);
   const activeRun = runs.find((run) => run.id === activeRunId) ?? runs.at(-1);
   const runningRun = runs.find((run) => run.status === "running");
   const selectedCommand = COMMANDS.find((candidate) => candidate.id === command)!;
   const query = drafts[command];
-  const execute = () => {
-    const trimmed = query.trim();
+  const completionToken = useMemo(() => queryCompletionToken(query, command), [command, query]);
+  const showSuggestions = suggestionsVisible && suggestions.length > 0;
+  const showCompletionStatus = suggestionsVisible
+    && completionToken !== undefined
+    && (completionStatus === "loading"
+      || completionStatus === "error"
+      || (completionStatus === "ready" && suggestions.length === 0));
+
+  useEffect(() => {
+    const generation = ++completionGeneration.current;
+    setSuggestions([]);
+    setActiveSuggestion(0);
+    if (!completionToken || !suggestionsVisible || runningRun) {
+      setCompletionStatus("idle");
+      return;
+    }
+    setCompletionStatus("waiting");
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (completionGeneration.current !== generation) return;
+      setCompletionStatus("loading");
+      void completeRef.current({ command, term: completionToken.term }, controller.signal)
+        .then((items) => {
+          if (completionGeneration.current !== generation) return;
+          const unique = new Map<string, QuerySuggestion>();
+          for (const item of items.slice(0, 8)) {
+            const value = graphCompletionValue(command, query, completionToken, item.insertText);
+            if (value === query || unique.has(value)) continue;
+            unique.set(value, {
+              nodeId: item.nodeId,
+              value,
+              label: item.label,
+              detail: item.detail
+            });
+          }
+          setSuggestions([...unique.values()]);
+          setCompletionStatus("ready");
+        })
+        .catch(() => {
+          if (completionGeneration.current !== generation) return;
+          setSuggestions([]);
+          setCompletionStatus("error");
+        });
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [command, completionRetry, completionToken, query, runningRun, suggestionsVisible]);
+
+  const updateQuery = (value: string) => {
+    setDrafts((current) => ({ ...current, [command]: value }));
+    if (command === "explain") setExplainSelection(undefined);
+    setActiveSuggestion(0);
+    setSuggestionsVisible(queryCompletionToken(value, command) !== undefined);
+  };
+  const chooseSuggestion = (value: string, nodeId?: string) => {
+    setDrafts((current) => ({ ...current, [command]: value }));
+    if (command === "explain") {
+      setExplainSelection(nodeId ? { value, nodeId } : undefined);
+    }
+    setSuggestionsVisible(false);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  };
+  const execute = (value = query, resolvedNodeId?: string) => {
+    const trimmed = value.trim();
     if (!trimmed || runningRun) return;
+    const selectedNodeId = command === "explain"
+      ? resolvedNodeId ?? (explainSelection?.value.trim() === trimmed
+        ? explainSelection.nodeId
+        : undefined)
+      : undefined;
     host.execute({
       command,
       query: trimmed,
+      ...(selectedNodeId ? { resolvedNodeId: selectedNodeId } : {}),
       params: parsedParams,
       timeoutMs: 5000,
       maxRows: 1000
@@ -146,9 +253,13 @@ export function QueryWorkspace({
                 aria-controls="query-composer-panel"
                 onClick={() => {
                   setCommand(candidate.id);
+                  setSuggestionsVisible(false);
+                  setActiveSuggestion(0);
+                  setSuggestions([]);
                   requestAnimationFrame(() => editorRef.current?.focus());
                 }}
               >
+                <span className="query-mode-indicator" aria-hidden="true" />
                 <Icon aria-hidden="true" />
                 <span>
                   <strong>{candidate.label}</strong>
@@ -165,27 +276,116 @@ export function QueryWorkspace({
           role="tabpanel"
           aria-labelledby={`query-mode-${command}`}
         >
-          <div className="query-editor-shell">
+          <div className="query-editor-shell" ref={editorShellRef}>
             <div className="query-editor">
               <textarea
                 ref={editorRef}
                 value={query}
                 placeholder={selectedCommand.placeholder}
                 aria-label={`${selectedCommand.label} input`}
-                aria-keyshortcuts="Control+Enter Meta+Enter"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls={showSuggestions ? "query-input-suggestions" : undefined}
+                aria-expanded={showSuggestions}
+                aria-activedescendant={showSuggestions
+                  ? `query-input-suggestion-${activeSuggestion}`
+                  : undefined}
+                aria-keyshortcuts="Enter Shift+Enter Control+Enter Meta+Enter"
+                autoComplete="off"
                 spellCheck={command === "ask"}
-                onChange={(event) => setDrafts((current) => ({
-                  ...current,
-                  [command]: event.target.value
-                }))}
+                onChange={(event) => updateQuery(event.target.value)}
+                onFocus={() => setSuggestionsVisible(completionToken !== undefined)}
+                onBlur={(event) => {
+                  const next = event.relatedTarget;
+                  if (next instanceof Node && editorShellRef.current?.contains(next)) return;
+                  setSuggestionsVisible(false);
+                }}
                 onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  if (event.nativeEvent.isComposing) return;
+                  if (event.key === "Escape" && showSuggestions) {
                     event.preventDefault();
+                    setSuggestionsVisible(false);
+                    return;
+                  }
+                  if ((event.key === "ArrowDown" || event.key === "ArrowUp")
+                    && suggestions.length > 0) {
+                    event.preventDefault();
+                    setSuggestionsVisible(true);
+                    setActiveSuggestion((current) => event.key === "ArrowDown"
+                      ? (current + 1) % suggestions.length
+                      : (current - 1 + suggestions.length) % suggestions.length);
+                    return;
+                  }
+                  if (event.key === "Tab" && showSuggestions) {
+                    event.preventDefault();
+                    const suggestion = suggestions[activeSuggestion];
+                    if (suggestion) chooseSuggestion(suggestion.value, suggestion.nodeId);
+                    return;
+                  }
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (command === "explain" && showSuggestions) {
+                      const suggestion = suggestions[activeSuggestion];
+                      if (suggestion) {
+                        chooseSuggestion(suggestion.value, suggestion.nodeId);
+                        execute(suggestion.value, suggestion.nodeId);
+                        return;
+                      }
+                    }
+                    setSuggestionsVisible(false);
                     execute();
                   }
                 }}
               />
             </div>
+            {showSuggestions && (
+              <div
+                id="query-input-suggestions"
+                className="query-suggestions"
+                role="listbox"
+                aria-label={`${selectedCommand.label} suggestions`}
+              >
+                <span className="query-suggestions-label">Code graph symbols</span>
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    id={`query-input-suggestion-${index}`}
+                    key={`${suggestion.nodeId}:${suggestion.value}`}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeSuggestion}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveSuggestion(index)}
+                    onClick={() => chooseSuggestion(suggestion.value, suggestion.nodeId)}
+                  >
+                    <span>{suggestion.label}</span>
+                    <small>{suggestion.detail}</small>
+                  </button>
+                ))}
+                <span className="query-suggestions-hint">
+                  {command === "explain"
+                    ? "↑↓ choose · Tab complete · Enter explain"
+                    : "↑↓ choose · Tab complete · Enter run"}
+                </span>
+              </div>
+            )}
+            {showCompletionStatus && (
+              <div className="query-completion-status" role="status">
+                <span>{completionStatus === "loading"
+                  ? "Searching the active code graph…"
+                  : completionStatus === "error"
+                    ? "Graph suggestions are unavailable. You can still run the query."
+                    : `No graph symbols match “${completionToken.term}”.`}</span>
+                {completionStatus === "error" && (
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setCompletionRetry((current) => current + 1)}
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            )}
             <div className="query-composer-footer">
               {command === "cql" && (
                 <label className="query-params">
@@ -200,14 +400,14 @@ export function QueryWorkspace({
               )}
               <div className="query-footer-actions">
                 <span className="query-shortcut">
-                  {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
+                  Enter to {runLabel(command).toLocaleLowerCase()} · Shift+Enter for new line
                 </span>
                 <button
                   type="button"
                   className="query-run"
                   aria-label={runningRun ? `Cancel ${commandLabel(runningRun.request.command)}` : runLabel(command)}
                   disabled={!runningRun && !query.trim()}
-                  onClick={runningRun ? () => host.cancel(runningRun.id) : execute}
+                  onClick={runningRun ? () => host.cancel(runningRun.id) : () => execute()}
                 >
                   {runningRun ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
                   {runningRun ? "Cancel" : runLabel(command)}
@@ -218,10 +418,12 @@ export function QueryWorkspace({
           <div className="query-examples" aria-label={`${selectedCommand.label} examples`}>
             <span>Try</span>
             {EXAMPLES[command].map((example) => (
-              <button key={example} type="button" onClick={() => {
-                setDrafts((current) => ({ ...current, [command]: example }));
-                editorRef.current?.focus();
-              }}>
+              <button
+                key={example}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseSuggestion(example)}
+              >
                 {example}
               </button>
             ))}
@@ -572,6 +774,46 @@ function runningDescription(command: QueryCommand): string {
   if (command === "ask") return "Compass is resolving the question to a typed graph operation.";
   if (command === "explain") return "Compass is loading the symbol and its incoming and outgoing relationships.";
   return "Compass is planning and executing the read-only graph query.";
+}
+
+export type QueryCompletionToken = {
+  term: string;
+  start: number;
+  end: number;
+};
+
+export function queryCompletionToken(
+  input: string,
+  command: QueryCommand = "ask"
+): QueryCompletionToken | undefined {
+  const matches = [...input.matchAll(/[\p{L}\p{N}_$:.#/@-]+/gu)];
+  const match = matches.at(-1);
+  let term = match?.[0];
+  let start = match?.index;
+  if (command === "cql" && term !== undefined && start !== undefined) {
+    for (let index = term.length - 1; index >= 0; index -= 1) {
+      if (term[index] !== ":" || term[index - 1] === ":" || term[index + 1] === ":") continue;
+      start += index + 1;
+      term = term.slice(index + 1);
+      break;
+    }
+  }
+  if (term === undefined || start === undefined
+    || term.length < 2 || term.length > 160
+    || /^\d+$/.test(term) || term.startsWith("-") || term.startsWith("$")) {
+    return undefined;
+  }
+  return { term, start, end: start + term.length };
+}
+
+export function graphCompletionValue(
+  command: QueryCommand,
+  input: string,
+  token: QueryCompletionToken,
+  insertText: string
+): string {
+  if (command === "explain") return insertText;
+  return `${input.slice(0, token.start)}${insertText}${input.slice(token.end)}`;
 }
 
 function operationLabel(operation: CodeQueryResponse["operation"]): string {
