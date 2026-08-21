@@ -1,8 +1,14 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { fireEvent } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
-import { QueryWorkspace, type QueryHost, type QueryRun } from "./QueryWorkspace";
+import {
+  QueryWorkspace,
+  querySuggestions,
+  type QueryHost,
+  type QueryRun
+} from "./QueryWorkspace";
 
 beforeAll(() => {
   vi.stubGlobal("navigator", { platform: "MacIntel" });
@@ -75,7 +81,78 @@ describe("QueryWorkspace", () => {
         expect.stringContaining("Explain"),
         expect.stringContaining("CompassQL")
       ]));
+    const selected = container.querySelector('[aria-label="Query command"] [aria-selected="true"]');
+    expect(selected?.textContent).toContain("Ask");
+    expect(selected?.querySelector(".query-mode-indicator")).not.toBeNull();
     root.unmount();
+  });
+
+  it("runs the active command with Enter and keeps Shift+Enter for a new line", () => {
+    const queryHost = host();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <QueryWorkspace runs={[]} host={queryHost} />
+    ));
+    const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask input"]')!;
+
+    fireEvent.change(input, { target: { value: "Who calls checkout?" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(queryHost.execute).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(queryHost.execute).toHaveBeenCalledWith({
+      command: "ask",
+      query: "Who calls checkout?",
+      params: {},
+      timeoutMs: 5000,
+      maxRows: 1000
+    });
+    root.unmount();
+  });
+
+  it("offers mode-aware completions and accepts the highlighted option with Tab", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <QueryWorkspace runs={[]} host={host()} />
+    ));
+    const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask input"]')!;
+
+    fireEvent.change(input, { target: { value: "Who" } });
+    const suggestions = container.querySelector('[role="listbox"][aria-label="Ask suggestions"]');
+    expect(suggestions?.textContent).toContain("Who calls PaymentService.charge?");
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(input.value).toBe("Who calls PaymentService.charge?");
+    expect(container.querySelector('[aria-label="Ask suggestions"]')).toBeNull();
+    root.unmount();
+  });
+
+  it("tailors completions to CompassQL and recently returned symbols", () => {
+    const run: QueryRun = {
+      id: "ask-1",
+      request: {
+        command: "ask",
+        query: "find checkout",
+        params: {},
+        timeoutMs: 5000,
+        maxRows: 1000
+      },
+      status: "success",
+      output: { kind: "code-query", value: typedAnswer() }
+    };
+
+    expect(querySuggestions("cql", "MATCH", []))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ value: "MATCH (n) RETURN n LIMIT 20" })
+      ]));
+    expect(querySuggestions("explain", "crate::check", [run]))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          value: "crate::checkout",
+          detail: "Symbol from recent results"
+        })
+      ]));
   });
 
   it("keeps command outputs in separate selectable result tabs", () => {

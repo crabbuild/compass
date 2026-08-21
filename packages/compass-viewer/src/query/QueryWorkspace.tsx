@@ -85,6 +85,26 @@ const EXAMPLES: Record<QueryCommand, string[]> = {
   ]
 };
 
+type QuerySuggestion = {
+  value: string;
+  detail: string;
+};
+
+const COMPLETIONS: Record<QueryCommand, QuerySuggestion[]> = {
+  ask: EXAMPLES.ask.map((value) => ({ value, detail: "Question starter" })),
+  explain: EXAMPLES.explain.map((value) => ({ value, detail: "Symbol example" })),
+  cql: [{
+    value: "MATCH (n) RETURN n LIMIT 20",
+    detail: "List graph nodes"
+  }, {
+    value: "MATCH (a)-[r:CALLS]->(b) RETURN a, r, b LIMIT 20",
+    detail: "Inspect call relationships"
+  }, {
+    value: "MATCH (n) WHERE n.kind = $kind RETURN n LIMIT 20",
+    detail: "Filter nodes by parameter"
+  }]
+};
+
 export function QueryWorkspace({
   runs,
   activeRunId,
@@ -97,6 +117,7 @@ export function QueryWorkspace({
   host: QueryHost;
 }) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const editorShellRef = useRef<HTMLDivElement>(null);
   const [command, setCommand] = useState<QueryCommand>("ask");
   const [drafts, setDrafts] = useState<Record<QueryCommand, string>>({
     ask: "",
@@ -104,11 +125,28 @@ export function QueryWorkspace({
     cql: ""
   });
   const [params, setParams] = useState("");
+  const [suggestionsVisible, setSuggestionsVisible] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
   const parsedParams = useMemo(() => parseParams(params), [params]);
   const activeRun = runs.find((run) => run.id === activeRunId) ?? runs.at(-1);
   const runningRun = runs.find((run) => run.status === "running");
   const selectedCommand = COMMANDS.find((candidate) => candidate.id === command)!;
   const query = drafts[command];
+  const suggestions = useMemo(
+    () => querySuggestions(command, query, runs),
+    [command, query, runs]
+  );
+  const showSuggestions = suggestionsVisible && suggestions.length > 0;
+  const updateQuery = (value: string) => {
+    setDrafts((current) => ({ ...current, [command]: value }));
+    setActiveSuggestion(0);
+    setSuggestionsVisible(Boolean(value.trim()));
+  };
+  const chooseSuggestion = (value: string) => {
+    setDrafts((current) => ({ ...current, [command]: value }));
+    setSuggestionsVisible(false);
+    requestAnimationFrame(() => editorRef.current?.focus());
+  };
   const execute = () => {
     const trimmed = query.trim();
     if (!trimmed || runningRun) return;
@@ -146,9 +184,12 @@ export function QueryWorkspace({
                 aria-controls="query-composer-panel"
                 onClick={() => {
                   setCommand(candidate.id);
+                  setSuggestionsVisible(false);
+                  setActiveSuggestion(0);
                   requestAnimationFrame(() => editorRef.current?.focus());
                 }}
               >
+                <span className="query-mode-indicator" aria-hidden="true" />
                 <Icon aria-hidden="true" />
                 <span>
                   <strong>{candidate.label}</strong>
@@ -165,27 +206,86 @@ export function QueryWorkspace({
           role="tabpanel"
           aria-labelledby={`query-mode-${command}`}
         >
-          <div className="query-editor-shell">
+          <div className="query-editor-shell" ref={editorShellRef}>
             <div className="query-editor">
               <textarea
                 ref={editorRef}
                 value={query}
                 placeholder={selectedCommand.placeholder}
                 aria-label={`${selectedCommand.label} input`}
-                aria-keyshortcuts="Control+Enter Meta+Enter"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls={showSuggestions ? "query-input-suggestions" : undefined}
+                aria-expanded={showSuggestions}
+                aria-activedescendant={showSuggestions
+                  ? `query-input-suggestion-${activeSuggestion}`
+                  : undefined}
+                aria-keyshortcuts="Enter Shift+Enter Control+Enter Meta+Enter"
+                autoComplete="off"
                 spellCheck={command === "ask"}
-                onChange={(event) => setDrafts((current) => ({
-                  ...current,
-                  [command]: event.target.value
-                }))}
+                onChange={(event) => updateQuery(event.target.value)}
+                onFocus={() => setSuggestionsVisible(Boolean(query.trim()))}
+                onBlur={(event) => {
+                  const next = event.relatedTarget;
+                  if (next instanceof Node && editorShellRef.current?.contains(next)) return;
+                  setSuggestionsVisible(false);
+                }}
                 onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                  if (event.nativeEvent.isComposing) return;
+                  if (event.key === "Escape" && showSuggestions) {
                     event.preventDefault();
+                    setSuggestionsVisible(false);
+                    return;
+                  }
+                  if ((event.key === "ArrowDown" || event.key === "ArrowUp")
+                    && suggestions.length > 0) {
+                    event.preventDefault();
+                    setSuggestionsVisible(true);
+                    setActiveSuggestion((current) => event.key === "ArrowDown"
+                      ? (current + 1) % suggestions.length
+                      : (current - 1 + suggestions.length) % suggestions.length);
+                    return;
+                  }
+                  if (event.key === "Tab" && showSuggestions) {
+                    event.preventDefault();
+                    const suggestion = suggestions[activeSuggestion];
+                    if (suggestion) chooseSuggestion(suggestion.value);
+                    return;
+                  }
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    setSuggestionsVisible(false);
                     execute();
                   }
                 }}
               />
             </div>
+            {showSuggestions && (
+              <div
+                id="query-input-suggestions"
+                className="query-suggestions"
+                role="listbox"
+                aria-label={`${selectedCommand.label} suggestions`}
+              >
+                <span className="query-suggestions-label">Suggestions</span>
+                {suggestions.map((suggestion, index) => (
+                  <button
+                    id={`query-input-suggestion-${index}`}
+                    key={suggestion.value}
+                    type="button"
+                    role="option"
+                    aria-selected={index === activeSuggestion}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onMouseEnter={() => setActiveSuggestion(index)}
+                    onClick={() => chooseSuggestion(suggestion.value)}
+                  >
+                    <span>{suggestion.value}</span>
+                    <small>{suggestion.detail}</small>
+                  </button>
+                ))}
+                <span className="query-suggestions-hint">↑↓ choose · Tab complete · Enter run</span>
+              </div>
+            )}
             <div className="query-composer-footer">
               {command === "cql" && (
                 <label className="query-params">
@@ -200,7 +300,7 @@ export function QueryWorkspace({
               )}
               <div className="query-footer-actions">
                 <span className="query-shortcut">
-                  {navigator.platform.toLocaleLowerCase().includes("mac") ? "⌘" : "Ctrl"} Enter
+                  Enter to {runLabel(command).toLocaleLowerCase()} · Shift+Enter for new line
                 </span>
                 <button
                   type="button"
@@ -218,10 +318,12 @@ export function QueryWorkspace({
           <div className="query-examples" aria-label={`${selectedCommand.label} examples`}>
             <span>Try</span>
             {EXAMPLES[command].map((example) => (
-              <button key={example} type="button" onClick={() => {
-                setDrafts((current) => ({ ...current, [command]: example }));
-                editorRef.current?.focus();
-              }}>
+              <button
+                key={example}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => chooseSuggestion(example)}
+              >
                 {example}
               </button>
             ))}
@@ -572,6 +674,49 @@ function runningDescription(command: QueryCommand): string {
   if (command === "ask") return "Compass is resolving the question to a typed graph operation.";
   if (command === "explain") return "Compass is loading the symbol and its incoming and outgoing relationships.";
   return "Compass is planning and executing the read-only graph query.";
+}
+
+export function querySuggestions(
+  command: QueryCommand,
+  input: string,
+  runs: QueryRun[]
+): QuerySuggestion[] {
+  const needle = input.trim().toLocaleLowerCase();
+  if (!needle) return [];
+  const recentSymbols = runs.flatMap((run) => run.output?.kind === "code-query"
+    ? run.output.value.nodes.flatMap((node) => [
+        node.qualifiedName,
+        node.name,
+        node.id
+      ])
+    : []);
+  const learned = command === "explain"
+    ? recentSymbols.map((value) => ({ value, detail: "Symbol from recent results" }))
+    : command === "ask"
+      ? recentSymbols.flatMap((value) => [{
+          value: `Who calls ${value}?`,
+          detail: "Ask about a recent symbol"
+        }, {
+          value: `What does ${value} call?`,
+          detail: "Ask about a recent symbol"
+        }])
+      : [];
+  const unique = new Map<string, QuerySuggestion>();
+  for (const suggestion of [...learned, ...COMPLETIONS[command]]) {
+    if (!unique.has(suggestion.value)) unique.set(suggestion.value, suggestion);
+  }
+  return [...unique.values()]
+    .filter((suggestion) => {
+      const value = suggestion.value.toLocaleLowerCase();
+      return value !== needle && (value.startsWith(needle) || value.includes(needle));
+    })
+    .sort((left, right) => {
+      const leftStarts = left.value.toLocaleLowerCase().startsWith(needle);
+      const rightStarts = right.value.toLocaleLowerCase().startsWith(needle);
+      if (leftStarts !== rightStarts) return leftStarts ? -1 : 1;
+      return left.value.localeCompare(right.value);
+    })
+    .slice(0, 5);
 }
 
 function operationLabel(operation: CodeQueryResponse["operation"]): string {

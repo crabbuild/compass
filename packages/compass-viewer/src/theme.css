@@ -3970,12 +3970,24 @@ body.vscode-high-contrast-light .compass-load-logo {
   gap: 8px;
   padding: 7px 12px 8px;
   border: 0;
-  border-top: 2px solid transparent;
+  border-top: 0;
   border-radius: 0;
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
   text-align: left;
+}
+
+.query-mode-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--query-accent);
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--query-accent) 35%, transparent);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .query-mode button:hover {
@@ -3984,12 +3996,15 @@ body.vscode-high-contrast-light .compass-load-logo {
 }
 
 .query-mode button[aria-selected="true"] {
-  border-top-color: var(--vscode-tab-activeBorder, var(--query-accent));
   background: var(--vscode-tab-activeBackground, var(--query-surface-raised));
   box-shadow:
     inset 1px 0 var(--query-border),
     inset -1px 0 var(--query-border);
   color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.query-mode button[aria-selected="true"] .query-mode-indicator {
+  opacity: 1;
 }
 
 .query-mode button[aria-selected="true"] svg,
@@ -4086,6 +4101,65 @@ body.vscode-high-contrast-light .compass-load-logo {
 .query-editor textarea::placeholder,
 .query-params input::placeholder {
   color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.query-suggestions {
+  display: grid;
+  max-height: 210px;
+  overflow-y: auto;
+  border-top: 1px solid var(--query-border);
+  background: var(--vscode-editorSuggestWidget-background, var(--query-surface-raised));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--foreground));
+}
+
+.query-suggestions-label,
+.query-suggestions-hint {
+  padding: 6px 10px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.2 var(--compass-font-sans);
+}
+
+.query-suggestions-label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.query-suggestions-hint {
+  border-top: 1px solid var(--query-border);
+  text-align: right;
+}
+
+.query-suggestions button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.query-suggestions button[aria-selected="true"],
+.query-suggestions button:hover {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--accent));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--foreground));
+}
+
+.query-suggestions button > span {
+  overflow: hidden;
+  font: 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-suggestions button > small {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .query-params input:focus-visible {
@@ -4862,7 +4936,9 @@ body.vscode-high-contrast-light .query-explanation-card,
 body.vscode-high-contrast .query-connections,
 body.vscode-high-contrast-light .query-connections,
 body.vscode-high-contrast .query-object-result,
-body.vscode-high-contrast-light .query-object-result {
+body.vscode-high-contrast-light .query-object-result,
+body.vscode-high-contrast .query-suggestions,
+body.vscode-high-contrast-light .query-suggestions {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
@@ -6030,6 +6106,16 @@ body.vscode-high-contrast-light .compass-change-badge {
   }
 
   .query-mode small {
+    display: none;
+  }
+
+  .query-suggestions button {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .query-suggestions button > small,
+  .query-suggestions-hint {
     display: none;
   }
 

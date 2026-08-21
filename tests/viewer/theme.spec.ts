@@ -45,7 +45,7 @@ for (const theme of themeCases) {
       hexToRgb(theme.background)
     );
     await expect(page.locator(".query-shell")).toHaveCSS("color", hexToRgb(theme.foreground));
-    await expect(page.getByRole("textbox", { name: "Ask input" }))
+    await expect(page.getByRole("combobox", { name: "Ask input" }))
       .toHaveCSS("background-color", hexToRgb(theme.input));
   });
 
@@ -127,7 +127,7 @@ test("Architecture symbol titles use editor foreground in light themes", async (
 
 test("query result surfaces honor the high-contrast border token", async ({ page }) => {
   await page.goto("/query.html");
-  await page.getByRole("textbox", { name: "Ask input" }).fill("What is Pipeline?");
+  await page.getByRole("combobox", { name: "Ask input" }).fill("What is Pipeline?");
   await page.getByRole("button", { name: "Ask" }).click();
   await applyTheme(page, {
     bodyClass: "vscode-high-contrast",
@@ -148,7 +148,7 @@ test("query composer focus follows the VS Code focus token", async ({ page }) =>
   await page.evaluate(() => {
     document.documentElement.style.setProperty("--vscode-focusBorder", "#ff00ff");
   });
-  await page.getByRole("textbox", { name: "Ask input" }).focus();
+  await page.getByRole("combobox", { name: "Ask input" }).focus();
 
   await expect(page.locator(".query-editor-shell"))
     .toHaveCSS("border-top-color", "rgb(255, 0, 255)");
@@ -201,7 +201,7 @@ test("narrow Architecture, Ask Codebase, and Evolution views preserve core actio
 
   await page.goto("/query.html");
   await expect(page.getByRole("button", { name: "Ask" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Ask input" }))
+  await expect(page.getByRole("combobox", { name: "Ask input" }))
     .toBeVisible();
   await expectNoHorizontalDocumentOverflow(page);
 
