@@ -783,7 +783,31 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 function queryHarness(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass query fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.queryHostMessages=[];
-window.queryTimer=undefined;
+window.queryTimers=new Map();
+const queryLimits={
+  maxDepth:8,maxNodes:500,maxEdges:1000,maxPaths:100,maxCandidates:20,
+  maxSourceBytes:1048576,maxResponseBytes:8388608
+};
+const queryNode={
+  id:"pipeline",kind:"function",roles:[],name:"Pipeline",
+  qualifiedName:"caching::util::Pipeline",language:"scala",framework:null,
+  source:{
+    file:"caching/util/src/Pipeline.scala",startByte:0,endByte:8,
+    startLine:154,startColumn:0,endLine:154,endColumn:8
+  },
+  details:null,evidence:[]
+};
+const typedQueryResult=(diagnostic=false)=>({
+  schema:"compass.query/1",operation:"search",
+  results:diagnostic?[]:[{nodeId:"pipeline",score:1,matchedFields:["qualifiedName"]}],
+  nodes:diagnostic?[]:[queryNode],edges:[],files:[],paths:[],
+  diagnostics:diagnostic?[{
+    code:"no_match",
+    message:"No exact node matched. Try a qualified name such as caching::util::Pipeline.",
+    nodeId:null,path:null
+  }]:[],
+  limits:queryLimits,truncated:false
+});
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.queryHostMessages.push(message);
   if(message.type==="openSource") {
@@ -795,50 +819,46 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     return;
   }
   if(message.type==="ready") {
-    setTimeout(()=>window.postMessage({type:"state",running:false},"*"),0);
+    setTimeout(()=>window.postMessage({type:"state",revision:"fixture-revision"},"*"),0);
     return;
   }
   if(message.type==="cancel") {
-    clearTimeout(window.queryTimer);
-    window.postMessage({type:"state",running:false},"*");
+    clearTimeout(window.queryTimers.get(message.runId));
+    window.queryTimers.delete(message.runId);
+    window.postMessage({type:"cancelled",runId:message.runId},"*");
     return;
   }
   if(message.type!=="execute") return;
-  window.postMessage({type:"state",running:true},"*");
   const params=new URLSearchParams(window.location.search);
   const delay=params.has("delay") ? 1200 : 20;
-  window.queryTimer=setTimeout(()=>{
+  const runId=message.request.id;
+  const timer=setTimeout(()=>{
+    window.queryTimers.delete(runId);
     if(params.has("error")) {
-      window.postMessage({type:"error",message:"CompassQL could not parse this query"},"*");
-    } else if(params.get("result")==="rows") {
       window.postMessage({
-        type:"result",
-        result:{
-          mode:message.request.mode,
-          json:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]},
-          durationMs:18
-        }
+        type:"error",runId,message:"CompassQL could not parse this query"
       },"*");
-    } else if(params.get("result")==="traversal") {
+    } else if(message.request.command==="cql") {
       window.postMessage({
-        type:"result",
-        result:{
-          mode:message.request.mode,
-          text:"Traversal: BFS depth=2 | Start: ['Pipeline'] | 146 nodes found\\n\\nNODE Pipeline [src=caching/util/src/Pipeline.scala loc=L154 community=Pipeline]\\nNODE .assert() [src=caching/util/src/AssertMacros.scala loc=L32 community=.iassert]\\nNODE String [src= loc= community=EtcdClient]",
-          durationMs:24
-        }
+        type:"result",runId,
+        output:{kind:"rows",value:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]}},
+        durationMs:18
+      },"*");
+    } else if(message.request.command==="explain") {
+      window.postMessage({
+        type:"result",runId,
+        output:{kind:"explanation",text:"Node: Pipeline\\n  ID:        pipeline\\n  Source:    caching/util/src/Pipeline.scala L154\\n  Type:      function\\n  Community: Caching\\n  Degree:    2\\n\\nConnections (2):\\n  --> save [calls] [exact]\\n  <-- run [calls] [inferred]"},
+        durationMs:12
       },"*");
     } else {
       window.postMessage({
-        type:"result",
-        result:{
-          mode:message.request.mode,
-          text:"Authentication reaches storage through the repository service.",
-          durationMs:24
-        }
+        type:"result",runId,
+        output:{kind:"code-query",value:typedQueryResult(params.has("diagnostic"))},
+        durationMs:24
       },"*");
     }
   },delay);
+  window.queryTimers.set(runId,timer);
 }})</script><script src="/query.js"></script></body></html>`;
 }
 

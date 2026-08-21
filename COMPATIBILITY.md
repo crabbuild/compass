@@ -143,6 +143,10 @@ preserve the established text traversal and reject discovery controls.
 CompassQL and explicit typed query commands remain unchanged. Discovery text
 pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
 JSON rejects those presentation-only controls.
+`compass ask --at REV` uses the same immutable trusted `compass.graph/1`
+realization selection as revision discovery. The response remains the unchanged
+`compass.query/1` contract; an older realization without that trusted graph is
+rejected and must be rebuilt.
 
 Default discovery JSON remains the strict `compass.query.discovery/1` shape.
 The focused default neighborhood is 64 nodes and 128 edges. The existing hard
