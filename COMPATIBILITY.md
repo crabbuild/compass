@@ -91,8 +91,8 @@ Versioned history remains on realization schema 1, store-format root
 `compass/store-format/v1`, and the `compass/v1` realization-root namespace.
 The visible output-path cutover does not change those serialized contracts.
 Historical realizations containing former hidden artifact paths are not mapped
-or rewritten; rebuild those revisions when they must be materialized with the
-current visible artifact layout.
+or rewritten; run `compass history rebuild REV` for a revision that must use
+the current visible artifact layout.
 
 The current local build publishes `graph.json` (`compass.graph/1`) directly
 under the selected output root by default. It also materializes

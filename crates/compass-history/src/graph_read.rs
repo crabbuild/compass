@@ -77,9 +77,10 @@ impl RealizationReader<'_> {
                         "labels.json" => sink.labels(value)?,
                         "analysis.json" => {}
                         _ => {
-                            return Err(HistoryError::InvalidArtifacts(format!(
-                                "unknown analysis sidecar {path}"
-                            )));
+                            return Err(unsupported_analysis_sidecar(
+                                &self.published.version.git_commit,
+                                &path,
+                            ));
                         }
                     }
                 }
@@ -195,4 +196,24 @@ fn require_count(kind: &str, expected: u64, actual: u64) -> Result<(), HistoryEr
 fn text(bytes: &[u8], kind: &str) -> Result<String, HistoryError> {
     String::from_utf8(bytes.to_vec())
         .map_err(|error| HistoryError::InvalidArtifacts(format!("non-UTF-8 {kind}: {error}")))
+}
+
+fn unsupported_analysis_sidecar(revision: &str, path: &str) -> HistoryError {
+    HistoryError::InvalidArtifacts(format!(
+        "stored graph for revision {revision} uses an unsupported artifact layout ({path}); rebuild this revision graph with the current Compass version"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unsupported_analysis_sidecar;
+
+    #[test]
+    fn unsupported_sidecars_request_a_current_graph_rebuild() {
+        let error = unsupported_analysis_sidecar("abcdef123456", ".compass_analysis.json");
+        assert_eq!(
+            error.to_string(),
+            "invalid graph artifacts: stored graph for revision abcdef123456 uses an unsupported artifact layout (.compass_analysis.json); rebuild this revision graph with the current Compass version"
+        );
+    }
 }
