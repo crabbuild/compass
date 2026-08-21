@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { runCallGraph, runCallGraphAtCursor } from "./callGraphClient";
+import {
+  runCallGraph,
+  runCallGraphAtCursor,
+  runCallGraphForSymbol
+} from "./callGraphClient";
 
 const source = {
   file: "crates/globset/src/glob.rs",
@@ -124,6 +128,52 @@ describe("callGraphClient", () => {
       "--format", "json"
     ]);
     expect(runJson.mock.calls[0]?.[3]).toBe(signal);
+  });
+
+  it("opens a bounded call graph directly from a symbol name", async () => {
+    const runJson = vi.fn().mockResolvedValue({
+      schema: "compass.call_graph/1",
+      rootSymbol: "sha256:root",
+      direction: "callees",
+      depth: 2,
+      nodes: [],
+      edges: [],
+      truncated: false,
+      continuations: [],
+      coverage: {
+        resolved: 0,
+        inferred: 0,
+        ambiguous: 0,
+        unresolved: 0,
+        evidenceLayer: "structural_graph",
+        partial: false,
+        limitations: [],
+        warning: null
+      }
+    });
+    const session = {
+      root: "/repo",
+      graphPath: "/repo/compass-out/graph.json",
+      processes: { runJson }
+    };
+
+    await runCallGraphForSymbol(
+      session as never,
+      "globset::GlobMatcher::is_match",
+      "callees",
+      2
+    );
+
+    expect(runJson.mock.calls[0]?.[1]).toEqual([
+      "call-graph",
+      "--symbol", "globset::GlobMatcher::is_match",
+      "--direction", "callees",
+      "--depth", "2",
+      "--max-nodes", "500",
+      "--max-edges", "1000",
+      "--graph", "/repo/compass-out/graph.json",
+      "--format", "json"
+    ]);
   });
 
   it("falls back to a typed cursor lookup for Compass 0.3.0 graphs", async () => {

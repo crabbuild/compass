@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
+import { parseCallGraphSymbolRequest } from "./callGraphGuideMessages";
 
 type CallGraphSource = {
   uri: vscode.Uri;
@@ -18,7 +19,8 @@ const directionCommands: Record<CallDirection, string> = {
 
 export function openCallGraphGuidePanel(
   context: vscode.ExtensionContext,
-  editor: vscode.TextEditor | undefined
+  editor: vscode.TextEditor | undefined,
+  openSymbol: (symbol: string, direction: CallDirection) => Promise<boolean>
 ): void {
   const source = editor ? captureSource(editor) : undefined;
   const panel = vscode.window.createWebviewPanel(
@@ -48,6 +50,23 @@ export function openCallGraphGuidePanel(
         "crabbuild.crabbuild-compass-vscode#compass.getStarted",
         false
       );
+      return;
+    }
+    const symbolRequest = parseCallGraphSymbolRequest(message);
+    if (symbolRequest) {
+      const opened = await openSymbol(
+        symbolRequest.symbol,
+        symbolRequest.direction
+      );
+      if (opened) {
+        panel.dispose();
+      } else {
+        await panel.webview.postMessage({ type: "openSymbolFailed" });
+      }
+      return;
+    }
+    if (message?.type === "openSymbol") {
+      await panel.webview.postMessage({ type: "openSymbolFailed" });
       return;
     }
     if (message?.type !== "openDirection") {

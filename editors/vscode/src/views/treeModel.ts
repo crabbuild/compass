@@ -124,10 +124,10 @@ export function buildWorkspaceTree(
       ),
       actionNode(
         "workspace:call-graph",
-        "Call graph from cursor",
+        "Call graph",
         "references",
         "compass.openCallGraphGuide",
-        "Learn how to trace callers and callees from the editor"
+        "Trace callers and callees by symbol name or editor cursor"
       ),
       actionNode(
         "workspace:query",
