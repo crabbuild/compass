@@ -39,9 +39,10 @@ is found first on `PATH`, Compass stops before running a workflow and offers
   located relationship to open the call or wiring site. The graph exploration
   panel isolates bounded directed neighborhoods, adjusts layout spacing, and
   controls the shared minimap; press `?` to reveal its keyboard shortcuts.
-- Start a caller/callee graph from the function under the cursor in any
-  call-capable language already represented in the Compass graph. Expand it by
-  depth while retaining resolved, inferred, ambiguous, and unresolved calls.
+- Start a caller/callee graph from a directly entered symbol name or the
+  function under the cursor in any call-capable language already represented
+  in the Compass graph. Expand it by depth while retaining resolved, inferred,
+  ambiguous, and unresolved calls.
 - Read the broader architecture flow document in a separate editor tab, with a
   horizontally scrollable map, draggable subsystem cards, and a route-table
   alternative for large systems.
@@ -59,7 +60,7 @@ Workspace is the single command surface for Compass. Repository rows report
 **Graph ready**, **Not initialized**, **Building**, or **Build failed** without
 repeating workflow actions under every folder.
 
-- **Explore** contains Code graph, Architecture flow, Call graph from cursor,
+- **Explore** contains Code graph, Architecture flow, Call graph,
   Ask codebase, and Codebase evolution.
 - **Maintain** contains Update graph and Watch for changes. It changes to
   **Stop watching** while the current repository watcher is active.
@@ -84,10 +85,18 @@ header control to collapse and expand it.
 
 ### Trace calls from the editor
 
-Choose **Call graph from cursor** under **Workspace > Explore** to open a visual
-guide with the editor steps and working **Show Callers**, **Show Callees**, and
-**Show Both** actions. Compass captures the active source position before the
-guide opens and returns to that exact cursor when an action is selected.
+Choose **Call graph** under **Workspace > Explore** to open a visual guide. Enter
+a function name, qualified name, or stable symbol ID and press Enter to trace it
+directly. Choose **Callers**, **Both**, or **Callees** before opening the graph;
+**Both** is the default. In a multi-root workspace, Compass uses the active
+editor's repository or asks you to choose one.
+
+![Call graph direct symbol lookup](../../docs/assets/screenshots/vscode-call-graph-symbol-desktop.jpg)
+
+The guide also includes the editor steps and working **Show Callers**, **Show
+Callees**, and **Show Both** cursor actions. Compass captures the active source
+position before the guide opens and returns to that exact cursor when an action
+is selected.
 
 1. Open an indexed source file and place the cursor anywhere inside a function
    or method body.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowDownToLineIcon,
@@ -9,9 +9,11 @@ import {
   FileCode2Icon,
   GitForkIcon,
   MousePointer2Icon,
-  NetworkIcon
+  NetworkIcon,
+  SearchIcon
 } from "lucide-react";
 import type { CallDirection } from "@compass/viewer/contracts/callGraph";
+import { MAX_CALL_GRAPH_SYMBOL_LENGTH } from "../views/callGraphGuideMessages";
 
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
 
@@ -26,9 +28,16 @@ if (!element) throw new Error("Compass call graph guide root is missing");
 
 function CallGraphGuide() {
   const [source, setSource] = useState<GuideSource | null | undefined>(undefined);
+  const [symbol, setSymbol] = useState("");
+  const [symbolDirection, setSymbolDirection] = useState<CallDirection>("both");
+  const [lookupPending, setLookupPending] = useState(false);
 
   useEffect(() => {
     const receive = (event: MessageEvent) => {
+      if (event.data?.type === "openSymbolFailed") {
+        setLookupPending(false);
+        return;
+      }
       if (event.data?.type !== "hydrate") return;
       const next = event.data.source;
       if (next === null) {
@@ -48,6 +57,17 @@ function CallGraphGuide() {
   const open = (direction: CallDirection) => {
     vscode.postMessage({ type: "openDirection", direction });
   };
+  const openSymbol = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalized = symbol.trim();
+    if (!normalized || lookupPending) return;
+    setLookupPending(true);
+    vscode.postMessage({
+      type: "openSymbol",
+      symbol: normalized,
+      direction: symbolDirection
+    });
+  };
   const ready = source !== null && source !== undefined;
 
   return (
@@ -62,9 +82,51 @@ function CallGraphGuide() {
           </div>
           <h1>Trace how this function connects.</h1>
           <p className="call-guide-lead">
-            Start from the cursor. Follow what calls in, what calls out, or map
-            the full neighborhood in one view.
+            Start from a symbol name or the cursor. Follow what calls in, what
+            calls out, or map the full neighborhood in one view.
           </p>
+          <form className="call-guide-lookup" onSubmit={openSymbol}>
+            <label htmlFor="call-guide-symbol">Trace by symbol</label>
+            <div className="call-guide-lookup-row">
+              <span className="call-guide-lookup-input">
+                <SearchIcon aria-hidden="true" />
+                <input
+                  id="call-guide-symbol"
+                  type="text"
+                  value={symbol}
+                  maxLength={MAX_CALL_GRAPH_SYMBOL_LENGTH}
+                  onChange={(event) => setSymbol(event.target.value)}
+                  placeholder="Function, qualified name, or symbol ID"
+                  autoComplete="off"
+                  autoFocus
+                  spellCheck={false}
+                />
+              </span>
+              <button
+                type="submit"
+                disabled={!symbol.trim() || lookupPending}
+              >
+                {lookupPending ? "Opening…" : "Show graph"}
+                <ArrowRightIcon aria-hidden="true" />
+              </button>
+            </div>
+            <fieldset className="call-guide-lookup-directions">
+              <legend>Direction</legend>
+              {(["callers", "both", "callees"] as const).map((direction) => (
+                <button
+                  key={direction}
+                  type="button"
+                  aria-pressed={symbolDirection === direction}
+                  onClick={() => setSymbolDirection(direction)}
+                >
+                  {direction === "both"
+                    ? "Both"
+                    : direction === "callers" ? "Callers" : "Callees"}
+                </button>
+              ))}
+              <span>Press Enter to trace</span>
+            </fieldset>
+          </form>
           <div
             className="call-guide-source"
             data-ready={ready ? "true" : "false"}
@@ -77,7 +139,7 @@ function CallGraphGuide() {
                 ? "Reading the active editor…"
                 : source
                   ? source.fileLabel
-                  : "Open a source file to enable trace actions"}
+                  : "Open a source file to enable cursor trace actions"}
             </span>
             {source && <code>{source.languageId}</code>}
           </div>
@@ -195,11 +257,11 @@ function CallRoute() {
     <div
       className="call-guide-route"
       role="img"
-      aria-label="A caller flows into the current function, which flows out to callees"
+      aria-label="A caller flows into the selected function, which flows out to callees"
     >
       <div className="call-guide-route-label">
         <span>Live call trace</span>
-        <code>cursor → graph</code>
+        <code>target → graph</code>
       </div>
       <div className="call-guide-route-stage">
         <div className="call-guide-route-line call-guide-route-line-in" aria-hidden="true">
@@ -215,8 +277,8 @@ function CallRoute() {
         </div>
         <div className="call-guide-route-node call-guide-route-current" data-kind="current">
           <MousePointer2Icon aria-hidden="true" />
-          <strong>cursor()</strong>
-          <small>active function</small>
+          <strong>target()</strong>
+          <small>selected function</small>
         </div>
         <div className="call-guide-route-node" data-kind="callee">
           <span>OUT</span>

@@ -44,7 +44,7 @@ describe("buildWorkspaceTree", () => {
     expect(nodes[1]?.children?.map((node) => [node.label, node.command])).toEqual([
       ["Code graph", "compass.openGraph"],
       ["Architecture flow", "compass.openArchitecture"],
-      ["Call graph from cursor", "compass.openCallGraphGuide"],
+      ["Call graph", "compass.openCallGraphGuide"],
       ["Ask codebase", "compass.openQuery"],
       ["Codebase evolution", "compass.openHistory"]
     ]);

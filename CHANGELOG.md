@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Let VS Code users open a call graph by entering a function name, qualified
+  name, or stable symbol ID in the Call Graph pane, with callers, callees, or
+  both selectable before tracing. The existing cursor workflow remains
+  available in the same pane.
+
 - Keep Codebase Evolution strict when a stored revision uses an unsupported
   artifact layout, and offer to rebuild the affected revision with the current
   Compass version instead of mapping legacy history records.
