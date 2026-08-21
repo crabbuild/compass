@@ -327,13 +327,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   const openCallGraphForSymbol = async (
     symbol: string,
-    direction: CallDirection
+    direction: CallDirection,
+    repositoryId?: string
   ): Promise<boolean> => {
     if (!vscode.workspace.isTrusted) {
       void vscode.window.showWarningMessage("Trust this workspace to run Compass.");
       return false;
     }
-    const session = await selectRepository();
+    const session = await selectRepository(repositoryId);
     if (!session) return false;
     if (!await ensureCompatible(session, COMPASS_REQUIREMENTS.calls)) return false;
     if (session.graphState !== "available") {
@@ -514,11 +515,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }
       await GraphPanel.open(context, session, output);
     }),
-    vscode.commands.registerCommand("compass.openCallGraphGuide", () => {
+    vscode.commands.registerCommand("compass.openCallGraphGuide", async () => {
+      const editor = vscode.window.activeTextEditor;
+      const session = editor
+        ? registry.forEditor(editor) ?? await selectRepository()
+        : await selectRepository();
+      if (!session) return;
       openCallGraphGuidePanel(
         context,
-        vscode.window.activeTextEditor,
-        openCallGraphForSymbol
+        editor,
+        session,
+        (symbol, direction) => openCallGraphForSymbol(
+          symbol,
+          direction,
+          session.id
+        )
       );
     }),
     vscode.commands.registerCommand("compass.openCallGraph", () => openCallGraph("both")),

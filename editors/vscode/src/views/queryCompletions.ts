@@ -6,6 +6,12 @@ import type {
 const MAX_COMPLETIONS = 8;
 const MAX_INSERT_TEXT = 512;
 const MAX_DETAIL = 240;
+const CALLABLE_NODE_KINDS = new Set([
+  "function",
+  "method",
+  "constructor",
+  "property"
+]);
 
 export function validGraphCompletionTerm(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length < 2 || value.length > 160
@@ -18,13 +24,26 @@ export function validGraphCompletionTerm(value: unknown): string | undefined {
 }
 
 export function graphCompletionItems(result: CodeQueryResponse): QueryCompletion[] {
+  return completionItems(result);
+}
+
+export function callGraphCompletionItems(
+  result: CodeQueryResponse
+): QueryCompletion[] {
+  return completionItems(result, (kind) => CALLABLE_NODE_KINDS.has(kind));
+}
+
+function completionItems(
+  result: CodeQueryResponse,
+  include: (kind: string) => boolean = () => true
+): QueryCompletion[] {
   const nodes = new Map(result.nodes.map((node) => [node.id, node]));
   const seen = new Set<string>();
   const completions: QueryCompletion[] = [];
   for (const match of result.results) {
     if (completions.length >= MAX_COMPLETIONS) break;
     const node = nodes.get(match.nodeId);
-    if (!node || seen.has(node.id)) continue;
+    if (!node || seen.has(node.id) || !include(node.kind)) continue;
     const insertText = node.qualifiedName.trim();
     if (!insertText || insertText.length > MAX_INSERT_TEXT) continue;
     seen.add(node.id);

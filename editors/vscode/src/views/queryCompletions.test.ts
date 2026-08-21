@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CodeQueryResponse } from "@compass/viewer";
 import {
+  callGraphCompletionItems,
   graphCompletionItems,
   validGraphCompletionTerm
 } from "./queryCompletions";
@@ -70,6 +71,24 @@ describe("graphCompletionItems", () => {
     value.nodes[9]!.qualifiedName = "x".repeat(513);
     expect(graphCompletionItems(value).some((item) => item.nodeId === "node-9"))
       .toBe(false);
+  });
+
+  it("offers only call-capable nodes to the call graph", () => {
+    const value = response();
+    value.nodes[9]!.kind = "class";
+    value.nodes[3]!.kind = "method";
+    value.nodes[0]!.kind = "property";
+
+    const items = callGraphCompletionItems(value);
+
+    expect(items.map((item) => item.nodeId)).not.toContain("node-9");
+    expect(items.map((item) => item.nodeId)).toEqual(expect.arrayContaining([
+      "node-3",
+      "node-0"
+    ]));
+    expect(items.every((item) => item.detail.startsWith("function")
+      || item.detail.startsWith("method")
+      || item.detail.startsWith("property"))).toBe(true);
   });
 
   it("accepts portable Unicode graph terms and rejects option-like or oversized input", () => {

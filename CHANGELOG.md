@@ -13,8 +13,10 @@
 
 - Let VS Code users open a call graph by entering a function name, qualified
   name, or stable symbol ID in the Call Graph pane, with callers, callees, or
-  both selectable before tracing. The existing cursor workflow remains
-  available in the same pane.
+  both selectable before tracing. The symbol field now completes callable
+  functions, methods, constructors, and properties from the selected
+  repository's active code graph, with keyboard navigation and bounded error
+  recovery. The existing cursor workflow remains available in the same pane.
 
 - Keep Codebase Evolution strict when a stored revision uses an unsupported
   artifact layout, and offer to rebuild the affected revision with the current
