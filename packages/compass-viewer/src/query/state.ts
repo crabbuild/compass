@@ -5,25 +5,30 @@ export type StructuredResult = {
   rows: string[][];
 };
 
-export type NaturalQuerySummary = {
-  strategy: string;
-  depth: number;
-  starts: string[];
-  total: number;
-};
-
-export type NaturalQueryEntry = {
-  kind: string;
+export type ExplanationConnection = {
+  direction: "incoming" | "outgoing";
   label: string;
-  community?: string | undefined;
-  source?: SourceLocation | undefined;
+  relation: string;
+  confidence: string;
 };
 
-export type NaturalQueryResult = {
-  summary?: NaturalQuerySummary | undefined;
-  entries: NaturalQueryEntry[];
-  prose?: string | undefined;
-};
+export type ExplanationResult =
+  | {
+    kind: "node";
+    label: string;
+    id: string;
+    source?: SourceLocation | undefined;
+    type?: string | undefined;
+    community?: string | undefined;
+    degree?: number | undefined;
+    connections: ExplanationConnection[];
+  }
+  | {
+    kind: "ambiguous";
+    title: string;
+    candidates: Array<{ id: string; source?: string | undefined }>;
+  }
+  | { kind: "prose"; text: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object"
@@ -58,82 +63,69 @@ export function normalizeStructuredResult(value: unknown): StructuredResult | un
   };
 }
 
-export function parseNaturalQueryResult(text: string): NaturalQueryResult {
-  const entries: NaturalQueryEntry[] = [];
-  const prose: string[] = [];
-  let summary: NaturalQuerySummary | undefined;
-
-  for (const rawLine of text.split(/\r?\n/)) {
+export function parseExplanationResult(text: string): ExplanationResult {
+  const lines = text.split(/\r?\n/);
+  const first = lines[0]?.trim() ?? "";
+  if (first.startsWith("Ambiguous:")) {
+    const candidates: Array<{ id: string; source?: string | undefined }> = [];
+    for (let index = 1; index < lines.length; index += 1) {
+      const source = lines[index]?.trim();
+      const id = lines[index + 1]?.trim().match(/^id:\s*(.+)$/)?.[1];
+      if (!id) continue;
+      candidates.push({ id, ...(source ? { source } : {}) });
+      index += 1;
+    }
+    return { kind: "ambiguous", title: first, candidates };
+  }
+  const label = first.match(/^Node:\s*(.+)$/)?.[1];
+  if (!label) return { kind: "prose", text };
+  const fields = new Map<string, string>();
+  const connections: ExplanationConnection[] = [];
+  for (const rawLine of lines.slice(1)) {
     const line = rawLine.trim();
-    if (!line) continue;
-    const parsedSummary = parseTraversalSummary(line);
-    if (parsedSummary) {
-      summary = parsedSummary;
+    const field = line.match(/^([A-Za-z]+):\s*(.*)$/);
+    if (field && field[1] !== "Connections") {
+      fields.set(field[1]!.toLocaleLowerCase(), field[2]!.trim());
       continue;
     }
-    const entry = parseTraversalEntry(line);
-    if (entry) {
-      entries.push(entry);
-    } else {
-      prose.push(line);
+    const connection = line.match(/^(-->|<--)\s+(.+?)\s+\[([^\]]+)]\s+\[([^\]]+)]/);
+    if (connection) {
+      connections.push({
+        direction: connection[1] === "-->" ? "outgoing" : "incoming",
+        label: connection[2]!,
+        relation: connection[3]!,
+        confidence: connection[4]!
+      });
     }
   }
-
+  const source = explanationSource(fields.get("source"));
+  const degreeValue = fields.get("degree");
+  const degree = degreeValue && /^\d+$/.test(degreeValue) ? Number(degreeValue) : undefined;
   return {
-    summary,
-    entries,
-    ...(prose.length > 0 ? { prose: prose.join("\n") } : {})
+    kind: "node",
+    label,
+    id: fields.get("id") ?? label,
+    ...(source ? { source } : {}),
+    ...(fields.get("type") ? { type: fields.get("type") } : {}),
+    ...(fields.get("community") ? { community: fields.get("community") } : {}),
+    ...(degree !== undefined ? { degree } : {}),
+    connections
   };
 }
 
-function parseTraversalSummary(line: string): NaturalQuerySummary | undefined {
-  const match = line.match(
-    /^Traversal:\s*(\S+)\s+depth=(\d+)\s*\|\s*Start:\s*\[(.*)]\s*\|\s*(\d+)\s+nodes?\s+found$/i
-  );
-  if (!match) return undefined;
-  const starts = [...match[3]!.matchAll(/['"]([^'"]+)['"]/g)]
-    .map((candidate) => candidate[1]!)
-    .filter(Boolean);
+function explanationSource(value: string | undefined): SourceLocation | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^(.*?)\s+(L\d+(?::\d+)?(?:-L?\d+(?::\d+)?)?)$/);
+  const file = (match?.[1] ?? value).trim();
+  if (!file) return undefined;
+  const range = match?.[2]?.match(/^L(\d+)(?::\d+)?(?:-L?(\d+)(?::\d+)?)?$/);
   return {
-    strategy: match[1]!,
-    depth: Number(match[2]),
-    starts,
-    total: Number(match[4])
+    file,
+    ...(range
+      ? {
+          startLine: Number(range[1]),
+          endLine: Number(range[2] ?? range[1])
+        }
+      : {})
   };
-}
-
-function parseTraversalEntry(line: string): NaturalQueryEntry | undefined {
-  const match = line.match(/^([A-Z][A-Z_-]*)\s+(.+?)\s+\[(.*)]$/);
-  if (!match) return undefined;
-  const attributes = match[3]!;
-  const file = attribute(attributes, "src");
-  const location = attribute(attributes, "loc");
-  const community = attribute(attributes, "community");
-  const lineRange = location?.match(/^L(\d+)(?:[-:](?:L)?(\d+))?$/i);
-  const source = file
-    ? {
-        file,
-        ...(lineRange
-          ? {
-              startLine: Number(lineRange[1]),
-              endLine: Number(lineRange[2] ?? lineRange[1])
-            }
-          : {})
-      }
-    : undefined;
-
-  return {
-    kind: match[1]!,
-    label: match[2]!,
-    ...(community ? { community } : {}),
-    ...(source ? { source } : {})
-  };
-}
-
-function attribute(attributes: string, name: string): string | undefined {
-  const match = attributes.match(
-    new RegExp(`(?:^|\\s)${name}=(.*?)(?=\\s+[A-Za-z_][\\w-]*=|$)`)
-  );
-  const value = match?.[1]?.trim();
-  return value || undefined;
 }

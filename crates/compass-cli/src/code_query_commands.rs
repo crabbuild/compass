@@ -4,7 +4,9 @@ use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryResponse, ExploreRequest, ImpactRequest,
     NodeTrailRequest, SearchRequest,
 };
-use compass_query::{EngineSelection, NaturalQueryRequest, open_with_engine};
+use compass_query::{
+    EngineSelection, NaturalQueryRequest, open_with_engine, open_with_verified_document,
+};
 
 use crate::Outcome;
 
@@ -30,6 +32,17 @@ pub(crate) fn command(operation: &str, args: &[String]) -> Outcome {
 fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String> {
     let positional = positional(args);
     let graph_option = option(args, "--graph");
+    let revision = option(args, "--at");
+    if graph_option.is_some() && revision.is_some() {
+        return Err("--graph and --at are mutually exclusive".to_owned());
+    }
+    if revision.is_some() {
+        for current_only in ["--engine", "--program", "--cache"] {
+            if option(args, current_only).is_some() {
+                return Err(format!("{current_only} cannot be combined with --at"));
+            }
+        }
+    }
     let output =
         PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()));
     let requested_graph = graph_option.map_or_else(|| output.join("graph.json"), PathBuf::from);
@@ -52,18 +65,41 @@ fn execute(operation: &str, args: &[String]) -> Result<CodeQueryResponse, String
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("cache")
         });
-    let graph = if graph_option.is_some() {
-        resolve_snapshot_artifact(requested_graph)?
-    } else {
-        compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
-            .map_err(|error| error.to_string())?
-    };
     let program = option(args, "--program")
         .map(PathBuf::from)
         .map(resolve_snapshot_artifact)
         .transpose()?;
-    let engine = open_with_engine(&graph, program.as_deref(), &cache, engine)
-        .map_err(|error| error.to_string())?;
+    let engine = if let Some(revision) = revision {
+        let (realization, document) = super::history_commands::load_typed_graph_at(revision)?;
+        let current = std::env::current_dir().map_err(|error| error.to_string())?;
+        let history_cache = current
+            .join(".compass")
+            .join("cache")
+            .join("history-query")
+            .join(realization.to_string());
+        let history_graph = current
+            .join(".compass")
+            .join("history-query")
+            .join(realization.to_string())
+            .join("graph.json");
+        open_with_verified_document(
+            document,
+            realization.as_hex(),
+            &history_graph,
+            program.as_deref(),
+            &history_cache,
+        )
+        .map_err(|error| error.to_string())?
+    } else {
+        let graph = if graph_option.is_some() {
+            resolve_snapshot_artifact(requested_graph)?
+        } else {
+            compass_files::BuildGuard::resolve_artifact(&output, "graph.json")
+                .map_err(|error| error.to_string())?
+        };
+        open_with_engine(&graph, program.as_deref(), &cache, engine)
+            .map_err(|error| error.to_string())?
+    };
     let limits = limits(args)?;
     match operation {
         "ask" => engine.query_natural(NaturalQueryRequest {
@@ -151,6 +187,7 @@ fn option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 fn positional(args: &[String]) -> Vec<String> {
     let value_options = [
         "--graph",
+        "--at",
         "--program",
         "--cache",
         "--engine",

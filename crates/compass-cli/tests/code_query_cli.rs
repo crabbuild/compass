@@ -70,6 +70,53 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
 }
 
 #[test]
+fn typed_ask_rejects_conflicting_current_and_revision_graph_sources() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("ask"),
+            OsString::from("who calls Target?"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+            OsString::from("--at"),
+            OsString::from("HEAD"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+
+    assert_eq!(outcome.code, 1);
+    assert_eq!(
+        outcome.stderr,
+        "error: --graph and --at are mutually exclusive"
+    );
+    for option in ["--engine", "--program", "--cache"] {
+        let outcome = run(
+            Frontend::Compass,
+            [
+                OsString::from("ask"),
+                OsString::from("who calls Target?"),
+                OsString::from("--at"),
+                OsString::from("HEAD"),
+                OsString::from(option),
+                OsString::from("ignored"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(outcome.code, 1);
+        assert_eq!(
+            outcome.stderr,
+            format!("error: {option} cannot be combined with --at")
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

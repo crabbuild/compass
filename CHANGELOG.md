@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Turn the VS Code codebase query view into a multi-command workbench with
+  separate Ask, Explain, and CompassQL composers and durable result tabs.
+  Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
+  now render as readable UI instead of raw JSON. Typed `compass ask` also
+  accepts `--at REV` for immutable revision graphs.
+
 - Keep Codebase Evolution strict when a stored revision uses an unsupported
   artifact layout, and offer to rebuild the affected revision with the current
   Compass version instead of mapping legacy history records.
