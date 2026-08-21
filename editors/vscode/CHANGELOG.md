@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.19
+
 - Keep code graphs static and selectable by default, run force layout only on
   explicit request, and keep every completed relayout paused. Simplify the
   layout picker and group Settings and Filters together with distinct icons.
