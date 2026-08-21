@@ -4,6 +4,10 @@ import type { HistoryTimeline } from "@compass/viewer";
 import { buildEnableHistoryArgs, buildHistoryArgs } from "../history/buildArguments";
 import { loadSemanticDiff } from "../history/diffClient";
 import { loadChangeCounts } from "../history/changeCountsClient";
+import {
+  RevisionGraphRebuildRequired,
+  withRevisionGraphContext
+} from "../history/rebuildRecovery";
 import { RevisionStore } from "../history/revisionStore";
 import { loadTimeline } from "../history/timelineClient";
 import {
@@ -169,7 +173,7 @@ export async function openHistoryPanel(
       activePanelBuild.command.cancel();
     }
   });
-  const buildRevision = async (commit: string): Promise<void> => {
+  const buildRevision = async (commit: string, rebuild = false): Promise<void> => {
     if (disposed) return;
     if (session.activeWriter) {
       await postMessage({
@@ -197,7 +201,7 @@ export async function openHistoryPanel(
           value: { kind: "from" as const }
         }
       ],
-      { title: `Build graph for ${commit.slice(0, 9)}` }
+      { title: `${rebuild ? "Rebuild" : "Build"} graph for ${commit.slice(0, 9)}` }
     );
     if (disposed) return;
     if (!profile) {
@@ -235,6 +239,7 @@ export async function openHistoryPanel(
           revision: commit,
           all: false,
           firstParent: false,
+          rebuild,
           profile: selectedProfile
         }),
         (event) => {
@@ -250,7 +255,7 @@ export async function openHistoryPanel(
       const result = await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: `Building Compass graph for ${commit.slice(0, 9)}`,
+          title: `${rebuild ? "Rebuilding" : "Building"} Compass graph for ${commit.slice(0, 9)}`,
           cancellable: true
         },
         async (progress, token) => {
@@ -407,10 +412,13 @@ export async function openHistoryPanel(
         const generation = ++viewGeneration;
         activeComparison = undefined;
         activeSourceCommits = new Set();
-        const revision = await revisions.load(
+        const revision = await withRevisionGraphContext(
           message.commit,
-          graphNodeLimit,
-          historyIdentity(entry)
+          () => revisions.load(
+            message.commit,
+            graphNodeLimit,
+            historyIdentity(entry)
+          )
         );
         if (generation !== viewGeneration) return;
         activeSourceCommits = new Set([message.commit]);
@@ -438,11 +446,14 @@ export async function openHistoryPanel(
           realization: message.realization,
           fingerprint: message.fingerprint
         };
-        const revision = await revisions.loadCommunity(
+        const revision = await withRevisionGraphContext(
           message.commit,
-          message.communityId,
-          graphNodeLimit,
-          expected
+          () => revisions.loadCommunity(
+            message.commit,
+            message.communityId,
+            graphNodeLimit,
+            expected
+          )
         );
         await postMessage({
           type: "communityGraph",
@@ -464,9 +475,17 @@ export async function openHistoryPanel(
         const generation = ++viewGeneration;
         activeComparison = undefined;
         activeSourceCommits = new Set([message.commit]);
-        const [current, parent, semanticDiff, counts] = await Promise.all([
-          revisions.load(message.commit, graphNodeLimit, historyIdentity(currentEntry)),
-          revisions.load(message.parent, graphNodeLimit, historyIdentity(parentEntry)),
+        const [current, parent] = await Promise.all([
+          withRevisionGraphContext(
+            message.commit,
+            () => revisions.load(message.commit, graphNodeLimit, historyIdentity(currentEntry))
+          ),
+          withRevisionGraphContext(
+            message.parent,
+            () => revisions.load(message.parent, graphNodeLimit, historyIdentity(parentEntry))
+          )
+        ]);
+        const [semanticDiff, counts] = await Promise.all([
           loadSemanticDiff(session, message.parent, message.commit),
           loadChangeCounts(session, message.commit, message.parent)
         ]);
@@ -536,19 +555,25 @@ export async function openHistoryPanel(
         try {
           [current, parent] = await Promise.all([
             message.hasCurrent
-              ? revisions.loadCommunity(
+              ? withRevisionGraphContext(
                   message.commit,
-                  message.communityId,
-                  graphNodeLimit,
-                  comparisonState.currentIdentity
+                  () => revisions.loadCommunity(
+                    message.commit,
+                    message.communityId,
+                    graphNodeLimit,
+                    comparisonState.currentIdentity
+                  )
                 )
               : undefined,
             message.hasParent
-              ? revisions.loadCommunity(
+              ? withRevisionGraphContext(
                   message.parent,
-                  message.communityId,
-                  graphNodeLimit,
-                  comparisonState.parentIdentity
+                  () => revisions.loadCommunity(
+                    message.parent,
+                    message.communityId,
+                    graphNodeLimit,
+                    comparisonState.parentIdentity
+                  )
                 )
               : undefined
           ]);
@@ -593,6 +618,25 @@ export async function openHistoryPanel(
         );
       }
     } catch (error) {
+      if (error instanceof RevisionGraphRebuildRequired) {
+        output.appendLine(`[history:error] ${error.detail}`);
+        const action = await vscode.window.showWarningMessage(
+          error.message,
+          "Rebuild graph"
+        );
+        if (action === "Rebuild graph") {
+          await buildRevision(error.commit, true);
+        } else {
+          const commit = typeof message?.commit === "string" ? message.commit : error.commit;
+          await postMessage({
+            type: "error",
+            operation: historyOperationFor(message),
+            commit,
+            message: error.message
+          });
+        }
+        return;
+      }
       if (message?.type === "buildRevision" && typeof message.commit === "string") {
         const fullMessage = error instanceof Error ? error.message : String(error);
         output.appendLine(`[history:error] ${fullMessage}`);

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep Codebase Evolution strict when a stored revision uses an unsupported
+  artifact layout, and offer to rebuild the affected revision with the current
+  Compass version instead of mapping legacy history records.
+
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,

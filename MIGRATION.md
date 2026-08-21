@@ -172,9 +172,9 @@ compass update .
 
 The history realization schema and SQLite store format remain at v1. Compass
 does not rewrite immutable realizations or map former hidden artifact paths.
-Use `compass history build` to recreate any revision that must materialize with
-the current visible artifact layout; archive the existing history database
-first only when it is needed for audit or rollback.
+Use `compass history rebuild` to recreate any revision that must materialize
+with the current visible artifact layout; archive the existing history
+database first only when it is needed for audit or rollback.
 
 ## Compass Store sidecar upgrades
 

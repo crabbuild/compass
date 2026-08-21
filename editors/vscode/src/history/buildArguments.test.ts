@@ -28,4 +28,16 @@ describe("history build arguments", () => {
       "history", "enable"
     ]);
   });
+
+  it("uses explicit rebuild semantics for an obsolete stored graph", () => {
+    expect(buildHistoryArgs({
+      revision: "abc",
+      all: false,
+      firstParent: false,
+      rebuild: true,
+      profile: { kind: "configured" }
+    })).toEqual([
+      "history", "rebuild", "abc", "--format", "json", "--events", "jsonl"
+    ]);
+  });
 });
