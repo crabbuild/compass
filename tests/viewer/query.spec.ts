@@ -3,17 +3,23 @@ import { expect, test } from "@playwright/test";
 test("query supports keyboard execution and cancellation", async ({ page }) => {
   await page.goto("/query.html?delay=1");
   const editor = page.getByRole("combobox", { name: "Ask input" });
-  await editor.fill("Who");
+  await editor.fill("Who calls Pipe");
   const completions = page.getByRole("listbox", { name: "Ask suggestions" });
   await expect(completions).toBeVisible();
   await expect(completions.getByRole("option")).toContainText([
-    "Who calls PaymentService.charge?"
+    "caching::util::Pipeline"
   ]);
+  await expect.poll(() => page.evaluate(() => {
+    const messages = (window as typeof window & {
+      queryHostMessages: Array<{ type: string; request?: { term?: string } }>;
+    }).queryHostMessages;
+    return messages.filter((message) => message.type === "complete").at(-1)?.request?.term;
+  })).toBe("Pipe");
   await editor.press("Tab");
-  await expect(editor).toHaveValue("Who calls PaymentService.charge?");
+  await expect(editor).toHaveValue("Who calls caching::util::Pipeline");
   await expect(completions).toBeHidden();
   await editor.press("Shift+Enter");
-  await expect(editor).toHaveValue("Who calls PaymentService.charge?\n");
+  await expect(editor).toHaveValue("Who calls caching::util::Pipeline\n");
   await editor.press("Enter");
   await expect(page.getByRole("button", { name: "Cancel Ask" })).toBeVisible();
   await expect(page.getByRole("status")).toContainText("resolving the question");
@@ -23,6 +29,31 @@ test("query supports keyboard execution and cancellation", async ({ page }) => {
   ).queryHostMessages.at(-1)?.type)).toBe("cancel");
   await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeVisible();
   await expect(page.getByText("Run cancelled")).toBeVisible();
+});
+
+test("graph completion failures degrade without blocking query execution", async ({ page }) => {
+  await page.goto("/query.html?completionError=1");
+  const editor = page.getByRole("combobox", { name: "Ask input" });
+  await editor.fill("What is Pipe");
+  await expect(page.getByRole("status")).toContainText(
+    "Graph suggestions are unavailable"
+  );
+  await editor.press("Enter");
+  await expect(page.getByRole("heading", { name: "1 graph match" })).toBeVisible();
+});
+
+test("late graph completions cannot replace a newer input generation", async ({ page }) => {
+  await page.goto("/query.html?completionDelay=1");
+  const editor = page.getByRole("combobox", { name: "Ask input" });
+  await editor.fill("Explain Pipe");
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { queryHostMessages: Array<{ type: string }> }
+  ).queryHostMessages.filter((message) => message.type === "complete").length)).toBe(1);
+  await editor.fill("Explain MissingSymbol");
+  await expect(page.getByRole("status")).toContainText(
+    "No graph symbols match “MissingSymbol”"
+  );
+  await expect(page.getByRole("option", { name: /Pipeline/ })).toHaveCount(0);
 });
 
 test("query renders structured columns", async ({ page }) => {

@@ -4162,6 +4162,40 @@ body.vscode-high-contrast-light .compass-load-logo {
   white-space: nowrap;
 }
 
+.query-completion-status {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 7px;
+  padding-inline: 10px;
+  border-top: 1px solid var(--query-border);
+  background: var(--vscode-editorSuggestWidget-background, var(--query-surface-raised));
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.query-completion-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.query-completion-status button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--vscode-button-border, var(--query-border));
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: inherit;
+}
+
+.query-completion-status button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
+}
+
 .query-params input:focus-visible {
   border-color: var(--ring);
   outline: 1px solid var(--ring);
@@ -4938,7 +4972,9 @@ body.vscode-high-contrast-light .query-connections,
 body.vscode-high-contrast .query-object-result,
 body.vscode-high-contrast-light .query-object-result,
 body.vscode-high-contrast .query-suggestions,
-body.vscode-high-contrast-light .query-suggestions {
+body.vscode-high-contrast-light .query-suggestions,
+body.vscode-high-contrast .query-completion-status,
+body.vscode-high-contrast-light .query-completion-status {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--ring));
 }

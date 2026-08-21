@@ -1,11 +1,13 @@
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
-import { fireEvent } from "@testing-library/react";
+import { fireEvent, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
 import {
   QueryWorkspace,
-  querySuggestions,
+  graphCompletionValue,
+  queryCompletionToken,
+  type QueryCompletion,
   type QueryHost,
   type QueryRun
 } from "./QueryWorkspace";
@@ -14,8 +16,9 @@ beforeAll(() => {
   vi.stubGlobal("navigator", { platform: "MacIntel" });
 });
 
-function host(): QueryHost {
+function host(completions: QueryCompletion[] = []): QueryHost {
   return {
+    complete: vi.fn().mockResolvedValue(completions),
     execute: vi.fn(),
     cancel: vi.fn(),
     selectRun: vi.fn(),
@@ -111,48 +114,46 @@ describe("QueryWorkspace", () => {
     root.unmount();
   });
 
-  it("offers mode-aware completions and accepts the highlighted option with Tab", () => {
+  it("offers code-graph completions and accepts the highlighted option with Tab", async () => {
     const container = document.createElement("div");
     const root = createRoot(container);
     flushSync(() => root.render(
-      <QueryWorkspace runs={[]} host={host()} />
+      <QueryWorkspace runs={[]} host={host([{
+        nodeId: "checkout",
+        label: "crate::checkout",
+        insertText: "crate::checkout",
+        detail: "function · src/checkout.rs:12"
+      }])} />
     ));
     const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask input"]')!;
 
-    fireEvent.change(input, { target: { value: "Who" } });
-    const suggestions = container.querySelector('[role="listbox"][aria-label="Ask suggestions"]');
-    expect(suggestions?.textContent).toContain("Who calls PaymentService.charge?");
+    fireEvent.change(input, { target: { value: "Who calls check" } });
+    await waitFor(() => expect(
+      container.querySelector('[role="listbox"][aria-label="Ask suggestions"]')?.textContent
+    ).toContain("crate::checkout"));
     fireEvent.keyDown(input, { key: "Tab" });
-    expect(input.value).toBe("Who calls PaymentService.charge?");
+    expect(input.value).toBe("Who calls crate::checkout");
     expect(container.querySelector('[aria-label="Ask suggestions"]')).toBeNull();
     root.unmount();
   });
 
-  it("tailors completions to CompassQL and recently returned symbols", () => {
-    const run: QueryRun = {
-      id: "ask-1",
-      request: {
-        command: "ask",
-        query: "find checkout",
-        params: {},
-        timeoutMs: 5000,
-        maxRows: 1000
-      },
-      status: "success",
-      output: { kind: "code-query", value: typedAnswer() }
-    };
-
-    expect(querySuggestions("cql", "MATCH", []))
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ value: "MATCH (n) RETURN n LIMIT 20" })
-      ]));
-    expect(querySuggestions("explain", "crate::check", [run]))
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          value: "crate::checkout",
-          detail: "Symbol from recent results"
-        })
-      ]));
+  it("extracts bounded Unicode graph terms and replaces only the active token", () => {
+    const token = queryCompletionToken("Who calls 支付::处");
+    expect(token).toEqual({ term: "支付::处", start: 10, end: 15 });
+    expect(graphCompletionValue("ask", "Who calls 支付::处?", token!, "支付::处理"))
+      .toBe("Who calls 支付::处理?");
+    const cqlToken = queryCompletionToken("MATCH (n:Pay", "cql");
+    expect(cqlToken).toEqual({ term: "Pay", start: 9, end: 12 });
+    expect(graphCompletionValue("cql", "MATCH (n:Pay", cqlToken!, "billing::Payment"))
+      .toBe("MATCH (n:billing::Payment");
+    expect(graphCompletionValue("explain", "please explain check", {
+      term: "check",
+      start: 15,
+      end: 20
+    }, "crate::checkout"))
+      .toBe("crate::checkout");
+    expect(queryCompletionToken("MATCH (n) LIMIT 20")).toBeUndefined();
+    expect(queryCompletionToken("a".repeat(161))).toBeUndefined();
   });
 
   it("keeps command outputs in separate selectable result tabs", () => {

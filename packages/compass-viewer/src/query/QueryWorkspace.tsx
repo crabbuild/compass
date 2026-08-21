@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -37,7 +37,21 @@ export type QueryRun = {
   output?: QueryOutput | undefined;
   error?: string | undefined;
 };
+export type QueryCompletion = {
+  nodeId: string;
+  label: string;
+  insertText: string;
+  detail: string;
+};
+export type QueryCompletionRequest = {
+  command: QueryCommand;
+  term: string;
+};
 export type QueryHost = {
+  complete(
+    request: QueryCompletionRequest,
+    signal?: AbortSignal
+  ): Promise<QueryCompletion[]>;
   execute(request: QuerySubmission): void;
   cancel(runId: string): void;
   selectRun(runId: string): void;
@@ -86,24 +100,13 @@ const EXAMPLES: Record<QueryCommand, string[]> = {
 };
 
 type QuerySuggestion = {
+  nodeId: string;
   value: string;
+  label: string;
   detail: string;
 };
 
-const COMPLETIONS: Record<QueryCommand, QuerySuggestion[]> = {
-  ask: EXAMPLES.ask.map((value) => ({ value, detail: "Question starter" })),
-  explain: EXAMPLES.explain.map((value) => ({ value, detail: "Symbol example" })),
-  cql: [{
-    value: "MATCH (n) RETURN n LIMIT 20",
-    detail: "List graph nodes"
-  }, {
-    value: "MATCH (a)-[r:CALLS]->(b) RETURN a, r, b LIMIT 20",
-    detail: "Inspect call relationships"
-  }, {
-    value: "MATCH (n) WHERE n.kind = $kind RETURN n LIMIT 20",
-    detail: "Filter nodes by parameter"
-  }]
-};
+type CompletionStatus = "idle" | "waiting" | "loading" | "ready" | "error";
 
 export function QueryWorkspace({
   runs,
@@ -118,6 +121,9 @@ export function QueryWorkspace({
 }) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
   const editorShellRef = useRef<HTMLDivElement>(null);
+  const completeRef = useRef(host.complete);
+  const completionGeneration = useRef(0);
+  completeRef.current = host.complete;
   const [command, setCommand] = useState<QueryCommand>("ask");
   const [drafts, setDrafts] = useState<Record<QueryCommand, string>>({
     ask: "",
@@ -127,20 +133,68 @@ export function QueryWorkspace({
   const [params, setParams] = useState("");
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
+  const [suggestions, setSuggestions] = useState<QuerySuggestion[]>([]);
+  const [completionStatus, setCompletionStatus] = useState<CompletionStatus>("idle");
+  const [completionRetry, setCompletionRetry] = useState(0);
   const parsedParams = useMemo(() => parseParams(params), [params]);
   const activeRun = runs.find((run) => run.id === activeRunId) ?? runs.at(-1);
   const runningRun = runs.find((run) => run.status === "running");
   const selectedCommand = COMMANDS.find((candidate) => candidate.id === command)!;
   const query = drafts[command];
-  const suggestions = useMemo(
-    () => querySuggestions(command, query, runs),
-    [command, query, runs]
-  );
+  const completionToken = useMemo(() => queryCompletionToken(query, command), [command, query]);
   const showSuggestions = suggestionsVisible && suggestions.length > 0;
+  const showCompletionStatus = suggestionsVisible
+    && completionToken !== undefined
+    && (completionStatus === "loading"
+      || completionStatus === "error"
+      || (completionStatus === "ready" && suggestions.length === 0));
+
+  useEffect(() => {
+    const generation = ++completionGeneration.current;
+    setSuggestions([]);
+    setActiveSuggestion(0);
+    if (!completionToken || !suggestionsVisible || runningRun) {
+      setCompletionStatus("idle");
+      return;
+    }
+    setCompletionStatus("waiting");
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (completionGeneration.current !== generation) return;
+      setCompletionStatus("loading");
+      void completeRef.current({ command, term: completionToken.term }, controller.signal)
+        .then((items) => {
+          if (completionGeneration.current !== generation) return;
+          const unique = new Map<string, QuerySuggestion>();
+          for (const item of items.slice(0, 8)) {
+            const value = graphCompletionValue(command, query, completionToken, item.insertText);
+            if (value === query || unique.has(value)) continue;
+            unique.set(value, {
+              nodeId: item.nodeId,
+              value,
+              label: item.label,
+              detail: item.detail
+            });
+          }
+          setSuggestions([...unique.values()]);
+          setCompletionStatus("ready");
+        })
+        .catch(() => {
+          if (completionGeneration.current !== generation) return;
+          setSuggestions([]);
+          setCompletionStatus("error");
+        });
+    }, 180);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [command, completionRetry, completionToken, query, runningRun, suggestionsVisible]);
+
   const updateQuery = (value: string) => {
     setDrafts((current) => ({ ...current, [command]: value }));
     setActiveSuggestion(0);
-    setSuggestionsVisible(Boolean(value.trim()));
+    setSuggestionsVisible(queryCompletionToken(value, command) !== undefined);
   };
   const chooseSuggestion = (value: string) => {
     setDrafts((current) => ({ ...current, [command]: value }));
@@ -186,6 +240,7 @@ export function QueryWorkspace({
                   setCommand(candidate.id);
                   setSuggestionsVisible(false);
                   setActiveSuggestion(0);
+                  setSuggestions([]);
                   requestAnimationFrame(() => editorRef.current?.focus());
                 }}
               >
@@ -224,7 +279,7 @@ export function QueryWorkspace({
                 autoComplete="off"
                 spellCheck={command === "ask"}
                 onChange={(event) => updateQuery(event.target.value)}
-                onFocus={() => setSuggestionsVisible(Boolean(query.trim()))}
+                onFocus={() => setSuggestionsVisible(completionToken !== undefined)}
                 onBlur={(event) => {
                   const next = event.relatedTarget;
                   if (next instanceof Node && editorShellRef.current?.contains(next)) return;
@@ -267,11 +322,11 @@ export function QueryWorkspace({
                 role="listbox"
                 aria-label={`${selectedCommand.label} suggestions`}
               >
-                <span className="query-suggestions-label">Suggestions</span>
+                <span className="query-suggestions-label">Code graph symbols</span>
                 {suggestions.map((suggestion, index) => (
                   <button
                     id={`query-input-suggestion-${index}`}
-                    key={suggestion.value}
+                    key={`${suggestion.nodeId}:${suggestion.value}`}
                     type="button"
                     role="option"
                     aria-selected={index === activeSuggestion}
@@ -279,11 +334,29 @@ export function QueryWorkspace({
                     onMouseEnter={() => setActiveSuggestion(index)}
                     onClick={() => chooseSuggestion(suggestion.value)}
                   >
-                    <span>{suggestion.value}</span>
+                    <span>{suggestion.label}</span>
                     <small>{suggestion.detail}</small>
                   </button>
                 ))}
                 <span className="query-suggestions-hint">↑↓ choose · Tab complete · Enter run</span>
+              </div>
+            )}
+            {showCompletionStatus && (
+              <div className="query-completion-status" role="status">
+                <span>{completionStatus === "loading"
+                  ? "Searching the active code graph…"
+                  : completionStatus === "error"
+                    ? "Graph suggestions are unavailable. You can still run the query."
+                    : `No graph symbols match “${completionToken.term}”.`}</span>
+                {completionStatus === "error" && (
+                  <button
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => setCompletionRetry((current) => current + 1)}
+                  >
+                    Retry
+                  </button>
+                )}
               </div>
             )}
             <div className="query-composer-footer">
@@ -676,47 +749,44 @@ function runningDescription(command: QueryCommand): string {
   return "Compass is planning and executing the read-only graph query.";
 }
 
-export function querySuggestions(
+export type QueryCompletionToken = {
+  term: string;
+  start: number;
+  end: number;
+};
+
+export function queryCompletionToken(
+  input: string,
+  command: QueryCommand = "ask"
+): QueryCompletionToken | undefined {
+  const matches = [...input.matchAll(/[\p{L}\p{N}_$:.#/@-]+/gu)];
+  const match = matches.at(-1);
+  let term = match?.[0];
+  let start = match?.index;
+  if (command === "cql" && term !== undefined && start !== undefined) {
+    for (let index = term.length - 1; index >= 0; index -= 1) {
+      if (term[index] !== ":" || term[index - 1] === ":" || term[index + 1] === ":") continue;
+      start += index + 1;
+      term = term.slice(index + 1);
+      break;
+    }
+  }
+  if (term === undefined || start === undefined
+    || term.length < 2 || term.length > 160
+    || /^\d+$/.test(term) || term.startsWith("-") || term.startsWith("$")) {
+    return undefined;
+  }
+  return { term, start, end: start + term.length };
+}
+
+export function graphCompletionValue(
   command: QueryCommand,
   input: string,
-  runs: QueryRun[]
-): QuerySuggestion[] {
-  const needle = input.trim().toLocaleLowerCase();
-  if (!needle) return [];
-  const recentSymbols = runs.flatMap((run) => run.output?.kind === "code-query"
-    ? run.output.value.nodes.flatMap((node) => [
-        node.qualifiedName,
-        node.name,
-        node.id
-      ])
-    : []);
-  const learned = command === "explain"
-    ? recentSymbols.map((value) => ({ value, detail: "Symbol from recent results" }))
-    : command === "ask"
-      ? recentSymbols.flatMap((value) => [{
-          value: `Who calls ${value}?`,
-          detail: "Ask about a recent symbol"
-        }, {
-          value: `What does ${value} call?`,
-          detail: "Ask about a recent symbol"
-        }])
-      : [];
-  const unique = new Map<string, QuerySuggestion>();
-  for (const suggestion of [...learned, ...COMPLETIONS[command]]) {
-    if (!unique.has(suggestion.value)) unique.set(suggestion.value, suggestion);
-  }
-  return [...unique.values()]
-    .filter((suggestion) => {
-      const value = suggestion.value.toLocaleLowerCase();
-      return value !== needle && (value.startsWith(needle) || value.includes(needle));
-    })
-    .sort((left, right) => {
-      const leftStarts = left.value.toLocaleLowerCase().startsWith(needle);
-      const rightStarts = right.value.toLocaleLowerCase().startsWith(needle);
-      if (leftStarts !== rightStarts) return leftStarts ? -1 : 1;
-      return left.value.localeCompare(right.value);
-    })
-    .slice(0, 5);
+  token: QueryCompletionToken,
+  insertText: string
+): string {
+  if (command === "explain") return insertText;
+  return `${input.slice(0, token.start)}${insertText}${input.slice(token.end)}`;
 }
 
 function operationLabel(operation: CodeQueryResponse["operation"]): string {

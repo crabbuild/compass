@@ -6,9 +6,10 @@
   separate Ask, Explain, and CompassQL composers and durable result tabs.
   Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
   now render as readable UI instead of raw JSON. Active commands use a visible
-  top indicator, inputs offer command-aware completions, Enter runs the active
-  command, and Shift+Enter inserts a new line. Typed `compass ask` also accepts
-  `--at REV` for immutable revision graphs.
+  top indicator, inputs offer bounded completions from the active code graph,
+  Enter runs the active command, and Shift+Enter inserts a new line. Historical
+  panels complete against their selected immutable revision. Typed `compass
+  ask` also accepts `--at REV` for immutable revision graphs.
 
 - Let VS Code users open a call graph by entering a function name, qualified
   name, or stable symbol ID in the Call Graph pane, with callers, callees, or
