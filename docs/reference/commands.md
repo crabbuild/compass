@@ -314,10 +314,11 @@ compass explain "<node>"
   [--graph PATH | --at REV]
 ```
 
-Shows one node and incoming/outgoing connections. An exact node ID resolves
-directly. When a label names multiple source-backed declarations, Compass lists
-the candidates and their source ranges and asks for the full node ID instead of
-silently selecting one. Connection lines include the stored relationship site.
+Shows one node and incoming/outgoing connections. An exact node ID or unique
+exact qualified name resolves directly. When a label or qualified name names
+multiple source-backed declarations, Compass lists the candidates and their
+source ranges and asks for the full node ID instead of silently selecting one.
+Connection lines include the stored relationship site.
 Connections and ambiguous candidates use the same bounded, deterministic
 pagination contract as natural-language queries instead of silently cutting off
 after the first group.

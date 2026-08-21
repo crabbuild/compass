@@ -23,6 +23,14 @@ export function validGraphCompletionTerm(value: unknown): string | undefined {
   return value;
 }
 
+export function validGraphCompletionNodeId(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_INSERT_TEXT
+    || value.trim() !== value || value.startsWith("-") || /[\u0000-\u001f\u007f]/u.test(value)) {
+    return undefined;
+  }
+  return value;
+}
+
 export function graphCompletionItems(result: CodeQueryResponse): QueryCompletion[] {
   return completionItems(result);
 }

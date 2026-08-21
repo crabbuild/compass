@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make `compass explain` resolve the exact qualified names returned by typed
+  graph search, preserving ambiguity instead of selecting a duplicate. In the
+  VS Code Explain composer, Enter now accepts and explains the highlighted
+  graph suggestion rather than submitting the incomplete token.
+
 - Turn the VS Code codebase query view into a multi-command workbench with
   separate Ask, Explain, and CompassQL composers and durable result tabs.
   Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows

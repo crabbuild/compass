@@ -15,6 +15,7 @@ import type { RepositorySession } from "../workspace/repositorySession";
 import { queryFailureMessage } from "./queryExecution";
 import {
   graphCompletionItems,
+  validGraphCompletionNodeId,
   validGraphCompletionTerm
 } from "./queryCompletions";
 import { openGraphSource } from "./sourceNavigation";
@@ -173,6 +174,7 @@ export async function openQueryPanel(
     }
     const controller = new AbortController();
     const request = message.request as QuerySubmission & { id: string };
+    const resolvedNodeId = validGraphCompletionNodeId(request.resolvedNodeId);
     active = { id: request.id, controller };
     const started = performance.now();
     try {
@@ -186,7 +188,7 @@ export async function openQueryPanel(
           ...selection
         })
         : request.command === "explain"
-          ? buildExplainArgs({ query: request.query, ...selection })
+          ? buildExplainArgs({ query: resolvedNodeId ?? request.query, ...selection })
           : buildAskArgs({ query: request.query, ...selection });
       const result = await session.processes.run(session.root, args, controller.signal);
       if (controller.signal.aborted) return;

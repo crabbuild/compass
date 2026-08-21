@@ -137,6 +137,44 @@ describe("QueryWorkspace", () => {
     root.unmount();
   });
 
+  it("explains the highlighted graph completion instead of the partial token", async () => {
+    const queryHost = host([{
+      nodeId: "sha256:checkout",
+      label: "crate::checkout",
+      insertText: "crate::checkout",
+      detail: "function · src/checkout.rs:12"
+    }]);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <QueryWorkspace runs={[]} host={queryHost} />
+    ));
+    fireEvent.click(Array.from(container.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Query command"] [role="tab"]'
+    )).find((tab) => tab.textContent?.includes("Explain"))!);
+    const input = container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Explain input"]'
+    )!;
+
+    fireEvent.change(input, { target: { value: "crate::check" } });
+    await waitFor(() => expect(
+      container.querySelector('[role="listbox"][aria-label="Explain suggestions"]')
+        ?.textContent
+    ).toContain("crate::checkout"));
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.value).toBe("crate::checkout");
+    expect(queryHost.execute).toHaveBeenCalledWith({
+      command: "explain",
+      query: "crate::checkout",
+      resolvedNodeId: "sha256:checkout",
+      params: {},
+      timeoutMs: 5000,
+      maxRows: 1000
+    });
+    root.unmount();
+  });
+
   it("extracts bounded Unicode graph terms and replaces only the active token", () => {
     const token = queryCompletionToken("Who calls 支付::处");
     expect(token).toEqual({ term: "支付::处", start: 10, end: 15 });

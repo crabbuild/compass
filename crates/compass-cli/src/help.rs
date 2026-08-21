@@ -381,7 +381,7 @@ const PAGES: &[Page] = &[
         "explain",
         "Explain a node and its important relationships",
         ["compass explain <NODE> [OPTIONS]"],
-        "Arguments:\n  <NODE>                  Node name, label, or identifier\n\nOptions:\n  --budget <N>            Approximate tokens per page [default: 2000]\n  --page <N>              Connection or ambiguity page, starting at 1 [default: 1]\n  --graph <PATH>          Read a graph JSON file\n  --at <REV>              Use an immutable Git revision; conflicts with --graph\n\nExamples:\n  compass explain PaymentService\n  compass explain PaymentService --budget 8000\n  compass explain PaymentService --page 2\n  compass explain auth --at HEAD~5"
+        "Arguments:\n  <NODE>                  Node ID, name, label, or qualified name\n\nOptions:\n  --budget <N>            Approximate tokens per page [default: 2000]\n  --page <N>              Connection or ambiguity page, starting at 1 [default: 1]\n  --graph <PATH>          Read a graph JSON file\n  --at <REV>              Use an immutable Git revision; conflicts with --graph\n\nExamples:\n  compass explain PaymentService\n  compass explain PaymentService --budget 8000\n  compass explain PaymentService --page 2\n  compass explain auth --at HEAD~5"
     ),
     page!(
         "affected",

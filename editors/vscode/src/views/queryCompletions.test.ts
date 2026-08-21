@@ -3,6 +3,7 @@ import type { CodeQueryResponse } from "@compass/viewer";
 import {
   callGraphCompletionItems,
   graphCompletionItems,
+  validGraphCompletionNodeId,
   validGraphCompletionTerm
 } from "./queryCompletions";
 
@@ -97,5 +98,13 @@ describe("graphCompletionItems", () => {
     expect(validGraphCompletionTerm("$parameter")).toBeUndefined();
     expect(validGraphCompletionTerm("two words")).toBeUndefined();
     expect(validGraphCompletionTerm("x".repeat(161))).toBeUndefined();
+  });
+
+  it("accepts bounded graph node IDs and rejects option-like or control input", () => {
+    const nodeId = `sha256:${"a".repeat(64)}`;
+    expect(validGraphCompletionNodeId(nodeId)).toBe(nodeId);
+    expect(validGraphCompletionNodeId("--help")).toBeUndefined();
+    expect(validGraphCompletionNodeId("node\nother")).toBeUndefined();
+    expect(validGraphCompletionNodeId("a".repeat(513))).toBeUndefined();
   });
 });

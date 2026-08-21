@@ -21,6 +21,7 @@ export type QueryCommand = "ask" | "explain" | "cql";
 export type QuerySubmission = {
   command: QueryCommand;
   query: string;
+  resolvedNodeId?: string | undefined;
   params: Record<string, string>;
   timeoutMs: number;
   maxRows: number;
@@ -134,6 +135,10 @@ export function QueryWorkspace({
   const [suggestionsVisible, setSuggestionsVisible] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   const [suggestions, setSuggestions] = useState<QuerySuggestion[]>([]);
+  const [explainSelection, setExplainSelection] = useState<{
+    value: string;
+    nodeId: string;
+  }>();
   const [completionStatus, setCompletionStatus] = useState<CompletionStatus>("idle");
   const [completionRetry, setCompletionRetry] = useState(0);
   const parsedParams = useMemo(() => parseParams(params), [params]);
@@ -193,20 +198,30 @@ export function QueryWorkspace({
 
   const updateQuery = (value: string) => {
     setDrafts((current) => ({ ...current, [command]: value }));
+    if (command === "explain") setExplainSelection(undefined);
     setActiveSuggestion(0);
     setSuggestionsVisible(queryCompletionToken(value, command) !== undefined);
   };
-  const chooseSuggestion = (value: string) => {
+  const chooseSuggestion = (value: string, nodeId?: string) => {
     setDrafts((current) => ({ ...current, [command]: value }));
+    if (command === "explain") {
+      setExplainSelection(nodeId ? { value, nodeId } : undefined);
+    }
     setSuggestionsVisible(false);
     requestAnimationFrame(() => editorRef.current?.focus());
   };
-  const execute = () => {
-    const trimmed = query.trim();
+  const execute = (value = query, resolvedNodeId?: string) => {
+    const trimmed = value.trim();
     if (!trimmed || runningRun) return;
+    const selectedNodeId = command === "explain"
+      ? resolvedNodeId ?? (explainSelection?.value.trim() === trimmed
+        ? explainSelection.nodeId
+        : undefined)
+      : undefined;
     host.execute({
       command,
       query: trimmed,
+      ...(selectedNodeId ? { resolvedNodeId: selectedNodeId } : {}),
       params: parsedParams,
       timeoutMs: 5000,
       maxRows: 1000
@@ -304,11 +319,19 @@ export function QueryWorkspace({
                   if (event.key === "Tab" && showSuggestions) {
                     event.preventDefault();
                     const suggestion = suggestions[activeSuggestion];
-                    if (suggestion) chooseSuggestion(suggestion.value);
+                    if (suggestion) chooseSuggestion(suggestion.value, suggestion.nodeId);
                     return;
                   }
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    if (command === "explain" && showSuggestions) {
+                      const suggestion = suggestions[activeSuggestion];
+                      if (suggestion) {
+                        chooseSuggestion(suggestion.value, suggestion.nodeId);
+                        execute(suggestion.value, suggestion.nodeId);
+                        return;
+                      }
+                    }
                     setSuggestionsVisible(false);
                     execute();
                   }
@@ -332,13 +355,17 @@ export function QueryWorkspace({
                     aria-selected={index === activeSuggestion}
                     onMouseDown={(event) => event.preventDefault()}
                     onMouseEnter={() => setActiveSuggestion(index)}
-                    onClick={() => chooseSuggestion(suggestion.value)}
+                    onClick={() => chooseSuggestion(suggestion.value, suggestion.nodeId)}
                   >
                     <span>{suggestion.label}</span>
                     <small>{suggestion.detail}</small>
                   </button>
                 ))}
-                <span className="query-suggestions-hint">↑↓ choose · Tab complete · Enter run</span>
+                <span className="query-suggestions-hint">
+                  {command === "explain"
+                    ? "↑↓ choose · Tab complete · Enter explain"
+                    : "↑↓ choose · Tab complete · Enter run"}
+                </span>
               </div>
             )}
             {showCompletionStatus && (
@@ -380,7 +407,7 @@ export function QueryWorkspace({
                   className="query-run"
                   aria-label={runningRun ? `Cancel ${commandLabel(runningRun.request.command)}` : runLabel(command)}
                   disabled={!runningRun && !query.trim()}
-                  onClick={runningRun ? () => host.cancel(runningRun.id) : execute}
+                  onClick={runningRun ? () => host.cancel(runningRun.id) : () => execute()}
                 >
                   {runningRun ? <SquareIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
                   {runningRun ? "Cancel" : runLabel(command)}

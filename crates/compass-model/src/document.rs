@@ -880,7 +880,7 @@ impl GraphDocument {
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG01";
 const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA02";
-const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT03";
+const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT04";
 const QUERY_CACHE_HEADER_LEN: usize = 28;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -906,6 +906,7 @@ struct TraversalRawNode {
     label: Option<Value>,
     name: Option<Value>,
     norm_label: Option<Value>,
+    qualified_name: Option<Value>,
     kind: Option<Value>,
     symbol_kind: Option<Value>,
     node_type: Option<Value>,
@@ -969,6 +970,9 @@ impl<'de> Deserialize<'de> for TraversalRawNode {
                         "label" => node.label = Some(map.next_value()?),
                         "name" => node.name = Some(map.next_value()?),
                         "norm_label" => node.norm_label = Some(map.next_value()?),
+                        "qualifiedName" | "qualified_name" => {
+                            node.qualified_name = Some(map.next_value()?);
+                        }
                         "kind" => node.kind = Some(map.next_value()?),
                         "symbol_kind" => node.symbol_kind = Some(map.next_value()?),
                         "type" => node.node_type = Some(map.next_value()?),
@@ -1220,6 +1224,7 @@ struct TraversalCacheNode(
     Option<Value>,
     Option<Value>,
     Option<Value>,
+    Option<Value>,
 );
 
 #[derive(Deserialize, Serialize)]
@@ -1258,6 +1263,7 @@ impl TraversalRawNode {
             label,
             name,
             norm_label,
+            qualified_name,
             kind,
             symbol_kind,
             node_type,
@@ -1317,6 +1323,7 @@ impl TraversalRawNode {
             id,
             label,
             norm_label,
+            qualified_name,
             kind,
             symbol_kind,
             node_type,
@@ -1414,6 +1421,7 @@ impl TraversalCacheDocument {
                     id,
                     label,
                     norm_label,
+                    qualified_name,
                     kind,
                     symbol_kind,
                     node_type,
@@ -1428,6 +1436,7 @@ impl TraversalCacheDocument {
                 let mut attributes = Map::new();
                 insert_optional_value(&mut attributes, "label", label);
                 insert_optional_value(&mut attributes, "norm_label", norm_label);
+                insert_optional_value(&mut attributes, "qualified_name", qualified_name);
                 insert_optional_value(&mut attributes, "kind", kind);
                 insert_optional_value(&mut attributes, "symbol_kind", symbol_kind);
                 insert_optional_value(&mut attributes, "type", node_type);
@@ -1952,7 +1961,7 @@ mod tests {
                 "directed":true,
                 "multigraph":true,
                 "nodes":[
-                    {"id":"a","name":"A","kind":"function","norm_label":"a","source":{"file":"src/a.py","startLine":2},"community":{"id":4,"label":"Core"},"evidence":[{"wiringSite":{"file":"src/routes.py","startLine":8}}],"large_payload":"discard"},
+                    {"id":"a","name":"A","qualifiedName":"pkg::A","kind":"function","norm_label":"a","source":{"file":"src/a.py","startLine":2},"community":{"id":4,"label":"Core"},"evidence":[{"wiringSite":{"file":"src/routes.py","startLine":8}}],"large_payload":"discard"},
                     {"id":"b","label":"B"}
                 ],
                 "links":[{"source":"a","target":"b","kind":"calls","evidence":[{"confidence":"exact"}],"relationshipSite":{"file":"src/a.py","startLine":3},"context":"call","large_payload":"discard"}]
@@ -1968,6 +1977,7 @@ mod tests {
         );
         assert!(traversal_cache_path(&path).is_file());
         assert_eq!(compact.nodes[0].label(), "A");
+        assert_eq!(compact.nodes[0].string("qualified_name"), "pkg::A");
         assert_eq!(compact.nodes[0].string("source_file"), "src/a.py");
         assert_eq!(compact.nodes[0].string("source_location"), "L2");
         assert_eq!(compact.nodes[0].string("wiring_file"), "src/routes.py");
@@ -1977,5 +1987,9 @@ mod tests {
         assert_eq!(compact.links[0].string("source_location"), "L3");
         assert!(!compact.nodes[0].attributes.contains_key("large_payload"));
         assert!(!compact.links[0].attributes.contains_key("large_payload"));
+
+        let cached =
+            GraphDocument::load_for_traversal(&path).unwrap_or_else(|_| std::process::abort());
+        assert_eq!(cached.nodes[0].string("qualified_name"), "pkg::A");
     }
 }
