@@ -1,8 +1,17 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
-import { SourceLocationSchema } from "@compass/viewer/contracts/graph";
-import { buildCqlArgs, buildNaturalQueryArgs } from "../commands/queryArguments";
+import {
+  CodeQueryResponseSchema,
+  SourceLocationSchema,
+  type QuerySubmission
+} from "@compass/viewer";
+import {
+  buildAskArgs,
+  buildCqlArgs,
+  buildExplainArgs
+} from "../commands/queryArguments";
 import type { RepositorySession } from "../workspace/repositorySession";
+import { queryFailureMessage } from "./queryExecution";
 import { openGraphSource } from "./sourceNavigation";
 
 export async function openQueryPanel(
@@ -20,16 +29,22 @@ export async function openQueryPanel(
       localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist")]
     }
   );
-  let active: AbortController | undefined;
-  panel.onDidDispose(() => active?.abort());
+  let active: { id: string; controller: AbortController } | undefined;
+  panel.onDidDispose(() => active?.controller.abort());
   panel.webview.html = html(context, panel.webview);
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === "ready") {
-      await panel.webview.postMessage({ type: "state", running: false, revision });
+      await panel.webview.postMessage({ type: "state", revision });
       return;
     }
     if (message?.type === "cancel") {
-      active?.abort();
+      const current = active;
+      if (current === undefined) return;
+      if (current.id === message.runId) {
+        current.controller.abort();
+        active = undefined;
+        await panel.webview.postMessage({ type: "cancelled", runId: message.runId });
+      }
       return;
     }
     if (message?.type === "openSource") {
@@ -49,55 +64,77 @@ export async function openQueryPanel(
       return;
     }
     if (message?.type !== "execute"
-      || !["natural", "cql"].includes(message.request?.mode)
+      || !["ask", "explain", "cql"].includes(message.request?.command)
+      || typeof message.request.id !== "string"
       || typeof message.request.query !== "string") return;
-    active?.abort();
+    if (active) {
+      const previous = active;
+      previous.controller.abort();
+      await panel.webview.postMessage({ type: "cancelled", runId: previous.id });
+    }
     const controller = new AbortController();
-    active = controller;
+    const request = message.request as QuerySubmission & { id: string };
+    active = { id: request.id, controller };
     const started = performance.now();
-    await panel.webview.postMessage({ type: "state", running: true, revision });
     try {
-      const request = message.request as {
-        mode: "natural" | "cql";
-        query: string;
-        params: Record<string, string>;
-        timeoutMs: number;
-        maxRows: number;
+      const selection = {
+        graph: revision ? undefined : session.graphPath,
+        revision
       };
-      const args = request.mode === "cql"
+      const args = request.command === "cql"
         ? buildCqlArgs({
           ...request,
-          graph: revision ? undefined : session.graphPath,
-          revision
+          ...selection
         })
-        : buildNaturalQueryArgs({
-          query: request.query,
-          graph: revision ? undefined : session.graphPath,
-          revision
-        });
+        : request.command === "explain"
+          ? buildExplainArgs({ query: request.query, ...selection })
+          : buildAskArgs({ query: request.query, ...selection });
       const result = await session.processes.run(session.root, args, controller.signal);
-      if (result.code !== 0) throw new Error(result.stderr || `Compass exited with ${result.code}`);
+      if (controller.signal.aborted) return;
+      if (result.code !== 0) {
+        throw new QueryProcessError(result.stderr || result.stdout, result.code);
+      }
+      const output = request.command === "ask"
+        ? { kind: "code-query" as const, value: CodeQueryResponseSchema.parse(JSON.parse(result.stdout)) }
+        : request.command === "cql"
+          ? { kind: "rows" as const, value: JSON.parse(result.stdout) as unknown }
+          : { kind: "explanation" as const, text: result.stdout };
       await panel.webview.postMessage({
         type: "result",
+        runId: request.id,
         revision,
-        result: {
-          mode: request.mode,
-          ...(request.mode === "cql"
-            ? { json: JSON.parse(result.stdout) }
-            : { text: result.stdout }),
-          durationMs: Math.round(performance.now() - started)
-        }
+        output,
+        durationMs: Math.round(performance.now() - started)
       });
     } catch (error) {
+      if (controller.signal.aborted) return;
       await panel.webview.postMessage({
         type: "error",
+        runId: request.id,
         revision,
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof QueryProcessError
+          ? queryFailureMessage(error.output, error.exitCode)
+          : invalidResultMessage(request.command, error)
       });
     } finally {
-      if (active === controller) active = undefined;
+      if (active?.controller === controller) active = undefined;
     }
   });
+}
+
+class QueryProcessError extends Error {
+  constructor(
+    public readonly output: string,
+    public readonly exitCode: number
+  ) {
+    super(output);
+  }
+}
+
+function invalidResultMessage(command: QuerySubmission["command"], error: unknown): string {
+  console.error(`[compass-query:${command}] invalid result`, error);
+  const label = command === "cql" ? "CompassQL" : command === "ask" ? "Ask" : "Explain";
+  return `Compass returned a ${label} result this extension could not read. Update Compass and the extension, then try again.`;
 }
 
 function html(context: vscode.ExtensionContext, webview: vscode.Webview): string {

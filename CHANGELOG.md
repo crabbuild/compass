@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Turn the VS Code codebase query view into a multi-command workbench with
+  separate Ask, Explain, and CompassQL composers and durable result tabs.
+  Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
+  now render as readable UI instead of raw JSON. Typed `compass ask` also
+  accepts `--at REV` for immutable revision graphs.
+
 - Let VS Code users open a call graph by entering a function name, qualified
   name, or stable symbol ID in the Call Graph pane, with callers, callees, or
   both selectable before tracing. The existing cursor workflow remains

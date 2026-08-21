@@ -250,6 +250,19 @@ an explicit `wiring=FILE:LOCATION` site, and traversed relationships render
 their occurrence as `at=FILE:LOCATION`; neither is presented as a declaration
 location.
 
+Typed intent routing:
+
+```text
+compass ask "<question>"
+  [--graph PATH | --at REV]
+  [--format text|json]
+```
+
+`ask` chooses a bounded typed search, callers, callees, impact, or node-trail
+operation and returns `compass.query/1`. `--at REV` reads one immutable trusted
+revision graph; it does not fall back to a legacy projection. Rebuild a revision
+whose realization does not contain the current trusted graph contract.
+
 CompassQL:
 
 ```text

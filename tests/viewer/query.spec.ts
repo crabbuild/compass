@@ -2,21 +2,23 @@ import { expect, test } from "@playwright/test";
 
 test("query supports keyboard execution and cancellation", async ({ page }) => {
   await page.goto("/query.html?delay=1");
-  const editor = page.getByRole("textbox", { name: "Natural-language query" });
+  const editor = page.getByRole("textbox", { name: "Ask input" });
   await editor.fill("How does authentication reach storage?");
   await editor.press("Control+Enter");
-  await expect(page.getByRole("button", { name: "Cancel query" })).toBeVisible();
-  await expect(page.getByRole("status")).toContainText("Traversing the code graph");
-  await page.getByRole("button", { name: "Cancel query" }).click();
+  await expect(page.getByRole("button", { name: "Cancel Ask" })).toBeVisible();
+  await expect(page.getByRole("status")).toContainText("resolving the question");
+  await page.getByRole("button", { name: "Cancel Ask" }).click();
   await expect.poll(() => page.evaluate(() => (
     window as typeof window & { queryHostMessages: Array<{ type: string }> }
   ).queryHostMessages.at(-1)?.type)).toBe("cancel");
-  await expect(page.getByRole("button", { name: "Run query" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask", exact: true })).toBeVisible();
+  await expect(page.getByText("Run cancelled")).toBeVisible();
 });
 
 test("query renders structured columns", async ({ page }) => {
   await page.goto("/query.html?result=rows");
-  await page.getByRole("textbox", { name: "Natural-language query" }).fill("List symbols");
+  await page.getByRole("tab", { name: /CompassQL/ }).click();
+  await page.getByRole("textbox", { name: "CompassQL input" }).fill("MATCH (n) RETURN n");
   await page.getByRole("button", { name: "Run query" }).click();
   await expect(page.getByRole("columnheader", { name: "symbol" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "calls" })).toBeVisible();
@@ -25,23 +27,26 @@ test("query renders structured columns", async ({ page }) => {
 
 test("query errors keep the editor available for recovery", async ({ page }) => {
   await page.goto("/query.html?error=1");
-  const editor = page.getByRole("textbox", { name: "Natural-language query" });
+  const editor = page.getByRole("textbox", { name: "Ask input" });
   await editor.fill("broken query");
-  await page.getByRole("button", { name: "Run query" }).click();
+  await page.getByRole("button", { name: "Ask" }).click();
   await expect(page.getByRole("alert")).toContainText("CompassQL could not parse this query");
-  await page.getByRole("button", { name: "Revise query" }).click();
+  await page.getByRole("button", { name: "Edit input" }).click();
   await expect(editor).toBeFocused();
 });
 
-test("query modes use a full-width tab rail", async ({ page }) => {
+test("query commands use a full-width tab rail", async ({ page }) => {
   await page.goto("/query.html");
-  const tabs = page.getByRole("tablist", { name: "Query mode" });
+  const tabs = page.getByRole("tablist", { name: "Query command" });
   await expect(tabs).toBeVisible();
   expect((await tabs.boundingBox())?.width).toBeGreaterThan(500);
-  const natural = page.getByRole("tab", { name: "Ask the codebase" });
-  const cql = page.getByRole("tab", { name: "CompassQL" });
-  await expect(natural).toHaveAttribute("aria-selected", "true");
-  expect(await natural.evaluate((element) => getComputedStyle(element).borderTopColor))
+  const ask = page.getByRole("tab", { name: /Ask/ });
+  const explain = page.getByRole("tab", { name: /Explain/ });
+  const cql = page.getByRole("tab", { name: /CompassQL/ });
+  await expect(tabs.getByRole("tab")).toHaveCount(3);
+  await expect(ask).toHaveAttribute("aria-selected", "true");
+  await expect(explain).toHaveAttribute("aria-selected", "false");
+  expect(await ask.evaluate((element) => getComputedStyle(element).borderTopColor))
     .not.toBe("rgba(0, 0, 0, 0)");
   expect(await cql.evaluate((element) => getComputedStyle(element).borderTopColor))
     .toBe("rgba(0, 0, 0, 0)");
@@ -49,9 +54,9 @@ test("query modes use a full-width tab rail", async ({ page }) => {
   await expect(cql).toHaveAttribute("aria-selected", "true");
   expect(await cql.evaluate((element) => getComputedStyle(element).borderTopColor))
     .not.toBe("rgba(0, 0, 0, 0)");
-  expect(await natural.evaluate((element) => getComputedStyle(element).borderTopColor))
+  expect(await ask.evaluate((element) => getComputedStyle(element).borderTopColor))
     .toBe("rgba(0, 0, 0, 0)");
-  await expect(page.getByRole("textbox", { name: "CompassQL query" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "CompassQL input" })).toBeVisible();
 });
 
 test("CompassQL actions and parameters share the bottom composer footer", async ({ page }) => {
@@ -59,7 +64,7 @@ test("CompassQL actions and parameters share the bottom composer footer", async 
   await page.getByRole("tab", { name: "CompassQL" }).click();
 
   const shell = await page.locator(".query-editor-shell").boundingBox();
-  const editor = await page.getByRole("textbox", { name: "CompassQL query" }).boundingBox();
+  const editor = await page.getByRole("textbox", { name: "CompassQL input" }).boundingBox();
   const params = await page.getByRole("textbox", { name: "CompassQL parameters" })
     .boundingBox();
   const run = await page.getByRole("button", { name: "Run query" }).boundingBox();
@@ -80,7 +85,7 @@ test("narrow CompassQL composer preserves parameters and the bottom action", asy
   await page.goto("/query.html");
   await page.getByRole("tab", { name: "CompassQL" }).click();
 
-  const editor = page.getByRole("textbox", { name: "CompassQL query" });
+  const editor = page.getByRole("textbox", { name: "CompassQL input" });
   const params = page.getByRole("textbox", { name: "CompassQL parameters" });
   const run = page.getByRole("button", { name: "Run query" });
   await expect(editor).toBeVisible();
@@ -101,13 +106,13 @@ test("narrow CompassQL composer preserves parameters and the bottom action", asy
   )).toBe(true);
 });
 
-test("traversal answers expose graph and source actions", async ({ page }) => {
-  await page.goto("/query.html?result=traversal");
-  await page.getByRole("textbox", { name: "Natural-language query" }).fill("What is Pipeline?");
-  await page.getByRole("button", { name: "Run query" }).click();
+test("typed Ask answers expose graph and source actions", async ({ page }) => {
+  await page.goto("/query.html");
+  await page.getByRole("textbox", { name: "Ask input" }).fill("What is Pipeline?");
+  await page.getByRole("button", { name: "Ask" }).click();
 
-  await expect(page.getByRole("heading", { name: "146 graph matches" })).toBeVisible();
-  await expect(page.getByText("Breadth-first · depth 2")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "1 graph match" })).toBeVisible();
+  await expect(page.getByText("Search evidence")).toBeVisible();
   await expect(page.getByRole("button", { name: "Open code graph" })).toBeVisible();
 
   await page.getByRole("button", {
@@ -117,14 +122,48 @@ test("traversal answers expose graph and source actions", async ({ page }) => {
     window as typeof window & { openedQuerySource?: unknown }
   ).openedQuerySource)).toEqual({
     file: "caching/util/src/Pipeline.scala",
+    startByte: 0,
+    endByte: 8,
     startLine: 154,
-    endLine: 154
+    startColumn: 0,
+    endLine: 154,
+    endColumn: 8
   });
 
   await page.getByRole("button", { name: "Open code graph" }).click();
   expect(await page.evaluate(() => (
     window as typeof window & { openedQueryGraph?: boolean }
   ).openedQueryGraph)).toBe(true);
+});
+
+test("Ask diagnostics are itemized instead of rendered as a JSON blob", async ({ page }) => {
+  await page.goto("/query.html?diagnostic=1");
+  await page.getByRole("textbox", { name: "Ask input" }).fill("Find a missing node");
+  await page.getByRole("button", { name: "Ask" }).click();
+
+  const guidance = page.getByRole("region", { name: "Query guidance" });
+  await expect(guidance).toContainText("No Match");
+  await expect(guidance).toContainText("Try a qualified name");
+  await expect(guidance).not.toContainText('"diagnostics"');
+});
+
+test("Ask and Explain results remain available in separate tabs", async ({ page }) => {
+  await page.goto("/query.html");
+  await page.getByRole("textbox", { name: "Ask input" }).fill("What is Pipeline?");
+  await page.getByRole("button", { name: "Ask" }).click();
+  await expect(page.getByRole("heading", { name: "1 graph match" })).toBeVisible();
+
+  await page.getByRole("tab", { name: /Explain/ }).click();
+  await page.getByRole("textbox", { name: "Explain input" }).fill("Pipeline");
+  await page.getByRole("button", { name: "Explain" }).click();
+  await expect(page.getByRole("heading", { name: "Symbol explanation" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Relationships 2" })).toBeVisible();
+  await expect(page.getByText("save")).toBeVisible();
+
+  const results = page.getByRole("tablist", { name: "Query results" });
+  await expect(results.getByRole("tab")).toHaveCount(2);
+  await results.getByRole("tab", { name: /Ask.*What is Pipeline/ }).click();
+  await expect(page.getByRole("heading", { name: "1 graph match" })).toBeVisible();
 });
 
 test("typed graph query evidence exposes exact and heuristic provenance", async ({ page }) => {

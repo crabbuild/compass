@@ -1931,6 +1931,30 @@ fn current_snapshot_promotion_matches_an_exact_rebuild() -> Result<(), Box<dyn s
         String::from_utf8_lossy(&promoted.stderr)
     );
     let promoted: serde_json::Value = serde_json::from_slice(&promoted.stdout)?;
+    let asked = run(
+        compass,
+        directory.path(),
+        &[
+            "ask",
+            "where is Service run?",
+            "--at",
+            "HEAD",
+            "--format=json",
+        ],
+    )?;
+    assert!(
+        asked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&asked.stderr)
+    );
+    let asked: serde_json::Value = serde_json::from_slice(&asked.stdout)?;
+    assert_eq!(asked["schema"], "compass.query/1");
+    assert!(
+        asked["nodes"]
+            .as_array()
+            .is_some_and(|nodes| !nodes.is_empty()),
+        "typed revision ask returned no nodes: {asked}"
+    );
     let rebuilt = run(
         compass,
         directory.path(),

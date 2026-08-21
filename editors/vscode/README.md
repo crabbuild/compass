@@ -46,7 +46,9 @@ is found first on `PATH`, Compass stops before running a workflow and offers
 - Read the broader architecture flow document in a separate editor tab, with a
   horizontally scrollable map, draggable subsystem cards, and a route-table
   alternative for large systems.
-- Run natural-language queries or deterministic CompassQL.
+- Run typed Ask questions, inspect one symbol with Explain, or execute
+  deterministic CompassQL. Each command keeps its own input and opens a
+  separate result tab with readable diagnostics and source links.
 - Browse every reachable Git commit with graph states: graph available, not
   materialized, building, or failed.
 - Explicitly build missing historical graphs, load exact revisions, and compare
