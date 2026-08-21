@@ -16,11 +16,76 @@ test("query supports keyboard execution and cancellation", async ({ page }) => {
 
 test("query renders structured columns", async ({ page }) => {
   await page.goto("/query.html?result=rows");
-  await page.getByRole("textbox", { name: "Natural-language query" }).fill("List symbols");
+  await page.getByRole("tab", { name: "CompassQL" }).click();
+  await page.getByRole("textbox", { name: "CompassQL query" }).fill("MATCH (n) RETURN n");
   await page.getByRole("button", { name: "Run query" }).click();
   await expect(page.getByRole("columnheader", { name: "symbol" })).toBeVisible();
   await expect(page.getByRole("columnheader", { name: "calls" })).toBeVisible();
   await expect(page.getByRole("cell", { name: "run" })).toBeVisible();
+  await expect(page.getByRole("rowheader", { name: "1" })).toBeVisible();
+});
+
+test("natural discovery answers are itemized by symbol and relationship", async ({ page }) => {
+  await page.goto("/query.html?result=discovery");
+  await page.getByRole("textbox", { name: "Natural-language query" })
+    .fill("Where is configuration saved and who calls it?");
+  await page.getByRole("button", { name: "Run query" }).click();
+
+  await expect(page.getByRole("heading", { name: "3 symbols found" })).toBeVisible();
+  await expect(page.getByLabel("Query overview")).toContainText("Relationships2");
+  await expect(page.locator(".query-discovery-node")).toHaveCount(3);
+  await expect(page.getByRole("heading", { name: "Save" })).toBeVisible();
+  await expect(page.getByText("func Save(c config.Config, file string) error")).toBeVisible();
+  const relationship = page.locator(".query-relationship-flow").first();
+  await expect(relationship).toContainText("Save");
+  await expect(relationship).toContainText("Calls");
+  await expect(relationship).toContainText("traverseConfig");
+  await expect(page.locator(".query-json-result")).toHaveCount(0);
+
+  await page.getByText("Why this matched").first().click();
+  await expect(page.getByText("Exact · Exact").first()).toBeVisible();
+  await expect(page.getByText("compass.languages.go.universal").first()).toBeVisible();
+
+  await page.getByRole("button", {
+    name: "Open Save at util/yamlutil/yaml.go line 27"
+  }).click();
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { openedQuerySource?: unknown }
+  ).openedQuerySource)).toEqual({
+    file: "util/yamlutil/yaml.go",
+    startByte: 270,
+    endByte: 378,
+    startLine: 27,
+    startColumn: 0,
+    endLine: 37,
+    endColumn: 8
+  });
+});
+
+test("natural discovery no-match results explain how to recover", async ({ page }) => {
+  await page.goto("/query.html?result=empty");
+  await page.getByRole("textbox", { name: "Natural-language query" })
+    .fill("Where is the lunar payment gateway?");
+  await page.getByRole("button", { name: "Run query" }).click();
+
+  await expect(page.getByRole("heading", { name: "0 symbols found" })).toBeVisible();
+  await expect(page.getByText("No symbols matched this question")).toBeVisible();
+  await expect(page.getByText("No symbol matched the requested terms.")).toBeVisible();
+});
+
+test("itemized discovery results remain usable in a narrow editor group", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/query.html?result=discovery");
+  await page.getByRole("textbox", { name: "Natural-language query" }).fill("configuration");
+  await page.getByRole("button", { name: "Run query" }).click();
+
+  await expect(page.getByRole("heading", { name: "Save" })).toBeVisible();
+  await expect(page.getByRole("button", {
+    name: "Open Save at util/yamlutil/yaml.go line 27"
+  })).toBeVisible();
+  expect(await page.evaluate(
+    () => document.documentElement.scrollWidth <= window.innerWidth
+  )).toBe(true);
 });
 
 test("query errors keep the editor available for recovery", async ({ page }) => {

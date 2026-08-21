@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
+import { DiscoveryQueryResponseSchema } from "@compass/viewer/contracts/codeQuery";
 import { SourceLocationSchema } from "@compass/viewer/contracts/graph";
 import { buildCqlArgs, buildNaturalQueryArgs } from "../commands/queryArguments";
 import type { RepositorySession } from "../workspace/repositorySession";
@@ -77,14 +78,16 @@ export async function openQueryPanel(
         });
       const result = await session.processes.run(session.root, args, controller.signal);
       if (result.code !== 0) throw new Error(result.stderr || `Compass exited with ${result.code}`);
+      const parsedJson = JSON.parse(result.stdout);
+      const json = request.mode === "natural"
+        ? DiscoveryQueryResponseSchema.parse(parsedJson)
+        : parsedJson;
       await panel.webview.postMessage({
         type: "result",
         revision,
         result: {
           mode: request.mode,
-          ...(request.mode === "cql"
-            ? { json: JSON.parse(result.stdout) }
-            : { text: result.stdout }),
+          json,
           durationMs: Math.round(performance.now() - started)
         }
       });

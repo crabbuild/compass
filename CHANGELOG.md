@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make natural-language codebase answers readable in VS Code by rendering the
+  typed discovery result as an itemized query trace with summary metrics,
+  source-linked symbol cards, relationship flows, evidence provenance,
+  ambiguity and truncation notices, and a guided no-match state. Number and
+  wrap CompassQL rows so wide or nested values remain inspectable.
+
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,

@@ -82,6 +82,12 @@ typed query results open as another lens beside the code graph rather than
 replacing its context. Drag the inspector divider to resize it, or use its
 header control to collapse and expand it.
 
+Open **Ask codebase** to run a natural-language discovery query. Results are
+grouped into starting points, itemized symbols, source-linked relationships,
+and expandable evidence so identifiers and provenance do not obscure the
+answer. Ambiguous, incomplete, truncated, and no-match results remain explicit.
+Use **CompassQL** in the same view for numbered, deterministic result rows.
+
 ### Trace calls from the editor
 
 Choose **Call graph from cursor** under **Workspace > Explore** to open a visual

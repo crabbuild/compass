@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   CODE_QUERY_CONTRACT_MANIFEST,
   CodeQueryResponseSchema,
-  decodeCodeQueryResponse
+  decodeCodeQueryResponse,
+  decodeDiscoveryQueryResponse
 } from "./codeQuery";
 
 const contracts = resolve(process.cwd(), "../../fixtures/contracts");
@@ -106,5 +107,86 @@ describe("compass.query/1", () => {
       path: null
     }];
     expect(decodeCodeQueryResponse(value).diagnostics[0]?.code).toBe("direction_mismatch");
+  });
+});
+
+describe("compass.query.discovery/1", () => {
+  it("decodes itemizable natural-query results with provenance", () => {
+    const response = decodeDiscoveryQueryResponse({
+      schema: "compass.query.discovery/1",
+      question: "what calls save?",
+      selectedDirection: "incoming",
+      directionSource: "heuristic",
+      relationContexts: ["call"],
+      scope: [],
+      traversal: "bfs",
+      seeds: [{
+        nodeId: "save",
+        score: "167600.000000",
+        scoreTier: "exact_name",
+        rank: 0,
+        matchedTerms: ["save"],
+        matchedFields: ["name", "qualified_name"],
+        source: null,
+        candidateSource: "exact_name",
+        alternatives: [],
+        ambiguous: false
+      }],
+      nodes: [{
+        id: "save",
+        kind: "function",
+        roles: ["service"],
+        name: "save",
+        qualifiedName: "storage.save",
+        language: "typescript",
+        framework: null,
+        source: null,
+        details: {
+          type: "symbol",
+          data: {
+            signature: "function save(record: Record): Promise<void>",
+            modifiers: [],
+            overloadDiscriminator: null,
+            declaringType: null,
+            signatureDigest: null,
+            implementationDigest: null,
+            sourceDigest: null
+          }
+        },
+        evidence: []
+      }],
+      edges: [],
+      diagnostics: [],
+      limits: {
+        maxDepth: 2,
+        maxSeeds: 3,
+        maxCandidates: 256,
+        maxNodes: 64,
+        maxEdges: 128,
+        maxExpandedRelationships: 10000,
+        maxResponseBytes: 8388608,
+        timeoutMs: 30000
+      },
+      stats: {
+        candidateProbes: 2,
+        candidateNodes: 1,
+        candidatesAdmitted: 1,
+        visitedNodes: 1,
+        expandedRelationships: 0,
+        returnedNodes: 1,
+        returnedEdges: 0
+      },
+      omissions: {
+        candidates: null,
+        alternatives: null,
+        nodes: null,
+        edges: null,
+        expandedRelationships: null
+      },
+      truncated: false
+    });
+
+    expect(response.nodes[0]?.qualifiedName).toBe("storage.save");
+    expect(response.seeds[0]?.candidateSource).toBe("exact_name");
   });
 });

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { buildCqlArgs } from "./queryArguments";
+import { buildCqlArgs, buildNaturalQueryArgs } from "./queryArguments";
+
+describe("buildNaturalQueryArgs", () => {
+  it("requests typed discovery JSON for readable result rendering", () => {
+    expect(buildNaturalQueryArgs({
+      query: "what calls save?",
+      graph: "/repo/compass-out/graph.json"
+    })).toEqual([
+      "query", "what calls save?", "--graph", "/repo/compass-out/graph.json",
+      "--format", "json"
+    ]);
+  });
+});
 
 describe("buildCqlArgs", () => {
   it("keeps the query and parameters as literal arguments", () => {

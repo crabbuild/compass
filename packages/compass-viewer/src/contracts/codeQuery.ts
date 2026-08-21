@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const CODE_QUERY_SCHEMA = "compass.query/1" as const;
+export const DISCOVERY_QUERY_SCHEMA = "compass.query.discovery/1" as const;
 
 export const CODE_QUERY_NODE_KINDS = [
   "file", "module", "package", "namespace", "class", "struct", "interface",
@@ -357,8 +358,99 @@ export const CodeQueryResponseSchema = z.strictObject({
   truncated: z.boolean()
 });
 
+export const DiscoveryScopeSchema = z.strictObject({
+  kind: z.enum(["community", "source", "package", "node"]),
+  value: z.string().min(1)
+});
+
+export const DiscoveryLimitsSchema = z.strictObject({
+  maxDepth: z.number().int().positive(),
+  maxSeeds: z.number().int().positive(),
+  maxCandidates: z.number().int().positive(),
+  maxNodes: z.number().int().positive(),
+  maxEdges: z.number().int().positive(),
+  maxExpandedRelationships: z.number().int().positive(),
+  maxResponseBytes: z.number().int().positive(),
+  timeoutMs: z.number().int().positive()
+});
+
+export const DiscoveryAlternativeSchema = z.strictObject({
+  nodeId: z.string().min(1),
+  qualifiedName: z.string().min(1),
+  source: CodeSourceAnchorSchema.nullable(),
+  score: z.string().min(1)
+});
+
+export const DiscoverySeedSchema = z.strictObject({
+  nodeId: z.string().min(1),
+  score: z.string().min(1),
+  scoreTier: z.enum(["exact_id", "exact_name", "lexical"]),
+  rank: z.number().int().nonnegative(),
+  matchedTerms: z.array(z.string()),
+  matchedFields: z.array(z.string()),
+  source: CodeSourceAnchorSchema.nullable(),
+  candidateSource: z.enum([
+    "exact_id", "exact_name", "alias", "term_index", "relation_seed", "fuzzy",
+    "heuristic_fallback"
+  ]),
+  alternatives: z.array(DiscoveryAlternativeSchema),
+  ambiguous: z.boolean()
+});
+
+export const DiscoveryStatsSchema = z.strictObject({
+  candidateProbes: z.number().int().nonnegative(),
+  candidateNodes: z.number().int().nonnegative(),
+  candidatesAdmitted: z.number().int().nonnegative(),
+  visitedNodes: z.number().int().nonnegative(),
+  expandedRelationships: z.number().int().nonnegative(),
+  returnedNodes: z.number().int().nonnegative(),
+  returnedEdges: z.number().int().nonnegative()
+});
+
+export const DiscoveryOmissionsSchema = z.strictObject({
+  candidates: z.number().int().nonnegative().nullable(),
+  alternatives: z.number().int().nonnegative().nullable(),
+  nodes: z.number().int().nonnegative().nullable(),
+  edges: z.number().int().nonnegative().nullable(),
+  expandedRelationships: z.number().int().nonnegative().nullable()
+});
+
+export const DiscoveryEdgeSchema = z.strictObject({
+  id: z.string().min(1).nullable(),
+  source: z.string().min(1),
+  target: z.string().min(1),
+  kind: CodeEdgeKindSchema,
+  occurrenceRule: z.string().min(1).nullable(),
+  relationshipSite: CodeSourceAnchorSchema.nullable(),
+  details: CodeEdgeDetailsSchema.nullable(),
+  evidence: z.array(CodeEvidenceSchema),
+  context: z.string().min(1).nullable()
+});
+
+export const DiscoveryQueryResponseSchema = z.strictObject({
+  schema: z.literal(DISCOVERY_QUERY_SCHEMA),
+  question: z.string().min(1),
+  selectedDirection: z.enum(["auto", "incoming", "outgoing", "both"]),
+  directionSource: z.enum(["explicit", "heuristic", "neutral"]),
+  relationContexts: z.array(z.string()),
+  scope: z.array(DiscoveryScopeSchema),
+  traversal: z.enum(["bfs", "dfs"]),
+  seeds: z.array(DiscoverySeedSchema),
+  nodes: z.array(CodeQueryNodeSchema),
+  edges: z.array(DiscoveryEdgeSchema),
+  diagnostics: z.array(CodeQueryDiagnosticSchema),
+  limits: DiscoveryLimitsSchema,
+  stats: DiscoveryStatsSchema,
+  omissions: DiscoveryOmissionsSchema,
+  truncated: z.boolean()
+});
+
 export function decodeCodeQueryResponse(value: unknown): CodeQueryResponse {
   return CodeQueryResponseSchema.parse(value);
+}
+
+export function decodeDiscoveryQueryResponse(value: unknown): DiscoveryQueryResponse {
+  return DiscoveryQueryResponseSchema.parse(value);
 }
 
 export type CodeQueryResponse = z.infer<typeof CodeQueryResponseSchema>;
@@ -370,3 +462,6 @@ export type CodeQueryPath = z.infer<typeof CodeQueryPathSchema>;
 export type CodeQueryDiagnostic = z.infer<typeof CodeQueryDiagnosticSchema>;
 export type CodeEvidenceRecord = z.infer<typeof CodeEvidenceSchema>;
 export type CodeSourceAnchor = z.infer<typeof CodeSourceAnchorSchema>;
+export type DiscoveryQueryResponse = z.infer<typeof DiscoveryQueryResponseSchema>;
+export type DiscoverySeed = z.infer<typeof DiscoverySeedSchema>;
+export type DiscoveryEdge = z.infer<typeof DiscoveryEdgeSchema>;

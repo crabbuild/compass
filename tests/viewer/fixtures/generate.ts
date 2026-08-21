@@ -781,6 +781,233 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 }
 
 function queryHarness(): string {
+  const anchor = (file: string, startLine: number, endLine = startLine) => ({
+    file,
+    startByte: startLine * 10,
+    endByte: endLine * 10 + 8,
+    startLine,
+    startColumn: 0,
+    endLine,
+    endColumn: 8
+  });
+  const discoveryResult = {
+    schema: "compass.query.discovery/1",
+    question: "Where is configuration saved and who calls it?",
+    selectedDirection: "both",
+    directionSource: "heuristic",
+    relationContexts: ["call", "data_access"],
+    scope: [],
+    traversal: "bfs",
+    seeds: [{
+      nodeId: "save",
+      score: "167600.000000",
+      scoreTier: "exact_name",
+      rank: 0,
+      matchedTerms: ["save", "configuration"],
+      matchedFields: ["name", "qualified_name"],
+      source: anchor("util/yamlutil/yaml.go", 27, 37),
+      candidateSource: "exact_name",
+      alternatives: [],
+      ambiguous: false
+    }],
+    nodes: [
+      {
+        id: "save",
+        kind: "function",
+        roles: ["service"],
+        name: "Save",
+        qualifiedName: "util/yamlutil.Save",
+        language: "go",
+        framework: null,
+        source: anchor("util/yamlutil/yaml.go", 27, 37),
+        details: {
+          type: "symbol",
+          data: {
+            signature: "func Save(c config.Config, file string) error",
+            modifiers: [],
+            overloadDiscriminator: null,
+            declaringType: null,
+            signatureDigest: null,
+            implementationDigest: null,
+            sourceDigest: null
+          }
+        },
+        evidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "compass.languages.go.universal",
+          confidence: "exact",
+          anchor: anchor("util/yamlutil/yaml.go", 27, 37),
+          rule: null,
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }]
+      },
+      {
+        id: "traverse-config",
+        kind: "function",
+        roles: [],
+        name: "traverseConfig",
+        qualifiedName: "util/yamlutil.traverseConfig",
+        language: "go",
+        framework: null,
+        source: anchor("util/yamlutil/yaml.go", 112, 138),
+        details: {
+          type: "symbol",
+          data: {
+            signature: "func traverseConfig(parentKey string, s any, vals map[string]any) error",
+            modifiers: [],
+            overloadDiscriminator: null,
+            declaringType: null,
+            signatureDigest: null,
+            implementationDigest: null,
+            sourceDigest: null
+          }
+        },
+        evidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "compass.languages.go.universal",
+          confidence: "exact",
+          anchor: anchor("util/yamlutil/yaml.go", 112, 138),
+          rule: null,
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }]
+      },
+      {
+        id: "config",
+        kind: "struct",
+        roles: ["model"],
+        name: "Config",
+        qualifiedName: "config.Config",
+        language: "go",
+        framework: null,
+        source: anchor("config/config.go", 15, 77),
+        details: {
+          type: "symbol",
+          data: {
+            signature: "type Config struct",
+            modifiers: [],
+            overloadDiscriminator: null,
+            declaringType: null,
+            signatureDigest: null,
+            implementationDigest: null,
+            sourceDigest: null
+          }
+        },
+        evidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "compass.languages.go.universal",
+          confidence: "exact",
+          anchor: anchor("config/config.go", 15, 77),
+          rule: null,
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }]
+      }
+    ],
+    edges: [
+      {
+        id: "save-traverse",
+        source: "save",
+        target: "traverse-config",
+        kind: "calls",
+        occurrenceRule: null,
+        relationshipSite: anchor("util/yamlutil/yaml.go", 31),
+        details: {
+          type: "call",
+          data: { dispatch: "static", receiverType: null, argumentCount: 3 }
+        },
+        evidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "compass.resolve.go.calls",
+          confidence: "exact",
+          anchor: anchor("util/yamlutil/yaml.go", 31),
+          rule: null,
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }],
+        context: "call"
+      },
+      {
+        id: "save-config",
+        source: "save",
+        target: "config",
+        kind: "references",
+        occurrenceRule: null,
+        relationshipSite: anchor("util/yamlutil/yaml.go", 27),
+        details: null,
+        evidence: [{
+          layer: "structural_graph",
+          origin: "ast",
+          extractor: "compass.resolve.go.types",
+          confidence: "inferred",
+          anchor: anchor("util/yamlutil/yaml.go", 27),
+          rule: "parameter-type",
+          wiringSite: null,
+          resolution: "exact",
+          candidates: []
+        }],
+        context: "data_access"
+      }
+    ],
+    diagnostics: [],
+    limits: {
+      maxDepth: 2,
+      maxSeeds: 3,
+      maxCandidates: 256,
+      maxNodes: 64,
+      maxEdges: 128,
+      maxExpandedRelationships: 10000,
+      maxResponseBytes: 8388608,
+      timeoutMs: 30000
+    },
+    stats: {
+      candidateProbes: 12,
+      candidateNodes: 6,
+      candidatesAdmitted: 1,
+      visitedNodes: 3,
+      expandedRelationships: 2,
+      returnedNodes: 3,
+      returnedEdges: 2
+    },
+    omissions: {
+      candidates: null,
+      alternatives: null,
+      nodes: null,
+      edges: null,
+      expandedRelationships: null
+    },
+    truncated: false
+  };
+  const emptyDiscoveryResult = {
+    ...discoveryResult,
+    question: "Where is the lunar payment gateway?",
+    seeds: [],
+    nodes: [],
+    edges: [],
+    diagnostics: [{
+      code: "no_match",
+      message: "No symbol matched the requested terms.",
+      nodeId: null,
+      path: null
+    }],
+    stats: {
+      ...discoveryResult.stats,
+      candidatesAdmitted: 0,
+      visitedNodes: 0,
+      expandedRelationships: 0,
+      returnedNodes: 0,
+      returnedEdges: 0
+    }
+  };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass query fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.queryHostMessages=[];
 window.queryTimer=undefined;
@@ -817,6 +1044,17 @@ window.acquireVsCodeApi=()=>({postMessage(message){
           mode:message.request.mode,
           json:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]},
           durationMs:18
+        }
+      },"*");
+    } else if(params.get("result")==="discovery" || params.get("result")==="empty") {
+      window.postMessage({
+        type:"result",
+        result:{
+          mode:message.request.mode,
+          json:params.get("result")==="empty"
+            ? ${JSON.stringify(emptyDiscoveryResult)}
+            : ${JSON.stringify(discoveryResult)},
+          durationMs:24
         }
       },"*");
     } else if(params.get("result")==="traversal") {

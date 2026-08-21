@@ -6,7 +6,9 @@ export function buildNaturalQueryArgs(options: {
   return [
     "query",
     options.query,
-    ...(options.revision ? ["--at", options.revision] : options.graph ? ["--graph", options.graph] : [])
+    ...(options.revision ? ["--at", options.revision] : options.graph ? ["--graph", options.graph] : []),
+    "--format",
+    "json"
   ];
 }
 

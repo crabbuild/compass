@@ -1,13 +1,27 @@
 import { useMemo, useRef, useState } from "react";
 import {
+  AlertTriangleIcon,
+  ArrowRightIcon,
   BracesIcon,
+  CheckCircle2Icon,
   Clock3Icon,
   FileCode2Icon,
+  GitBranchIcon,
+  Layers3Icon,
   NetworkIcon,
   PlayIcon,
   SearchIcon,
   SquareIcon
 } from "lucide-react";
+import {
+  DiscoveryQueryResponseSchema,
+  type CodeEvidenceRecord,
+  type CodeQueryNode,
+  type CodeSourceAnchor,
+  type DiscoveryEdge,
+  type DiscoveryQueryResponse,
+  type DiscoverySeed
+} from "../contracts/codeQuery";
 import type { SourceLocation } from "../contracts/graph";
 import { WorkspaceState } from "../components/workbench/WorkspaceState";
 import {
@@ -63,8 +77,18 @@ export function QueryWorkspace({
   const [history, setHistory] = useState<string[]>([]);
   const parsedParams = useMemo(() => parseParams(params), [params]);
   const structured = useMemo(
-    () => result?.json === undefined ? undefined : normalizeStructuredResult(result.json),
-    [result?.json]
+    () => result?.mode !== "cql" || result.json === undefined
+      ? undefined
+      : normalizeStructuredResult(result.json),
+    [result?.json, result?.mode]
+  );
+  const discovery = useMemo(
+    () => {
+      if (result?.mode !== "natural" || result.json === undefined) return undefined;
+      const decoded = DiscoveryQueryResponseSchema.safeParse(result.json);
+      return decoded.success ? decoded.data : undefined;
+    },
+    [result?.json, result?.mode]
   );
   const naturalResult = useMemo(
     () => result?.text === undefined ? undefined : parseNaturalQueryResult(result.text),
@@ -220,14 +244,28 @@ export function QueryWorkspace({
               <div>
                 <span>Result</span>
                 <h2 id="query-result-heading">
-                  {naturalResult?.summary
+                  {discovery
+                    ? `${discovery.nodes.length.toLocaleString()} ${plural(
+                      discovery.nodes.length,
+                      "symbol",
+                      "symbols"
+                    )} found`
+                    : structured
+                      ? `${structured.rows.length.toLocaleString()} CompassQL ${plural(
+                        structured.rows.length,
+                        "row",
+                        "rows"
+                      )}`
+                      : naturalResult?.summary
                     ? `${naturalResult.summary.total.toLocaleString()} graph matches`
                     : result.mode === "natural" ? "Codebase answer" : "CompassQL rows"}
                 </h2>
               </div>
               <span><Clock3Icon aria-hidden="true" /> {result.durationMs.toLocaleString()} ms</span>
             </header>
-            {result.text !== undefined ? (
+            {discovery ? (
+              <DiscoveryResult result={discovery} host={host} />
+            ) : result.text !== undefined ? (
               naturalResult && (naturalResult.summary || naturalResult.entries.length > 0) ? (
                 <TraversalResult result={naturalResult} host={host} />
               ) : (
@@ -237,13 +275,22 @@ export function QueryWorkspace({
               <div className="query-table">
                 <table>
                   <thead>
-                    <tr>{structured.columns.map((column) => <th key={column}>{column}</th>)}</tr>
+                    <tr>
+                      <th className="query-table-index" aria-label="Row number">#</th>
+                      {structured.columns.map((column) => <th key={column}>{column}</th>)}
+                    </tr>
                   </thead>
                   <tbody>
                     {structured.rows.map((row, rowIndex) => (
                       <tr key={rowIndex}>
+                        <th className="query-table-index" scope="row">{rowIndex + 1}</th>
                         {row.map((cell, columnIndex) => (
-                          <td key={`${rowIndex}:${structured.columns[columnIndex]}`}>{cell}</td>
+                          <td
+                            key={`${rowIndex}:${structured.columns[columnIndex]}`}
+                            title={cell}
+                          >
+                            {cell || <span className="query-cell-empty">empty</span>}
+                          </td>
                         ))}
                       </tr>
                     ))}
@@ -279,6 +326,473 @@ export function QueryWorkspace({
       </main>
     </div>
   );
+}
+
+function DiscoveryResult({
+  result,
+  host
+}: {
+  result: DiscoveryQueryResponse;
+  host: QueryHost;
+}) {
+  const nodeById = new Map(result.nodes.map((node) => [node.id, node]));
+  const seedById = new Map(result.seeds.map((seed) => [seed.nodeId, seed]));
+  const ambiguousSeeds = result.seeds.filter((seed) => seed.ambiguous);
+  const omissions = Object.entries(result.omissions)
+    .filter((entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0);
+  const incompleteCoverage = result.diagnostics.some(
+    (diagnostic) => diagnostic.code === "incomplete_coverage"
+  );
+  const coverage = result.truncated
+    ? { label: "Partial", tone: "warning" }
+    : incompleteCoverage
+      ? { label: "Limited", tone: "warning" }
+      : { label: "Complete", tone: "exact" };
+
+  return (
+    <div className="query-discovery-result">
+      <section className="query-discovery-overview" aria-label="Query overview">
+        <div className="query-discovery-question">
+          <span>Compass followed</span>
+          <p>{result.question}</p>
+        </div>
+        <dl className="query-discovery-metrics">
+          <div>
+            <dt>Symbols</dt>
+            <dd>{result.nodes.length.toLocaleString()}</dd>
+          </div>
+          <div>
+            <dt>Relationships</dt>
+            <dd>{result.edges.length.toLocaleString()}</dd>
+          </div>
+          <div>
+            <dt>Starting points</dt>
+            <dd>{result.seeds.length.toLocaleString()}</dd>
+          </div>
+          <div data-tone={coverage.tone}>
+            <dt>Coverage</dt>
+            <dd>
+              {coverage.tone === "exact"
+                ? <CheckCircle2Icon aria-hidden="true" />
+                : <AlertTriangleIcon aria-hidden="true" />}
+              {coverage.label}
+            </dd>
+          </div>
+        </dl>
+        <div className="query-discovery-route">
+          <GitBranchIcon aria-hidden="true" />
+          <div>
+            <span>{result.traversal.toLocaleUpperCase()} traversal</span>
+            <small>
+              {directionDescription(result.selectedDirection)}
+              {result.relationContexts.length > 0
+                ? ` · ${result.relationContexts.map(humanize).join(", ")}`
+                : " · all relationship types"}
+            </small>
+          </div>
+          <button type="button" className="query-graph-action" onClick={host.openGraph}>
+            <NetworkIcon aria-hidden="true" />
+            Open code graph
+          </button>
+        </div>
+        {result.seeds.length > 0 && (
+          <div className="query-discovery-seeds" aria-label="Starting points">
+            <span>Started at</span>
+            <div>
+              {result.seeds.map((seed) => {
+                const node = nodeById.get(seed.nodeId);
+                return (
+                  <span key={seed.nodeId} data-ambiguous={seed.ambiguous || undefined}>
+                    {node?.name ?? shortId(seed.nodeId)}
+                    <small>{seedSourceLabel(seed)}</small>
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {(result.truncated || omissions.length > 0) && (
+        <div className="query-discovery-notice" role="status">
+          <AlertTriangleIcon aria-hidden="true" />
+          <div>
+            <strong>This is a bounded result</strong>
+            <span>
+              Compass reached a query limit
+              {omissions.length > 0
+                ? `; ${omissions.map(([name, count]) => `${count} ${humanize(name)}`).join(", ")} omitted.`
+                : "."}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {result.diagnostics.length > 0 && (
+        <section className="query-discovery-diagnostics" aria-labelledby="query-diagnostics-heading">
+          <h3 id="query-diagnostics-heading">What to know</h3>
+          <ul>
+            {result.diagnostics.map((diagnostic, index) => (
+              <li key={`${diagnostic.code}:${diagnostic.nodeId ?? index}`}>
+                <AlertTriangleIcon aria-hidden="true" />
+                <div>
+                  <strong>{humanize(diagnostic.code)}</strong>
+                  <span>{diagnostic.message}</span>
+                </div>
+                {diagnostic.path && (
+                  <SourceAction
+                    label={diagnostic.path}
+                    source={{ file: diagnostic.path }}
+                    host={host}
+                    compact
+                  />
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {ambiguousSeeds.length > 0 && (
+        <section className="query-discovery-ambiguity" aria-labelledby="query-ambiguity-heading">
+          <h3 id="query-ambiguity-heading">Possible starting points</h3>
+          <p>Compass kept these alternatives visible instead of guessing.</p>
+          <ul>
+            {ambiguousSeeds.flatMap((seed) => seed.alternatives.map((alternative) => (
+              <li key={`${seed.nodeId}:${alternative.nodeId}`}>
+                <span>{alternative.qualifiedName}</span>
+                {alternative.source && (
+                  <SourceAction
+                    label={alternative.qualifiedName}
+                    source={alternative.source}
+                    host={host}
+                    compact
+                  />
+                )}
+              </li>
+            )))}
+          </ul>
+        </section>
+      )}
+
+      {result.nodes.length > 0 ? (
+        <section className="query-discovery-section" aria-labelledby="query-symbols-heading">
+          <div className="query-discovery-section-heading">
+            <div>
+              <span>Itemized result</span>
+              <h3 id="query-symbols-heading">Symbols</h3>
+            </div>
+            <span>{result.nodes.length.toLocaleString()}</span>
+          </div>
+          <ol className="query-discovery-nodes">
+            {result.nodes.map((node, index) => (
+              <DiscoveryNode
+                key={node.id}
+                index={index}
+                node={node}
+                seed={seedById.get(node.id)}
+                host={host}
+              />
+            ))}
+          </ol>
+        </section>
+      ) : (
+        <div className="query-discovery-empty" role="status">
+          <SearchIcon aria-hidden="true" />
+          <div>
+            <strong>No symbols matched this question</strong>
+            <span>Try a concrete symbol, file, subsystem, or relationship such as “what calls save?”</span>
+          </div>
+        </div>
+      )}
+
+      {result.edges.length > 0 && (
+        <details className="query-discovery-relationships" open={result.edges.length <= 24}>
+          <summary>
+            <span>
+              <strong>Relationships</strong>
+              <small>How the listed symbols connect</small>
+            </span>
+            <span>{result.edges.length.toLocaleString()}</span>
+          </summary>
+          <ol>
+            {result.edges.map((edge, index) => (
+              <DiscoveryRelationship
+                key={edge.id ?? `${edge.source}:${edge.target}:${index}`}
+                edge={edge}
+                index={index}
+                nodeById={nodeById}
+                host={host}
+              />
+            ))}
+          </ol>
+        </details>
+      )}
+
+      <details className="query-discovery-technical">
+        <summary>Query details</summary>
+        <dl>
+          <div><dt>Direction</dt><dd>{humanize(result.selectedDirection)} ({humanize(result.directionSource)})</dd></div>
+          <div><dt>Traversal</dt><dd>{result.traversal.toLocaleUpperCase()}</dd></div>
+          <div><dt>Visited</dt><dd>{result.stats.visitedNodes.toLocaleString()} symbols</dd></div>
+          <div><dt>Expanded</dt><dd>{result.stats.expandedRelationships.toLocaleString()} relationships</dd></div>
+          <div>
+            <dt>Scope</dt>
+            <dd>{result.scope.length > 0
+              ? result.scope.map((scope) => `${humanize(scope.kind)}: ${scope.value}`).join(", ")
+              : "Entire graph"}</dd>
+          </div>
+        </dl>
+      </details>
+    </div>
+  );
+}
+
+function DiscoveryNode({
+  index,
+  node,
+  seed,
+  host
+}: {
+  index: number;
+  node: CodeQueryNode;
+  seed?: DiscoverySeed | undefined;
+  host: QueryHost;
+}) {
+  const confidence = evidenceConfidence(node.evidence);
+  const detail = nodeDetailSummary(node);
+  return (
+    <li className="query-discovery-node" data-confidence={confidence}>
+      <article>
+        <span className="query-discovery-index" aria-hidden="true">
+          {String(index + 1).padStart(2, "0")}
+        </span>
+        <FileCode2Icon className="query-discovery-node-icon" aria-hidden="true" />
+        <div className="query-discovery-node-copy">
+          <div className="query-discovery-node-badges">
+            <span data-kind={node.kind}>{humanize(node.kind)}</span>
+            {seed && <span data-seed="true">Starting point</span>}
+            {node.roles.map((role) => <span key={role}>{humanize(role)}</span>)}
+          </div>
+          <h4>{node.name}</h4>
+          {node.qualifiedName !== node.name && <p>{node.qualifiedName}</p>}
+          {detail && <code className="query-discovery-signature">{detail}</code>}
+          <div className="query-discovery-node-meta">
+            {node.language && <span>{humanize(node.language)}</span>}
+            {node.framework && <span>{node.framework}</span>}
+            <span data-confidence={confidence}>{confidenceLabel(confidence)} evidence</span>
+          </div>
+        </div>
+        {node.source ? (
+          <SourceAction label={node.name} source={node.source} host={host} />
+        ) : (
+          <span className="query-source-missing">Source not recorded</span>
+        )}
+        <details className="query-discovery-evidence">
+          <summary>
+            Why this matched
+            <span>{node.evidence.length.toLocaleString()} {plural(node.evidence.length, "record", "records")}</span>
+          </summary>
+          {seed && (
+            <div className="query-discovery-match-reason">
+              <strong>{seedSourceLabel(seed)}</strong>
+              <span>
+                {seed.matchedTerms.length > 0
+                  ? `Matched ${seed.matchedTerms.join(", ")}`
+                  : "Selected as a traversal starting point"}
+                {seed.matchedFields.length > 0
+                  ? ` in ${seed.matchedFields.map(humanize).join(", ")}`
+                  : ""}
+              </span>
+            </div>
+          )}
+          <EvidenceList evidence={node.evidence} host={host} />
+          <div className="query-discovery-identity">
+            <span>Stable identity</span>
+            <code title={node.id}>{shortId(node.id)}</code>
+          </div>
+        </details>
+      </article>
+    </li>
+  );
+}
+
+function DiscoveryRelationship({
+  edge,
+  index,
+  nodeById,
+  host
+}: {
+  edge: DiscoveryEdge;
+  index: number;
+  nodeById: Map<string, CodeQueryNode>;
+  host: QueryHost;
+}) {
+  const sourceNode = nodeById.get(edge.source);
+  const targetNode = nodeById.get(edge.target);
+  const site = edge.relationshipSite
+    ?? edge.evidence.find((record) => record.anchor || record.wiringSite)?.anchor
+    ?? edge.evidence.find((record) => record.wiringSite)?.wiringSite;
+  const confidence = evidenceConfidence(edge.evidence);
+  return (
+    <li data-confidence={confidence}>
+      <span className="query-discovery-index" aria-hidden="true">
+        {String(index + 1).padStart(2, "0")}
+      </span>
+      <div className="query-relationship-flow">
+        <span title={sourceNode?.qualifiedName ?? edge.source}>
+          {sourceNode?.name ?? shortId(edge.source)}
+        </span>
+        <span className="query-relationship-kind">
+          {humanize(edge.kind)}
+          <ArrowRightIcon aria-hidden="true" />
+        </span>
+        <span title={targetNode?.qualifiedName ?? edge.target}>
+          {targetNode?.name ?? shortId(edge.target)}
+        </span>
+      </div>
+      <div className="query-relationship-meta">
+        {edge.context && <span>{humanize(edge.context)}</span>}
+        <span data-confidence={confidence}>{confidenceLabel(confidence)}</span>
+        {site && <SourceAction label={`${sourceNode?.name ?? "relationship"} relationship`} source={site} host={host} compact />}
+      </div>
+    </li>
+  );
+}
+
+function EvidenceList({
+  evidence,
+  host
+}: {
+  evidence: CodeEvidenceRecord[];
+  host: QueryHost;
+}) {
+  if (evidence.length === 0) {
+    return <p className="query-discovery-no-evidence">No evidence record was published.</p>;
+  }
+  return (
+    <ul className="query-discovery-evidence-list">
+      {evidence.map((record, index) => {
+        const source = record.anchor ?? record.wiringSite;
+        return (
+          <li key={`${record.extractor}:${index}`} data-confidence={record.confidence}>
+            <Layers3Icon aria-hidden="true" />
+            <div>
+              <strong>{confidenceLabel(record.confidence)} · {humanize(record.resolution)}</strong>
+              <span>{humanize(record.layer)} · {humanize(record.origin)}</span>
+              <code>{record.extractor}</code>
+              {record.rule && <small>Rule: {humanize(record.rule)}</small>}
+            </div>
+            {source && <SourceAction label="evidence" source={source} host={host} compact />}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function SourceAction({
+  label,
+  source,
+  host,
+  compact = false
+}: {
+  label: string;
+  source: SourceLocation | CodeSourceAnchor;
+  host: QueryHost;
+  compact?: boolean | undefined;
+}) {
+  return (
+    <button
+      type="button"
+      className="query-source-action"
+      data-compact={compact || undefined}
+      aria-label={sourceActionLabel(label, source)}
+      title={sourceActionLabel(label, source)}
+      onClick={() => host.openSource(source)}
+    >
+      <span>{source.file}</span>
+      {source.startLine && <small>{sourceLineLabel(source)}</small>}
+    </button>
+  );
+}
+
+type EvidenceConfidence = CodeEvidenceRecord["confidence"] | "unverified";
+
+function evidenceConfidence(evidence: CodeEvidenceRecord[]): EvidenceConfidence {
+  if (evidence.some((record) => record.confidence === "ambiguous")) return "ambiguous";
+  if (evidence.some((record) => record.confidence === "inferred")) return "inferred";
+  if (evidence.some((record) => record.confidence === "exact")) return "exact";
+  return "unverified";
+}
+
+function confidenceLabel(confidence: EvidenceConfidence): string {
+  return confidence === "unverified" ? "Unverified" : humanize(confidence);
+}
+
+function nodeDetailSummary(node: CodeQueryNode): string | undefined {
+  const details = node.details;
+  if (!details) return undefined;
+  switch (details.type) {
+    case "symbol": return details.data.signature ?? undefined;
+    case "route": return `${details.data.operation.toLocaleUpperCase()} ${details.data.path}`;
+    case "import_export": return details.data.specifier;
+    case "config": return details.data.keyPath;
+    case "messaging": return `${details.data.transport}: ${details.data.subject}`;
+    case "job": return details.data.schedule ?? details.data.queue ?? undefined;
+    case "schema": return details.data.dialect ?? details.data.logicalDatabase ?? undefined;
+    case "query": return details.data.operation ?? details.data.dialect ?? undefined;
+    case "database": return [details.data.logicalDatabase, details.data.databaseSchema]
+      .filter(Boolean).join(" · ");
+    case "component": return details.data.componentType;
+    case "resource": return details.data.mediaType ?? details.data.resourceKind;
+    case "file": return `${details.data.byteSize.toLocaleString()} bytes${
+      details.data.generated ? " · generated" : ""
+    }`;
+  }
+}
+
+function seedSourceLabel(seed: DiscoverySeed): string {
+  const labels: Record<DiscoverySeed["candidateSource"], string> = {
+    exact_id: "Exact identity match",
+    exact_name: "Exact name match",
+    alias: "Alias match",
+    term_index: "Term match",
+    relation_seed: "Relationship match",
+    fuzzy: "Similar name",
+    heuristic_fallback: "Heuristic match"
+  };
+  return labels[seed.candidateSource];
+}
+
+function directionDescription(direction: DiscoveryQueryResponse["selectedDirection"]): string {
+  switch (direction) {
+    case "incoming": return "Following relationships into the starting points";
+    case "outgoing": return "Following relationships out from the starting points";
+    case "both": return "Following relationships in both directions";
+    case "auto": return "Compass selected the relationship direction";
+  }
+}
+
+function humanize(value: string): string {
+  return value.replaceAll("_", " ").replaceAll("-", " ").replace(/\b\w/g, (letter) =>
+    letter.toLocaleUpperCase());
+}
+
+function shortId(value: string): string {
+  const digest = value.startsWith("sha256:") ? value.slice(7) : value;
+  return digest.length > 16 ? `${digest.slice(0, 12)}…` : digest;
+}
+
+function sourceLineLabel(source: Pick<SourceLocation, "startLine" | "endLine">): string {
+  if (!source.startLine) return "";
+  return source.endLine && source.endLine !== source.startLine
+    ? `L${source.startLine}–${source.endLine}`
+    : `L${source.startLine}`;
+}
+
+function plural(count: number, singular: string, pluralValue: string): string {
+  return count === 1 ? singular : pluralValue;
 }
 
 function TraversalResult({
