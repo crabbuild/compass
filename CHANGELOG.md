@@ -2,31 +2,6 @@
 
 ## Unreleased
 
-- Make `compass explain` resolve the exact qualified names returned by typed
-  graph search, preserving ambiguity instead of selecting a duplicate. In the
-  VS Code Explain composer, Enter now accepts and explains the highlighted
-  graph suggestion rather than submitting the incomplete token.
-
-- Turn the VS Code codebase query view into a multi-command workbench with
-  separate Ask, Explain, and CompassQL composers and durable result tabs.
-  Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
-  now render as readable UI instead of raw JSON. Active commands use a visible
-  top indicator, inputs offer bounded completions from the active code graph,
-  Enter runs the active command, and Shift+Enter inserts a new line. Historical
-  panels complete against their selected immutable revision. Typed `compass
-  ask` also accepts `--at REV` for immutable revision graphs.
-
-- Let VS Code users open a call graph by entering a function name, qualified
-  name, or stable symbol ID in the Call Graph pane, with callers, callees, or
-  both selectable before tracing. The symbol field now completes callable
-  functions, methods, constructors, and properties from the selected
-  repository's active code graph, with keyboard navigation and bounded error
-  recovery. The existing cursor workflow remains available in the same pane.
-
-- Keep Codebase Evolution strict when a stored revision uses an unsupported
-  artifact layout, and offer to rebuild the affected revision with the current
-  Compass version instead of mapping legacy history records.
-
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,
@@ -87,6 +62,33 @@
   already materialized. Rebuilding does not order or allowlist Compass release
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
+
+## 0.3.19 - 2026-08-21
+
+- Make `compass explain` resolve the exact qualified names returned by typed
+  graph search, preserving ambiguity instead of selecting a duplicate. In the
+  VS Code Explain composer, Enter now accepts and explains the highlighted
+  graph suggestion rather than submitting the incomplete token.
+
+- Turn the VS Code codebase query view into a multi-command workbench with
+  separate Ask, Explain, and CompassQL composers and durable result tabs.
+  Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
+  now render as readable UI instead of raw JSON. Active commands use a visible
+  top indicator, inputs offer bounded completions from the active code graph,
+  Enter runs the active command, and Shift+Enter inserts a new line. Historical
+  panels complete against their selected immutable revision. Typed `compass
+  ask` also accepts `--at REV` for immutable revision graphs.
+
+- Let VS Code users open a call graph by entering a function name, qualified
+  name, or stable symbol ID in the Call Graph pane, with callers, callees, or
+  both selectable before tracing. The symbol field now completes callable
+  functions, methods, constructors, and properties from the selected
+  repository's active code graph, with keyboard navigation and bounded error
+  recovery. The existing cursor workflow remains available in the same pane.
+
+- Keep Codebase Evolution strict when a stored revision uses an unsupported
+  artifact layout, and offer to rebuild the affected revision with the current
+  Compass version instead of mapping legacy history records.
 
 ## 0.3.18 - 2026-08-19
 
