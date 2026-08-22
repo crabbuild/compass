@@ -312,11 +312,6 @@ impl Engine {
         spec: LanguageSpec,
         source: &[u8],
     ) -> Result<Extraction, ExtractError> {
-        if spec.name == "groovy" {
-            let mut extraction = crate::groovy::extract(path, source);
-            attach_basic_symbol_metadata(&mut extraction, source, spec.name);
-            return Ok(extraction);
-        }
         // These extractors are intentionally source-driven and do not consume a
         // tree-sitter root. Avoid initializing and touching their large static
         // grammar tables only to discard the tree; this materially lowers cold
@@ -328,7 +323,6 @@ impl Engine {
             "r" => Some(crate::r::extract(path, source)),
             "pascal" => Some(crate::pascal::extract(path, source)),
             "apex" => Some(crate::apex::extract(path, source)),
-            "dart" => Some(crate::dart::extract(path, source)),
             _ => None,
         };
         if let Some(mut extraction) = source_driven {
@@ -374,7 +368,6 @@ impl Engine {
                 "bash" => crate::bash::extract(path, source, root),
                 "cpp" => crate::cpp::extract(path, source, root),
                 "php" => crate::php::extract(path, source, root),
-                "swift" => crate::swift::extract(path, source, root),
                 "objc" => crate::objc::extract(path, source, root),
                 "powershell" => crate::powershell::extract(path, source, root),
                 "elixir" => crate::elixir::extract(path, source, root),
@@ -424,7 +417,16 @@ impl Engine {
                 portable_framework_source(path)
             }
         });
-        let framework_path = framework_source.as_deref().map(Path::new).unwrap_or(path);
+        // Dart's convention bridge retains the resolved filesystem path for
+        // relative export targets.  Other universal framework packs use the
+        // portable source identity so route classification remains checkout
+        // independent.  Source-supplied callers still own their explicit
+        // repository-relative identity above.
+        let framework_path = if spec.name == "dart" && !evidence_source_is_explicit {
+            path
+        } else {
+            framework_source.as_deref().map(Path::new).unwrap_or(path)
+        };
         crate::frameworks::detect(
             framework_path,
             source,
@@ -1654,8 +1656,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "scala" {
-                self.add_scala_class_references(node, &id);
             }
             if matches!(self.language, "javascript" | "typescript" | "tsx") {
                 self.add_js_parent_edges(node, &id);
@@ -1727,8 +1727,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_python_decorators(node, &id);
             } else if self.language == "c" {
                 self.add_c_function_references(node, &id);
-            } else if self.language == "scala" {
-                self.add_scala_function_references(node, &id);
             }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody {
@@ -1763,13 +1761,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             && kind == "assignment_expression"
         {
             self.add_js_commonjs_export(node);
-        }
-
-        if self.language == "scala"
-            && matches!(kind, "val_definition" | "var_definition")
-            && let Some((class_id, _, _, _)) = parent_declaration
-        {
-            self.add_scala_field_reference(node, class_id);
         }
 
         if matches!(self.language, "javascript" | "typescript" | "tsx")
@@ -2367,30 +2358,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn add_import(&mut self, node: Node<'tree>) {
         if self.language == "python" {
             self.add_python_import(node);
-            return;
-        }
-        if self.language == "scala" {
-            let mut cursor = node.walk();
-            if let Some(target_node) = node
-                .children(&mut cursor)
-                .find(|child| matches!(child.kind(), "stable_id" | "identifier"))
-            {
-                let raw = self.node_text(target_node).unwrap_or_default();
-                let target = raw
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or_default()
-                    .trim_matches(['{', '}', ' ']);
-                if !target.is_empty() && target != "_" {
-                    self.add_edge(
-                        &self.file_id.clone(),
-                        &make_id(&[target]),
-                        "imports",
-                        line(node),
-                        Some("import"),
-                    );
-                }
-            }
             return;
         }
         let text = self.node_text(node).unwrap_or_default();
@@ -3181,111 +3148,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                         .insert("target_qualified_name".to_owned(), Value::String(qualified));
                 }
                 crate::facts::stamp_node_range(&mut edge.attributes, decorator);
-            }
-        }
-    }
-
-    fn add_scala_class_references(&mut self, node: Node<'tree>, class_id: &str) {
-        let extends = node
-            .child_by_field_name("extend")
-            .or_else(|| first_descendant(node, "extends_clause"));
-        if let Some(extends) = extends {
-            let mut bases = Vec::new();
-            let mut cursor = extends.walk();
-            for child in extends.children(&mut cursor) {
-                let name_node = if child.kind() == "type_identifier" {
-                    Some(child)
-                } else if child.kind() == "generic_type" {
-                    child
-                        .child_by_field_name("type")
-                        .or_else(|| first_descendant(child, "type_identifier"))
-                } else {
-                    None
-                };
-                if let Some(name) = name_node
-                    .and_then(|name| self.node_text(name))
-                    .map(clean_name)
-                {
-                    bases.push((name, line(child)));
-                }
-            }
-            for (index, (name, at)) in bases.into_iter().enumerate() {
-                let target = self.ensure_type_node(&name, true);
-                if target != class_id {
-                    self.add_edge(
-                        class_id,
-                        &target,
-                        if index == 0 { "inherits" } else { "mixes_in" },
-                        at,
-                        None,
-                    );
-                }
-            }
-        }
-
-        let mut parameters = Vec::new();
-        collect_nodes_of_kind(node, "class_parameter", &mut parameters);
-        for parameter in parameters {
-            if let Some(type_node) = parameter.child_by_field_name("type") {
-                let mut refs = Vec::new();
-                collect_scala_type_refs(type_node, self.source, false, &mut refs);
-                self.add_scala_type_references(class_id, &refs, "field", line(parameter));
-            }
-        }
-    }
-
-    fn add_scala_field_reference(&mut self, node: Node<'tree>, class_id: &str) {
-        let Some(type_node) = node.child_by_field_name("type") else {
-            return;
-        };
-        let mut refs = Vec::new();
-        collect_scala_type_refs(type_node, self.source, false, &mut refs);
-        self.add_scala_type_references(class_id, &refs, "field", line(node));
-    }
-
-    fn add_scala_function_references(&mut self, node: Node<'tree>, function_id: &str) {
-        if let Some(parameters) = first_descendant(node, "parameters") {
-            let mut cursor = parameters.walk();
-            for parameter in parameters
-                .children(&mut cursor)
-                .filter(|child| child.kind() == "parameter")
-            {
-                if let Some(type_node) = parameter.child_by_field_name("type") {
-                    let mut refs = Vec::new();
-                    collect_scala_type_refs(type_node, self.source, false, &mut refs);
-                    self.add_scala_type_references(
-                        function_id,
-                        &refs,
-                        "parameter_type",
-                        line(node),
-                    );
-                }
-            }
-        }
-        if let Some(return_type) = node.child_by_field_name("return_type") {
-            let mut refs = Vec::new();
-            collect_scala_type_refs(return_type, self.source, false, &mut refs);
-            self.add_scala_type_references(function_id, &refs, "return_type", line(node));
-        }
-    }
-
-    fn add_scala_type_references(
-        &mut self,
-        source: &str,
-        refs: &[(String, bool)],
-        context: &str,
-        at: usize,
-    ) {
-        for (name, generic) in refs {
-            let target = self.ensure_type_node(name, true);
-            if target != source {
-                self.add_edge(
-                    source,
-                    &target,
-                    "references",
-                    at,
-                    Some(if *generic { "generic_arg" } else { context }),
-                );
             }
         }
     }
@@ -4210,61 +4072,6 @@ fn collect_c_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>)
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_c_type_names(child, source, output);
-    }
-}
-
-fn collect_scala_type_refs(
-    node: Node<'_>,
-    source: &[u8],
-    generic: bool,
-    output: &mut Vec<(String, bool)>,
-) {
-    if node.kind() == "type_identifier" {
-        if let Ok(name) = node.utf8_text(source)
-            && !name.is_empty()
-        {
-            output.push((name.to_owned(), generic));
-        }
-        return;
-    }
-    if node.kind() == "generic_type" {
-        let base = node
-            .child_by_field_name("type")
-            .or_else(|| first_descendant(node, "type_identifier"));
-        if let Some(base) = base
-            && let Ok(name) = base.utf8_text(source)
-            && !name.is_empty()
-        {
-            output.push((name.to_owned(), generic));
-        }
-        let mut cursor = node.walk();
-        for arguments in node
-            .children(&mut cursor)
-            .filter(|child| child.kind() == "type_arguments")
-        {
-            let mut argument_cursor = arguments.walk();
-            for argument in arguments
-                .children(&mut argument_cursor)
-                .filter(|child| child.is_named())
-            {
-                collect_scala_type_refs(argument, source, true, output);
-            }
-        }
-        return;
-    }
-    if matches!(
-        node.kind(),
-        "compound_type"
-            | "infix_type"
-            | "function_type"
-            | "tuple_type"
-            | "annotated_type"
-            | "projected_type"
-    ) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            collect_scala_type_refs(child, source, generic, output);
-        }
     }
 }
 

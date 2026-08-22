@@ -846,6 +846,18 @@ pub(crate) fn extract_tree_evidence(
             pipeline.producer.language,
         );
     }
+    if matches!(
+        pipeline.producer.language,
+        "dart" | "groovy" | "scala" | "swift"
+    ) {
+        return super::extended::emit_tree_evidence(
+            path,
+            source_file,
+            source,
+            root,
+            pipeline.producer.language,
+        );
+    }
     let mut state = DirectEvidenceState::new(path, source_file, source, root, pipeline);
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {

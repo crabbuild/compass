@@ -2,9 +2,11 @@
 
 Compass resolves source relationships through a language-neutral evidence
 contract. Every hard-cut language uses the same production route. C#, PHP,
-Kotlin, Ruby, TypeScript, and JavaScript remain `Qualifying` while their
-independent audit matrices run; they do not retain a second direct graph
-publisher.
+Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy remain
+`Qualifying` pending their separate promotion decisions; they do not retain a
+second direct graph publisher. Swift, Dart, Scala, and Groovy have complete
+independent audit artifacts captured in the mounted qualification target for
+that decision.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
@@ -192,8 +194,9 @@ orders return the same first error.
 
 `UniversalEvidenceRegistry::pipeline(language)` is the authority for universal
 cutover. A returned `UniversalEvidencePipeline` means universal evidence is mandatory.
-Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are currently
-registered. TSX resolves to the canonical TypeScript pipeline.
+Python, Go, Rust, Java, PHP, C#, Kotlin, Ruby, TypeScript, JavaScript, Swift,
+Dart, Scala, and Groovy are currently registered. TSX resolves to the
+canonical TypeScript pipeline.
 An unregistered language
 does not silently claim universal behavior.
 
@@ -708,11 +711,41 @@ fixture. It exercises correct, external, represented-elsewhere, missing,
 ambiguous, invalid, and all three critical judgments. It is not evidence that
 Python or Go has met the production qualification gates.
 
+Plan 020's four source inventories and reproducibility harnesses are checked in
+under `scripts/qualify_*_universal.py` and
+`tests/qualification/*-universal-repositories.toml`. They consume only clean,
+detached checkouts below `/Volumes/Workspace/Github`; they never clone, build,
+execute, or mutate a corpus. A graph-backed audit is assembled with
+`scripts/build_universal_quality_audit.py` and evaluated with the command above.
+The generated manifest records the source globs used by each corpus so the
+audit's inventory digest is exactly the same population as `pinned` mode.
+`scripts/record_universal_baseline.py` records reproducible established-path
+fixture baselines, including graph/evidence digests, relation counts,
+diagnostics, omissions, identity collisions, cold/warm/forced/alternate
+timings, fact-neutral and semantic-edit runs, restore identity, and peak RSS.
+The checked-in Swift, Dart, Scala, and Groovy artifacts were captured from the
+pre-cutover direct extractor at the immutable revision
+`88abe4c071a19ec03b3bca132656830a02a47907`; they are separate from the
+post-cutover pinned-corpus quality-audit artifacts.
+The checked-in wrappers use parser providers when the pinned qualification
+toolchains are provisioned under the mounted target (Swift 6.3.3 with
+SwiftSyntax 603.0.0; Dart SDK 3.13.1 with Analyzer 8.4.0; Scala CLI 1.9.1
+with Scala 3.7.3, scala.meta 4.13.10, and ujson 4.1.0; and Groovy 4.0.27 in
+the current release candidate). They fail closed to the bounded lexical contract when a provider
+is unavailable; that fallback reports `parserAvailable: false` and cannot pass
+the quality-audit evaluator. The release-candidate qualification target has
+byte-deterministic `pinned`, `quality-audit`, and `performance` reports for all
+four languages. Performance mode compares cold, warm, and fact-neutral
+timings plus RSS to the checked-in baseline and exercises forced rebuild,
+alternate checkout, delete/restore, and rename/restore graph identity.
+Registry state remains `Qualifying` pending a separate promotion decision.
+
 ## Current qualification boundary
 
-Python, Go, Rust, Java, PHP, C#, Kotlin, Ruby, TypeScript, and JavaScript are
-hard-cut universal pipelines. C#, PHP, Kotlin, Ruby, TypeScript, and JavaScript
-remain `Qualifying`; TypeScript and JavaScript share a bounded ECMAScript
+Python, Go, Rust, Java, PHP, C#, Kotlin, Ruby, TypeScript, JavaScript, Swift,
+Dart, Scala, and Groovy are hard-cut universal pipelines. C#, PHP, Kotlin,
+Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy remain
+`Qualifying`; TypeScript and JavaScript share a bounded ECMAScript
 producer but retain distinct producer identities. TSX uses the TypeScript
 pipeline. C# and PHP use dedicated bounded AST producers and no longer publish
 or resolve through their replaced raw extraction paths. `Qualifying` means the
@@ -728,7 +761,11 @@ typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
 and security capabilities; ASP.NET consumes exact C# imports, attributes,
 ownership, callable signatures, and source ranges to derive MVC routes. The
 Kotlin pack consumes the version-1 Kotlin universal evidence batch and never
-re-enters the removed established detector.
+re-enters the removed established detector. Vapor consumes the version-1 Swift
+batch through the `vapor-swift` universal pack; Dart convention facts remain
+outside structural evidence, are marked as bounded convention-origin records,
+and require matching source or manifest activation for Flutter navigation,
+BLoC, and Riverpod contexts.
 
 Kotlin source resolution is exact-language only. Java/Kotlin call edges require
 fresh project/compiler evidence with exact anchored endpoints; imports, shared

@@ -302,6 +302,121 @@ pub(crate) const RUBY_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
+// Conservative common capabilities emitted by the AST-first extended
+// language producer. Project-wide target selection and framework conventions
+// remain outside the language boundary.
+const DART_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Imports,
+    LanguageCapability::Reexports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
+const GROOVY_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::Decorators,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
+const SCALA_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
+    LanguageCapability::Traits,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
+const SWIFT_CAPABILITIES: &[LanguageCapability] = &[
+    LanguageCapability::Declarations,
+    LanguageCapability::LexicalScopes,
+    LanguageCapability::Traits,
+    LanguageCapability::Imports,
+    LanguageCapability::Aliases,
+    LanguageCapability::Calls,
+    LanguageCapability::Construction,
+    LanguageCapability::TypeReferences,
+    LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
+    LanguageCapability::Members,
+    LanguageCapability::Ownership,
+    LanguageCapability::Receivers,
+    LanguageCapability::ExternalReferences,
+];
+
+const DART_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer {
+        id: "compass.dart",
+        language: "dart",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        capabilities: DART_CAPABILITIES,
+    },
+    qualification: UniversalEvidenceQualification::Qualifying,
+};
+
+const GROOVY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer {
+        id: "compass.groovy",
+        language: "groovy",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        capabilities: GROOVY_CAPABILITIES,
+    },
+    qualification: UniversalEvidenceQualification::Qualifying,
+};
+
+const SCALA_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer {
+        id: "compass.scala",
+        language: "scala",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        capabilities: SCALA_CAPABILITIES,
+    },
+    qualification: UniversalEvidenceQualification::Qualifying,
+};
+
+const SWIFT_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer {
+        id: "compass.swift",
+        language: "swift",
+        version: 1,
+        evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
+        capabilities: SWIFT_CAPABILITIES,
+    },
+    qualification: UniversalEvidenceQualification::Qualifying,
+};
+
 pub(crate) const RUBY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
     producer: UniversalEvidenceProducer {
         id: "compass.ruby",
@@ -324,6 +439,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         },
         qualification: UniversalEvidenceQualification::Qualifying,
     },
+    DART_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
             id: "compass.go",
@@ -334,6 +450,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         },
         qualification: UniversalEvidenceQualification::Qualifying,
     },
+    GROOVY_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
             id: "compass.java",
@@ -395,6 +512,8 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         },
         qualification: UniversalEvidenceQualification::Qualifying,
     },
+    SCALA_EVIDENCE_PIPELINE,
+    SWIFT_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
             id: "compass.typescript",

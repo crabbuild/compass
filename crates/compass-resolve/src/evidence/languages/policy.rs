@@ -14,6 +14,10 @@ pub(in crate::evidence) enum LanguagePolicyKind {
     Php,
     Ruby,
     Rust,
+    Swift,
+    Dart,
+    Scala,
+    Groovy,
     Generic,
 }
 
@@ -27,6 +31,10 @@ impl LanguagePolicyKind {
             "php" => Self::Php,
             "ruby" => Self::Ruby,
             "rust" => Self::Rust,
+            "swift" => Self::Swift,
+            "dart" => Self::Dart,
+            "scala" => Self::Scala,
+            "groovy" => Self::Groovy,
             _ => Self::Generic,
         }
     }
@@ -60,7 +68,9 @@ impl LanguagePolicyKind {
             }
             Self::Java => db.resolve_java_same_package_builtin_collision(candidate),
             Self::Kotlin => db.resolve_kotlin_candidate(candidate),
-            Self::Ruby | Self::Generic => None,
+            Self::Ruby | Self::Swift | Self::Dart | Self::Scala | Self::Groovy | Self::Generic => {
+                None
+            }
         }
     }
 
@@ -78,6 +88,10 @@ impl LanguagePolicyKind {
             | Self::Ruby
             | Self::TypeScript
             | Self::Rust
+            | Self::Swift
+            | Self::Dart
+            | Self::Scala
+            | Self::Groovy
             | Self::Generic => None,
         }
     }
@@ -116,6 +130,22 @@ mod tests {
         assert_eq!(
             LanguagePolicyKind::for_language("ruby"),
             LanguagePolicyKind::Ruby
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("swift"),
+            LanguagePolicyKind::Swift
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("dart"),
+            LanguagePolicyKind::Dart
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("scala"),
+            LanguagePolicyKind::Scala
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("groovy"),
+            LanguagePolicyKind::Groovy
         );
         assert_eq!(
             LanguagePolicyKind::for_language("future-language"),

@@ -5084,7 +5084,42 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 if let Some(object) = object
                     && self.is_builtin_member_target(scope_id, object, &property_name)
                 {
-                    return Ok(());
+                    if self.language != "typescript" {
+                        return Ok(());
+                    }
+                    let Some(receiver) = self.builtin_receiver_name(scope_id, object) else {
+                        return Ok(());
+                    };
+                    let target = format!("global::{receiver}.{property_name}");
+                    return self.add_external_resolution_candidate(
+                        property,
+                        scope_id,
+                        if construction {
+                            CandidateRelation::Constructs
+                        } else {
+                            CandidateRelation::Calls
+                        },
+                        if construction {
+                            SemanticRole::Construction
+                        } else {
+                            SemanticRole::Call
+                        },
+                        &property_name,
+                        Some(&node_text(self.source, function)),
+                        member_context,
+                        &target,
+                        "javascript.global",
+                        argument_count,
+                        argument_types,
+                        &[
+                            "class",
+                            "constructor",
+                            "function",
+                            "method",
+                            "property",
+                            "external",
+                        ],
+                    );
                 }
                 // A dynamic receiver, proxy, or ambiguous member is not a
                 // safe call target. Preserve its source occurrence as
@@ -5314,7 +5349,32 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         );
         let Some(resolution) = resolution else {
             if self.is_unshadowed_builtin(scope_id, &spelling) {
-                return Ok(());
+                if self.language != "typescript" {
+                    return Ok(());
+                }
+                let target_name = format!("global::{spelling}");
+                return self.add_external_resolution_candidate(
+                    target,
+                    scope_id,
+                    if construction {
+                        CandidateRelation::Constructs
+                    } else {
+                        CandidateRelation::Calls
+                    },
+                    if construction {
+                        SemanticRole::Construction
+                    } else {
+                        SemanticRole::Call
+                    },
+                    &spelling,
+                    None,
+                    call_context,
+                    &target_name,
+                    "javascript.global",
+                    argument_count,
+                    argument_types,
+                    &["class", "constructor", "function", "external"],
+                );
             }
             return self.add_unresolved_candidate(
                 target,

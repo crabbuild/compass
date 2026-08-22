@@ -444,6 +444,10 @@ pub fn is_language_builtin_qualified_target(language: &str, qualified_name: &str
             .strip_prefix("java.lang.")
             .and_then(|name| name.split(['.', ':']).next())
             .is_some_and(|name| is_language_builtin_global(language, name)),
+        "javascript" | "typescript" | "tsx" => qualified_name
+            .strip_prefix("global::")
+            .and_then(|name| name.split(['.', ':']).next())
+            .is_some_and(|name| is_language_builtin_global(language, name)),
         _ => false,
     }
 }
@@ -478,6 +482,14 @@ mod tests {
         assert!(is_language_builtin_qualified_target(
             "java",
             "java.lang.String::valueOf"
+        ));
+        assert!(is_language_builtin_qualified_target(
+            "typescript",
+            "global::Array.from"
+        ));
+        assert!(is_language_builtin_qualified_target(
+            "javascript",
+            "global::console.log"
         ));
         assert!(!is_language_builtin_qualified_target(
             "rust",

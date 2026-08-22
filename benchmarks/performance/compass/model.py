@@ -195,6 +195,8 @@ class AuditCorpus:
     path: str
     graph: str
     graph_sha256: str
+    source_globs: tuple[str, ...] = ()
+    exclude_globs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

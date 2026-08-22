@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
+  universal evidence pipelines. The bounded AST-first producer publishes
+  declarations, scopes, bindings, occurrences, and conservative relationship
+  candidates with exact language constraints; Swift Vapor routes now use the
+  `vapor-swift` evidence-backed pack, bounded `pubspec.yaml`/`build.sbt`/
+  `Package.swift`/Gradle project metadata participates in fingerprints, and
+  legacy Swift member-table plus broad JVM stub rewiring no longer selects
+  targets for these languages.
+
+- Complete the independent SwiftSyntax, Dart Analyzer, scala.meta, and Groovy
+  CompilationUnit qualification providers. Clean pinned Swift, Dart, Scala,
+  and Groovy corpora now pass the graph-backed precision/recall audits and
+  fixture performance gates; the four production pipelines remain
+  `Qualifying` pending a separate promotion decision.
+
 - Turn the VS Code codebase query view into a multi-command workbench with
   separate Ask, Explain, and CompassQL composers and durable result tabs.
   Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows

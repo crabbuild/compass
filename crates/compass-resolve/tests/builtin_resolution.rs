@@ -118,17 +118,9 @@ export function normalize(input: unknown) {
         .semantic_evidence
         .as_ref()
         .ok_or("missing TypeScript semantic evidence")?;
-
-    assert!(evidence.candidates.iter().all(|candidate| {
-        !matches!(
-            candidate.relation,
-            compass_languages::CandidateRelation::Calls
-                | compass_languages::CandidateRelation::Constructs
-                | compass_languages::CandidateRelation::AccessesMember
-        ) || !matches!(
-            candidate.target_spelling.as_str(),
-            "String" | "Number" | "log" | "resolve" | "Date"
-        )
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.constraints.module_or_package.as_deref() == Some("javascript.global")
+            && candidate.constraints.allow_external
     }));
 
     let sources = HashMap::from([(
@@ -205,24 +197,21 @@ func run(identifier: UUID) {
 }
 "#;
     let extracted = Engine::default().extract_source(path, source)?;
-    let raw_names = extracted
-        .raw_calls
-        .iter()
-        .flatten()
-        .map(|call| call.callee.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(!raw_names.contains(&"Data"));
-    assert!(!raw_names.contains(&"UUID"));
+    assert!(extracted.raw_calls.is_none());
     assert!(
         extracted
             .nodes
             .iter()
             .all(|node| { !matches!(node.label(), "Codable" | "Sendable" | "Data" | "UUID") })
     );
-    let call_targets = call_edges(&extracted)
+    let sources = HashMap::from([(
+        path.to_string_lossy().into_owned(),
+        String::from_utf8(source.to_vec())?,
+    )]);
+    let resolved = compass_resolve::resolve(&[extracted], &sources);
+    let call_targets = call_edges(&resolved)
         .into_iter()
-        .filter_map(|edge| extracted.nodes.iter().find(|node| node.id == edge.target))
+        .filter_map(|edge| resolved.nodes.iter().find(|node| node.id == edge.target))
         .map(compass_languages::RawNodeRecord::label)
         .collect::<Vec<_>>();
     assert!(call_targets.contains(&"print()"));

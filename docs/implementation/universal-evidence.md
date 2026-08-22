@@ -30,12 +30,12 @@ future work.
 | Status | Implementation |
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established extractors, and universal evidence schema version 2 (extraction semantics version 3) |
-| Available now | C#, PHP, Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are entries in the hard-cut `UniversalEvidenceRegistry`; each entry pairs a `UniversalEvidenceProducer` with a `UniversalEvidenceQualification` state |
-| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; C#, PHP, Kotlin, Ruby, and the ECMAScript family use dedicated source-grounded producers, while TypeScript and JavaScript retain distinct producer identities |
+| Available now | C#, Dart, Go, Groovy, Java, Kotlin, PHP, Python, Ruby, Rust, Scala, Swift, TypeScript, and JavaScript are entries in the hard-cut `UniversalEvidenceRegistry`; each entry pairs a `UniversalEvidenceProducer` with a `UniversalEvidenceQualification` state |
+| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; Swift, Dart, Scala, and Groovy share the bounded AST-first extended producer, while each retains a distinct version-1 producer identity |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
 | Available now | Rust has passed its Phase 2 quality audit; all registered pipelines remain explicitly `Qualifying` until their complete independent audit gates promote them |
 | Planned | `GrammarProvider` and grammar provenance |
-| Planned | Independently qualified hard cuts for the remaining registered languages |
+| Planned | Independent source-oracle audits for pipelines without complete artifacts, plus separate promotion decisions for every `Qualifying` pipeline |
 
 Do not treat a planned interface as a shipped public API until its implementation and qualification commits land.
 
@@ -417,9 +417,14 @@ This table describes the current branch.
 | Ruby | Hard-cut `Qualifying` | Version-1 producer evidence plus shared resolution and projection; method-space-aware dispatch and Rails pack use the same pipeline while audit gates remain open |
 | TypeScript | Hard-cut `Qualifying` | Version-5 producer evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
 | JavaScript | Hard-cut `Qualifying` | Version-5 producer evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
+| Swift | Hard-cut `Qualifying` | Version-1 AST-first evidence with exact declarations, scopes, imports, calls, construction, type/base references, members, ownership, and source-bounded diagnostics; Vapor uses the `vapor-swift` universal pack and Swift legacy member-table compatibility is removed |
+| Dart | Hard-cut `Qualifying` | Version-1 AST-first evidence with bounded imports/exports, calls, construction, type/base references, members, ownership, and explicit language constraints; established Flutter/BLoC/Riverpod/navigation convention facts remain separately marked, source/manifest-activated, and bounded |
+| Scala | Hard-cut `Qualifying` | Version-1 AST-first evidence with package scopes, declarations, imports, calls, construction, type/base references, members, ownership, and exact-language JVM boundaries; `build.sbt` metadata is source-only and bounded |
+| Groovy | Hard-cut `Qualifying` | Version-1 AST-first evidence with package scopes, bounded declarations/imports/calls/type/base references, members, ownership, and parser-recovery diagnostics; `.gradle` is treated as Groovy and JVM-family stub rewiring excludes it |
 | Remaining registered languages | Established direct extractors | Current language-specific or generic extraction paths |
 
-Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, and JavaScript are hard-cut on this branch.
+Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala,
+and Groovy are hard-cut on this branch.
 Each later language
 reuses the same hard-cut registry, evidence model, resolver, and projector
 without adding language cases to the central publisher. A language's
@@ -430,6 +435,14 @@ audit gates are recorded in
 Ruby's pinned three-corpus baseline, independent Ripper oracle, performance
 samples, and qualifying-only audit boundary are recorded in
 [Ruby universal qualification](ruby-universal-qualification.md).
+Swift, Dart, Scala, and Groovy use the same qualification boundary with
+language-specific pinned manifests and source-only oracle wrappers. Their
+established direct-path fixture baselines are captured at the pre-cutover
+revision `88abe4c071a19ec03b3bca132656830a02a47907` in
+`tests/qualification/{swift,dart,scala,groovy}-universal-baseline.json`.
+Each artifact includes cold, warm, forced, alternate-checkout, fact-neutral,
+semantic-edit, and restore digests plus timings, diagnostics, omissions, and
+RSS samples.
 
 ## Framework-pack status
 
@@ -458,6 +471,13 @@ focused adapters. Shared project evidence supplies bounded configuration,
 alias, plugin, and route-root metadata, while the qualification module checks
 that each framework's expected routes resolve exactly before a fixture can
 claim support.
+
+The bounded project index also recognizes `Package.swift`, `pubspec.yaml`/
+`pubspec.yml`, `build.sbt`, and Gradle build files. It records only checked-in
+dependency coordinates, explicit package/toolchain metadata, and normalized
+project-contained source roots; it never invokes SwiftPM, pub, sbt, Gradle, or
+project scripts. These values are part of the deterministic project-evidence
+fingerprint used for cache reuse.
 
 ## Verification gates
 

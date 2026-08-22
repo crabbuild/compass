@@ -1,0 +1,35 @@
+schema = "compass.swift-universal-qualification/1"
+language = "swift"
+producer = "compass.swift"
+producerVersion = 1
+oracleProvider = "swift-syntax-source-oracle"
+oracleToolchain = "swift 6.3.3; SwiftSyntax 603.0.0"
+checkoutRoot = "/Volumes/Workspace/Github"
+readOnly = true
+minimumAcceptedRelationships = 2000
+minimumAcceptedPerCorpus = 400
+minimumAcceptedPerRelation = 100
+
+[[repository]]
+name = "swift-nio"
+url = "https://github.com/apple/swift-nio.git"
+commit = "385c1a7d48ebe018bcde205f8bd4506403dc889a"
+purpose = "large systems library, protocols, nested types, async calls, and extensions"
+sourceGlobs = ["Sources/**/*.swift", "Tests/**/*.swift"]
+excludeGlobs = []
+
+[[repository]]
+name = "vapor"
+url = "https://github.com/vapor/vapor.git"
+commit = "13efaeefd52a965009fc6a69a96ba66e7f20402e"
+purpose = "framework modules, route handlers, builders, and application extensions"
+sourceGlobs = ["Sources/**/*.swift", "Tests/**/*.swift"]
+excludeGlobs = []
+
+[[repository]]
+name = "swift-collections"
+url = "https://github.com/apple/swift-collections.git"
+commit = "f425dffd5bf70fe2a880c5eb6568bbdcade9f4f5"
+purpose = "value types, protocols, generic constraints, and companion-style APIs"
+sourceGlobs = ["Sources/**/*.swift", "Tests/**/*.swift"]
+excludeGlobs = []

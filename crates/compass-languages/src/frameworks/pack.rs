@@ -601,10 +601,101 @@ pub(super) const PHP_FRAMEWORKS_DESCRIPTOR: FrameworkPackDescriptor = FrameworkP
     limits: FrameworkLimits::DEFAULT,
 };
 
+pub(super) const VAPOR_SWIFT_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "vapor-swift",
+    kind: FrameworkPackKind::Source,
+    languages: &["swift"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["vapor"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["vapor-import", "vapor-route-call"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DART_FLUTTER_NAVIGATION_DESCRIPTOR: FrameworkPackDescriptor =
+    FrameworkPackDescriptor {
+        id: "dart-flutter-navigation",
+        kind: FrameworkPackKind::Source,
+        languages: &["dart"],
+        required_capabilities: &[
+            LanguageCapability::Imports,
+            LanguageCapability::Calls,
+            LanguageCapability::Receivers,
+        ],
+        framework_capabilities: &[FrameworkCapability::HttpRoutes],
+        dependency_markers: &["flutter"],
+        manifest_policy: FrameworkManifestPolicy::Advisory,
+        activation_rules: &["flutter-navigation-call", "flutter-navigation-import"],
+        accepted_roles: &[
+            SemanticRole::Import,
+            SemanticRole::Call,
+            SemanticRole::Receiver,
+        ],
+        emitted_relation_families: &[FrameworkRelation::RoutesTo],
+        occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+        limits: FrameworkLimits::DEFAULT,
+    };
+
+pub(super) const DART_BLOC_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "dart-bloc",
+    kind: FrameworkPackKind::Source,
+    languages: &["dart"],
+    required_capabilities: &[
+        LanguageCapability::Calls,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::Members,
+    ],
+    framework_capabilities: &[FrameworkCapability::Messaging],
+    dependency_markers: &["bloc", "flutter_bloc"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["bloc-builder", "bloc-event", "bloc-provider"],
+    accepted_roles: &[
+        SemanticRole::Call,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+    ],
+    emitted_relation_families: &[FrameworkRelation::Handles],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DART_RIVERPOD_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "dart-riverpod",
+    kind: FrameworkPackKind::Source,
+    languages: &["dart"],
+    required_capabilities: &[LanguageCapability::Calls, LanguageCapability::Members],
+    framework_capabilities: &[FrameworkCapability::Messaging],
+    dependency_markers: &["hooks_riverpod", "riverpod"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["riverpod-provider", "riverpod-reference"],
+    accepted_roles: &[SemanticRole::Call, SemanticRole::MemberAccess],
+    emitted_relation_families: &[FrameworkRelation::Handles],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+    limits: FrameworkLimits::DEFAULT,
+};
+
 const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     ASPNET_CSHARP_DESCRIPTOR,
     PHP_FRAMEWORKS_DESCRIPTOR,
     SPRING_JAVA_DESCRIPTOR,
     SPRING_KOTLIN_DESCRIPTOR,
     RAILS_RUBY_DESCRIPTOR,
+    VAPOR_SWIFT_DESCRIPTOR,
+    DART_BLOC_DESCRIPTOR,
+    DART_FLUTTER_NAVIGATION_DESCRIPTOR,
+    DART_RIVERPOD_DESCRIPTOR,
 ];
