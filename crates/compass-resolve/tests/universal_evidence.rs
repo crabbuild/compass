@@ -104,6 +104,61 @@ class Box: Store {}
 }
 
 #[test]
+fn dart_part_receiver_dispatch_resolves_repeated_local_calls() -> Result<(), Box<dyn Error>> {
+    let library = br#"library wave;
+abstract class Store { void save(String value); }
+class UserStore implements Store {
+  void save(String value) {}
+}
+"#;
+    let part = br#"part of wave;
+void repeated(UserStore store) { store.save('a'); store.save('b'); }
+void dynamicCall(dynamic receiver) { receiver.unknown(); }
+"#;
+    let library_file = "lib/library.dart";
+    let part_file = "lib/src/part.dart";
+    let library_extracted = Engine::default()
+        .extract_source_combined(Path::new(library_file), library_file, library)?
+        .graph;
+    let part_extracted = Engine::default()
+        .extract_source_combined(Path::new(part_file), part_file, part)?
+        .graph;
+    let resolved = resolve(
+        &[library_extracted, part_extracted],
+        &HashMap::from([
+            (
+                library_file.to_owned(),
+                String::from_utf8(library.to_vec())?,
+            ),
+            (part_file.to_owned(), String::from_utf8(part.to_vec())?),
+        ]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let save = node("wave.UserStore.save").ok_or("missing UserStore.save")?;
+    let repeated = node("wave.repeated").ok_or("missing repeated")?;
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == repeated.id
+                    && edge.target == save.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        2,
+        "missing repeated Dart receiver dispatch edges"
+    );
+    Ok(())
+}
+
+#[test]
 fn groovy_local_implements_publishes_direct_base_edge() -> Result<(), Box<dyn Error>> {
     let source = br#"package wave
 interface Store {}

@@ -2559,6 +2559,31 @@ fn normalization_drops_non_recursive_self_loops_and_invalid_inheritance_targets(
 }
 
 #[test]
+fn raw_extensions_publish_as_class_shaped_owners() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut extension = raw_node(root, "extension", "Box", 10);
+    extension
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("extension"));
+    extension
+        .attributes
+        .insert("language".to_owned(), json!("swift"));
+    let graph = normalize_v1(
+        Extraction {
+            nodes: vec![extension],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(graph.nodes.len(), 1);
+    assert_eq!(graph.nodes[0].kind, NodeKind::Class);
+    validate_code_graph(&graph)?;
+    Ok(())
+}
+
+#[test]
 fn normalization_preserves_rust_blanket_implementation_edges()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

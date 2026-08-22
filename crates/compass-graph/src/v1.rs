@@ -4159,6 +4159,12 @@ fn map_node_kind(
         "package" => NodeKind::Package,
         "namespace" => NodeKind::Namespace,
         "class" => NodeKind::Class,
+        // The v1 vocabulary has no separate extension node kind. Keep
+        // Swift (and other extension-capable languages) source-backed
+        // extension scopes publishable as class-shaped owners so their
+        // contained members and conformances are not discarded at the
+        // closed-schema boundary.
+        "extension" => NodeKind::Class,
         "struct" | "record" => NodeKind::Struct,
         "interface" => NodeKind::Interface,
         "trait" => NodeKind::Trait,

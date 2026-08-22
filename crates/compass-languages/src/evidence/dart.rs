@@ -1,5 +1,6 @@
 //! Universal evidence profile for Dart.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use tree_sitter::Node;
@@ -66,7 +67,8 @@ impl LanguageProfile for Dart {
     fn collect_source_supplement<'source>(
         state: &mut State<'source, Self>,
     ) -> Result<(), EvidenceError> {
-        collect_dart_parts(state)
+        collect_dart_parts(state)?;
+        collect_dart_receiver_calls(state)
     }
 }
 
@@ -129,6 +131,187 @@ fn collect_dart_parts<'source>(state: &mut State<'source, Dart>) -> Result<(), E
         line_start = line_start.saturating_add(line.len());
     }
     Ok(())
+}
+
+fn collect_dart_receiver_calls<'source>(
+    state: &mut State<'source, Dart>,
+) -> Result<(), EvidenceError> {
+    let Ok(text) = std::str::from_utf8(state.source) else {
+        return Ok(());
+    };
+    let mut bindings_by_owner = BTreeMap::<usize, BTreeMap<String, String>>::new();
+    let mut line_start = 0_usize;
+    for line in text.split_inclusive('\n') {
+        let line_without_newline = line.trim_end_matches(['\r', '\n']);
+        let trim_offset = line_without_newline
+            .len()
+            .saturating_sub(line_without_newline.trim_start().len());
+        let trimmed = line_without_newline.trim();
+        let line_owner = trimmed.find('(').and_then(|open| {
+            state.source_callable_owner_for(
+                line_start.saturating_add(trim_offset).saturating_add(open),
+            )
+        });
+
+        if let Some(owner) = line_owner {
+            let bindings = dart_typed_bindings(trimmed)
+                .into_iter()
+                .filter_map(|(name, raw_type)| {
+                    state
+                        .source_type_name_or_namespace(&raw_type)
+                        .map(|qualified| (name, qualified))
+                })
+                .collect::<BTreeMap<_, _>>();
+            if !bindings.is_empty() {
+                bindings_by_owner.insert(owner, bindings);
+            }
+        }
+
+        for call in dart_calls(line_without_newline) {
+            let start = line_start.saturating_add(call.start);
+            let end = line_start.saturating_add(call.end);
+            let Some(owner) = state.source_callable_owner_for(start).or(line_owner) else {
+                continue;
+            };
+            let receiver = call.qualifier.as_deref().and_then(|qualifier| {
+                (!qualifier.contains('.'))
+                    .then(|| bindings_by_owner.get(&owner))
+                    .flatten()
+                    .and_then(|bindings| bindings.get(qualifier))
+                    .cloned()
+                    .or_else(|| {
+                        (!qualifier.contains('.'))
+                            .then(|| state.source_type_name_or_namespace(qualifier))
+                            .flatten()
+                    })
+            });
+            let Some(receiver) = receiver else {
+                continue;
+            };
+            state.emit_source_receiver_call(
+                owner,
+                &receiver,
+                &call.spelling,
+                call.qualifier.as_deref(),
+                start,
+                end,
+            )?;
+        }
+        line_start = line_start.saturating_add(line.len());
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct DartCall {
+    qualifier: Option<String>,
+    spelling: String,
+    start: usize,
+    end: usize,
+}
+
+fn dart_typed_bindings(line: &str) -> Vec<(String, String)> {
+    let Some(open) = line.find('(') else {
+        return Vec::new();
+    };
+    let Some(close) = line[open.saturating_add(1)..].find(')') else {
+        return Vec::new();
+    };
+    let close = open.saturating_add(1).saturating_add(close);
+    line[open.saturating_add(1)..close]
+        .split(',')
+        .filter_map(|parameter| {
+            let parameter = parameter
+                .split_once('=')
+                .map_or(parameter, |(value, _)| value)
+                .trim();
+            let tokens = parameter
+                .split_whitespace()
+                .filter(|token| !matches!(*token, "required" | "covariant" | "final"))
+                .collect::<Vec<_>>();
+            let name = tokens.last()?.trim_start_matches("this.");
+            if !shared::valid_name(name) || tokens.len() < 2 {
+                return None;
+            }
+            let raw_type = tokens[..tokens.len().saturating_sub(1)].join(" ");
+            let raw_type = raw_type.trim().trim_end_matches('?');
+            (!raw_type.is_empty()).then(|| (name.to_owned(), raw_type.to_owned()))
+        })
+        .collect()
+}
+
+fn dart_calls(line: &str) -> Vec<DartCall> {
+    let bytes = line.as_bytes();
+    let mut calls = Vec::new();
+    let mut cursor = 0_usize;
+    while cursor < bytes.len() {
+        if !dart_identifier_start(bytes[cursor]) {
+            cursor = cursor.saturating_add(1);
+            continue;
+        }
+        let first_start = cursor;
+        cursor = cursor.saturating_add(1);
+        while cursor < bytes.len() && dart_identifier_continue(bytes[cursor]) {
+            cursor = cursor.saturating_add(1);
+        }
+        let first_end = cursor;
+        let mut lookahead = skip_dart_space(bytes, cursor);
+        if bytes.get(lookahead) != Some(&b'.') {
+            cursor = first_end;
+            continue;
+        }
+
+        let qualifier_start = first_start;
+        loop {
+            lookahead = skip_dart_space(bytes, lookahead.saturating_add(1));
+            if !dart_identifier_start(bytes.get(lookahead).copied().unwrap_or_default()) {
+                break;
+            }
+            let last_start = lookahead;
+            lookahead = lookahead.saturating_add(1);
+            while lookahead < bytes.len() && dart_identifier_continue(bytes[lookahead]) {
+                lookahead = lookahead.saturating_add(1);
+            }
+            let last_end = lookahead;
+            let after = skip_dart_space(bytes, lookahead);
+            if bytes.get(after) == Some(&b'(') {
+                calls.push(DartCall {
+                    qualifier: Some(
+                        line[qualifier_start..last_start]
+                            .trim()
+                            .trim_end_matches('.')
+                            .to_owned(),
+                    ),
+                    spelling: line[last_start..last_end].to_owned(),
+                    start: last_start,
+                    end: last_end,
+                });
+                cursor = last_end;
+                break;
+            }
+            if bytes.get(after) != Some(&b'.') {
+                cursor = last_end;
+                break;
+            }
+            lookahead = after;
+        }
+    }
+    calls
+}
+
+fn skip_dart_space(bytes: &[u8], mut index: usize) -> usize {
+    while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+        index = index.saturating_add(1);
+    }
+    index
+}
+
+fn dart_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn dart_identifier_continue(byte: u8) -> bool {
+    dart_identifier_start(byte) || byte.is_ascii_digit()
 }
 
 fn dart_directive_target(rest: &str) -> Option<String> {

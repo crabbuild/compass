@@ -595,6 +595,17 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         (types.len() == 1).then(|| types.pop_first()).flatten()
     }
 
+    pub(super) fn source_type_name_or_namespace(&self, raw: &str) -> Option<String> {
+        self.source_type_name(raw).or_else(|| {
+            let (qualifier, spelling) = split_qualified(raw);
+            (qualifier.is_none()
+                && !self.namespace.is_empty()
+                && valid_name(&spelling)
+                && !matches!(spelling.as_str(), "dynamic" | "void" | "Never"))
+            .then(|| join_name(&self.namespace, &spelling))
+        })
+    }
+
     pub(super) fn emit_source_receiver_call(
         &mut self,
         owner: usize,

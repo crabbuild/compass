@@ -316,6 +316,7 @@ const DART_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Construction,
     LanguageCapability::TypeReferences,
     LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
     LanguageCapability::Members,
     LanguageCapability::Ownership,
     LanguageCapability::Receivers,
