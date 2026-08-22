@@ -7,7 +7,7 @@ use compass_languages::{
 };
 
 #[test]
-fn extended_languages_publish_ast_first_universal_evidence() -> Result<(), Box<dyn Error>> {
+fn language_wave_publish_ast_first_universal_evidence() -> Result<(), Box<dyn Error>> {
     let fixtures = [
         (
             "Sources/Greeter.swift",
@@ -121,7 +121,7 @@ class Greeter {
 }
 
 #[test]
-fn registry_fixtures_keep_extended_pipelines_valid() -> Result<(), Box<dyn Error>> {
+fn registry_fixtures_keep_language_wave_pipelines_valid() -> Result<(), Box<dyn Error>> {
     for case in Registry::cases()
         .iter()
         .filter(|case| matches!(case.spec.name, "swift" | "dart" | "scala" | "groovy"))
@@ -140,7 +140,7 @@ fn registry_fixtures_keep_extended_pipelines_valid() -> Result<(), Box<dyn Error
 }
 
 #[test]
-fn extended_empty_and_recovered_sources_remain_bounded() -> Result<(), Box<dyn Error>> {
+fn language_wave_empty_and_recovered_sources_remain_bounded() -> Result<(), Box<dyn Error>> {
     for (path, source) in [
         ("empty.swift", b"".as_slice()),
         ("empty.dart", b"\n".as_slice()),

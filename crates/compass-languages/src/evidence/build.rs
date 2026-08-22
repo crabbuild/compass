@@ -848,16 +848,16 @@ pub(crate) fn extract_tree_evidence(
     }
     match pipeline.producer.language {
         "dart" => {
-            return super::extended::emit_dart_tree_evidence(path, source_file, source, root);
+            return super::dart::emit_tree_evidence(path, source_file, source, root);
         }
         "groovy" => {
-            return super::extended::emit_groovy_tree_evidence(path, source_file, source, root);
+            return super::groovy::emit_tree_evidence(path, source_file, source, root);
         }
         "scala" => {
-            return super::extended::emit_scala_tree_evidence(path, source_file, source, root);
+            return super::scala::emit_tree_evidence(path, source_file, source, root);
         }
         "swift" => {
-            return super::extended::emit_swift_tree_evidence(path, source_file, source, root);
+            return super::swift::emit_tree_evidence(path, source_file, source, root);
         }
         _ => {}
     }

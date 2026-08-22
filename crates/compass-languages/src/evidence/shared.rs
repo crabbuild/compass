@@ -1,4 +1,4 @@
-//! Shared AST-first evidence producer for Swift, Dart, Scala, and Groovy.
+//! Shared AST-first traversal for the language-specific universal producers.
 //!
 //! The four grammars have different surface syntax, but their project-neutral
 //! evidence boundary is the same: declarations and lexical scopes first,
@@ -13,12 +13,12 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
-use super::super::model::{
+use super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
+use super::model::{
     BindingKind, CandidateRelation, EvidenceRange, LanguageCapability, ResolutionConstraint,
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
-use super::super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
+use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
 use crate::{UniversalEvidenceRegistry, file_stem, make_id};
 
 const MAX_TRAVERSAL_DEPTH: usize = 256;

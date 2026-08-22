@@ -4,9 +4,9 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::super::model::SemanticEvidenceBatch;
-use super::super::validate::EvidenceError;
-use super::common::{self, LanguageProfile, State};
+use super::model::SemanticEvidenceBatch;
+use super::shared::{self, LanguageProfile, State};
+use super::validate::EvidenceError;
 
 struct Groovy;
 
@@ -14,7 +14,7 @@ impl LanguageProfile for Groovy {
     const LANGUAGE: &'static str = "groovy";
 
     fn package_name(source: &[u8]) -> Option<String> {
-        common::package_name_from_source(source)
+        shared::package_name_from_source(source)
     }
 
     fn has_source_supplement(declaration_count: usize) -> bool {
@@ -34,7 +34,7 @@ pub(super) fn emit_tree_evidence(
     source: &[u8],
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    common::emit_tree_evidence::<Groovy>(path, source_file, source, root)
+    shared::emit_tree_evidence::<Groovy>(path, source_file, source, root)
 }
 
 /// The pinned Groovy grammar intentionally exposes each top-level form as a
@@ -153,7 +153,7 @@ fn groovy_type_declaration(line: &str) -> Option<(&'static str, String, usize)> 
         let name = tokens
             .get(index.saturating_add(1))?
             .trim_matches(['{', ';']);
-        if !common::valid_name(name) {
+        if !shared::valid_name(name) {
             return None;
         }
         let offset = line.find(name)?;
@@ -172,7 +172,7 @@ fn groovy_method_declaration(line: &str) -> Option<(String, bool, usize)> {
         .find(|(_, character)| !character.is_ascii_alphanumeric() && *character != '_')
         .map_or(0, |(index, _)| index.saturating_add(1));
     let name = before.get(name_start..name_end)?.trim();
-    if !common::valid_name(name)
+    if !shared::valid_name(name)
         || matches!(
             name,
             "if" | "for" | "while" | "switch" | "catch" | "try" | "return" | "assert"

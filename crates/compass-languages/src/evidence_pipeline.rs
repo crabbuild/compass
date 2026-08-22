@@ -302,9 +302,9 @@ pub(crate) const RUBY_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::ExternalReferences,
 ];
 
-// Conservative common capabilities emitted by the AST-first extended
-// language producer. Project-wide target selection and framework conventions
-// remain outside the language boundary.
+// Conservative capabilities emitted by the AST-first language-specific
+// producers. Project-wide target selection and framework conventions remain
+// outside the language boundary.
 const DART_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
     LanguageCapability::LexicalScopes,

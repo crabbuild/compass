@@ -31,7 +31,7 @@ future work.
 | --- | --- |
 | Available now | `compass-languages` owns the source registry, parsers, established extractors, and universal evidence schema version 2 (extraction semantics version 3) |
 | Available now | C#, Dart, Go, Groovy, Java, Kotlin, PHP, Python, Ruby, Rust, Scala, Swift, TypeScript, and JavaScript are entries in the hard-cut `UniversalEvidenceRegistry`; each entry pairs a `UniversalEvidenceProducer` with a `UniversalEvidenceQualification` state |
-| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; Swift, Dart, Scala, and Groovy share the bounded AST-first extended producer, while each retains a distinct version-1 producer identity |
+| Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; Swift, Dart, Scala, and Groovy use direct language modules backed by a shared bounded AST-first traversal, while each retains a distinct version-1 producer identity |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
 | Available now | Rust has passed its Phase 2 quality audit; all registered pipelines remain explicitly `Qualifying` until their complete independent audit gates promote them |
 | Planned | `GrammarProvider` and grammar provenance |

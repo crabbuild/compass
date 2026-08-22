@@ -4,9 +4,9 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::super::model::SemanticEvidenceBatch;
-use super::super::validate::EvidenceError;
-use super::common::{self, LanguageProfile};
+use super::model::SemanticEvidenceBatch;
+use super::shared::{self, LanguageProfile};
+use super::validate::EvidenceError;
 
 struct Dart;
 
@@ -15,7 +15,7 @@ impl LanguageProfile for Dart {
 
     fn declaration_kind(kind: &str) -> Option<&'static str> {
         let lower = kind.to_ascii_lowercase();
-        common::shared_declaration_kind(kind)
+        shared::shared_declaration_kind(kind)
             .or_else(|| (lower == "variable_declaration").then_some("field"))
     }
 
@@ -31,5 +31,5 @@ pub(super) fn emit_tree_evidence(
     source: &[u8],
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    common::emit_tree_evidence::<Dart>(path, source_file, source, root)
+    shared::emit_tree_evidence::<Dart>(path, source_file, source, root)
 }

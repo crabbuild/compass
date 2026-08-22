@@ -4,9 +4,9 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::super::model::SemanticEvidenceBatch;
-use super::super::validate::EvidenceError;
-use super::common::{self, LanguageProfile};
+use super::model::SemanticEvidenceBatch;
+use super::shared::{self, LanguageProfile};
+use super::validate::EvidenceError;
 
 struct Swift;
 
@@ -24,5 +24,5 @@ pub(super) fn emit_tree_evidence(
     source: &[u8],
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    common::emit_tree_evidence::<Swift>(path, source_file, source, root)
+    shared::emit_tree_evidence::<Swift>(path, source_file, source, root)
 }
