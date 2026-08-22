@@ -91,6 +91,7 @@ struct PreparedNodeFailure {
 
 struct EdgeNodeFacts {
     kind: NodeKind,
+    language: Option<String>,
     kotlin_interface: bool,
     rust_type_parameter: bool,
     rust_enum_member: bool,
@@ -881,6 +882,12 @@ fn finalize_prepared_edge(
         .get(edge.target.as_str())
         .map(|facts| facts.kind)
         .unwrap_or(NodeKind::Variable);
+    let dart_endpoints = edge_node_facts
+        .get(edge.source.as_str())
+        .zip(edge_node_facts.get(edge.target.as_str()))
+        .is_some_and(|(source, target)| {
+            source.language.as_deref() == Some("dart") && target.language.as_deref() == Some("dart")
+        });
     let target_is_constructible = edge_node_facts
         .get(edge.target.as_str())
         .is_some_and(|facts| {
@@ -982,10 +989,16 @@ fn finalize_prepared_edge(
         EdgeKind::Embeds | EdgeKind::Extends | EdgeKind::Implements | EdgeKind::MixesIn
     ) {
         let valid = match edge.kind {
-            EdgeKind::Embeds | EdgeKind::Extends => source_kind.is_type() && target_kind.is_type(),
+            EdgeKind::Embeds => {
+                (source_kind.is_type() && target_kind.is_type())
+                    || (dart_endpoints
+                        && source_kind == NodeKind::File
+                        && target_kind == NodeKind::File)
+            }
+            EdgeKind::Extends => source_kind.is_type() && target_kind.is_type(),
             EdgeKind::Implements => {
                 (source_kind.is_type() || source_is_rust_type_parameter)
-                    && matches!(
+                    && (matches!(
                         target_kind,
                         NodeKind::Interface
                             | NodeKind::Trait
@@ -994,7 +1007,7 @@ fn finalize_prepared_edge(
                             // structural object type declared through a type
                             // alias.
                             | NodeKind::TypeAlias
-                    )
+                    ) || (dart_endpoints && target_kind == NodeKind::Class))
             }
             EdgeKind::MixesIn => source_kind.is_type() && target_kind.is_type(),
             _ => false,
@@ -1245,6 +1258,7 @@ fn normalize_v1_with_mode(
                 id.as_str(),
                 EdgeNodeFacts {
                     kind: node.kind,
+                    language: node.language.clone(),
                     kotlin_interface: node.kind == NodeKind::Interface
                         && node.language.as_deref() == Some("kotlin"),
                     rust_type_parameter: node.kind == NodeKind::Parameter

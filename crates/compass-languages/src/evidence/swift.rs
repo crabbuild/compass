@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::model::SemanticEvidenceBatch;
+use super::model::{CandidateRelation, SemanticEvidenceBatch};
 use super::shared::{self, LanguageProfile};
 use super::validate::EvidenceError;
 
@@ -41,6 +41,30 @@ impl LanguageProfile for Swift {
             return Some("method");
         }
         shared::shared_declaration_kind(node.kind())
+    }
+
+    fn base_type_relation(node: Node<'_>, owner_kind: Option<&str>) -> Option<CandidateRelation> {
+        let mut current = node.parent();
+        for _ in 0..=4 {
+            let Some(parent) = current else {
+                break;
+            };
+            if parent.kind() == "inheritance_specifier" {
+                // Swift structs and enums can conform to protocols but cannot
+                // extend a superclass.  Keep class inheritance conservative;
+                // the resolver reclassifies class-to-protocol conformances
+                // once the target declaration kind is known.
+                return Some(
+                    if matches!(owner_kind, Some("struct" | "enum" | "extension")) {
+                        CandidateRelation::Implements
+                    } else {
+                        CandidateRelation::Extends
+                    },
+                );
+            }
+            current = parent.parent();
+        }
+        None
     }
 }
 

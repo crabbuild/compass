@@ -5,7 +5,7 @@ use std::path::Path;
 use tree_sitter::Node;
 
 use super::build::range_for_byte_span;
-use super::model::SemanticEvidenceBatch;
+use super::model::{CandidateRelation, SemanticEvidenceBatch};
 use super::shared::{self, LanguageProfile, ParsedImport, State};
 use super::validate::EvidenceError;
 
@@ -22,6 +22,25 @@ impl LanguageProfile for Dart {
         let lower = kind.to_ascii_lowercase();
         shared::shared_declaration_kind(kind)
             .or_else(|| (lower == "variable_declaration").then_some("field"))
+    }
+
+    fn base_type_relation(node: Node<'_>, _owner_kind: Option<&str>) -> Option<CandidateRelation> {
+        let mut current = node.parent();
+        for _ in 0..=4 {
+            let Some(parent) = current else {
+                break;
+            };
+            match parent.kind() {
+                // The Dart grammar separates `extends` and `implements`
+                // clauses into these containers rather than naming the
+                // relation on the leaf type node.
+                "interfaces" | "mixins" => return Some(CandidateRelation::Implements),
+                "superclass" => return Some(CandidateRelation::Extends),
+                _ => {}
+            }
+            current = parent.parent();
+        }
+        None
     }
 
     fn declaration_lookup_name(name: &str) -> String {

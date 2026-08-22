@@ -281,11 +281,56 @@ class Generated {}
 }
 
 #[test]
+fn dart_base_types_do_not_create_phantom_declarations() -> Result<(), Box<dyn Error>> {
+    let source = br#"library wave;
+abstract class Store { void save(); }
+class UserStore implements Store {
+  UserStore(this.value);
+  final String value;
+  void save() {}
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("lib/store.dart"),
+        "lib/store.dart",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    assert!(
+        !evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.qualified_name == "wave.UserStore.Store")
+    );
+    assert!(
+        !evidence
+            .declarations
+            .iter()
+            .any(|declaration| { declaration.name == "UserStore" && declaration.kind == "struct" })
+    );
+    assert!(
+        !evidence
+            .declarations
+            .iter()
+            .any(|declaration| { declaration.name == "value" && declaration.kind == "struct" })
+    );
+    assert!(evidence.declarations.iter().any(|declaration| {
+        declaration.name == "UserStore" && declaration.kind == "constructor"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements && candidate.target_spelling == "Store"
+    }));
+    Ok(())
+}
+
+#[test]
 fn swift_nominal_and_extension_identities_remain_distinct() -> Result<(), Box<dyn Error>> {
     let source = br#"import Foundation
 protocol Renderable {}
 class Box: Renderable {}
-struct Widget {}
+struct Widget: Renderable {}
 enum State { case ready, done }
 extension Box { func render() {} }
 typealias Alias = Box
@@ -314,6 +359,18 @@ typealias Alias = Box
         declaration.name == "render"
             && declaration.kind == "method"
             && declaration.qualified_name == "Box.render"
+    }));
+    let widget_id = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Widget")
+        .ok_or("missing Widget evidence")?
+        .id
+        .as_str();
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements
+            && candidate.source_declaration_id == widget_id
+            && candidate.target_spelling == "Renderable"
     }));
     Ok(())
 }

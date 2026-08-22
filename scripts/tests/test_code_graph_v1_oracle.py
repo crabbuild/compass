@@ -94,6 +94,18 @@ class OracleTests(unittest.TestCase):
     def test_endpoint_matrix_rejects_inheritance_to_variable(self) -> None:
         self.assertFalse(endpoint_allowed({"kind": "class"}, {"kind": "extends"}, {"kind": "variable"}))
 
+    def test_endpoint_matrix_accepts_dart_implicit_interface_classes(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "class", "language": "dart"},
+            {"kind": "implements"},
+            {"kind": "class", "language": "dart"},
+        ))
+        self.assertFalse(endpoint_allowed(
+            {"kind": "class", "language": "csharp"},
+            {"kind": "implements"},
+            {"kind": "class", "language": "csharp"},
+        ))
+
     def test_endpoint_matrix_accepts_top_level_instantiations(self) -> None:
         for source_kind in ("file", "module"):
             with self.subTest(source_kind=source_kind):

@@ -378,7 +378,17 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
     if kind == "extends":
         return s in TYPE_KINDS and t in TYPE_KINDS
     if kind == "implements":
-        return s in TYPE_KINDS and t in {"interface", "trait", "protocol"}
+        return (
+            s in TYPE_KINDS
+            and (
+                t in {"interface", "trait", "protocol"}
+                or (
+                    source.get("language") == "dart"
+                    and target.get("language") == "dart"
+                    and t == "class"
+                )
+            )
+        )
     if kind == "mixes_in":
         return s in TYPE_KINDS and t in TYPE_KINDS
     if kind == "type_of":

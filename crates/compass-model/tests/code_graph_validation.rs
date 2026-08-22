@@ -692,6 +692,34 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
 }
 
 #[test]
+fn dart_implicit_interfaces_and_parts_have_valid_graph_endpoints() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Class;
+    graph.nodes[0].language = Some("dart".to_owned());
+    graph.nodes[1].kind = NodeKind::Class;
+    graph.nodes[1].language = Some("dart".to_owned());
+    graph.links[0].kind = EdgeKind::Implements;
+    let id = edge_id(
+        "route",
+        EdgeKind::Implements,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(validate_code_graph(&graph).is_ok());
+
+    graph.nodes[0].kind = NodeKind::File;
+    graph.nodes[1].kind = NodeKind::File;
+    graph.links[0].kind = EdgeKind::Embeds;
+    let id = edge_id("route", EdgeKind::Embeds, "handler", Some(&anchor()), None);
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(validate_code_graph(&graph).is_ok());
+}
+
+#[test]
 fn typescript_implements_accepts_a_structural_type_alias() {
     let mut graph = document();
     graph.nodes[0].kind = NodeKind::Class;

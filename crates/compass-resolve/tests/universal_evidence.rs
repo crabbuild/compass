@@ -63,6 +63,47 @@ fn rust_method_navigation_uses_definition_extent_without_weakening_exact_evidenc
 }
 
 #[test]
+fn swift_protocol_conformance_publishes_implements() -> Result<(), Box<dyn Error>> {
+    let source = br#"protocol Store {}
+struct UserStore: Store {}
+class Box: Store {}
+"#;
+    let source_file = "Sources/Store.swift";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Swift universal evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let store = node("Store").ok_or("missing Store")?;
+    for implementer in ["UserStore", "Box"] {
+        let source_node = node(implementer).ok_or("missing Swift implementer")?;
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.source == source_node.id
+                    && edge.target == store.id
+                    && edge.string("relation") == "implements"
+            }),
+            "missing Swift implements edge for {implementer}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn ambiguous_owned_scopes_fall_back_to_the_exact_declaration_anchor() -> Result<(), Box<dyn Error>>
 {
     let source = b"struct Service;\nimpl Service {\n    fn run(&self) {\n        let _value = 1;\n    }\n}\n";

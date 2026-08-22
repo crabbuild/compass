@@ -273,14 +273,18 @@ impl UniversalResolutionIndex {
                         .declarations
                         .get(&candidate.source_declaration_id)?;
                     let relation_override = pending.relation_override.or_else(|| {
-                        (candidate.language == "csharp"
-                            && candidate.relation == CandidateRelation::Extends
-                            && matches!(
-                                candidate.constraints.hierarchy.as_ref(),
-                                Some(HierarchyConstraint::DirectBase { .. })
-                            )
+                        let direct_base = matches!(
+                            candidate.constraints.hierarchy.as_ref(),
+                            Some(HierarchyConstraint::DirectBase { .. })
+                        );
+                        let csharp_conformance = candidate.language == "csharp"
+                            && direct_base
+                            && target.kind == "interface";
+                        let swift_conformance =
+                            candidate.language == "swift" && target.kind == "protocol";
+                        (candidate.relation == CandidateRelation::Extends
                             && source.kind != "interface"
-                            && target.kind == "interface")
+                            && (csharp_conformance || swift_conformance))
                             .then_some(CandidateRelation::Implements)
                     });
                     Some(PreparedTarget {

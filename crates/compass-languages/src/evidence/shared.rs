@@ -46,6 +46,19 @@ pub(super) trait LanguageProfile: Sized {
         Self::declaration_kind(node.kind())
     }
 
+    fn base_type_relation(node: Node<'_>, owner_kind: Option<&str>) -> Option<CandidateRelation> {
+        if !is_base_context(node) {
+            return None;
+        }
+        Some(
+            if owner_kind.is_some_and(|kind| matches!(kind, "interface" | "trait" | "protocol")) {
+                CandidateRelation::Implements
+            } else {
+                CandidateRelation::Extends
+            },
+        )
+    }
+
     fn declaration_lookup_name(name: &str) -> String {
         name.to_owned()
     }
@@ -875,23 +888,17 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         let owner = self.owner_for(node.start_byte());
         let owner_id = self.owner_id(owner);
         let owner_scope = self.owner_scope(owner);
-        let base = is_base_context(node);
-        let role = if base {
+        let base_relation = P::base_type_relation(
+            node,
+            self.declaration_for(owner)
+                .map(|declaration| declaration.kind.as_str()),
+        );
+        let role = if base_relation.is_some() {
             SemanticRole::BaseType
         } else {
             SemanticRole::TypeReference
         };
-        let relation = if base {
-            if self.declaration_for(owner).is_some_and(|decl| {
-                decl.kind == "interface" || decl.kind == "trait" || decl.kind == "protocol"
-            }) {
-                CandidateRelation::Implements
-            } else {
-                CandidateRelation::Extends
-            }
-        } else {
-            CandidateRelation::References
-        };
+        let relation = base_relation.unwrap_or(CandidateRelation::References);
         let occurrence_id = self.emit_occurrence(
             role,
             &owner_id,
@@ -1131,6 +1138,16 @@ pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
         return None;
     }
     let lower = kind.to_ascii_lowercase();
+    // These grammar nodes carry identifiers but are syntax containers or
+    // constructor parameters, not declarations.  Treating them as nominal
+    // types (for example, `interfaces` or `constructor_param`) creates
+    // phantom nested symbols and can make a real base target ambiguous.
+    if matches!(
+        lower.as_str(),
+        "interfaces" | "constructor_param" | "constructor_parameter"
+    ) {
+        return None;
+    }
     if lower.contains("protocol") {
         return Some("protocol");
     }
@@ -1142,6 +1159,16 @@ pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
     }
     if lower.contains("enum") {
         return Some("enum");
+    }
+    if lower.contains("initializer") || lower.contains("constructor") || lower == "init_declaration"
+    {
+        return Some("constructor");
+    }
+    if lower.contains("deinitializer") || lower.contains("deinit") {
+        return Some("method");
+    }
+    if lower.contains("subscript") {
+        return Some("method");
     }
     if lower.contains("struct") {
         return Some("struct");
@@ -1161,16 +1188,6 @@ pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
     }
     if lower.contains("type_alias") || lower.contains("type_definition") {
         return Some("type_alias");
-    }
-    if lower.contains("initializer") || lower.contains("constructor") || lower == "init_declaration"
-    {
-        return Some("constructor");
-    }
-    if lower.contains("deinitializer") || lower.contains("deinit") {
-        return Some("method");
-    }
-    if lower.contains("subscript") {
-        return Some("method");
     }
     if lower.contains("method") {
         return Some("method");
