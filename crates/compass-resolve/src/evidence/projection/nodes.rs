@@ -129,16 +129,21 @@ pub(super) fn declaration_node(
     }
 }
 
-/// Preserve the public callable spelling emitted by the pre-universal
-/// TypeScript/JavaScript extractor. Universal evidence keeps its richer module
-/// qualified name for resolution, while framework route contracts continue to
-/// identify source callables as `name()@offset` (or `Owner::name()@offset`).
+/// Preserve the public callable spelling emitted by pre-universal extractors.
+/// Universal evidence keeps its richer module-qualified name for resolution,
+/// while framework route contracts continue to identify source callables as
+/// `name()@offset` (or `Owner::name()@offset`). Swift's legacy route contract
+/// intentionally omitted the offset, so its compatibility spelling is
+/// `name()`.
 pub(super) fn legacy_callable_qualified_name(declaration: &DeclarationFact) -> Option<String> {
     let start = declaration
         .definition_start_byte
         .unwrap_or(declaration.range.start_byte);
     match declaration.kind.as_str() {
         "function" => {
+            if declaration.language == "swift" {
+                return Some(format!("{}()", declaration.name));
+            }
             if declaration.name == "default" {
                 Some("default".to_owned())
             } else {

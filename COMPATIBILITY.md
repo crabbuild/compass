@@ -52,6 +52,14 @@ product checkout.
 
 ## Evolving contracts
 
+Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
+universal evidence pipelines. The four pipelines are intentionally
+`Qualifying`: they use one bounded, source-grounded publication route and may
+change unresolved/ambiguous edges compared with older direct extraction. Normal
+cache fingerprints invalidate affected files; users do not need to delete
+artifacts manually. Equal names across Swift/native or JVM-family languages do
+not by themselves create cross-language targets.
+
 A user-visible incompatible change requires:
 
 1. native regression coverage;

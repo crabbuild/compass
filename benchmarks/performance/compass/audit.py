@@ -337,6 +337,8 @@ def _source_oracle_candidates(
     corpus_commit: str,
     producer: str,
     compass_nodes: dict[str, Any],
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Export independently parsed source constructs for recall adjudication."""
 
@@ -346,7 +348,12 @@ def _source_oracle_candidates(
         if node.qualified_name:
             owners[node.qualified_name.casefold()].append(identifier)
 
-    inventory = independent_source_inventory(corpus_root, producer)
+    inventory = independent_source_inventory(
+        corpus_root,
+        producer,
+        include_globs=include_globs,
+        exclude_globs=exclude_globs,
+    )
     candidates: list[dict[str, Any]] = []
     for construct in inventory.constructs:
         bounded = source_index.exact_range(
@@ -731,14 +738,27 @@ def _corpus(value: object, index: int) -> AuditCorpus:
     _keys(
         item,
         required=("name", "commit", "path", "graph", "graphSha256"),
+        optional=("sourceGlobs", "excludeGlobs"),
         context=context,
     )
+    source_globs = item.get("sourceGlobs", [])
+    exclude_globs = item.get("excludeGlobs", [])
+    if not isinstance(source_globs, list) or any(
+        not isinstance(pattern, str) or not pattern for pattern in source_globs
+    ):
+        raise AuditError(f"{context}.sourceGlobs must be a list of non-empty strings")
+    if not isinstance(exclude_globs, list) or any(
+        not isinstance(pattern, str) or not pattern for pattern in exclude_globs
+    ):
+        raise AuditError(f"{context}.excludeGlobs must be a list of non-empty strings")
     return AuditCorpus(
         name=_text(item["name"], f"{context}.name", identity=True),
         commit=_commit(item["commit"], f"{context}.commit"),
         path=_safe_path(item["path"], f"{context}.path", allow_dot=True),
         graph=_safe_path(item["graph"], f"{context}.graph"),
         graph_sha256=_sha256(item["graphSha256"], f"{context}.graphSha256"),
+        source_globs=tuple(source_globs),
+        exclude_globs=tuple(exclude_globs),
     )
 
 
@@ -1161,6 +1181,7 @@ def _validate_record_inputs(
 ) -> dict[str, _GraphIndex]:
     indexes: dict[str, _GraphIndex] = {}
     corpus_roots: dict[str, Path] = {}
+    corpus_specs = {corpus.name: corpus for corpus in manifest.corpora}
     single = len(manifest.corpora) == 1
     for corpus in manifest.corpora:
         root = corpus_root if single and corpus.path == "." else corpus_root / corpus.path
@@ -1197,7 +1218,13 @@ def _validate_record_inputs(
                 f"provider mismatch: expected {source_oracle.provider!r}, "
                 f"observed {provider!r}"
             )
-        inventory = independent_source_inventory(root, source_oracle.producer)
+        corpus = corpus_specs[source_oracle.corpus]
+        inventory = independent_source_inventory(
+            root,
+            source_oracle.producer,
+            include_globs=corpus.source_globs,
+            exclude_globs=corpus.exclude_globs,
+        )
         observed_counts = (inventory.scanned_files, inventory.parsed_files)
         expected_counts = (
             source_oracle.scanned_files,
@@ -1217,6 +1244,17 @@ def _validate_record_inputs(
                 f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
                 "inventory digest mismatch: "
                 f"expected {source_oracle.inventory_sha256}, observed {observed_digest}"
+            )
+        metadata = dict(inventory.provider_metadata)
+        # Legacy providers (for example the built-in Python AST oracle) do
+        # not publish parser metadata and remain governed by their existing
+        # contracts.  The universal-language wrappers explicitly publish
+        # ``oracleImplementation``/``parserAvailable`` so a bounded lexical
+        # fallback cannot be mistaken for a promotion-grade parser oracle.
+        if metadata.get("oracleImplementation") and metadata.get("parserAvailable") != "true":
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
+                "is a reproducible fallback inventory, not a pinned parser provider"
             )
 
     for record in manifest.records:
@@ -1245,7 +1283,11 @@ def _validate_record_inputs(
             )
 
         graph = indexes[record.corpus]
-        if record.source.node_id not in graph.nodes:
+        requires_source_node = not (
+            record.pool == "source_oracle"
+            and record.judgment in {"missing", "ambiguous"}
+        )
+        if requires_source_node and record.source.node_id not in graph.nodes:
             raise AuditError(
                 f"record {record.record_id!r} source node is absent from the graph"
             )

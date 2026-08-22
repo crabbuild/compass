@@ -846,6 +846,21 @@ pub(crate) fn extract_tree_evidence(
             pipeline.producer.language,
         );
     }
+    match pipeline.producer.language {
+        "dart" => {
+            return super::dart::emit_tree_evidence(path, source_file, source, root);
+        }
+        "groovy" => {
+            return super::groovy::emit_tree_evidence(path, source_file, source, root);
+        }
+        "scala" => {
+            return super::scala::emit_tree_evidence(path, source_file, source, root);
+        }
+        "swift" => {
+            return super::swift::emit_tree_evidence(path, source_file, source, root);
+        }
+        _ => {}
+    }
     let mut state = DirectEvidenceState::new(path, source_file, source, root, pipeline);
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {

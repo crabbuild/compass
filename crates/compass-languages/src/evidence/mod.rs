@@ -1,9 +1,14 @@
 mod build;
 mod csharp;
+mod dart;
+mod groovy;
 mod kotlin;
 mod model;
 mod php;
 mod ruby;
+mod scala;
+mod shared;
+mod swift;
 mod typescript;
 mod validate;
 

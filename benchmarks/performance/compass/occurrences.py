@@ -12,9 +12,12 @@ from pathlib import Path
 import re
 import selectors
 import subprocess
+import sys
 import tempfile
 import time
 import tokenize
+
+from .jsonstream import iter_top_level_array, read_top_level_value
 
 
 StatementSpans = Mapping[str, tuple[tuple[int, int], ...]]
@@ -71,7 +74,7 @@ class ConstructProvider:
     identity: str
     suffixes: tuple[str, ...]
     parse: SourceConstructParser
-    collect: Callable[[Path], SourceConstructInventory] | None = None
+    collect: Callable[[Path, tuple[str, ...], tuple[str, ...]], SourceConstructInventory] | None = None
 
 
 def _python_statement_spans(path: Path) -> StatementSpans:
@@ -1397,7 +1400,11 @@ def _typescript_payload_from_jsonl(raw: bytes) -> dict[str, object]:
     }
 
 
-def _typescript_compiler_inventory(root: Path) -> SourceConstructInventory:
+def _typescript_compiler_inventory(
+    root: Path,
+    _include_globs: tuple[str, ...] = (),
+    _exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
     try:
         payload = _typescript_payload_from_jsonl(_bounded_node_oracle(root))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -1631,9 +1638,236 @@ def _ruby_inventory_from_payload(
     )
 
 
-def _ruby_ripper_inventory(root: Path) -> SourceConstructInventory:
+def _ruby_ripper_inventory(
+    root: Path,
+    _include_globs: tuple[str, ...] = (),
+    _exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
     _raw, payload = _bounded_ruby_oracle(root)
     return _ruby_inventory_from_payload(root, payload)
+
+
+def _language_source_oracle_inventory(
+    root: Path,
+    language: str,
+    script_name: str,
+    provider: str,
+    suffixes: tuple[str, ...],
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
+    """Run one pinned, source-only language oracle for an audit corpus.
+
+    The subprocess is deliberately a qualification boundary: it receives a
+    path and writes JSON, but it never receives permission to run repository
+    tooling or build scripts.  The oracle output is independently hashed by
+    the common audit inventory code below.
+    """
+
+    source_root = root.resolve()
+    if not source_root.is_dir():
+        return SourceConstructInventory((), 0, 0, (str(source_root),))
+    # ``occurrences.py`` lives at ``benchmarks/performance/compass``; the
+    # qualification helpers are repository-root scripts, three parents up.
+    script = Path(__file__).resolve().parents[3] / "scripts" / script_name
+    if not script.is_file():
+        return SourceConstructInventory((), 0, 0, (script_name,))
+    # Keep the provider file alive while the streaming array iterator consumes
+    # it below.  The old context-manager form removed the file before the
+    # iterator ran; retaining the object until the function returns preserves
+    # bounded parsing without materializing the full JSON document.
+    cached_output = os.environ.get(f"COMPASS_{language.upper()}_ORACLE_CACHE")
+    temporary_directory = tempfile.TemporaryDirectory(prefix=f"compass-{language}-oracle-")
+    if temporary_directory:
+        directory = temporary_directory.name
+        output = Path(cached_output).expanduser().resolve() if cached_output else Path(directory) / "oracle.json"
+        try:
+            completed = (
+                subprocess.CompletedProcess((), 0, "", "")
+                if cached_output
+                else subprocess.run(
+                    [
+                        sys.executable,
+                        str(script),
+                        "--root",
+                        str(source_root),
+                        "--output",
+                        str(output),
+                        *sum(([
+                            "--include",
+                            pattern,
+                        ] for pattern in include_globs), []),
+                        *sum(([
+                            "--exclude",
+                            pattern,
+                        ] for pattern in exclude_globs), []),
+                    ],
+                    cwd=source_root,
+                    check=False,
+                    text=True,
+                    capture_output=True,
+                    timeout=300,
+                )
+            )
+        except subprocess.TimeoutExpired:
+            return SourceConstructInventory((), 0, 0, (f"{language}:oracle-timeout",))
+        if completed.returncode or not output.is_file():
+            return SourceConstructInventory(
+                (),
+                0,
+                0,
+                (completed.stderr.strip() or completed.stdout.strip() or script_name,),
+            )
+        try:
+            document_language = read_top_level_value(output, "language")
+            document_provider = read_top_level_value(output, "provider")
+            document_toolchain = read_top_level_value(output, "toolchain")
+            document_implementation = read_top_level_value(output, "implementation")
+            document_parser_available = read_top_level_value(output, "parserAvailable")
+            document_inventory = read_top_level_value(output, "inventorySha256")
+            document_scanned = read_top_level_value(output, "scannedFiles")
+            document_parsed = read_top_level_value(output, "parsedFiles")
+        except (OSError, KeyError, ValueError, TypeError):
+            return SourceConstructInventory((), 0, 0, (script_name,))
+        if document_provider != provider or document_language != language:
+            return SourceConstructInventory((), 0, 0, (f"{language}:provider-mismatch",))
+        if not isinstance(document_toolchain, str) or not isinstance(document_implementation, str):
+            return SourceConstructInventory((), 0, 0, (f"{language}:provider-metadata",))
+        try:
+            file_items = iter_top_level_array(output, "files")
+            scanned = int(document_scanned)
+            parsed = int(document_parsed)
+        except (KeyError, TypeError, ValueError):
+            return SourceConstructInventory((), 0, 0, (script_name,))
+    constructs: list[SourceConstruct] = []
+    rejected: list[str] = []
+    try:
+        for item in file_items:
+            if not isinstance(item, dict):
+                rejected.append("<invalid-file-record>")
+                continue
+            relative = item.get("path")
+            if not isinstance(relative, str) or Path(relative).suffix.casefold() not in suffixes:
+                continue
+            if item.get("status") != "ok":
+                rejected.append(relative)
+                continue
+            relations = item.get("relations", [])
+            if not isinstance(relations, list):
+                rejected.append(relative)
+                continue
+            for relation in relations:
+                if not isinstance(relation, dict):
+                    rejected.append(relative)
+                    continue
+                try:
+                    start = int(relation["startByte"])
+                    end = int(relation["endByte"])
+                    line = int(relation["startLine"])
+                    name = str(relation["relation"])
+                    capability = str(relation["capability"])
+                    owner = str(relation["ownerQualifiedName"])
+                    target = str(relation["targetSpelling"])
+                except (KeyError, TypeError, ValueError):
+                    rejected.append(relative)
+                    continue
+                if start < 0 or end <= start or line < 1 or not name or not capability:
+                    rejected.append(relative)
+                    continue
+                constructs.append(
+                    SourceConstruct(
+                        relative,
+                        name,
+                        capability,
+                        owner,
+                        target,
+                        relation.get("qualifier") if isinstance(relation.get("qualifier"), str) else None,
+                        start,
+                        end,
+                        line,
+                    )
+                )
+    except (KeyError, TypeError, ValueError):
+        return SourceConstructInventory((), 0, 0, (f"{language}:invalid-json",))
+    metadata = (
+        ("oracleInventorySha256", str(document_inventory)),
+        ("oracleToolchain", document_toolchain),
+        ("oracleImplementation", document_implementation),
+        ("parserAvailable", str(document_parser_available).lower()),
+    )
+    result = SourceConstructInventory(
+        tuple(sorted(set(constructs), key=_source_construct_key)),
+        scanned,
+        parsed,
+        tuple(sorted(set(rejected))),
+        metadata,
+    )
+    temporary_directory.cleanup()
+    return result
+
+
+def _swift_source_oracle_inventory(
+    root: Path,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
+    return _language_source_oracle_inventory(
+        root,
+        "swift",
+        "swift_source_oracle.py",
+        "swift-syntax-source-oracle",
+        (".swift",),
+        include_globs,
+        exclude_globs,
+    )
+
+
+def _dart_source_oracle_inventory(
+    root: Path,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
+    return _language_source_oracle_inventory(
+        root,
+        "dart",
+        "dart_source_oracle.py",
+        "dart-analyzer-source-oracle",
+        (".dart",),
+        include_globs,
+        exclude_globs,
+    )
+
+
+def _scala_source_oracle_inventory(
+    root: Path,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
+    return _language_source_oracle_inventory(
+        root,
+        "scala",
+        "scala_source_oracle.py",
+        "scala-meta-source-oracle",
+        (".scala",),
+        include_globs,
+        exclude_globs,
+    )
+
+
+def _groovy_source_oracle_inventory(
+    root: Path,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
+) -> SourceConstructInventory:
+    return _language_source_oracle_inventory(
+        root,
+        "groovy",
+        "groovy_source_oracle.py",
+        "groovy-compilation-unit-source-oracle",
+        (".groovy", ".gradle"),
+        include_globs,
+        exclude_globs,
+    )
 
 
 def _collector_only_construct_parser(
@@ -1669,6 +1903,30 @@ DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
         _collector_only_construct_parser,
         _ruby_ripper_inventory,
     ),
+    "swift": ConstructProvider(
+        "swift-syntax-source-oracle",
+        (".swift",),
+        _collector_only_construct_parser,
+        _swift_source_oracle_inventory,
+    ),
+    "dart": ConstructProvider(
+        "dart-analyzer-source-oracle",
+        (".dart",),
+        _collector_only_construct_parser,
+        _dart_source_oracle_inventory,
+    ),
+    "scala": ConstructProvider(
+        "scala-meta-source-oracle",
+        (".scala",),
+        _collector_only_construct_parser,
+        _scala_source_oracle_inventory,
+    ),
+    "groovy": ConstructProvider(
+        "groovy-compilation-unit-source-oracle",
+        (".groovy", ".gradle"),
+        _collector_only_construct_parser,
+        _groovy_source_oracle_inventory,
+    ),
 }
 
 
@@ -1691,13 +1949,16 @@ def independent_source_constructs(
 ) -> tuple[SourceConstruct, ...]:
     """Collect independent source candidates without reading the graph."""
 
-    return independent_source_inventory(root, language, providers).constructs
+    return independent_source_inventory(root, language, providers=providers).constructs
 
 
 def independent_source_inventory(
     root: Path,
     language: str,
     providers: Mapping[str, ConstructProvider] = DEFAULT_CONSTRUCT_PROVIDERS,
+    *,
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
 ) -> SourceConstructInventory:
     """Collect source candidates and explicit parser-coverage evidence."""
 
@@ -1706,7 +1967,7 @@ def independent_source_inventory(
     if provider is None:
         return SourceConstructInventory((), 0, 0, ())
     if provider.collect is not None:
-        return provider.collect(root)
+        return provider.collect(root, include_globs, exclude_globs)
     constructs: list[SourceConstruct] = []
     scanned = 0
     parsed = 0

@@ -88,13 +88,6 @@ pub(crate) fn resolve_language_call_facts_additions(
             })
             .collect::<HashSet<_>>();
 
-        resolve_swift_registry_compatibility(
-            &facts.calls,
-            &indexes,
-            &facts.tables,
-            &mut existing,
-            &mut edges,
-        );
         resolve_typed_members(
             &facts.calls,
             &indexes,
@@ -112,53 +105,6 @@ pub(crate) fn resolve_language_call_facts_additions(
         }
     };
     (external_nodes, edges)
-}
-
-/// Preserve Compass's resolver-registry ordering for strict external parity.
-///
-/// Once a corpus contains Swift type facts, the Python implementation's Swift
-/// pass sees the collection-wide raw-call list. Consequently, an explicitly
-/// capitalized receiver from another language is still resolved as a unique
-/// type reference before later language passes run. This is observable graph
-/// output, so Compass deliberately retains it as a compatibility rule.
-fn resolve_swift_registry_compatibility(
-    calls: &[RawCall],
-    indexes: &Indexes,
-    tables: &TypeTables,
-    existing: &mut HashSet<(String, String, String)>,
-    edges: &mut Vec<EdgeRecord>,
-) {
-    if tables.swift.is_empty() {
-        return;
-    }
-    for call in calls {
-        if call.is_member_call != Some(true)
-            || member_family(&call.source_file, call.lang.as_deref()) == MemberFamily::Swift
-        {
-            continue;
-        }
-        let Some(receiver) = receiver(call) else {
-            continue;
-        };
-        let Some(owner) = starts_upper(receiver)
-            .then(|| indexes.unique_type(receiver))
-            .flatten()
-        else {
-            continue;
-        };
-        let (target, relation_name) = indexes
-            .unique_method(owner, &call.callee)
-            .map_or((owner, "references"), |method| (method, "calls"));
-        emit(
-            call,
-            target,
-            relation_name,
-            "call",
-            ("EXTRACTED", 1.0),
-            existing,
-            edges,
-        );
-    }
 }
 
 struct Indexes<'a> {
@@ -298,7 +244,6 @@ impl<'a> Indexes<'a> {
 
 #[derive(Default)]
 struct TypeTables {
-    swift: HashMap<String, HashMap<String, String>>,
     typescript: HashMap<String, HashMap<String, String>>,
     cpp: HashMap<String, HashMap<String, String>>,
     objc: HashMap<String, HashMap<String, String>>,
@@ -311,7 +256,6 @@ impl TypeTables {
             .iter()
             .filter(|extraction| extraction.semantic_evidence.is_none())
         {
-            collect_table(extraction, "swift_type_table", &mut tables.swift);
             collect_table(extraction, "ts_type_table", &mut tables.typescript);
             collect_table(extraction, "cpp_type_table", &mut tables.cpp);
             collect_table(extraction, "objc_type_table", &mut tables.objc);
@@ -329,7 +273,6 @@ fn indexed_families(calls: &[RawCall], tables: &TypeTables) -> (HashSet<&'static
         .iter()
         .any(|call| index_family(&call.source_file).is_none());
     for (present, family) in [
-        (!tables.swift.is_empty(), "swift"),
         (!tables.typescript.is_empty(), "javascript"),
         (!tables.cpp.is_empty(), "cpp"),
         (!tables.objc.is_empty(), "objc"),
@@ -346,7 +289,6 @@ fn index_family(source: &str) -> Option<&'static str> {
         "py" | "pyi" => Some("python"),
         "rb" | "rake" => Some("ruby"),
         "pas" | "pp" | "dpr" | "dpk" | "inc" => Some("pascal"),
-        "swift" => Some("swift"),
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => Some("javascript"),
         "c" | "h" | "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "cu" | "cuh" => Some("cpp"),
         "cs" | "razor" | "cshtml" => Some("csharp"),
@@ -374,7 +316,6 @@ fn resolve_typed_members(
         let language = call.lang.as_deref();
         let family = member_family(source, language);
         let owner = match family {
-            MemberFamily::Swift => typed_owner(receiver, source, &tables.swift, indexes, None),
             MemberFamily::Typescript => {
                 let result = typed_owner(receiver, source, &tables.typescript, indexes, None);
                 if result
@@ -858,7 +799,6 @@ fn is_bare_constant(label: &str) -> bool {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemberFamily {
-    Swift,
     Typescript,
     Cpp,
     Csharp,
@@ -872,7 +812,6 @@ fn member_family(source: &str, language: Option<&str>) -> MemberFamily {
         Some("csharp") => MemberFamily::Csharp,
         Some("objc") => MemberFamily::Objc,
         _ => match extension(source).as_str() {
-            "swift" => MemberFamily::Swift,
             "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" => MemberFamily::Typescript,
             _ => MemberFamily::Other,
         },
@@ -972,7 +911,7 @@ mod tests {
         assert_eq!(member_family("x.any", Some("cpp")), MemberFamily::Cpp);
         assert_eq!(member_family("x.any", Some("csharp")), MemberFamily::Csharp);
         assert_eq!(member_family("x.any", Some("objc")), MemberFamily::Objc);
-        assert_eq!(member_family("x.swift", None), MemberFamily::Swift);
+        assert_eq!(member_family("x.swift", None), MemberFamily::Other);
         assert_eq!(member_family("x.TSX", None), MemberFamily::Typescript);
         assert_eq!(member_family("x.unknown", None), MemberFamily::Other);
 
@@ -1073,64 +1012,5 @@ mod tests {
             edge.string("language") == "typescript"
                 && edge.string("extractor") == "compass.languages.typescript"
         }));
-    }
-
-    #[test]
-    fn swift_registry_compatibility_precedes_other_language_member_passes() {
-        let mut swift = Extraction::default();
-        swift.extensions.insert(
-            "swift_type_table".to_owned(),
-            serde_json::json!({"path":"source.swift","table":{"value":"Service"}}),
-        );
-        let python = Extraction {
-            raw_calls: Some(vec![RawCall {
-                caller_nid: "caller".to_owned(),
-                callee: "glob".to_owned(),
-                is_member_call: Some(true),
-                source_file: "tests/test_extract.py".to_owned(),
-                source_location: "L61".to_owned(),
-                receiver: Some(Some("Fixtures".to_owned())),
-                receiver_type: None,
-                lang: None,
-                extensions: Map::new(),
-            }]),
-            ..Extraction::default()
-        };
-        let mut merged = Extraction {
-            nodes: vec![
-                node(serde_json::json!({
-                    "id":"file","label":"coverage_paths.rs","file_type":"code",
-                    "source_file":"coverage_paths.rs"
-                })),
-                node(serde_json::json!({
-                    "id":"fixtures","label":"Fixtures","file_type":"code",
-                    "source_file":"coverage_paths.rs"
-                })),
-                node(serde_json::json!({
-                    "id":"caller","label":"test_extract()","file_type":"code",
-                    "source_file":"tests/test_extract.py"
-                })),
-            ],
-            ..Extraction::default()
-        };
-        merged.edges.push(EdgeRecord {
-            source: "file".to_owned(),
-            target: "fixtures".to_owned(),
-            attributes: Map::from_iter([(
-                "relation".to_owned(),
-                Value::String("contains".to_owned()),
-            )]),
-        });
-
-        resolve_language_calls(&[swift, python], &mut merged);
-
-        let edge = merged
-            .edges
-            .iter()
-            .find(|edge| edge.source == "caller" && edge.target == "fixtures")
-            .unwrap_or_else(|| std::process::abort());
-        assert_eq!(relation(edge), "references");
-        assert_eq!(edge.string("context"), "call");
-        assert_eq!(edge.string("confidence"), "EXTRACTED");
     }
 }

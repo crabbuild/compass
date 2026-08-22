@@ -33,12 +33,19 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 5);
+    assert_eq!(FrameworkPackRegistry::descriptors().len(), 9);
     assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
     assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "php-frameworks");
     assert_eq!(FrameworkPackRegistry::descriptors()[2].id, "spring-java");
     assert_eq!(FrameworkPackRegistry::descriptors()[3].id, "spring-kotlin");
     assert_eq!(FrameworkPackRegistry::descriptors()[4].id, "rails-ruby");
+    assert_eq!(FrameworkPackRegistry::descriptors()[5].id, "vapor-swift");
+    assert_eq!(FrameworkPackRegistry::descriptors()[6].id, "dart-bloc");
+    assert_eq!(
+        FrameworkPackRegistry::descriptors()[7].id,
+        "dart-flutter-navigation"
+    );
+    assert_eq!(FrameworkPackRegistry::descriptors()[8].id, "dart-riverpod");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -715,8 +722,7 @@ fn repeated_zig_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
 fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("repeated.dart");
-    let source =
-        b"class State {}\nclass Controller { void run() { emit(State()); emit(State()); } }\n";
+    let source = b"import 'package:flutter_bloc/flutter_bloc.dart';\nclass State {}\nclass Controller { void run() { emit(State()); emit(State()); } }\n";
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
@@ -739,6 +745,27 @@ fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn 
     assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
     assert!(sites.iter().all(|(start, end)| start < end));
     assert_ne!(sites[0], sites[1]);
+    Ok(())
+}
+
+#[test]
+fn dart_framework_conventions_require_positive_activation() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("inactive.dart");
+    fs::write(
+        &path,
+        b"class State {}\nclass Controller { void run() { emit(State()); go('/home'); } }\n",
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("context").is_empty()),
+        "inactive Dart conventions emitted: {:?}",
+        extraction.edges
+    );
     Ok(())
 }
 
@@ -785,29 +812,7 @@ fn dart_navigation_sites(source: &[u8]) -> Result<Vec<NavigationSite>, Box<dyn E
 
 #[test]
 fn dart_ascii_navigation_range_slices_original_source() -> Result<(), Box<dyn Error>> {
-    let source = b"void run() { go('/home'); }\n";
-    let sites = dart_navigation_sites(source)?;
-
-    assert_eq!(sites.len(), 1);
-    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
-    assert_eq!((sites[0].line, sites[0].column), (1, 13));
-    Ok(())
-}
-
-#[test]
-fn dart_multiline_comment_preserves_navigation_bytes_and_lines() -> Result<(), Box<dyn Error>> {
-    let source = b"/* lead\ncomment */\nvoid run() { go('/home'); }\n";
-    let sites = dart_navigation_sites(source)?;
-
-    assert_eq!(sites.len(), 1);
-    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
-    assert_eq!((sites[0].line, sites[0].column), (3, 13));
-    Ok(())
-}
-
-#[test]
-fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dyn Error>> {
-    let source = "const label = 'café';\nvoid run() { go('/home'); }\n".as_bytes();
+    let source = b"import 'package:flutter/widgets.dart';\nvoid run() { go('/home'); }\n";
     let sites = dart_navigation_sites(source)?;
 
     assert_eq!(sites.len(), 1);
@@ -817,8 +822,30 @@ fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dy
 }
 
 #[test]
+fn dart_multiline_comment_preserves_navigation_bytes_and_lines() -> Result<(), Box<dyn Error>> {
+    let source = b"import 'package:flutter/widgets.dart';\n/* lead\ncomment */\nvoid run() { go('/home'); }\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (4, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dyn Error>> {
+    let source = "import 'package:flutter/widgets.dart';\nconst label = 'café';\nvoid run() { go('/home'); }\n".as_bytes();
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (3, 13));
+    Ok(())
+}
+
+#[test]
 fn dart_minified_navigation_keeps_same_line_occurrences_distinct() -> Result<(), Box<dyn Error>> {
-    let source = b"void run(){go('/a');go('/b');}\n";
+    let source = b"import 'package:flutter/widgets.dart';\nvoid run(){go('/a');go('/b');}\n";
     let sites = dart_navigation_sites(source)?;
 
     assert_eq!(sites.len(), 2);

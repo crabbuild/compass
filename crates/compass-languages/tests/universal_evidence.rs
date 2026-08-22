@@ -474,7 +474,9 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
             .collect::<Vec<_>>(),
         [
             "csharp",
+            "dart",
             "go",
+            "groovy",
             "java",
             "javascript",
             "kotlin",
@@ -482,6 +484,8 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
             "python",
             "ruby",
             "rust",
+            "scala",
+            "swift",
             "typescript",
         ]
     );

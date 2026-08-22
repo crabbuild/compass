@@ -1,0 +1,35 @@
+schema = "compass.groovy-universal-qualification/1"
+language = "groovy"
+producer = "compass.groovy"
+producerVersion = 1
+oracleProvider = "groovy-compilation-unit-source-oracle"
+oracleToolchain = "Apache Groovy 4.0.27 CompilationUnit conversion phase"
+checkoutRoot = "/Volumes/Workspace/Github"
+readOnly = true
+minimumAcceptedRelationships = 2000
+minimumAcceptedPerCorpus = 400
+minimumAcceptedPerRelation = 100
+
+[[repository]]
+name = "groovy"
+url = "https://github.com/apache/groovy.git"
+commit = "f6bc5a511c3ea79e51afe0eb26e494e544da06c1"
+purpose = "Groovy compiler sources, traits, scripts, closures, and dynamic boundaries"
+sourceGlobs = ["src/**/*.groovy", "subprojects/**/*.groovy", "*.gradle", "**/*.gradle"]
+excludeGlobs = []
+
+[[repository]]
+name = "gradle"
+url = "https://github.com/gradle/gradle.git"
+commit = "534f27719b66953f95cc907aae7f2c1b12f5482d"
+purpose = "Gradle build scripts, convention plugins, and statically typed Groovy APIs"
+sourceGlobs = ["subprojects/**/*.groovy", "build-logic/**/*.groovy", "*.gradle", "**/*.gradle"]
+excludeGlobs = []
+
+[[repository]]
+name = "spock"
+url = "https://github.com/spockframework/spock.git"
+commit = "37e5e9a663ac6bc1ed1f72ac8374a81b879c66b0"
+purpose = "Spock feature methods, specifications, extensions, and Groovy test DSL"
+sourceGlobs = ["spock-*/**/*.groovy", "build-logic/**/*.groovy", "*.gradle", "**/*.gradle"]
+excludeGlobs = []

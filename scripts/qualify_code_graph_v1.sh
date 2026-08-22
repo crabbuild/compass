@@ -328,11 +328,38 @@ checkout_graph="$(active_graph "$CHECKOUT_OUTPUT")"
 cp "$checkout_graph" "$QUALIFY_TMP/checkout.graph.json"
 cmp "$QUALIFY_TMP/clean.graph.json" "$QUALIFY_TMP/checkout.graph.json"
 
+echo "[code-graph-v1] language-wave delete/rename/restore production updates"
+for lifecycle_path in \
+  fixtures/code-graph/routes/swift/NearMatches.swift \
+  fixtures/code-graph/qualification/rich.dart \
+  fixtures/code-graph/routes/scala/Universal.scala \
+  fixtures/code-graph/routes/groovy/SpockSpec.groovy; do
+  source_path="$CORPUS/$lifecycle_path"
+  [[ -f "$source_path" ]] || {
+    echo "missing lifecycle fixture: $lifecycle_path" >&2
+    exit 1
+  }
+  original_path="$QUALIFY_TMP/$(basename "$lifecycle_path").original"
+  cp "$source_path" "$original_path"
+  rm "$source_path"
+  deleted_graph="$(run_update "delete-$(basename "$lifecycle_path")")"
+  cp "$original_path" "$source_path"
+  delete_restore_graph="$(run_update "delete-restore-$(basename "$lifecycle_path")")"
+  cmp "$QUALIFY_TMP/clean.graph.json" "$delete_restore_graph"
+
+  renamed_path="${source_path%.*}.compass-renamed.${source_path##*.}"
+  mv "$source_path" "$renamed_path"
+  renamed_graph="$(run_update "rename-$(basename "$lifecycle_path")")"
+  mv "$renamed_path" "$source_path"
+  rename_restore_graph="$(run_update "rename-restore-$(basename "$lifecycle_path")")"
+  cmp "$QUALIFY_TMP/clean.graph.json" "$rename_restore_graph"
+done
+
 fixture_digest_after="$(fixture_digest)"
 [[ "$fixture_digest_before" == "$fixture_digest_after" ]]
 
 cat >"$QUALIFY_TMP/comparisons.json" <<'JSON'
-{"cleanEqualsCheckout":true,"cleanEqualsRebuild":true,"cleanEqualsRestored":true,"cleanEqualsWarm":true,"sourceFixtureUnchanged":true}
+{"cleanEqualsCheckout":true,"cleanEqualsDeleteRestored":true,"cleanEqualsRebuild":true,"cleanEqualsRenameRestored":true,"cleanEqualsRestored":true,"cleanEqualsWarm":true,"sourceFixtureUnchanged":true}
 JSON
 
 echo "[code-graph-v1] execute semantic assertions over production graph"

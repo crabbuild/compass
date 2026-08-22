@@ -1,5 +1,6 @@
 mod aspnet;
 mod axum;
+mod dart;
 mod domain;
 mod jvm;
 mod native;
@@ -10,6 +11,7 @@ mod qualification;
 mod routes;
 mod ruby;
 mod spring;
+mod swift;
 mod target_index;
 mod typescript;
 
@@ -93,6 +95,22 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
     UniversalFrameworkPack {
         id: "rails-ruby",
         expand: ruby::expand,
+    },
+    UniversalFrameworkPack {
+        id: "vapor-swift",
+        expand: swift::expand,
+    },
+    UniversalFrameworkPack {
+        id: "dart-flutter-navigation",
+        expand: dart::expand,
+    },
+    UniversalFrameworkPack {
+        id: "dart-bloc",
+        expand: dart::expand,
+    },
+    UniversalFrameworkPack {
+        id: "dart-riverpod",
+        expand: dart::expand,
     },
 ];
 

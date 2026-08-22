@@ -43,6 +43,23 @@ quality gates. The pinned three-corpus audit now passes (89,981 accepted
 relationships, 100% observed precision, 98.5567% recall); Ruby remains
 `Qualifying` until a separate promotion decision.
 
+Plan 020 is the Swift, Dart, Scala, and Groovy universal-evidence program. It
+was planned at Compass commit `88abe4c0` on 2026-08-21. All four languages are
+already recognized and have established extraction, so the program freezes
+that behavior, builds independent source oracles and qualification-only
+candidates, performs one atomic hard cut per language, preserves existing
+Vapor/Dart/Play/Spock/Gradle behavior through evidence-backed boundaries, and
+finishes with a mixed-language release gate. Swift, Dart, and Scala candidates
+can proceed independently after the shared baseline; Groovy reuses Scala's
+exact-language JVM boundary.
+The production hard cut, deterministic fixture baselines, pinned manifests,
+parser-backed source-oracle providers, audit builder, mixed fixture gate, and
+three-corpus quality audits are implemented. The plan is `DONE`; all four
+registry entries intentionally remain version-1 `Qualifying` until a separate
+promotion decision. The mounted qualification target records the pinned
+SwiftSyntax, Dart Analyzer, scala.meta, and Groovy CompilationUnit toolchains
+and the immutable audit results.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -66,6 +83,7 @@ relationships, 100% observed precision, 98.5567% recall); Ruby remains
 | 017 | Derive bounded, ranked execution flows from entry points | P2 | L | Existing universal call graph | TODO |
 | 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
 | 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
+| 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -106,6 +124,12 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   Rails pack stay qualification-only until one atomic production hard cut;
   optimization follows semantic parity; and complete promotion remains gated
   by the 2,000-record quality audit.
+- Plan 020 is one program with four independent language tracks. Phase 0
+  freezes shared baselines and independent truth. Swift, Dart, and Scala
+  candidates may then proceed in parallel; Groovy may also proceed but must
+  reuse the exact-language JVM boundary established for Scala. Each language
+  has a separate candidate and atomic hard-cut phase, and the mixed-language
+  release gate runs only after all four cuts.
 
 ## Direction options not promoted to implementation plans
 

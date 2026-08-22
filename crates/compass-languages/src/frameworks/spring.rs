@@ -281,6 +281,10 @@ fn constant_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFramewo
                     anchor: anchor(&declaration.range),
                     origin: crate::RawFrameworkOrigin::Ast,
                     detail: Map::from_iter([
+                        (
+                            "frameworkPack".to_owned(),
+                            Value::String(PACK_ID.to_owned()),
+                        ),
                         ("expression".to_owned(), Value::String(expression.clone())),
                         (
                             "handler_reference".to_owned(),
@@ -324,6 +328,10 @@ fn constant_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFramewo
                     anchor: anchor(&declaration.range),
                     origin: crate::RawFrameworkOrigin::Ast,
                     detail: Map::from_iter([
+                        (
+                            "frameworkPack".to_owned(),
+                            Value::String(PACK_ID.to_owned()),
+                        ),
                         (
                             "expression".to_owned(),
                             Value::String(expression.to_owned()),
@@ -669,6 +677,10 @@ fn constructor_facts(
             }
             (!targets.is_empty()).then(|| {
                 let mut detail = Map::new();
+                detail.insert(
+                    "frameworkPack".to_owned(),
+                    Value::String(PACK_ID.to_owned()),
+                );
                 detail.insert(
                     "handler_reference".to_owned(),
                     Value::String(declaration.graph_node_id.clone()),
