@@ -334,6 +334,7 @@ const GROOVY_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Decorators,
     LanguageCapability::TypeReferences,
     LanguageCapability::BaseTypes,
+    LanguageCapability::HierarchyDispatch,
     LanguageCapability::Members,
     LanguageCapability::Ownership,
     LanguageCapability::Receivers,

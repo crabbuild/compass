@@ -4273,6 +4273,7 @@ fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
         "maps_to" => (EdgeKind::MapsTo, None, false),
         "imports_from" => (EdgeKind::Imports, Some("raw-relation:imports_from"), false),
         "re_exports" => (EdgeKind::Exports, Some("raw-relation:re_exports"), false),
+        "navigates" => (EdgeKind::References, Some("raw-relation:navigates"), false),
         "inherits" => (EdgeKind::Extends, None, false),
         "indirect_call" => (EdgeKind::Calls, Some("indirect-call-resolution"), true),
         "reads_from" => (EdgeKind::Reads, None, false),

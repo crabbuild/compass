@@ -104,6 +104,92 @@ class Box: Store {}
 }
 
 #[test]
+fn groovy_local_implements_publishes_direct_base_edge() -> Result<(), Box<dyn Error>> {
+    let source = br#"package wave
+interface Store {}
+class UserStore implements Store {
+    void save() {}
+}
+"#;
+    let source_file = "src/Store.groovy";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Groovy universal evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let store = node("wave.Store").ok_or("missing Store")?;
+    let implementer = node("wave.UserStore").ok_or("missing UserStore")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == implementer.id
+            && edge.target == store.id
+            && edge.string("relation") == "implements"
+    }));
+    Ok(())
+}
+
+#[test]
+fn scala_local_receiver_dispatch_resolves_inherited_and_extension_calls()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"package wave
+trait Store { def save(value: String): Unit }
+final class UserStore extends Store {
+  override def save(value: String): Unit = ()
+  def route(): Unit = save("users")
+}
+extension (store: UserStore) def repeated(): Unit = { store.save("a"); store.save("b") }
+"#;
+    let source_file = "src/Module.scala";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let save = node("wave.UserStore.save").ok_or("missing UserStore.save")?;
+    let route = node("wave.UserStore.route").ok_or("missing UserStore.route")?;
+    let repeated = node("wave.repeated").ok_or("missing repeated extension")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == route.id && edge.target == save.id && edge.string("relation") == "calls"
+    }));
+    assert!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == repeated.id
+                    && edge.target == save.id
+                    && edge.string("relation") == "calls"
+            })
+            .count()
+            >= 2,
+        "missing repeated extension dispatch edges"
+    );
+    Ok(())
+}
+
+#[test]
 fn ambiguous_owned_scopes_fall_back_to_the_exact_declaration_anchor() -> Result<(), Box<dyn Error>>
 {
     let source = b"struct Service;\nimpl Service {\n    fn run(&self) {\n        let _value = 1;\n    }\n}\n";

@@ -1837,6 +1837,51 @@ fn normalization_maps_declared_raw_aliases_without_publishing_them()
 }
 
 #[test]
+fn normalization_maps_dart_navigation_to_anchored_reference()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut target = raw_node(root, "route", "Route /users", 20);
+    target
+        .attributes
+        .insert("file_type".to_owned(), json!("concept"));
+    let mut source = raw_node(root, "navigate", "navigate", 10);
+    source
+        .attributes
+        .insert("language".to_owned(), json!("dart"));
+    let graph = Extraction {
+        nodes: vec![source, target],
+        edges: vec![RawEdgeRecord {
+            source: "navigate".to_owned(),
+            target: "route".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("navigates")),
+                ("source_file".to_owned(), json!(root.join("src/lib.rs"))),
+                ("source_anchor".to_owned(), anchor(root, 10)),
+                ("context".to_owned(), json!("route_path")),
+                ("_origin".to_owned(), json!("convention")),
+                ("rule".to_owned(), json!("dart-route-path")),
+                ("extractor".to_owned(), json!("test.dart.framework")),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let edge = document
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::References)
+        .ok_or("missing navigation edge")?;
+    assert_eq!(edge.kind, EdgeKind::References);
+    assert!(
+        edge.evidence
+            .iter()
+            .any(|evidence| { evidence.rule.as_deref() == Some("dart-route-path") })
+    );
+    Ok(())
+}
+
+#[test]
 fn normalization_treats_blank_external_source_paths_as_unanchored()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

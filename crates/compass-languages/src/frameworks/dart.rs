@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::{RawFrameworkFact, UniversalDetectionContext};
 use crate::{
@@ -110,6 +110,7 @@ pub(super) fn append_convention_facts(
         .collect::<HashMap<_, _>>();
     let mut endpoint_ids = HashSet::new();
     let mut contextual_endpoint_ids = HashSet::new();
+    let mut contextual_node_attributes = HashMap::<String, Map<String, Value>>::new();
     let mut projected_edges = Vec::new();
     for mut edge in conventions.edges {
         let relation = edge.string("relation");
@@ -158,6 +159,31 @@ pub(super) fn append_convention_facts(
             "extractor".to_owned(),
             Value::String("compass.languages.dart.framework".to_owned()),
         );
+        if contextual {
+            let mut node_attributes = Map::new();
+            for key in [
+                "source_file",
+                "start_byte",
+                "end_byte",
+                "line_start",
+                "line_end",
+                "column_start",
+                "column_end",
+                "rule",
+                "_origin",
+                "extractor",
+            ] {
+                if let Some(value) = edge.attributes.get(key) {
+                    node_attributes.insert(key.to_owned(), value.clone());
+                }
+            }
+            contextual_node_attributes
+                .entry(edge.source.clone())
+                .or_insert_with(|| node_attributes.clone());
+            contextual_node_attributes
+                .entry(edge.target.clone())
+                .or_insert(node_attributes);
+        }
         endpoint_ids.insert(edge.source.clone());
         endpoint_ids.insert(edge.target.clone());
         projected_edges.push(edge);
@@ -204,6 +230,22 @@ pub(super) fn append_convention_facts(
                 "extractor".to_owned(),
                 Value::String("compass.languages.dart.framework".to_owned()),
             );
+            if let Some(anchor) = contextual_node_attributes.get(&node.id) {
+                for key in [
+                    "source_file",
+                    "start_byte",
+                    "end_byte",
+                    "line_start",
+                    "line_end",
+                    "column_start",
+                    "column_end",
+                    "rule",
+                ] {
+                    if let Some(value) = anchor.get(key) {
+                        node.attributes.insert(key.to_owned(), value.clone());
+                    }
+                }
+            }
         }
         extraction.nodes.push(node);
     }

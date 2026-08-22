@@ -15,8 +15,8 @@ use tree_sitter::Node;
 
 use super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
 use super::model::{
-    BindingKind, CandidateRelation, EvidenceRange, LanguageCapability, ResolutionConstraint,
-    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
+    BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, LanguageCapability,
+    ResolutionConstraint, SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
 use crate::{UniversalEvidenceRegistry, file_stem, make_id};
@@ -551,6 +551,170 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         Ok(())
     }
 
+    pub(super) fn source_callable_owner_for(&self, byte: usize) -> Option<usize> {
+        self.declarations
+            .iter()
+            .enumerate()
+            .filter(|(_, declaration)| {
+                declaration.start <= byte
+                    && byte < declaration.end
+                    && matches!(
+                        declaration.kind.as_str(),
+                        "constructor" | "function" | "method"
+                    )
+            })
+            .max_by_key(|(_, declaration)| declaration.start)
+            .map(|(index, _)| index)
+    }
+
+    pub(super) fn source_enclosing_type(&self, byte: usize) -> Option<String> {
+        self.declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.start <= byte
+                    && byte < declaration.end
+                    && is_nominal_type_kind(&declaration.kind)
+            })
+            .max_by_key(|declaration| declaration.start)
+            .map(|declaration| declaration.qualified.clone())
+    }
+
+    pub(super) fn source_type_name(&self, raw: &str) -> Option<String> {
+        let (qualifier, spelling) = split_qualified(raw);
+        let values = if let Some(qualifier) = qualifier.as_deref() {
+            self.by_qualified.get(&format!("{qualifier}.{spelling}"))
+        } else {
+            self.by_terminal.get(&spelling)
+        }?;
+        let mut types = values
+            .iter()
+            .filter_map(|index| self.declarations.get(*index))
+            .filter(|declaration| is_nominal_type_kind(&declaration.kind))
+            .map(|declaration| declaration.qualified.clone())
+            .collect::<BTreeSet<_>>();
+        (types.len() == 1).then(|| types.pop_first()).flatten()
+    }
+
+    pub(super) fn emit_source_receiver_call(
+        &mut self,
+        owner: usize,
+        receiver_qualified_name: &str,
+        spelling: &str,
+        qualifier: Option<&str>,
+        start: usize,
+        end: usize,
+    ) -> Result<(), EvidenceError> {
+        if !self.supports(LanguageCapability::HierarchyDispatch) || !valid_name(spelling) {
+            return Ok(());
+        }
+        let (owner_id, owner_scope) = {
+            let Some(declaration) = self.declarations.get(owner) else {
+                return Ok(());
+            };
+            (declaration.id.clone(), declaration.body_scope_id.clone())
+        };
+        let occurrence_id = self.emit_occurrence(
+            SemanticRole::Call,
+            &owner_id,
+            spelling,
+            qualifier,
+            Some(&owner_scope),
+            range_for_byte_span(self.source_file, self.source, start, end),
+        )?;
+        self.builder.relate(
+            CandidateRelation::Calls,
+            &owner_id,
+            Some(&occurrence_id),
+            None,
+            spelling,
+            ResolutionConstraint {
+                exact_language: Some(P::LANGUAGE.to_owned()),
+                scope_id: Some(owner_scope),
+                allowed_target_kinds: vec![
+                    "constructor".to_owned(),
+                    "function".to_owned(),
+                    "method".to_owned(),
+                ],
+                hierarchy: Some(HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name: receiver_qualified_name.to_owned(),
+                    strategy: super::model::ReceiverDispatchStrategy::C3FromReceiver,
+                }),
+                allow_external: true,
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        Ok(())
+    }
+
+    pub(super) fn emit_source_base_type(
+        &mut self,
+        owner: usize,
+        relation: CandidateRelation,
+        raw_target: &str,
+        start: usize,
+        end: usize,
+        base_set_complete: bool,
+    ) -> Result<(), EvidenceError> {
+        let (qualifier, spelling) = split_qualified(raw_target);
+        if !valid_name(&spelling) {
+            return Ok(());
+        }
+        let (owner_id, owner_scope) = {
+            let Some(declaration) = self.declarations.get(owner) else {
+                return Ok(());
+            };
+            (declaration.id.clone(), declaration.body_scope_id.clone())
+        };
+        let occurrence_id = self.emit_occurrence(
+            SemanticRole::BaseType,
+            &owner_id,
+            &spelling,
+            qualifier.as_deref(),
+            Some(&owner_scope),
+            range_for_byte_span(self.source_file, self.source, start, end),
+        )?;
+        let exact = self.resolve_local(&spelling, qualifier.as_deref());
+        let qualified_name = exact
+            .and_then(|index| self.declarations.get(index))
+            .map(|declaration| declaration.qualified.clone())
+            .or_else(|| {
+                qualifier
+                    .as_deref()
+                    .map(|prefix| format!("{prefix}.{spelling}"))
+            })
+            .or_else(|| {
+                (!self.namespace.is_empty()).then(|| format!("{}.{}", self.namespace, spelling))
+            });
+        self.builder.relate(
+            relation,
+            &owner_id,
+            Some(&occurrence_id),
+            None,
+            &spelling,
+            ResolutionConstraint {
+                exact_target_declaration_id: exact
+                    .and_then(|index| self.declarations.get(index))
+                    .map(|declaration| declaration.id.clone()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
+                scope_id: Some(owner_scope),
+                qualified_name,
+                allowed_target_kinds: vec![
+                    "class".to_owned(),
+                    "enum".to_owned(),
+                    "interface".to_owned(),
+                    "protocol".to_owned(),
+                    "record".to_owned(),
+                    "struct".to_owned(),
+                    "trait".to_owned(),
+                ],
+                hierarchy: Some(HierarchyConstraint::DirectBase { base_set_complete }),
+                allow_external: true,
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        Ok(())
+    }
+
     pub(super) fn emit_embedding(
         &mut self,
         target: &str,
@@ -899,6 +1063,12 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             SemanticRole::TypeReference
         };
         let relation = base_relation.unwrap_or(CandidateRelation::References);
+        let hierarchy = base_relation.and_then(|_| {
+            self.supports(LanguageCapability::HierarchyDispatch)
+                .then_some(HierarchyConstraint::DirectBase {
+                    base_set_complete: !node.has_error(),
+                })
+        });
         let occurrence_id = self.emit_occurrence(
             role,
             &owner_id,
@@ -929,6 +1099,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
                     "trait".to_owned(),
                     "type_alias".to_owned(),
                 ],
+                hierarchy,
                 allow_external: exact.is_none(),
                 ..ResolutionConstraint::default()
             },
@@ -1257,6 +1428,13 @@ fn scope_kind(kind: &str) -> &'static str {
     } else {
         "type"
     }
+}
+
+fn is_nominal_type_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class" | "enum" | "interface" | "protocol" | "record" | "struct" | "trait"
+    )
 }
 
 fn join_name(prefix: &str, name: &str) -> String {
