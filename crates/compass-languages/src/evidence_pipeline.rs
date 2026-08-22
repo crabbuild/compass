@@ -308,6 +308,7 @@ pub(crate) const RUBY_CAPABILITIES: &[LanguageCapability] = &[
 const DART_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Declarations,
     LanguageCapability::LexicalScopes,
+    LanguageCapability::Namespaces,
     LanguageCapability::Imports,
     LanguageCapability::Reexports,
     LanguageCapability::Aliases,
@@ -318,6 +319,7 @@ const DART_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Members,
     LanguageCapability::Ownership,
     LanguageCapability::Receivers,
+    LanguageCapability::Embedding,
     LanguageCapability::ExternalReferences,
 ];
 

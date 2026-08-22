@@ -41,8 +41,41 @@ pub(super) trait LanguageProfile: Sized {
         shared_declaration_kind(kind)
     }
 
+    fn declaration_kind_for_node(node: Node<'_>, source: &[u8]) -> Option<&'static str> {
+        let _ = source;
+        Self::declaration_kind(node.kind())
+    }
+
     fn declaration_lookup_name(name: &str) -> String {
         name.to_owned()
+    }
+
+    fn declaration_name_is_valid(name: &str) -> bool {
+        valid_name(name)
+    }
+
+    fn ignores_type_reference(_spelling: &str) -> bool {
+        false
+    }
+
+    fn parse_imports(statement: &str) -> Vec<ParsedImport> {
+        parse_import(statement)
+            .into_iter()
+            .map(|(target, alias, reexport)| {
+                let spelling = alias
+                    .as_deref()
+                    .map_or_else(|| terminal(&target).to_owned(), str::to_owned);
+                ParsedImport {
+                    target,
+                    binding_spelling: spelling.clone(),
+                    local_spelling: spelling,
+                    qualifier: None,
+                    alias: alias.is_some(),
+                    prefix: false,
+                    reexport,
+                }
+            })
+            .collect()
     }
 
     fn emits_module_declarations() -> bool {
@@ -51,6 +84,11 @@ pub(super) trait LanguageProfile: Sized {
 
     fn has_source_supplement(_declaration_count: usize) -> bool {
         false
+    }
+
+    fn should_collect_source_supplement(source: &[u8], declaration_count: usize) -> bool {
+        let _ = source;
+        Self::has_source_supplement(declaration_count)
     }
 
     fn collect_source_supplement<'source>(
@@ -75,6 +113,19 @@ pub(super) struct Decl {
 struct Import {
     spelling: String,
     target: String,
+    qualifier: Option<String>,
+    prefix: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ParsedImport {
+    pub(super) target: String,
+    pub(super) binding_spelling: String,
+    pub(super) local_spelling: String,
+    pub(super) qualifier: Option<String>,
+    pub(super) alias: bool,
+    pub(super) prefix: bool,
+    pub(super) reexport: bool,
 }
 
 pub(super) struct State<'source, P: LanguageProfile> {
@@ -90,6 +141,7 @@ pub(super) struct State<'source, P: LanguageProfile> {
     by_qualified: BTreeMap<String, Vec<usize>>,
     name_ranges: BTreeSet<(usize, usize)>,
     imports: Vec<Import>,
+    emitted_imports: BTreeSet<(String, String, usize, usize)>,
     module_targets: BTreeSet<String>,
     emitted: BTreeSet<(SemanticRole, usize, usize, String)>,
     occurrence_ids: BTreeMap<(SemanticRole, usize, usize, String), String>,
@@ -152,6 +204,7 @@ pub(super) fn emit_tree_evidence<P: LanguageProfile>(
         by_qualified: BTreeMap::new(),
         name_ranges: BTreeSet::new(),
         imports: Vec::new(),
+        emitted_imports: BTreeSet::new(),
         module_targets: BTreeSet::new(),
         emitted: BTreeSet::new(),
         occurrence_ids: BTreeMap::new(),
@@ -167,7 +220,7 @@ pub(super) fn emit_tree_evidence<P: LanguageProfile>(
     }
     let root_scope = state.add_namespace(root)?;
     state.collect_declarations(root, None, &root_scope, 0)?;
-    if P::has_source_supplement(state.declarations.len()) {
+    if P::should_collect_source_supplement(source, state.declarations.len()) {
         P::collect_source_supplement(&mut state)?;
     }
     state.collect_imports(root, 0)?;
@@ -238,7 +291,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             .map(|decl| decl.qualified.clone())
             .unwrap_or_else(|| self.namespace.clone());
 
-        if let Some(kind) = P::declaration_kind(node.kind())
+        if let Some(kind) = P::declaration_kind_for_node(node, self.source)
             && let Some(name_node) = declaration_name(node)
         {
             let name = self.text(name_node);
@@ -356,7 +409,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         parent: Option<usize>,
         parent_scope: &str,
     ) -> Result<Option<usize>, EvidenceError> {
-        if !valid_name(name)
+        if !P::declaration_name_is_valid(name)
             || self
                 .declarations
                 .iter()
@@ -485,109 +538,176 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         Ok(())
     }
 
+    pub(super) fn emit_embedding(
+        &mut self,
+        target: &str,
+        range: EvidenceRange,
+    ) -> Result<(), EvidenceError> {
+        if target.is_empty() || !self.supports(LanguageCapability::Embedding) {
+            return Ok(());
+        }
+        let owner_id = self.owner_id(None);
+        let owner_scope = self.owner_scope(None);
+        let occurrence_id = self.emit_occurrence(
+            SemanticRole::Embedding,
+            &owner_id,
+            target,
+            None,
+            Some(&owner_scope),
+            range,
+        )?;
+        self.builder.relate(
+            CandidateRelation::Embeds,
+            &owner_id,
+            Some(&occurrence_id),
+            None,
+            target,
+            ResolutionConstraint {
+                exact_language: Some(P::LANGUAGE.to_owned()),
+                qualified_name: Some(target.to_owned()),
+                allow_external: true,
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        Ok(())
+    }
+
     fn collect_imports(&mut self, node: Node<'_>, depth: usize) -> Result<(), EvidenceError> {
         if depth > MAX_TRAVERSAL_DEPTH {
             self.depth_diagnostic(node)?;
             return Ok(());
         }
         let statement = self.text(node);
-        if is_import_node(node.kind())
-            && let Some((target, alias, reexport)) = parse_import(&statement)
-            && !target.is_empty()
-        {
-            let has_alias = alias.is_some();
-            let spelling = alias.unwrap_or_else(|| terminal(&target).to_owned());
-            if !spelling.is_empty() {
-                let owner = self.owner_for(node.start_byte());
-                let owner_scope = self
-                    .declaration_for(owner)
-                    .map_or(self.file_scope_id.as_str(), |decl| {
-                        decl.body_scope_id.as_str()
-                    })
-                    .to_owned();
-                // Swift's pre-universal extractor published imported modules
-                // as source-anchored module nodes. Keep that established
-                // Vapor/framework identity on the evidence route while the
-                // binding itself remains an exact, language-constrained
-                // import candidate.
-                if P::emits_module_declarations() && self.module_targets.insert(target.clone()) {
-                    let module_id = make_id(&[self.source_file, P::LANGUAGE, "module", &target]);
-                    let module_declaration = self.builder.declare(
-                        "module",
-                        &module_id,
-                        &spelling,
-                        &target,
-                        None,
-                        Some(&self.file_scope_id),
-                        range_for_node(self.source_file, node),
-                    )?;
-                    self.builder.relate(
-                        CandidateRelation::Owns,
-                        &self.file_id,
-                        None,
-                        None,
-                        &spelling,
-                        ResolutionConstraint {
-                            exact_target_declaration_id: Some(module_declaration),
-                            exact_language: Some(P::LANGUAGE.to_owned()),
-                            ..ResolutionConstraint::default()
-                        },
-                    )?;
-                }
-                let binding_id = self.builder.bind_with_identity(
-                    if reexport {
-                        BindingKind::Reexport
-                    } else if has_alias {
-                        BindingKind::ImportAlias
-                    } else {
-                        BindingKind::Import
-                    },
-                    &spelling,
-                    &target,
-                    None,
-                    Some(&owner_scope),
-                    None,
-                    false,
-                    range_for_node(self.source_file, node),
-                )?;
-                let owner_id = self.owner_id(owner);
-                let role = if reexport {
-                    SemanticRole::Reexport
-                } else {
-                    SemanticRole::Import
-                };
-                let occurrence_id = self.emit_occurrence(
-                    role,
-                    &owner_id,
-                    &spelling,
-                    qualifier_for(&target),
-                    Some(&owner_scope),
-                    range_for_node(self.source_file, node),
-                )?;
-                let relation = if reexport {
-                    CandidateRelation::Reexports
-                } else {
-                    CandidateRelation::Imports
-                };
-                self.builder.relate(
-                    relation,
-                    &owner_id,
-                    Some(&occurrence_id),
-                    Some(&binding_id),
-                    &spelling,
-                    ResolutionConstraint {
-                        exact_language: Some(P::LANGUAGE.to_owned()),
-                        qualified_name: Some(target.clone()),
-                        allow_external: true,
-                        ..ResolutionConstraint::default()
-                    },
-                )?;
-                self.imports.push(Import { spelling, target });
-            }
+        if is_import_node(node.kind()) {
+            self.emit_imports(
+                P::parse_imports(&statement),
+                range_for_node(self.source_file, node),
+            )?;
         }
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
             self.collect_imports(child, depth.saturating_add(1))?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn emit_imports(
+        &mut self,
+        parsed_imports: Vec<ParsedImport>,
+        range: EvidenceRange,
+    ) -> Result<(), EvidenceError> {
+        for parsed in parsed_imports {
+            let ParsedImport {
+                target,
+                binding_spelling,
+                local_spelling,
+                qualifier,
+                alias,
+                prefix,
+                reexport,
+            } = parsed;
+            if target.is_empty() || binding_spelling.is_empty() {
+                continue;
+            }
+            let spelling = binding_spelling;
+            let import_key = (
+                spelling.clone(),
+                target.clone(),
+                range.start_byte as usize,
+                range.end_byte as usize,
+            );
+            if !self.emitted_imports.insert(import_key) {
+                continue;
+            }
+            let owner = self.owner_for(range.start_byte as usize);
+            let owner_scope = self
+                .declaration_for(owner)
+                .map_or(self.file_scope_id.as_str(), |decl| {
+                    decl.body_scope_id.as_str()
+                })
+                .to_owned();
+            // Swift's pre-universal extractor published imported modules as
+            // source-anchored module nodes. Keep that established Vapor/
+            // framework identity while the binding remains exact and
+            // language-constrained.
+            if P::emits_module_declarations() && self.module_targets.insert(target.clone()) {
+                let module_id = make_id(&[self.source_file, P::LANGUAGE, "module", &target]);
+                let module_declaration = self.builder.declare(
+                    "module",
+                    &module_id,
+                    &spelling,
+                    &target,
+                    None,
+                    Some(&self.file_scope_id),
+                    range.clone(),
+                )?;
+                self.builder.relate(
+                    CandidateRelation::Owns,
+                    &self.file_id,
+                    None,
+                    None,
+                    &spelling,
+                    ResolutionConstraint {
+                        exact_target_declaration_id: Some(module_declaration),
+                        exact_language: Some(P::LANGUAGE.to_owned()),
+                        ..ResolutionConstraint::default()
+                    },
+                )?;
+            }
+            let binding_id = self.builder.bind_with_identity(
+                if reexport {
+                    BindingKind::Reexport
+                } else if alias {
+                    BindingKind::ImportAlias
+                } else {
+                    BindingKind::Import
+                },
+                &spelling,
+                &target,
+                None,
+                Some(&owner_scope),
+                None,
+                false,
+                range.clone(),
+            )?;
+            let owner_id = self.owner_id(owner);
+            let role = if reexport {
+                SemanticRole::Reexport
+            } else {
+                SemanticRole::Import
+            };
+            let occurrence_id = self.emit_occurrence(
+                role,
+                &owner_id,
+                &spelling,
+                qualifier.as_deref().or_else(|| qualifier_for(&target)),
+                Some(&owner_scope),
+                range.clone(),
+            )?;
+            let relation = if reexport {
+                CandidateRelation::Reexports
+            } else {
+                CandidateRelation::Imports
+            };
+            self.builder.relate(
+                relation,
+                &owner_id,
+                Some(&occurrence_id),
+                Some(&binding_id),
+                &spelling,
+                ResolutionConstraint {
+                    exact_language: Some(P::LANGUAGE.to_owned()),
+                    qualified_name: Some(target.clone()),
+                    allow_external: true,
+                    ..ResolutionConstraint::default()
+                },
+            )?;
+            self.imports.push(Import {
+                spelling: local_spelling,
+                target,
+                qualifier,
+                prefix,
+            });
         }
         Ok(())
     }
@@ -674,10 +794,29 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             .then(|| {
                 self.imports
                     .iter()
-                    .find(|import| import.spelling == spelling)
+                    .find(|import| {
+                        import.spelling == spelling && import.qualifier.as_deref() == qualifier
+                    })
                     .map(|import| import.target.clone())
             })
-            .flatten();
+            .flatten()
+            .or_else(|| {
+                qualifier.and_then(|prefix| {
+                    self.imports
+                        .iter()
+                        .find(|import| {
+                            (import.spelling == spelling || import.prefix)
+                                && import.qualifier.as_deref() == Some(prefix)
+                        })
+                        .map(|import| {
+                            if import.prefix {
+                                format!("{}.{}", import.target, spelling)
+                            } else {
+                                import.target.clone()
+                            }
+                        })
+                })
+            });
         let qualified_name = exact
             .and_then(|index| {
                 self.declarations
@@ -726,6 +865,9 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             return Ok(());
         }
         let raw = self.text(node);
+        if P::ignores_type_reference(&raw) {
+            return Ok(());
+        }
         let (qualifier, spelling) = split_qualified(&raw);
         if !valid_name(&spelling) || spelling.len() > 256 {
             return Ok(());
@@ -1085,6 +1227,7 @@ fn opens_scope(kind: &str) -> bool {
             | "interface"
             | "trait"
             | "module"
+            | "extension"
             | "function"
             | "method"
             | "constructor"

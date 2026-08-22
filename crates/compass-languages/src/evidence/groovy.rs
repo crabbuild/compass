@@ -21,6 +21,21 @@ impl LanguageProfile for Groovy {
         declaration_count <= 1
     }
 
+    fn should_collect_source_supplement(source: &[u8], declaration_count: usize) -> bool {
+        Self::has_source_supplement(declaration_count)
+            || std::str::from_utf8(source).is_ok_and(|text| {
+                text.lines()
+                    .any(|line| groovy_spock_feature_declaration(line.trim()).is_some())
+            })
+    }
+
+    fn declaration_name_is_valid(name: &str) -> bool {
+        shared::valid_name(name)
+            || (!name.is_empty()
+                && name.len() <= 512
+                && name.chars().all(|character| !character.is_control()))
+    }
+
     fn collect_source_supplement<'source>(
         state: &mut State<'source, Self>,
     ) -> Result<(), EvidenceError> {
@@ -51,6 +66,15 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
     let Ok(text) = std::str::from_utf8(state.source) else {
         return Ok(());
     };
+    // The pinned grammar can recover a quoted feature declaration even when
+    // the specification imports its base class through a project-local alias
+    // (or the fixture intentionally omits the import). Treat the quoted
+    // declaration itself as the bounded syntax signal; no test relationship
+    // is inferred here.
+    let spock_source = text.contains("spock.lang.Specification")
+        || text
+            .lines()
+            .any(|line| groovy_spock_feature_declaration(line.trim()).is_some());
     let mut depth = 0_i32;
     let mut classes: Vec<(usize, usize, i32)> = Vec::new();
     let mut method: Option<(usize, usize)> = None;
@@ -98,6 +122,33 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
 
         let active_class = classes.last().map(|(index, _, _)| *index);
         if let Some(class_index) = active_class
+            && let Some((name, name_start, name_end)) = spock_source
+                .then(|| groovy_spock_feature_declaration(trimmed))
+                .flatten()
+        {
+            let parent_scope = state
+                .declarations
+                .get(class_index)
+                .map_or(state.file_scope_id.as_str(), |decl| {
+                    decl.body_scope_id.as_str()
+                })
+                .to_owned();
+            let body_end = matching_brace_end(state.source, line_start, line_end);
+            let end = body_end.max(line_end);
+            if let Some(index) = state.add_source_declaration(
+                "method",
+                &name,
+                line_start,
+                end,
+                line_start.saturating_add(name_start),
+                line_start.saturating_add(name_end),
+                Some(class_index),
+                &parent_scope,
+            )? {
+                method = Some((index, end));
+                state.emit_source_calls(line_start, line_end, index)?;
+            }
+        } else if let Some(class_index) = active_class
             && let Some((name, constructor, name_offset)) = groovy_method_declaration(trimmed)
         {
             let parent_scope = state
@@ -185,6 +236,48 @@ fn groovy_method_declaration(line: &str) -> Option<(String, bool, usize)> {
         .split_whitespace()
         .any(|token| token == "def" || !token.is_empty());
     (has_return_shape || constructor).then(|| (name.to_owned(), constructor, name_start))
+}
+
+fn groovy_spock_feature_declaration(line: &str) -> Option<(String, usize, usize)> {
+    let rest = line.strip_prefix("def")?.trim_start();
+    let quote = rest.as_bytes().first().copied()?;
+    if !matches!(quote, b'\'' | b'"') {
+        return None;
+    }
+    let mut escaped = false;
+    let closing = rest
+        .as_bytes()
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find_map(|(index, byte)| {
+            if escaped {
+                escaped = false;
+                return None;
+            }
+            if *byte == b'\\' {
+                escaped = true;
+                return None;
+            }
+            (*byte == quote).then_some(index)
+        })?;
+    if !rest
+        .get(closing.saturating_add(1)..)?
+        .trim_start()
+        .starts_with('(')
+    {
+        return None;
+    }
+    let name = rest.get(1..closing)?.trim();
+    if name.is_empty() || name.chars().any(char::is_control) {
+        return None;
+    }
+    let rest_offset = line.len().saturating_sub(rest.len());
+    Some((
+        name.to_owned(),
+        rest_offset.saturating_add(1),
+        rest_offset.saturating_add(closing),
+    ))
 }
 
 fn brace_delta(line: &str) -> i32 {
