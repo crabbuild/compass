@@ -1,5 +1,6 @@
 mod axum;
 mod csharp;
+mod dart;
 mod enterprise;
 mod evidence;
 mod express;
@@ -293,7 +294,13 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::source("go-web", &["go"], &[], detect_go),
     FrameworkPack::source("axum-web", &["rust"], &["axum"], detect_axum),
     FrameworkPack::source("rust-web", &["rust"], &[], detect_rust),
-    FrameworkPack::source("vapor-routes", &["swift"], &["vapor"], detect_swift),
+    FrameworkPack::universal(&pack::VAPOR_SWIFT_DESCRIPTOR, detect_swift_universal),
+    FrameworkPack::universal(
+        &pack::DART_FLUTTER_NAVIGATION_DESCRIPTOR,
+        dart::detect_flutter_navigation,
+    ),
+    FrameworkPack::universal(&pack::DART_BLOC_DESCRIPTOR, dart::detect_bloc),
+    FrameworkPack::universal(&pack::DART_RIVERPOD_DESCRIPTOR, dart::detect_riverpod),
     FrameworkPack::source(
         "express-web",
         &["javascript", "typescript", "tsx"],
@@ -467,6 +474,13 @@ pub(crate) fn detect(
         }
     }
     accumulator.publish(extraction);
+    if language == "dart" && extraction.semantic_evidence.is_some() {
+        // Framework convention meaning is deliberately owned by this
+        // registry boundary; the language producer only emits structural
+        // universal evidence. Contextual facts additionally require positive
+        // source/manifest activation in their owning pack.
+        dart::append_convention_facts(path, source, project, extraction);
+    }
 }
 
 pub(crate) fn detect_config_file(
@@ -547,10 +561,14 @@ fn detect_axum(
     axum::detect(context.path, context.source, context.root)
 }
 
-fn detect_swift(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
+fn detect_swift_universal(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    let vapor_import = context.evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == crate::SemanticRole::Import
+            && occurrence.spelling.eq_ignore_ascii_case("Vapor")
+    });
+    if !vapor_import {
+        return Vec::new();
+    }
     swift::detect(context.path, context.source, context.root)
 }
 
@@ -666,7 +684,10 @@ mod tests {
             "axum-web",
             "rust-web",
             "aspnet-csharp",
-            "vapor-routes",
+            "vapor-swift",
+            "dart-flutter-navigation",
+            "dart-bloc",
+            "dart-riverpod",
             "express-web",
             "fastify-web",
             "hono-web",

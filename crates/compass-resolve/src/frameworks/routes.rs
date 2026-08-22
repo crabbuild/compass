@@ -378,6 +378,19 @@ fn resolve_reference(
         score = 100;
         reason = "exact endpoint re-export module";
     }
+    // An unqualified handler reference from a source file is local evidence
+    // when that file declares a matching callable. Prefer that exact
+    // same-source candidate before consulting project-wide qualified names.
+    // This keeps a Go `listUsers` route bound to the Go declaration when a
+    // universal Swift file happens to expose the same top-level spelling.
+    // Explicitly qualified references and import aliases retain their
+    // project-wide lookup semantics below.
+    if positions.is_empty() && owner.is_none() && alias.is_none() {
+        (positions, candidates_truncated) =
+            targets.by_source_terminal(source_file, &last, &families, max);
+        score = 100;
+        reason = "exact same-source route target";
+    }
     if positions.is_empty()
         && let Some(owner) = owner.as_deref()
     {
@@ -943,6 +956,69 @@ mod tests {
         assert_eq!(resolved[0].state, ResolutionState::Unresolved);
         assert!(resolved[0].stages[0].target.is_none());
         assert!(resolved[0].candidates.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn unqualified_routes_prefer_same_source_over_cross_language_qualified_names()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let function = |id: &str, qualified: &str, source: &str| RawNodeRecord {
+            id: id.to_owned(),
+            attributes: Map::from_iter([
+                ("label".into(), Value::String("listUsers".into())),
+                ("name".into(), Value::String("listUsers".into())),
+                ("qualified_name".into(), Value::String(qualified.into())),
+                ("symbol_kind".into(), Value::String("function".into())),
+                ("source_file".into(), Value::String(source.into())),
+            ]),
+        };
+        let route = RawRouteFact {
+            framework: "gin".to_owned(),
+            operation: "GET".to_owned(),
+            raw_path: "/users".to_owned(),
+            normalized_path: "/users".to_owned(),
+            declaring_scope: "routes".to_owned(),
+            anchor: RawFrameworkAnchor {
+                source_file: "routes/go/gin.go".to_owned(),
+                start_byte: 1,
+                end_byte: 2,
+                start_line: 1,
+                start_column: 0,
+                end_line: 1,
+                end_column: 1,
+            },
+            handler_reference: "listUsers".to_owned(),
+            middleware_references: Vec::new(),
+            origin: RawFrameworkOrigin::Ast,
+            rule: Some("gin-router-call".to_owned()),
+            detail: Map::new(),
+        };
+        let extraction = Extraction {
+            nodes: vec![
+                function(
+                    "go-list-users",
+                    "routes.routes.listUsers",
+                    "routes/go/gin.go",
+                ),
+                function(
+                    "swift-list-users",
+                    "listUsers",
+                    "routes/swift/VaporRoutes.swift",
+                ),
+            ],
+            framework_facts: vec![RawFrameworkFact::Route(route)],
+            ..Extraction::default()
+        };
+
+        let resolved = resolve_routes(&extraction, FrameworkLimits::default())?;
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].state, ResolutionState::Exact);
+        assert_eq!(
+            resolved[0].stages[0].target.as_deref(),
+            Some("go-list-users")
+        );
+        assert_eq!(resolved[0].candidates.len(), 1);
+        assert_eq!(resolved[0].candidates[0].node_id, "go-list-users");
         Ok(())
     }
 }

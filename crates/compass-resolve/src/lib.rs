@@ -931,7 +931,7 @@ fn restore_framework_callable_names(
         if !framework_sources.contains(&source)
             || !matches!(
                 string_attribute(node, "language").as_str(),
-                "typescript" | "javascript" | "tsx" | "jsx"
+                "typescript" | "javascript" | "tsx" | "jsx" | "swift"
             )
         {
             continue;
@@ -3848,6 +3848,7 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
             stubs.insert(node.id.clone(), label);
         } else if is_type_like_definition(node)
             && let Some(family @ "jvm") = language_family(&source)
+            && !is_hard_cut_universal_source(&source)
         {
             definitions
                 .entry((label, family))
@@ -3897,6 +3898,9 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
             continue;
         };
         let source_file = edge.string("source_file");
+        if is_hard_cut_universal_source(&source_file) {
+            continue;
+        }
         let Some(family @ "jvm") = language_family(&source_file) else {
             continue;
         };
@@ -4557,6 +4561,9 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         let Some(family) = language_family(&edge.string("source_file")) else {
             continue;
         };
+        if is_hard_cut_universal_source(&edge.string("source_file")) {
+            continue;
+        }
         for endpoint in [&edge.source, &edge.target] {
             if stub_ids.contains(endpoint.as_str()) {
                 stub_relations
@@ -4603,6 +4610,9 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                     let Some(candidate_family) = language_family(candidate_source) else {
                         return false;
                     };
+                    if is_hard_cut_universal_source(candidate_source) {
+                        return false;
+                    }
                     let family_compatible = families
                         .is_some_and(|set| set.len() == 1 && set.contains(candidate_family));
                     let scope_compatible = scopes.is_some_and(|set| {
@@ -5560,6 +5570,9 @@ fn language_name_from_source(source: &str) -> Option<&'static str> {
         "rs" => Some("rust"),
         "java" => Some("java"),
         "swift" => Some("swift"),
+        "dart" => Some("dart"),
+        "scala" => Some("scala"),
+        "groovy" | "gradle" => Some("groovy"),
         _ => None,
     }
 }
@@ -5587,6 +5600,13 @@ fn language_family(source: &str) -> Option<&'static str> {
         "ps1" | "psm1" | "psd1" => Some("powershell"),
         _ => None,
     }
+}
+
+fn is_hard_cut_universal_source(source: &str) -> bool {
+    matches!(
+        extension(source).as_str(),
+        "swift" | "dart" | "scala" | "groovy" | "gradle"
+    )
 }
 
 fn extension(source: &str) -> String {

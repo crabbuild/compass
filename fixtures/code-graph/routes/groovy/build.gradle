@@ -1,0 +1,2 @@
+plugins { id 'groovy' }
+def dynamicDsl = project(':missing').customTask()

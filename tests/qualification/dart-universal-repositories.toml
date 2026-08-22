@@ -1,0 +1,35 @@
+schema = "compass.dart-universal-qualification/1"
+language = "dart"
+producer = "compass.dart"
+producerVersion = 1
+oracleProvider = "dart-analyzer-source-oracle"
+oracleToolchain = "Dart SDK 3.13.1; package:analyzer 8.4.0"
+checkoutRoot = "/Volumes/Workspace/Github"
+readOnly = true
+minimumAcceptedRelationships = 2000
+minimumAcceptedPerCorpus = 400
+minimumAcceptedPerRelation = 100
+
+[[repository]]
+name = "dart-sdk"
+url = "https://github.com/dart-lang/sdk.git"
+commit = "227791d36348c8fcb90e350245f4c3d2cf265ff0"
+purpose = "Dart library subset with language features, imports, parts, and analyzer fixtures"
+sourceGlobs = ["pkg/analyzer/lib/**/*.dart", "pkg/analysis_server/lib/**/*.dart", "pkg/front_end/lib/**/*.dart", "pkg/compiler/lib/**/*.dart", "pkg/linter/lib/**/*.dart"]
+excludeGlobs = []
+
+[[repository]]
+name = "flutter"
+url = "https://github.com/flutter/flutter.git"
+commit = "0cb32fd1625d0782fc3162754f73da90f14205c0"
+purpose = "Flutter packages subset with widgets, navigation, and framework conventions"
+sourceGlobs = ["packages/**/*.dart", "dev/**/*.dart"]
+excludeGlobs = []
+
+[[repository]]
+name = "riverpod"
+url = "https://github.com/rrousselGit/riverpod.git"
+commit = "d71acf645364cc35d45559eb10bd489e2a7d6eb2"
+purpose = "Riverpod providers, generated-safe source, and package exports"
+sourceGlobs = ["packages/**/*.dart", "examples/**/*.dart"]
+excludeGlobs = []

@@ -377,7 +377,9 @@ impl ResolutionDb<'_> {
         else {
             return StageOutcome::Continue;
         };
-        if is_language_builtin_qualified_target(context.language, &qualified_name) {
+        if is_language_builtin_qualified_target(context.language, &qualified_name)
+            && !self.rust_builtin_external_candidate(context, candidate)
+        {
             return StageOutcome::Decided(ResolutionDecision::Unresolved);
         }
         StageOutcome::Decided(ResolutionDecision::QualifiedExternal {
@@ -387,6 +389,47 @@ impl ResolutionDb<'_> {
                 candidate_count: 0,
             },
         })
+    }
+
+    /// Rust's prelude names are intentionally not published as graph hubs for
+    /// ordinary constructor calls (`Vec::new`, `Box::new`, and friends).  Two
+    /// forms still carry useful, source-backed evidence: a receiver whose
+    /// concrete type was inferred from `self`, and a qualified call in a
+    /// scope with an explicit wildcard import (where the imported module may
+    /// provide a project/dependency symbol that is outside the corpus).
+    fn rust_builtin_external_candidate(
+        &self,
+        context: &CandidateContext<'_>,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        if context.language != "rust" || candidate.relation != CandidateRelation::Calls {
+            return false;
+        }
+        if self
+            .occurrence(candidate)
+            .and_then(OccurrenceRef::qualifier)
+            .is_some_and(|qualifier| qualifier == "self")
+        {
+            return true;
+        }
+        let mut scope_id = candidate.constraints.scope_id.as_deref();
+        let mut visited = BTreeSet::new();
+        while let Some(scope) = scope_id.filter(|scope| visited.insert((*scope).to_owned())) {
+            if self
+                .indexes
+                .wildcards
+                .by_scope
+                .contains_key(&(context.language.to_owned(), scope.to_owned()))
+            {
+                return true;
+            }
+            scope_id = self
+                .facts
+                .scopes
+                .get(scope)
+                .and_then(|scope| scope.parent_scope_id.as_deref());
+        }
+        false
     }
 
     fn stage_deferred_receiver(&self, context: &CandidateContext<'_>) -> StageOutcome {

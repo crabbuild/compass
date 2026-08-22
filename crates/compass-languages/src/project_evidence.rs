@@ -38,6 +38,9 @@ const FIXED_MANIFEST_NAMES: &[&str] = &[
     "Cargo.toml",
     "go.mod",
     "Package.swift",
+    "pubspec.yaml",
+    "pubspec.yml",
+    "build.sbt",
 ];
 const FIXED_CONFIGURATION_NAMES: &[&str] = &[
     "application.properties",
@@ -74,6 +77,8 @@ pub struct ProjectEvidence {
     project_root: PathBuf,
     manifests: Vec<String>,
     ecosystems: Vec<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: Vec<String>,
     dependencies: BTreeSet<String>,
     configuration_files: Vec<String>,
     configuration_keys: BTreeSet<String>,
@@ -116,6 +121,21 @@ impl ProjectEvidence {
     #[must_use]
     pub fn ecosystems(&self) -> &[String] {
         &self.ecosystems
+    }
+
+    /// Bounded, source-only project metadata such as a package name or an
+    /// explicitly declared language/toolchain version. Values are never
+    /// obtained by evaluating a build tool or project script.
+    #[must_use]
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
+        &self.metadata
+    }
+
+    /// Project-contained source roots declared by a manifest. The paths are
+    /// normalized relative paths and are only advisory to downstream stages.
+    #[must_use]
+    pub fn source_roots(&self) -> &[String] {
+        &self.source_roots
     }
 
     #[must_use]
@@ -291,6 +311,23 @@ impl ProjectEvidenceIndex {
                 builder.manifests.insert(file_name(&project_file));
                 if let Some(parsed) = parse_manifest(&project_file) {
                     builder.ecosystems.insert(parsed.ecosystem.to_owned());
+                    for (key, value) in parsed.metadata {
+                        if builder.metadata.len() < MAX_PROJECT_CONFIGURATION_KEYS
+                            || builder.metadata.contains_key(&key)
+                        {
+                            builder.metadata.insert(key, value);
+                        }
+                    }
+                    for root in parsed.source_roots {
+                        let Some(root) =
+                            contained_manifest_root(&repository_root, &project_root, &root)
+                        else {
+                            continue;
+                        };
+                        if builder.source_roots.len() < MAX_PROJECT_ROUTE_ROOTS {
+                            builder.source_roots.insert(root);
+                        }
+                    }
                     let remaining =
                         MAX_DEPENDENCIES_PER_PROJECT.saturating_sub(builder.dependencies.len());
                     builder
@@ -434,6 +471,8 @@ impl ProjectEvidenceIndex {
 struct ProjectBuilder {
     manifests: BTreeSet<String>,
     ecosystems: BTreeSet<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: BTreeSet<String>,
     dependencies: BTreeSet<String>,
     configuration_files: BTreeSet<String>,
     configuration_keys: BTreeSet<String>,
@@ -447,6 +486,8 @@ struct ProjectBuilder {
 struct ParsedManifest {
     ecosystem: &'static str,
     dependencies: BTreeSet<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -463,6 +504,8 @@ fn finish_project(
 ) -> ProjectEvidence {
     let manifests = builder.manifests.into_iter().collect::<Vec<_>>();
     let ecosystems = builder.ecosystems.into_iter().collect::<Vec<_>>();
+    let metadata = builder.metadata;
+    let source_roots = builder.source_roots.into_iter().collect::<Vec<_>>();
     let dependencies = builder.dependencies;
     let configuration_files = builder.configuration_files.into_iter().collect::<Vec<_>>();
     let configuration_keys = builder.configuration_keys;
@@ -490,6 +533,16 @@ fn finish_project(
     }
     for ecosystem in &ecosystems {
         digest.update(ecosystem.as_bytes());
+        digest.update([0]);
+    }
+    for (key, value) in &metadata {
+        digest.update(key.as_bytes());
+        digest.update([0]);
+        digest.update(value.as_bytes());
+        digest.update([0]);
+    }
+    for source_root in &source_roots {
+        digest.update(source_root.as_bytes());
         digest.update([0]);
     }
     for dependency in &dependencies {
@@ -543,6 +596,8 @@ fn finish_project(
         project_root,
         manifests,
         ecosystems,
+        metadata,
+        source_roots,
         dependencies,
         configuration_files,
         configuration_keys,
@@ -778,21 +833,92 @@ fn parse_manifest(path: &Path) -> Option<ParsedManifest> {
     let source = fs::read_to_string(path).ok()?;
     let name = path.file_name()?.to_str()?;
     let lower = name.to_ascii_lowercase();
-    let (ecosystem, dependencies) = match lower.as_str() {
-        "package.json" => ("npm", json_dependencies(&source, NPM_DEPENDENCY_KEYS)?),
+    let (ecosystem, dependencies, metadata, source_roots) = match lower.as_str() {
+        "package.json" => (
+            "npm",
+            json_dependencies(&source, NPM_DEPENDENCY_KEYS)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
         "composer.json" => (
             "composer",
             json_dependencies(&source, &["require", "require-dev"])?,
+            BTreeMap::new(),
+            BTreeSet::new(),
         ),
-        "pyproject.toml" => ("python", pyproject_dependencies(&source)?),
-        "requirements.txt" | "requirements.in" => ("python", requirements_dependencies(&source)),
-        "gemfile" => ("ruby", gemfile_dependencies(&source)),
-        "pom.xml" => ("maven", pom_dependencies(&source)?),
-        "build.gradle" | "build.gradle.kts" => ("gradle", gradle_dependencies(&source)),
-        "cargo.toml" => ("cargo", cargo_dependencies(&source)?),
-        "go.mod" => ("go", go_mod_dependencies(&source)),
-        "package.swift" => ("swift", swift_package_dependencies(&source)),
-        _ if lower.ends_with(".csproj") => ("dotnet", csproj_dependencies(&source)?),
+        "pyproject.toml" => (
+            "python",
+            pyproject_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "requirements.txt" | "requirements.in" => (
+            "python",
+            requirements_dependencies(&source),
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "gemfile" => (
+            "ruby",
+            gemfile_dependencies(&source),
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "pom.xml" => (
+            "maven",
+            pom_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "build.gradle" | "build.gradle.kts" => {
+            let (metadata, source_roots) = gradle_project_metadata(&source);
+            (
+                "gradle",
+                gradle_dependencies(&source),
+                metadata,
+                source_roots,
+            )
+        }
+        "cargo.toml" => (
+            "cargo",
+            cargo_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "go.mod" => (
+            "go",
+            go_mod_dependencies(&source),
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "package.swift" => {
+            let (metadata, source_roots) = swift_package_metadata(&source);
+            (
+                "swift",
+                swift_package_dependencies(&source),
+                metadata,
+                source_roots,
+            )
+        }
+        "pubspec.yaml" | "pubspec.yml" => {
+            let parsed = pubspec_metadata(&source)?;
+            (
+                "dart",
+                parsed.dependencies,
+                parsed.metadata,
+                parsed.source_roots,
+            )
+        }
+        "build.sbt" => {
+            let (dependencies, metadata, source_roots) = sbt_project_metadata(&source);
+            ("scala", dependencies, metadata, source_roots)
+        }
+        _ if lower.ends_with(".csproj") => (
+            "dotnet",
+            csproj_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
         _ => return None,
     };
     Some(ParsedManifest {
@@ -803,6 +929,8 @@ fn parse_manifest(path: &Path) -> Option<ParsedManifest> {
             .filter(|dependency| !dependency.is_empty())
             .take(MAX_DEPENDENCIES_PER_PROJECT)
             .collect(),
+        metadata,
+        source_roots,
     })
 }
 
@@ -990,6 +1118,244 @@ fn swift_package_dependencies(source: &str) -> Vec<String> {
                 .map(|name| name.trim_end_matches(".git").to_owned())
         })
         .collect()
+}
+
+fn swift_package_metadata(source: &str) -> (BTreeMap<String, String>, BTreeSet<String>) {
+    let mut metadata = BTreeMap::new();
+    let mut source_roots = default_source_roots(["Sources", "Tests"]);
+    let Ok(package_name) = Regex::new(r#"\bname\s*:\s*[\"']([^\"']+)[\"']"#) else {
+        return (metadata, source_roots);
+    };
+    if let Some(name) = package_name
+        .captures(source)
+        .and_then(|capture| capture.get(1))
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        metadata.insert("swift.package.name".to_owned(), name.to_owned());
+    }
+    let Ok(paths) = Regex::new(r#"\bpath\s*:\s*[\"']([^\"']+)[\"']"#) else {
+        return (metadata, source_roots);
+    };
+    for capture in paths.captures_iter(source).take(MAX_PROJECT_ROUTE_ROOTS) {
+        let Some(path) = capture
+            .get(1)
+            .and_then(|value| bounded_source_root(value.as_str()))
+        else {
+            continue;
+        };
+        source_roots.insert(path);
+    }
+    (metadata, source_roots)
+}
+
+struct ParsedPubspec {
+    dependencies: Vec<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: BTreeSet<String>,
+}
+
+fn pubspec_metadata(source: &str) -> Option<ParsedPubspec> {
+    let root = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).ok()?;
+    let mapping = root.as_mapping()?;
+    let mut dependencies = Vec::new();
+    for section in ["dependencies", "dev_dependencies", "dependency_overrides"] {
+        let Some(values) =
+            yaml_mapping_value(mapping, section).and_then(|value| value.as_mapping())
+        else {
+            continue;
+        };
+        dependencies.extend(
+            values
+                .keys()
+                .filter_map(|key| key.as_str().map(str::to_owned)),
+        );
+    }
+    let mut metadata = BTreeMap::new();
+    if let Some(name) = yaml_mapping_value(mapping, "name")
+        .and_then(serde_yaml_ng::Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        metadata.insert("dart.package.name".to_owned(), name.to_owned());
+    }
+    if let Some(sdk) = yaml_mapping_value(mapping, "environment")
+        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(|environment| yaml_mapping_value(environment, "sdk"))
+        .and_then(serde_yaml_ng::Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        metadata.insert("dart.sdk".to_owned(), sdk.to_owned());
+    }
+    if let Some(flutter) = yaml_mapping_value(mapping, "flutter")
+        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(|flutter| yaml_mapping_value(flutter, "module"))
+        .and_then(serde_yaml_ng::Value::as_str)
+        .and_then(bounded_source_root)
+    {
+        metadata.insert("flutter.module".to_owned(), flutter);
+    }
+    Some(ParsedPubspec {
+        dependencies,
+        metadata,
+        source_roots: default_source_roots(["lib", "bin", "test", "tool", "web"]),
+    })
+}
+
+fn yaml_mapping_value<'value>(
+    mapping: &'value serde_yaml_ng::Mapping,
+    key: &str,
+) -> Option<&'value serde_yaml_ng::Value> {
+    mapping.get(serde_yaml_ng::Value::String(key.to_owned()))
+}
+
+fn sbt_project_metadata(source: &str) -> (Vec<String>, BTreeMap<String, String>, BTreeSet<String>) {
+    let mut dependencies = Vec::new();
+    let mut metadata = BTreeMap::new();
+    let mut source_roots = default_source_roots(["src/main/scala", "src/test/scala"]);
+    for line in source.lines().take(MAX_PROJECT_CONFIGURATION_KEYS) {
+        let values = quoted_values(line).take(4).collect::<Vec<_>>();
+        if line.contains('%') && values.len() >= 2 {
+            dependencies.push(format!("{}:{}", values[0], values[1]));
+        }
+    }
+    collect_sbt_metadata(source, "scalaVersion", "scala.version", &mut metadata);
+    collect_sbt_metadata(source, "sbtVersion", "sbt.version", &mut metadata);
+    collect_sbt_metadata(source, "organization", "scala.organization", &mut metadata);
+    let Ok(paths) = Regex::new(
+        r#"(?:scalaSource|javaSource|sourceDirectory)\s*:?=\s*[^\n\r]*?[\"']([^\"']+)[\"']"#,
+    ) else {
+        return (dependencies, metadata, source_roots);
+    };
+    for capture in paths.captures_iter(source).take(MAX_PROJECT_ROUTE_ROOTS) {
+        if let Some(path) = capture
+            .get(1)
+            .and_then(|value| bounded_source_root(value.as_str()))
+        {
+            source_roots.insert(path);
+        }
+    }
+    (dependencies, metadata, source_roots)
+}
+
+fn collect_sbt_metadata(
+    source: &str,
+    setting: &str,
+    key: &str,
+    output: &mut BTreeMap<String, String>,
+) {
+    let pattern = format!(r#"(?m)\b{setting}\s*:?=\s*[\"']([^\"']+)[\"']"#);
+    let Ok(pattern) = Regex::new(&pattern) else {
+        return;
+    };
+    if let Some(value) = pattern
+        .captures(source)
+        .and_then(|capture| capture.get(1))
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        output.insert(key.to_owned(), value.to_owned());
+    }
+}
+
+fn gradle_project_metadata(source: &str) -> (BTreeMap<String, String>, BTreeSet<String>) {
+    let mut metadata = BTreeMap::new();
+    let mut source_roots = default_source_roots([
+        "src/main/groovy",
+        "src/test/groovy",
+        "src/main/java",
+        "src/test/java",
+    ]);
+    for (setting, key) in [("group", "gradle.group"), ("version", "gradle.version")] {
+        collect_gradle_metadata(source, setting, key, &mut metadata);
+    }
+    let Ok(paths) = Regex::new(
+        r#"(?:srcDirs|srcDir|srcDirs\.from)\s*(?:=|\+=|\()\s*[^\n\r]*?[\"']([^\"']+)[\"']"#,
+    ) else {
+        return (metadata, source_roots);
+    };
+    for capture in paths.captures_iter(source).take(MAX_PROJECT_ROUTE_ROOTS) {
+        if let Some(path) = capture
+            .get(1)
+            .and_then(|value| bounded_source_root(value.as_str()))
+        {
+            source_roots.insert(path);
+        }
+    }
+    (metadata, source_roots)
+}
+
+fn collect_gradle_metadata(
+    source: &str,
+    setting: &str,
+    key: &str,
+    output: &mut BTreeMap<String, String>,
+) {
+    let pattern = format!(
+        r#"(?m)^\s*{setting}\s*(?:=|:)\s*[\"']([^\"']+)[\"']|\b{setting}\s*=\s*[\"']([^\"']+)[\"']"#
+    );
+    let Ok(pattern) = Regex::new(&pattern) else {
+        return;
+    };
+    if let Some(value) = pattern
+        .captures(source)
+        .and_then(|capture| capture.get(1).or_else(|| capture.get(2)))
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        output.insert(key.to_owned(), value.to_owned());
+    }
+}
+
+fn bounded_source_root(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 4_096
+        || value.starts_with(['/', '\\'])
+        || value.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut components = Vec::new();
+    for component in Path::new(value).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => components.push(segment.to_string_lossy()),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    (!components.is_empty()).then(|| components.join("/"))
+}
+
+fn default_source_roots<const N: usize>(roots: [&str; N]) -> BTreeSet<String> {
+    roots.into_iter().map(str::to_owned).collect()
+}
+
+fn contained_manifest_root(
+    repository_root: &Path,
+    project_root: &Path,
+    relative: &str,
+) -> Option<String> {
+    let candidate = project_root.join(relative);
+    if !candidate.starts_with(repository_root) {
+        return None;
+    }
+    if !candidate.is_dir() {
+        return None;
+    }
+    let canonical_repository = fs::canonicalize(repository_root).ok()?;
+    let mut existing_ancestor = candidate.clone();
+    while !existing_ancestor.exists() {
+        if existing_ancestor == repository_root || !existing_ancestor.pop() {
+            return None;
+        }
+    }
+    let canonical_ancestor = fs::canonicalize(existing_ancestor).ok()?;
+    if !canonical_ancestor.starts_with(canonical_repository) {
+        return None;
+    }
+    Some(normalize_project_path(relative))
 }
 
 fn first_quoted(value: &str) -> Option<String> {
@@ -1798,6 +2164,86 @@ mod tests {
                 .contains("spring.application.name")
         );
         assert!(evidence.configuration_keys().contains("server.port"));
+        Ok(())
+    }
+
+    #[test]
+    fn language_manifests_are_bounded_and_never_execute_build_tools() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("lib/main.dart");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "class Main {}\n")?;
+        fs::write(
+            root.join("pubspec.yaml"),
+            "name: sample_app\nenvironment:\n  sdk: ^3.4.0\ndependencies:\n  flutter:\n    sdk: flutter\n  riverpod: ^2.5.0\n",
+        )?;
+        fs::write(
+            root.join("build.sbt"),
+            "scalaVersion := \"3.3.3\"\nlibraryDependencies += \"org.typelevel\" %% \"cats-core\" % \"2.12.0\"\n",
+        )?;
+        fs::write(
+            root.join("Package.swift"),
+            "let package = Package(name: \"Sample\", targets: [.target(name: \"Sample\", path: \"Sources/Sample\")])\n",
+        )?;
+
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = first.evidence_for(&source);
+        assert!(evidence.has_dependency("riverpod"));
+        assert_eq!(
+            evidence.metadata().get("dart.package.name"),
+            Some(&"sample_app".to_owned())
+        );
+        assert_eq!(
+            evidence.metadata().get("dart.sdk"),
+            Some(&"^3.4.0".to_owned())
+        );
+        assert!(evidence.source_roots().iter().any(|root| root == "lib"));
+        assert!(
+            evidence
+                .manifests()
+                .iter()
+                .any(|name| name == "pubspec.yaml")
+        );
+        assert_eq!(
+            evidence.fingerprint(),
+            second.evidence_for(&source).fingerprint()
+        );
+
+        let scala_source = root.join("src/main/scala/Main.scala");
+        fs::create_dir_all(scala_source.parent().ok_or("scala source has no parent")?)?;
+        fs::write(&scala_source, "object Main {}\n")?;
+        let scala_index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&scala_source));
+        let scala = scala_index.evidence_for(&scala_source);
+        assert!(scala.has_dependency("org.typelevel:cats-core"));
+        assert_eq!(
+            scala.metadata().get("scala.version"),
+            Some(&"3.3.3".to_owned())
+        );
+        assert!(
+            scala
+                .source_roots()
+                .iter()
+                .any(|root| root == "src/main/scala")
+        );
+
+        let swift_source = root.join("Sources/Sample/Main.swift");
+        fs::create_dir_all(swift_source.parent().ok_or("swift source has no parent")?)?;
+        fs::write(&swift_source, "struct Main {}\n")?;
+        let swift_index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&swift_source));
+        let swift = swift_index.evidence_for(&swift_source);
+        assert_eq!(
+            swift.metadata().get("swift.package.name"),
+            Some(&"Sample".to_owned())
+        );
+        assert!(
+            swift
+                .source_roots()
+                .iter()
+                .any(|root| root == "Sources/Sample")
+        );
         Ok(())
     }
 }

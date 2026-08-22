@@ -921,7 +921,7 @@
       "kind": "module",
       "source": "fixtures/code-graph/routes/swift/VaporRoutes.swift",
       "qualifiedName": "Vapor",
-      "producer": "compass.languages.swift",
+      "producer": "compass.languages.swift.universal",
       "origins": [
         "ast"
       ],
@@ -1451,7 +1451,7 @@
       "kind": "exports",
       "source": "fixtures/code-graph/qualification/export.dart",
       "qualifiedName": "*",
-      "producer": "compass.languages.dart",
+      "producer": "compass.resolve.dart.universal",
       "origins": [
         "ast"
       ],
@@ -1745,6 +1745,14 @@
       "sourceQualifiedName": "<crate::rich::Widget as crate::rich::Renderable>::render",
       "targetQualifiedName": "crate::rich::target",
       "minimum": 2
+    },
+    {
+      "id": "repeated-groovy-call",
+      "kind": "calls",
+      "source": "fixtures/code-graph/routes/groovy/SpockSpec.groovy",
+      "sourceQualifiedName": "routes.UserService.run",
+      "targetQualifiedName": "routes.UserService.load",
+      "minimum": 2
     }
   ],
   "coverage": [
@@ -1765,6 +1773,16 @@
       "id": "missing-reference-diagnostic",
       "source": "fixtures/code-graph/qualification/MissingReference.csproj",
       "diagnosticCode": "unresolved_external_reference"
+    },
+    {
+      "id": "scala-universal-extracted",
+      "source": "fixtures/code-graph/routes/scala/Universal.scala",
+      "extractionStatus": "extracted"
+    },
+    {
+      "id": "groovy-universal-recovery",
+      "source": "fixtures/code-graph/routes/groovy/SpockSpec.groovy",
+      "extractionStatus": "partial"
     }
   ],
   "limits": {

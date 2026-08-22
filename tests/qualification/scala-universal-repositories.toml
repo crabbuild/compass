@@ -1,0 +1,35 @@
+schema = "compass.scala-universal-qualification/1"
+language = "scala"
+producer = "compass.scala"
+producerVersion = 1
+oracleProvider = "scala-meta-source-oracle"
+oracleToolchain = "Scala CLI 1.9.1; Scala 3.7.3; scala.meta 4.13.10; ujson 4.1.0"
+checkoutRoot = "/Volumes/Workspace/Github"
+readOnly = true
+minimumAcceptedRelationships = 2000
+minimumAcceptedPerCorpus = 400
+minimumAcceptedPerRelation = 100
+
+[[repository]]
+name = "scala3"
+url = "https://github.com/scala/scala3.git"
+commit = "b873e5a76ca51cd098684a1eb90e0946a33dbd39"
+purpose = "Scala 3 compiler sources, givens, extensions, enums, and quoted syntax"
+sourceGlobs = ["library/**/*.scala", "compiler/**/*.scala", "presentation-compiler/**/*.scala", "scaladoc/**/*.scala", "repl/**/*.scala", "language-server/**/*.scala", "sbt-bridge/**/*.scala", "directives-parser/**/*.scala", "tasty/**/*.scala", "staging/**/*.scala"]
+excludeGlobs = []
+
+[[repository]]
+name = "akka"
+url = "https://github.com/akka/akka.git"
+commit = "2b829515c4e33adc926323a6888a688c29c49c67"
+purpose = "actors, protocols, implicits, typeclasses, and multi-module Scala APIs"
+sourceGlobs = ["**/*.scala", "*.scala"]
+excludeGlobs = ["project/**/*.scala"]
+
+[[repository]]
+name = "playframework"
+url = "https://github.com/playframework/playframework.git"
+commit = "123a45f849996f656e5138816824ff35b3699acb"
+purpose = "Play routing, actions, Scala handlers, Java interop boundaries, and tests"
+sourceGlobs = ["**/*.scala", "*.scala"]
+excludeGlobs = ["documentation/**/*.scala", "project/**/*.scala"]

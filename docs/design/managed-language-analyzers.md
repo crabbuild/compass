@@ -943,12 +943,18 @@ unrealizable. Published realizations remain immutable.
 | --- | --- | --- | --- | --- | --- | --- |
 | Native structural path | Available | Available | Available | Evidence pipeline | Evidence pipeline | Available |
 | Universal hard cut | Available | Available | Available | Qualifying; audit ongoing | Qualifying; audit ongoing | Available |
+
 | Offline SCIP ingestion | Generic | Generic | Generic | Generic | Generic | Calls projected |
 | Managed artifact runner | Planned | Planned | Not selected | Planned | Planned | Planned |
 | Native batch analyzer | Optional | Optional | Go types | Compiler API | Compiler API | JDT Core |
 | Interactive analyzer | Pyright | rust-analyzer | gopls | tsserver | tsserver | JDT LS |
 | Exact graph projection | Planned | Planned | Planned | After cutover | After cutover | Local calls available |
 | Dispatch qualification | Planned | Planned | Planned | Planned | Limited/planned | Planned |
+
+Swift, Dart, Scala, and Groovy are also hard-cut version-1 `Qualifying`
+pipelines. Their structural evidence is emitted by the bounded AST-first
+producer; Swift Vapor routing uses `vapor-swift`, while Dart framework
+conventions remain separately marked and source-bounded.
 
 This matrix describes architecture status, not release scheduling.
 
