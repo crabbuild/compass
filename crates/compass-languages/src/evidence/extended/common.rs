@@ -8,30 +8,67 @@
 //! language.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::marker::PhantomData;
 use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
-use super::model::{
+use super::super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
+use super::super::model::{
     BindingKind, CandidateRelation, EvidenceRange, LanguageCapability, ResolutionConstraint,
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
-use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
+use super::super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
 use crate::{UniversalEvidenceRegistry, file_stem, make_id};
 
 const MAX_TRAVERSAL_DEPTH: usize = 256;
 const MAX_TEXT_BYTES: usize = 4_096;
 
+/// Language-specific policy for the shared AST traversal.
+///
+/// The traversal owns the evidence contract and bounded bookkeeping; each
+/// language module supplies only its syntax profile and any language-specific
+/// source supplement. This keeps the production entry points separate without
+/// duplicating validation and relationship machinery.
+pub(super) trait LanguageProfile: Sized {
+    const LANGUAGE: &'static str;
+
+    fn package_name(_source: &[u8]) -> Option<String> {
+        None
+    }
+
+    fn declaration_kind(kind: &str) -> Option<&'static str> {
+        shared_declaration_kind(kind)
+    }
+
+    fn declaration_lookup_name(name: &str) -> String {
+        name.to_owned()
+    }
+
+    fn emits_module_declarations() -> bool {
+        false
+    }
+
+    fn has_source_supplement(_declaration_count: usize) -> bool {
+        false
+    }
+
+    fn collect_source_supplement<'source>(
+        _state: &mut State<'source, Self>,
+    ) -> Result<(), EvidenceError> {
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
-struct Decl {
-    id: String,
-    name: String,
-    qualified: String,
-    kind: String,
-    body_scope_id: String,
-    start: usize,
-    end: usize,
+pub(super) struct Decl {
+    pub(super) id: String,
+    pub(super) name: String,
+    pub(super) qualified: String,
+    pub(super) kind: String,
+    pub(super) body_scope_id: String,
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -40,15 +77,14 @@ struct Import {
     target: String,
 }
 
-struct State<'source> {
-    language: &'static str,
-    source: &'source [u8],
-    source_file: &'source str,
+pub(super) struct State<'source, P: LanguageProfile> {
+    pub(super) source: &'source [u8],
+    pub(super) source_file: &'source str,
     builder: EvidenceBuilder,
     file_id: String,
-    file_scope_id: String,
+    pub(super) file_scope_id: String,
     namespace: String,
-    declarations: Vec<Decl>,
+    pub(super) declarations: Vec<Decl>,
     by_node: BTreeMap<usize, usize>,
     by_terminal: BTreeMap<String, Vec<usize>>,
     by_qualified: BTreeMap<String, Vec<usize>>,
@@ -57,25 +93,28 @@ struct State<'source> {
     module_targets: BTreeSet<String>,
     emitted: BTreeSet<(SemanticRole, usize, usize, String)>,
     occurrence_ids: BTreeMap<(SemanticRole, usize, usize, String), String>,
+    _profile: PhantomData<P>,
 }
 
-pub(super) fn emit_tree_evidence(
+pub(super) fn emit_tree_evidence<P: LanguageProfile>(
     path: &Path,
     source_file: &str,
     source: &[u8],
     root: Node<'_>,
-    language: &'static str,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    let pipeline = UniversalEvidenceRegistry::pipeline(language).ok_or_else(|| {
+    let pipeline = UniversalEvidenceRegistry::pipeline(P::LANGUAGE).ok_or_else(|| {
         EvidenceError::new(
             EvidenceErrorCode::InvalidPipeline,
-            format!("{language} universal evidence pipeline is not registered"),
+            format!(
+                "{} universal evidence pipeline is not registered",
+                P::LANGUAGE
+            ),
         )
     })?;
     let file_range = range_for_file(source_file, source);
     let mut builder = EvidenceBuilder::new(
         pipeline,
-        format!("compass.languages.{language}.universal"),
+        format!("compass.languages.{}.universal", P::LANGUAGE),
         source_file,
         EvidenceLimits::default(),
     );
@@ -99,9 +138,8 @@ pub(super) fn emit_tree_evidence(
         return builder.finish();
     }
 
-    let namespace = package_name(language, source).unwrap_or_default();
+    let namespace = P::package_name(source).unwrap_or_default();
     let mut state = State {
-        language,
         source,
         source_file,
         builder,
@@ -117,6 +155,7 @@ pub(super) fn emit_tree_evidence(
         module_targets: BTreeSet::new(),
         emitted: BTreeSet::new(),
         occurrence_ids: BTreeMap::new(),
+        _profile: PhantomData,
     };
     if std::str::from_utf8(source).is_err() {
         state.builder.diagnose(
@@ -128,8 +167,8 @@ pub(super) fn emit_tree_evidence(
     }
     let root_scope = state.add_namespace(root)?;
     state.collect_declarations(root, None, &root_scope, 0)?;
-    if language == "groovy" && state.declarations.len() <= 1 {
-        state.collect_groovy_source()?;
+    if P::has_source_supplement(state.declarations.len()) {
+        P::collect_source_supplement(&mut state)?;
     }
     state.collect_imports(root, 0)?;
     state.collect_semantics(root, 0)?;
@@ -144,12 +183,12 @@ pub(super) fn emit_tree_evidence(
     state.builder.finish()
 }
 
-impl<'source> State<'source> {
+impl<'source, P: LanguageProfile> State<'source, P> {
     fn add_namespace(&mut self, root: Node<'_>) -> Result<String, EvidenceError> {
         if self.namespace.is_empty() || !self.supports(LanguageCapability::Namespaces) {
             return Ok(self.file_scope_id.clone());
         }
-        let graph_id = make_id(&[self.language, "namespace", &self.namespace]);
+        let graph_id = make_id(&[P::LANGUAGE, "namespace", &self.namespace]);
         let declaration_id = self.builder.declare_with_namespace(
             "namespace",
             &graph_id,
@@ -174,7 +213,7 @@ impl<'source> State<'source> {
             &self.namespace,
             ResolutionConstraint {
                 exact_target_declaration_id: Some(declaration_id),
-                exact_language: Some(self.language.to_owned()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
                 ..ResolutionConstraint::default()
             },
         )?;
@@ -199,16 +238,11 @@ impl<'source> State<'source> {
             .map(|decl| decl.qualified.clone())
             .unwrap_or_else(|| self.namespace.clone());
 
-        if let Some(kind) = declaration_kind(self.language, node.kind())
+        if let Some(kind) = P::declaration_kind(node.kind())
             && let Some(name_node) = declaration_name(node)
         {
             let name = self.text(name_node);
-            let lookup_name = if self.language == "dart" {
-                name.split_once('(')
-                    .map_or_else(|| name.clone(), |(base, _)| base.trim().to_owned())
-            } else {
-                name.clone()
-            };
+            let lookup_name = P::declaration_lookup_name(&name);
             // The Dart grammar exposes a method signature as the declaration
             // name child (for example ``clearLibraryContext()``).  Calls and
             // Analyzer source evidence carry the base name only; retaining
@@ -230,7 +264,7 @@ impl<'source> State<'source> {
                 {
                     let graph_id = make_id(&[
                         self.source_file,
-                        self.language,
+                        P::LANGUAGE,
                         kind,
                         &qualified,
                         &node.start_byte().to_string(),
@@ -272,7 +306,7 @@ impl<'source> State<'source> {
                         &name,
                         ResolutionConstraint {
                             exact_target_declaration_id: Some(declaration_id.clone()),
-                            exact_language: Some(self.language.to_owned()),
+                            exact_language: Some(P::LANGUAGE.to_owned()),
                             ..ResolutionConstraint::default()
                         },
                     )?;
@@ -310,109 +344,8 @@ impl<'source> State<'source> {
         Ok(())
     }
 
-    /// The pinned Groovy grammar intentionally exposes each top-level form as
-    /// a bounded `command` node.  Keep Groovy on the universal evidence route
-    /// by extracting the declaration/call spans from that command text rather
-    /// than reintroducing a raw graph fallback.  The scanner is line- and
-    /// brace-bounded, preserves exact byte ranges, and remains fail-closed for
-    /// ambiguous method spellings.
-    fn collect_groovy_source(&mut self) -> Result<(), EvidenceError> {
-        // A lossy conversion can expand one invalid source byte into multiple
-        // replacement bytes. Do not publish scanner offsets derived from it;
-        // tree-sitter evidence above remains available and this omission is
-        // reported as explicit incomplete input.
-        let Ok(text) = std::str::from_utf8(self.source) else {
-            return Ok(());
-        };
-        let mut depth = 0_i32;
-        let mut classes: Vec<(usize, usize, i32)> = Vec::new();
-        let mut method: Option<(usize, usize)> = None;
-        let mut line_start = 0_usize;
-        for line in text.split_inclusive('\n') {
-            let line_without_newline = line.trim_end_matches(['\r', '\n']);
-            let line_end = line_start.saturating_add(line_without_newline.len());
-            let trimmed = line_without_newline.trim();
-            while classes.last().is_some_and(|(_, end, _)| line_start >= *end) {
-                classes.pop();
-            }
-            if method.is_some_and(|(_, end)| line_start >= end) {
-                method = None;
-            }
-
-            let class_decl = groovy_type_declaration(trimmed);
-            if let Some((kind, name, name_offset)) = class_decl {
-                let parent = classes.last().map(|(index, _, _)| *index);
-                let parent_scope = parent
-                    .and_then(|index| self.declarations.get(index))
-                    .map_or(self.file_scope_id.as_str(), |decl| {
-                        decl.body_scope_id.as_str()
-                    })
-                    .to_owned();
-                let body_end = matching_brace_end(self.source, line_start, line_end);
-                let end = body_end.max(line_end);
-                if let Some(index) = self.add_source_declaration(
-                    kind,
-                    &name,
-                    line_start,
-                    end,
-                    line_start.saturating_add(name_offset),
-                    line_start
-                        .saturating_add(name_offset)
-                        .saturating_add(name.len()),
-                    parent,
-                    &parent_scope,
-                )? {
-                    classes.push((index, end, depth));
-                    self.emit_groovy_calls(line_start, line_end, index)?;
-                }
-                depth = depth.saturating_add(brace_delta(trimmed));
-                line_start = line_start.saturating_add(line.len());
-                continue;
-            }
-
-            let active_class = classes.last().map(|(index, _, _)| *index);
-            if let Some(class_index) = active_class
-                && let Some((name, constructor, name_offset)) = groovy_method_declaration(trimmed)
-            {
-                let parent_scope = self
-                    .declarations
-                    .get(class_index)
-                    .map_or(self.file_scope_id.as_str(), |decl| {
-                        decl.body_scope_id.as_str()
-                    })
-                    .to_owned();
-                let body_end = matching_brace_end(self.source, line_start, line_end);
-                let end = body_end.max(line_end);
-                let kind = if constructor { "constructor" } else { "method" };
-                if let Some(index) = self.add_source_declaration(
-                    kind,
-                    &name,
-                    line_start,
-                    end,
-                    line_start.saturating_add(name_offset),
-                    line_start
-                        .saturating_add(name_offset)
-                        .saturating_add(name.len()),
-                    Some(class_index),
-                    &parent_scope,
-                )? {
-                    method = Some((index, end));
-                    self.emit_groovy_calls(line_start, line_end, index)?;
-                }
-            } else if let Some((method_index, method_end)) = method
-                && line_start < method_end
-            {
-                self.emit_groovy_calls(line_start, line_end, method_index)?;
-            }
-
-            depth = depth.saturating_add(brace_delta(trimmed));
-            line_start = line_start.saturating_add(line.len());
-        }
-        Ok(())
-    }
-
     #[allow(clippy::too_many_arguments)]
-    fn add_source_declaration(
+    pub(super) fn add_source_declaration(
         &mut self,
         kind: &str,
         name: &str,
@@ -438,7 +371,7 @@ impl<'source> State<'source> {
         let qualified = join_name(prefix, name);
         let graph_id = make_id(&[
             self.source_file,
-            self.language,
+            P::LANGUAGE,
             kind,
             &qualified,
             &start.to_string(),
@@ -471,7 +404,7 @@ impl<'source> State<'source> {
             name,
             ResolutionConstraint {
                 exact_target_declaration_id: Some(declaration_id.clone()),
-                exact_language: Some(self.language.to_owned()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
                 ..ResolutionConstraint::default()
             },
         )?;
@@ -494,7 +427,7 @@ impl<'source> State<'source> {
         Ok(Some(index))
     }
 
-    fn emit_groovy_calls(
+    pub(super) fn emit_source_calls(
         &mut self,
         line_start: usize,
         line_end: usize,
@@ -577,8 +510,8 @@ impl<'source> State<'source> {
                 // Vapor/framework identity on the evidence route while the
                 // binding itself remains an exact, language-constrained
                 // import candidate.
-                if self.language == "swift" && self.module_targets.insert(target.clone()) {
-                    let module_id = make_id(&[self.source_file, self.language, "module", &target]);
+                if P::emits_module_declarations() && self.module_targets.insert(target.clone()) {
+                    let module_id = make_id(&[self.source_file, P::LANGUAGE, "module", &target]);
                     let module_declaration = self.builder.declare(
                         "module",
                         &module_id,
@@ -596,7 +529,7 @@ impl<'source> State<'source> {
                         &spelling,
                         ResolutionConstraint {
                             exact_target_declaration_id: Some(module_declaration),
-                            exact_language: Some(self.language.to_owned()),
+                            exact_language: Some(P::LANGUAGE.to_owned()),
                             ..ResolutionConstraint::default()
                         },
                     )?;
@@ -643,7 +576,7 @@ impl<'source> State<'source> {
                     Some(&binding_id),
                     &spelling,
                     ResolutionConstraint {
-                        exact_language: Some(self.language.to_owned()),
+                        exact_language: Some(P::LANGUAGE.to_owned()),
                         qualified_name: Some(target.clone()),
                         allow_external: true,
                         ..ResolutionConstraint::default()
@@ -775,7 +708,7 @@ impl<'source> State<'source> {
             spelling,
             ResolutionConstraint {
                 exact_target_declaration_id: exact.map(|index| self.declarations[index].id.clone()),
-                exact_language: Some(self.language.to_owned()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
                 qualified_name,
                 allowed_target_kinds: allowed,
                 allow_external: exact.is_none(),
@@ -834,7 +767,7 @@ impl<'source> State<'source> {
             &spelling,
             ResolutionConstraint {
                 exact_target_declaration_id: exact.map(|index| self.declarations[index].id.clone()),
-                exact_language: Some(self.language.to_owned()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
                 qualified_name: qualifier
                     .as_ref()
                     .map(|prefix| format!("{prefix}.{spelling}")),
@@ -883,7 +816,7 @@ impl<'source> State<'source> {
             None,
             spelling,
             ResolutionConstraint {
-                exact_language: Some(self.language.to_owned()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
                 qualified_name: Some(format!("{qualifier}.{spelling}")),
                 allowed_target_kinds: vec![
                     "field".to_owned(),
@@ -926,7 +859,7 @@ impl<'source> State<'source> {
             None,
             spelling,
             ResolutionConstraint {
-                exact_language: Some(self.language.to_owned()),
+                exact_language: Some(P::LANGUAGE.to_owned()),
                 allow_external: true,
                 ..ResolutionConstraint::default()
             },
@@ -997,7 +930,7 @@ impl<'source> State<'source> {
     }
 
     fn supports(&self, capability: LanguageCapability) -> bool {
-        UniversalEvidenceRegistry::pipeline(self.language)
+        UniversalEvidenceRegistry::pipeline(P::LANGUAGE)
             .is_some_and(|pipeline| pipeline.producer.capabilities.contains(&capability))
     }
 
@@ -1036,7 +969,7 @@ impl<'source> State<'source> {
     }
 }
 
-fn declaration_kind(language: &str, kind: &str) -> Option<&'static str> {
+pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
     if matches!(
         kind,
         "source_file"
@@ -1109,12 +1042,6 @@ fn declaration_kind(language: &str, kind: &str) -> Option<&'static str> {
     if lower.contains("property") || lower.contains("field") {
         return Some("field");
     }
-    if language == "scala" && (lower.contains("val_") || lower.contains("var_")) {
-        return Some("field");
-    }
-    if language == "dart" && lower == "variable_declaration" {
-        return Some("field");
-    }
     None
 }
 
@@ -1138,7 +1065,7 @@ fn declaration_name(node: Node<'_>) -> Option<Node<'_>> {
     })
 }
 
-fn valid_name(value: &str) -> bool {
+pub(super) fn valid_name(value: &str) -> bool {
     let value = value.trim();
     !value.is_empty()
         && value.len() <= 512
@@ -1180,10 +1107,7 @@ fn join_name(prefix: &str, name: &str) -> String {
     }
 }
 
-fn package_name(language: &str, source: &[u8]) -> Option<String> {
-    if language == "swift" || language == "dart" {
-        return None;
-    }
+pub(super) fn package_name_from_source(source: &[u8]) -> Option<String> {
     let text = std::str::from_utf8(source).ok()?;
     for line in text.lines().take(128) {
         let line = line.trim();
@@ -1332,111 +1256,6 @@ fn is_member_node(kind: &str) -> bool {
 fn is_decorator_node(kind: &str) -> bool {
     let lower = kind.to_ascii_lowercase();
     lower.contains("annotation") || lower.contains("decorator") || lower == "attribute_list"
-}
-
-fn groovy_type_declaration(line: &str) -> Option<(&'static str, String, usize)> {
-    let tokens = line
-        .split_whitespace()
-        .map(|token| token.trim_matches(['@', '{', ';', ',']))
-        .collect::<Vec<_>>();
-    for (index, token) in tokens.iter().enumerate() {
-        let kind = match *token {
-            "class" => "class",
-            "interface" => "interface",
-            "trait" => "trait",
-            "enum" => "enum",
-            _ => continue,
-        };
-        let name = tokens
-            .get(index.saturating_add(1))?
-            .trim_matches(['{', ';']);
-        if !valid_name(name) {
-            return None;
-        }
-        let offset = line.find(name)?;
-        return Some((kind, name.to_owned(), offset));
-    }
-    None
-}
-
-fn groovy_method_declaration(line: &str) -> Option<(String, bool, usize)> {
-    let open = line.find('(')?;
-    let before = line.get(..open)?.trim_end();
-    let name_end = before.len();
-    let name_start = before
-        .char_indices()
-        .rev()
-        .find(|(_, character)| !character.is_ascii_alphanumeric() && *character != '_')
-        .map_or(0, |(index, _)| index.saturating_add(1));
-    let name = before.get(name_start..name_end)?.trim();
-    if !valid_name(name)
-        || matches!(
-            name,
-            "if" | "for" | "while" | "switch" | "catch" | "try" | "return" | "assert"
-        )
-    {
-        return None;
-    }
-    let constructor = name.chars().next().is_some_and(char::is_uppercase);
-    let has_return_shape = before[..name_start]
-        .split_whitespace()
-        .any(|token| token == "def" || !token.is_empty());
-    (has_return_shape || constructor).then(|| (name.to_owned(), constructor, name_start))
-}
-
-fn brace_delta(line: &str) -> i32 {
-    let mut delta = 0_i32;
-    let mut quote = None;
-    for character in line.chars() {
-        if let Some(active) = quote {
-            if character == active {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(character, '\'' | '"') {
-            quote = Some(character);
-        } else if character == '{' {
-            delta = delta.saturating_add(1);
-        } else if character == '}' {
-            delta = delta.saturating_sub(1);
-        }
-    }
-    delta
-}
-
-fn matching_brace_end(source: &[u8], line_start: usize, line_end: usize) -> usize {
-    let Some(open) = source
-        .get(line_start..line_end)
-        .and_then(|line| line.iter().position(|byte| *byte == b'{'))
-        .map(|offset| line_start.saturating_add(offset))
-    else {
-        return line_end;
-    };
-    let mut depth = 0_i32;
-    let mut quote = None;
-    for (offset, byte) in source.iter().enumerate().skip(open) {
-        let character = char::from(*byte);
-        if let Some(active) = quote {
-            if character == active {
-                quote = None;
-            }
-            continue;
-        }
-        if matches!(character, '\'' | '"') {
-            quote = Some(character);
-            continue;
-        }
-        if character == '{' {
-            depth = depth.saturating_add(1);
-        } else if character == '}' {
-            depth = depth.saturating_sub(1);
-            if depth == 0 {
-                return offset.saturating_add(1);
-            }
-        }
-    }
-    source.len()
 }
 
 fn is_identifier_start(byte: u8) -> bool {
