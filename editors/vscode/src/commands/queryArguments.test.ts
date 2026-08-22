@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAskArgs,
+  buildCompletionArgs,
   buildCqlArgs,
   buildExplainArgs
 } from "./queryArguments";
@@ -34,6 +35,33 @@ describe("buildExplainArgs", () => {
       "explain", "crate::Checkout::run",
       "--graph", "/repo/compass-out/graph.json"
     ]);
+  });
+});
+
+describe("buildCompletionArgs", () => {
+  it("runs a tightly bounded typed search against the working graph", () => {
+    expect(buildCompletionArgs({
+      term: "Payment",
+      graph: "/repo/compass-out/graph.json"
+    })).toEqual([
+      "search", "Payment",
+      "--max-depth", "1",
+      "--max-nodes", "8",
+      "--max-edges", "1",
+      "--max-paths", "1",
+      "--max-candidates", "8",
+      "--max-source-bytes", "1",
+      "--max-response-bytes", "1048576",
+      "--graph", "/repo/compass-out/graph.json",
+      "--format", "json"
+    ]);
+  });
+
+  it("searches the selected immutable revision without mixing graph sources", () => {
+    expect(buildCompletionArgs({ term: "Payment", revision: "HEAD~2" }))
+      .toEqual(expect.arrayContaining([
+        "search", "Payment", "--max-depth", "1", "--at", "HEAD~2", "--format", "json"
+      ]));
   });
 });
 

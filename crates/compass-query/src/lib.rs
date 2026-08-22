@@ -181,6 +181,65 @@ mod tests {
     }
 
     #[test]
+    fn explanation_resolves_the_qualified_name_returned_by_search() -> Result<(), Box<dyn Error>> {
+        let graph = load(
+            r#"{
+                "directed": true, "multigraph": true, "graph": {},
+                "nodes": [{
+                    "id": "sha256:qualified",
+                    "kind": "method",
+                    "name": ".Start()",
+                    "qualifiedName": "cmd/daemon.pinger::Start",
+                    "source": {
+                        "file": "cmd/daemon/daemon_test.go",
+                        "startByte": 2204,
+                        "endByte": 2303,
+                        "startLine": 129,
+                        "startColumn": 0,
+                        "endLine": 131,
+                        "endColumn": 1
+                    }
+                }],
+                "links": []
+            }"#,
+        )?;
+
+        let output = render_explanation(&graph, "cmd/daemon.pinger::Start", &HashMap::new());
+
+        assert!(output.contains("ID:        sha256:qualified"), "{output}");
+        assert!(!output.contains("No node matching"), "{output}");
+        Ok(())
+    }
+
+    #[test]
+    fn explanation_preserves_qualified_name_ambiguity() -> Result<(), Box<dyn Error>> {
+        let graph = load(
+            r#"{
+                "directed": true, "multigraph": true, "graph": {},
+                "nodes": [{
+                    "id": "first", "kind": "method", "name": ".Start()",
+                    "qualifiedName": "daemon.Manager::Start",
+                    "source": {"file": "daemon/first.go", "startByte": 0, "endByte": 4,
+                        "startLine": 1, "startColumn": 0, "endLine": 1, "endColumn": 4}
+                }, {
+                    "id": "second", "kind": "method", "name": ".Start()",
+                    "qualifiedName": "daemon.Manager::Start",
+                    "source": {"file": "daemon/second.go", "startByte": 0, "endByte": 4,
+                        "startLine": 1, "startColumn": 0, "endLine": 1, "endColumn": 4}
+                }],
+                "links": []
+            }"#,
+        )?;
+
+        let output = render_explanation(&graph, "daemon.Manager::Start", &HashMap::new());
+
+        assert!(output.contains("Ambiguous:"), "{output}");
+        assert!(output.contains("daemon/first.go"), "{output}");
+        assert!(output.contains("daemon/second.go"), "{output}");
+        Ok(())
+    }
+
+    #[test]
     fn natural_query_prefers_declarations_and_renders_relationship_sites()
     -> Result<(), Box<dyn Error>> {
         let graph = load(

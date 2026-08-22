@@ -7,11 +7,17 @@ import {
 } from "@compass/viewer";
 import {
   buildAskArgs,
+  buildCompletionArgs,
   buildCqlArgs,
   buildExplainArgs
 } from "../commands/queryArguments";
 import type { RepositorySession } from "../workspace/repositorySession";
 import { queryFailureMessage } from "./queryExecution";
+import {
+  graphCompletionItems,
+  validGraphCompletionNodeId,
+  validGraphCompletionTerm
+} from "./queryCompletions";
 import { openGraphSource } from "./sourceNavigation";
 
 export async function openQueryPanel(
@@ -30,7 +36,11 @@ export async function openQueryPanel(
     }
   );
   let active: { id: string; controller: AbortController } | undefined;
-  panel.onDidDispose(() => active?.controller.abort());
+  let completion: { id: string; controller: AbortController } | undefined;
+  panel.onDidDispose(() => {
+    active?.controller.abort();
+    completion?.controller.abort();
+  });
   panel.webview.html = html(context, panel.webview);
   panel.webview.onDidReceiveMessage(async (message) => {
     if (message?.type === "ready") {
@@ -44,6 +54,87 @@ export async function openQueryPanel(
         current.controller.abort();
         active = undefined;
         await panel.webview.postMessage({ type: "cancelled", runId: message.runId });
+      }
+      return;
+    }
+    if (message?.type === "cancelCompletion") {
+      const current = completion;
+      if (!current || current.id !== message.requestId) return;
+      current.controller.abort();
+      completion = undefined;
+      await panel.webview.postMessage({
+        type: "completionCancelled",
+        requestId: current.id
+      });
+      return;
+    }
+    if (message?.type === "complete") {
+      const requestId = typeof message.request?.id === "string"
+        ? message.request.id
+        : undefined;
+      const command = message.request?.command;
+      const term = validGraphCompletionTerm(message.request?.term);
+      if (!requestId || !["ask", "explain", "cql"].includes(command) || !term) return;
+      if (completion) {
+        const previous = completion;
+        previous.controller.abort();
+        completion = undefined;
+        await panel.webview.postMessage({
+          type: "completionCancelled",
+          requestId: previous.id
+        });
+      }
+      const controller = new AbortController();
+      completion = { id: requestId, controller };
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 4000);
+      try {
+        const args = buildCompletionArgs({
+          term,
+          graph: revision ? undefined : session.graphPath,
+          revision
+        });
+        const result = await session.processes.run(
+          session.root,
+          args,
+          controller.signal,
+          { stdoutBytes: 1024 * 1024, stderrBytes: 64 * 1024 }
+        );
+        if (controller.signal.aborted) {
+          if (timedOut) {
+            await panel.webview.postMessage({
+              type: "completionError",
+              requestId,
+              message: "Code graph search timed out."
+            });
+          }
+          return;
+        }
+        if (result.code !== 0) {
+          throw new QueryProcessError(result.stderr || result.stdout, result.code);
+        }
+        const response = CodeQueryResponseSchema.parse(JSON.parse(result.stdout));
+        await panel.webview.postMessage({
+          type: "completions",
+          requestId,
+          items: graphCompletionItems(response)
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error("[compass-query:completion] failed", error);
+        await panel.webview.postMessage({
+          type: "completionError",
+          requestId,
+          message: error instanceof QueryProcessError
+            ? queryFailureMessage(error.output, error.exitCode)
+            : "Compass returned graph suggestions this extension could not read."
+        });
+      } finally {
+        clearTimeout(timer);
+        if (completion?.controller === controller) completion = undefined;
       }
       return;
     }
@@ -67,6 +158,15 @@ export async function openQueryPanel(
       || !["ask", "explain", "cql"].includes(message.request?.command)
       || typeof message.request.id !== "string"
       || typeof message.request.query !== "string") return;
+    if (completion) {
+      const previous = completion;
+      previous.controller.abort();
+      completion = undefined;
+      await panel.webview.postMessage({
+        type: "completionCancelled",
+        requestId: previous.id
+      });
+    }
     if (active) {
       const previous = active;
       previous.controller.abort();
@@ -74,6 +174,7 @@ export async function openQueryPanel(
     }
     const controller = new AbortController();
     const request = message.request as QuerySubmission & { id: string };
+    const resolvedNodeId = validGraphCompletionNodeId(request.resolvedNodeId);
     active = { id: request.id, controller };
     const started = performance.now();
     try {
@@ -87,7 +188,7 @@ export async function openQueryPanel(
           ...selection
         })
         : request.command === "explain"
-          ? buildExplainArgs({ query: request.query, ...selection })
+          ? buildExplainArgs({ query: resolvedNodeId ?? request.query, ...selection })
           : buildAskArgs({ query: request.query, ...selection });
       const result = await session.processes.run(session.root, args, controller.signal);
       if (controller.signal.aborted) return;
