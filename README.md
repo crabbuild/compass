@@ -33,6 +33,22 @@ large codebase
 less searching, smaller context, traceable evidence
 ```
 
+## What Compass gives you
+
+Compass covers the path from repository orientation to verified automation:
+
+| Need | Compass capability |
+| --- | --- |
+| Understand an unfamiliar repository | Communities, architecture reports, god-node detection, and interactive HTML |
+| Find implementation paths | Natural-language graph discovery, symbol explanations, and directed paths |
+| Estimate change impact | Reverse dependency traversal and version-to-version topology diffs |
+| Automate structural checks | Deterministic, read-only [CompassQL](docs/COMPASSQL.md) with JSON and JSONL output |
+| Ask questions about old revisions | Immutable graph realizations for exact Git commits |
+| Give assistants focused context | Native skills, hooks, MCP serving, and compact graph queries |
+| Connect other tools | Graph JSON, GraphML, SVG, Wiki, Obsidian, Neo4j, FalkorDB, and other exports |
+
+Structural extraction and graph queries run locally. They do not require Python, embeddings, a vector database, model credentials, or runtime parser downloads.
+
 ## See the graph before you open every file
 
 Compass exports a self-contained workbench. Move from a repository map to subsystem flow, call evidence, or bounded dependency neighborhoods without changing snapshots.
