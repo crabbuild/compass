@@ -26,14 +26,19 @@ impl LanguageProfile for Swift {
                 .get(node.start_byte()..node.end_byte())
                 .and_then(|bytes| std::str::from_utf8(bytes).ok())
         {
-            let keyword = text.split_whitespace().next().unwrap_or_default();
-            if keyword == "enum" {
+            let header = text.split('{').next().unwrap_or(text);
+            let has_keyword = |keyword: &str| {
+                header
+                    .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                    .any(|token| token == keyword)
+            };
+            if has_keyword("enum") {
                 return Some("enum");
             }
-            if keyword == "struct" {
+            if has_keyword("struct") {
                 return Some("struct");
             }
-            if keyword == "extension" {
+            if has_keyword("extension") {
                 return Some("extension");
             }
         }

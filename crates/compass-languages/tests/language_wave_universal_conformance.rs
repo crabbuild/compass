@@ -281,6 +281,34 @@ class Generated {}
 }
 
 #[test]
+fn dart_instance_fields_publish_field_declarations() -> Result<(), Box<dyn Error>> {
+    let source = br#"library wave;
+class UserStore {
+  final String value, other;
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("lib/store.dart"),
+        "lib/store.dart",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    for field in ["value", "other"] {
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.kind == "field"
+                    && declaration.qualified_name == format!("wave.UserStore.{field}")),
+            "missing Dart instance field declaration {field}: {:#?}",
+            evidence.declarations
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn dart_base_types_do_not_create_phantom_declarations() -> Result<(), Box<dyn Error>> {
     let source = br#"library wave;
 abstract class Store { void save(); }
@@ -332,7 +360,7 @@ protocol Renderable {}
 class Box: Renderable {}
 struct Widget: Renderable {}
 enum State { case ready, done }
-extension Box { func render() {} }
+public extension Box { func render() {} }
 typealias Alias = Box
 "#;
     let path = Path::new("Sources/Models.swift");

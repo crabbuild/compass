@@ -32,6 +32,14 @@ impl LanguageProfile for Scala {
         true
     }
 
+    fn prefers_constructor_declarations() -> bool {
+        true
+    }
+
+    fn supports_implicit_constructors() -> bool {
+        true
+    }
+
     fn collect_source_supplement<'source>(
         state: &mut super::shared::State<'source, Self>,
     ) -> Result<(), EvidenceError> {
@@ -178,6 +186,17 @@ fn collect_scala_receiver_calls<'source>(
             let Some(owner) = state.source_callable_owner_for(start) else {
                 continue;
             };
+            if call.constructor {
+                state.emit_source_local_call(
+                    Some(owner),
+                    &call.spelling,
+                    call.qualifier.as_deref(),
+                    start,
+                    end,
+                    true,
+                )?;
+                continue;
+            }
             let receiver = call
                 .qualifier
                 .as_deref()
@@ -222,6 +241,7 @@ struct ScalaCall {
     spelling: String,
     start: usize,
     end: usize,
+    constructor: bool,
 }
 
 fn scala_calls(line: &str) -> Vec<ScalaCall> {
@@ -243,12 +263,13 @@ fn scala_calls(line: &str) -> Vec<ScalaCall> {
         if bytes.get(lookahead) == Some(&b'(') {
             let spelling = &line[first_start..first_end];
             let previous = previous_scala_word(bytes, first_start);
-            if !scala_call_keyword(spelling) && previous != Some("def") && previous != Some("new") {
+            if !scala_call_keyword(spelling) && previous != Some("def") {
                 calls.push(ScalaCall {
                     qualifier: None,
                     spelling: spelling.to_owned(),
                     start: first_start,
                     end: first_end,
+                    constructor: previous == Some("new"),
                 });
             }
             continue;
@@ -283,6 +304,7 @@ fn scala_calls(line: &str) -> Vec<ScalaCall> {
                         spelling: spelling.to_owned(),
                         start: last_start,
                         end: last_end,
+                        constructor: previous_scala_word(bytes, qualifier_start) == Some("new"),
                     });
                 }
                 cursor = last_end;

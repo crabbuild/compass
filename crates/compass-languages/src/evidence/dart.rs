@@ -25,6 +25,49 @@ impl LanguageProfile for Dart {
             .or_else(|| (lower == "variable_declaration").then_some("field"))
     }
 
+    fn declaration_kind_for_node(node: Node<'_>, _source: &[u8]) -> Option<&'static str> {
+        if node.kind() == "declaration"
+            && node.parent().is_some_and(|parent| {
+                matches!(
+                    parent.kind(),
+                    "class_body" | "extension_body" | "mixin_body" | "enum_body"
+                )
+            })
+            && node
+                .named_children(&mut node.walk())
+                .any(|child| child.kind() == "initialized_identifier_list")
+        {
+            return Some("field");
+        }
+        Self::declaration_kind(node.kind())
+    }
+
+    fn declaration_name_nodes_for_node(node: Node<'_>) -> Vec<Node<'_>> {
+        if node.kind() == "declaration" {
+            let mut cursor = node.walk();
+            if let Some(list) = node
+                .named_children(&mut cursor)
+                .find(|child| child.kind() == "initialized_identifier_list")
+            {
+                let mut names = Vec::new();
+                let mut list_cursor = list.walk();
+                for initialized in list.named_children(&mut list_cursor) {
+                    let mut initialized_cursor = initialized.walk();
+                    if let Some(identifier) = initialized
+                        .named_children(&mut initialized_cursor)
+                        .find(|child| child.kind() == "identifier")
+                    {
+                        names.push(identifier);
+                    }
+                }
+                if !names.is_empty() {
+                    return names;
+                }
+            }
+        }
+        shared::declaration_name(node).into_iter().collect()
+    }
+
     fn ignores_declaration(_node: Node<'_>, name_node: Node<'_>, source: &[u8]) -> bool {
         let prefix = source.get(..name_node.start_byte()).unwrap_or_default();
         prefix

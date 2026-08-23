@@ -374,6 +374,7 @@ final class UserStore extends Store {
   def route(): Unit = save("users")
 }
 extension (store: UserStore) def repeated(): Unit = { store.save("a"); store.save("b") }
+object UserStore { def apply(): UserStore = new UserStore() }
 "#;
     let source_file = "src/Module.scala";
     let extracted = Engine::default()
@@ -393,6 +394,8 @@ extension (store: UserStore) def repeated(): Unit = { store.save("a"); store.sav
     let save = node("wave.UserStore.save").ok_or("missing UserStore.save")?;
     let route = node("wave.UserStore.route").ok_or("missing UserStore.route")?;
     let repeated = node("wave.repeated").ok_or("missing repeated extension")?;
+    let apply = node("wave.UserStore.apply").ok_or("missing UserStore.apply")?;
+    let user_store = node("wave.UserStore").ok_or("missing UserStore class")?;
     assert!(resolved.edges.iter().any(|edge| {
         edge.source == route.id && edge.target == save.id && edge.string("relation") == "calls"
     }));
@@ -408,6 +411,14 @@ extension (store: UserStore) def repeated(): Unit = { store.save("a"); store.sav
             .count()
             >= 2,
         "missing repeated extension dispatch edges"
+    );
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.source == apply.id
+                && edge.target == user_store.id
+                && matches!(edge.string("relation").as_str(), "calls" | "instantiates")
+        }),
+        "missing Scala companion construction edge"
     );
     Ok(())
 }

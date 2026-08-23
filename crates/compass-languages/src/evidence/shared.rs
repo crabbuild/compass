@@ -46,6 +46,10 @@ pub(super) trait LanguageProfile: Sized {
         Self::declaration_kind(node.kind())
     }
 
+    fn declaration_name_nodes_for_node(node: Node<'_>) -> Vec<Node<'_>> {
+        declaration_name(node).into_iter().collect()
+    }
+
     fn ignores_declaration(_node: Node<'_>, _name_node: Node<'_>, _source: &[u8]) -> bool {
         false
     }
@@ -326,101 +330,103 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             .map(|decl| decl.qualified.clone())
             .unwrap_or_else(|| self.namespace.clone());
 
-        if let Some(kind) = P::declaration_kind_for_node(node, self.source)
-            && let Some(name_node) = declaration_name(node)
-            && !P::ignores_declaration(node, name_node, self.source)
-        {
-            let name = self.text(name_node);
-            let lookup_name = P::declaration_lookup_name(&name);
-            // The Dart grammar exposes a method signature as the declaration
-            // name child (for example ``clearLibraryContext()``).  Calls and
-            // Analyzer source evidence carry the base name only; retaining
-            // the punctuation makes an otherwise exact lexical target look
-            // unresolved.  Preserve the parser spelling for declaration
-            // identity and index a separate base-name alias for lookup; this
-            // keeps overloads and stable declaration IDs distinct.
-            if valid_name(&lookup_name)
-                && !self
-                    .name_ranges
-                    .contains(&(name_node.start_byte(), name_node.end_byte()))
-            {
-                let qualified = join_name(&prefix, &name);
-                let key = (node.start_byte(), node.end_byte(), name.clone());
-                if !self
-                    .declarations
-                    .iter()
-                    .any(|decl| (decl.start, decl.end) == (key.0, key.1) && decl.name == key.2)
+        if let Some(kind) = P::declaration_kind_for_node(node, self.source) {
+            for name_node in P::declaration_name_nodes_for_node(node) {
+                if P::ignores_declaration(node, name_node, self.source) {
+                    continue;
+                }
+                let name = self.text(name_node);
+                let lookup_name = P::declaration_lookup_name(&name);
+                // The Dart grammar exposes a method signature as the declaration
+                // name child (for example ``clearLibraryContext()``).  Calls and
+                // Analyzer source evidence carry the base name only; retaining
+                // the punctuation makes an otherwise exact lexical target look
+                // unresolved.  Preserve the parser spelling for declaration
+                // identity and index a separate base-name alias for lookup; this
+                // keeps overloads and stable declaration IDs distinct.
+                if valid_name(&lookup_name)
+                    && !self
+                        .name_ranges
+                        .contains(&(name_node.start_byte(), name_node.end_byte()))
                 {
-                    let graph_id = make_id(&[
-                        self.source_file,
-                        P::LANGUAGE,
-                        kind,
-                        &qualified,
-                        &node.start_byte().to_string(),
-                        &node.end_byte().to_string(),
-                    ]);
-                    let declaration_id = self.builder.declare(
-                        kind,
-                        &graph_id,
-                        &name,
-                        &qualified,
-                        if self.namespace.is_empty() {
-                            None
-                        } else {
-                            Some(&self.namespace)
-                        },
-                        Some(parent_scope),
-                        range_for_node(self.source_file, node),
-                    )?;
-                    let opens_scope = opens_scope(kind);
-                    let body_scope_id = if opens_scope {
-                        self.builder.open_scope(
-                            scope_kind(kind),
-                            Some(&declaration_id),
+                    let qualified = join_name(&prefix, &name);
+                    let key = (node.start_byte(), node.end_byte(), name.clone());
+                    if !self
+                        .declarations
+                        .iter()
+                        .any(|decl| (decl.start, decl.end) == (key.0, key.1) && decl.name == key.2)
+                    {
+                        let graph_id = make_id(&[
+                            self.source_file,
+                            P::LANGUAGE,
+                            kind,
+                            &qualified,
+                            &node.start_byte().to_string(),
+                            &node.end_byte().to_string(),
+                        ]);
+                        let declaration_id = self.builder.declare(
+                            kind,
+                            &graph_id,
+                            &name,
+                            &qualified,
+                            if self.namespace.is_empty() {
+                                None
+                            } else {
+                                Some(&self.namespace)
+                            },
                             Some(parent_scope),
                             range_for_node(self.source_file, node),
-                        )?
-                    } else {
-                        parent_scope.to_owned()
-                    };
-                    let source_id = parent_decl
-                        .and_then(|index| self.declarations.get(index))
-                        .map_or(self.file_id.as_str(), |decl| decl.id.as_str())
-                        .to_owned();
-                    self.builder.relate(
-                        CandidateRelation::Owns,
-                        &source_id,
-                        None,
-                        None,
-                        &name,
-                        ResolutionConstraint {
-                            exact_target_declaration_id: Some(declaration_id.clone()),
-                            exact_language: Some(P::LANGUAGE.to_owned()),
-                            ..ResolutionConstraint::default()
-                        },
-                    )?;
-                    let index = self.declarations.len();
-                    let decl = Decl {
-                        id: declaration_id,
-                        name: name.clone(),
-                        qualified: qualified.clone(),
-                        kind: kind.to_owned(),
-                        body_scope_id: body_scope_id.clone(),
-                        start: node.start_byte(),
-                        end: node.end_byte(),
-                    };
-                    self.name_ranges
-                        .insert((name_node.start_byte(), name_node.end_byte()));
-                    self.by_node.insert(node.id(), index);
-                    self.by_terminal.entry(name).or_default().push(index);
-                    if lookup_name != decl.name {
-                        self.by_terminal.entry(lookup_name).or_default().push(index);
-                    }
-                    self.by_qualified.entry(qualified).or_default().push(index);
-                    self.declarations.push(decl);
-                    if opens_scope {
-                        owner = Some(index);
-                        scope = body_scope_id;
+                        )?;
+                        let opens_scope = opens_scope(kind);
+                        let body_scope_id = if opens_scope {
+                            self.builder.open_scope(
+                                scope_kind(kind),
+                                Some(&declaration_id),
+                                Some(parent_scope),
+                                range_for_node(self.source_file, node),
+                            )?
+                        } else {
+                            parent_scope.to_owned()
+                        };
+                        let source_id = parent_decl
+                            .and_then(|index| self.declarations.get(index))
+                            .map_or(self.file_id.as_str(), |decl| decl.id.as_str())
+                            .to_owned();
+                        self.builder.relate(
+                            CandidateRelation::Owns,
+                            &source_id,
+                            None,
+                            None,
+                            &name,
+                            ResolutionConstraint {
+                                exact_target_declaration_id: Some(declaration_id.clone()),
+                                exact_language: Some(P::LANGUAGE.to_owned()),
+                                ..ResolutionConstraint::default()
+                            },
+                        )?;
+                        let index = self.declarations.len();
+                        let decl = Decl {
+                            id: declaration_id,
+                            name: name.clone(),
+                            qualified: qualified.clone(),
+                            kind: kind.to_owned(),
+                            body_scope_id: body_scope_id.clone(),
+                            start: node.start_byte(),
+                            end: node.end_byte(),
+                        };
+                        self.name_ranges
+                            .insert((name_node.start_byte(), name_node.end_byte()));
+                        self.by_node.insert(node.id(), index);
+                        self.by_terminal.entry(name).or_default().push(index);
+                        if lookup_name != decl.name {
+                            self.by_terminal.entry(lookup_name).or_default().push(index);
+                        }
+                        self.by_qualified.entry(qualified).or_default().push(index);
+                        self.declarations.push(decl);
+                        if opens_scope {
+                            owner = Some(index);
+                            scope = body_scope_id;
+                        }
                     }
                 }
             }
@@ -1582,7 +1588,7 @@ pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
     None
 }
 
-fn declaration_name(node: Node<'_>) -> Option<Node<'_>> {
+pub(super) fn declaration_name(node: Node<'_>) -> Option<Node<'_>> {
     for field in ["name", "identifier", "declarator"] {
         if let Some(child) = node.child_by_field_name(field) {
             return Some(child);
