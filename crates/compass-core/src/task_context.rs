@@ -230,19 +230,18 @@ impl TaskContext {
                 self.work.response_bytes
             )));
         }
-        if let Some(agent) = &self.agent_knowledge {
-            if agent.schema != "compass.agent-knowledge/1"
+        if let Some(agent) = &self.agent_knowledge
+            && (agent.schema != "compass.agent-knowledge/1"
                 || agent.effective_identity.as_str() != self.graph_identity
                 || agent
                     .assertions
                     .len()
                     .saturating_add(agent.challenges.len())
-                    > MAX_KNOWLEDGE_ITEMS as usize
-            {
-                return Err(TaskContextError::InvalidResult(
-                    "Agent knowledge identity, schema, or record bound is invalid".to_owned(),
-                ));
-            }
+                    > MAX_KNOWLEDGE_ITEMS as usize)
+        {
+            return Err(TaskContextError::InvalidResult(
+                "Agent knowledge identity, schema, or record bound is invalid".to_owned(),
+            ));
         }
         Ok(())
     }
