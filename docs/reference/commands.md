@@ -345,10 +345,13 @@ compass context explain|modify|debug|test TARGET
   [--max-knowledge-items N] [--max-response-bytes N]
 ```
 
-Emits `compass.task-context/1` after exact target resolution. It composes
-digest-verified source, exact calls, related tests, bounded impact, and
-identity-linked reflection memory. Ambiguous and fuzzy-only targets retain
-candidates but do not compose structural evidence.
+Emits `compass.task-context/2` after exact target resolution. It composes
+digest-verified source, exact calls, related tests, bounded impact, typed
+framework context, and identity-linked reflection memory. The framework
+context includes pack/version and qualification state, routes and stages,
+render direction, runtime boundaries, configuration dependencies, provenance,
+ambiguity, and truncation. Ambiguous and fuzzy-only targets retain candidates
+but do not compose structural evidence.
 
 ### `tree`
 
@@ -892,6 +895,34 @@ report. Guided writers accept `--events jsonl`; stdout then contains
 
 `json` is the canonical versioned graph-presentation export. `viewer-json`
 remains accepted as a deprecated compatibility alias.
+
+## Grounded Agent Graph overlays
+
+```text
+compass agent-graph status [OPTIONS]
+compass agent-graph apply --request FILE --enable-writes [OPTIONS]
+compass agent-graph show ASSERTION_ID [OPTIONS]
+compass agent-graph history [OPTIONS]
+compass agent-graph audit --revision REVISION [OPTIONS]
+compass agent-graph diff OLD_REVISION NEW_REVISION [OPTIONS]
+compass agent-graph query --revision REVISION --cql QUERY [OPTIONS]
+compass agent-graph export --revision REVISION --output FILE [OPTIONS]
+compass agent-graph rebase-plan --revision SOURCE_REVISION [OPTIONS]
+compass agent-graph rebase-commit --request FILE --enable-writes [OPTIONS]
+```
+
+Common selectors are `--root`, `--overlay`, `--revision`, `--profile
+augment|curated`, and `--format text|json`. Select the current Base Generation
+with `--graph`, or an exact immutable historical Base Generation with
+`--realization`; these selectors are mutually exclusive. Non-Git current-tree
+use requires `--state-root`. Writes are disabled unless the invocation includes
+`--enable-writes`; curated masks additionally require `--allow-masks`.
+
+Apply accepts `compass.agent-graph.batch/1`; rebase commit accepts
+`compass.agent-graph.rebase-commit/1`. Query remains read-only CompassQL.
+Export writes a self-describing `compass.agent-graph.effective/1` document and
+refuses an unsafe or existing destination. Usage errors exit `2`; typed domain,
+conflict, authorization, verification, storage, and limit errors exit `1`.
 
 ## Output and exit conventions
 

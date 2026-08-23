@@ -1,7 +1,7 @@
 # Compass code graph v1 qualification
 
 Status: executable release gate
-Contracts: `compass.graph/1` and `compass.code-graph-qualification/1`
+Contracts: `compass.graph/1` and `compass.code-graph-qualification/2`
 
 ## Release claim
 

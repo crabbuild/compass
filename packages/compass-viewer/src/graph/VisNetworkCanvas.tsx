@@ -8,7 +8,7 @@ import {
   useState
 } from "react";
 import { DataSet, Network, type Edge, type Node, type Options } from "vis-network/standalone";
-import type { GraphNode, GraphViewModel } from "../contracts/graph";
+import type { GraphEdge, GraphNode, GraphViewModel } from "../contracts/graph";
 import type { GraphEdgeHover } from "./EdgeHoverCard";
 import type { GraphHover } from "./NodeHoverCard";
 import {
@@ -260,6 +260,12 @@ export function graphNodeColor(
   communityColors?: ReadonlyMap<number, string>,
   semanticPalette?: SemanticNodePalette
 ) {
+  if (node.groundingStatus === "GROUNDED") {
+    return {
+      background: "#153d3a",
+      border: node.challenged ? "#fbbf24" : "#5eead4"
+    };
+  }
   const comparisonColor = node.change && comparisonPalette
     ? comparisonPalette[node.change]
     : undefined;
@@ -313,6 +319,19 @@ function comparisonEdgeAppearance(
   }
   const appearance = edgeAppearance(confidence);
   return { color: fallback, ...appearance };
+}
+
+function effectiveEdgeAppearance(
+  edge: GraphEdge,
+  appearance: ReturnType<typeof comparisonEdgeAppearance>
+) {
+  if (edge.challenged) {
+    return { color: "#fbbf24", dashes: [3, 3], width: 2.5, opacity: 0.9 };
+  }
+  if (edge.groundingStatus === "GROUNDED") {
+    return { color: "#5eead4", dashes: [7, 4], width: 2.3, opacity: 0.86 };
+  }
+  return appearance;
 }
 
 function comparisonEdgeCurve(change: GraphChangeType | undefined) {
@@ -740,14 +759,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     ]);
     const edgeData = useMemo(() => new DataSet<Edge>(
       renderedEdges.map((edge) => {
-        const appearance = comparisonEdgeAppearance(
+        const appearance = effectiveEdgeAppearance(edge, comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
           semanticDetail
             ? fallbackSemanticEdgePalette[edgeSemanticCategory(edge.relation)]
             : "#60728b",
           fallbackComparisonPalette
-        );
+        ));
         return {
           id: edge.id,
           from: edge.source,
@@ -940,14 +959,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       }));
       edgeData.update(renderedEdges.map((edge) => {
-        const appearance = comparisonEdgeAppearance(
+        const appearance = effectiveEdgeAppearance(edge, comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
           semanticDetail
             ? semanticEdgePalette[edgeSemanticCategory(edge.relation)]
             : edgeColor,
           comparisonPalette
-        );
+        ));
         const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
         return {
           id: edge.id,

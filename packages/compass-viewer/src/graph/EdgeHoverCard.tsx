@@ -69,7 +69,22 @@ export function EdgeHoverCard({
         {change && (
           <span className="compass-change-badge" data-change={edge.change}>{change}</span>
         )}
+        {edge.groundingStatus === "GROUNDED" && (
+          <span className="compass-change-badge" data-grounding="grounded">
+            GROUNDED · agent-authored
+          </span>
+        )}
       </div>
+
+      {edge.agentSummary && <p>{edge.agentSummary}</p>}
+      {edge.challenge && (
+        <p>
+          Challenge ({edge.challenge.effect}): {edge.challenge.summary}
+        </p>
+      )}
+      {edge.challenged && !edge.challenge && (
+        <p>Challenge: this Base Graph relationship is disputed.</p>
+      )}
 
       {(evidence || relationshipSite) && (
         <div className="compass-edge-metadata">

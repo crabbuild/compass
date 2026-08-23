@@ -20,6 +20,11 @@ whether a Compass capability is covered by the installed skill. Run
 - `compass node`: show an attributable evidence trail between two symbols.
 - `compass context`: compose a bounded, digest-verified evidence packet for an
   explain, modify, debug, or test task after exact target resolution.
+- `compass agent-graph`: inspect, apply, query, diff, and export an exact
+  GROUNDED agent-authored overlay. Writes require explicit local enablement;
+  select either the current Base Graph or an exact `--realization`, and always
+  name an exact Overlay Revision for Effective Graph reads. Base Graph facts
+  and historical realizations remain immutable.
 - `compass call-graph`: trace bounded callers, callees, or both from a source
   position or structural symbol, with optional Program IR enrichment.
 - `compass query`: budgeted, deterministic pages of natural-language graph

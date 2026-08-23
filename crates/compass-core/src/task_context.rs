@@ -1,9 +1,16 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use compass_model::code_graph::EdgeKind;
+use compass_agent_graph::{
+    ChallengeId, CompositionOmissions, EffectiveGraph, GroundingEvidence, OverlayState,
+};
+use compass_model::code_graph::{
+    EdgeDetails, EdgeKind, NodeDetails, NodeKind, NodeRole, RouteStage,
+};
+use compass_model::provenance::{ResolutionState, SourceAnchor};
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, ExploreRequest,
-    ImpactRequest, QueryDiagnosticCode, QueryEdge, QueryNode, SearchHit, SearchRequest,
+    ImpactRequest, QueryDiagnosticCode, QueryEdge, QueryEvidence, QueryNode, SearchHit,
+    SearchRequest,
 };
 use compass_query::CodeQueryEngine;
 use compass_reflect::MemoryDoc;
@@ -11,8 +18,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub const TASK_CONTEXT_SCHEMA: &str = "compass.task-context/1";
+pub const TASK_CONTEXT_SCHEMA: &str = "compass.task-context/2";
+pub const TASK_CONTEXT_SCHEMA_V1: &str = "compass.task-context/1";
 pub const TASK_CONTEXT_PROFILE_SCHEMA: &str = "compass.task-context-profile/1";
+pub const FRAMEWORK_CONTEXT_SCHEMA: &str = "compass.framework-context/1";
 const MAX_TASK_TARGET_BYTES: usize = 16 * 1024;
 const MAX_REPOSITORY_ROOT_BYTES: usize = 32 * 1024;
 const MAX_KNOWLEDGE_ITEMS: u32 = 100;
@@ -20,6 +29,9 @@ const MAX_MEMORY_DOCS: usize = 10_000;
 const MAX_MEMORY_SOURCE_NODES: usize = 100_000;
 const MAX_MEMORY_INPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_TASK_CONTEXT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_FRAMEWORK_CONTEXT_RECORDS: usize = 256;
+const MAX_FRAMEWORK_CONTEXT_BYTES: usize = 256 * 1024;
+const MAX_FRAMEWORK_TEXT_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +97,7 @@ pub enum TaskContextSectionKind {
     ImplementationType,
     RelatedTests,
     TransitiveImpact,
+    Framework,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -92,6 +105,220 @@ pub enum TaskContextSectionKind {
 pub struct TaskContextSection {
     pub kind: TaskContextSectionKind,
     pub evidence: CodeQueryResponse,
+}
+
+/// Qualification state is deliberately closed. Consumers must reject a
+/// future state rather than treating it as a successful framework claim.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameworkQualificationState {
+    Qualified,
+    Qualifying,
+    Incomplete,
+    Unsupported,
+    Ambiguous,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkPackContext {
+    pub id: String,
+    pub version: u32,
+    pub qualification: FrameworkQualificationState,
+    pub capabilities: Vec<String>,
+    pub observed_nodes: u32,
+    pub observed_relations: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkStageContext {
+    pub stage: RouteStage,
+    pub position: u32,
+    pub reference: String,
+    pub resolution: ResolutionState,
+    pub source: Option<SourceAnchor>,
+    pub target: Option<String>,
+    pub provenance: Vec<QueryEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkRouteContext {
+    pub node_id: String,
+    pub framework: String,
+    pub operation: String,
+    pub path: String,
+    pub declaring_scope: String,
+    pub resolution: ResolutionState,
+    pub stages: Vec<FrameworkStageContext>,
+    pub provenance: Vec<QueryEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkRelationContext {
+    pub id: String,
+    pub relation: EdgeKind,
+    pub source: String,
+    pub target: String,
+    pub details: Option<EdgeDetails>,
+    pub relationship_site: Option<SourceAnchor>,
+    pub provenance: Vec<QueryEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkBoundaryContext {
+    pub node_id: String,
+    pub framework: String,
+    pub roles: Vec<NodeRole>,
+    pub source: Option<SourceAnchor>,
+    pub provenance: Vec<QueryEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkCapabilityStatus {
+    pub framework: String,
+    pub capability: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkAmbiguity {
+    pub kind: String,
+    pub reference: String,
+    pub candidates: Vec<String>,
+}
+
+/// Typed framework evidence attached to one task-context response. The
+/// section contains only graph evidence already admitted by the query engine;
+/// it never reparses source or executes a framework configuration.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FrameworkContext {
+    pub schema: String,
+    pub graph_identity: String,
+    pub build_generation_identity: String,
+    pub focus_node_id: Option<String>,
+    pub packs: Vec<FrameworkPackContext>,
+    pub routes: Vec<FrameworkRouteContext>,
+    pub relations: Vec<FrameworkRelationContext>,
+    pub rendered_by: Vec<FrameworkRelationContext>,
+    pub renders: Vec<FrameworkRelationContext>,
+    pub config_dependencies: Vec<FrameworkRelationContext>,
+    pub runtime_boundaries: Vec<FrameworkBoundaryContext>,
+    pub unsupported: Vec<FrameworkCapabilityStatus>,
+    pub incomplete: Vec<FrameworkCapabilityStatus>,
+    pub ambiguities: Vec<FrameworkAmbiguity>,
+    pub truncated: bool,
+    pub record_limit: u32,
+    pub byte_limit: u64,
+}
+
+impl FrameworkContext {
+    fn trim_one(&mut self) -> bool {
+        self.relations.pop().is_some()
+            || self.rendered_by.pop().is_some()
+            || self.renders.pop().is_some()
+            || self.config_dependencies.pop().is_some()
+            || self.routes.pop().is_some()
+            || self.runtime_boundaries.pop().is_some()
+            || self.ambiguities.pop().is_some()
+            || self.incomplete.pop().is_some()
+            || self.unsupported.pop().is_some()
+            || self.packs.pop().is_some()
+    }
+
+    fn validate(&self) -> Result<(), TaskContextError> {
+        if self.schema != FRAMEWORK_CONTEXT_SCHEMA {
+            return Err(TaskContextError::UnsupportedSchema(self.schema.clone()));
+        }
+        if self.graph_identity.is_empty() || self.build_generation_identity.is_empty() {
+            return Err(TaskContextError::InvalidResult(
+                "framework context is missing graph or build identity".to_owned(),
+            ));
+        }
+        if let Some(focus) = &self.focus_node_id {
+            validate_framework_strings(std::slice::from_ref(focus))?;
+        }
+        if self.record_limit == 0
+            || usize::try_from(self.record_limit).unwrap_or(usize::MAX)
+                > MAX_FRAMEWORK_CONTEXT_RECORDS
+            || self.byte_limit == 0
+            || usize::try_from(self.byte_limit).unwrap_or(usize::MAX) > MAX_FRAMEWORK_CONTEXT_BYTES
+        {
+            return Err(TaskContextError::InvalidResult(
+                "framework context limits are outside the supported bounds".to_owned(),
+            ));
+        }
+        for pack in &self.packs {
+            let Some(expected) = compass_languages::framework_pack_semantics_version(&pack.id)
+            else {
+                return Err(TaskContextError::InvalidResult(format!(
+                    "unknown framework pack ID {:?}",
+                    pack.id
+                )));
+            };
+            if pack.version != expected || pack.id.trim().is_empty() {
+                return Err(TaskContextError::InvalidResult(format!(
+                    "invalid version for framework pack {:?}",
+                    pack.id
+                )));
+            }
+            validate_framework_strings(&pack.capabilities)?;
+        }
+        validate_framework_strings(
+            &self
+                .routes
+                .iter()
+                .flat_map(|route| {
+                    [
+                        route.node_id.clone(),
+                        route.framework.clone(),
+                        route.operation.clone(),
+                        route.path.clone(),
+                        route.declaring_scope.clone(),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        )?;
+        for route in &self.routes {
+            validate_framework_strings(
+                &route
+                    .stages
+                    .iter()
+                    .flat_map(|stage| {
+                        [
+                            stage.reference.clone(),
+                            stage.target.clone().unwrap_or_default(),
+                        ]
+                    })
+                    .collect::<Vec<_>>(),
+            )?;
+        }
+        for status in self.unsupported.iter().chain(self.incomplete.iter()) {
+            validate_framework_strings(&[
+                status.framework.clone(),
+                status.capability.clone(),
+                status.reason.clone(),
+            ])?;
+        }
+        for ambiguity in &self.ambiguities {
+            validate_framework_strings(&[ambiguity.kind.clone(), ambiguity.reference.clone()])?;
+            validate_framework_strings(&ambiguity.candidates)?;
+        }
+        if framework_record_count(self) > usize::try_from(self.record_limit).unwrap_or(usize::MAX)
+            || canonical_bytes(self)?.len() > usize::try_from(self.byte_limit).unwrap_or(usize::MAX)
+        {
+            return Err(TaskContextError::InvalidResult(
+                "framework context exceeds its declared record or byte limit".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -124,7 +351,55 @@ pub struct TaskContextWork {
     pub files_verified: u64,
     pub source_bytes: u64,
     pub knowledge_items_read: u64,
+    pub framework_records: u64,
+    pub framework_bytes: u64,
+    #[serde(default)]
+    pub agent_knowledge_records: u64,
+    #[serde(default)]
+    pub agent_knowledge_bytes: u64,
     pub response_bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentKnowledgeAssertion {
+    pub assertion_id: compass_agent_graph::AssertionId,
+    pub projected_id: String,
+    pub owner: compass_agent_graph::PrincipalId,
+    pub version: u64,
+    pub grounding_status: String,
+    pub structural_confidence: String,
+    pub certificate_digest: compass_agent_graph::GroundingCertificateDigest,
+    pub summary: String,
+    pub citations: Vec<GroundingEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentKnowledgeChallenge {
+    pub challenge_id: ChallengeId,
+    pub target_id: String,
+    pub effect: compass_agent_graph::ChallengeEffect,
+    pub masked: bool,
+    pub grounding_status: String,
+    pub certificate_digest: compass_agent_graph::GroundingCertificateDigest,
+    pub summary: String,
+    pub citations: Vec<GroundingEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentKnowledgeSection {
+    pub schema: String,
+    pub effective_identity: compass_agent_graph::Digest,
+    pub base_generation: compass_agent_graph::BaseGenerationId,
+    pub overlay_revision: compass_agent_graph::OverlayRevisionId,
+    pub composition_profile: compass_agent_graph::CompositionProfile,
+    pub assertions: Vec<AgentKnowledgeAssertion>,
+    pub challenges: Vec<AgentKnowledgeChallenge>,
+    pub omissions: CompositionOmissions,
+    pub truncated: bool,
+    pub omitted_records: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -137,6 +412,10 @@ pub struct TaskContext {
     pub graph_identity: String,
     pub build_generation_identity: String,
     pub sections: Vec<TaskContextSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framework: Option<FrameworkContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_knowledge: Option<AgentKnowledgeSection>,
     pub project_knowledge: Vec<TaskContextKnowledge>,
     pub omissions: Vec<TaskContextOmission>,
     pub truncated: bool,
@@ -164,6 +443,51 @@ impl TaskContext {
             return Err(TaskContextError::UnsupportedSchema(
                 self.work.schema.clone(),
             ));
+        }
+        if let Some(framework) = &self.framework {
+            framework.validate()?;
+            let encoded = canonical_bytes(framework)?;
+            if encoded.len() > MAX_FRAMEWORK_CONTEXT_BYTES {
+                return Err(TaskContextError::InvalidResult(
+                    "framework context exceeds its byte bound".to_owned(),
+                ));
+            }
+        }
+        if let Some(agent) = &self.agent_knowledge {
+            if agent.schema != "compass.agent-knowledge/1"
+                || agent.effective_identity.as_str() != self.graph_identity
+                || agent
+                    .assertions
+                    .len()
+                    .saturating_add(agent.challenges.len())
+                    > MAX_KNOWLEDGE_ITEMS as usize
+            {
+                return Err(TaskContextError::InvalidResult(
+                    "Agent knowledge schema, identity, or record bound is invalid".to_owned(),
+                ));
+            }
+            if !agent.truncated && agent.omitted_records != 0 {
+                return Err(TaskContextError::InvalidResult(
+                    "complete Agent knowledge cannot report omitted records".to_owned(),
+                ));
+            }
+            for assertion in &agent.assertions {
+                if assertion.grounding_status != "GROUNDED"
+                    || assertion.structural_confidence != "inferred"
+                {
+                    return Err(TaskContextError::InvalidResult(
+                        "Agent knowledge must keep GROUNDED separate from structural confidence"
+                            .to_owned(),
+                    ));
+                }
+            }
+            for challenge in &agent.challenges {
+                if challenge.grounding_status != "GROUNDED" {
+                    return Err(TaskContextError::InvalidResult(
+                        "Agent knowledge Challenge is missing GROUNDED status".to_owned(),
+                    ));
+                }
+            }
         }
         let expected_digest = task_context_digest(self)?;
         if self.result_digest != expected_digest {
@@ -368,6 +692,12 @@ pub fn build_task_context(
             .then_with(|| left.reason.cmp(&right.reason))
     });
     omissions.dedup();
+    let framework = build_framework_context(
+        &target,
+        &sections,
+        engine.graph_identity(),
+        engine.build_generation_identity(),
+    )?;
     let mut context = TaskContext {
         schema: TASK_CONTEXT_SCHEMA.to_owned(),
         intent: request.intent,
@@ -376,6 +706,8 @@ pub fn build_task_context(
         graph_identity: engine.graph_identity().to_owned(),
         build_generation_identity: engine.build_generation_identity().to_owned(),
         sections,
+        framework: Some(framework),
+        agent_knowledge: None,
         project_knowledge: knowledge,
         omissions,
         truncated: preliminary_truncated
@@ -410,6 +742,163 @@ pub fn build_task_context(
     }
     context.validate()?;
     Ok(context)
+}
+
+/// Attach only Agent Assertions that are directly relevant to the already-resolved exact target.
+/// Grounding metadata stays separate from structural confidence, and no source excerpt is copied.
+pub fn attach_agent_knowledge(
+    context: &mut TaskContext,
+    effective: &EffectiveGraph,
+    state_revision: &compass_agent_graph::OverlayRevisionId,
+    state: &OverlayState,
+    max_records: usize,
+    max_response_bytes: u64,
+) -> Result<(), TaskContextError> {
+    if max_records == 0 || max_records > MAX_KNOWLEDGE_ITEMS as usize {
+        return Err(TaskContextError::InvalidRequest(format!(
+            "Agent knowledge record limit must be between 1 and {MAX_KNOWLEDGE_ITEMS}"
+        )));
+    }
+    if max_response_bytes == 0 || max_response_bytes > MAX_TASK_CONTEXT_BYTES as u64 {
+        return Err(TaskContextError::InvalidRequest(
+            "Agent knowledge response limit is zero or exceeds the task-context ceiling".to_owned(),
+        ));
+    }
+    if state.base_generation != effective.base_generation
+        || state_revision != &effective.overlay_revision
+    {
+        return Err(TaskContextError::InvalidResult(
+            "Effective Graph and overlay state identities disagree".to_owned(),
+        ));
+    }
+    let TaskContextTarget::Exact { node_id } = &context.target else {
+        return Err(TaskContextError::InvalidRequest(
+            "Agent knowledge requires an exact task-context target".to_owned(),
+        ));
+    };
+    if context.graph_identity != effective.effective_identity.as_str() {
+        return Err(TaskContextError::InvalidResult(
+            "task context is not bound to the selected Effective Graph identity".to_owned(),
+        ));
+    }
+    let incident_agent_edges = effective
+        .graph
+        .links
+        .iter()
+        .filter(|edge| edge.source == *node_id || edge.target == *node_id)
+        .map(|edge| edge.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut assertions = Vec::new();
+    for fact in &effective.agent_facts {
+        if fact.projected_id != *node_id
+            && !incident_agent_edges.contains(fact.projected_id.as_str())
+        {
+            continue;
+        }
+        let assertion = state.assertions.get(&fact.assertion).ok_or_else(|| {
+            TaskContextError::InvalidResult(
+                "Effective Graph metadata references a missing active assertion".to_owned(),
+            )
+        })?;
+        if assertion.certificate_digest != fact.certificate_digest {
+            return Err(TaskContextError::InvalidResult(
+                "Effective Graph assertion certificate digest does not match overlay state"
+                    .to_owned(),
+            ));
+        }
+        assertions.push(AgentKnowledgeAssertion {
+            assertion_id: assertion.id.clone(),
+            projected_id: fact.projected_id.clone(),
+            owner: assertion.owner.clone(),
+            version: assertion.version,
+            grounding_status: "GROUNDED".to_owned(),
+            structural_confidence: "inferred".to_owned(),
+            certificate_digest: assertion.certificate_digest.clone(),
+            summary: assertion.summary.clone(),
+            citations: assertion.grounding.evidence.clone(),
+        });
+    }
+    let mut challenges = Vec::new();
+    for effective_challenge in &effective.challenges {
+        if effective_challenge.target_id != *node_id {
+            continue;
+        }
+        let challenge = state
+            .challenges
+            .get(&effective_challenge.challenge)
+            .ok_or_else(|| {
+                TaskContextError::InvalidResult(
+                    "Effective Graph metadata references a missing active Challenge".to_owned(),
+                )
+            })?;
+        if challenge.certificate_digest != effective_challenge.certificate_digest {
+            return Err(TaskContextError::InvalidResult(
+                "Effective Graph Challenge certificate digest does not match overlay state"
+                    .to_owned(),
+            ));
+        }
+        challenges.push(AgentKnowledgeChallenge {
+            challenge_id: challenge.id.clone(),
+            target_id: effective_challenge.target_id.clone(),
+            effect: challenge.effect,
+            masked: effective_challenge.masked,
+            grounding_status: "GROUNDED".to_owned(),
+            certificate_digest: challenge.certificate_digest.clone(),
+            summary: challenge.summary.clone(),
+            citations: challenge.grounding.evidence.clone(),
+        });
+    }
+    assertions.sort_by(|left, right| left.assertion_id.cmp(&right.assertion_id));
+    challenges.sort_by(|left, right| left.challenge_id.cmp(&right.challenge_id));
+    let available = assertions.len().saturating_add(challenges.len());
+    let mut omitted_records = available.saturating_sub(max_records);
+    if assertions.len() > max_records {
+        assertions.truncate(max_records);
+        challenges.clear();
+    } else {
+        challenges.truncate(max_records.saturating_sub(assertions.len()));
+    }
+    context.agent_knowledge = Some(AgentKnowledgeSection {
+        schema: "compass.agent-knowledge/1".to_owned(),
+        effective_identity: effective.effective_identity.clone(),
+        base_generation: effective.base_generation.clone(),
+        overlay_revision: effective.overlay_revision.clone(),
+        composition_profile: effective.composition_profile,
+        assertions,
+        challenges,
+        omissions: effective.omissions.clone(),
+        truncated: omitted_records > 0,
+        omitted_records: omitted_records as u64,
+    });
+    while u64::try_from(canonical_bytes(context)?.len()).unwrap_or(u64::MAX) > max_response_bytes {
+        let Some(agent) = context.agent_knowledge.as_mut() else {
+            break;
+        };
+        if !agent.trim_one() {
+            return Err(TaskContextError::ResponseLimit {
+                limit: max_response_bytes,
+            });
+        }
+        omitted_records = omitted_records.saturating_add(1);
+        agent.truncated = true;
+        agent.omitted_records = omitted_records as u64;
+        context.truncated = true;
+    }
+    update_work(context);
+    context.result_digest = task_context_digest(context)?;
+    update_response_bytes(context)?;
+    context.validate()
+}
+
+impl AgentKnowledgeSection {
+    fn trim_one(&mut self) -> bool {
+        let removed = self.challenges.pop().is_some() || self.assertions.pop().is_some();
+        if removed {
+            self.omitted_records = self.omitted_records.saturating_add(1);
+            self.truncated = true;
+        }
+        removed
+    }
 }
 
 fn validate_request(request: &TaskContextRequest) -> Result<(), TaskContextError> {
@@ -468,6 +957,436 @@ fn validate_memory(memory: &[MemoryDoc]) -> Result<(), TaskContextError> {
         }
     }
     Ok(())
+}
+
+fn validate_framework_strings(values: &[String]) -> Result<(), TaskContextError> {
+    if values.iter().any(|value| {
+        value.is_empty()
+            || value.len() > MAX_FRAMEWORK_TEXT_BYTES
+            || value.chars().any(char::is_control)
+    }) {
+        return Err(TaskContextError::InvalidResult(
+            "framework context contains an empty, oversized, or control-bearing value".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn framework_pack_id(framework: &str) -> Option<&'static str> {
+    let normalized = framework.trim().to_ascii_lowercase();
+    let mapped = match normalized.as_str() {
+        "react" | "react-dom" => "react-ui",
+        "next" | "nextjs" => "nextjs-routes",
+        "react-router" | "react-router-dom" => "react-router-routes",
+        "remix" => "remix-routes",
+        "tanstack" | "tanstack-router" => "tanstack-router",
+        "tanstack-start" => "tanstack-start",
+        "vite" => "vite-config",
+        _ => return None,
+    };
+    Some(mapped)
+}
+
+fn framework_capabilities(pack_id: &str) -> Vec<String> {
+    let values = match pack_id {
+        "react-ui" => ["ui", "renders", "hooks", "client_server_boundary"].as_slice(),
+        "nextjs-routes" => ["routes", "stages", "client_server_boundary", "config"].as_slice(),
+        "react-router-routes" => ["routes", "loaders", "actions", "stages"].as_slice(),
+        "remix-routes" => ["routes", "loaders", "actions", "stages"].as_slice(),
+        "tanstack-router" => ["routes", "loaders", "components", "stages"].as_slice(),
+        "tanstack-start" => ["routes", "loaders", "actions", "server_functions"].as_slice(),
+        "vite-config" => ["aliases", "plugins", "file_sets", "config"].as_slice(),
+        _ => ["framework_evidence"].as_slice(),
+    };
+    values.iter().map(|value| (*value).to_owned()).collect()
+}
+
+fn framework_node_id(node: &QueryNode) -> Option<&str> {
+    node.framework
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn is_framework_relation(kind: EdgeKind) -> bool {
+    matches!(
+        kind,
+        EdgeKind::Renders
+            | EdgeKind::RoutesTo
+            | EdgeKind::Handles
+            | EdgeKind::Registers
+            | EdgeKind::Produces
+            | EdgeKind::Consumes
+            | EdgeKind::Publishes
+            | EdgeKind::Subscribes
+            | EdgeKind::DependsOn
+            | EdgeKind::MapsTo
+            | EdgeKind::Decorates
+    )
+}
+
+fn is_config_relation(kind: EdgeKind) -> bool {
+    matches!(
+        kind,
+        EdgeKind::Imports | EdgeKind::DependsOn | EdgeKind::Aliases
+    )
+}
+
+fn evidence_sort_key(evidence: &QueryEvidence) -> String {
+    let anchor = evidence.anchor.as_ref().map_or_else(String::new, |anchor| {
+        format!(
+            "{}:{:020}:{:020}",
+            anchor.file, anchor.start_byte, anchor.end_byte
+        )
+    });
+    format!(
+        "{}|{:?}|{:?}|{:?}|{}|{}",
+        evidence.extractor,
+        evidence.origin,
+        evidence.confidence,
+        evidence.resolution,
+        evidence.rule.as_deref().unwrap_or_default(),
+        anchor
+    )
+}
+
+fn sorted_provenance(mut values: Vec<QueryEvidence>) -> Vec<QueryEvidence> {
+    values.sort_by_key(evidence_sort_key);
+    values.dedup_by(|left, right| evidence_sort_key(left) == evidence_sort_key(right));
+    values
+}
+
+fn build_framework_context(
+    target: &TaskContextTarget,
+    sections: &[TaskContextSection],
+    graph_identity: &str,
+    build_generation_identity: &str,
+) -> Result<FrameworkContext, TaskContextError> {
+    let mut nodes = BTreeMap::<String, QueryNode>::new();
+    let mut edges = BTreeMap::<String, QueryEdge>::new();
+    let mut truncated = false;
+    for section in sections {
+        truncated |= section.evidence.truncated;
+        for node in &section.evidence.nodes {
+            nodes.entry(node.id.clone()).or_insert_with(|| node.clone());
+        }
+        for edge in &section.evidence.edges {
+            edges.entry(edge.id.clone()).or_insert_with(|| edge.clone());
+        }
+    }
+
+    let focus_node_id = match target {
+        TaskContextTarget::Exact { node_id } => Some(node_id.clone()),
+        TaskContextTarget::Ambiguous { .. } | TaskContextTarget::NotFound { .. } => None,
+    };
+    let focus_id = focus_node_id.as_deref();
+
+    let mut framework_names = BTreeSet::new();
+    for node in nodes.values() {
+        if let Some(framework) = framework_node_id(node) {
+            framework_names.insert(framework.to_owned());
+        }
+    }
+    if edges.values().any(|edge| edge.kind == EdgeKind::Renders) {
+        framework_names.insert("react".to_owned());
+    }
+
+    let mut packs = Vec::new();
+    let mut unsupported = Vec::new();
+    let mut incomplete = Vec::new();
+    for framework in framework_names {
+        let Some(pack_id) = framework_pack_id(&framework).or_else(|| {
+            compass_languages::framework_pack_semantics_version(&framework)
+                .map(|_| framework.as_str())
+        }) else {
+            unsupported.push(FrameworkCapabilityStatus {
+                framework,
+                capability: "framework_pack".to_owned(),
+                reason: "the graph names a framework without a registered pack".to_owned(),
+            });
+            continue;
+        };
+        let Some(version) = compass_languages::framework_pack_semantics_version(pack_id) else {
+            unsupported.push(FrameworkCapabilityStatus {
+                framework,
+                capability: "framework_pack".to_owned(),
+                reason: "the graph names a pack whose semantics version is unavailable".to_owned(),
+            });
+            continue;
+        };
+        let observed_nodes = nodes
+            .values()
+            .filter(|node| {
+                framework_node_id(node)
+                    .is_some_and(|value| framework_pack_id(value).unwrap_or(value) == pack_id)
+            })
+            .count();
+        let observed_relations = edges
+            .values()
+            .filter(|edge| is_framework_relation(edge.kind))
+            .filter(|edge| {
+                nodes.get(&edge.source).is_some_and(|node| {
+                    framework_node_id(node)
+                        .is_some_and(|value| framework_pack_id(value).unwrap_or(value) == pack_id)
+                }) || nodes.get(&edge.target).is_some_and(|node| {
+                    framework_node_id(node)
+                        .is_some_and(|value| framework_pack_id(value).unwrap_or(value) == pack_id)
+                })
+            })
+            .count();
+        let has_ambiguity = nodes.values().any(|node| {
+            node.framework
+                .as_deref()
+                .is_some_and(|value| framework_pack_id(value).unwrap_or(value) == pack_id)
+                && node.evidence.iter().any(|evidence| {
+                    matches!(
+                        evidence.confidence,
+                        compass_model::provenance::EvidenceConfidence::Ambiguous
+                    ) || matches!(evidence.resolution, ResolutionState::Ambiguous)
+                })
+        }) || edges.values().any(|edge| {
+            is_framework_relation(edge.kind)
+                && edge.evidence.iter().any(|evidence| {
+                    matches!(
+                        evidence.confidence,
+                        compass_model::provenance::EvidenceConfidence::Ambiguous
+                    ) || matches!(evidence.resolution, ResolutionState::Ambiguous)
+                })
+        });
+        let qualification = if has_ambiguity {
+            FrameworkQualificationState::Ambiguous
+        } else if observed_nodes == 0 && observed_relations == 0 {
+            FrameworkQualificationState::Unsupported
+        } else if truncated {
+            FrameworkQualificationState::Incomplete
+        } else {
+            // A checked-in task context is evidence from the current graph;
+            // promotion to `qualified` remains the independent corpus gate's
+            // responsibility.
+            FrameworkQualificationState::Qualifying
+        };
+        packs.push(FrameworkPackContext {
+            id: pack_id.to_owned(),
+            version,
+            qualification,
+            capabilities: framework_capabilities(pack_id),
+            observed_nodes: u32::try_from(observed_nodes).unwrap_or(u32::MAX),
+            observed_relations: u32::try_from(observed_relations).unwrap_or(u32::MAX),
+        });
+    }
+
+    let mut routes = Vec::new();
+    let mut runtime_boundaries = Vec::new();
+    for node in nodes.values() {
+        if node.kind == NodeKind::Route
+            && focus_id.is_none_or(|focus| {
+                node.id == focus
+                    || edges.values().any(|edge| {
+                        is_framework_relation(edge.kind)
+                            && (edge.source == focus && edge.target == node.id
+                                || edge.target == focus && edge.source == node.id)
+                    })
+            })
+            && let Some(NodeDetails::Route(details)) = node.details.as_ref()
+        {
+            routes.push(FrameworkRouteContext {
+                node_id: node.id.clone(),
+                framework: node
+                    .framework
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                operation: details.operation.clone(),
+                path: details.path.clone(),
+                declaring_scope: details.declaring_scope.clone(),
+                resolution: details.resolution,
+                stages: details
+                    .stages
+                    .iter()
+                    .map(|stage| FrameworkStageContext {
+                        stage: stage.stage,
+                        position: stage.position,
+                        reference: stage.reference.clone(),
+                        resolution: stage.resolution,
+                        source: stage.source_anchor.clone(),
+                        target: stage.target.clone(),
+                        provenance: sorted_provenance(node.evidence.clone()),
+                    })
+                    .collect(),
+                provenance: sorted_provenance(node.evidence.clone()),
+            });
+        }
+        let boundary_roles = node
+            .roles
+            .iter()
+            .copied()
+            .filter(|role| {
+                matches!(
+                    role,
+                    NodeRole::ClientBoundary
+                        | NodeRole::ClientComponent
+                        | NodeRole::ServerComponent
+                        | NodeRole::ServerFunction
+                )
+            })
+            .collect::<Vec<_>>();
+        if !boundary_roles.is_empty()
+            && focus_id.is_none_or(|focus| {
+                node.id == focus
+                    || edges.values().any(|edge| {
+                        (edge.source == focus && edge.target == node.id)
+                            || (edge.target == focus && edge.source == node.id)
+                    })
+            })
+        {
+            runtime_boundaries.push(FrameworkBoundaryContext {
+                node_id: node.id.clone(),
+                framework: node
+                    .framework
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                roles: boundary_roles,
+                source: node.source.clone(),
+                provenance: sorted_provenance(node.evidence.clone()),
+            });
+        }
+    }
+
+    let mut relations = Vec::new();
+    let mut rendered_by = Vec::new();
+    let mut renders = Vec::new();
+    let mut config_dependencies = Vec::new();
+    let mut ambiguities = Vec::new();
+    for edge in edges
+        .values()
+        .filter(|edge| is_framework_relation(edge.kind) || is_config_relation(edge.kind))
+    {
+        let touches_focus =
+            focus_id.is_none_or(|focus| edge.source == focus || edge.target == focus);
+        if !touches_focus {
+            continue;
+        }
+        let provenance = sorted_provenance(edge.evidence.clone());
+        let relation = FrameworkRelationContext {
+            id: edge.id.clone(),
+            relation: edge.kind,
+            source: edge.source.clone(),
+            target: edge.target.clone(),
+            details: edge.details.clone(),
+            relationship_site: edge.relationship_site.clone(),
+            provenance: provenance.clone(),
+        };
+        if edge.kind == EdgeKind::Renders {
+            if focus_id == Some(edge.target.as_str()) {
+                rendered_by.push(relation.clone());
+            }
+            if focus_id == Some(edge.source.as_str()) {
+                renders.push(relation.clone());
+            }
+        }
+        if is_config_relation(edge.kind) {
+            config_dependencies.push(relation.clone());
+        }
+        if is_framework_relation(edge.kind) {
+            relations.push(relation);
+        }
+        for evidence in &provenance {
+            if !matches!(evidence.resolution, ResolutionState::Exact)
+                || !evidence.candidates.is_empty()
+            {
+                ambiguities.push(FrameworkAmbiguity {
+                    kind: edge.kind.as_str().to_owned(),
+                    reference: edge.id.clone(),
+                    candidates: evidence
+                        .candidates
+                        .iter()
+                        .map(|candidate| candidate.node_id.clone())
+                        .collect(),
+                });
+            }
+        }
+    }
+
+    if let TaskContextTarget::Ambiguous { candidates }
+    | TaskContextTarget::NotFound { candidates } = target
+    {
+        ambiguities.push(FrameworkAmbiguity {
+            kind: "target".to_owned(),
+            reference: "requested_target".to_owned(),
+            candidates: candidates
+                .iter()
+                .map(|candidate| candidate.node_id.clone())
+                .collect(),
+        });
+    }
+    for section in sections {
+        if section.evidence.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == QueryDiagnosticCode::IncompleteCoverage
+                || diagnostic.code == QueryDiagnosticCode::BoundedTruncation
+        }) {
+            incomplete.push(FrameworkCapabilityStatus {
+                framework: "graph".to_owned(),
+                capability: "coverage".to_owned(),
+                reason: "the bounded query response reported incomplete coverage".to_owned(),
+            });
+        }
+    }
+
+    routes.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+    runtime_boundaries.sort_by(|left, right| left.node_id.cmp(&right.node_id));
+    relations.sort_by(|left, right| left.id.cmp(&right.id));
+    rendered_by.sort_by(|left, right| left.id.cmp(&right.id));
+    renders.sort_by(|left, right| left.id.cmp(&right.id));
+    config_dependencies.sort_by(|left, right| left.id.cmp(&right.id));
+    ambiguities.sort_by(|left, right| {
+        left.kind
+            .cmp(&right.kind)
+            .then_with(|| left.reference.cmp(&right.reference))
+    });
+    ambiguities.dedup();
+
+    let mut context = FrameworkContext {
+        schema: FRAMEWORK_CONTEXT_SCHEMA.to_owned(),
+        graph_identity: graph_identity.to_owned(),
+        build_generation_identity: build_generation_identity.to_owned(),
+        focus_node_id,
+        packs,
+        routes,
+        relations,
+        rendered_by,
+        renders,
+        config_dependencies,
+        runtime_boundaries,
+        unsupported,
+        incomplete,
+        ambiguities,
+        truncated,
+        record_limit: MAX_FRAMEWORK_CONTEXT_RECORDS as u32,
+        byte_limit: MAX_FRAMEWORK_CONTEXT_BYTES as u64,
+    };
+    let record_count = framework_record_count(&context);
+    if record_count > MAX_FRAMEWORK_CONTEXT_RECORDS {
+        context.truncated = true;
+        while framework_record_count(&context) > MAX_FRAMEWORK_CONTEXT_RECORDS && context.trim_one()
+        {
+        }
+    }
+    while canonical_bytes(&context)?.len() > MAX_FRAMEWORK_CONTEXT_BYTES && context.trim_one() {
+        context.truncated = true;
+    }
+    context.validate()?;
+    Ok(context)
+}
+
+fn framework_record_count(context: &FrameworkContext) -> usize {
+    context.packs.len()
+        + context.routes.len()
+        + context.relations.len()
+        + context.rendered_by.len()
+        + context.renders.len()
+        + context.config_dependencies.len()
+        + context.runtime_boundaries.len()
+        + context.unsupported.len()
+        + context.incomplete.len()
+        + context.ambiguities.len()
 }
 
 fn resolve_target(requested: &str, search: &CodeQueryResponse) -> TaskContextTarget {
@@ -689,6 +1608,36 @@ fn update_work(context: &mut TaskContext) {
         .filter_map(|file| file.source.as_ref())
         .map(|source| u64::try_from(source.len()).unwrap_or(u64::MAX))
         .sum();
+    context.work.framework_records = context
+        .framework
+        .as_ref()
+        .map(|framework| u64::try_from(framework_record_count(framework)).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    context.work.framework_bytes = context
+        .framework
+        .as_ref()
+        .and_then(|framework| canonical_bytes(framework).ok())
+        .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    context.work.agent_knowledge_records = context
+        .agent_knowledge
+        .as_ref()
+        .map(|agent| {
+            u64::try_from(
+                agent
+                    .assertions
+                    .len()
+                    .saturating_add(agent.challenges.len()),
+            )
+            .unwrap_or(u64::MAX)
+        })
+        .unwrap_or(0);
+    context.work.agent_knowledge_bytes = context
+        .agent_knowledge
+        .as_ref()
+        .and_then(|agent| canonical_bytes(agent).ok())
+        .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
 }
 
 fn update_response_bytes(context: &mut TaskContext) -> Result<(), TaskContextError> {
@@ -706,7 +1655,25 @@ fn update_response_bytes(context: &mut TaskContext) -> Result<(), TaskContextErr
 
 fn enforce_response_bound(context: &mut TaskContext, limit: u64) -> Result<(), TaskContextError> {
     while u64::try_from(canonical_bytes(context)?.len()).unwrap_or(u64::MAX) > limit {
-        if let Some(section) = context.sections.pop() {
+        if let Some(agent) = context.agent_knowledge.as_mut()
+            && agent.trim_one()
+        {
+            context.truncated = true;
+            context.omissions.push(omission(
+                "agent_knowledge_budget",
+                "omitted lower-priority Agent Graph evidence after reaching maxResponseBytes",
+            ));
+            update_work(context);
+        } else if let Some(framework) = context.framework.as_mut()
+            && framework.trim_one()
+        {
+            context.truncated = true;
+            context.omissions.push(omission(
+                "framework_context_budget",
+                "omitted lower-priority framework evidence after reaching maxResponseBytes",
+            ));
+            update_work(context);
+        } else if let Some(section) = context.sections.pop() {
             context.truncated = true;
             context.omissions.push(omission(
                 "response_budget",
@@ -820,7 +1787,8 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_resolution_preserves_candidates_without_selecting_first() {
+    fn ambiguous_resolution_preserves_candidates_without_selecting_first()
+    -> Result<(), Box<dyn std::error::Error>> {
         let mut response =
             CodeQueryResponse::empty(CodeQueryOperation::Search, CodeQueryLimits::default());
         response.nodes.extend([
@@ -846,9 +1814,9 @@ mod tests {
             path: None,
         });
         let TaskContextTarget::Ambiguous { candidates } = resolve_target("parse", &response) else {
-            assert!(false, "ambiguous target was unexpectedly selected");
-            return;
+            return Err("ambiguous target was unexpectedly selected".into());
         };
         assert_eq!(candidates.len(), 2);
+        Ok(())
     }
 }

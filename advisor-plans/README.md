@@ -60,6 +60,13 @@ promotion decision. The mounted qualification target records the pinned
 SwiftSyntax, Dart Analyzer, scala.meta, and Groovy CompilationUnit toolchains
 and the immutable audit results.
 
+Plan 021 hardens the React frontend framework graph after Plan 013's
+TypeScript/JavaScript production hard cut. It adds occurrence-preserving render
+evidence, conservative component and runtime-boundary roles, deep Next.js and
+TanStack route semantics, parsed Vite configuration, and agent-facing context
+and impact workflows. Each framework capability remains qualifying until its
+independent precision, recall, determinism, and safety gates pass.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -84,6 +91,7 @@ and the immutable audit results.
 | 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
 | 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 | 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
+| 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -130,6 +138,11 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   reuse the exact-language JVM boundary established for Scala. Each language
   has a separate candidate and atomic hard-cut phase, and the mixed-language
   release gate runs only after all four cuts.
+- Plan 021 builds on Plan 013's hard-cut TypeScript/JavaScript evidence rather
+  than creating another parser path. It lands the public graph vocabulary and
+  universal framework substrate first, then qualifies React, Next.js,
+  TanStack, React Router/Remix, and Vite independently. Its final claim should
+  consume Plan 005's exact-production-evidence model or an equivalent gate.
 
 ## Direction options not promoted to implementation plans
 

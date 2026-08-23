@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Add Grounded Agent Graph overlays: authorized agents can submit citation-
+  backed node, edge, Challenge, and Retraction operations without mutating the
+  source-derived Base Graph. Compass deterministically issues `GROUNDED`,
+  publishes immutable CAS-activated revisions with bounded audit, supports
+  exact rebase and historical composition, and exposes exact effective reads
+  through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
+  stronger curated masks remain deny-by-default capabilities.
+
+- Add versioned `compass.task-context/2` framework evidence for React and
+  frontend workflows, including pack versions, route stages, render direction,
+  runtime boundaries, configuration dependencies, provenance, and bounded
+  qualification states.
+
+- Add the first provisional React frontend graph slice: exact JSX `renders`
+  relationships, component/hook/client/server role evidence, strict viewer and
+  query contracts, and framework-pack cache invalidation. The slice remains
+  `Qualifying` until the independent React/Next/TanStack/React Router/Remix/Vite
+  corpus and precision/recall gates are complete.
+
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes
   declarations, scopes, bindings, occurrences, and conservative relationship

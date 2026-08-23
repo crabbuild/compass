@@ -3,18 +3,22 @@
 mod code_query;
 mod transport;
 
-pub use transport::{HttpOptions, serve_http, serve_stdio};
+pub use transport::{HttpOptions, serve_http, serve_stdio, serve_stdio_configured};
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use compass_core::LoadedGraph;
+use compass_agent_graph::{
+    AgentGraphLimits, ChangeBatch, CompositionProfile, OperationPermission, OverlayId,
+    OverlayRevisionId, PrincipalId, ReadRequest, ReadResult, RebaseCommitRequest, WriteAuthority,
+};
+use compass_core::{AgentGraphContext, LoadedGraph};
 use compass_graph::{
     Communities, blind_spot_report, god_nodes, suggest_questions, surprising_connections,
 };
@@ -284,6 +288,48 @@ impl GraphStore {
 #[derive(Clone, Debug)]
 pub struct CompassMcp {
     store: GraphStore,
+    agent_graph: Option<Arc<AgentGraphMcpConfig>>,
+}
+
+/// Trusted server-side scope for Agent Graph tools. None of these values are accepted from a
+/// tool request, and the project allowlist is canonicalized before the server starts.
+#[derive(Clone, Debug)]
+pub struct AgentGraphMcpConfig {
+    pub writes_enabled: bool,
+    pub masks_enabled: bool,
+    pub principal: PrincipalId,
+    pub allowed_projects: BTreeSet<PathBuf>,
+    pub non_git_state_root: Option<PathBuf>,
+}
+
+impl AgentGraphMcpConfig {
+    pub fn validate(mut self) -> Result<Self, String> {
+        if self.allowed_projects.is_empty() {
+            return Err(
+                "agent graph MCP configuration requires a non-empty project allowlist".to_owned(),
+            );
+        }
+        let mut canonical = BTreeSet::new();
+        for root in self.allowed_projects {
+            let root = root
+                .canonicalize()
+                .map_err(|error| format!("cannot canonicalize agent graph project: {error}"))?;
+            if !root.is_dir() {
+                return Err("agent graph project allowlist entries must be directories".to_owned());
+            }
+            canonical.insert(root);
+        }
+        self.allowed_projects = canonical;
+        if self.non_git_state_root.is_some() && self.allowed_projects.len() != 1 {
+            return Err(
+                "one explicit non-Git state root may be scoped to exactly one project".to_owned(),
+            );
+        }
+        if self.masks_enabled && !self.writes_enabled {
+            return Err("agent graph masks require writes to be enabled".to_owned());
+        }
+        Ok(self)
+    }
 }
 
 impl CompassMcp {
@@ -291,12 +337,23 @@ impl CompassMcp {
     pub fn new(graph_path: impl Into<PathBuf>) -> Self {
         Self {
             store: GraphStore::new(graph_path),
+            agent_graph: None,
         }
+    }
+
+    pub fn with_agent_graph(mut self, config: AgentGraphMcpConfig) -> Result<Self, String> {
+        self.agent_graph = Some(Arc::new(config.validate()?));
+        Ok(self)
     }
 
     #[must_use]
     pub fn tools() -> Vec<Tool> {
         tool_specs()
+    }
+
+    #[must_use]
+    pub fn configured_tools(&self) -> Vec<Tool> {
+        configured_tool_specs(self.agent_graph.as_deref())
     }
 
     #[must_use]
@@ -358,7 +415,7 @@ impl ServerHandler for CompassMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tool_specs()))
+        Ok(ListToolsResult::with_all_items(self.configured_tools()))
     }
 
     async fn call_tool(
@@ -430,7 +487,7 @@ impl CompassMcp {
         name: &str,
         arguments: &mut Map<String, Value>,
     ) -> Result<ToolInvocation, InvocationError> {
-        if !tool_specs().iter().any(|tool| tool.name == name) {
+        if !self.configured_tools().iter().any(|tool| tool.name == name) {
             return Err(InvocationError::InvalidParams(format!(
                 "unknown tool: {name}"
             )));
@@ -447,6 +504,9 @@ impl CompassMcp {
             }
             None => None,
         };
+        if matches!(name, "inspect_agent_graph" | "apply_agent_graph") {
+            return self.invoke_agent_graph(name, arguments, project_path.as_deref());
+        }
         if matches!(name, "review_pull_request" | "pr_readiness") {
             let root = self
                 .store
@@ -478,6 +538,7 @@ impl CompassMcp {
                 &graph_path,
                 &root,
                 context.as_deref(),
+                self.agent_graph.as_deref(),
             );
         }
         if name == "query_graph" && natural_discovery_requested(arguments) {
@@ -522,6 +583,399 @@ impl CompassMcp {
             structured_content: None,
         })
     }
+
+    fn invoke_agent_graph(
+        &self,
+        name: &str,
+        arguments: &mut Map<String, Value>,
+        project_path: Option<&str>,
+    ) -> Result<ToolInvocation, InvocationError> {
+        let config = self.agent_graph.as_deref().ok_or_else(|| {
+            InvocationError::InvalidParams("agent graph tools are not configured".to_owned())
+        })?;
+        let project_path = project_path.ok_or_else(|| {
+            InvocationError::InvalidParams(
+                "project_path is required for agent graph tools".to_owned(),
+            )
+        })?;
+        let requested_root = PathBuf::from(project_path)
+            .canonicalize()
+            .map_err(|error| {
+                InvocationError::InvalidParams(format!("cannot canonicalize project_path: {error}"))
+            })?;
+        if !config.allowed_projects.contains(&requested_root) {
+            return Err(InvocationError::InvalidParams(
+                "project_path is outside the server-authorized allowlist".to_owned(),
+            ));
+        }
+        let graph_path = self
+            .store
+            .resolve(Some(project_path))
+            .map_err(InvocationError::Internal)?;
+        let context = AgentGraphContext::open_current(
+            &requested_root,
+            &graph_path,
+            config.non_git_state_root.as_deref(),
+        )
+        .map_err(agent_graph_invocation_error)?;
+        match name {
+            "inspect_agent_graph" => {
+                invoke_agent_graph_read(&context, arguments, &graph_path, config.writes_enabled)
+            }
+            "apply_agent_graph" => {
+                if !config.writes_enabled {
+                    return Err(InvocationError::InvalidParams(
+                        "agent graph writes are disabled".to_owned(),
+                    ));
+                }
+                invoke_agent_graph_write(&context, config, arguments)
+            }
+            _ => Err(InvocationError::InvalidParams(format!(
+                "unknown agent graph tool {name}"
+            ))),
+        }
+    }
+}
+
+fn invoke_agent_graph_read(
+    context: &AgentGraphContext,
+    arguments: &Map<String, Value>,
+    graph_path: &Path,
+    writes_enabled: bool,
+) -> Result<ToolInvocation, InvocationError> {
+    reject_unknown_arguments(
+        arguments,
+        &[
+            "operation",
+            "overlay",
+            "revision",
+            "old_revision",
+            "new_revision",
+            "profile",
+            "limit",
+            "query",
+        ],
+        "inspect_agent_graph",
+    )?;
+    let operation = string_argument(arguments, "operation")?;
+    let overlay = OverlayId::parse(string_argument(arguments, "overlay")?.to_owned())
+        .map_err(agent_graph_invocation_error)?;
+    let result = match operation {
+        "status" => {
+            let active = context
+                .active_revision(&overlay)
+                .map_err(agent_graph_invocation_error)?;
+            json!({
+                "schema":"compass.agent-graph.status/1",
+                "overlay":overlay,
+                "baseGeneration":context.base_generation(),
+                "activeRevision":active,
+                "writesEnabled":writes_enabled
+            })
+        }
+        "overlay" => {
+            let revision = optional_revision(arguments, "revision")?;
+            serialize_agent_read(context.read(ReadRequest::Overlay { overlay, revision }))?
+        }
+        "effective" => {
+            let revision = required_revision(arguments, "revision")?;
+            let profile = match arguments
+                .get("profile")
+                .and_then(Value::as_str)
+                .unwrap_or("augment")
+            {
+                "augment" => CompositionProfile::Augment,
+                "curated" => CompositionProfile::Curated,
+                _ => {
+                    return Err(InvocationError::InvalidParams(
+                        "profile must be augment or curated".to_owned(),
+                    ));
+                }
+            };
+            serialize_agent_read(context.read(ReadRequest::EffectiveGraph {
+                overlay,
+                revision,
+                profile,
+            }))?
+        }
+        "query" => {
+            let revision = required_revision(arguments, "revision")?;
+            let query = string_argument(arguments, "query")?;
+            if query.len() > 16_384 || query.chars().any(char::is_control) {
+                return Err(InvocationError::InvalidParams(
+                    "query must contain at most 16384 non-control bytes".to_owned(),
+                ));
+            }
+            let profile = match arguments
+                .get("profile")
+                .and_then(Value::as_str)
+                .unwrap_or("augment")
+            {
+                "augment" => CompositionProfile::Augment,
+                "curated" => CompositionProfile::Curated,
+                _ => {
+                    return Err(InvocationError::InvalidParams(
+                        "profile must be augment or curated".to_owned(),
+                    ));
+                }
+            };
+            let effective = match context
+                .read(ReadRequest::EffectiveGraph {
+                    overlay,
+                    revision,
+                    profile,
+                })
+                .map_err(agent_graph_invocation_error)?
+            {
+                ReadResult::EffectiveGraph(value) => value,
+                _ => {
+                    return Err(InvocationError::Internal(
+                        "Agent Graph effective read returned the wrong result type".to_owned(),
+                    ));
+                }
+            };
+            let cache_root = graph_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("cache");
+            let engine = compass_query::open_with_verified_document(
+                effective.graph,
+                effective.effective_identity.as_str().to_owned(),
+                graph_path,
+                None,
+                &cache_root,
+            )
+            .map_err(|error| InvocationError::Internal(error.to_string()))?;
+            serde_json::to_value(
+                engine
+                    .search(compass_model::query_contract::SearchRequest {
+                        query: query.to_owned(),
+                        limits: compass_model::query_contract::CodeQueryLimits::default(),
+                    })
+                    .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            )
+            .map_err(|error| InvocationError::Internal(error.to_string()))?
+        }
+        "history" => {
+            let limit = arguments
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(100);
+            let limit = usize::try_from(limit)
+                .map_err(|_| InvocationError::InvalidParams("limit is too large".to_owned()))?;
+            serialize_agent_read(context.read(ReadRequest::History { overlay, limit }))?
+        }
+        "audit" => serialize_agent_read(context.read(ReadRequest::Audit {
+            revision: required_revision(arguments, "revision")?,
+        }))?,
+        "diff" => serialize_agent_read(context.read(ReadRequest::Diff {
+            overlay,
+            old: required_revision(arguments, "old_revision")?,
+            new: required_revision(arguments, "new_revision")?,
+        }))?,
+        "rebase_plan" => serialize_agent_read(context.read(ReadRequest::PrepareRebase {
+            overlay,
+            source_revision: required_revision(arguments, "revision")?,
+            target_base_generation: context.base_generation().clone(),
+        }))?,
+        _ => {
+            return Err(InvocationError::InvalidParams(format!(
+                "unknown inspect operation {operation}"
+            )));
+        }
+    };
+    Ok(ToolInvocation {
+        text: format!("Agent Graph {operation} completed for an exact local context."),
+        structured_content: Some(transport_envelope(result)?),
+    })
+}
+
+fn serialize_agent_read(
+    result: Result<ReadResult, compass_agent_graph::AgentGraphError>,
+) -> Result<Value, InvocationError> {
+    let result = result.map_err(agent_graph_invocation_error)?;
+    serde_json::to_value(match result {
+        ReadResult::Overlay {
+            revision,
+            manifest,
+            state,
+        } => json!({
+            "schema":"compass.agent-graph.overlay-read/1",
+            "revision":revision,
+            "manifest":manifest,
+            "state":state
+        }),
+        ReadResult::EffectiveGraph(value) => serde_json::to_value(value)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        ReadResult::History(value) => serde_json::to_value(value)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        ReadResult::Diff(value) => serde_json::to_value(value)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        ReadResult::RebasePlan(value) => serde_json::to_value(value)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        ReadResult::Audit(value) => serde_json::to_value(value)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?,
+    })
+    .map_err(|error| InvocationError::Internal(error.to_string()))
+}
+
+fn invoke_agent_graph_write(
+    context: &AgentGraphContext,
+    config: &AgentGraphMcpConfig,
+    arguments: &Map<String, Value>,
+) -> Result<ToolInvocation, InvocationError> {
+    reject_unknown_arguments(arguments, &["request_type", "request"], "apply_agent_graph")?;
+    let request_type = string_argument(arguments, "request_type")?;
+    let request = arguments
+        .get("request")
+        .ok_or_else(|| InvocationError::InvalidParams("request is required".to_owned()))?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| InvocationError::Internal(format!("system clock is invalid: {error}")))?
+        .as_secs();
+    let authority = WriteAuthority::explicitly_enabled(context.repository_id().clone());
+    let mut permissions = BTreeSet::from([
+        OperationPermission::PutAssertion,
+        OperationPermission::RetractAssertion,
+        OperationPermission::PutChallenge,
+        OperationPermission::RetractChallenge,
+    ]);
+    let receipt = match request_type {
+        "change_batch" => {
+            let batch =
+                serde_json::from_value::<ChangeBatch>(request.clone()).map_err(|error| {
+                    InvocationError::InvalidParams(format!(
+                        "request is not a strict change batch: {error}"
+                    ))
+                })?;
+            if &batch.base_generation != context.base_generation() {
+                return Err(InvocationError::InvalidParams(
+                    "batch Base Generation does not match the selected exact graph".to_owned(),
+                ));
+            }
+            let request_digest =
+                compass_agent_graph::canonical_digest("compass.agent-graph.mcp-request/1", &batch)
+                    .map_err(agent_graph_invocation_error)?;
+            let attestation = compass_agent_graph::WriteAttestation::new("mcp")
+                .map_err(agent_graph_invocation_error)?
+                .with_request_digest(request_digest);
+            let grant = authority
+                .mint_attested(
+                    config.principal.clone(),
+                    batch.overlay.clone(),
+                    batch.base_generation.clone(),
+                    batch.expected_revision.clone(),
+                    permissions,
+                    config.masks_enabled,
+                    now.saturating_add(300),
+                    AgentGraphLimits::default(),
+                    attestation,
+                )
+                .map_err(agent_graph_invocation_error)?;
+            context
+                .apply(&grant, batch)
+                .map_err(agent_graph_invocation_error)?
+        }
+        "rebase_commit" => {
+            permissions.insert(OperationPermission::CommitRebase);
+            let request = serde_json::from_value::<RebaseCommitRequest>(request.clone()).map_err(
+                |error| {
+                    InvocationError::InvalidParams(format!(
+                        "request is not a strict rebase commit: {error}"
+                    ))
+                },
+            )?;
+            if &request.plan.target_base_generation != context.base_generation() {
+                return Err(InvocationError::InvalidParams(
+                    "rebase target does not match the selected exact graph".to_owned(),
+                ));
+            }
+            let request_digest = compass_agent_graph::canonical_digest(
+                "compass.agent-graph.mcp-request/1",
+                &request,
+            )
+            .map_err(agent_graph_invocation_error)?;
+            let attestation = compass_agent_graph::WriteAttestation::new("mcp")
+                .map_err(agent_graph_invocation_error)?
+                .with_request_digest(request_digest);
+            let grant = authority
+                .mint_attested(
+                    config.principal.clone(),
+                    request.plan.overlay.clone(),
+                    request.plan.target_base_generation.clone(),
+                    Some(request.plan.source_revision.clone()),
+                    permissions,
+                    config.masks_enabled,
+                    now.saturating_add(300),
+                    AgentGraphLimits::default(),
+                    attestation,
+                )
+                .map_err(agent_graph_invocation_error)?;
+            context
+                .commit_rebase(&grant, request)
+                .map_err(agent_graph_invocation_error)?
+        }
+        _ => {
+            return Err(InvocationError::InvalidParams(
+                "request_type must be change_batch or rebase_commit".to_owned(),
+            ));
+        }
+    };
+    let value = serde_json::to_value(&receipt)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    Ok(ToolInvocation {
+        text: format!(
+            "Committed Agent Graph revision {}.",
+            receipt.revision.as_digest().as_str()
+        ),
+        structured_content: Some(transport_envelope(value)?),
+    })
+}
+
+fn agent_graph_invocation_error(error: compass_agent_graph::AgentGraphError) -> InvocationError {
+    let encoded = serde_json::to_string(&error).unwrap_or_else(|_| error.to_string());
+    InvocationError::InvalidParams(encoded)
+}
+
+fn required_revision(
+    arguments: &Map<String, Value>,
+    name: &str,
+) -> Result<OverlayRevisionId, InvocationError> {
+    let value = string_argument(arguments, name)?;
+    Ok(OverlayRevisionId(
+        compass_agent_graph::Digest::parse(value.to_owned())
+            .map_err(agent_graph_invocation_error)?,
+    ))
+}
+
+fn optional_revision(
+    arguments: &Map<String, Value>,
+    name: &str,
+) -> Result<Option<OverlayRevisionId>, InvocationError> {
+    arguments.get(name).map_or(Ok(None), |value| {
+        let value = value
+            .as_str()
+            .ok_or_else(|| InvocationError::InvalidParams(format!("{name} must be a string")))?;
+        Ok(Some(OverlayRevisionId(
+            compass_agent_graph::Digest::parse(value.to_owned())
+                .map_err(agent_graph_invocation_error)?,
+        )))
+    })
+}
+
+fn reject_unknown_arguments(
+    arguments: &Map<String, Value>,
+    allowed: &[&str],
+    tool_name: &str,
+) -> Result<(), InvocationError> {
+    for name in arguments.keys() {
+        if !allowed.contains(&name.as_str()) {
+            return Err(InvocationError::InvalidParams(format!(
+                "unknown {tool_name} argument {name:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn invoke_typed_tool(
@@ -833,7 +1287,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "task_context",
-            "Compose a bounded, verified compass.task-context/1 packet after exact target resolution. Ambiguous fuzzy candidates are never selected.",
+            "Compose a bounded, verified compass.task-context/2 packet after exact target resolution. The typed framework context reports pack versions, routes, render direction, boundaries, configuration dependencies, provenance, ambiguity, and truncation. Ambiguous fuzzy candidates are never selected.",
             json!({"type":"object","additionalProperties":false,"properties":{
                 "intent":{"type":"string","enum":["explain","modify","debug","test"]},
                 "target":{"type":"string","minLength":1,"maxLength":16384},
@@ -844,7 +1298,10 @@ fn tool_specs() -> Vec<Tool> {
                 "max_candidates":{"type":"integer","minimum":1},
                 "max_source_bytes":{"type":"integer","minimum":1},
                 "max_response_bytes":{"type":"integer","minimum":1,"maximum":67108864},
-                "max_knowledge_items":{"type":"integer","minimum":1,"maximum":100}
+                "max_knowledge_items":{"type":"integer","minimum":1,"maximum":100},
+                "agent_overlay":{"type":"string","minLength":1,"maxLength":256,"description":"Exact configured Agent Graph overlay ID; requires agent_revision"},
+                "agent_revision":{"type":"string","pattern":"^[0-9a-f]{64}$","description":"Exact immutable Overlay Revision; requires agent_overlay"},
+                "agent_profile":{"type":"string","enum":["augment","curated"]}
             },"required":["intent","target"]}),
         ),
     ];
@@ -858,6 +1315,50 @@ fn tool_specs() -> Vec<Tool> {
         {
             properties.insert("project_path".to_owned(), project.clone());
         }
+    }
+    specs
+}
+
+fn configured_tool_specs(config: Option<&AgentGraphMcpConfig>) -> Vec<Tool> {
+    let mut specs = tool_specs();
+    let Some(config) = config else {
+        return specs;
+    };
+    specs.push(tool(
+        "inspect_agent_graph",
+        "Inspect or query one exact grounded Agent Graph overlay, Effective Graph, history, diff, or rebase plan. This tool never writes.",
+        json!({
+            "type":"object",
+            "additionalProperties":false,
+            "properties":{
+                "project_path":{"type":"string","minLength":1,"maxLength":32768},
+                "operation":{"type":"string","enum":["status","overlay","effective","query","history","audit","diff","rebase_plan"]},
+                "overlay":{"type":"string","pattern":"^overlay:"},
+                "revision":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+                "old_revision":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+                "new_revision":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+                "profile":{"type":"string","enum":["augment","curated"]},
+                "limit":{"type":"integer","minimum":1,"maximum":1000},
+                "query":{"type":"string","minLength":1,"maxLength":16384}
+            },
+            "required":["project_path","operation","overlay"]
+        }),
+    ));
+    if config.writes_enabled {
+        specs.push(tool(
+            "apply_agent_graph",
+            "Apply one exact versioned grounded Agent Graph change batch or rebase commit under server-authorized scope.",
+            json!({
+                "type":"object",
+                "additionalProperties":false,
+                "properties":{
+                    "project_path":{"type":"string","minLength":1,"maxLength":32768},
+                    "request_type":{"type":"string","enum":["change_batch","rebase_commit"]},
+                    "request":{"type":"object"}
+                },
+                "required":["project_path","request_type","request"]
+            }),
+        ));
     }
     specs
 }
@@ -1015,6 +1516,7 @@ fn invoke_task_context(
     graph_path: &Path,
     root: &Path,
     graph_context: Option<&GraphContext>,
+    agent_config: Option<&AgentGraphMcpConfig>,
 ) -> Result<ToolInvocation, InvocationError> {
     const ALLOWED: &[&str] = &[
         "intent",
@@ -1027,6 +1529,9 @@ fn invoke_task_context(
         "max_source_bytes",
         "max_response_bytes",
         "max_knowledge_items",
+        "agent_overlay",
+        "agent_revision",
+        "agent_profile",
     ];
     if let Some(name) = arguments
         .keys()
@@ -1086,31 +1591,131 @@ fn invoke_task_context(
             "task-context limits are zero or exceed their ceilings".to_owned(),
         ));
     }
-    let engine = cached_typed_engine(store, graph_path, graph_context)?;
-    let engine = engine
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let result = compass_core::build_task_context(
-        &engine,
-        &compass_core::TaskContextRequest {
-            intent,
-            target,
-            repository_root: root.to_string_lossy().into_owned(),
-            limits,
-        },
-        &compass_reflect::load_memory_docs(
-            &graph_path
+    let request = compass_core::TaskContextRequest {
+        intent,
+        target,
+        repository_root: root.to_string_lossy().into_owned(),
+        limits,
+    };
+    let memory = compass_reflect::load_memory_docs(
+        &graph_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("memory"),
+    );
+    let result = match (
+        arguments.get("agent_overlay"),
+        arguments.get("agent_revision"),
+    ) {
+        (None, None) => {
+            let engine = cached_typed_engine(store, graph_path, graph_context)?;
+            let engine = engine
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            compass_core::build_task_context(&engine, &request, &memory)
+                .map_err(task_context_invocation_error)?
+        }
+        (Some(Value::String(overlay)), Some(Value::String(revision))) => {
+            let config = agent_config.ok_or_else(|| {
+                InvocationError::InvalidParams(
+                    "Agent-aware task context is not configured for this server".to_owned(),
+                )
+            })?;
+            let canonical_root = root.canonicalize().map_err(|error| {
+                InvocationError::InvalidParams(format!(
+                    "cannot canonicalize task-context project root: {error}"
+                ))
+            })?;
+            if !config.allowed_projects.contains(&canonical_root) {
+                return Err(InvocationError::InvalidParams(
+                    "task-context project is outside the Agent Graph allowlist".to_owned(),
+                ));
+            }
+            let overlay =
+                OverlayId::parse(overlay.clone()).map_err(agent_graph_invocation_error)?;
+            let revision = OverlayRevisionId(
+                compass_agent_graph::Digest::parse(revision.clone())
+                    .map_err(agent_graph_invocation_error)?,
+            );
+            let profile = match arguments
+                .get("agent_profile")
+                .and_then(Value::as_str)
+                .unwrap_or("augment")
+            {
+                "augment" => CompositionProfile::Augment,
+                "curated" => CompositionProfile::Curated,
+                _ => {
+                    return Err(InvocationError::InvalidParams(
+                        "agent_profile must be augment or curated".to_owned(),
+                    ));
+                }
+            };
+            let agent = AgentGraphContext::open_current(
+                &canonical_root,
+                graph_path,
+                config.non_git_state_root.as_deref(),
+            )
+            .map_err(agent_graph_invocation_error)?;
+            let effective = match agent
+                .read(ReadRequest::EffectiveGraph {
+                    overlay: overlay.clone(),
+                    revision: revision.clone(),
+                    profile,
+                })
+                .map_err(agent_graph_invocation_error)?
+            {
+                ReadResult::EffectiveGraph(effective) => effective,
+                _ => {
+                    return Err(InvocationError::Internal(
+                        "Agent Graph effective read returned the wrong result type".to_owned(),
+                    ));
+                }
+            };
+            let state = match agent
+                .read(ReadRequest::Overlay {
+                    overlay,
+                    revision: Some(revision.clone()),
+                })
+                .map_err(agent_graph_invocation_error)?
+            {
+                ReadResult::Overlay { state, .. } => state,
+                _ => {
+                    return Err(InvocationError::Internal(
+                        "Agent Graph overlay read returned the wrong result type".to_owned(),
+                    ));
+                }
+            };
+            let cache_root = graph_path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
-                .join("memory"),
-        ),
-    )
-    .map_err(|error| match error {
-        compass_core::TaskContextError::InvalidRequest(message) => {
-            InvocationError::InvalidParams(message)
+                .join("cache");
+            let engine = compass_query::open_with_verified_document(
+                effective.graph.clone(),
+                effective.effective_identity.as_str().to_owned(),
+                graph_path,
+                None,
+                &cache_root,
+            )
+            .map_err(|error| InvocationError::Internal(error.to_string()))?;
+            let mut result = compass_core::build_task_context(&engine, &request, &memory)
+                .map_err(task_context_invocation_error)?;
+            compass_core::attach_agent_knowledge(
+                &mut result,
+                &effective,
+                &revision,
+                &state,
+                usize::try_from(request.limits.max_knowledge_items).unwrap_or(usize::MAX),
+                request.limits.max_response_bytes,
+            )
+            .map_err(task_context_invocation_error)?;
+            result
         }
-        other => InvocationError::Internal(other.to_string()),
-    })?;
+        _ => {
+            return Err(InvocationError::InvalidParams(
+                "agent_overlay and agent_revision must be supplied together as strings".to_owned(),
+            ));
+        }
+    };
     let text = format!(
         "Task context: {:?}, {} sections{}",
         result.target,
@@ -1126,6 +1731,15 @@ fn invoke_task_context(
             Some(&digest),
         )?),
     })
+}
+
+fn task_context_invocation_error(error: compass_core::TaskContextError) -> InvocationError {
+    match error {
+        compass_core::TaskContextError::InvalidRequest(message) => {
+            InvocationError::InvalidParams(message)
+        }
+        other => InvocationError::Internal(other.to_string()),
+    }
 }
 
 fn select_review_realization(

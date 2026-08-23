@@ -107,4 +107,34 @@ describe("compass.query/1", () => {
     }];
     expect(decodeCodeQueryResponse(value).diagnostics[0]?.code).toBe("direction_mismatch");
   });
+
+  it("accepts typed render edges without treating them as calls", () => {
+    const value = example() as Record<string, unknown>;
+    value.edges = [{
+      id: "render-edge",
+      source: "component:app",
+      target: "component:button",
+      kind: "renders",
+      relationshipSite: {
+        file: "src/App.tsx",
+        startByte: 42,
+        endByte: 48,
+        startLine: 4,
+        startColumn: 10,
+        endLine: 4,
+        endColumn: 16
+      },
+      details: {
+        type: "render",
+        data: { renderKind: "jsx", boundary: "client" }
+      },
+      evidence: []
+    }];
+    const decoded = decodeCodeQueryResponse(value);
+    expect(decoded.edges[0]?.kind).toBe("renders");
+    expect(decoded.edges[0]?.details).toEqual({
+      type: "render",
+      data: { renderKind: "jsx", boundary: "client" }
+    });
+  });
 });

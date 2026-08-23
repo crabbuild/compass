@@ -778,13 +778,51 @@ fn file_routes_emit_convention_components_and_exact_bindings()
         );
         let resolved =
             resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+        if expected_framework == "nuxt" && name.contains("server/api") {
+            let route = resolved
+                .iter()
+                .find(|route| route.route.operation == "POST")
+                .ok_or("missing Nuxt endpoint resolution")?;
+            assert_eq!(route.state, ResolutionState::Exact, "Nuxt default endpoint");
+            let target = route
+                .stages
+                .last()
+                .and_then(|stage| stage.target.as_deref())
+                .ok_or("Nuxt default endpoint has no target")?;
+            assert!(extraction.nodes.iter().any(|node| {
+                node.id == target
+                    && node
+                        .attributes
+                        .get("synthetic_handler")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                    && node
+                        .string("source_file")
+                        .ends_with("server/api/users/[id].post.ts")
+            }));
+        }
         assert!(
             resolved.iter().all(|route| {
-                route.state == ResolutionState::Exact
-                    && route
-                        .stages
-                        .last()
-                        .is_some_and(|stage| stage.role == RouteStageRole::Handler)
+                (route.state == ResolutionState::Exact
+                    // Convention pages use the typed RouteComponent role;
+                    // endpoint/resource routes retain Handler. Both are
+                    // exact terminal stages in the typed route contract.
+                    && route.stages.last().is_some_and(|stage| {
+                        matches!(
+                            stage.role,
+                            RouteStageRole::Handler | RouteStageRole::RouteComponent
+                        )
+                    }))
+                    // A default-only endpoint may use a convention-owned
+                    // synthetic identity when the parser cannot name its
+                    // expression; if no default export is evidenced, keep
+                    // the route explicitly unresolved.
+                    || (route.state == ResolutionState::Unresolved
+                        && route.route.handler_reference == "default"
+                        && route.stages.last().is_some_and(|stage| {
+                            stage.target.is_none()
+                                && stage.role == RouteStageRole::Handler
+                        }))
             }),
             "{name}: {:?}",
             resolved
@@ -833,11 +871,15 @@ fn file_routes_emit_convention_components_and_exact_bindings()
                 }));
             }
         }
-        assert!(extraction.edges.iter().any(|edge| {
+        let has_convention_route_edge = extraction.edges.iter().any(|edge| {
             edge.string("relation") == "routes_to"
                 && edge.string("_origin") == "convention"
                 && !edge.string("rule").is_empty()
-        }));
+        });
+        let has_explicit_unresolved_default = resolved.iter().any(|route| {
+            route.state == ResolutionState::Unresolved && route.route.handler_reference == "default"
+        });
+        assert!(has_convention_route_edge || has_explicit_unresolved_default);
     }
     let page_load_only = Engine::default().extract_source(
         Path::new("src/routes/users/+page.ts"),
@@ -1008,7 +1050,7 @@ fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact
     )?;
     fs::write(
         &vite_config,
-        "import react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; export default defineConfig({ plugins: [react()], resolve: { alias: { '~': './src' } } });",
+        "import react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; const pages = import.meta.glob('./src/**/*.tsx', { eager: true }); export default defineConfig({ plugins: [react()], resolve: { alias: { '~': './src' } } });",
     )?;
     fs::write(
         root.join("package.json"),
@@ -1068,6 +1110,31 @@ fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact
             && node.string("framework") == "vite"
             && node.string("component_type") == "framework_configuration"
     }));
+    assert!(graph.nodes.iter().any(|node| {
+        node.string("symbol_kind") == "config_key"
+            && node.string("framework") == "vite"
+            && node.string("component_type") == "framework_configuration_field"
+            && node.string("field") == "resolve"
+    }));
+    let file_set = graph.nodes.iter().find(|node| {
+        node.string("symbol_kind") == "resource"
+            && node.string("framework") == "vite"
+            && node.string("component_type") == "framework_file_set"
+    });
+    assert!(
+        file_set.is_some(),
+        "Vite import.meta.glob must publish a resource"
+    );
+    let file_set_id = file_set.map(|node| node.id.clone()).unwrap_or_default();
+    assert!(graph.edges.iter().any(|edge| {
+        edge.target == file_set_id
+            && edge.string("relation") == "contains"
+            && graph
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.source)
+                .is_some_and(|node| node.string("symbol_kind") == "file")
+    }));
 
     let config_only = tempdir()?;
     let config_page = config_only.path().join("src/app/page.tsx");
@@ -1090,6 +1157,76 @@ fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact
         Engine::with_project_evidence(Arc::new(config_evidence)).extract(&config_page)?;
     assert!(routes(&config_extraction).any(|route| {
         route.framework == "next" && route.operation == "PAGE" && route.normalized_path == "/"
+    }));
+    Ok(())
+}
+
+#[test]
+fn next_pages_named_default_export_routes_resolve_to_same_source_components()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = Engine::default();
+    let path = Path::new("src/pages/errors/[errorCode].tsx");
+    let source = r#"
+function ErrorDecoderPage() { return null }
+export default ErrorDecoderPage
+"#;
+    let file = engine.extract_source(path, source.as_bytes())?;
+    let mut sources = HashMap::new();
+    sources.insert(path.to_string_lossy().into_owned(), source.to_owned());
+    let mut extraction = resolve(std::slice::from_ref(&file), &sources);
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    let route = resolved
+        .iter()
+        .find(|route| route.route.framework == "next")
+        .ok_or("missing Next Pages route")?;
+    assert_eq!(route.state, ResolutionState::Exact);
+    assert_eq!(
+        route
+            .stages
+            .last()
+            .and_then(|stage| stage.target.as_deref())
+            .is_some(),
+        true
+    );
+    Ok(())
+}
+
+#[test]
+fn next_app_default_reexport_routes_resolve_through_module_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut engine = Engine::default();
+    let component_path = Path::new("src/components/page.tsx");
+    let route_path = Path::new("src/app/reexport/page.tsx");
+    let component_source = "export function SuspensePage() { return null }";
+    let route_source = "export { SuspensePage as default } from '../../components/page'";
+    let component = engine.extract_source(component_path, component_source.as_bytes())?;
+    let route = engine.extract_source(route_path, route_source.as_bytes())?;
+    let mut sources = HashMap::new();
+    sources.insert(
+        component_path.to_string_lossy().into_owned(),
+        component_source.to_owned(),
+    );
+    sources.insert(
+        route_path.to_string_lossy().into_owned(),
+        route_source.to_owned(),
+    );
+    let mut extraction = resolve(&[component, route], &sources);
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    let route = resolved
+        .iter()
+        .find(|route| route.route.framework == "next")
+        .ok_or("missing Next App route")?;
+    assert_eq!(route.state, ResolutionState::Exact);
+    let target = route
+        .stages
+        .iter()
+        .rev()
+        .find_map(|stage| stage.target.as_deref())
+        .ok_or("missing re-export route target")?;
+    assert!(extraction.nodes.iter().any(|node| {
+        node.id == target && node.string("source_file") == component_path.to_string_lossy()
     }));
     Ok(())
 }

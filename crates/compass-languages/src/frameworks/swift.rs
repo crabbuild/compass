@@ -171,6 +171,7 @@ fn collect_vapor_route(
         anchor,
         handler_reference,
         middleware_references: Vec::new(),
+        stages: Vec::new(),
         origin: RawFrameworkOrigin::Ast,
         rule: Some("vapor-route-call".to_owned()),
         detail: if opaque_handler {

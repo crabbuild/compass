@@ -146,6 +146,7 @@ fn collect_routes(
                 anchor: anchor.clone(),
                 handler_reference: handler_reference.clone(),
                 middleware_references: Vec::new(),
+                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("rails-routes-dsl".to_owned()),
                 detail: Map::from_iter([(

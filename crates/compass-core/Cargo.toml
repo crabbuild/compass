@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 compass-analysis = { path = "../compass-analysis", version = "0.3.19" }
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 compass-ir = { path = "../compass-ir", version = "0.3.19" }
 compass-program = { path = "../compass-program", version = "0.3.19" }
 ahash.workspace = true

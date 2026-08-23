@@ -33,7 +33,8 @@ pub use discovery_text::{
     discovery_result_envelope, render_discovery_text_page,
 };
 pub use graph_engine::{
-    DirectGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine,
+    DirectGraphEngine, EffectiveGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine,
+    open_graph_engine,
 };
 pub use index::{
     CachedQueryEngine, DEFAULT_QUERY_ENGINE_CACHE_CAPACITY, EngineSelection,

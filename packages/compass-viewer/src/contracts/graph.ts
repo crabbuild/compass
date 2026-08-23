@@ -23,6 +23,27 @@ export const GraphRecordEvidenceSchema = z.object({
   fields: z.array(GraphFieldChangeSchema)
 });
 
+export const AgentChallengeSchema = z.object({
+  challenge: z.string().startsWith("challenge:"),
+  targetId: z.string().min(1),
+  effect: z.enum(["flag", "mask"]),
+  masked: z.boolean(),
+  certificateDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  summary: z.string()
+}).strict();
+
+export const AgentRetractionsSchema = z.object({
+  total: z.number().int().nonnegative(),
+  examples: z.array(z.object({
+    kind: z.enum(["assertion", "challenge"]),
+    id: z.string().min(1),
+    reasonCode: z.string().min(1),
+    explanation: z.string(),
+    sequence: z.number().int().nonnegative()
+  }).strict()),
+  omittedExamples: z.number().int().nonnegative()
+}).strict();
+
 export const GraphNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string(),
@@ -39,6 +60,11 @@ export const GraphNodeSchema = z.object({
   learningStale: z.boolean().optional(),
   depth: z.number().int().nonnegative().optional(),
   root: z.boolean().optional(),
+  agentAssertion: z.string().startsWith("assertion:").optional(),
+  agentSummary: z.string().optional(),
+  groundingStatus: z.literal("GROUNDED").optional(),
+  challenged: z.boolean().optional(),
+  challenge: AgentChallengeSchema.optional(),
   change: z.enum(["added", "removed", "changed", "unchanged"]).optional(),
   evidence: GraphRecordEvidenceSchema.optional(),
   codeEvidence: z.array(CodeEvidenceSchema).optional(),
@@ -65,7 +91,12 @@ export const GraphEdgeSchema = z.object({
     "inferred",
     "ambiguous",
     "aggregated"
-  ]).optional()
+  ]).optional(),
+  agentAssertion: z.string().startsWith("assertion:").optional(),
+  agentSummary: z.string().optional(),
+  groundingStatus: z.literal("GROUNDED").optional(),
+  challenged: z.boolean().optional(),
+  challenge: AgentChallengeSchema.optional()
 }).passthrough();
 
 export const CommunitySchema = z.object({
@@ -87,7 +118,24 @@ export const GraphViewModelSchema = z.object({
   nodes: z.array(GraphNodeSchema),
   edges: z.array(GraphEdgeSchema),
   communities: z.array(CommunitySchema),
-  hyperedges: z.array(z.unknown()).default([])
+  hyperedges: z.array(z.unknown()).default([]),
+  effectiveGraph: z.object({
+    effectiveIdentity: z.string().regex(/^[0-9a-f]{64}$/),
+    baseGeneration: z.object({
+      generationId: z.string().min(1),
+      graphDigest: z.string().regex(/^[0-9a-f]{64}$/)
+    }).strict(),
+    overlayRevision: z.string().regex(/^[0-9a-f]{64}$/),
+    compositionProfile: z.enum(["augment", "curated"]),
+    retractions: AgentRetractionsSchema,
+    omissions: z.object({
+      total: z.number().int().nonnegative(),
+      direct: z.number().int().nonnegative(),
+      cascaded: z.number().int().nonnegative(),
+      examples: z.array(z.unknown()),
+      omittedExamples: z.number().int().nonnegative()
+    }).strict()
+  }).strict().optional()
 }).passthrough();
 
 export type SourceLocation = z.infer<typeof SourceLocationSchema>;

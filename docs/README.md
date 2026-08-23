@@ -37,6 +37,7 @@ to yours:
 
 - [Explore an unfamiliar codebase](guides/exploring-a-codebase.md)
 - [Compose task-oriented context](guides/task-context.md)
+- [Enhance a graph with an agent](guides/enhancing-a-graph-with-an-agent.md)
 - [Integrate Compass with other tools](guides/integrating-compass.md)
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
@@ -55,6 +56,7 @@ to yours:
 | [How Compass works](concepts/how-it-works.md) | How does a directory become a queryable graph? |
 | [Graph model](concepts/graph-model.md) | What do the entities and relationships mean? |
 | [Provenance](concepts/provenance.md) | How can I judge where an edge came from? |
+| [Agent Graph Overlays](concepts/agent-graph-overlays.md) | How can an agent add verified knowledge without rewriting the Base Graph? |
 | [CompassQL concepts](concepts/compassql.md) | When should I use an exact structural query? |
 
 ### Complete a task
@@ -64,6 +66,7 @@ to yours:
 | [Getting started](getting-started.md) | A working local graph and your first useful answers |
 | [Exploring a codebase](guides/exploring-a-codebase.md) | A repeatable architecture-reading workflow |
 | [Task context](guides/task-context.md) | A bounded, verified evidence packet for explain, modify, debug, or test work |
+| [Agent graph enhancement](guides/enhancing-a-graph-with-an-agent.md) | A grounded, versioned, opt-in agent enhancement workflow |
 | [Integrating Compass](guides/integrating-compass.md) | Stable, machine-readable data in another tool |
 | [Assistant setup](guides/assistant-setup.md) | A native Compass skill installed at the right scope |
 | [Versioned history](guides/versioned-history.md) | Immutable graphs and diffs for exact Git commits |
@@ -88,6 +91,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
+| [React frontend graph](reference/react-framework-graph.md) | React-family roles, render evidence, activation, and qualification boundaries |
 | [PR Intelligence](reference/pr-intelligence.md) | Canonical report, fingerprints, completeness, risk rubric, and gates |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
@@ -105,6 +109,8 @@ They are not evidence that an uncompleted design has shipped.
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
 | [Query recall and accuracy design](implementation/query-recall-accuracy/query-performance-accuracy-recall-phased-technical-design.md) | Phased query-quality architecture, evidence, and rollout boundaries |
 | [Query implementation plans](plans/README.md) | Ordered, independently executable query-quality work plans |
+| [Grounded Agent Graph Overlay design](implementation/grounded-agent-graph-overlay-technical-design.md) | Ownership, Grounding, CRUD, composition, security, and history contracts for agent-authored graph enhancement |
+| [Grounded Agent Graph Overlay execution plan](implementation/grounded-agent-graph-overlay-phased-execution-plan.md) | Phased implementation, verification, qualification, and release record for the overlay |
 
 ## How these documents are written
 

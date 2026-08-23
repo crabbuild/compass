@@ -88,6 +88,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Explore",
         commands: &[
+            "agent-graph",
             "ask",
             "search",
             "callers",
@@ -145,10 +146,27 @@ const GROUPS: &[Group] = &[
 
 const PAGES: &[Page] = &[
     page!(
+        "agent-graph",
+        "Manage grounded agent-authored graph overlays",
+        [
+            "compass agent-graph status [OPTIONS]",
+            "compass agent-graph apply --request FILE --enable-writes [OPTIONS]",
+            "compass agent-graph show ASSERTION_ID [OPTIONS]",
+            "compass agent-graph history [OPTIONS]",
+            "compass agent-graph audit --revision REVISION [OPTIONS]",
+            "compass agent-graph diff OLD NEW [OPTIONS]",
+            "compass agent-graph rebase-plan --revision SOURCE_REVISION [OPTIONS]",
+            "compass agent-graph rebase-commit --request FILE --enable-writes [OPTIONS]",
+            "compass agent-graph query --revision REV [--profile augment|curated] --cql QUERY",
+            "compass agent-graph export --revision REV --output FILE [OPTIONS]"
+        ],
+        "Options:\n  --graph <PATH>          Exact current Base Graph [default: compass-out/graph.json]\n  --realization <ID>      Exact immutable history realization instead of --graph\n  --root <PATH>           Repository root [default: current directory]\n  --state-root <PATH>     Required explicit state root outside Git\n  --overlay <ID>          Overlay ID [default: overlay:default]\n  --revision <DIGEST>     Exact Overlay Revision\n  --profile <PROFILE>     augment or curated [default: augment]\n  --format <text|json>    Output format [default: text]\n  --enable-writes         Explicitly enable this local apply invocation\n  --allow-masks           Permit stronger curated-mask operations (requires writes)\n  --principal <ID>        Local owner principal [default: principal:local]\n\nNotes:\n  Apply accepts one compass.agent-graph.batch/1 JSON value. --realization cannot be combined with --graph or --state-root. Base Graph artifacts and historical realizations are never mutated. Query remains read-only CompassQL. GROUNDED means citation integrity was deterministically verified; it is not structural confidence or proof of semantic truth."
+    ),
+    page!(
         "context",
         "Compose bounded, verified evidence for a coding task",
         ["compass context <explain|modify|debug|test> <TARGET> [OPTIONS]"],
-        "Arguments:\n  <INTENT>                 Task intent: explain, modify, debug, or test\n  <TARGET>                 Exact symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>           Graph JSON [default: compass-out/graph.json]\n  --program <PATH>         Optional Program IR bundle\n  --root <PATH>            Repository root for digest-verified source [default: current directory]\n  --memory <PATH>          Reflection memory directory [default: GRAPH_DIR/memory]\n  --engine <default|json|store> Query backend [default: default]\n  --format <text|json>     Output format [default: text]\n  --max-depth <N>          Maximum impact depth\n  --max-nodes <N>          Maximum nodes per evidence query\n  --max-edges <N>          Maximum edges per evidence query\n  --max-paths <N>          Maximum paths per evidence query\n  --max-candidates <N>     Maximum target candidates\n  --max-source-bytes <N>   Maximum verified source bytes\n  --max-knowledge-items <N> Maximum linked memory records\n  --max-response-bytes <N> Maximum composed response bytes\n\nExamples:\n  compass context explain crate::Parser::parse\n  compass context modify symbol-id --format json\n\nNotes:\n  Fuzzy candidates are suggestions only. Compass composes structural evidence only after one exact identity resolves; ambiguity is never resolved by first match."
+        "Arguments:\n  <INTENT>                 Task intent: explain, modify, debug, or test\n  <TARGET>                 Exact symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>           Graph JSON [default: compass-out/graph.json]\n  --program <PATH>         Optional Program IR bundle\n  --root <PATH>            Repository root for digest-verified source [default: current directory]\n  --memory <PATH>          Reflection memory directory [default: GRAPH_DIR/memory]\n  --engine <default|json|store> Query backend [default: default]\n  --format <text|json>     Output format [default: text]\n  --agent-overlay <ID>     Exact Agent Graph overlay; requires --agent-revision\n  --agent-revision <DIGEST> Exact immutable Overlay Revision\n  --agent-profile <PROFILE> augment or curated [default: augment]\n  --agent-state-root <PATH> Explicit Agent Graph state root outside Git\n  --max-depth <N>          Maximum impact depth\n  --max-nodes <N>          Maximum nodes per evidence query\n  --max-edges <N>          Maximum edges per evidence query\n  --max-paths <N>          Maximum paths per evidence query\n  --max-candidates <N>     Maximum target candidates\n  --max-source-bytes <N>   Maximum verified source bytes\n  --max-knowledge-items <N> Maximum linked memory/Agent records\n  --max-response-bytes <N> Maximum composed response bytes\n\nExamples:\n  compass context explain crate::Parser::parse\n  compass context modify symbol-id --format json\n\nNotes:\n  Fuzzy candidates are suggestions only. Compass composes structural evidence only after one exact identity resolves; ambiguity is never resolved by first match. Agent knowledge requires both exact overlay selectors and remains separate from Base provenance."
     ),
     page!(
         "ask",
@@ -883,7 +901,11 @@ pub(crate) fn append_usage_hint(
     command: &str,
     arguments: &[String],
 ) -> Outcome {
-    if outcome.code != 2 || outcome.stderr.is_empty() || outcome.stderr.contains("--help") {
+    if outcome.code != 2
+        || outcome.stderr.is_empty()
+        || outcome.stderr.contains("--help")
+        || serde_json::from_str::<serde_json::Value>(&outcome.stderr).is_ok()
+    {
         return outcome;
     }
     let mut tokens = vec![command];
@@ -1253,7 +1275,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 49);
+        assert_eq!(roots.len(), 50);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

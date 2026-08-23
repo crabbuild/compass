@@ -72,9 +72,9 @@ pub use review::{
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 pub use viewer_model::{
-    GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewEdge, GraphViewModel, GraphViewNode,
-    GraphViewSource, GraphViewStats, graph_view_model, shared_viewer_html,
-    shared_viewer_html_with_communities,
+    EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewEdge,
+    GraphViewModel, GraphViewNode, GraphViewSource, GraphViewStats, effective_graph_view_model,
+    graph_view_model, shared_viewer_html, shared_viewer_html_with_communities,
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub use workbench::{

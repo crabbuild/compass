@@ -255,9 +255,23 @@ Add a fixture that proves direction, multiplicity, attributes, and provenance
 together. A test that checks only that “some edge exists” is too weak for a
 public graph contract.
 
+## Grounding is not inference confidence
+
+`EXTRACTED` and `INFERRED` classify how Compass established a structural Base
+Graph fact. `GROUNDED` is orthogonal: it says Compass deterministically
+verified the citations supplied for an agent-authored Assertion or Challenge.
+It must never be inferred from a model response or accepted as a caller field.
+The certificate binds the exact Base Generation, claim digest, verified
+evidence digests, policy, and verifier version.
+
+Grounding verifies attribution and evidence integrity. It does not prove that
+an interpretation is universally true. Consumers should display authorship,
+Grounding, and structural confidence as separate fields.
+
 ## Related pages
 
 - [Graph model](graph-model.md)
+- [Agent Graph overlays](agent-graph-overlays.md)
 - [How Compass works](how-it-works.md)
 - [Impact-analysis cookbook](../cookbook/impact-analysis.md)
 - [Output reference](../reference/outputs.md)

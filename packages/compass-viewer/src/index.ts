@@ -4,6 +4,7 @@ export * from "./contracts/callGraph";
 export * from "./contracts/callflow";
 export * from "./contracts/architecture";
 export * from "./contracts/codeQuery";
+export * from "./contracts/taskContext";
 export * from "./contracts/graph";
 export * from "./contracts/history";
 export * from "./contracts/workbench";

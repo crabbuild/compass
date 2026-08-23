@@ -1,5 +1,6 @@
 //! Application services shared by the Compass and Compass command frontends.
 
+mod agent_graph;
 mod build_state;
 mod cluster_existing;
 mod diagnostics;
@@ -13,6 +14,10 @@ mod task_context;
 mod watch;
 mod watch_scheduler;
 
+pub use agent_graph::{
+    AgentGraphContext, CurrentBaseGenerationProvider, HistoricalAgentGraphContext,
+    HistoricalBaseGenerationProvider,
+};
 pub use cluster_existing::{
     ClusterExistingOptions, ClusterExistingResult, ClusterExistingTimings, ClusterLabelContext,
     ClusterLabelSelection, cluster_existing_graph, cluster_existing_graph_with_labeler,
@@ -40,10 +45,14 @@ pub use review::{
     review_change_request_ready_exact,
 };
 pub use task_context::{
-    TASK_CONTEXT_PROFILE_SCHEMA, TASK_CONTEXT_SCHEMA, TaskContext, TaskContextError,
-    TaskContextIntent, TaskContextKnowledge, TaskContextLimits, TaskContextOmission,
-    TaskContextRequest, TaskContextSection, TaskContextSectionKind, TaskContextTarget,
-    TaskContextWork, build_task_context,
+    AgentKnowledgeAssertion, AgentKnowledgeChallenge, AgentKnowledgeSection,
+    FRAMEWORK_CONTEXT_SCHEMA, FrameworkAmbiguity, FrameworkBoundaryContext,
+    FrameworkCapabilityStatus, FrameworkContext, FrameworkPackContext, FrameworkQualificationState,
+    FrameworkRelationContext, FrameworkRouteContext, FrameworkStageContext,
+    TASK_CONTEXT_PROFILE_SCHEMA, TASK_CONTEXT_SCHEMA, TASK_CONTEXT_SCHEMA_V1, TaskContext,
+    TaskContextError, TaskContextIntent, TaskContextKnowledge, TaskContextLimits,
+    TaskContextOmission, TaskContextRequest, TaskContextSection, TaskContextSectionKind,
+    TaskContextTarget, TaskContextWork, attach_agent_knowledge, build_task_context,
 };
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,

@@ -469,6 +469,62 @@ export function GraphInspector({
         />
       )}
 
+      {model.effectiveGraph && (
+        <section className="compass-info-panel" aria-labelledby="compass-agent-overlay-title">
+          <div className="compass-section-heading">
+            <h2 id="compass-agent-overlay-title">Agent overlay</h2>
+            <span>Exact revision</span>
+          </div>
+          <dl className="compass-metadata-grid">
+            <div>
+              <dt>Pinned profile</dt>
+              <dd>{model.effectiveGraph.compositionProfile}</dd>
+            </div>
+            <div>
+              <dt>Retractions</dt>
+              <dd>{model.effectiveGraph.retractions.total.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Omissions</dt>
+              <dd>{model.effectiveGraph.omissions.total.toLocaleString()}</dd>
+            </div>
+            <div className="compass-metadata-wide">
+              <dt>Overlay revision</dt>
+              <dd title={model.effectiveGraph.overlayRevision}>
+                <code>{model.effectiveGraph.overlayRevision.slice(0, 12)}</code>
+              </dd>
+            </div>
+          </dl>
+          {model.effectiveGraph.retractions.examples.length > 0 && (
+            <details>
+              <summary>
+                Retraction history
+                <span>{model.effectiveGraph.retractions.examples.length}</span>
+              </summary>
+              <ul>
+                {model.effectiveGraph.retractions.examples.map((retraction) => (
+                  <li key={`${retraction.kind}:${retraction.id}`}>
+                    <strong>{retraction.kind}</strong>{" "}
+                    <code>{retraction.id}</code>{" — "}
+                    {retraction.reasonCode}: {retraction.explanation}
+                  </li>
+                ))}
+              </ul>
+              {model.effectiveGraph.retractions.omittedExamples > 0 && (
+                <p className="compass-empty">
+                  {model.effectiveGraph.retractions.omittedExamples.toLocaleString()} additional
+                  Retractions omitted by the response bound.
+                </p>
+              )}
+            </details>
+          )}
+          <p className="compass-empty">
+            Changing augment or curated profile requires a new exact Effective Graph read;
+            this viewer never relabels one identity as another.
+          </p>
+        </section>
+      )}
+
       <section
         className="compass-community-panel"
         aria-labelledby="compass-communities-title"

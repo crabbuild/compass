@@ -20,6 +20,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 tower-http.workspace = true
 compass-core = { path = "../compass-core", version = "0.3.19" }
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 compass-files = { path = "../compass-files", version = "0.3.19" }
 compass-graph = { path = "../compass-graph", version = "0.3.19" }
 compass-history = { path = "../compass-history", version = "0.3.19" }

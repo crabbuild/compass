@@ -169,8 +169,8 @@ pub enum WorkbenchViewContent {
     History {
         base_revision: String,
         target_revision: String,
-        before: GraphViewModel,
-        after: GraphViewModel,
+        before: Box<GraphViewModel>,
+        after: Box<GraphViewModel>,
     },
     Affected {
         root: String,
@@ -380,6 +380,7 @@ mod tests {
                         edges: Vec::new(),
                         communities: Vec::new(),
                         hyperedges: Vec::new(),
+                        effective_graph: None,
                     },
                     community_details: BTreeMap::new(),
                 },
