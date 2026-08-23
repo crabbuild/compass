@@ -21,6 +21,16 @@
   drill-down, explicit versioned overlays, and migration guidance for direct
   `compass.viewer.callflow/1` consumers.
 
+- Add bounded native PDF, DOCX, PPTX, and XLSX document artifacts and graph
+  projection, gap-free semantic slicing, pure-Rust PDF rasterization, optional
+  local PP-OCRv6 OCR, explicit pinned model management, and the
+  `document inspect` and `models` command families. OCR remains off by default
+  and requires no Python, Tesseract, office suite, or system PDF installation.
+  Harden document reads against files that grow while being read, validate
+  cached and OCR-derived artifact coherence, bound aggregate raster work and
+  per-tile deadlines, and serialize model installation while rejecting symlinked
+  model artifacts and markers.
+
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes
   declarations, scopes, bindings, occurrences, and conservative relationship

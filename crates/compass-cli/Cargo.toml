@@ -50,6 +50,8 @@ compass-history = { path = "../compass-history", version = "0.3.19" }
 compass-google-workspace = { path = "../compass-google-workspace", version = "0.3.19" }
 compass-ingest = { path = "../compass-ingest", version = "0.3.19" }
 compass-model = { path = "../compass-model", version = "0.3.19" }
+compass-media = { path = "../compass-media", version = "0.3.19" }
+compass-ocr = { path = "../compass-ocr", version = "0.3.19" }
 compass-mcp = { path = "../compass-mcp", version = "0.3.19" }
 compass-output = { path = "../compass-output", version = "0.3.19" }
 compass-postgres = { path = "../compass-postgres", version = "0.3.19" }
@@ -64,3 +66,6 @@ url.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+zip.workspace = true

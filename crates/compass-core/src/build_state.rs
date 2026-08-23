@@ -102,6 +102,8 @@ pub(crate) struct BuildProfile {
     pub inference_level: String,
     #[serde(default = "default_max_source_bytes")]
     pub max_source_bytes: u64,
+    #[serde(default = "default_document_processing_identity")]
+    pub document_processing_identity: String,
 }
 
 // Build-state schema 1 omitted the historical max profile. Keep interpreting
@@ -118,6 +120,10 @@ fn inference_level_is_legacy_max(level: &str) -> bool {
 
 const fn default_max_source_bytes() -> u64 {
     crate::pipeline::DEFAULT_MAX_SOURCE_BYTES
+}
+
+fn default_document_processing_identity() -> String {
+    crate::PreparedDocumentSet::default().cache_identity
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -297,6 +303,7 @@ mod tests {
             graph_storage: "json".to_owned(),
             inference_level: legacy_default_inference_level(),
             max_source_bytes: default_max_source_bytes(),
+            document_processing_identity: default_document_processing_identity(),
         };
         let document = serde_json::to_value(&profile)?;
         assert!(document.get("inference_level").is_none());
@@ -331,6 +338,7 @@ mod tests {
             graph_storage: "json".to_owned(),
             inference_level: legacy_default_inference_level(),
             max_source_bytes: default_max_source_bytes(),
+            document_processing_identity: default_document_processing_identity(),
         };
         let state = BuildState::capture(
             output,

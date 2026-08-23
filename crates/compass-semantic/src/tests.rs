@@ -965,7 +965,7 @@ fn cached_corpus_orchestration_checkpoints_replays_and_prunes() -> Result<(), Bo
                         cache,
                         &[chunk[0].path().to_path_buf()],
                         false,
-                        &extraction_prompt(false),
+                        &semantic_cache_prompt(false, &PreparedDocumentInputs::default()),
                     )
                     .ok()
                 });

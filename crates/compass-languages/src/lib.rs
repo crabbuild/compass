@@ -94,6 +94,8 @@ pub enum ExtractError {
     ParseCancelled(PathBuf),
     #[error("invalid program evidence for {path}: {detail}")]
     InvalidProgramEvidence { path: PathBuf, detail: String },
+    #[error("invalid prepared document evidence for {path}: {detail}")]
+    InvalidDocumentEvidence { path: PathBuf, detail: String },
     #[error(transparent)]
     File(#[from] compass_files::FileError),
 }

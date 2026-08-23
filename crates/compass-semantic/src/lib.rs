@@ -13,6 +13,7 @@ use std::io::{Read, Write};
 use std::net::{IpAddr, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -106,6 +107,8 @@ pub enum SemanticError {
     InvalidProviderResponse(String),
     #[error("invalid provider configuration: {0}")]
     InvalidProviderConfiguration(String),
+    #[error("document processing failed: {0}")]
+    DocumentProcessing(String),
     #[error("provider transport failed: {0}")]
     Transport(String),
     #[error("semantic cache failed: {0}")]
@@ -509,12 +512,12 @@ pub fn build_untrusted_prompt(sources: &[EvidenceSource<'_>], root: &Path) -> St
                 .strip_prefix(root)
                 .unwrap_or(source.path)
                 .to_string_lossy();
-            let capped = source
+            let bounded = source
                 .content
                 .chars()
                 .take(FILE_CHAR_CAP)
                 .collect::<String>();
-            Some(wrap_untrusted_source(&relative, &capped))
+            Some(wrap_untrusted_source(&relative, &bounded))
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -742,6 +745,32 @@ pub fn strip_partial_markers(result: &mut Value) {
 pub enum SemanticUnit {
     File(PathBuf),
     Slice(FileSlice),
+    DocumentSlice(DocumentSlice),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DocumentSlice {
+    pub path: PathBuf,
+    pub content: Arc<str>,
+    pub start: usize,
+    pub end: usize,
+    pub ordinal: u32,
+    pub total: u32,
+    pub schema: &'static str,
+    pub normalizer_version: u32,
+}
+
+impl DocumentSlice {
+    pub fn text(&self) -> Result<&str, String> {
+        if self.start > self.end
+            || self.end > self.content.len()
+            || !self.content.is_char_boundary(self.start)
+            || !self.content.is_char_boundary(self.end)
+        {
+            return Err("document slice has invalid UTF-8 boundaries".to_owned());
+        }
+        Ok(&self.content[self.start..self.end])
+    }
 }
 
 impl SemanticUnit {
@@ -750,6 +779,7 @@ impl SemanticUnit {
         match self {
             Self::File(path) => path,
             Self::Slice(slice) => &slice.path,
+            Self::DocumentSlice(slice) => &slice.path,
         }
     }
 }
@@ -799,10 +829,25 @@ pub fn read_semantic_units(units: &[SemanticUnit], root: &Path) -> SemanticReadR
                 };
                 read_slice_text(&safe_slice).ok()
             }
+            SemanticUnit::DocumentSlice(slice) => match slice.text() {
+                Ok(content) => Some(content.to_owned()),
+                Err(error) => {
+                    result.warnings.push(format!(
+                        "could not read semantic document slice {}: {error}",
+                        path.display()
+                    ));
+                    None
+                }
+            },
             SemanticUnit::File(_) => match extract_text(&resolved_path) {
                 Ok(content) => Some(content),
-                Err(_) if is_compat_binary_document(&resolved_path) => Some(String::new()),
-                Err(_) => None,
+                Err(error) => {
+                    result.warnings.push(format!(
+                        "could not decode semantic source {}: {error}",
+                        path.display()
+                    ));
+                    None
+                }
             },
         };
         let Some(content) = loaded else {
@@ -811,7 +856,6 @@ pub fn read_semantic_units(units: &[SemanticUnit], root: &Path) -> SemanticReadR
                 .push(format!("could not read semantic source {}", path.display()));
             continue;
         };
-        let content = content.chars().take(FILE_CHAR_CAP).collect::<String>();
         result.sources.push(LoadedSemanticSource {
             path: resolved_path,
             relative_path,
@@ -825,16 +869,6 @@ pub fn read_semantic_units(units: &[SemanticUnit], root: &Path) -> SemanticReadR
         .collect::<Vec<_>>()
         .join("\n\n");
     result
-}
-
-fn is_compat_binary_document(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            ["pdf", "docx", "xlsx"]
-                .iter()
-                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
-        })
 }
 
 mod orchestration;

@@ -50,6 +50,27 @@ CI covers Linux, macOS, and Windows targets listed in
 performance checks are owned by Compass workflows and require no external
 product checkout.
 
+## Document and OCR compatibility
+
+Native PDF, DOCX, PPTX, and XLSX processing is part of the local Rust product
+boundary. It does not require Python, Tesseract, LibreOffice, Poppler, Java, a
+runtime grammar download, or provider credentials. The stable artifact majors
+introduced here are `compass.document/1`, `compass.document.inspect/1`, and
+`compass.ocr/1`; unknown majors and normalizer versions fail explicitly.
+
+OCR is off by default. Enabling `auto` or `always` requires one exact verified
+Compass-managed profile. Extraction never downloads models, and `models
+verify` never accesses the network. Document and semantic caches are hard-cut
+by source digest, schema, normalizer, rasterizer, OCR policy, preprocessing,
+profile manifest/model digests, and languages. An incompatible cache entry is
+a miss or explicit corruption error, never a fallback to flattened text.
+
+The selected OCR identity is included in graph build and immutable history
+profiles. Native text remains authoritative; OCR is additive derived evidence
+with exact source owner, geometry, confidence, and model provenance. Partial
+visual coverage is never labeled complete or finalized as a complete document
+cache entry.
+
 ## Evolving contracts
 
 The Grounded Agent Graph feature is additive and opt-in. It does not change

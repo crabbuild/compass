@@ -431,15 +431,13 @@ fn copy_snapshot(
             fs::create_dir(&to).map_err(|error| io_error(&to, error))?;
             copy_snapshot(&from, &to, excluded_artifacts, false)?;
         } else if file_type.is_file() {
-            // Snapshot files are immutable after publication and Compass
-            // replaces mutable artifacts through the atomic writers. A
-            // same-filesystem hard link therefore gives the staging snapshot
-            // copy-on-write behavior without reading large graphs again. If
-            // links are unavailable (for example across filesystems or on a
-            // restricted volume), retain the portable copy fallback.
-            if fs::hard_link(&from, &to).is_err() {
-                fs::copy(&from, &to).map_err(|error| io_error(&to, error))?;
-            }
+            // A staging snapshot is writable by the build pipeline. Hard
+            // linking a published artifact would make an ordinary write to
+            // the staging path mutate the active snapshot as well, violating
+            // the one-complete-snapshot publication contract. Copy the bytes
+            // instead; callers that need large sidecars can explicitly use
+            // the excluded-artifact path and its immutable reference.
+            fs::copy(&from, &to).map_err(|error| io_error(&to, error))?;
         }
     }
     Ok(())

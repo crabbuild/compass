@@ -63,6 +63,10 @@ though the query itself does not edit the working tree.
 - `compass update`: deterministic structural refresh.
 - `compass extract`: structural plus optional semantic, Cargo, PostgreSQL, or
   Google Workspace layers.
+- `compass document`: inspect PDF, DOCX, PPTX, or XLSX content locally, with
+  optional managed OCR and typed JSON evidence.
+- `compass models`: list, install, or verify the pinned OCR model profiles in
+  the Compass cache; no system OCR package is required.
 - `compass watch`: long-running deterministic refresh and semantic-staleness
   detection.
 - `compass cluster-only`: recompute communities and visual/report artifacts from

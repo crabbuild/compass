@@ -123,9 +123,10 @@ Classify the effect before selecting a command:
 
 - Read-only local: `ask`, `search`, `callers`, `callees`, `impact`, `explore`,
   `node`, `call-graph`, `query`, `program`, `path`, `explain`, `affected`,
-  `tree`, and local diagnostics.
+  `tree`, `document`, `models list`, `models verify`, and local diagnostics.
 - Local publication: `init`, `update`, `extract`, `watch`, `cluster-only`,
-  `label`, history materialization, installation, and file-based exports.
+  `label`, `models install`, history materialization, installation, and
+  file-based exports.
 - External or credentialed: semantic providers, URL ingestion, cloning, PR
   inspection, PostgreSQL or Google Workspace extraction, HTTP serving, and
   database export pushes.
@@ -146,6 +147,11 @@ Choose the least expensive command that satisfies the request:
   optional native integrations.
 - `compass extract PATH` when the user wants semantic facts from documents,
   papers, Office files, or images and accepts the configured provider.
+- `compass document inspect FILE` for a local, bounded preview of PDF, DOCX,
+  PPTX, or XLSX content; add `--ocr auto` for scanned pages or embedded images.
+- `compass models list|verify` to inspect local OCR readiness, and
+  `compass models install pp-ocrv6-small` only when OCR is requested and the
+  verified model profile is missing.
 - `compass cluster-only` when extraction is current and only communities or
   visual outputs need regeneration.
 - `compass watch .` for continuous deterministic refresh during active work.

@@ -60,6 +60,13 @@ promotion decision. The mounted qualification target records the pinned
 SwiftSyntax, Dart Analyzer, scala.meta, and Groovy CompilationUnit toolchains
 and the immutable audit results.
 
+Plan 022 extends the native document program with selective, local OCR for
+scanned PDF pages and images embedded in DOCX, PPTX, and XLSX. Native package
+and PDF text remains authoritative. OCR is off by default, model/profile and
+geometry provenance are explicit, model installation is separate from
+extraction, and the recommended engine must beat a pinned baseline on a
+Compass-owned corpus before support or quality claims ship.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -84,6 +91,7 @@ and the immutable audit results.
 | 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
 | 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 | 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
+| 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -130,6 +138,11 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   reuse the exact-language JVM boundary established for Scala. Each language
   has a separate candidate and atomic hard-cut phase, and the mixed-language
   release gate runs only after all four cuts.
+- Plan 022 starts only after the document safety, artifact, slicing/fusion, and
+  OOXML plans. It adds a separate OCR qualification gate rather than weakening
+  Plan 012's credential-free native document gate. Plan 012 and Plan 022 may
+  reuse fixture-manifest infrastructure, but neither may make OCR models or
+  helper runtimes prerequisites for native document support.
 
 ## Direction options not promoted to implementation plans
 
@@ -147,9 +160,10 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   stability, latency, and memory measurements.
 - **Linux and Windows release artifacts:** clear distribution gap; deferred
   only to keep this first plan set at five items.
-- **Image OCR and slide-layout understanding:** valuable for scanned PDFs and
-  diagram-heavy decks, but require a separate bounded media/provenance design;
-  these plans deliberately cover native text and package evidence first.
+- **Generative slide-layout, chart, and formula understanding:** Plan 022 now
+  owns bounded text OCR and geometry for scanned pages and embedded images.
+  Generative VLM interpretation remains deferred because it needs separate
+  inferred-evidence, hallucination, cost, and qualification contracts.
 - **Legacy binary Office formats (`.doc`, `.xls`, `.ppt`):** require a safe
   parser/conversion boundary distinct from OOXML and are not implied by plan
   010.

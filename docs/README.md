@@ -41,6 +41,7 @@ to yours:
 - [Integrate Compass with other tools](guides/integrating-compass.md)
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
+- [Process PDF and Office documents](reference/document-formats.md)
 - [Review pull requests in GitHub](guides/github-pr-review.md)
 - [Operate watch, serve, hooks, and providers](guides/operations.md)
 - [Solve a concrete problem](cookbook/README.md)
@@ -104,6 +105,7 @@ They are not evidence that an uncompleted design has shipped.
 | Document | Purpose |
 | --- | --- |
 | [Universal evidence implementation](implementation/universal-evidence.md) | Current universal evidence pipeline, resolution order, and failure classes |
+| [Document OCR qualification](implementation/document-ocr-qualification.md) | Offline contract gate and opt-in pinned-model acceptance procedure |
 | [Evidence resolution framework technical design](implementation/evidence-resolution-framework-technical-design.md) | Target ownership, components, interfaces, and invariants for rearchitecting the resolver |
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
 | [Architecture graph hardening technical design](implementation/architecture-graph-hardening-phased-technical-design.md) | Project-specific architecture projection, quality contract, and phased delivery plan |
@@ -154,10 +156,11 @@ document and open a documentation issue.
 ## Product status in one paragraph
 
 Compass is a Rust workspace that ships the `compass` executable. Structural
-code extraction and graph queries run locally and do not require Python,
-embeddings, a vector database, or runtime grammar downloads. Semantic
-extraction for documents and other non-code sources is optional and may contact
-the provider you explicitly configure. The current release packaging and
+code and document extraction and graph queries run locally and do not require
+Python, embeddings, a vector database, or runtime grammar downloads. OCR is
+optional and local with Compass-managed verified models. Semantic provider
+enrichment is separate and may contact the provider you explicitly configure.
+The current release packaging and
 platform guarantees are recorded in the
 [compatibility ledger](../COMPATIBILITY.md), not inferred from what happens to
 compile on one developer machine.
