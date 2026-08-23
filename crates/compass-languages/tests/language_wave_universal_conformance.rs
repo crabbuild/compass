@@ -510,6 +510,139 @@ typealias Alias = Box
 }
 
 #[test]
+fn swift_source_supplement_recovers_conditional_and_nested_declarations()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"#if canImport(NIOCore)
+final class ConditionalHandler {
+    func outer() {
+        @Sendable func nested() {}
+    }
+
+    deinit {}
+}
+#endif
+
+protocol ChannelLike {
+    var localAddress: SocketAddress? { get }
+}
+
+let ignored = "func fake() {}"
+// func alsoFake() {}
+
+private func topLevelAfterConditional() {}
+private func isDebugAssertConfiguration() -> Bool { true }
+let topLevelValue: Int
+"#;
+    let path = Path::new("Sources/Conditional.swift");
+    let mut engine = Engine::default();
+    let evidence =
+        engine.extract_source_universal_evidence(path, "Sources/Conditional.swift", source)?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    for (name, kind) in [
+        ("ConditionalHandler", "class"),
+        ("outer", "method"),
+        ("nested", "method"),
+        ("deinit", "method"),
+        ("ChannelLike", "protocol"),
+        ("localAddress", "field"),
+        ("topLevelAfterConditional", "function"),
+        ("isDebugAssertConfiguration", "function"),
+        ("topLevelValue", "field"),
+    ] {
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == name && declaration.kind == kind),
+            "missing Swift {name} {kind}: {:#?}",
+            evidence.declarations
+        );
+    }
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .all(|declaration| declaration.name != "fake" && declaration.name != "alsoFake"),
+        "Swift source supplement scanned a comment/string: {:#?}",
+        evidence.declarations
+    );
+    for name in [
+        "ConditionalHandler",
+        "outer",
+        "nested",
+        "deinit",
+        "ChannelLike",
+        "localAddress",
+    ] {
+        assert!(
+            evidence.candidates.iter().any(|candidate| {
+                candidate.relation == CandidateRelation::Owns && candidate.target_spelling == name
+            }),
+            "missing Swift ownership candidate for {name}: {:#?}",
+            evidence.candidates
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn swift_source_supplement_recovers_top_level_function_after_parser_recovery()
+-> Result<(), Box<dyn Error>> {
+    let source = br##"import Testing
+
+#if compiler(>=6.2)
+@Suite struct ByteBufferCrashTests {
+    @Test func movingReaderIndexPastWriterIndex() async {
+        let result = await #expect(processExitsWith: .failure, observing: [\.standardErrorContent]) {
+            var buffer = ByteBufferAllocator().buffer(capacity: 16)
+            buffer.moveReaderIndex(forwardBy: 1)
+        }
+        expectCrashOutput(result, matches: #"Precondition failed"#)
+    }
+}
+
+private func expectCrashOutput(
+    _ result: ExitTest.Result?,
+    matches regex: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    guard let result else { return }
+    if isDebugAssertConfiguration() {
+        let output = String(decoding: result.standardErrorContent, as: UTF8.self)
+        #expect(output.range(of: regex, options: .regularExpression) != nil)
+    }
+}
+
+private func isDebugAssertConfiguration() -> Bool {
+    var isDebugAssert = false
+    assert({
+        isDebugAssert = true
+        return true
+    }())
+    return isDebugAssert
+}
+#endif
+"##;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("Tests/ByteBufferCrashTests.swift"),
+        "Tests/ByteBufferCrashTests.swift",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "isDebugAssertConfiguration"),
+        "missing parser-recovery function: {:#?}",
+        evidence.declarations
+    );
+    Ok(())
+}
+
+#[test]
 fn scala_companion_and_selector_identities_do_not_collapse() -> Result<(), Box<dyn Error>> {
     let source = br#"package sample
 import foo.{Bar => Baz, Hidden => _, _}

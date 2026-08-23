@@ -281,14 +281,16 @@ def _declaration_overlap_matches(
     graph target in the file; otherwise the construct remains an explicit
     missing record. Dart, Groovy, and Scala use this normalization for ownership
     declarations; base-type relations remain Groovy-only until their
-    language-specific target contracts are independently qualified.
+    language-specific target contracts are independently qualified. Swift
+    declaration spans are normalized here as well because SwiftSyntax keeps
+    some trailing trivia that the Tree-sitter declaration anchor excludes.
     """
 
     allowed = (
         language == "groovy"
         and construct.relation in {"contains", "extends", "implements"}
     ) or (
-        language in {"dart", "scala"}
+        language in {"dart", "scala", "swift"}
         and construct.relation == "contains"
     )
     if not allowed:
@@ -831,7 +833,7 @@ def main() -> int:
                     else replace(construct, relation=edge["relation"])
                 )
                 if (
-                    args.language in {"dart", "groovy", "scala"}
+                    args.language in {"dart", "groovy", "scala", "swift"}
                     and overlap_match
                     and (
                         construct.start_byte != edge["anchor"][1]

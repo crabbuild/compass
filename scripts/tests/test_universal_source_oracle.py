@@ -120,6 +120,37 @@ class UniversalSourceOracleTests(unittest.TestCase):
             ),
         )
 
+    def test_swift_ownership_overlap_accepts_trailing_trivia_difference(self) -> None:
+        construct = SourceConstruct(
+            "Sources/Channel.swift",
+            "contains",
+            "ownership",
+            "ServerSocketChannel",
+            "getOption0",
+            None,
+            100,
+            420,
+            1,
+        )
+        edge = {
+            "anchor": ("Sources/Channel.swift", 100, 414),
+            "target": "get-option-id",
+            "targetNode": {
+                "qualifiedName": "ServerSocketChannel.getOption0",
+                "sourceStart": 100,
+                "sourceEnd": 414,
+            },
+        }
+        self.assertEqual(
+            [edge],
+            _declaration_overlap_matches(
+                "swift",
+                construct,
+                frozenset(("contains",)),
+                {("Sources/Channel.swift", "contains"): [edge]},
+            ),
+        )
+
     def test_ownership_overlap_prefers_unique_enclosing_declaration_span(self) -> None:
         construct = SourceConstruct(
             "lib/cache.dart",
