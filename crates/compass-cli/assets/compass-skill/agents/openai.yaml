@@ -1,4 +1,4 @@
 interface:
   display_name: "Compass"
-  short_description: "Graph-first codebase navigation and impact analysis"
-  default_prompt: "Use $compass to map this repository and answer with cited graph and source evidence."
+  short_description: "Graph navigation and GROUNDED agent enhancements"
+  default_prompt: "Use $compass to initialize this coding session, map the relevant code, and answer with cited graph and source evidence. Keep graph enhancement read-only unless I explicitly ask you to preserve GROUNDED agent knowledge."
