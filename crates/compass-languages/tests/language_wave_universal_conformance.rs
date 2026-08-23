@@ -226,6 +226,55 @@ class UserSpec extends spock.lang.Specification {
 }
 
 #[test]
+fn groovy_spock_data_table_keeps_one_feature_identity() -> Result<(), Box<dyn Error>> {
+    let source = br#"package routes
+class UserSpec extends spock.lang.Specification {
+    def "loads users"(String input, String expected) {
+        expect:
+        helper(input) == expected
+
+        where:
+        input  | expected
+        "alice" | "ALICE"
+        "bob"   | "BOB"
+    }
+}
+"#;
+    let path = Path::new("src/UserSpec.groovy");
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(path, "src/UserSpec.groovy", source)?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    let features = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.name == "loads users")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        features.len(),
+        1,
+        "duplicate Spock feature identity: {features:#?}"
+    );
+    let feature = features[0];
+    assert_eq!(feature.kind, "method");
+    assert_eq!(feature.qualified_name, "routes.UserSpec.loads users");
+    let body = std::str::from_utf8(
+        source
+            .get(feature.range.start_byte as usize..feature.range.end_byte as usize)
+            .ok_or("feature range outside source")?,
+    )?;
+    assert!(body.contains("where:"));
+    assert!(body.contains("\"alice\" | \"ALICE\""));
+    assert!(
+        evidence.declarations.iter().all(|declaration| !matches!(
+            declaration.name.as_str(),
+            "where" | "input" | "expected"
+        ))
+    );
+    Ok(())
+}
+
+#[test]
 fn groovy_generic_base_types_do_not_publish_phantom_declarations() -> Result<(), Box<dyn Error>> {
     let source = br#"package sample
 interface NodeMaker<T> { T makeNode(Object value) }

@@ -81,6 +81,45 @@ class UniversalSourceOracleTests(unittest.TestCase):
             ),
         )
 
+    def test_scala_ownership_overlap_requires_one_target(self) -> None:
+        construct = SourceConstruct(
+            "src/Types.scala",
+            "contains",
+            "ownership",
+            "dotty.tools.Types.TermLambda.compute",
+            "compute",
+            None,
+            100,
+            400,
+            1,
+        )
+        edge = {
+            "anchor": ("src/Types.scala", 220, 227),
+            "target": "compute-id",
+            "targetNode": {
+                "qualifiedName": "dotty.tools.Types.TermLambda.compute"
+            },
+        }
+        self.assertEqual(
+            [edge],
+            _declaration_overlap_matches(
+                "scala",
+                construct,
+                frozenset(("contains",)),
+                {("src/Types.scala", "contains"): [edge]},
+            ),
+        )
+        ambiguous = {**edge, "target": "other-compute-id"}
+        self.assertEqual(
+            [],
+            _declaration_overlap_matches(
+                "scala",
+                construct,
+                frozenset(("contains",)),
+                {("src/Types.scala", "contains"): [edge, ambiguous]},
+            ),
+        )
+
     def test_metadata_is_reported_without_changing_inventory_digest(self) -> None:
         cases = (
             ("swift", ".swift", "SwiftSyntax provider unavailable"),

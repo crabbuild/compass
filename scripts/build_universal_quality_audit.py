@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, defaultdict
 from dataclasses import replace
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -157,12 +158,20 @@ def _edges(graph: Path, nodes: dict[str, dict[str, Any]], language: str) -> list
     return values
 
 
-def _snippet(root: Path, construct: SourceConstruct) -> str | None:
-    path = (root / construct.source_file).resolve()
+@lru_cache(maxsize=8192)
+def _source_bytes(root: str, source_file: str) -> bytes | None:
+    root_path = Path(root)
+    path = (root_path / source_file).resolve()
     try:
-        path.relative_to(root.resolve())
-        contents = path.read_bytes()
+        path.relative_to(root_path)
+        return path.read_bytes()
     except (OSError, ValueError):
+        return None
+
+
+def _snippet(root: Path, construct: SourceConstruct) -> str | None:
+    contents = _source_bytes(str(root.resolve()), construct.source_file)
+    if contents is None:
         return None
     if construct.start_byte < 0 or construct.end_byte <= construct.start_byte:
         return None
@@ -182,11 +191,8 @@ def _has_trailing_comment(root: Path, construct: SourceConstruct) -> bool:
     ownership recall judgment until both producers publish the same anchor.
     """
 
-    path = (root / construct.source_file).resolve()
-    try:
-        path.relative_to(root.resolve())
-        contents = path.read_bytes()
-    except (OSError, ValueError):
+    contents = _source_bytes(str(root.resolve()), construct.source_file)
+    if contents is None:
         return False
     if construct.end_byte < 0 or construct.end_byte > len(contents):
         return False
@@ -261,6 +267,9 @@ def _declaration_overlap_matches(
     construct: SourceConstruct,
     aliases: frozenset[str],
     by_file_relation: dict[tuple[str, str], list[dict[str, Any]]],
+    by_file_relation_terminal: dict[
+        tuple[str, str, str], list[dict[str, Any]]
+    ] | None = None,
 ) -> list[dict[str, Any]]:
     """Match declaration facts when providers choose different spans.
 
@@ -268,7 +277,7 @@ def _declaration_overlap_matches(
     tree-sitter producer reports the exact type/name token. A source overlap
     is safe only when the relation family and terminal target identify one
     graph target in the file; otherwise the construct remains an explicit
-    missing record. Dart and Groovy both use this normalization for ownership
+    missing record. Dart, Groovy, and Scala use this normalization for ownership
     declarations; base-type relations remain Groovy-only until their
     language-specific target contracts are independently qualified.
     """
@@ -276,14 +285,31 @@ def _declaration_overlap_matches(
     allowed = (
         language == "groovy"
         and construct.relation in {"contains", "extends", "implements"}
-    ) or (language == "dart" and construct.relation == "contains")
+    ) or (
+        language in {"dart", "scala"}
+        and construct.relation == "contains"
+    )
     if not allowed:
         return []
     terminal = construct.target_spelling.rsplit(".", 1)[-1]
+    candidates = by_file_relation_terminal
+    if candidates is not None:
+        overlap_candidates = [
+            edge
+            for relation in aliases
+            for edge in candidates.get(
+                (construct.source_file, relation, terminal), ()
+            )
+        ]
+    else:
+        overlap_candidates = [
+            edge
+            for relation in aliases
+            for edge in by_file_relation.get((construct.source_file, relation), ())
+        ]
     overlap_matches = [
         edge
-        for relation in aliases
-        for edge in by_file_relation.get((construct.source_file, relation), ())
+        for edge in overlap_candidates
         if (
             max(edge["anchor"][1], construct.start_byte)
             < min(edge["anchor"][2], construct.end_byte)
@@ -690,10 +716,19 @@ def main() -> int:
         edges = _edges(graph, nodes, args.language)
         by_anchor: dict[tuple[str, str, int, int], list[dict[str, Any]]] = defaultdict(list)
         by_file_relation: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        by_file_relation_terminal: dict[
+            tuple[str, str, str], list[dict[str, Any]]
+        ] = defaultdict(list)
         for edge in edges:
             file, start, end = edge["anchor"]
             by_anchor[(edge["relation"], file, start, end)].append(edge)
             by_file_relation[(file, edge["relation"])].append(edge)
+            terminal = (
+                edge["targetNode"].get("qualifiedName") or edge["target"]
+            ).rsplit(".", 1)[-1]
+            by_file_relation_terminal[
+                (file, edge["relation"], terminal)
+            ].append(edge)
         file_nodes: dict[str, str] = {}
         for node in nodes.values():
             source = node.get("sourceFile")
@@ -764,6 +799,7 @@ def main() -> int:
                     construct,
                     aliases,
                     by_file_relation,
+                    by_file_relation_terminal,
                 )
                 overlap_match = bool(matches)
             if matches:
@@ -775,7 +811,7 @@ def main() -> int:
                     else replace(construct, relation=edge["relation"])
                 )
                 if (
-                    args.language in {"dart", "groovy"}
+                    args.language in {"dart", "groovy", "scala"}
                     and overlap_match
                     and (
                         construct.start_byte != edge["anchor"][1]
