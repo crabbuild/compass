@@ -46,6 +46,10 @@ pub(super) trait LanguageProfile: Sized {
         Self::declaration_kind(node.kind())
     }
 
+    fn ignores_declaration(_node: Node<'_>, _name_node: Node<'_>, _source: &[u8]) -> bool {
+        false
+    }
+
     fn base_type_relation(node: Node<'_>, owner_kind: Option<&str>) -> Option<CandidateRelation> {
         if !is_base_context(node) {
             return None;
@@ -112,6 +116,10 @@ pub(super) trait LanguageProfile: Sized {
         false
     }
 
+    fn supports_implicit_constructors() -> bool {
+        false
+    }
+
     fn collect_source_supplement<'source>(
         _state: &mut State<'source, Self>,
     ) -> Result<(), EvidenceError> {
@@ -165,6 +173,9 @@ pub(super) struct State<'source, P: LanguageProfile> {
     emitted_imports: BTreeSet<(String, String, usize, usize)>,
     module_targets: BTreeSet<String>,
     emitted: BTreeSet<(SemanticRole, usize, usize, String)>,
+    resolved_occurrences: BTreeSet<(SemanticRole, usize, usize, String)>,
+    source_call_owners: BTreeMap<usize, usize>,
+    source_call_roles: BTreeMap<usize, SemanticRole>,
     occurrence_ids: BTreeMap<(SemanticRole, usize, usize, String), String>,
     _profile: PhantomData<P>,
 }
@@ -228,6 +239,9 @@ pub(super) fn emit_tree_evidence<P: LanguageProfile>(
         emitted_imports: BTreeSet::new(),
         module_targets: BTreeSet::new(),
         emitted: BTreeSet::new(),
+        resolved_occurrences: BTreeSet::new(),
+        source_call_owners: BTreeMap::new(),
+        source_call_roles: BTreeMap::new(),
         occurrence_ids: BTreeMap::new(),
         _profile: PhantomData,
     };
@@ -314,6 +328,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
 
         if let Some(kind) = P::declaration_kind_for_node(node, self.source)
             && let Some(name_node) = declaration_name(node)
+            && !P::ignores_declaration(node, name_node, self.source)
         {
             let name = self.text(name_node);
             let lookup_name = P::declaration_lookup_name(&name);
@@ -676,14 +691,27 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         end: usize,
         constructor_node: bool,
     ) -> Result<(), EvidenceError> {
-        if !valid_name(spelling) || self.name_ranges.contains(&(start, end)) {
+        if !valid_name(spelling)
+            || (self.name_ranges.contains(&(start, end))
+                && !self.is_ignored_declaration_name(start, end))
+        {
             return Ok(());
         }
-        let constructor =
-            spelling.chars().next().is_some_and(char::is_uppercase) || constructor_node;
+        let local_constructor = self.resolve_local_constructor(spelling, qualifier);
+        let constructor = spelling.chars().next().is_some_and(char::is_uppercase)
+            || constructor_node
+            || local_constructor.is_some();
+        let role = if constructor {
+            SemanticRole::Construction
+        } else {
+            SemanticRole::Call
+        };
+        let key = (role, start, end, spelling.to_owned());
+        if self.emitted.contains(&key) && self.resolved_occurrences.contains(&key) {
+            return Ok(());
+        }
         let exact = if constructor && P::prefers_constructor_declarations() {
-            self.resolve_local_constructor(spelling, qualifier)
-                .or_else(|| self.resolve_local(spelling, qualifier))
+            local_constructor.or_else(|| self.resolve_local(spelling, qualifier))
         } else {
             P::prefers_owner_local_calls()
                 .then(|| self.resolve_local_for_owner(owner, spelling, qualifier))
@@ -707,12 +735,13 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         if !accepted {
             return Ok(());
         }
+        self.source_call_roles.insert(start, role);
         self.emit_call_site(
             owner,
             spelling,
             qualifier,
             range_for_byte_span(self.source_file, self.source, start, end),
-            constructor_node,
+            constructor,
         )
     }
 
@@ -997,12 +1026,20 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         if !valid_name(&spelling) {
             return Ok(());
         }
+        let owner = self
+            .source_call_owners
+            .get(&node.start_byte())
+            .copied()
+            .or_else(|| self.source_call_owners.get(&callee.start_byte()).copied())
+            .or_else(|| self.owner_for(node.start_byte()));
         self.emit_call_site(
-            self.owner_for(node.start_byte()),
+            owner,
             &spelling,
             qualifier.as_deref(),
             range_for_node(self.source_file, callee),
-            node.kind().contains("constructor"),
+            node.kind().contains("constructor")
+                || self.source_call_roles.get(&callee.start_byte())
+                    == Some(&SemanticRole::Construction),
         )
     }
 
@@ -1028,6 +1065,12 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         } else {
             CandidateRelation::Calls
         };
+        let range_start = range.start_byte as usize;
+        let range_end = range.end_byte as usize;
+        let key = (role, range_start, range_end, spelling.to_owned());
+        if self.emitted.contains(&key) && self.resolved_occurrences.contains(&key) {
+            return Ok(());
+        }
         let occurrence_id = self.emit_occurrence(
             role,
             &owner_id,
@@ -1072,6 +1115,10 @@ impl<'source, P: LanguageProfile> State<'source, P> {
                         })
                 })
             });
+        if exact.is_some() {
+            self.resolved_occurrences
+                .insert((role, range_start, range_end, spelling.to_owned()));
+        }
         let qualified_name = exact
             .and_then(|index| {
                 self.declarations
@@ -1299,6 +1346,10 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             .map(|(index, _)| index)
     }
 
+    pub(super) fn record_source_call_owner(&mut self, start: usize, owner: usize) {
+        self.source_call_owners.insert(start, owner);
+    }
+
     fn owner_id(&self, owner: Option<usize>) -> String {
         owner
             .and_then(|index| self.declarations.get(index))
@@ -1358,7 +1409,32 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             })
             .copied()
             .collect::<Vec<_>>();
-        (constructors.len() == 1).then(|| constructors[0])
+        if constructors.len() == 1 {
+            return Some(constructors[0]);
+        }
+        if constructors.is_empty() && P::supports_implicit_constructors() {
+            let classes = values
+                .iter()
+                .filter(|index| {
+                    self.declarations
+                        .get(**index)
+                        .is_some_and(|declaration| declaration.kind == "class")
+                })
+                .copied()
+                .collect::<Vec<_>>();
+            return (classes.len() == 1).then(|| classes[0]);
+        }
+        None
+    }
+
+    fn is_ignored_declaration_name(&self, start: usize, _end: usize) -> bool {
+        let prefix = self.source.get(..start).unwrap_or_default();
+        prefix
+            .iter()
+            .rev()
+            .skip_while(|byte| byte.is_ascii_whitespace())
+            .take(2)
+            .eq(b">=".iter())
     }
 
     fn local_candidates(&self, spelling: &str, qualifier: Option<&str>) -> Option<Vec<usize>> {

@@ -25,6 +25,16 @@ impl LanguageProfile for Dart {
             .or_else(|| (lower == "variable_declaration").then_some("field"))
     }
 
+    fn ignores_declaration(_node: Node<'_>, name_node: Node<'_>, source: &[u8]) -> bool {
+        let prefix = source.get(..name_node.start_byte()).unwrap_or_default();
+        prefix
+            .iter()
+            .rev()
+            .skip_while(|byte| byte.is_ascii_whitespace())
+            .take(2)
+            .eq(b">=".iter())
+    }
+
     fn base_type_relation(node: Node<'_>, _owner_kind: Option<&str>) -> Option<CandidateRelation> {
         let mut current = node.parent();
         for _ in 0..=4 {
@@ -69,6 +79,10 @@ impl LanguageProfile for Dart {
     }
 
     fn prefers_constructor_declarations() -> bool {
+        true
+    }
+
+    fn supports_implicit_constructors() -> bool {
         true
     }
 
@@ -207,6 +221,9 @@ fn collect_dart_receiver_calls<'source>(
                 .source_callable_owner_for(start)
                 .or(line_owner)
                 .or(inherited_owner);
+            if let Some(owner) = owner {
+                state.record_source_call_owner(start, owner);
+            }
             if call.qualifier.is_none() {
                 state.emit_source_local_call(
                     owner,

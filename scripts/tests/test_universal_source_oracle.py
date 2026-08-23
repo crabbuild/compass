@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from benchmarks.performance.compass.occurrences import SourceConstruct  # noqa: E402
-from build_universal_quality_audit import _groovy_overlap_matches  # noqa: E402
+from build_universal_quality_audit import _declaration_overlap_matches  # noqa: E402
 from independent_language_oracle import canonical_bytes, run_oracle  # noqa: E402
 
 
@@ -36,7 +36,7 @@ class UniversalSourceOracleTests(unittest.TestCase):
         }
         self.assertEqual(
             [edge],
-            _groovy_overlap_matches(
+            _declaration_overlap_matches(
                 "groovy",
                 construct,
                 frozenset(("implements",)),
@@ -46,11 +46,38 @@ class UniversalSourceOracleTests(unittest.TestCase):
         ambiguous = {**edge, "target": "other-store-id"}
         self.assertEqual(
             [],
-            _groovy_overlap_matches(
+            _declaration_overlap_matches(
                 "groovy",
                 construct,
                 frozenset(("implements",)),
                 {("Module.groovy", "implements"): [edge, ambiguous]},
+            ),
+        )
+
+    def test_dart_ownership_overlap_requires_one_target(self) -> None:
+        construct = SourceConstruct(
+            "lib/system.dart",
+            "contains",
+            "ownership",
+            "SystemChannels",
+            "SystemChannels",
+            None,
+            100,
+            400,
+            1,
+        )
+        edge = {
+            "anchor": ("lib/system.dart", 110, 125),
+            "target": "system-id",
+            "targetNode": {"qualifiedName": "SystemChannels"},
+        }
+        self.assertEqual(
+            [edge],
+            _declaration_overlap_matches(
+                "dart",
+                construct,
+                frozenset(("contains",)),
+                {("lib/system.dart", "contains"): [edge]},
             ),
         )
 

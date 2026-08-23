@@ -165,12 +165,19 @@ fn dart_source_supplement_recovers_local_calls_and_constructions() -> Result<(),
   void save() {}
   void run() {
     save();
+    final callback = () => save();
     Store();
     unknown();
     // save();
     final text = 'save()';
   }
 }
+class _Hidden {
+  _Hidden();
+}
+void build() { _Hidden(); }
+class _Implicit {}
+void buildImplicit() { _Implicit(); }
 "#;
     let source_file = "lib/store.dart";
     let extracted = Engine::default()
@@ -190,6 +197,10 @@ fn dart_source_supplement_recovers_local_calls_and_constructions() -> Result<(),
     let run = node("Store.run").ok_or("missing Store.run")?;
     let save = node("Store.save").ok_or("missing Store.save")?;
     let constructor = node("Store.Store").ok_or("missing Store constructor")?;
+    let hidden_constructor = node("_Hidden._Hidden").ok_or("missing private constructor")?;
+    let build = node("build").ok_or("missing build function")?;
+    let implicit_class = node("_Implicit").ok_or("missing implicit constructor class")?;
+    let build_implicit = node("buildImplicit").ok_or("missing implicit constructor caller")?;
     assert_eq!(
         resolved
             .edges
@@ -200,8 +211,8 @@ fn dart_source_supplement_recovers_local_calls_and_constructions() -> Result<(),
                     && edge.string("relation") == "calls"
             })
             .count(),
-        1,
-        "local Dart call should be recovered exactly once"
+        2,
+        "local Dart calls should be recovered once per source occurrence"
     );
     assert_eq!(
         resolved
@@ -215,6 +226,32 @@ fn dart_source_supplement_recovers_local_calls_and_constructions() -> Result<(),
             .count(),
         1,
         "local Dart construction should resolve to the constructor"
+    );
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == build.id
+                    && edge.target == hidden_constructor.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        1,
+        "private Dart constructions should resolve to their constructor"
+    );
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == build_implicit.id
+                    && edge.target == implicit_class.id
+                    && matches!(edge.string("relation").as_str(), "calls" | "instantiates")
+            })
+            .count(),
+        1,
+        "implicit Dart constructions should resolve to their class"
     );
     assert!(
         !resolved.edges.iter().any(|edge| {

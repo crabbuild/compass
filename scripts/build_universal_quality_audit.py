@@ -256,26 +256,28 @@ def _declaration_index(
     }
 
 
-def _groovy_overlap_matches(
+def _declaration_overlap_matches(
     language: str,
     construct: SourceConstruct,
     aliases: frozenset[str],
     by_file_relation: dict[tuple[str, str], list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """Match Groovy declaration facts when providers choose different spans.
+    """Match declaration facts when providers choose different spans.
 
     The compilation-unit oracle reports the complete declaration, while the
     tree-sitter producer reports the exact type/name token. A source overlap
     is safe only when the relation family and terminal target identify one
     graph target in the file; otherwise the construct remains an explicit
-    missing record.
+    missing record. Dart and Groovy both use this normalization for ownership
+    declarations; base-type relations remain Groovy-only until their
+    language-specific target contracts are independently qualified.
     """
 
-    if language != "groovy" or construct.relation not in {
-        "contains",
-        "extends",
-        "implements",
-    }:
+    allowed = (
+        language == "groovy"
+        and construct.relation in {"contains", "extends", "implements"}
+    ) or (language == "dart" and construct.relation == "contains")
+    if not allowed:
         return []
     terminal = construct.target_spelling.rsplit(".", 1)[-1]
     overlap_matches = [
@@ -757,7 +759,7 @@ def main() -> int:
             ]
             overlap_match = False
             if not matches:
-                matches = _groovy_overlap_matches(
+                matches = _declaration_overlap_matches(
                     args.language,
                     construct,
                     aliases,
@@ -773,20 +775,19 @@ def main() -> int:
                     else replace(construct, relation=edge["relation"])
                 )
                 if (
-                    args.language == "groovy"
+                    args.language in {"dart", "groovy"}
                     and overlap_match
                     and (
                         construct.start_byte != edge["anchor"][1]
                         or construct.end_byte != edge["anchor"][2]
                     )
                 ):
-                    # Groovy's compilation-unit oracle anchors ownership and
-                    # base-type facts to the whole declaration, while the
-                    # tree-sitter producer anchors the same fact to the
-                    # normalized name/type span. The overlap match is still
-                    # source-grounded; publish the graph's exact occurrence
-                    # and recompute the snippet digest so the audit manifest
-                    # remains self-validating.
+                    # The independent source oracle may anchor ownership to
+                    # the whole declaration, while the tree-sitter producer
+                    # anchors the same fact to the normalized name/type span.
+                    # The overlap match is still source-grounded; publish the
+                    # graph's exact occurrence and recompute the snippet
+                    # digest so the audit manifest remains self-validating.
                     matched_construct = replace(
                         matched_construct,
                         start_byte=edge["anchor"][1],
