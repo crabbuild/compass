@@ -75,6 +75,8 @@ const GROUPS: &[Group] = &[
             "init",
             "update",
             "extract",
+            "document",
+            "models",
             "watch",
             "cluster-only",
             "label",
@@ -240,7 +242,29 @@ const PAGES: &[Page] = &[
             "compass extract [PATH] [OPTIONS]",
             "compass extract --postgres <DSN> [OPTIONS]"
         ],
-        "Arguments:\n  [PATH]                       Project directory to scan\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --code-only                  Extract structural code without semantic sources\n  --cargo                      Include Cargo metadata\n  --google-workspace           Include Google Workspace shortcuts\n  --postgres <DSN>             Extract PostgreSQL schema objects\n  --backend <NAME>             Semantic provider name\n  --model <MODEL>              Override the provider's default model\n  --mode <deep>                Use deep semantic extraction\n  --token-budget <N>           Maximum semantic token budget\n  --max-concurrency <N>        Maximum concurrent provider requests\n  --max-workers <N>            Maximum local extraction workers\n  --api-timeout <SECONDS>      Provider request timeout\n  --allow-partial              Publish results when semantic chunks fail\n  --dedup-llm                  Use the model to review likely duplicates\n  --timing                     Print stage timings\n  --global                     Merge the completed graph into the global graph\n  --as <TAG>                   Repository tag used with --global\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Output directory\n  --force                      Rebuild unchanged inputs\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree clustering hubs\n\nExamples:\n  compass extract ./project --code-only\n  compass extract ./project --program --code-only\n  compass extract ./project --no-program --code-only\n  compass extract ./project --program-artifact index.scip --code-only\n  compass extract ./project --code-only --inference-level max\n  compass extract ./project --code-only --store sqlite\n  compass extract --postgres \"postgresql://localhost/app\" --code-only\n\nNotes:\n  Low is the evidence-first default and publishes exact relationships only. Medium adds source-backed inference; high adds explicitly qualified external relationships; max retains all inferred relationships, including deferred receivers. Semantic extraction may require credentials for the selected provider."
+        "Arguments:\n  [PATH]                       Project directory to scan\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --code-only                  Extract structural code without semantic sources\n  --cargo                      Include Cargo metadata\n  --google-workspace           Include Google Workspace shortcuts\n  --postgres <DSN>             Extract PostgreSQL schema objects\n  --backend <NAME>             Semantic provider name\n  --model <MODEL>              Override the provider's default model\n  --mode <deep>                Use deep semantic extraction\n  --ocr <off|auto|always>      Local document OCR policy [default: off]\n  --ocr-profile <NAME>         pp-ocrv6-small or pp-ocrv6-medium\n  --ocr-language <BCP47>       OCR language hint; repeatable\n  --token-budget <N>           Maximum semantic token budget\n  --max-concurrency <N>        Maximum concurrent provider requests\n  --max-workers <N>            Maximum local extraction workers\n  --api-timeout <SECONDS>      Provider request timeout\n  --allow-partial              Publish results when semantic or OCR candidates fail\n  --dedup-llm                  Use the model to review likely duplicates\n  --timing                     Print stage timings\n  --global                     Merge the completed graph into the global graph\n  --as <TAG>                   Repository tag used with --global\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Output directory\n  --force                      Rebuild unchanged inputs\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree clustering hubs\n\nExamples:\n  compass extract ./project --code-only\n  compass extract ./documents --ocr auto\n  compass extract ./project --program --code-only\n  compass extract ./project --program-artifact index.scip --code-only\n  compass extract ./project --code-only --inference-level max\n  compass extract ./project --code-only --store sqlite\n  compass extract --postgres \"postgresql://localhost/app\" --code-only\n\nNotes:\n  OCR is local and never downloads during extraction. Install a pinned profile once with `compass models install pp-ocrv6-small`; no Python, Tesseract, office suite, or system PDF tool is required.\n  Low publishes exact relationships only. Medium adds source-backed inference; high adds explicitly qualified external relationships; max retains all inferred relationships, including deferred receivers. Semantic extraction may require credentials for the selected provider."
+    ),
+    page!(
+        "document",
+        "Inspect PDF and Office documents with optional local OCR",
+        ["compass document inspect <FILE> [OPTIONS]"],
+        "Commands:\n  inspect <FILE>             Decode and inspect one PDF, DOCX, XLSX, or PPTX file\n\nExamples:\n  compass document inspect report.pdf\n  compass document inspect scan.pdf --ocr auto\n  compass document inspect deck.pptx --ocr auto --format json\n\nNotes:\n  Native text remains authoritative. OCR is local derived evidence and requires a verified Compass-managed profile. Run `compass models install pp-ocrv6-small` once; no Python, Tesseract, office suite, or system PDF tool is required."
+    ),
+    page!(
+        "document inspect",
+        "Decode one document and show typed structure, locators, and OCR evidence",
+        ["compass document inspect <FILE> [OPTIONS]"],
+        "Arguments:\n  <FILE>                     PDF, DOCX, XLSX, or PPTX document\n\nOptions:\n  --format <text|json>       Human output or compass.document.inspect/1 [default: text]\n  --ocr <off|auto|always>    Selective local OCR policy [default: off]\n  --ocr-profile <NAME>       pp-ocrv6-small or pp-ocrv6-medium [default: pp-ocrv6-small]\n  --ocr-language <TAG>       Language hint; repeatable\n  --allow-partial            Retain exact successful OCR evidence if one candidate fails\n\nExamples:\n  compass document inspect contract.docx\n  compass document inspect scanned.pdf --ocr auto\n  compass document inspect workbook.xlsx --ocr always --format json"
+    ),
+    page!(
+        "models",
+        "Manage verified local OCR model profiles",
+        [
+            "compass models list [--format text|json]",
+            "compass models install <PROFILE>",
+            "compass models verify <PROFILE>"
+        ],
+        "Commands:\n  list                       Show installation and verification status\n  install <PROFILE>          Download a pinned profile and verify size plus SHA-256\n  verify <PROFILE>           Verify an installed profile without network access\n\nProfiles:\n  pp-ocrv6-small             Default 30 MiB model profile\n  pp-ocrv6-medium            Larger 132 MiB model profile\n\nExamples:\n  compass models list\n  compass models install pp-ocrv6-small\n  compass models verify pp-ocrv6-small\n\nNotes:\n  Compass manages the inference runtime and model files. Document extraction never silently downloads a model."
     ),
     page!(
         "watch",
@@ -1275,7 +1299,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 50);
+        assert_eq!(roots.len(), 52);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

@@ -1178,3 +1178,27 @@ builds, first/repeated semantic diff, first/repeated viewer projection, peak
 RSS, and deterministic output digests. Existing sealed realizations and cached
 diff/view projections are expected to be constant- or bounded-read paths;
 explicit `history verify` remains the full integrity scan.
+
+## Document and OCR qualification
+
+Document decoding and OCR are governed by correctness and resource gates, not
+an unmeasured speed claim. Qualification records per-format wall time, peak RSS,
+page/image count, aggregate pixels, cache hit/miss behavior, and deterministic
+artifact digests. A warm complete document cache must perform zero OCR
+inference calls. Partial or corrupt entries are not warm hits.
+
+Run the focused deterministic gate with:
+
+```bash
+scripts/qualify_document_ocr_v1.sh --fixtures-only
+```
+
+Native format fixtures run without a model. The optional model-backed corpus
+runs only when its exact verified profile is already installed; ordinary CI
+does not download model weights.
+
+On 2026-08-23, the installed `pp-ocrv6-small` acceptance test on the local
+aarch64 macOS host initialized the statically linked runtime and processed its
+blank plus clean synthetic-English rasters in 1.77 seconds under a debug test
+build. The clean sample had 0 CER. This single smoke result is not a production
+latency, memory, degraded-input, cross-architecture, or multilingual claim.

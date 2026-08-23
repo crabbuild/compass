@@ -84,3 +84,19 @@ not link cloud SDKs into the CLI. Never attach a store database or raw backup
 to a public issue: it can disclose repository names, paths, source anchors,
 and graph structure. Share a sanitized `compass store status --format json`
 response instead.
+
+## Document and OCR boundary
+
+PDF and OOXML files, XML relationships, compressed members, embedded images,
+model files, OCR output, and document cache entries are untrusted. Compass
+enforces raw/archive/member/ratio/XML-depth/document/raster limits, rejects
+package traversal and duplicate normalized members, never executes spreadsheet
+formulas or embedded objects, and never follows external document links.
+
+`compass models install` is the only OCR download boundary. It accepts only
+the pinned profile catalog, fixed HTTPS host, declared byte size, SHA-256, and
+zero redirects; publication uses temporary files and an atomic verified marker.
+Inspection, extraction, listing, verification, cache replay, and historical
+materialization never silently fetch or invoke an arbitrary executable. Model
+and document cache paths can contain sensitive derived content and should not
+be attached to public issues.

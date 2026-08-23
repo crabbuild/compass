@@ -1,5 +1,5 @@
 [package]
-name = "compass-media"
+name = "compass-ocr"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,20 +12,14 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-compass-ocr = { path = "../compass-ocr", version = "0.3.19" }
-hayro.workspace = true
 image.workspace = true
-oxidize-pdf.workspace = true
-roxmltree.workspace = true
+oar-ocr.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
-unicode-normalization.workspace = true
-zip.workspace = true
+ureq.workspace = true
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-tempfile.workspace = true

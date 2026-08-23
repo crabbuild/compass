@@ -298,6 +298,22 @@ CLI** labels an installation unsupported, upgrade that CLI or select another
 detected installation. Releases below 0.3.0 and 0.3.0 prereleases cannot be
 activated, even if they advertise some current capabilities.
 
+## Optional document OCR
+
+No migration is required for existing projects because OCR defaults to off.
+PDF and Office files now produce native structural blocks, so run `compass
+update --force` once if an existing output predates `compass.document/1`.
+To opt into local OCR, install one profile explicitly and rebuild under its new
+fingerprint:
+
+```bash
+compass models install pp-ocrv6-small
+compass extract . --ocr auto --force
+```
+
+Do not copy or rename old flattened document caches; incompatible schema,
+normalizer, renderer, OCR, and model identities are intentionally not migrated.
+
 ## Replace commands
 
 Replace Python and legacy executable invocations with `compass`:

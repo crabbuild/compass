@@ -67,6 +67,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::PreparedDocumentSet;
 use crate::build_state::{
     ArtifactSeal, BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified,
 };
@@ -143,6 +144,9 @@ pub struct BuildOptions {
     /// keeping it in the build profile prevents a document-inclusive output
     /// from being reused for a code-only build.
     pub code_only: bool,
+    /// Rich documents prepared once at the application boundary. The same
+    /// validated artifacts feed structural publication and semantic slicing.
+    pub prepared_documents: PreparedDocumentSet,
     /// Enable deterministic Program IR analysis and `program.json` output.
     pub program_analysis: bool,
     /// Explicit offline program evidence artifacts, in addition to `index.scip`.
@@ -382,6 +386,7 @@ impl BuildOptions {
             exclude_hubs: None,
             google_workspace: false,
             code_only: false,
+            prepared_documents: PreparedDocumentSet::default(),
             program_analysis: false,
             program_artifacts: Vec::new(),
             program_artifact_limits: compass_program::ArtifactLimits::default(),
@@ -2196,6 +2201,8 @@ pub enum CoreError {
     InvalidSemanticFragment(serde_json::Error),
     #[error("invalid supplemental extraction fragment: {0}")]
     InvalidSupplementalFragment(serde_json::Error),
+    #[error("document processing failed: {0}")]
+    DocumentProcessing(String),
     #[error("could not create an AST worker pool: {0}")]
     WorkerPool(String),
     #[error("build worker panicked during {0}")]
@@ -2455,13 +2462,24 @@ fn build_graph_inner_unscoped(
     let mut internal_started = Instant::now();
     let preserve_prior_semantic =
         prior_semantic_layer_required(read_prior_published_graph, &output_dir);
-    let mut semantic_documents = if preserve_prior_semantic {
-        semantic_document_sources(&output_dir.join("graph.json"), &root)
-    } else {
-        HashSet::new()
-    };
-    if let Some(layer) = semantic {
-        semantic_documents.extend(canonical_source_set(&layer.refreshed_files, &root));
+    let mut prepared_documents = options.prepared_documents.clone();
+    if !options.code_only {
+        let document_paths = detection
+            .files
+            .get("document")
+            .into_iter()
+            .flatten()
+            .map(PathBuf::from)
+            .filter(|path| {
+                Registry::resolve(path).is_none() && prepared_documents.get(path).is_none()
+            })
+            .collect::<Vec<_>>();
+        let native = crate::prepare_document_set(
+            &document_paths,
+            &crate::CoreDocumentProcessingOptions::default(),
+        )
+        .map_err(CoreError::DocumentProcessing)?;
+        prepared_documents.documents.extend(native.documents);
     }
     let mut sources = detection
         .files
@@ -2480,12 +2498,7 @@ fn build_graph_inner_unscoped(
                 .flatten()
                 .map(PathBuf::from)
                 .filter(|path| {
-                    let structural_document = Registry::resolve(path).is_some_and(|spec| {
-                        matches!(spec.kind, ExtractorKind::Markdown | ExtractorKind::Html)
-                    });
-                    Registry::resolve(path).is_some()
-                        && (structural_document
-                            || !semantic_documents.contains(&canonical_identity(path)))
+                    Registry::resolve(path).is_some() || prepared_documents.get(path).is_some()
                 }),
         );
     }
@@ -2761,9 +2774,11 @@ fn build_graph_inner_unscoped(
     let mut missing = Vec::new();
     if reuse_cached_analysis {
         for path in &sources {
-            if fs::metadata(path).is_ok_and(|metadata| {
-                metadata.is_file() && metadata.len() > options.max_source_bytes
-            }) {
+            if prepared_documents.get(path).is_none()
+                && fs::metadata(path).is_ok_and(|metadata| {
+                    metadata.is_file() && metadata.len() > options.max_source_bytes
+                })
+            {
                 extractions.insert(
                     path.clone(),
                     oversized_source_extraction(path, options.max_source_bytes)?,
@@ -2781,6 +2796,13 @@ fn build_graph_inner_unscoped(
             if let Some(extraction) = cached {
                 if cached_framework_evidence_matches(&extraction, path, &project_evidence)
                     && cached_universal_evidence_matches(&extraction, path)
+                    && prepared_documents.get(path).is_none_or(|prepared| {
+                        extraction
+                            .extensions
+                            .get("document_cache_identity")
+                            .and_then(Value::as_str)
+                            == Some(prepared.cache_identity.as_str())
+                    })
                 {
                     extractions.insert(path.clone(), extraction);
                 } else {
@@ -2792,9 +2814,11 @@ fn build_graph_inner_unscoped(
         }
     } else {
         for path in &sources {
-            if fs::metadata(path).is_ok_and(|metadata| {
-                metadata.is_file() && metadata.len() > options.max_source_bytes
-            }) {
+            if prepared_documents.get(path).is_none()
+                && fs::metadata(path).is_ok_and(|metadata| {
+                    metadata.is_file() && metadata.len() > options.max_source_bytes
+                })
+            {
                 extractions.insert(
                     path.clone(),
                     oversized_source_extraction(path, options.max_source_bytes)?,
@@ -2834,7 +2858,7 @@ fn build_graph_inner_unscoped(
                 path: path.clone(),
                 source,
             })?;
-            if metadata.len() > options.max_source_bytes {
+            if prepared_documents.get(path).is_none() && metadata.len() > options.max_source_bytes {
                 let graph = oversized_source_extraction(path, options.max_source_bytes)?;
                 if let Some(progress) = progress {
                     let mut completed = completed_files
@@ -2870,8 +2894,29 @@ fn build_graph_inner_unscoped(
                 .unwrap_or(path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            let language = Registry::resolve(path).map_or("", |spec| spec.name);
-            let (mut graph, program) = if options.program_analysis {
+            let prepared_document = prepared_documents.get(path);
+            let language = if prepared_document.is_some() {
+                "document"
+            } else {
+                Registry::resolve(path).map_or("", |spec| spec.name)
+            };
+            let (mut graph, program) = if let Some(prepared) = prepared_document {
+                (
+                    crate::document_processing::project_document(
+                        &source_file,
+                        path,
+                        &prepared.artifact,
+                        &prepared.cache_identity,
+                    )
+                    .map_err(|detail| {
+                        compass_languages::ExtractError::InvalidDocumentEvidence {
+                            path: path.clone(),
+                            detail,
+                        }
+                    })?,
+                    None,
+                )
+            } else if options.program_analysis {
                 let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
                 (combined.graph, combined.program)
             } else {
@@ -4383,6 +4428,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         .to_owned(),
         inference_level: options.inference_level.as_str().to_owned(),
         max_source_bytes: options.max_source_bytes,
+        document_processing_identity: options.prepared_documents.cache_identity.clone(),
     }
 }
 
@@ -6614,26 +6660,6 @@ fn save_build_manifest(
     Ok(())
 }
 
-fn semantic_document_sources(graph_path: &Path, root: &Path) -> HashSet<PathBuf> {
-    let Ok(existing) = V1GraphDocument::load(graph_path) else {
-        return HashSet::new();
-    };
-    existing
-        .nodes
-        .into_iter()
-        .filter(|node| node_has_semantic_layer_evidence(node) && node.kind == NodeKind::Resource)
-        .filter_map(|node| {
-            node.source_file().map(Path::new).map(|path| {
-                if path.is_absolute() {
-                    canonical_identity(path)
-                } else {
-                    canonical_identity(&root.join(path))
-                }
-            })
-        })
-        .collect()
-}
-
 fn canonical_identity(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
@@ -7368,11 +7394,13 @@ fn extraction_has_cacheable_ast_facts(extraction: &Extraction) -> bool {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::io::Write as _;
 
     use compass_graph::{GraphSnapshotReader, IndexKind};
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
     use compass_model::provenance::{EvidenceConfidence, effective_confidence};
     use serde_json::{Map, Value};
+    use zip::write::SimpleFileOptions;
 
     use super::*;
 
@@ -9208,6 +9236,40 @@ char* Arena::AllocateAligned(size_t bytes) { return Allocate(bytes); }
 
         assert!(!code_nodes.is_empty());
         assert!(!document_nodes.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn document_native_docx_blocks_are_published_without_semantic_or_ocr_dependencies()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("report.docx");
+        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        archive.start_file("word/document.xml", SimpleFileOptions::default())?;
+        archive.write_all(br#"<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>Document sentinel</w:t></w:r></w:p></w:body></w:document>"#)?;
+        fs::write(&path, archive.finish()?.into_inner())?;
+
+        let mut options = BuildOptions::new(directory.path());
+        options.no_cluster = true;
+        options.no_viz = true;
+        let result = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        let document_nodes = graph
+            .nodes
+            .iter()
+            .filter(|node| node.source_file() == Some("report.docx"))
+            .collect::<Vec<_>>();
+        assert!(document_nodes.len() >= 2);
+        assert!(
+            document_nodes
+                .iter()
+                .any(|node| node.name == "Document sentinel")
+        );
+        assert!(graph.links.iter().any(|edge| {
+            edge.source_file() == Some("report.docx")
+                && document_nodes.iter().any(|node| node.id == edge.source)
+                && document_nodes.iter().any(|node| node.id == edge.target)
+        }));
         Ok(())
     }
 

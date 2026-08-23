@@ -96,6 +96,9 @@ compass extract [PATH]
   [--backend NAME]
   [--model MODEL]
   [--mode deep]
+  [--ocr off|auto|always]
+  [--ocr-profile NAME]
+  [--ocr-language BCP47]
   [--token-budget N]
   [--max-concurrency N]
   [--max-workers N]
@@ -120,6 +123,34 @@ structural node and edge extraction to code-classified files while retaining
 the scanned file inventory. Program IR is opt-in with `--program`;
 `--program-artifact` also enables it. `--no-program` is retained for callers
 that already use the structural-only spelling.
+
+OCR is off by default. `auto` processes scanned/low-text PDF pages and eligible
+embedded Office images; `always` processes every bounded visual candidate.
+Both are local and require an explicitly installed verified profile. Extraction
+never downloads a model. `--ocr-language` is repeatable, and
+`--allow-partial` also authorizes visibly incomplete OCR coverage.
+
+### `document` and `models`
+
+```text
+compass document inspect FILE
+  [--format text|json]
+  [--ocr off|auto|always]
+  [--ocr-profile NAME]
+  [--ocr-language BCP47]
+  [--allow-partial]
+
+compass models list [--format text|json]
+compass models install pp-ocrv6-small|pp-ocrv6-medium
+compass models verify pp-ocrv6-small|pp-ocrv6-medium
+```
+
+`document inspect` is read-only and does not publish a graph. JSON uses
+`compass.document.inspect/1`; text marks OCR-derived evidence visibly. Native
+PDF, DOCX, PPTX, and XLSX processing requires no additional installation.
+`models install` is the only command here that uses the network. It downloads
+only pinned artifacts from the Compass allowlist, validates size and SHA-256,
+and publishes an atomic verification marker. `list` and `verify` are offline.
 
 `update`, `extract`, and watch rebuilds may succeed with a warning that Compass
 published a partial graph. The warning reports exact omitted node, omitted

@@ -5,6 +5,7 @@ mod call_graph_commands;
 mod capability_commands;
 mod code_query_commands;
 mod dedup_commands;
+mod document_commands;
 mod help;
 mod history_batch;
 mod history_build;
@@ -16,6 +17,7 @@ mod init_commands;
 mod install_commands;
 mod integration_commands;
 mod label_commands;
+mod models_commands;
 mod program_commands;
 mod provider_commands;
 mod prs_commands;
@@ -45,12 +47,12 @@ use compass_analysis::{
 };
 use compass_core::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
-    ClusterExistingOptions, ExportInputs, GraphStorage, InferenceLevel, LoadedGraph, SemanticLayer,
-    WatchBackend, WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
-    build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
-    cluster_existing_graph, default_graph_path, diagnose_graph_file, diagnose_graph_quality,
-    format_diagnostic_json, format_diagnostic_report, format_quality_json, format_quality_report,
-    merge_graphs, watch_local_graph,
+    ClusterExistingOptions, CoreDocumentProcessingOptions, ExportInputs, GraphStorage,
+    InferenceLevel, LoadedGraph, SemanticLayer, WatchBackend, WatchBuildReason, WatchOptions,
+    WatchStatus, build_graph_with_layers, build_graph_with_layers_and_progress,
+    build_graph_with_layers_and_tiebreaker, cluster_existing_graph, default_graph_path,
+    diagnose_graph_file, diagnose_graph_quality, format_diagnostic_json, format_diagnostic_report,
+    format_quality_json, format_quality_report, merge_graphs, watch_local_graph,
 };
 use compass_files::{
     BuildScope, DetectOptions, Detection, Manifest, ManifestKind, ProjectConfig, detect,
@@ -84,9 +86,9 @@ use compass_query::{
     render_discovery_text_page, render_explanation_page, render_shortest_path, run_benchmark,
 };
 use compass_semantic::{
-    CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
-    extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
-    resolve_builtin_backend, resolve_custom_backend,
+    CachedCorpusExtractionOptions, CorpusExtractionOptions, PreparedDocumentInputs,
+    detect_backend_with_custom, extract_builtin_corpus_cached, extract_custom_corpus_cached,
+    load_custom_providers, resolve_builtin_backend, resolve_custom_backend,
 };
 
 pub use help::HelpStyle;
@@ -379,6 +381,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "context" => task_context_commands::command(&args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
+        "document" => document_commands::command(&args),
+        "models" => models_commands::command(&args),
         "query" => query_commands::command_query(frontend, &args),
         "program" => program_commands::command(frontend, &args),
         "path" => command_path(frontend, &args),
@@ -1766,6 +1770,9 @@ fn command_build_with_validation_inner(
     let mut max_source_bytes = None;
     let mut api_timeout = None;
     let mut allow_partial = false;
+    let mut document_ocr_mode = compass_ocr::OcrMode::Off;
+    let mut document_ocr_profile = compass_ocr::ModelProfile::PpOcrV6Small;
+    let mut document_ocr_languages = Vec::new();
     let mut timing = false;
     let mut dedup_llm = false;
     let mut excludes = Vec::new();
@@ -1801,6 +1808,53 @@ fn command_build_with_validation_inner(
                 postgres_dsn = Some(value[11..].to_owned());
             }
             "--allow-partial" if extract => allow_partial = true,
+            "--ocr" if extract && index + 1 < args.len() => {
+                document_ocr_mode = match args[index + 1].parse::<compass_ocr::OcrMode>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--ocr=") => {
+                document_ocr_mode = match value[6..].parse::<compass_ocr::OcrMode>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+            }
+            "--ocr-profile" if extract && index + 1 < args.len() => {
+                document_ocr_profile = match args[index + 1].parse::<compass_ocr::ModelProfile>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--ocr-profile=") => {
+                document_ocr_profile = match value[14..].parse::<compass_ocr::ModelProfile>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+            }
+            "--ocr-language" if extract && index + 1 < args.len() => {
+                let language = &args[index + 1];
+                if language.is_empty() || language.len() > 64 {
+                    return extract_parse_failure(
+                        frontend,
+                        "OCR language tag is empty or too long".to_owned(),
+                    );
+                }
+                document_ocr_languages.push(language.clone());
+                index += 1;
+            }
+            value if extract && value.starts_with("--ocr-language=") => {
+                let language = &value[15..];
+                if language.is_empty() || language.len() > 64 {
+                    return extract_parse_failure(
+                        frontend,
+                        "OCR language tag is empty or too long".to_owned(),
+                    );
+                }
+                document_ocr_languages.push(language.to_owned());
+            }
             "--backend" if extract && index + 1 < args.len() => {
                 backend = Some(args[index + 1].clone());
                 index += 1;
@@ -1974,14 +2028,14 @@ fn command_build_with_validation_inner(
                 }
                 exclude_hubs = Some(parsed);
             }
-            "--max-workers" if extract && index + 1 < args.len() => {
+            "--max-workers" if index + 1 < args.len() => {
                 max_workers = match parse_positive_usize(&args[index + 1], "--max-workers") {
                     Ok(value) => Some(value),
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
                 index += 1;
             }
-            value if extract && value.starts_with("--max-workers=") => {
+            value if value.starts_with("--max-workers=") => {
                 max_workers = match parse_positive_usize(&value[14..], "--max-workers") {
                     Ok(value) => Some(value),
                     Err(error) => return extract_parse_failure(frontend, error),
@@ -2012,7 +2066,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--max-workers N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -2195,6 +2249,13 @@ fn command_build_with_validation_inner(
             max_concurrency,
             api_timeout,
             allow_partial,
+            CoreDocumentProcessingOptions {
+                ocr_mode: document_ocr_mode,
+                ocr_profile: document_ocr_profile,
+                language_hints: document_ocr_languages,
+                allow_partial,
+                cache_directory: Some(output_container.join("cache").join("documents")),
+            },
             &auxiliary_fragments,
             dedup_tiebreaker
                 .as_mut()
@@ -2312,7 +2373,17 @@ fn command_build_with_validation_inner(
             }
             outcome
         }
-        Err(error) => Outcome::failure(format!("error: {error}")),
+        Err(error) => {
+            let mut message = format!("error: {error}");
+            if document_ocr_mode != compass_ocr::OcrMode::Off
+                && error.contains("compass models install pp-ocrv6-")
+            {
+                message.push_str(
+                    "\nhelp: Compass manages the OCR runtime; no system OCR package is required",
+                );
+            }
+            Outcome::failure(message)
+        }
     }
 }
 
@@ -2496,6 +2567,7 @@ fn build_semantic_graph(
     max_concurrency: Option<usize>,
     api_timeout: Option<f64>,
     allow_partial: bool,
+    document_processing: CoreDocumentProcessingOptions,
     auxiliary_fragments: &[serde_json::Value],
     tiebreaker: Option<&mut dyn compass_graph::EntityTiebreaker>,
 ) -> Result<(BuildResult, Vec<String>, Duration), String> {
@@ -2526,7 +2598,10 @@ fn build_semantic_graph(
     )
     .map_err(|error| error.to_string())?;
     let live_semantic = semantic_files(&incremental.detection.files);
-    let semantic_files = if options.force || deep_mode {
+    let semantic_files = if options.force
+        || deep_mode
+        || document_processing.ocr_mode != compass_ocr::OcrMode::Off
+    {
         live_semantic.clone()
     } else {
         semantic_files(&incremental.new_files)
@@ -2550,8 +2625,19 @@ fn build_semantic_graph(
     if let Some(max_concurrency) = max_concurrency {
         extraction_options.max_concurrency = max_concurrency;
     }
+    let prepared_documents =
+        compass_core::prepare_document_set(&semantic_files, &document_processing)?;
+    let prepared_inputs = PreparedDocumentInputs {
+        documents: prepared_documents
+            .documents
+            .iter()
+            .map(|(path, prepared)| (path.clone(), prepared.semantic_text.clone()))
+            .collect(),
+        cache_identity: prepared_documents.cache_identity.clone(),
+    };
     let cached_options = CachedCorpusExtractionOptions {
         extraction: extraction_options,
+        prepared_documents: prepared_inputs,
         deep_mode,
         force: options.force,
         cache_enabled: true,
@@ -2728,8 +2814,10 @@ fn build_semantic_graph(
         allow_partial,
     };
     let semantic_elapsed = semantic_started.elapsed();
+    let mut graph_options = options.clone();
+    graph_options.prepared_documents = prepared_documents;
     let result = build_graph_with_optional_tiebreaker(
-        options,
+        &graph_options,
         Some(&layer),
         auxiliary_fragments,
         tiebreaker,
@@ -2914,7 +3002,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--ocr off|auto|always] [--ocr-profile NAME] [--ocr-language BCP47] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {

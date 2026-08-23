@@ -17,6 +17,7 @@ members = [
     "crates/compass-media",
     "crates/compass-mcp",
     "crates/compass-model",
+    "crates/compass-ocr",
     "crates/compass-output",
     "crates/compass-postgres",
     "crates/compass-pr-intelligence",
@@ -74,6 +75,9 @@ prolly-map = "=0.5.0"
 prolly-store-sqlite = "=0.3.0"
 protobuf = "=3.7.2"
 oxidize-pdf = { version = "4.1.1", default-features = false, features = ["compression"] }
+hayro = { version = "0.7.1", default-features = false }
+image = { version = "0.25.6", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
+oar-ocr = { version = "=0.9.2", default-features = true }
 ctrlc = "3.5.2"
 strsim = "0.11"
 rayon = "1"

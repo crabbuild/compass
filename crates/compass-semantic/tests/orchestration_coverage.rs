@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use compass_files::{Cache, CacheOptions};
 use compass_semantic::{
-    CachedCorpusExtractionOptions, CorpusExtractionOptions, SemanticCacheSaveOptions,
-    SemanticError, SemanticUnit, check_semantic_cache, effective_semantic_concurrency,
-    estimate_semantic_unit_tokens, expand_oversized_semantic_files, extract_corpus_cached_with,
+    CachedCorpusExtractionOptions, CorpusExtractionOptions, PreparedDocumentInputs,
+    SemanticCacheSaveOptions, SemanticError, SemanticUnit, check_semantic_cache,
+    effective_semantic_concurrency, estimate_semantic_unit_tokens, expand_oversized_semantic_files,
+    expand_semantic_files_with_prepared_documents, extract_corpus_cached_with,
     extract_corpus_parallel_with, extract_corpus_parallel_with_progress,
     extract_with_adaptive_retry, merge_semantic_results, pack_semantic_chunks,
     reconcile_semantic_scope, save_semantic_cache,
@@ -20,6 +22,30 @@ fn node_for(unit: &SemanticUnit, id: String) -> Value {
         "label": "Fixture",
         "source_file": unit.path().to_string_lossy()
     })
+}
+
+#[test]
+fn prepared_rich_documents_are_sliced_losslessly_past_the_legacy_cap() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("large.docx");
+    let content = Arc::<str>::from(format!("{}END-🧭", "文档🙂".repeat(7_500)));
+    let prepared = PreparedDocumentInputs {
+        documents: std::collections::BTreeMap::from([(path.clone(), Arc::clone(&content))]),
+        cache_identity: "fixture-document-cache-v1".to_owned(),
+    };
+    let units = expand_semantic_files_with_prepared_documents(&[path], 2_003, &prepared)?;
+    assert!(units.len() > 10);
+    let rebuilt = units
+        .iter()
+        .map(|unit| match unit {
+            SemanticUnit::DocumentSlice(slice) => slice.text(),
+            _ => Err("expected only prepared document slices".to_owned()),
+        })
+        .collect::<Result<String, _>>()?;
+    assert_eq!(rebuilt, content.as_ref());
+    assert!(rebuilt.ends_with("END-🧭"));
+    Ok(())
 }
 
 #[test]
@@ -363,6 +389,7 @@ fn slice_retry_cache_disabled_and_deep_partial_merges_cover_public_orchestration
 
     let cached_options = CachedCorpusExtractionOptions {
         extraction: options,
+        prepared_documents: compass_semantic::PreparedDocumentInputs::default(),
         deep_mode: true,
         force: false,
         cache_enabled: false,

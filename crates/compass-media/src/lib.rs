@@ -1,440 +1,355 @@
-//! Bounded, pure-Rust text extraction for semantic media inputs.
+//! Bounded, pure-Rust document decoding with provenance-preserving artifacts.
 
-use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::Read;
-use std::path::{Path, PathBuf};
+pub mod document;
+pub mod limits;
+mod ooxml;
+mod processing;
+mod raster;
 
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::Cursor;
+use std::path::Path;
+
+use document::{
+    DocumentArtifact, DocumentBlock, DocumentBlockKind, DocumentError, DocumentFormat,
+    DocumentLocator,
+};
 use oxidize_pdf::parser::{PdfDocument, PdfReader};
-use roxmltree::{Document, Node};
-use zip::ZipArchive;
 
-pub const MEDIA_MAX_RAW_BYTES: u64 = 50 * 1024 * 1024;
-pub const OFFICE_MAX_DECOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
-pub const OFFICE_MAX_COMPRESSION_RATIO: u64 = 200;
-const OFFICE_MEMBER_MAX_BYTES: u64 = 64 * 1024 * 1024;
+pub use document::{
+    DOCUMENT_INSPECT_SCHEMA, DOCUMENT_NORMALIZER_VERSION, DOCUMENT_SCHEMA, DiagnosticSeverity,
+    DocumentDiagnostic, DocumentLink, DocumentLinkKind, DocumentOrigin, VisualCoverage,
+};
+pub use limits::{
+    MEDIA_MAX_RAW_BYTES, OCR_MAX_AGGREGATE_PIXELS, OCR_MAX_OOXML_IMAGES, OCR_MAX_PDF_PAGES,
+    OFFICE_MAX_COMPRESSION_RATIO, OFFICE_MAX_DECOMPRESSED_BYTES,
+};
+pub use ooxml::{RasterCandidate, decode_docx, decode_pptx, decode_xlsx, raster_candidates};
+pub use processing::{
+    DocumentProcessingOptions, decode_document_with_ocr, decode_document_with_ocr_cancellable,
+};
+pub use raster::{
+    PDF_RASTERIZER_IDENTITY, PdfRasterCandidate, rasterize_pdf_pages,
+    rasterize_pdf_pages_cancellable,
+};
 
-#[derive(Debug, thiserror::Error)]
-pub enum MediaError {
-    #[error("could not access {path}: {source}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("media rejected: {0}")]
-    Rejected(String),
-    #[error("media parse failed: {0}")]
-    Parse(String),
-}
+pub type MediaError = DocumentError;
 
-/// Extract text from the formats accepted by Compass's semantic path.
-pub fn extract_text(path: &Path) -> Result<String, MediaError> {
-    enforce_raw_size(path)?;
-    match extension(path).as_str() {
-        "pdf" => extract_pdf_text(path),
-        "docx" => docx_to_markdown(path),
-        "xlsx" => xlsx_to_markdown(path),
-        _ => fs::read(path)
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .map_err(|source| MediaError::Io {
-                path: path.to_path_buf(),
-                source,
-            }),
+/// Decode one bounded source into Compass's stable document artifact.
+pub fn decode_document(
+    logical_path: &Path,
+    bytes: &[u8],
+) -> Result<DocumentArtifact, DocumentError> {
+    if bytes.len() as u64 > MEDIA_MAX_RAW_BYTES {
+        return Err(DocumentError::Rejected(format!(
+            "source is {} bytes; maximum is {MEDIA_MAX_RAW_BYTES}",
+            bytes.len()
+        )));
     }
+    let artifact = match extension(logical_path).as_str() {
+        "pdf" => decode_pdf(bytes)?,
+        "docx" => decode_docx(bytes)?,
+        "xlsx" => decode_xlsx(bytes)?,
+        "pptx" => decode_pptx(bytes)?,
+        "txt" => decode_plain_text(bytes, DocumentFormat::Text)?,
+        "md" | "markdown" => decode_plain_text(bytes, DocumentFormat::Markdown)?,
+        "html" | "htm" => decode_plain_text(bytes, DocumentFormat::Html)?,
+        "rtf" => {
+            return Err(DocumentError::Unsupported(
+                "rtf (enum vocabulary exists, decoder is not implemented)".to_owned(),
+            ));
+        }
+        _ => decode_plain_text(bytes, DocumentFormat::Text)?,
+    };
+    artifact.validate()?;
+    Ok(artifact)
 }
 
-/// Compatibility surface for callers where malformed media is a skipped,
-/// empty source rather than a fatal corpus error.
+/// Extract compatibility Markdown/text through the versioned artifact path.
+pub fn extract_text(path: &Path) -> Result<String, MediaError> {
+    let bytes = read_bounded(path)?;
+    let artifact = decode_document(path, &bytes)?;
+    render_document_markdown(&artifact)
+}
+
+/// Legacy best-effort surface. New callers must use [`extract_text`] or [`decode_document`].
 #[must_use]
 pub fn extract_text_compat(path: &Path) -> String {
     extract_text(path).unwrap_or_default()
 }
 
 pub fn extract_pdf_text(path: &Path) -> Result<String, MediaError> {
-    enforce_raw_size(path)?;
-    let owned = path.to_path_buf();
-    std::panic::catch_unwind(move || {
-        let reader = PdfReader::open(&owned).map_err(|error| error.to_string())?;
-        let document = PdfDocument::new(reader);
-        let pages = document.extract_text().map_err(|error| error.to_string())?;
-        Ok::<_, String>(
-            pages
-                .into_iter()
-                .map(|page| page.text)
-                .filter(|text| !text.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    })
-    .map_err(|_| MediaError::Parse("PDF parser panicked".to_owned()))?
-    .map_err(MediaError::Parse)
+    let bytes = read_bounded(path)?;
+    render_document_markdown(&decode_pdf(&bytes)?)
 }
 
 pub fn docx_to_markdown(path: &Path) -> Result<String, MediaError> {
-    validate_office_archive(path)?;
-    let styles = read_zip_member(path, "word/styles.xml")
-        .ok()
-        .and_then(|xml| parse_docx_styles(&xml).ok())
-        .unwrap_or_default();
-    let document_xml = read_zip_member(path, "word/document.xml")?;
-    let document = Document::parse(&document_xml)
-        .map_err(|error| MediaError::Parse(format!("invalid DOCX document XML: {error}")))?;
-    let Some(body) = document
-        .descendants()
-        .find(|node| node.is_element() && node.tag_name().name() == "body")
-    else {
-        return Ok(String::new());
-    };
-    let mut paragraphs = Vec::new();
-    let mut tables = Vec::new();
-    for child in body.children().filter(Node::is_element) {
-        match child.tag_name().name() {
-            "p" => paragraphs.push(render_docx_paragraph(child, &styles)),
-            "tbl" => tables.push(render_docx_table(child, &styles)),
-            _ => {}
-        }
-    }
-    let mut lines = paragraphs;
-    for table in tables {
-        if table.is_empty() {
-            continue;
-        }
-        lines.push(markdown_row(&table[0]));
-        lines.push(markdown_row(
-            &table[0]
-                .iter()
-                .map(|_| "---".to_owned())
-                .collect::<Vec<_>>(),
-        ));
-        lines.extend(table.iter().skip(1).map(|row| markdown_row(row)));
-    }
-    Ok(lines.join("\n"))
+    let bytes = read_bounded(path)?;
+    render_document_markdown(&decode_docx(&bytes)?)
 }
 
 pub fn xlsx_to_markdown(path: &Path) -> Result<String, MediaError> {
-    validate_office_archive(path)?;
-    let workbook_xml = read_zip_member(path, "xl/workbook.xml")?;
-    let relationships_xml = read_zip_member(path, "xl/_rels/workbook.xml.rels")?;
-    let shared_strings = read_zip_member(path, "xl/sharedStrings.xml")
-        .ok()
-        .and_then(|xml| parse_shared_strings(&xml).ok())
-        .unwrap_or_default();
-    let relationships = parse_workbook_relationships(&relationships_xml)?;
-    let workbook = Document::parse(&workbook_xml)
-        .map_err(|error| MediaError::Parse(format!("invalid XLSX workbook XML: {error}")))?;
-    let mut sections = Vec::new();
-    for sheet in workbook
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "sheet")
-    {
-        let name = attribute_local(sheet, "name").unwrap_or_default();
-        let relation = attribute_local(sheet, "id").unwrap_or_default();
-        let Some(target) = relationships.get(relation) else {
-            continue;
-        };
-        let member = normalize_xlsx_target(target);
-        let Ok(sheet_xml) = read_zip_member(path, &member) else {
-            continue;
-        };
-        let rows = parse_xlsx_rows(&sheet_xml, &shared_strings)?;
-        if rows.is_empty() {
-            continue;
-        }
-        sections.push(format!("## Sheet: {name}"));
-        sections.push(markdown_row(&rows[0]));
-        sections.push(markdown_row(
-            &rows[0].iter().map(|_| "---".to_owned()).collect::<Vec<_>>(),
-        ));
-        sections.extend(rows.iter().skip(1).map(|row| markdown_row(row)));
-    }
-    Ok(sections.join("\n"))
+    let bytes = read_bounded(path)?;
+    render_document_markdown(&decode_xlsx(&bytes)?)
+}
+
+pub fn pptx_to_markdown(path: &Path) -> Result<String, MediaError> {
+    let bytes = read_bounded(path)?;
+    render_document_markdown(&decode_pptx(&bytes)?)
 }
 
 pub fn validate_office_archive(path: &Path) -> Result<(), MediaError> {
-    enforce_raw_size(path)?;
-    let file = File::open(path).map_err(|source| MediaError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut archive = ZipArchive::new(file)
-        .map_err(|error| MediaError::Parse(format!("invalid ZIP container: {error}")))?;
-    let mut compressed = 0_u64;
-    let mut declared = 0_u64;
-    for index in 0..archive.len() {
-        let member = archive
-            .by_index_raw(index)
-            .map_err(|error| MediaError::Parse(error.to_string()))?;
-        compressed = compressed.saturating_add(member.compressed_size());
-        declared = declared.saturating_add(member.size());
-    }
-    if declared > OFFICE_MAX_DECOMPRESSED_BYTES {
-        return Err(MediaError::Rejected(format!(
-            "declared office payload is {declared} bytes"
-        )));
-    }
-    if declared
-        > compressed
-            .max(1)
-            .saturating_mul(OFFICE_MAX_COMPRESSION_RATIO)
-    {
-        return Err(MediaError::Rejected(
-            "office compression ratio exceeds safety limit".to_owned(),
-        ));
-    }
-    let mut actual = 0_u64;
-    let mut buffer = [0_u8; 1024 * 1024];
-    for index in 0..archive.len() {
-        let mut member = archive
-            .by_index(index)
-            .map_err(|error| MediaError::Parse(error.to_string()))?;
-        loop {
-            let read = member
-                .read(&mut buffer)
-                .map_err(|error| MediaError::Parse(error.to_string()))?;
-            if read == 0 {
-                break;
-            }
-            actual = actual.saturating_add(read as u64);
-            if actual > OFFICE_MAX_DECOMPRESSED_BYTES {
-                return Err(MediaError::Rejected(
-                    "decompressed office payload exceeds safety limit".to_owned(),
-                ));
-            }
-        }
-    }
-    Ok(())
+    let bytes = read_bounded(path)?;
+    ooxml::Package::open(&bytes).map(|_| ())
 }
 
-fn enforce_raw_size(path: &Path) -> Result<(), MediaError> {
-    let metadata = fs::metadata(path).map_err(|source| MediaError::Io {
+pub fn render_document_markdown(artifact: &DocumentArtifact) -> Result<String, DocumentError> {
+    artifact.validate()?;
+    match artifact.format {
+        DocumentFormat::Xlsx => render_spreadsheet(artifact),
+        _ => render_ordered_blocks(artifact),
+    }
+}
+
+fn decode_pdf(bytes: &[u8]) -> Result<DocumentArtifact, DocumentError> {
+    let owned = bytes.to_vec();
+    std::panic::catch_unwind(move || {
+        let reader = PdfReader::new(Cursor::new(owned)).map_err(|error| error.to_string())?;
+        let document = PdfDocument::new(reader);
+        let pages = document.extract_text().map_err(|error| error.to_string())?;
+        let mut artifact = DocumentArtifact::new(DocumentFormat::Pdf);
+        for (index, page) in pages.into_iter().enumerate() {
+            let page_number = one_based_u32(index, "PDF page")?;
+            let page_block = artifact
+                .push_block(
+                    None,
+                    DocumentBlockKind::Page,
+                    String::new(),
+                    DocumentLocator::Pdf {
+                        page: page_number,
+                        item: 1,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            if !page.text.is_empty() {
+                artifact
+                    .push_block(
+                        Some(page_block),
+                        DocumentBlockKind::Paragraph,
+                        page.text,
+                        DocumentLocator::Pdf {
+                            page: page_number,
+                            item: 2,
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        Ok::<_, String>(artifact)
+    })
+    .map_err(|_| DocumentError::Parse("PDF parser panicked".to_owned()))?
+    .map_err(DocumentError::Parse)
+}
+
+fn decode_plain_text(
+    bytes: &[u8],
+    format: DocumentFormat,
+) -> Result<DocumentArtifact, DocumentError> {
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    let end_byte = u64::try_from(bytes.len())
+        .map_err(|_| DocumentError::Rejected("text byte length overflow".to_owned()))?;
+    let end_line = u32::try_from(text.lines().count().max(1))
+        .map_err(|_| DocumentError::Rejected("text line count overflow".to_owned()))?;
+    let mut artifact = DocumentArtifact::new(format);
+    artifact.push_block(
+        None,
+        DocumentBlockKind::Paragraph,
+        text,
+        DocumentLocator::TextRange {
+            start_byte: 0,
+            end_byte,
+            start_line: 1,
+            end_line,
+        },
+    )?;
+    Ok(artifact)
+}
+
+fn read_bounded(path: &Path) -> Result<Vec<u8>, DocumentError> {
+    let metadata = fs::metadata(path).map_err(|source| DocumentError::Io {
         path: path.to_path_buf(),
         source,
     })?;
     if metadata.len() > MEDIA_MAX_RAW_BYTES {
-        return Err(MediaError::Rejected(format!(
+        return Err(DocumentError::Rejected(format!(
             "{} is {} bytes; maximum is {MEDIA_MAX_RAW_BYTES}",
             path.display(),
             metadata.len()
         )));
     }
-    Ok(())
-}
-
-fn read_zip_member(path: &Path, name: &str) -> Result<String, MediaError> {
-    let file = File::open(path).map_err(|source| MediaError::Io {
+    let bytes = fs::read(path).map_err(|source| DocumentError::Io {
         path: path.to_path_buf(),
         source,
     })?;
-    let mut archive = ZipArchive::new(file)
-        .map_err(|error| MediaError::Parse(format!("invalid ZIP container: {error}")))?;
-    let member = archive
-        .by_name(name)
-        .map_err(|error| MediaError::Parse(format!("missing {name}: {error}")))?;
-    if member.size() > OFFICE_MEMBER_MAX_BYTES {
-        return Err(MediaError::Rejected(format!(
-            "office member {name} exceeds safety limit"
-        )));
+    if bytes.len() as u64 > MEDIA_MAX_RAW_BYTES {
+        return Err(DocumentError::Rejected(
+            "source grew beyond the media limit while being read".to_owned(),
+        ));
     }
-    let mut bytes = Vec::with_capacity(usize::try_from(member.size()).unwrap_or(0));
-    member
-        .take(OFFICE_MEMBER_MAX_BYTES.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|error| MediaError::Parse(error.to_string()))?;
-    if bytes.len() as u64 > OFFICE_MEMBER_MAX_BYTES {
-        return Err(MediaError::Rejected(format!(
-            "office member {name} exceeds safety limit"
-        )));
-    }
-    String::from_utf8(bytes)
-        .map_err(|error| MediaError::Parse(format!("office member {name} is not UTF-8: {error}")))
+    Ok(bytes)
 }
 
-fn parse_docx_styles(xml: &str) -> Result<HashMap<String, String>, MediaError> {
-    let document = Document::parse(xml)
-        .map_err(|error| MediaError::Parse(format!("invalid DOCX styles XML: {error}")))?;
-    let mut styles = HashMap::new();
-    for style in document
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "style")
-    {
-        let Some(id) = attribute_local(style, "styleId") else {
+fn render_ordered_blocks(artifact: &DocumentArtifact) -> Result<String, DocumentError> {
+    let children = child_index(&artifact.blocks);
+    let mut lines = Vec::new();
+    let mut skipped = std::collections::BTreeSet::new();
+    for block in &artifact.blocks {
+        if skipped.contains(&block.ordinal) {
             continue;
-        };
-        let name = style
-            .children()
-            .find(|node| node.is_element() && node.tag_name().name() == "name")
-            .and_then(|node| attribute_local(node, "val"))
-            .unwrap_or(id);
-        styles.insert(id.to_owned(), name.to_owned());
-    }
-    Ok(styles)
-}
-
-fn render_docx_paragraph(node: Node<'_, '_>, styles: &HashMap<String, String>) -> String {
-    let text = node
-        .descendants()
-        .filter(|descendant| descendant.is_element() && descendant.tag_name().name() == "t")
-        .filter_map(|descendant| descendant.text())
-        .collect::<String>()
-        .trim()
-        .to_owned();
-    if text.is_empty() {
-        return String::new();
-    }
-    let style_id = node
-        .descendants()
-        .find(|descendant| descendant.is_element() && descendant.tag_name().name() == "pStyle")
-        .and_then(|style| attribute_local(style, "val"))
-        .unwrap_or_default();
-    let style_name = styles.get(style_id).map_or(style_id, String::as_str);
-    let normalized_style = style_name.to_ascii_lowercase();
-    if normalized_style.starts_with("heading 1") || normalized_style == "heading1" {
-        format!("# {text}")
-    } else if normalized_style.starts_with("heading 2") || normalized_style == "heading2" {
-        format!("## {text}")
-    } else if normalized_style.starts_with("heading 3") || normalized_style == "heading3" {
-        format!("### {text}")
-    } else if normalized_style.starts_with("list") {
-        format!("- {text}")
-    } else {
-        text
-    }
-}
-
-fn render_docx_table(table: Node<'_, '_>, styles: &HashMap<String, String>) -> Vec<Vec<String>> {
-    table
-        .children()
-        .filter(|node| node.is_element() && node.tag_name().name() == "tr")
-        .map(|row| {
-            row.children()
-                .filter(|node| node.is_element() && node.tag_name().name() == "tc")
-                .map(|cell| {
-                    cell.children()
-                        .filter(|node| node.is_element() && node.tag_name().name() == "p")
-                        .map(|paragraph| render_docx_paragraph(paragraph, styles))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                        .trim()
-                        .to_owned()
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn parse_shared_strings(xml: &str) -> Result<Vec<String>, MediaError> {
-    let document = Document::parse(xml)
-        .map_err(|error| MediaError::Parse(format!("invalid shared strings XML: {error}")))?;
-    Ok(document
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "si")
-        .map(|item| {
-            item.descendants()
-                .filter(|node| node.is_element() && node.tag_name().name() == "t")
-                .filter_map(|node| node.text())
-                .collect::<String>()
-        })
-        .collect())
-}
-
-fn parse_workbook_relationships(xml: &str) -> Result<HashMap<String, String>, MediaError> {
-    let document = Document::parse(xml)
-        .map_err(|error| MediaError::Parse(format!("invalid workbook relationships: {error}")))?;
-    Ok(document
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "Relationship")
-        .filter_map(|node| {
-            Some((
-                attribute_local(node, "Id")?.to_owned(),
-                attribute_local(node, "Target")?.to_owned(),
-            ))
-        })
-        .collect())
-}
-
-fn parse_xlsx_rows(xml: &str, shared_strings: &[String]) -> Result<Vec<Vec<String>>, MediaError> {
-    let document = Document::parse(xml)
-        .map_err(|error| MediaError::Parse(format!("invalid worksheet XML: {error}")))?;
-    let mut rows = Vec::new();
-    for row in document
-        .descendants()
-        .filter(|node| node.is_element() && node.tag_name().name() == "row")
-    {
-        let mut values = Vec::<String>::new();
-        for cell in row
-            .children()
-            .filter(|node| node.is_element() && node.tag_name().name() == "c")
-        {
-            let column = attribute_local(cell, "r")
-                .map(excel_column_index)
-                .unwrap_or(values.len());
-            if values.len() <= column {
-                values.resize(column + 1, String::new());
+        }
+        match &block.kind {
+            DocumentBlockKind::Table => {
+                let rendered = render_table(artifact, block.ordinal, &children, &mut skipped);
+                if !rendered.is_empty() {
+                    lines.extend(rendered);
+                }
             }
-            let cell_type = attribute_local(cell, "t").unwrap_or_default();
-            let raw = cell
-                .descendants()
-                .find(|node| node.is_element() && node.tag_name().name() == "v")
-                .and_then(|node| node.text())
-                .unwrap_or_default();
-            values[column] = match cell_type {
-                "s" => raw
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(|index| shared_strings.get(index))
-                    .cloned()
-                    .unwrap_or_default(),
-                "inlineStr" => cell
-                    .descendants()
-                    .filter(|node| node.is_element() && node.tag_name().name() == "t")
-                    .filter_map(|node| node.text())
-                    .collect::<String>(),
-                "b" => match raw {
-                    "1" => "True".to_owned(),
-                    "0" => "False".to_owned(),
-                    _ => raw.to_owned(),
-                },
-                _ => raw.to_owned(),
+            DocumentBlockKind::Heading { level } => {
+                lines.push(format!(
+                    "{} {}",
+                    "#".repeat(usize::from(*level)),
+                    block.text
+                ));
+            }
+            DocumentBlockKind::DocumentTitle => lines.push(format!("# {}", block.text)),
+            DocumentBlockKind::ListItem => lines.push(format!("- {}", block.text)),
+            DocumentBlockKind::Code => lines.push(format!("```\n{}\n```", block.text)),
+            DocumentBlockKind::Quote => lines.push(format!("> {}", block.text)),
+            DocumentBlockKind::Paragraph | DocumentBlockKind::Note => {
+                lines.push(block.text.clone());
+            }
+            DocumentBlockKind::Slide if artifact.format == DocumentFormat::Pptx => {
+                if let DocumentLocator::Slide { slide, .. } = block.locator {
+                    lines.push(format!("## Slide {slide}"));
+                }
+            }
+            DocumentBlockKind::Page
+            | DocumentBlockKind::Sheet
+            | DocumentBlockKind::Slide
+            | DocumentBlockKind::List
+            | DocumentBlockKind::Row
+            | DocumentBlockKind::Cell
+            | DocumentBlockKind::Other { .. } => {}
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+fn render_spreadsheet(artifact: &DocumentArtifact) -> Result<String, DocumentError> {
+    let children = child_index(&artifact.blocks);
+    let mut sections = Vec::new();
+    for sheet in artifact
+        .blocks
+        .iter()
+        .filter(|block| matches!(block.kind, DocumentBlockKind::Sheet))
+    {
+        sections.push(format!("## Sheet: {}", sheet.text));
+        let rows = children.get(&sheet.ordinal).cloned().unwrap_or_default();
+        let mut rendered_rows = Vec::new();
+        let mut max_column = 0_usize;
+        for row_ordinal in rows {
+            let Some(row) = artifact.blocks.get(row_ordinal as usize) else {
+                continue;
             };
+            if !matches!(row.kind, DocumentBlockKind::Row) {
+                continue;
+            }
+            let cells = children.get(&row.ordinal).cloned().unwrap_or_default();
+            let mut sparse = BTreeMap::new();
+            for cell_ordinal in cells {
+                let Some(cell) = artifact.blocks.get(cell_ordinal as usize) else {
+                    continue;
+                };
+                if let DocumentLocator::Spreadsheet { column, .. } = cell.locator {
+                    let column = usize::from(column);
+                    max_column = max_column.max(column);
+                    sparse.insert(column, cell.text.clone());
+                }
+            }
+            rendered_rows.push(sparse);
         }
-        if values.iter().any(|value| !value.is_empty()) {
-            rows.push(values);
+        if rendered_rows.is_empty() {
+            continue;
+        }
+        for (index, row) in rendered_rows.iter().enumerate() {
+            let cells = (1..=max_column)
+                .map(|column| row.get(&column).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            sections.push(markdown_row(&cells));
+            if index == 0 {
+                sections.push(markdown_row(&vec!["---".to_owned(); max_column]));
+            }
         }
     }
-    Ok(rows)
+    Ok(sections.join("\n"))
 }
 
-fn normalize_xlsx_target(target: &str) -> String {
-    if let Some(absolute) = target.strip_prefix('/') {
-        absolute.to_owned()
-    } else if target.starts_with("xl/") {
-        target.to_owned()
-    } else {
-        format!("xl/{target}")
+fn child_index(blocks: &[DocumentBlock]) -> BTreeMap<u32, Vec<u32>> {
+    let mut children = BTreeMap::<u32, Vec<u32>>::new();
+    for block in blocks {
+        if let Some(parent) = block.parent {
+            children.entry(parent).or_default().push(block.ordinal);
+        }
     }
+    children
 }
 
-fn excel_column_index(reference: &str) -> usize {
-    reference
-        .bytes()
-        .take_while(u8::is_ascii_alphabetic)
-        .fold(0_usize, |value, byte| {
-            value
-                .saturating_mul(26)
-                .saturating_add(usize::from(byte.to_ascii_uppercase() - b'A' + 1))
-        })
-        .saturating_sub(1)
+fn render_table(
+    artifact: &DocumentArtifact,
+    table: u32,
+    children: &BTreeMap<u32, Vec<u32>>,
+    skipped: &mut std::collections::BTreeSet<u32>,
+) -> Vec<String> {
+    let mut rows = Vec::new();
+    for row_ordinal in children.get(&table).into_iter().flatten() {
+        skipped.insert(*row_ordinal);
+        let mut cells = Vec::new();
+        for cell_ordinal in children.get(row_ordinal).into_iter().flatten() {
+            skipped.insert(*cell_ordinal);
+            if let Some(cell) = artifact.blocks.get(*cell_ordinal as usize) {
+                cells.push(escape_markdown_cell(&cell.text));
+            }
+        }
+        if !cells.is_empty() {
+            rows.push(cells);
+        }
+    }
+    let Some(header) = rows.first() else {
+        return Vec::new();
+    };
+    let mut rendered = vec![markdown_row(header)];
+    rendered.push(markdown_row(&vec!["---".to_owned(); header.len()]));
+    rendered.extend(rows.iter().skip(1).map(|row| markdown_row(row)));
+    rendered
 }
 
-fn attribute_local<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
-    node.attributes()
-        .find(|attribute| attribute.name() == name)
-        .map(|attribute| attribute.value())
+fn escape_markdown_cell(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace(['\r', '\n'], "<br>")
 }
 
 fn markdown_row(cells: &[String]) -> String {
     format!("| {} |", cells.join(" | "))
+}
+
+fn one_based_u32(index: usize, field: &str) -> Result<u32, String> {
+    u32::try_from(index)
+        .ok()
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| format!("{field} index overflow"))
 }
 
 fn extension(path: &Path) -> String {
@@ -472,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn converts_docx_paragraphs_styles_and_tables_like_python() -> TestResult {
+    fn docx_preserves_paragraph_table_paragraph_order() -> TestResult {
         let directory = tempdir()?;
         let path = directory.path().join("sample.docx");
         write_zip(
@@ -480,24 +395,23 @@ mod tests {
             &[
                 (
                     "word/styles.xml",
-                    r#"<w:styles xmlns:w="urn:w"><w:style w:styleId="Heading1"><w:name w:val="Heading 1"/></w:style><w:style w:styleId="ListBullet"><w:name w:val="List Bullet"/></w:style></w:styles>"#,
+                    r#"<w:styles xmlns:w="urn:w"><w:style w:styleId="Heading1"><w:name w:val="Heading 1"/></w:style></w:styles>"#,
                 ),
                 (
                     "word/document.xml",
-                    r#"<w:document xmlns:w="urn:w"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p><w:p/><w:p><w:pPr><w:pStyle w:val="ListBullet"/></w:pPr><w:r><w:t>Item</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Name</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>"#,
+                    r#"<w:document xmlns:w="urn:w"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Name</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Value</w:t></w:r></w:p></w:tc></w:tr><w:tr><w:tc><w:p><w:r><w:t>A</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>1</w:t></w:r></w:p></w:tc></w:tr></w:tbl><w:p><w:r><w:t>After</w:t></w:r></w:p></w:body></w:document>"#,
                 ),
             ],
         )?;
-
         assert_eq!(
             docx_to_markdown(&path)?,
-            "# Title\n\n- Item\n| Name | Value |\n| --- | --- |\n| A | 1 |"
+            "# Title\n| Name | Value |\n| --- | --- |\n| A | 1 |\nAfter"
         );
         Ok(())
     }
 
     #[test]
-    fn converts_xlsx_shared_inline_boolean_and_sparse_cells() -> TestResult {
+    fn xlsx_is_sparse_typed_and_bounded() -> TestResult {
         let directory = tempdir()?;
         let path = directory.path().join("sample.xlsx");
         write_zip(
@@ -517,51 +431,55 @@ mod tests {
                 ),
                 (
                     "xl/worksheets/sheet1.xml",
-                    r#"<worksheet><sheetData><row><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row><c r="A2" t="inlineStr"><is><t>Alice</t></is></c><c r="B2" t="b"><v>1</v></c><c r="C2"><v>42</v></c></row></sheetData></worksheet>"#,
+                    r#"<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c><c r="C1" t="s"><v>1</v></c></row><row r="2"><c r="A2" t="inlineStr"><is><t>Alice</t></is></c><c r="B2" t="b"><v>1</v></c><c r="C2"><f>20+22</f><v>42</v></c></row></sheetData></worksheet>"#,
                 ),
             ],
         )?;
-
+        let artifact = decode_document(&path, &fs::read(&path)?)?;
         assert_eq!(
-            xlsx_to_markdown(&path)?,
+            artifact
+                .blocks
+                .iter()
+                .filter(|b| matches!(b.kind, DocumentBlockKind::Cell))
+                .count(),
+            5
+        );
+        assert_eq!(
+            render_document_markdown(&artifact)?,
             "## Sheet: Main\n| Name |  | Value |\n| --- | --- | --- |\n| Alice | True | 42 |"
+        );
+        assert!(
+            artifact
+                .blocks
+                .iter()
+                .any(|block| block.metadata.contains_key("formula"))
         );
         Ok(())
     }
 
     #[test]
-    fn rejects_non_zip_office_documents() -> TestResult {
+    fn rejects_non_zip_and_high_ratio_archives() -> TestResult {
         let directory = tempdir()?;
-        let path = directory.path().join("fake.xlsx");
-        fs::write(&path, b"not a zip")?;
+        let fake = directory.path().join("fake.xlsx");
+        fs::write(&fake, b"not a zip")?;
+        assert!(validate_office_archive(&fake).is_err());
 
-        assert!(validate_office_archive(&path).is_err());
-        assert_eq!(extract_text_compat(&path), "");
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_high_ratio_office_archives() -> TestResult {
-        let directory = tempdir()?;
-        let path = directory.path().join("bomb.docx");
+        let bomb = directory.path().join("bomb.docx");
         let payload = "0".repeat(5 * 1024 * 1024);
-        write_zip(&path, &[("word/document.xml", &payload)])?;
-
+        write_zip(&bomb, &[("word/document.xml", &payload)])?;
         assert!(matches!(
-            validate_office_archive(&path),
+            validate_office_archive(&bomb),
             Err(MediaError::Rejected(_))
         ));
-        assert_eq!(docx_to_markdown(&path).unwrap_or_default(), "");
         Ok(())
     }
 
     #[test]
-    fn rejects_raw_files_over_the_cap_without_reading_them() -> TestResult {
+    fn rejects_raw_files_over_cap() -> TestResult {
         let directory = tempdir()?;
         let path = directory.path().join("oversize.pdf");
         let file = File::create(&path)?;
         file.set_len(MEDIA_MAX_RAW_BYTES + 1)?;
-
         assert!(matches!(
             extract_pdf_text(&path),
             Err(MediaError::Rejected(_))
@@ -574,7 +492,6 @@ mod tests {
         let directory = tempdir()?;
         let path = directory.path().join("notes.txt");
         fs::write(&path, b"hello\xffworld")?;
-
         assert_eq!(extract_text(&path)?, "hello\u{fffd}world");
         Ok(())
     }

@@ -1,0 +1,43 @@
+{
+  "schema": "compass.document-ocr.qualification/1",
+  "license": "CC0-1.0 synthetic fixtures",
+  "generation": "deterministic in-memory Rust test fixtures",
+  "formats": ["pdf", "docx", "pptx", "xlsx", "png"],
+  "policies": ["off", "auto", "always", "allow_partial"],
+  "required_contracts": [
+    "compass.document/1",
+    "compass.document.inspect/1",
+    "compass.ocr/1",
+    "compass.ocr.protocol/1"
+  ],
+  "offline_default": true,
+  "network_during_tests": false,
+  "model_profile": "pp-ocrv6-small",
+  "engine": "oar-ocr/0.9.2",
+  "model_revision": "GreatV/oar-ocr@v0.7.0",
+  "renderer": "hayro/0.7.1@300dpi",
+  "preprocessing": {
+    "version": 2,
+    "exif_orientation": true,
+    "alpha_background": "white",
+    "resize_filter": "triangle",
+    "engine_max_side": 2048,
+    "tile_overlap": 128,
+    "engine_threads": 1,
+    "document_timeout_seconds": 600
+  },
+  "installed_model_gate": {
+    "fixture": "synthetic-clean-english-5x7-v1",
+    "expected": "COMPASS OCR 2026",
+    "maximum_cer_bps": 500,
+    "license": "CC0-1.0 synthetic fixture"
+  },
+  "quality_claim": "Clean synthetic English only; no multilingual, degraded, handwriting, or broad accuracy claim",
+  "blocking_unmeasured_release_gates": [
+    "degraded-English comparison against pinned Tesseract 5 tessdata_best",
+    "PP-OCRv6 medium and ocrs candidate comparison",
+    "per-script CER/WER and region-IoU corpus",
+    "x86_64 versus aarch64 semantic equivalence",
+    "hostile-corpus peak RSS and timeout termination"
+  ]
+}
