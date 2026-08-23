@@ -150,6 +150,10 @@ pub struct WorkbenchView {
     rename_all = "snake_case",
     rename_all_fields = "camelCase"
 )]
+// Keep the established public model types and serialized contract intact. The
+// effective-graph context can make history the largest variant, but boxing it
+// here would be a source-breaking public API change.
+#[allow(clippy::large_enum_variant)]
 pub enum WorkbenchViewContent {
     Code {
         model: GraphViewModel,
@@ -380,6 +384,7 @@ mod tests {
                         edges: Vec::new(),
                         communities: Vec::new(),
                         hyperedges: Vec::new(),
+                        effective_graph: None,
                     },
                     community_details: BTreeMap::new(),
                 },
