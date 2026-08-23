@@ -1529,7 +1529,11 @@ pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
     if matches!(
         lower.as_str(),
         "interfaces" | "constructor_param" | "constructor_parameter"
-    ) {
+    ) || lower.starts_with("generics_")
+    {
+        // Type-shaped nodes (including generic/class type syntax) carry
+        // references, not declarations.  Publishing them as nominal symbols
+        // creates duplicate targets and can make a real base edge ambiguous.
         return None;
     }
     if lower.contains("protocol") {

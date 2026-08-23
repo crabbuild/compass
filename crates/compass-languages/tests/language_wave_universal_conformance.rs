@@ -226,6 +226,43 @@ class UserSpec extends spock.lang.Specification {
 }
 
 #[test]
+fn groovy_generic_base_types_do_not_publish_phantom_declarations() -> Result<(), Box<dyn Error>> {
+    let source = br#"package sample
+interface NodeMaker<T> { T makeNode(Object value) }
+class SwingNodeMaker implements NodeMaker<String> {
+    String makeNode(Object value) { value.toString() }
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("src/NodeMaker.groovy"),
+        "src/NodeMaker.groovy",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    let node_makers = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.qualified_name == "sample.NodeMaker")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        node_makers.len(),
+        1,
+        "phantom generic declaration: {node_makers:#?}"
+    );
+    assert_eq!(node_makers[0].kind, "interface");
+    assert!(
+        evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Implements
+                && candidate.target_spelling == "NodeMaker"
+        }),
+        "missing generic Groovy implements candidate: {:#?}",
+        evidence.candidates
+    );
+    Ok(())
+}
+
+#[test]
 fn dart_library_parts_and_import_filters_remain_explicit() -> Result<(), Box<dyn Error>> {
     let source = br#"library foo.bar;
 part 'src/generated.dart';

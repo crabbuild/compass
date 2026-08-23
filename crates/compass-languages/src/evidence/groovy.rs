@@ -284,9 +284,10 @@ fn groovy_type_declaration(line: &str) -> Option<(&'static str, String, usize)> 
             "enum" => "enum",
             _ => continue,
         };
-        let name = tokens
+        let raw_name = tokens
             .get(index.saturating_add(1))?
             .trim_matches(['{', ';']);
+        let name = raw_name.split('<').next().unwrap_or(raw_name).trim();
         if !shared::valid_name(name) {
             return None;
         }
