@@ -3,6 +3,31 @@
 This guide creates and inspects an opt-in Agent Graph Overlay while leaving the
 Base Graph byte-for-byte unchanged.
 
+## Use it from an AI coding session
+
+Install or refresh Compass's bundled skill, then reload the skill or start a new
+assistant session:
+
+```bash
+compass install --project
+```
+
+The user can ask for the outcome without writing commands or batch JSON:
+
+```text
+Use Compass overlay overlay:review for this coding session. Query the current
+graph first. Preserve only useful source-cited GROUNDED enhancements, show each
+applied change, and pin the exact revision for later reads. Do not mask Base
+facts.
+```
+
+The installed skill teaches the assistant to initialize the Base Generation,
+draft the strict batch, request only the required local write capability, audit
+the receipt, and rebase after source changes. Navigation stays read-only unless
+the user explicitly asks to add, update, retract, challenge, or enhance overlay
+knowledge. `GROUNDED` is awarded by Compass verification, not asserted by the
+assistant.
+
 ## 1. Inspect the selected Base Generation
 
 For a Git repository:
