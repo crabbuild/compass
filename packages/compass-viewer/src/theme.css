@@ -7243,6 +7243,24 @@ body.vscode-high-contrast-light .architecture-call-table {
   font-size: 11px;
 }
 
+.architecture-directory-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--architecture-border);
+  font: 9px/1.2 var(--compass-font-mono);
+}
+
+.architecture-directory-pagination button {
+  padding: 3px 7px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
 .architecture-scope-switch {
   display: flex;
   overflow: hidden;
@@ -7304,11 +7322,49 @@ body.vscode-high-contrast-light .architecture-call-table {
   font-weight: 600;
 }
 
+.architecture-context-strip button {
+  padding: 1px 5px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--primary));
+  font: inherit;
+  cursor: pointer;
+}
+
+.architecture-quality-status {
+  padding: 2px 6px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+
+.architecture-quality-status[data-status="good"] {
+  color: var(--vscode-testing-iconPassed, var(--success));
+}
+
+.architecture-quality-status[data-status="degraded"] {
+  color: var(--vscode-editorWarning-foreground, var(--warning));
+}
+
+.architecture-quality-status[data-status="insufficient"] {
+  color: var(--vscode-editorError-foreground, var(--destructive));
+}
+
 .architecture-coverage-warning {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--vscode-editorWarning-foreground, var(--warning));
+}
+
+.architecture-omitted-selection {
+  margin: 12px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--compass-border);
+  border-radius: 8px;
+  color: var(--compass-muted);
+  background: color-mix(in srgb, var(--compass-surface-raised) 88%, transparent);
 }
 
 .architecture-coverage-warning svg {

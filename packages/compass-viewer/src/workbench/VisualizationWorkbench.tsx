@@ -14,11 +14,11 @@ import {
   SlidersHorizontalIcon,
   WaypointsIcon
 } from "lucide-react";
-import type { ArchitectureOverview } from "../contracts/architecture";
-import type { CallflowViewModel } from "../contracts/callflow";
+import type { ArchitectureLens, ArchitectureOverview, ArchitectureViewModel } from "../contracts/architecture";
 import type { GraphViewModel } from "../contracts/graph";
 import type { WorkbenchModel, WorkbenchView } from "../contracts/workbench";
 import { ArchitectureMap, type ArchitectureSelection } from "../architecture/ArchitectureMap";
+import { architectureOverview } from "../architecture/projection";
 import { CallGraph } from "../calls/CallGraph";
 import { CompassGraph, type GraphHost } from "../graph/CompassGraph";
 import { codeQueryGraphViewModel } from "../graph/codeQueryGraph";
@@ -469,19 +469,36 @@ function WorkbenchArchitecture({
   model,
   host
 }: {
-  model: CallflowViewModel;
+  model: ArchitectureViewModel;
   host: VisualizationWorkbenchHost;
 }) {
   const [scope, setScope] = useState<"production" | "all">("production");
   const [evidence, setEvidence] = useState<"all" | "extracted" | "inferred" | "ambiguous">("all");
-  const overview = useMemo(() => callflowOverview(model, scope, evidence), [evidence, model, scope]);
-  const first = overview.sections.find((section) => section.nodeCount > 0);
-  const [selection, setSelection] = useState<ArchitectureSelection>(
-    first ? { kind: "section", id: first.id } : undefined
+  const [lens, setLens] = useState<ArchitectureLens>("architecture");
+  const overview = useMemo(
+    () => architectureOverview(model, { scope, evidence, lens }),
+    [evidence, lens, model, scope]
   );
-  const selectedSection = selection?.kind === "section"
-    ? model.sections.find((section) => section.id === selection.id)
+  const first = overview.groups.find((section) => section.nodeCount > 0);
+  const [selection, setSelection] = useState<ArchitectureSelection>(
+    first ? { kind: "group", id: first.id } : undefined
+  );
+  const projection = model.projections.find((candidate) =>
+    candidate.scope === (scope === "all" ? "all_code" : "production"));
+  const selectedGroup = selection?.kind === "group"
+    ? projection?.groups.find((group) => group.id === selection.id)
     : undefined;
+  const childIds = new Set(projection?.groups
+    .filter((group) => group.parentId === selectedGroup?.id)
+    .map((group) => group.id) ?? []);
+  const selectedNodeIds = new Set(projection?.memberships
+    .filter((membership) => {
+      const groupId = projection.groups[membership.groupIndex]?.id;
+      return groupId === selectedGroup?.id || (groupId !== undefined && childIds.has(groupId));
+    })
+    .map((membership) => model.nodes[membership.nodeIndex]?.id)
+    .filter((nodeId): nodeId is string => nodeId !== undefined) ?? []);
+  const selectedNodes = model.nodes.filter((node) => selectedNodeIds.has(node.id));
   const selectedRoute = selection?.kind === "route"
     ? overview.routes.find((route) => route.id === selection.id)
     : undefined;
@@ -490,18 +507,43 @@ function WorkbenchArchitecture({
       <div className="workbench-filter-strip" aria-label="Architecture filters">
         <Filter label="Source scope" value={scope} values={["production", "all"]} onChange={(value) => setScope(value as typeof scope)} />
         <Filter label="Evidence" value={evidence} values={["all", "extracted", "inferred", "ambiguous"]} onChange={(value) => setEvidence(value as typeof evidence)} />
-        <span role="status">{overview.statistics.visibleCalls.toLocaleString()} visible calls</span>
+        <Filter label="Lens" value={lens} values={["architecture", "execution", "dependency", "type", "structure", "all"]} onChange={(value) => setLens(value as ArchitectureLens)} />
+        <label>
+          Subsystem directory
+          <select
+            aria-label="Subsystem directory"
+            value={selectedGroup?.id ?? ""}
+            onChange={(event) => event.target.value
+              && setSelection({ kind: "group", id: event.target.value })}
+          >
+            <option value="">Select a subsystem</option>
+            {projection?.groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name.value} · {group.nodeCount.toLocaleString()} symbols
+              </option>
+            ))}
+          </select>
+        </label>
+        <span role="status">{overview.statistics.visibleRelationships.toLocaleString()} visible relationships</span>
+        <span role="status">Architecture quality: {overview.quality.status}</span>
+        <span role="status">
+          {overview.omissions.shownGroups.toLocaleString()} of {overview.omissions.totalGroups.toLocaleString()} groups shown
+          {overview.omissions.omittedGroups > 0
+            ? ` · ${overview.omissions.omittedGroups.toLocaleString()} available in directory`
+            : ""}
+        </span>
       </div>
       <div className="workbench-architecture-body">
         <ArchitectureMap overview={overview} selection={selection} onSelect={setSelection} />
         <aside aria-label="Architecture details">
-          {selectedSection ? (
+          {selectedGroup ? (
             <>
               <span>Subsystem</span>
-              <h2>{selectedSection.name}</h2>
-              <p>{selectedSection.nodes.length.toLocaleString()} symbols · {selectedSection.edges.length.toLocaleString()} internal calls</p>
+              <h2>{selectedGroup.name.value}</h2>
+              <p>{selectedNodes.length.toLocaleString()} symbols · {selectedGroup.relationshipCount.toLocaleString()} related relationships</p>
+              <small>Name source: {selectedGroup.name.provenance} · quality {selectedGroup.name.quality}/100</small>
               <div className="workbench-symbol-list">
-                {selectedSection.nodes.slice(0, 100).map((node) => (
+                {selectedNodes.slice(0, 100).map((node) => (
                   <button
                     key={node.id}
                     type="button"
@@ -517,8 +559,8 @@ function WorkbenchArchitecture({
           ) : selectedRoute ? (
             <>
               <span>Subsystem route</span>
-              <h2>{sectionName(overview, selectedRoute.sourceSection)} → {sectionName(overview, selectedRoute.targetSection)}</h2>
-              <p>{selectedRoute.calls.toLocaleString()} calls cross this boundary.</p>
+              <h2>{groupName(overview, selectedRoute.sourceGroup)} → {groupName(overview, selectedRoute.targetGroup)}</h2>
+              <p>{selectedRoute.relationships.toLocaleString()} relationships cross this boundary.</p>
             </>
           ) : <p>Select a subsystem or route.</p>}
         </aside>
@@ -571,78 +613,6 @@ function filterGraph(
   };
 }
 
-function callflowOverview(
-  model: CallflowViewModel,
-  scope: "production" | "all",
-  evidence: "all" | "extracted" | "inferred" | "ambiguous"
-): ArchitectureOverview {
-  const sections = model.sections.filter((section) => section.id !== "overview");
-  const includeNode = (scopeValue: string) => scope === "all" || scopeValue === "production";
-  const nodeById = new Map(sections.flatMap((section) => section.nodes).map((node) => [node.id, node]));
-  const includeCall = (call: { source: string; target: string; confidence: string }) =>
-    (evidence === "all" || call.confidence === evidence)
-    && includeNode(nodeById.get(call.source)?.scope ?? "unknown")
-    && includeNode(nodeById.get(call.target)?.scope ?? "unknown");
-  const routes = new Map<string, typeof model.crossSectionCalls>();
-  for (const call of model.crossSectionCalls.filter(includeCall)) {
-    const id = `${call.sourceSection}->${call.targetSection}`;
-    const group = routes.get(id) ?? [];
-    group.push(call);
-    routes.set(id, group);
-  }
-  const routeModels = [...routes.entries()].map(([id, calls]) => ({
-    id,
-    sourceSection: calls[0]!.sourceSection,
-    targetSection: calls[0]!.targetSection,
-    calls: calls.length,
-    extracted: calls.filter((call) => call.confidence === "extracted").length,
-    inferred: calls.filter((call) => call.confidence === "inferred").length,
-    ambiguous: calls.filter((call) => call.confidence === "ambiguous").length
-  })).sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
-  const incoming = new Map<string, number>();
-  const outgoing = new Map<string, number>();
-  for (const route of routeModels) {
-    outgoing.set(route.sourceSection, (outgoing.get(route.sourceSection) ?? 0) + route.calls);
-    incoming.set(route.targetSection, (incoming.get(route.targetSection) ?? 0) + route.calls);
-  }
-  const sectionModels = sections.map((section) => {
-    const scopes = { production: 0, test: 0, generated: 0, vendor: 0, unknown: 0 };
-    for (const node of section.nodes) scopes[node.scope] += 1;
-    return {
-      id: section.id,
-      name: section.name,
-      nodeCount: section.nodes.filter((node) => includeNode(node.scope)).length,
-      totalNodeCount: section.nodes.length,
-      internalCallCount: section.edges.filter(includeCall).length,
-      incomingCalls: incoming.get(section.id) ?? 0,
-      outgoingCalls: outgoing.get(section.id) ?? 0,
-      scopes
-    };
-  });
-  const visibleNodes = sectionModels.reduce((sum, section) => sum + section.nodeCount, 0);
-  const visibleInternal = sectionModels.reduce((sum, section) => sum + section.internalCallCount, 0);
-  const visibleCross = routeModels.reduce((sum, route) => sum + route.calls, 0);
-  return {
-    title: model.title,
-    scope,
-    evidence,
-    sections: sectionModels,
-    routes: routeModels,
-    statistics: {
-      visibleNodes,
-      totalNodes: model.statistics.nodes,
-      visibleCalls: visibleInternal + visibleCross,
-      totalCalls: model.statistics.edges,
-      communities: model.statistics.communities,
-      extracted: model.statistics.extracted,
-      inferred: model.statistics.inferred,
-      ambiguous: model.statistics.ambiguous
-    },
-    coverage: model.coverage,
-    provenance: model.provenance
-  };
-}
-
 function ViewIcon({ view }: { view: WorkbenchView }) {
   const Icon = view.kind === "code" ? NetworkIcon
     : view.kind === "call" ? GitForkIcon
@@ -670,6 +640,10 @@ function viewEyebrow(view: WorkbenchView): string {
 }
 
 function coverageLabel(view: WorkbenchView): string {
+  if (view.kind === "architecture") {
+    return view.coverage.status === "complete" ? "Extraction complete"
+      : view.coverage.status === "summary" ? "Extraction summary" : "Extraction bounded";
+  }
   return view.coverage.status === "complete" ? "Complete"
     : view.coverage.status === "summary" ? "Community summary" : "Bounded result";
 }
@@ -678,6 +652,6 @@ function humanize(value: string): string {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function sectionName(overview: ArchitectureOverview, id: string): string {
-  return overview.sections.find((section) => section.id === id)?.name ?? id;
+function groupName(overview: ArchitectureOverview, id: string): string {
+  return overview.groups.find((section) => section.id === id)?.name ?? id;
 }

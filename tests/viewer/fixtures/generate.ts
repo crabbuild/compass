@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { graphStaticLoadingMarkup } from "../../../editors/vscode/src/webviews/graphLoadingMarkup";
 import { ArchitectureIndex } from "../../../editors/vscode/src/views/architectureIndex";
-import { CallflowViewModelSchema } from "../../../packages/compass-viewer/src/contracts/callflow";
+import { ArchitectureViewModelSchema } from "../../../packages/compass-viewer/src/contracts/architecture";
 
 export default async function generate(): Promise<void> {
   const root = path.resolve("../..");
@@ -222,15 +222,17 @@ export default async function generate(): Promise<void> {
     sourceFile: `src/api/module-${index}.ts`,
     scope: "production"
   }));
-  const architectureEdges = Array.from({ length: 53 }, (_, index) => ({
+  const architectureRelationships = Array.from({ length: 53 }, (_, index) => ({
+    id: `internal-${index}`,
     source: "authenticate",
     target: index % 4 === 0 ? "database" : `symbol-${2 + (index % 29)}`,
     relation: index % 3 === 0 ? "calls" : "uses",
+    relationClass: index % 3 === 0 ? "execution" : "dependency",
     confidence: index % 5 === 0 ? "inferred" : "extracted"
   }));
-  const architectureSectionNodeId = (index: number) =>
-    index === 0 ? "authenticate" : index === 1 ? "database-adapter" : `section-node-${index}`;
-  const architectureSections = Array.from({ length: 26 }, (_, index) => {
+  const architectureGroupNodeId = (index: number) =>
+    index === 0 ? "authenticate" : index === 1 ? "database-adapter" : `group-node-${index}`;
+  const architectureGroups = Array.from({ length: 26 }, (_, index) => {
     const nodes = index === 0
       ? architectureNodes
       : index === 1
@@ -242,67 +244,133 @@ export default async function generate(): Promise<void> {
           scope: "production"
         }]
         : [{
-          id: architectureSectionNodeId(index),
-          label: `section ${index} entry`,
+          id: architectureGroupNodeId(index),
+          label: `subsystem ${index} entry`,
           kind: "function",
-          sourceFile: `src/section-${index}/entry.ts`,
+          sourceFile: `src/subsystem-${index}/entry.ts`,
           scope: "production"
         }];
-    const edges = index === 0 ? architectureEdges : [];
     return {
-      id: `section-${index}`,
-      name: index === 0 ? "API" : index === 1 ? "Storage" : `Section ${index}`,
-      communities: [`${index}`],
+      id: `group-${index}`,
+      parentId: null,
+      kind: "subsystem",
+      rank: index + 1,
+      name: {
+        value: index === 0 ? "API" : index === 1 ? "Storage" : `Subsystem ${index}`,
+        provenance: "path",
+        membershipSignature: `signature-${index}`,
+        quality: 90,
+        evidence: [`path:src/subsystem-${index}`]
+      },
+      ownerKey: `src/subsystem-${index}`,
+      communityIds: [index],
       nodeCount: nodes.length,
-      internalCallCount: edges.length,
-      nodes,
-      edges
+      relationshipCount: index === 0 ? 54 : index < 25 ? 2 : 1,
+      neighborCount: index === 0 || index === 25 ? 1 : 2,
+      cohesion: index === 0 ? 0.8 : 1,
+      sourceScopes: { production: nodes.length, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 },
+      pinned: false,
+      nodes
     };
   });
-  const architectureOverviewLinks = Array.from({ length: 25 }, (_, index) => ({
-    sourceSection: `section-${index}`,
-    targetSection: `section-${index + 1}`,
-    calls: index + 1
+  const architectureOverviewRoutes = Array.from({ length: 25 }, (_, index) => ({
+    id: `group-${index}->group-${index + 1}`,
+    level: "overview",
+    ownerId: null,
+    sourceGroup: `group-${index}`,
+    targetGroup: `group-${index + 1}`,
+    relationshipCount: index + 1,
+    relationClasses: {
+      execution: index + 1, dependency: 0, type: 0, structure: 0, contextual: 0, unknown: 0
+    },
+    evidence: { extracted: index + 1, inferred: 0, ambiguous: 0 }
   }));
-  const architectureCrossSectionCalls = architectureOverviewLinks.flatMap((link, index) =>
-    Array.from({ length: link.calls }, () => ({
-      source: architectureSectionNodeId(index),
-      target: architectureSectionNodeId(index + 1),
-      sourceSection: link.sourceSection,
-      targetSection: link.targetSection,
+  const architectureCrossGroupRelationships = architectureOverviewRoutes.flatMap((route, index) =>
+    Array.from({ length: route.relationshipCount }, (_, relationshipIndex) => ({
+      id: `route-${index}-${relationshipIndex}`,
+      source: architectureGroupNodeId(index),
+      target: architectureGroupNodeId(index + 1),
       relation: "calls",
+      relationClass: "execution",
       confidence: "extracted"
     }))
   );
+  const rawArchitectureNodes = architectureGroups.flatMap(({ nodes }) => nodes).map((node, index) => ({
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    sourceFile: node.sourceFile,
+    sourceScope: "production",
+    scopeReason: "source_path",
+    community: index < 31 ? 0 : index - 30
+  }));
+  const groups = architectureGroups.map(({ nodes: _nodes, ...group }) => group);
+  const architectureNodeIndex = new Map(rawArchitectureNodes.map((node, index) => [node.id, index]));
+  const architectureGroupIndex = new Map(groups.map((group, index) => [group.id, index]));
+  const memberships = architectureGroups.flatMap((group) =>
+    group.nodes.map((node) => ({
+      nodeIndex: architectureNodeIndex.get(node.id)!,
+      groupIndex: architectureGroupIndex.get(group.id)!
+    }))
+  );
+  const sourceScopes = { production: 56, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 };
+  const relationClasses = {
+    execution: 343, dependency: 35, type: 0, structure: 0, contextual: 0, unknown: 0
+  };
+  const quality = {
+    status: "good",
+    metrics: {
+      sourceScopes,
+      unknownSourceFraction: 0,
+      generatedVendorLeakage: 0,
+      representedNodeFraction: 1,
+      representedRelationshipFraction: 1,
+      duplicateNames: 0,
+      fallbackNames: 0,
+      largestGroupFraction: 31 / 56,
+      unknownRelations: 0,
+      unassignedNodes: 0,
+      unassignedRelationships: 0
+    },
+    diagnostics: []
+  };
+  const projection = {
+    scope: "production",
+    defaultLens: "architecture",
+    groups,
+    memberships,
+    routes: architectureOverviewRoutes,
+    overviewGroupIds: groups.slice(0, 24).map(({ id }) => id),
+    overviewRouteIds: architectureOverviewRoutes.slice(0, 23).map(({ id }) => id),
+    coverage: { admitted: 378, internal: 53, crossGroup: 325, unassigned: 0, relationClasses },
+    omissions: {
+      totalGroups: 26, shownGroups: 24, omittedGroups: 2,
+      representedNodes: 54, omittedNodes: 2,
+      representedRelationships: 329, omittedRelationships: 49,
+      witnessGroupIds: ["group-24", "group-25"], maxOverviewGroups: 24, maxOverviewRoutes: 23
+    },
+    quality
+  };
   const architecture = {
-    schema: "compass.viewer.callflow/1",
+    schema: "compass.viewer.architecture/1",
     title: "Fixture — Architecture Flow",
-    sections: [
-      {
-        id: "overview",
-        name: "Overview",
-        communities: [],
-        nodeCount: 0,
-        internalCallCount: 0,
-        nodes: [],
-        edges: []
-      },
-      ...architectureSections
-    ],
-    overviewLinks: architectureOverviewLinks,
-    crossSectionCalls: architectureCrossSectionCalls,
-    coverage: { internal: 53, crossSection: 325, unassigned: 0 },
-    reportHighlights: [],
+    nodes: rawArchitectureNodes,
+    relationships: [...architectureRelationships, ...architectureCrossGroupRelationships],
+    projections: [projection, { ...projection, scope: "all_code" }],
     statistics: {
       nodes: 56,
-      edges: 378,
+      relationships: 378,
       communities: 26,
-      hyperedges: 0,
       extracted: 367,
       inferred: 11,
       ambiguous: 0
     },
-    provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
+    provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null },
+    limits: {
+      maxNodes: 250000, maxRelationships: 1000000, maxGroups: 100000, maxRoutes: 250000,
+      maxOverviewGroups: 24, maxOverviewRoutes: 23, maxNameCandidates: 12,
+      maxNameEvidence: 4, maxDiagnostics: 128, maxOmissionWitnesses: 8
+    }
   };
   const calls = {
     schema: "compass.program.call_graph/1",
@@ -656,23 +724,25 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 }
 
 function architectureHarness(model: unknown): string {
-  const parsedModel = CallflowViewModelSchema.parse(model);
+  const parsedModel = ArchitectureViewModelSchema.parse(model);
   const index = new ArchitectureIndex(parsedModel);
-  const overview = index.overview("production", "all");
-  const sectionPages: Record<string, unknown> = {};
-  for (const section of overview.sections) {
-    for (const kind of ["symbols", "calls"] as const) {
+  const overview = index.overview("production", "all", "architecture");
+  const groupPages: Record<string, unknown> = {};
+  const productionGroups = parsedModel.projections.find(({ scope }) => scope === "production")!.groups;
+  for (const group of productionGroups) {
+    for (const kind of ["symbols", "relationships"] as const) {
       for (const query of ["", "database"]) {
         for (const page of [1, 2]) {
-          const key = [section.id, kind, page, query].join("|");
-          sectionPages[key] = index.sectionPage({
-            sectionId: section.id,
+          const key = [group.id, kind, page, query].join("|");
+          groupPages[key] = index.groupPage({
+            groupId: group.id,
             kind,
             page,
             pageSize: 100,
             query,
             scope: "production",
-            evidence: "all"
+            evidence: "all",
+            lens: "architecture"
           });
         }
       }
@@ -687,7 +757,8 @@ function architectureHarness(model: unknown): string {
         pageSize: 100,
         query: "",
         scope: "production",
-        evidence: "all"
+        evidence: "all",
+        lens: "architecture"
       })
     ])
   );
@@ -699,11 +770,12 @@ function architectureHarness(model: unknown): string {
         page: 1,
         pageSize: 100,
         scope: "production",
-        evidence: "all"
+        evidence: "all",
+        lens: "architecture"
       })
     ])
   );
-  const fixture = { overview, sectionPages, routePages, searchPages };
+  const fixture = { overview, groupPages, routePages, searchPages };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass architecture fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.architectureHostMessages=[];
 const architectureFixture=${JSON.stringify(fixture)};
@@ -743,12 +815,12 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     },delayed ? 800 : 20);
     return;
   }
-  if(message.type==="requestSection") {
-    const key=[message.sectionId,message.kind,message.page,message.query||""].join("|");
+  if(message.type==="requestGroup") {
+    const key=[message.groupId,message.kind,message.page,message.query||""].join("|");
     sendArchitecture({
-      type:"architectureSectionPage",
+      type:"architectureGroupPage",
       ...architectureIdentity(message),
-      model:architectureFixture.sectionPages[key]
+      model:architectureFixture.groupPages[key]
     });
     return;
   }
@@ -774,7 +846,12 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     sendArchitecture({
       type:"architectureOverview",
       ...architectureIdentity(message),
-      model:{...architectureFixture.overview,scope:message.scope,evidence:message.evidence}
+      model:{
+        ...architectureFixture.overview,
+        scope:message.scope,
+        evidence:message.evidence,
+        lens:message.lens
+      }
     });
   }
 }})</script><script src="/architecture.js"></script></body></html>`;

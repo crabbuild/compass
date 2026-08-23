@@ -10,45 +10,72 @@ vi.mock("./sourceNavigation", () => ({ openGraphSource: vi.fn() }));
 import { ArchitecturePanelController, ARCHITECTURE_STDOUT_LIMIT } from "./architecturePanel";
 
 function callflowPayload(): string {
+  const sourceScopes = { production: 2, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 };
+  const group = (id: string, name: string, community: number) => ({
+    id, parentId: null, kind: "subsystem", rank: community + 1,
+    name: {
+      value: name, provenance: "path", membershipSignature: `signature-${id}`,
+      quality: 90, evidence: [`path:${name}`]
+    },
+    ownerKey: `crates/${id}`, communityIds: [community], nodeCount: 1,
+    relationshipCount: 1, neighborCount: 1, cohesion: 0.8,
+    sourceScopes: { ...sourceScopes, production: 1 }, pinned: false
+  });
+  const quality = {
+    status: "good",
+    metrics: {
+      sourceScopes, unknownSourceFraction: 0, generatedVendorLeakage: 0,
+      representedNodeFraction: 1, representedRelationshipFraction: 1,
+      duplicateNames: 0, fallbackNames: 0, largestGroupFraction: 0.5,
+      unknownRelations: 0, unassignedNodes: 0, unassignedRelationships: 0
+    },
+    diagnostics: []
+  };
+  const projection = (scope: "production" | "all_code") => ({
+    scope, defaultLens: "architecture",
+    groups: [group("api", "API", 0), group("storage", "Storage", 1)],
+    memberships: [
+      { nodeIndex: 0, groupIndex: 0 },
+      { nodeIndex: 1, groupIndex: 1 }
+    ],
+    routes: [], overviewGroupIds: ["api", "storage"], overviewRouteIds: [],
+    coverage: {
+      admitted: 1, internal: 0, crossGroup: 1, unassigned: 0,
+      relationClasses: { execution: 1, dependency: 0, type: 0, structure: 0, contextual: 0, unknown: 0 }
+    },
+    omissions: {
+      totalGroups: 2, shownGroups: 2, omittedGroups: 0,
+      representedNodes: 2, omittedNodes: 0,
+      representedRelationships: 1, omittedRelationships: 0,
+      witnessGroupIds: [], maxOverviewGroups: 24, maxOverviewRoutes: 64
+    },
+    quality
+  });
   return JSON.stringify({
-    schema: "compass.viewer.callflow/1",
+    schema: "compass.viewer.architecture/1",
     title: "Fixture — Architecture Flow",
-    sections: [
+    nodes: [
       {
-        id: "overview", name: "Architecture Overview", communities: [],
-        nodeCount: 0, internalCallCount: 0, nodes: [], edges: []
+        id: "handler", label: `handler-${"x".repeat(9 * 1024 * 1024)}`, kind: "function",
+        sourceFile: "src/api.ts", sourceScope: "production", scopeReason: "source_path", community: 0
       },
       {
-        id: "api", name: "API", communities: ["0"],
-        nodeCount: 1, internalCallCount: 0,
-        nodes: [{
-          id: "handler", label: "handler", kind: "function",
-          sourceFile: "src/api.ts", scope: "production"
-        }],
-        edges: []
-      },
-      {
-        id: "storage", name: "Storage", communities: ["1"],
-        nodeCount: 1, internalCallCount: 0,
-        nodes: [{
-          id: "store", label: "store", kind: "function",
-          sourceFile: "src/store.ts", scope: "production"
-        }],
-        edges: []
+        id: "store", label: "store", kind: "function", sourceFile: "src/store.ts",
+        sourceScope: "production", scopeReason: "source_path", community: 1
       }
     ],
-    overviewLinks: [{ sourceSection: "api", targetSection: "storage", calls: 1 }],
-    crossSectionCalls: [{
-      source: "handler", target: "store", sourceSection: "api",
-      targetSection: "storage", relation: "calls", confidence: "extracted"
+    relationships: [{
+      id: "relationship-1", source: "handler", target: "store", relation: "calls",
+      relationClass: "execution", confidence: "extracted"
     }],
-    coverage: { internal: 0, crossSection: 1, unassigned: 0 },
-    reportHighlights: ["x".repeat(9 * 1024 * 1024)],
-    statistics: {
-      nodes: 2, edges: 1, communities: 2, hyperedges: 0,
-      extracted: 1, inferred: 0, ambiguous: 0
+    projections: [projection("production"), projection("all_code")],
+    statistics: { nodes: 2, relationships: 1, communities: 2, extracted: 1, inferred: 0, ambiguous: 0 },
+    provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null },
+    limits: {
+      maxNodes: 250000, maxRelationships: 1000000, maxGroups: 100000, maxRoutes: 250000,
+      maxOverviewGroups: 24, maxOverviewRoutes: 64, maxNameCandidates: 12,
+      maxNameEvidence: 4, maxDiagnostics: 128, maxOmissionWitnesses: 8
     },
-    provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
   });
 }
 
@@ -87,7 +114,7 @@ describe("ArchitecturePanelController", () => {
       .find((message) => message.type === "architectureOverview");
     expect(overview).toBeDefined();
     if (!overview?.model) throw new Error("Expected architecture overview");
-    expect(overview.model.statistics).toMatchObject({ totalNodes: 2, totalCalls: 1 });
+    expect(overview.model.statistics).toMatchObject({ totalNodes: 2, totalRelationships: 1 });
     expect(overview.model).not.toHaveProperty("crossSectionCalls");
     expect(JSON.stringify(overview).length).toBeLessThan(100_000);
   });

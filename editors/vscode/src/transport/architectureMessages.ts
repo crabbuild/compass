@@ -1,10 +1,11 @@
 import {
   ArchitectureEvidenceSchema,
+  ArchitectureLensSchema,
   ArchitectureOverviewSchema,
   ArchitectureRoutePageSchema,
   ArchitectureScopeSchema,
   ArchitectureSearchPageSchema,
-  ArchitectureSectionPageSchema
+  ArchitectureGroupPageSchema
 } from "@compass/viewer/contracts/architecture";
 import { z } from "zod";
 
@@ -16,7 +17,8 @@ const RequestIdentitySchema = z.object({
 const DataRequestSchema = RequestIdentitySchema.extend({
   generation: z.number().int().nonnegative(),
   scope: ArchitectureScopeSchema,
-  evidence: ArchitectureEvidenceSchema
+  evidence: ArchitectureEvidenceSchema,
+  lens: ArchitectureLensSchema
 });
 
 const PageRequestSchema = DataRequestSchema.extend({
@@ -32,12 +34,13 @@ export const ArchitectureToHostMessageSchema = z.discriminatedUnion("type", [
   RequestIdentitySchema.extend({
     type: z.literal("setArchitectureFilters"),
     scope: ArchitectureScopeSchema,
-    evidence: ArchitectureEvidenceSchema
+    evidence: ArchitectureEvidenceSchema,
+    lens: ArchitectureLensSchema
   }),
   PageRequestSchema.extend({
-    type: z.literal("requestSection"),
-    sectionId: z.string().min(1),
-    kind: z.enum(["symbols", "calls"])
+    type: z.literal("requestGroup"),
+    groupId: z.string().min(1),
+    kind: z.enum(["symbols", "relationships"])
   }),
   PageRequestSchema.extend({
     type: z.literal("requestRoute"),
@@ -68,8 +71,8 @@ export const HostToArchitectureMessageSchema = z.discriminatedUnion("type", [
     model: ArchitectureOverviewSchema
   }),
   ResponseIdentitySchema.extend({
-    type: z.literal("architectureSectionPage"),
-    model: ArchitectureSectionPageSchema
+    type: z.literal("architectureGroupPage"),
+    model: ArchitectureGroupPageSchema
   }),
   ResponseIdentitySchema.extend({
     type: z.literal("architectureRoutePage"),
