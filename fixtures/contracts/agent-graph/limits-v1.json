@@ -1,0 +1,29 @@
+{
+  "default": {
+    "auditBytes": 4096,
+    "batchBytes": 1048576,
+    "candidates": 10,
+    "citationsPerAssertion": 16,
+    "dependencyDepth": 16,
+    "diagnostics": 20,
+    "evidenceBytes": 1048576,
+    "operations": 100,
+    "overlayEdges": 100000,
+    "overlayNodes": 10000,
+    "textBytes": 2048
+  },
+  "hard": {
+    "auditBytes": 16384,
+    "batchBytes": 16777216,
+    "candidates": 20,
+    "citationsPerAssertion": 64,
+    "dependencyDepth": 32,
+    "diagnostics": 100,
+    "evidenceBytes": 8388608,
+    "operations": 1000,
+    "overlayEdges": 500000,
+    "overlayNodes": 100000,
+    "textBytes": 8192
+  },
+  "schema": "compass.agent-graph.limits/1"
+}

@@ -1,0 +1,17 @@
+{
+  "ambiguousCount": 0,
+  "items": [],
+  "overlay": "overlay:review",
+  "planDigest": "0c7fed1dc4ed6c9ee4987a188da61329ed6636e6fc58d8d353b048fd57d8f5fc",
+  "schema": "compass.agent-graph.rebase-plan/1",
+  "sourceBaseGeneration": {
+    "generationId": "generation-1",
+    "graphDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "sourceRevision": "4444444444444444444444444444444444444444444444444444444444444444",
+  "targetBaseGeneration": {
+    "generationId": "generation-2",
+    "graphDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "unresolvedCount": 0
+}
