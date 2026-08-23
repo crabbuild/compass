@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 base64.workspace = true
 regex.workspace = true
 rusqlite.workspace = true

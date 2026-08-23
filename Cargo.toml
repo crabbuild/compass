@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/compass-analysis",
+    "crates/compass-agent-graph",
     "crates/compass-cargo",
     "crates/compass-cli",
     "crates/compass-core",

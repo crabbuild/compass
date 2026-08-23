@@ -105,4 +105,56 @@ describe("GraphViewModelSchema", () => {
       endLine: 42
     });
   });
+
+  it("validates exact Agent Graph context, challenges, and bounded Retractions", () => {
+    const digest = "a".repeat(64);
+    const parsed = GraphViewModelSchema.parse({
+      schema: "compass.viewer.graph/1",
+      title: "Grounded overlay",
+      stats: { nodes: 1, edges: 0, communities: 1, aggregated: false },
+      nodes: [{
+        id: "base-node",
+        label: "Base node",
+        community: 0,
+        challenged: true,
+        challenge: {
+          challenge: "challenge:review",
+          targetId: "base-node",
+          effect: "flag",
+          masked: false,
+          certificateDigest: digest,
+          summary: "The exact source contradicts this fact."
+        }
+      }],
+      edges: [],
+      communities: [{ id: 0, label: "Core", color: "#4E79A7" }],
+      effectiveGraph: {
+        effectiveIdentity: digest,
+        baseGeneration: { generationId: "generation-1", graphDigest: digest },
+        overlayRevision: digest,
+        compositionProfile: "augment",
+        retractions: {
+          total: 1,
+          examples: [{
+            kind: "assertion",
+            id: "assertion:old",
+            reasonCode: "superseded",
+            explanation: "Replaced with stronger evidence.",
+            sequence: 2
+          }],
+          omittedExamples: 0
+        },
+        omissions: {
+          total: 0,
+          direct: 0,
+          cascaded: 0,
+          examples: [],
+          omittedExamples: 0
+        }
+      }
+    });
+
+    expect(parsed.nodes[0]?.challenge?.summary).toContain("contradicts");
+    expect(parsed.effectiveGraph?.retractions.examples).toHaveLength(1);
+  });
 });

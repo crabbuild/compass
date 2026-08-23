@@ -20,6 +20,7 @@ describe("semantic graph appearance", () => {
     expect(edgeSemanticCategory("depends on")).toBe("dependency");
     expect(edgeSemanticCategory("member-of")).toBe("structure");
     expect(edgeSemanticCategory("publishes")).toBe("flow");
+    expect(edgeSemanticCategory("renders")).toBe("structure");
     expect(edgeSemanticCategory("cochanges_with")).toBe("other");
   });
 

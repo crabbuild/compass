@@ -19,6 +19,7 @@ name = "compass"
 path = "src/bin/compass.rs"
 
 [dependencies]
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 ctrlc.workspace = true
 flate2.workspace = true
 glob.workspace = true

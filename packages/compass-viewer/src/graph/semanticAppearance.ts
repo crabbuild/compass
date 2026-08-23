@@ -116,6 +116,7 @@ const STRUCTURE_RELATIONS = new Set([
   "member_of",
   "mixes_in",
   "overrides",
+  "renders",
   "owns"
 ]);
 const FLOW_RELATIONS = new Set([

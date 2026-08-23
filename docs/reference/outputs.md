@@ -697,7 +697,9 @@ Use its command help and retain the source graph.
 First-party editor and offline-viewer contracts are versioned independently:
 
 - `compass.viewer.graph/1` — shared interactive graph model; located edges may
-  include an optional `relationshipSite` source anchor;
+  include an optional `relationshipSite` source anchor, while exact Agent Graph
+  views carry the pinned composition profile, bounded Retraction history,
+  Challenge details, and Grounding metadata;
 - `compass.graph-overview/1` — rebuildable prepared graph projection used by
   editor integrations;
 - `compass.program.call_graph/1` — bounded symbol-centered caller/callee graph;
@@ -717,6 +719,22 @@ First-party editor and offline-viewer contracts are versioned independently:
   changes, and exact added, removed, and changed node/edge records consumed by
   the CLI HTML report and editor comparison views;
 - `compass.ide.progress/1` — newline-delimited guided-operation events.
+- `compass.agent-graph.overlay/1` — one immutable logical Overlay state;
+- `compass.agent-graph.receipt/1` — atomic publication receipt;
+- `compass.agent-graph.effective/1` — Base Graph plus one exact Overlay
+  Revision and composition profile;
+- `compass.agent-graph.rebase-plan/1` — exact, digest-bound rebase decision;
+- `compass.agent-graph.audit/1` and `audit-result/1` — bounded operational
+  attestations without prompts, credentials, chain-of-thought, or excerpts;
+- `compass.agent-knowledge/1` — bounded task-context projection for one exact
+  Effective Graph.
+
+Agent Graph digests are lowercase SHA-256 and all contracts reject unknown
+fields. `GROUNDED` appears only in Compass-produced results. Effective exports
+carry the Base Generation, Overlay Revision, profile, composition version, and
+effective identity; consumers must validate all of them before caching or
+joining results. A profile change requires a newly composed Effective Graph;
+viewer clients do not reinterpret one effective identity under another profile.
 
 ## Graph quality diagnostics
 

@@ -14,7 +14,8 @@ mod slice;
 
 pub use atomic::{
     AtomicJsonDigest, write_atomic_with, write_atomic_with_digest, write_bytes_atomic,
-    write_json_ascii_atomic, write_json_atomic, write_json_atomic_with_digest, write_text_atomic,
+    write_json_ascii_atomic, write_json_atomic, write_json_atomic_new,
+    write_json_atomic_with_digest, write_text_atomic,
 };
 pub use build_guard::BuildGuard;
 pub use cache::{

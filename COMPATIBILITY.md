@@ -52,6 +52,21 @@ product checkout.
 
 ## Evolving contracts
 
+The Grounded Agent Graph feature is additive and opt-in. It does not change
+`compass.graph/1`, structural extraction, default query behavior, or immutable
+history schemas. Its versioned contracts use the
+`compass.agent-graph.*/*` and `compass.agent-knowledge/1` namespaces. Unknown
+majors and unknown fields fail closed. `GROUNDED` is a Compass-issued citation
+verification state and must not be interpreted as `INFERRED`, `EXTRACTED`, or
+proof of semantic truth.
+
+Overlay writes require explicit CLI or server enablement. Existing MCP servers
+without Agent Graph configuration advertise no Agent Graph tools. Configured
+read-only servers advertise inspection only; HTTP writes additionally require
+a distinct write key. Historical composition is selected explicitly and never
+changes realization preference or stored history content. No migration of
+existing graphs or history is required.
+
 Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
 universal evidence pipelines. The four pipelines are intentionally
 `Qualifying`: they use one bounded, source-grounded publication route and may
