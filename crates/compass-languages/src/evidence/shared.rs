@@ -344,7 +344,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
                 // unresolved.  Preserve the parser spelling for declaration
                 // identity and index a separate base-name alias for lookup; this
                 // keeps overloads and stable declaration IDs distinct.
-                if valid_name(&lookup_name)
+                if P::declaration_name_is_valid(&lookup_name)
                     && !self
                         .name_ranges
                         .contains(&(name_node.start_byte(), name_node.end_byte()))

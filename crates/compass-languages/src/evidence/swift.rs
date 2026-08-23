@@ -48,6 +48,28 @@ impl LanguageProfile for Swift {
         shared::shared_declaration_kind(node.kind())
     }
 
+    fn declaration_name_nodes_for_node(node: Node<'_>) -> Vec<Node<'_>> {
+        // Swift's grammar represents an extension target as `user_type`,
+        // including qualified names such as `Foo.Bar`. The shared fallback
+        // intentionally only knows the common identifier node kinds, so keep
+        // this language-specific name recovery at the Swift boundary.
+        if node.kind() == "class_declaration" {
+            let mut cursor = node.walk();
+            if let Some(user_type) = node
+                .named_children(&mut cursor)
+                .find(|child| child.kind() == "user_type")
+            {
+                return vec![user_type];
+            }
+        }
+        shared::declaration_name(node).into_iter().collect()
+    }
+
+    fn declaration_name_is_valid(name: &str) -> bool {
+        let name = name.trim();
+        !name.is_empty() && name.len() <= 512 && name.split('.').all(shared::valid_name)
+    }
+
     fn base_type_relation(node: Node<'_>, owner_kind: Option<&str>) -> Option<CandidateRelation> {
         let mut current = node.parent();
         for _ in 0..=4 {

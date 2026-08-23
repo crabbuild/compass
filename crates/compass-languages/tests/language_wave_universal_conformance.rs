@@ -398,6 +398,7 @@ class Box: Renderable {}
 struct Widget: Renderable {}
 enum State { case ready, done }
 public extension Box { func render() {} }
+extension Foo.Bar: Sendable where Value: Sendable {}
 typealias Alias = Box
 "#;
     let path = Path::new("Sources/Models.swift");
@@ -417,9 +418,28 @@ typealias Alias = Box
             evidence
                 .declarations
                 .iter()
-                .any(|declaration| declaration.name == name && declaration.kind == kind)
+                .any(|declaration| declaration.name == name && declaration.kind == kind),
+            "missing {name} {kind}: {:#?}",
+            evidence.declarations
         );
     }
+    assert!(evidence.declarations.iter().any(|declaration| {
+        declaration.name == "Foo.Bar"
+            && declaration.qualified_name == "Foo.Bar"
+            && declaration.kind == "extension"
+    }));
+    let qualified_extension_id = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Foo.Bar" && declaration.kind == "extension")
+        .ok_or("missing qualified extension evidence")?
+        .id
+        .as_str();
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements
+            && candidate.source_declaration_id == qualified_extension_id
+            && candidate.target_spelling == "Sendable"
+    }));
     assert!(evidence.declarations.iter().any(|declaration| {
         declaration.name == "render"
             && declaration.kind == "method"
