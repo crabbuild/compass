@@ -1,0 +1,15 @@
+{
+  "activeAssertions": 1,
+  "activeChallenges": 0,
+  "baseGeneration": {
+    "generationId": "generation-1",
+    "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "batchDigest": "3333333333333333333333333333333333333333333333333333333333333333",
+  "idempotentReplay": false,
+  "overlay": "overlay:review",
+  "retractions": 0,
+  "revision": "4444444444444444444444444444444444444444444444444444444444444444",
+  "schema": "compass.agent-graph.receipt/1",
+  "sequence": 1
+}
