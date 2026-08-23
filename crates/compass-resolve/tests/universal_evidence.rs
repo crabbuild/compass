@@ -104,6 +104,72 @@ class Box: Store {}
 }
 
 #[test]
+fn swift_class_and_extension_publish_distinct_normalized_owners() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_file = "Sources/Models.swift";
+    let source = br#"class Box {}
+extension Box { func render() {} }
+"#;
+    let path = directory.path().join(source_file);
+    std::fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
+    std::fs::write(&path, source)?;
+
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+
+    let owners = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("language") == "swift" && node.string("qualified_name") == "Box")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        owners.len(),
+        2,
+        "class and extension owners should both project"
+    );
+    assert!(
+        owners
+            .iter()
+            .any(|node| node.string("symbol_kind") == "class")
+    );
+    let extension = owners
+        .iter()
+        .find(|node| node.string("symbol_kind") == "extension")
+        .ok_or("missing Swift extension owner")?;
+    assert_eq!(extension.string("overload_discriminator"), "extension:0");
+
+    let build = BuildEvidence::from_extraction(
+        directory.path(),
+        &resolved,
+        "sha256:swift-extension-identity",
+    )?;
+    let graph = normalize_v1(resolved, build)?;
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.language.as_deref() == Some("swift") && node.qualified_name == "Box")
+            .count(),
+        2,
+        "v1 normalization must retain both source-backed owners"
+    );
+    assert!(
+        !graph
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "publication_identity_collision")
+    );
+    Ok(())
+}
+
+#[test]
 fn dart_part_receiver_dispatch_resolves_repeated_local_calls() -> Result<(), Box<dyn Error>> {
     let library = br#"library wave;
 abstract class Store { void save(String value); }
