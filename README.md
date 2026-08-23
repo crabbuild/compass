@@ -21,7 +21,16 @@
 Compass turns source code and project artifacts into a directed, queryable knowledge graph. It gives people and coding assistants a shared map of symbols, files, communities, relationships, and evidence.
 
 ```text
-repository → graph snapshot → architecture · paths · impact · history · focused context
+large codebase
+     |
+     v
+  Compass  ----->  architecture map
+     |           \-> dependency and impact answers
+     |            \-> exact CompassQL results
+     |             \-> historical graph diffs
+     |              \-> focused context for assistants
+     v
+less searching, smaller context, traceable evidence
 ```
 
 ## See the graph before you open every file
