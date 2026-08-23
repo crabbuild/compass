@@ -63,6 +63,433 @@ fn rust_method_navigation_uses_definition_extent_without_weakening_exact_evidenc
 }
 
 #[test]
+fn swift_protocol_conformance_publishes_implements() -> Result<(), Box<dyn Error>> {
+    let source = br#"protocol Store {}
+struct UserStore: Store {}
+class Box: Store {}
+"#;
+    let source_file = "Sources/Store.swift";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Swift universal evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let store = node("Store").ok_or("missing Store")?;
+    for implementer in ["UserStore", "Box"] {
+        let source_node = node(implementer).ok_or("missing Swift implementer")?;
+        assert!(
+            resolved.edges.iter().any(|edge| {
+                edge.source == source_node.id
+                    && edge.target == store.id
+                    && edge.string("relation") == "implements"
+            }),
+            "missing Swift implements edge for {implementer}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn swift_class_and_extension_publish_distinct_normalized_owners() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_file = "Sources/Models.swift";
+    let source = br#"class Box {}
+extension Box { func render() {} }
+"#;
+    let path = directory.path().join(source_file);
+    std::fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
+    std::fs::write(&path, source)?;
+
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+
+    let owners = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("language") == "swift" && node.string("qualified_name") == "Box")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        owners.len(),
+        2,
+        "class and extension owners should both project"
+    );
+    assert!(
+        owners
+            .iter()
+            .any(|node| node.string("symbol_kind") == "class")
+    );
+    let extension = owners
+        .iter()
+        .find(|node| node.string("symbol_kind") == "extension")
+        .ok_or("missing Swift extension owner")?;
+    assert_eq!(extension.string("overload_discriminator"), "extension:0");
+
+    let build = BuildEvidence::from_extraction(
+        directory.path(),
+        &resolved,
+        "sha256:swift-extension-identity",
+    )?;
+    let graph = normalize_v1(resolved, build)?;
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.language.as_deref() == Some("swift") && node.qualified_name == "Box")
+            .count(),
+        2,
+        "v1 normalization must retain both source-backed owners"
+    );
+    assert!(
+        !graph
+            .graph
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "publication_identity_collision")
+    );
+    Ok(())
+}
+
+#[test]
+fn dart_part_receiver_dispatch_resolves_repeated_local_calls() -> Result<(), Box<dyn Error>> {
+    let library = br#"library wave;
+abstract class Store { void save(String value); }
+class UserStore implements Store {
+  void save(String value) {}
+}
+"#;
+    let part = br#"part of wave;
+void repeated(UserStore store) { store.save('a'); store.save('b'); }
+void dynamicCall(dynamic receiver) { receiver.unknown(); }
+"#;
+    let library_file = "lib/library.dart";
+    let part_file = "lib/src/part.dart";
+    let library_extracted = Engine::default()
+        .extract_source_combined(Path::new(library_file), library_file, library)?
+        .graph;
+    let part_extracted = Engine::default()
+        .extract_source_combined(Path::new(part_file), part_file, part)?
+        .graph;
+    let resolved = resolve(
+        &[library_extracted, part_extracted],
+        &HashMap::from([
+            (
+                library_file.to_owned(),
+                String::from_utf8(library.to_vec())?,
+            ),
+            (part_file.to_owned(), String::from_utf8(part.to_vec())?),
+        ]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let save = node("wave.UserStore.save").ok_or("missing UserStore.save")?;
+    let repeated = node("wave.repeated").ok_or("missing repeated")?;
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == repeated.id
+                    && edge.target == save.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        2,
+        "missing repeated Dart receiver dispatch edges"
+    );
+    Ok(())
+}
+
+#[test]
+fn dart_source_supplement_recovers_local_calls_and_constructions() -> Result<(), Box<dyn Error>> {
+    let source = br#"class Store {
+  Store();
+  void save() {}
+  void run() {
+    save();
+    final callback = () => save();
+    Store();
+    unknown();
+    // save();
+    final text = 'save()';
+  }
+}
+class _Hidden {
+  _Hidden();
+}
+void build() { _Hidden(); }
+class _Implicit {}
+void buildImplicit() { _Implicit(); }
+"#;
+    let source_file = "lib/store.dart";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let run = node("Store.run").ok_or("missing Store.run")?;
+    let save = node("Store.save").ok_or("missing Store.save")?;
+    let constructor = node("Store.Store").ok_or("missing Store constructor")?;
+    let hidden_constructor = node("_Hidden._Hidden").ok_or("missing private constructor")?;
+    let build = node("build").ok_or("missing build function")?;
+    let implicit_class = node("_Implicit").ok_or("missing implicit constructor class")?;
+    let build_implicit = node("buildImplicit").ok_or("missing implicit constructor caller")?;
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == run.id
+                    && edge.target == save.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        2,
+        "local Dart calls should be recovered once per source occurrence"
+    );
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == run.id
+                    && edge.target == constructor.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        1,
+        "local Dart construction should resolve to the constructor"
+    );
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == build.id
+                    && edge.target == hidden_constructor.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        1,
+        "private Dart constructions should resolve to their constructor"
+    );
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == build_implicit.id
+                    && edge.target == implicit_class.id
+                    && matches!(edge.string("relation").as_str(), "calls" | "instantiates")
+            })
+            .count(),
+        1,
+        "implicit Dart constructions should resolve to their class"
+    );
+    assert!(
+        !resolved.edges.iter().any(|edge| {
+            edge.source == run.id
+                && edge.string("relation") == "calls"
+                && edge.string("label") == "unknown"
+        }),
+        "unresolved Dart calls must remain fail-closed"
+    );
+    Ok(())
+}
+
+#[test]
+fn groovy_local_implements_publishes_direct_base_edge() -> Result<(), Box<dyn Error>> {
+    let source = br#"package wave
+interface Store {}
+class UserStore implements Store {
+    void save() {}
+}
+"#;
+    let source_file = "src/Store.groovy";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let evidence = extracted
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Groovy universal evidence")?;
+    validate_evidence(evidence, EvidenceLimits::default())?;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let store = node("wave.Store").ok_or("missing Store")?;
+    let implementer = node("wave.UserStore").ok_or("missing UserStore")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == implementer.id
+            && edge.target == store.id
+            && edge.string("relation") == "implements"
+    }));
+    Ok(())
+}
+
+#[test]
+fn groovy_source_calls_exclude_declaration_headers() -> Result<(), Box<dyn Error>> {
+    let source = br#"package wave
+interface Store { void save(String value) }
+class UserStore implements Store {
+    String value
+    UserStore() {}
+    void save(String value) { this.value = value }
+    void route() { save('users') }
+}
+class Specification extends spock.lang.Specification {
+    def "stores users"() { expect: new UserStore().save('ok') }
+}
+"#;
+    let source_file = "Module.groovy";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let mut call_sources = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .filter_map(|edge| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.source)
+                .map(|node| node.string("qualified_name"))
+        })
+        .collect::<Vec<_>>();
+    call_sources.sort_unstable();
+    assert_eq!(
+        call_sources,
+        vec![
+            "wave.Specification.stores users",
+            "wave.Specification.stores users",
+            "wave.UserStore.route"
+        ]
+    );
+    let feature = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "wave.Specification.stores users")
+        .ok_or("missing Spock feature")?;
+    let constructor = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "wave.UserStore.UserStore")
+        .ok_or("missing UserStore constructor")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == feature.id
+            && edge.target == constructor.id
+            && edge.string("relation") == "calls"
+    }));
+    Ok(())
+}
+
+#[test]
+fn scala_local_receiver_dispatch_resolves_inherited_and_extension_calls()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"package wave
+trait Store { def save(value: String): Unit }
+final class UserStore extends Store {
+  override def save(value: String): Unit = ()
+  def route(): Unit = save("users")
+}
+extension (store: UserStore) def repeated(): Unit = { store.save("a"); store.save("b") }
+object UserStore { def apply(): UserStore = new UserStore() }
+"#;
+    let source_file = "src/Module.scala";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let save = node("wave.UserStore.save").ok_or("missing UserStore.save")?;
+    let route = node("wave.UserStore.route").ok_or("missing UserStore.route")?;
+    let repeated = node("wave.repeated").ok_or("missing repeated extension")?;
+    let apply = node("wave.UserStore.apply").ok_or("missing UserStore.apply")?;
+    let user_store = node("wave.UserStore").ok_or("missing UserStore class")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == route.id && edge.target == save.id && edge.string("relation") == "calls"
+    }));
+    assert!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == repeated.id
+                    && edge.target == save.id
+                    && edge.string("relation") == "calls"
+            })
+            .count()
+            >= 2,
+        "missing repeated extension dispatch edges"
+    );
+    assert!(
+        resolved.edges.iter().any(|edge| {
+            edge.source == apply.id
+                && edge.target == user_store.id
+                && matches!(edge.string("relation").as_str(), "calls" | "instantiates")
+        }),
+        "missing Scala companion construction edge"
+    );
+    Ok(())
+}
+
+#[test]
 fn ambiguous_owned_scopes_fall_back_to_the_exact_declaration_anchor() -> Result<(), Box<dyn Error>>
 {
     let source = b"struct Service;\nimpl Service {\n    fn run(&self) {\n        let _value = 1;\n    }\n}\n";

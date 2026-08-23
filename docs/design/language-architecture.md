@@ -214,6 +214,17 @@ renderer support, compatibility review, and qualification in the same change.
 Until then, unsupported implementation owners remain unresolved rather than
 being assigned a convenient but false identity.
 
+Dart has the inverse boundary: every class provides an implicit interface, so
+an exact `implements` edge may legitimately target a Dart `class` node. Dart
+library `part` directives likewise embed one source file in another. The v1
+endpoint validator admits these two language-keyed shapes while keeping the
+stricter nominal-type and embedding rules for other languages.
+
+Swift value types conform to protocols rather than extending a superclass; the
+Swift evidence profile emits `implements` for struct/enum conformances, and
+resolution reclassifies a class-to-protocol target once the target declaration
+kind is known. Class-to-class inheritance remains `extends`.
+
 An AST-backed producer receives borrowed source bytes and one prepared tree. It
 does not parse the source again or call the language pack's generic intelligence
 pipeline.

@@ -422,8 +422,9 @@ fn declaration_basic_allowed(target: &DeclarationFact, candidate: &RelationshipC
 fn declaration_overloads<'a>(
     declarations: impl Iterator<Item = &'a DeclarationFact>,
 ) -> AHashMap<String, String> {
+    let declarations = declarations.collect::<Vec<_>>();
     let mut groups = AHashMap::<(String, String, String, String), Vec<&DeclarationFact>>::new();
-    for declaration in declarations {
+    for declaration in &declarations {
         groups
             .entry((
                 declaration.language.clone(),
@@ -439,6 +440,51 @@ fn declaration_overloads<'a>(
         declarations.sort_by_key(|declaration| (declaration.range.start_byte, &declaration.id));
         for (position, declaration) in declarations.iter().enumerate() {
             overloads.insert(declaration.id.clone(), format!("overload:{position}"));
+        }
+    }
+
+    // v1 intentionally represents source extensions as class-shaped owners,
+    // but their raw evidence kind remains `extension`.  A class and an
+    // extension with the same qualified name therefore share the normalized
+    // identity unless the extension receives a publication discriminator.
+    // Keep the primary class identity unchanged and disambiguate only the
+    // extension when that collision is present.  This preserves existing
+    // class IDs while allowing the extension's ownership, members, and
+    // conformances to survive normalization.
+    let mut extension_groups = AHashMap::<(String, String, String), Vec<&DeclarationFact>>::new();
+    let mut class_keys = AHashSet::new();
+    for declaration in &declarations {
+        match declaration.kind.as_str() {
+            "extension" => {
+                extension_groups
+                    .entry((
+                        declaration.language.clone(),
+                        declaration.range.source_file.clone(),
+                        declaration.qualified_name.clone(),
+                    ))
+                    .or_default()
+                    .push(declaration);
+            }
+            "class" => {
+                class_keys.insert((
+                    declaration.language.clone(),
+                    declaration.range.source_file.clone(),
+                    declaration.qualified_name.clone(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    for (key, extensions) in extension_groups {
+        if !class_keys.contains(&key) || extensions.len() != 1 {
+            continue;
+        }
+        let extension = extensions[0];
+        // Multiple extension declarations already receive the ordinary
+        // overload discriminator above; only add this special form for the
+        // class-plus-single-extension collision.
+        if !overloads.contains_key(&extension.id) {
+            overloads.insert(extension.id.clone(), "extension:0".to_owned());
         }
     }
     overloads

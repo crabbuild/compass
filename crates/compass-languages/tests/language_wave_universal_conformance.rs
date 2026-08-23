@@ -226,6 +226,92 @@ class UserSpec extends spock.lang.Specification {
 }
 
 #[test]
+fn groovy_spock_data_table_keeps_one_feature_identity() -> Result<(), Box<dyn Error>> {
+    let source = br#"package routes
+class UserSpec extends spock.lang.Specification {
+    def "loads users"(String input, String expected) {
+        expect:
+        helper(input) == expected
+
+        where:
+        input  | expected
+        "alice" | "ALICE"
+        "bob"   | "BOB"
+    }
+}
+"#;
+    let path = Path::new("src/UserSpec.groovy");
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(path, "src/UserSpec.groovy", source)?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    let features = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.name == "loads users")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        features.len(),
+        1,
+        "duplicate Spock feature identity: {features:#?}"
+    );
+    let feature = features[0];
+    assert_eq!(feature.kind, "method");
+    assert_eq!(feature.qualified_name, "routes.UserSpec.loads users");
+    let body = std::str::from_utf8(
+        source
+            .get(feature.range.start_byte as usize..feature.range.end_byte as usize)
+            .ok_or("feature range outside source")?,
+    )?;
+    assert!(body.contains("where:"));
+    assert!(body.contains("\"alice\" | \"ALICE\""));
+    assert!(
+        evidence.declarations.iter().all(|declaration| !matches!(
+            declaration.name.as_str(),
+            "where" | "input" | "expected"
+        ))
+    );
+    Ok(())
+}
+
+#[test]
+fn groovy_generic_base_types_do_not_publish_phantom_declarations() -> Result<(), Box<dyn Error>> {
+    let source = br#"package sample
+interface NodeMaker<T> { T makeNode(Object value) }
+class SwingNodeMaker implements NodeMaker<String> {
+    String makeNode(Object value) { value.toString() }
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("src/NodeMaker.groovy"),
+        "src/NodeMaker.groovy",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    let node_makers = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.qualified_name == "sample.NodeMaker")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        node_makers.len(),
+        1,
+        "phantom generic declaration: {node_makers:#?}"
+    );
+    assert_eq!(node_makers[0].kind, "interface");
+    assert!(
+        evidence.candidates.iter().any(|candidate| {
+            candidate.relation == CandidateRelation::Implements
+                && candidate.target_spelling == "NodeMaker"
+        }),
+        "missing generic Groovy implements candidate: {:#?}",
+        evidence.candidates
+    );
+    Ok(())
+}
+
+#[test]
 fn dart_library_parts_and_import_filters_remain_explicit() -> Result<(), Box<dyn Error>> {
     let source = br#"library foo.bar;
 part 'src/generated.dart';
@@ -281,13 +367,87 @@ class Generated {}
 }
 
 #[test]
+fn dart_instance_fields_publish_field_declarations() -> Result<(), Box<dyn Error>> {
+    let source = br#"library wave;
+class UserStore {
+  final String value, other;
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("lib/store.dart"),
+        "lib/store.dart",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    for field in ["value", "other"] {
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.kind == "field"
+                    && declaration.qualified_name == format!("wave.UserStore.{field}")),
+            "missing Dart instance field declaration {field}: {:#?}",
+            evidence.declarations
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn dart_base_types_do_not_create_phantom_declarations() -> Result<(), Box<dyn Error>> {
+    let source = br#"library wave;
+abstract class Store { void save(); }
+class UserStore implements Store {
+  UserStore(this.value);
+  final String value;
+  void save() {}
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("lib/store.dart"),
+        "lib/store.dart",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    assert!(
+        !evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.qualified_name == "wave.UserStore.Store")
+    );
+    assert!(
+        !evidence
+            .declarations
+            .iter()
+            .any(|declaration| { declaration.name == "UserStore" && declaration.kind == "struct" })
+    );
+    assert!(
+        !evidence
+            .declarations
+            .iter()
+            .any(|declaration| { declaration.name == "value" && declaration.kind == "struct" })
+    );
+    assert!(evidence.declarations.iter().any(|declaration| {
+        declaration.name == "UserStore" && declaration.kind == "constructor"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements && candidate.target_spelling == "Store"
+    }));
+    Ok(())
+}
+
+#[test]
 fn swift_nominal_and_extension_identities_remain_distinct() -> Result<(), Box<dyn Error>> {
     let source = br#"import Foundation
 protocol Renderable {}
 class Box: Renderable {}
-struct Widget {}
+struct Widget: Renderable {}
 enum State { case ready, done }
-extension Box { func render() {} }
+public extension Box { func render() {} }
+extension Foo.Bar: Sendable where Value: Sendable {}
 typealias Alias = Box
 "#;
     let path = Path::new("Sources/Models.swift");
@@ -307,14 +467,178 @@ typealias Alias = Box
             evidence
                 .declarations
                 .iter()
-                .any(|declaration| declaration.name == name && declaration.kind == kind)
+                .any(|declaration| declaration.name == name && declaration.kind == kind),
+            "missing {name} {kind}: {:#?}",
+            evidence.declarations
         );
     }
+    assert!(evidence.declarations.iter().any(|declaration| {
+        declaration.name == "Foo.Bar"
+            && declaration.qualified_name == "Foo.Bar"
+            && declaration.kind == "extension"
+    }));
+    let qualified_extension_id = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Foo.Bar" && declaration.kind == "extension")
+        .ok_or("missing qualified extension evidence")?
+        .id
+        .as_str();
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements
+            && candidate.source_declaration_id == qualified_extension_id
+            && candidate.target_spelling == "Sendable"
+    }));
     assert!(evidence.declarations.iter().any(|declaration| {
         declaration.name == "render"
             && declaration.kind == "method"
             && declaration.qualified_name == "Box.render"
     }));
+    let widget_id = evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "Widget")
+        .ok_or("missing Widget evidence")?
+        .id
+        .as_str();
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Implements
+            && candidate.source_declaration_id == widget_id
+            && candidate.target_spelling == "Renderable"
+    }));
+    Ok(())
+}
+
+#[test]
+fn swift_source_supplement_recovers_conditional_and_nested_declarations()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"#if canImport(NIOCore)
+final class ConditionalHandler {
+    func outer() {
+        @Sendable func nested() {}
+    }
+
+    deinit {}
+}
+#endif
+
+protocol ChannelLike {
+    var localAddress: SocketAddress? { get }
+}
+
+let ignored = "func fake() {}"
+// func alsoFake() {}
+
+private func topLevelAfterConditional() {}
+private func isDebugAssertConfiguration() -> Bool { true }
+let topLevelValue: Int
+"#;
+    let path = Path::new("Sources/Conditional.swift");
+    let mut engine = Engine::default();
+    let evidence =
+        engine.extract_source_universal_evidence(path, "Sources/Conditional.swift", source)?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    for (name, kind) in [
+        ("ConditionalHandler", "class"),
+        ("outer", "method"),
+        ("nested", "method"),
+        ("deinit", "method"),
+        ("ChannelLike", "protocol"),
+        ("localAddress", "field"),
+        ("topLevelAfterConditional", "function"),
+        ("isDebugAssertConfiguration", "function"),
+        ("topLevelValue", "field"),
+    ] {
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.name == name && declaration.kind == kind),
+            "missing Swift {name} {kind}: {:#?}",
+            evidence.declarations
+        );
+    }
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .all(|declaration| declaration.name != "fake" && declaration.name != "alsoFake"),
+        "Swift source supplement scanned a comment/string: {:#?}",
+        evidence.declarations
+    );
+    for name in [
+        "ConditionalHandler",
+        "outer",
+        "nested",
+        "deinit",
+        "ChannelLike",
+        "localAddress",
+    ] {
+        assert!(
+            evidence.candidates.iter().any(|candidate| {
+                candidate.relation == CandidateRelation::Owns && candidate.target_spelling == name
+            }),
+            "missing Swift ownership candidate for {name}: {:#?}",
+            evidence.candidates
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn swift_source_supplement_recovers_top_level_function_after_parser_recovery()
+-> Result<(), Box<dyn Error>> {
+    let source = br##"import Testing
+
+#if compiler(>=6.2)
+@Suite struct ByteBufferCrashTests {
+    @Test func movingReaderIndexPastWriterIndex() async {
+        let result = await #expect(processExitsWith: .failure, observing: [\.standardErrorContent]) {
+            var buffer = ByteBufferAllocator().buffer(capacity: 16)
+            buffer.moveReaderIndex(forwardBy: 1)
+        }
+        expectCrashOutput(result, matches: #"Precondition failed"#)
+    }
+}
+
+private func expectCrashOutput(
+    _ result: ExitTest.Result?,
+    matches regex: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    guard let result else { return }
+    if isDebugAssertConfiguration() {
+        let output = String(decoding: result.standardErrorContent, as: UTF8.self)
+        #expect(output.range(of: regex, options: .regularExpression) != nil)
+    }
+}
+
+private func isDebugAssertConfiguration() -> Bool {
+    var isDebugAssert = false
+    assert({
+        isDebugAssert = true
+        return true
+    }())
+    return isDebugAssert
+}
+#endif
+"##;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("Tests/ByteBufferCrashTests.swift"),
+        "Tests/ByteBufferCrashTests.swift",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .any(|declaration| declaration.name == "isDebugAssertConfiguration"),
+        "missing parser-recovery function: {:#?}",
+        evidence.declarations
+    );
     Ok(())
 }
 
@@ -354,6 +678,43 @@ object Box {}
             .bindings
             .iter()
             .any(|binding| binding.spelling == "Hidden")
+    );
+    Ok(())
+}
+
+#[test]
+fn scala_typed_and_destructured_values_publish_their_bindings() -> Result<(), Box<dyn Error>> {
+    let source = br#"package sample
+class Store {
+  def read(): Unit = {
+    val typed: String = "value"
+    var mutable: Int = 1
+    val (first, second) = (1, 2)
+  }
+}
+"#;
+    let path = Path::new("src/Store.scala");
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(path, "src/Store.scala", source)?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    for name in ["typed", "mutable", "first", "second"] {
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.kind == "field" && declaration.name == name),
+            "missing Scala value binding {name}: {:#?}",
+            evidence.declarations
+        );
+    }
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .all(|declaration| declaration.name != "String" && declaration.name != "Int"),
+        "Scala type alternatives became declarations: {:#?}",
+        evidence.declarations
     );
     Ok(())
 }

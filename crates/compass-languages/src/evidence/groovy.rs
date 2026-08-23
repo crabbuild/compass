@@ -4,7 +4,7 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
-use super::model::SemanticEvidenceBatch;
+use super::model::{CandidateRelation, SemanticEvidenceBatch};
 use super::shared::{self, LanguageProfile, State};
 use super::validate::EvidenceError;
 
@@ -19,6 +19,14 @@ impl LanguageProfile for Groovy {
 
     fn has_source_supplement(declaration_count: usize) -> bool {
         declaration_count <= 1
+    }
+
+    fn prefers_owner_local_calls() -> bool {
+        true
+    }
+
+    fn prefers_constructor_declarations() -> bool {
+        true
     }
 
     fn should_collect_source_supplement(source: &[u8], declaration_count: usize) -> bool {
@@ -98,6 +106,9 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
                     decl.body_scope_id.as_str()
                 })
                 .to_owned();
+            let trim_offset = line_without_newline
+                .len()
+                .saturating_sub(line_without_newline.trim_start().len());
             let body_end = matching_brace_end(state.source, line_start, line_end);
             let end = body_end.max(line_end);
             if let Some(index) = state.add_source_declaration(
@@ -105,15 +116,58 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
                 &name,
                 line_start,
                 end,
-                line_start.saturating_add(name_offset),
                 line_start
+                    .saturating_add(trim_offset)
+                    .saturating_add(name_offset),
+                line_start
+                    .saturating_add(trim_offset)
                     .saturating_add(name_offset)
                     .saturating_add(name.len()),
                 parent,
                 &parent_scope,
             )? {
                 classes.push((index, end, depth));
-                state.emit_source_calls(line_start, line_end, index)?;
+                if let Some((method_name, constructor, name_offset)) =
+                    groovy_inline_method_declaration(trimmed)
+                {
+                    let method_name_start = line_start
+                        .saturating_add(trim_offset)
+                        .saturating_add(name_offset);
+                    let method_kind = if constructor { "constructor" } else { "method" };
+                    let parent_scope = state
+                        .declarations
+                        .get(index)
+                        .map_or(state.file_scope_id.as_str(), |decl| {
+                            decl.body_scope_id.as_str()
+                        })
+                        .to_owned();
+                    let _ = state.add_source_declaration(
+                        method_kind,
+                        &method_name,
+                        method_name_start,
+                        line_end,
+                        method_name_start,
+                        method_name_start.saturating_add(method_name.len()),
+                        Some(index),
+                        &parent_scope,
+                    )?;
+                }
+                for (relation, target, target_offset, target_end) in
+                    groovy_base_declarations(trimmed)
+                {
+                    state.emit_source_base_type(
+                        index,
+                        relation,
+                        &target,
+                        line_start
+                            .saturating_add(trim_offset)
+                            .saturating_add(target_offset),
+                        line_start
+                            .saturating_add(trim_offset)
+                            .saturating_add(target_end),
+                        true,
+                    )?;
+                }
             }
             depth = depth.saturating_add(brace_delta(trimmed));
             line_start = line_start.saturating_add(line.len());
@@ -133,6 +187,9 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
                     decl.body_scope_id.as_str()
                 })
                 .to_owned();
+            let trim_offset = line_without_newline
+                .len()
+                .saturating_sub(line_without_newline.trim_start().len());
             let body_end = matching_brace_end(state.source, line_start, line_end);
             let end = body_end.max(line_end);
             if let Some(index) = state.add_source_declaration(
@@ -140,13 +197,25 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
                 &name,
                 line_start,
                 end,
-                line_start.saturating_add(name_start),
-                line_start.saturating_add(name_end),
+                line_start
+                    .saturating_add(trim_offset)
+                    .saturating_add(name_start),
+                line_start
+                    .saturating_add(trim_offset)
+                    .saturating_add(name_end),
                 Some(class_index),
                 &parent_scope,
             )? {
                 method = Some((index, end));
-                state.emit_source_calls(line_start, line_end, index)?;
+                if let Some(open_offset) = trimmed.find('{') {
+                    let body_start = line_start
+                        .saturating_add(trim_offset)
+                        .saturating_add(open_offset)
+                        .saturating_add(1);
+                    if body_start < line_end {
+                        state.emit_source_calls(body_start, line_end, index)?;
+                    }
+                }
             }
         } else if let Some(class_index) = active_class
             && let Some((name, constructor, name_offset)) = groovy_method_declaration(trimmed)
@@ -158,6 +227,9 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
                     decl.body_scope_id.as_str()
                 })
                 .to_owned();
+            let trim_offset = line_without_newline
+                .len()
+                .saturating_sub(line_without_newline.trim_start().len());
             let body_end = matching_brace_end(state.source, line_start, line_end);
             let end = body_end.max(line_end);
             let kind = if constructor { "constructor" } else { "method" };
@@ -166,15 +238,26 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
                 &name,
                 line_start,
                 end,
-                line_start.saturating_add(name_offset),
                 line_start
+                    .saturating_add(trim_offset)
+                    .saturating_add(name_offset),
+                line_start
+                    .saturating_add(trim_offset)
                     .saturating_add(name_offset)
                     .saturating_add(name.len()),
                 Some(class_index),
                 &parent_scope,
             )? {
                 method = Some((index, end));
-                state.emit_source_calls(line_start, line_end, index)?;
+                if let Some(open_offset) = trimmed.find('{') {
+                    let body_start = line_start
+                        .saturating_add(trim_offset)
+                        .saturating_add(open_offset)
+                        .saturating_add(1);
+                    if body_start < line_end {
+                        state.emit_source_calls(body_start, line_end, index)?;
+                    }
+                }
             }
         } else if let Some((method_index, method_end)) = method
             && line_start < method_end
@@ -201,9 +284,10 @@ fn groovy_type_declaration(line: &str) -> Option<(&'static str, String, usize)> 
             "enum" => "enum",
             _ => continue,
         };
-        let name = tokens
+        let raw_name = tokens
             .get(index.saturating_add(1))?
             .trim_matches(['{', ';']);
+        let name = raw_name.split('<').next().unwrap_or(raw_name).trim();
         if !shared::valid_name(name) {
             return None;
         }
@@ -211,6 +295,72 @@ fn groovy_type_declaration(line: &str) -> Option<(&'static str, String, usize)> 
         return Some((kind, name.to_owned(), offset));
     }
     None
+}
+
+fn groovy_base_declarations(line: &str) -> Vec<(CandidateRelation, String, usize, usize)> {
+    let body = line.split_once('{').map_or(line, |(prefix, _)| prefix);
+    let mut clauses = Vec::new();
+    for (keyword, relation) in [
+        ("extends", CandidateRelation::Extends),
+        ("implements", CandidateRelation::Implements),
+    ] {
+        let Some(keyword_start) = body
+            .split_whitespace()
+            .scan(0_usize, |offset, token| {
+                body[*offset..].find(token).map(|relative| {
+                    let absolute = offset.saturating_add(relative);
+                    *offset = absolute.saturating_add(token.len());
+                    absolute
+                })
+            })
+            .find(|start| {
+                body.get(*start..)
+                    .is_some_and(|rest| rest.starts_with(keyword))
+            })
+        else {
+            continue;
+        };
+        let values_start = keyword_start.saturating_add(keyword.len());
+        let values_end = ["extends", "implements"]
+            .iter()
+            .filter(|other| **other != keyword)
+            .filter_map(|other| body[values_start..].find(other))
+            .map(|offset| values_start.saturating_add(offset))
+            .min()
+            .unwrap_or(body.len());
+        let values = body.get(values_start..values_end).unwrap_or_default();
+        let mut cursor = values_start;
+        for value in values.split(',') {
+            let trimmed = value.trim();
+            let token = trimmed
+                .split(|character: char| character.is_whitespace() || character == '<')
+                .next()
+                .unwrap_or_default()
+                .trim_matches(['{', ';']);
+            if token.is_empty() || !valid_groovy_type_name(token) {
+                cursor = cursor.saturating_add(value.len()).saturating_add(1);
+                continue;
+            }
+            let relative = value.find(token).unwrap_or_default();
+            let start = cursor.saturating_add(relative);
+            clauses.push((
+                relation,
+                token.to_owned(),
+                start,
+                start.saturating_add(token.len()),
+            ));
+            cursor = cursor.saturating_add(value.len()).saturating_add(1);
+        }
+    }
+    clauses.sort_by_key(|(_, _, start, _)| *start);
+    clauses
+}
+
+fn valid_groovy_type_name(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .split('.')
+            .all(|part| !part.is_empty() && shared::valid_name(part))
 }
 
 fn groovy_method_declaration(line: &str) -> Option<(String, bool, usize)> {
@@ -232,10 +382,44 @@ fn groovy_method_declaration(line: &str) -> Option<(String, bool, usize)> {
         return None;
     }
     let constructor = name.chars().next().is_some_and(char::is_uppercase);
-    let has_return_shape = before[..name_start]
-        .split_whitespace()
-        .any(|token| token == "def" || !token.is_empty());
+    let prefix = before[..name_start].trim();
+    let tokens = prefix.split_whitespace().collect::<Vec<_>>();
+    let has_return_shape = !prefix.contains('.')
+        && !tokens.iter().any(|token| {
+            matches!(
+                *token,
+                "new" | "this" | "super" | "if" | "for" | "while" | "switch" | "catch"
+            )
+        })
+        && tokens.iter().any(|token| {
+            matches!(
+                *token,
+                "abstract"
+                    | "def"
+                    | "final"
+                    | "native"
+                    | "private"
+                    | "protected"
+                    | "public"
+                    | "static"
+                    | "synchronized"
+                    | "transient"
+                    | "volatile"
+            ) || valid_groovy_type_name(token)
+        });
     (has_return_shape || constructor).then(|| (name.to_owned(), constructor, name_start))
+}
+
+fn groovy_inline_method_declaration(line: &str) -> Option<(String, bool, usize)> {
+    let open_brace = line.find('{')?;
+    let body = line.get(open_brace.saturating_add(1)..).unwrap_or_default();
+    let body_trimmed = body.trim();
+    let body_offset = open_brace
+        .saturating_add(1)
+        .saturating_add(body.len().saturating_sub(body.trim_start().len()));
+    groovy_method_declaration(body_trimmed).map(|(name, constructor, name_offset)| {
+        (name, constructor, body_offset.saturating_add(name_offset))
+    })
 }
 
 fn groovy_spock_feature_declaration(line: &str) -> Option<(String, usize, usize)> {

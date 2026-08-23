@@ -811,6 +811,54 @@ fn dart_navigation_sites(source: &[u8]) -> Result<Vec<NavigationSite>, Box<dyn E
 }
 
 #[test]
+fn dart_navigation_concept_nodes_keep_convention_provenance() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("navigation.dart");
+    fs::write(
+        &path,
+        b"import 'package:flutter/widgets.dart';\nvoid run() { go('/home'); }\n",
+    )?;
+    let extraction = Engine::default().extract(&path)?;
+    let edge = extraction
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "navigates")
+        .ok_or("missing Dart navigation edge")?;
+    let target = extraction
+        .nodes
+        .iter()
+        .find(|node| node.id == edge.target)
+        .ok_or("missing Dart navigation concept")?;
+    assert_eq!(target.string("file_type"), "concept");
+    assert_eq!(target.string("_origin"), "convention");
+    assert_eq!(target.string("rule"), "dart-route_path");
+    assert_eq!(
+        target.string("extractor"),
+        "compass.languages.dart.framework"
+    );
+    assert!(
+        target
+            .attributes
+            .get("source_file")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.ends_with("navigation.dart"))
+    );
+    assert!(
+        target
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .zip(
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(serde_json::Value::as_u64),
+            )
+            .is_some_and(|(start, end)| start < end)
+    );
+    Ok(())
+}
+
+#[test]
 fn dart_ascii_navigation_range_slices_original_source() -> Result<(), Box<dyn Error>> {
     let source = b"import 'package:flutter/widgets.dart';\nvoid run() { go('/home'); }\n";
     let sites = dart_navigation_sites(source)?;

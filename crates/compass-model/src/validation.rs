@@ -579,7 +579,13 @@ fn endpoint_kinds_are_valid(
 ) -> bool {
     match kind {
         EdgeKind::Contains => contains_endpoint_pair(source.kind, target.kind),
-        EdgeKind::Embeds => source.kind.is_type() && target.kind.is_type(),
+        EdgeKind::Embeds => {
+            (source.kind.is_type() && target.kind.is_type())
+                || (source.kind == NodeKind::File
+                    && target.kind == NodeKind::File
+                    && source.language.as_deref() == Some("dart")
+                    && target.language.as_deref() == Some("dart"))
+        }
         EdgeKind::Calls => {
             is_call_source(source.kind)
                 && (target.kind.is_callable()
@@ -613,7 +619,7 @@ fn endpoint_kinds_are_valid(
             (source.kind.is_type()
                 || (source.kind == NodeKind::Parameter
                     && source.language.as_deref() == Some("rust")))
-                && matches!(
+                && (matches!(
                     target.kind,
                     NodeKind::Interface
                         | NodeKind::Trait
@@ -622,7 +628,9 @@ fn endpoint_kinds_are_valid(
                         // structural object type declared through a type
                         // alias.
                         | NodeKind::TypeAlias
-                )
+                ) || (source.language.as_deref() == Some("dart")
+                    && target.language.as_deref() == Some("dart")
+                    && target.kind == NodeKind::Class))
         }
         EdgeKind::MixesIn => source.kind.is_type() && target.kind.is_type(),
         EdgeKind::TypeOf => {
