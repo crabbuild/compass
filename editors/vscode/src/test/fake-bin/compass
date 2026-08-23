@@ -6,7 +6,7 @@ if (command === "capabilities") {
     compass_version: "0.3.0",
     contracts: {
       graph_viewer: "compass.viewer.graph/1",
-      callflow_viewer: "compass.viewer.callflow/1",
+      architecture_viewer: "compass.viewer.architecture/1",
       program_call_graph: "compass.program.call_graph/1",
       progress: "compass.ide.progress/1",
       history_timeline: "compass.history.timeline/1",

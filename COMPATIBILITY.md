@@ -70,6 +70,18 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+The architecture viewer is a coordinated hard cut from
+`compass.viewer.callflow/1` to `compass.viewer.architecture/1`. Capability
+negotiation advertises `architecture_viewer`; consumers must reject an unknown
+major. The new payload does not reinterpret old `sections` or `calls` fields:
+it publishes typed nodes and relationships once plus source-specific group,
+membership, route, omission, and quality projections. The `callflow-json` and
+`callflow-html` command names remain available, but direct v1 callflow JSON
+consumers must migrate.
+Membership records are compact validated indexes into the deterministic node
+and per-projection group arrays. Documentation is a first-class All-code source
+scope and cannot influence Production architecture.
+
 Before the first compatibility-stable release, Compass hard-resets active
 internal extraction, cache, publication, store-index, query-index/ranker,
 overview, qualification, and semantic-diff identities to v1. Provisional

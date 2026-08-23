@@ -6,7 +6,7 @@ use compass_model::query_contract::CodeQueryResponse;
 use serde::Serialize;
 use url::Url;
 
-use crate::{CallflowViewModel, GraphViewModel, OutputError};
+use crate::{ArchitectureViewModel, GraphViewModel, OutputError};
 
 pub const WORKBENCH_SCHEMA: &str = "compass.viewer.workbench/1";
 
@@ -164,7 +164,7 @@ pub enum WorkbenchViewContent {
         result: CodeQueryResponse,
     },
     Architecture {
-        model: CallflowViewModel,
+        model: ArchitectureViewModel,
     },
     History {
         base_revision: String,

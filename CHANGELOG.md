@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Replace the predefined flat call-flow architecture model with the native
+  `compass.viewer.architecture/1` projection. Production source scope is fixed
+  before grouping, generated/vendor/test/documentation content cannot shape Production,
+  relationships have explicit classes and lenses, owner/leaf groups use
+  source-grounded unique names, overview overflow is exact omission metadata
+  rather than `Other`, and HTML plus VS Code share the same Rust semantics.
+  Add architecture quality diagnostics, complete-group search, compact
+  index-based memberships, bounded
+  drill-down, explicit versioned overlays, and migration guidance for direct
+  `compass.viewer.callflow/1` consumers.
+
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes
   declarations, scopes, bindings, occurrences, and conservative relationship

@@ -1,6 +1,6 @@
 import type {
   ArchitectureRouteSummary,
-  ArchitectureSectionSummary
+  ArchitectureGroupSummary
 } from "../contracts/architecture";
 
 export type ArchitecturePosition = {
@@ -8,7 +8,7 @@ export type ArchitecturePosition = {
   y: number;
 };
 
-export type ArchitectureLayoutNode = ArchitectureSectionSummary & {
+export type ArchitectureLayoutNode = ArchitectureGroupSummary & {
   x: number;
   y: number;
   width: number;
@@ -47,14 +47,14 @@ const MINIMUM_ROW_STEP = 112;
 const MAXIMUM_LANES = 12;
 
 export function layoutArchitecture(
-  sections: readonly ArchitectureSectionSummary[],
+  groups: readonly ArchitectureGroupSummary[],
   routes: readonly ArchitectureRouteSummary[],
   viewport: { width: number; height: number } = { width: 1280, height: 620 },
   positions: Readonly<Record<string, ArchitecturePosition>> = {},
   focusSectionId?: string
 ): ArchitectureLayout {
-  const visible = sections.filter((section) =>
-    section.nodeCount > 0 || section.incomingCalls > 0 || section.outgoingCalls > 0
+  const visible = groups.filter((section) =>
+    section.nodeCount > 0 || section.incomingRelationships > 0 || section.outgoingRelationships > 0
   );
   if (visible.length === 0) {
     return {
@@ -66,9 +66,9 @@ export function layoutArchitecture(
     };
   }
 
-  const sectionIds = new Set(visible.map((section) => section.id));
+  const groupIds = new Set(visible.map((section) => section.id));
   const visibleRoutes = routes.filter((route) =>
-    sectionIds.has(route.sourceSection) && sectionIds.has(route.targetSection)
+    groupIds.has(route.sourceGroup) && groupIds.has(route.targetGroup)
   );
   const columns = assignColumns(visible, visibleRoutes);
   const columnCount = columns.length;
@@ -118,8 +118,8 @@ export function layoutArchitecture(
   const sourcePorts = assignRoutePorts(visibleRoutes, byId, "source");
   const targetPorts = assignRoutePorts(visibleRoutes, byId, "target");
   const layoutRoutes = visibleRoutes.flatMap((route) => {
-    const source = byId.get(route.sourceSection);
-    const target = byId.get(route.targetSection);
+    const source = byId.get(route.sourceGroup);
+    const target = byId.get(route.targetGroup);
     if (!source || !target) return [];
     const direction = routeDirection(source, target);
     return [{
@@ -134,7 +134,7 @@ export function layoutArchitecture(
         sourcePorts.get(route.id) ?? 0,
         targetPorts.get(route.id) ?? 0
       ),
-      width: 1 + Math.min(4.4, Math.log10(route.calls + 1) * 1.35)
+      width: 1 + Math.min(4.4, Math.log10(route.relationships + 1) * 1.35)
     }];
   });
 
@@ -148,39 +148,39 @@ export function layoutArchitecture(
 }
 
 function assignColumns(
-  sections: readonly ArchitectureSectionSummary[],
+  groups: readonly ArchitectureGroupSummary[],
   routes: readonly ArchitectureRouteSummary[]
-): ArchitectureSectionSummary[][] {
-  if (sections.length === 1) return [[sections[0]!]];
-  if (routes.length === 0) return balancedColumns(sections);
+): ArchitectureGroupSummary[][] {
+  if (groups.length === 1) return [[groups[0]!]];
+  if (routes.length === 0) return balancedColumns(groups);
 
-  const ordered = feedbackAwareOrder(sections, routes);
+  const ordered = feedbackAwareOrder(groups, routes);
   const rank = new Map(ordered.map((section, index) => [section.id, index]));
   const predecessors = new Map<string, ArchitectureRouteSummary[]>();
-  for (const section of sections) predecessors.set(section.id, []);
+  for (const section of groups) predecessors.set(section.id, []);
   for (const route of routes) {
     if (
-      (rank.get(route.sourceSection) ?? 0) < (rank.get(route.targetSection) ?? 0)
-      && route.sourceSection !== route.targetSection
+      (rank.get(route.sourceGroup) ?? 0) < (rank.get(route.targetGroup) ?? 0)
+      && route.sourceGroup !== route.targetGroup
     ) {
-      predecessors.get(route.targetSection)?.push(route);
+      predecessors.get(route.targetGroup)?.push(route);
     }
   }
 
   const depth = new Map<string, number>();
   for (const section of ordered) {
     const parentDepths = (predecessors.get(section.id) ?? []).map(
-      (route) => (depth.get(route.sourceSection) ?? 0) + 1
+      (route) => (depth.get(route.sourceGroup) ?? 0) + 1
     );
     depth.set(section.id, parentDepths.length > 0 ? Math.max(...parentDepths) : 0);
   }
   const maximumDepth = Math.max(0, ...depth.values());
   const desiredLaneCount = Math.min(MAXIMUM_LANES, maximumDepth + 1);
-  if (desiredLaneCount === 1) return balancedColumns(sections);
+  if (desiredLaneCount === 1) return balancedColumns(groups);
 
   const columns = Array.from(
     { length: desiredLaneCount },
-    () => [] as ArchitectureSectionSummary[]
+    () => [] as ArchitectureGroupSummary[]
   );
   for (const section of ordered) {
     const rawDepth = depth.get(section.id) ?? 0;
@@ -198,13 +198,13 @@ function assignColumns(
  * weighted outgoing bias. Edges that oppose this order become feedback routes.
  */
 function feedbackAwareOrder(
-  sections: readonly ArchitectureSectionSummary[],
+  groups: readonly ArchitectureGroupSummary[],
   routes: readonly ArchitectureRouteSummary[]
-): ArchitectureSectionSummary[] {
-  const byId = new Map(sections.map((section) => [section.id, section]));
+): ArchitectureGroupSummary[] {
+  const byId = new Map(groups.map((section) => [section.id, section]));
   const remaining = new Set(byId.keys());
-  const left: ArchitectureSectionSummary[] = [];
-  const right: ArchitectureSectionSummary[] = [];
+  const left: ArchitectureGroupSummary[] = [];
+  const right: ArchitectureGroupSummary[] = [];
 
   while (remaining.size > 0) {
     const weights = weightedDegrees(remaining, routes);
@@ -253,44 +253,44 @@ function weightedDegrees(
   const outgoing = new Map<string, number>();
   for (const route of routes) {
     if (
-      route.sourceSection === route.targetSection
-      || !remaining.has(route.sourceSection)
-      || !remaining.has(route.targetSection)
+      route.sourceGroup === route.targetGroup
+      || !remaining.has(route.sourceGroup)
+      || !remaining.has(route.targetGroup)
     ) continue;
-    const weight = 1 + Math.log10(route.calls + 1);
-    outgoing.set(route.sourceSection, (outgoing.get(route.sourceSection) ?? 0) + weight);
-    incoming.set(route.targetSection, (incoming.get(route.targetSection) ?? 0) + weight);
+    const weight = 1 + Math.log10(route.relationships + 1);
+    outgoing.set(route.sourceGroup, (outgoing.get(route.sourceGroup) ?? 0) + weight);
+    incoming.set(route.targetGroup, (incoming.get(route.targetGroup) ?? 0) + weight);
   }
   return { incoming, outgoing };
 }
 
 function balancedColumns(
-  sections: readonly ArchitectureSectionSummary[]
-): ArchitectureSectionSummary[][] {
+  groups: readonly ArchitectureGroupSummary[]
+): ArchitectureGroupSummary[][] {
   const columnCount = Math.min(
     6,
-    Math.max(2, Math.ceil(Math.sqrt(sections.length)))
+    Math.max(2, Math.ceil(Math.sqrt(groups.length)))
   );
   const columns = Array.from(
     { length: columnCount },
-    () => [] as ArchitectureSectionSummary[]
+    () => [] as ArchitectureGroupSummary[]
   );
-  [...sections]
+  [...groups]
     .sort(compareSections)
     .forEach((section, index) => {
-      columns[Math.floor(index * columnCount / sections.length)]!.push(section);
+      columns[Math.floor(index * columnCount / groups.length)]!.push(section);
     });
   return columns;
 }
 
 function orderColumns(
-  columns: ArchitectureSectionSummary[][],
+  columns: ArchitectureGroupSummary[][],
   routes: readonly ArchitectureRouteSummary[]
 ): void {
   const weights = new Map<string, Map<string, number>>();
   for (const route of routes) {
-    addWeight(weights, route.sourceSection, route.targetSection, route.calls);
-    addWeight(weights, route.targetSection, route.sourceSection, route.calls);
+    addWeight(weights, route.sourceGroup, route.targetGroup, route.relationships);
+    addWeight(weights, route.targetGroup, route.sourceGroup, route.relationships);
   }
 
   for (let pass = 0; pass < 8; pass += 1) {
@@ -340,13 +340,13 @@ function addWeight(
 }
 
 function barycenter(
-  sectionId: string,
+  groupId: string,
   weights: ReadonlyMap<string, ReadonlyMap<string, number>>,
   neighborIndex: ReadonlyMap<string, number>
 ): number | undefined {
   let weightedPosition = 0;
   let totalWeight = 0;
-  for (const [neighborId, weight] of weights.get(sectionId) ?? []) {
+  for (const [neighborId, weight] of weights.get(groupId) ?? []) {
     const index = neighborIndex.get(neighborId);
     if (index === undefined) continue;
     weightedPosition += index * weight;
@@ -418,20 +418,20 @@ function assignRouteBands(
   const bands = new Map<string, number>();
   const nextBand = new Map<string, number>();
   const ordered = [...routes].sort((left, right) => {
-    const leftSource = nodes.get(left.sourceSection);
-    const rightSource = nodes.get(right.sourceSection);
-    const leftTarget = nodes.get(left.targetSection);
-    const rightTarget = nodes.get(right.targetSection);
+    const leftSource = nodes.get(left.sourceGroup);
+    const rightSource = nodes.get(right.sourceGroup);
+    const leftTarget = nodes.get(left.targetGroup);
+    const rightTarget = nodes.get(right.targetGroup);
     return (leftSource?.column ?? 0) - (rightSource?.column ?? 0)
       || (leftTarget?.column ?? 0) - (rightTarget?.column ?? 0)
       || (leftSource?.y ?? 0) - (rightSource?.y ?? 0)
       || (leftTarget?.y ?? 0) - (rightTarget?.y ?? 0)
-      || right.calls - left.calls
+      || right.relationships - left.relationships
       || left.id.localeCompare(right.id);
   });
   for (const route of ordered) {
-    const source = nodes.get(route.sourceSection);
-    const target = nodes.get(route.targetSection);
+    const source = nodes.get(route.sourceGroup);
+    const target = nodes.get(route.targetGroup);
     if (!source || !target) continue;
     const direction = routeDirection(source, target);
     const key = `${Math.min(source.column, target.column)}:${Math.max(source.column, target.column)}:${direction}`;
@@ -449,7 +449,7 @@ function assignRoutePorts(
 ): Map<string, number> {
   const grouped = new Map<string, ArchitectureRouteSummary[]>();
   for (const route of routes) {
-    const id = endpoint === "source" ? route.sourceSection : route.targetSection;
+    const id = endpoint === "source" ? route.sourceGroup : route.targetGroup;
     const group = grouped.get(id) ?? [];
     group.push(route);
     grouped.set(id, group);
@@ -458,10 +458,10 @@ function assignRoutePorts(
   for (const group of grouped.values()) {
     group.sort((left, right) => {
       const leftOther = nodes.get(
-        endpoint === "source" ? left.targetSection : left.sourceSection
+        endpoint === "source" ? left.targetGroup : left.sourceGroup
       );
       const rightOther = nodes.get(
-        endpoint === "source" ? right.targetSection : right.sourceSection
+        endpoint === "source" ? right.targetGroup : right.sourceGroup
       );
       return (leftOther?.y ?? 0) - (rightOther?.y ?? 0)
         || (leftOther?.x ?? 0) - (rightOther?.x ?? 0)
@@ -532,11 +532,11 @@ function laneLabel(index: number, count: number, focus?: number): string {
 }
 
 function compareSections(
-  left: ArchitectureSectionSummary,
-  right: ArchitectureSectionSummary
+  left: ArchitectureGroupSummary,
+  right: ArchitectureGroupSummary
 ): number {
-  return (right.incomingCalls + right.outgoingCalls)
-    - (left.incomingCalls + left.outgoingCalls)
+  return (right.incomingRelationships + right.outgoingRelationships)
+    - (left.incomingRelationships + left.outgoingRelationships)
     || left.name.localeCompare(right.name)
     || left.id.localeCompare(right.id);
 }

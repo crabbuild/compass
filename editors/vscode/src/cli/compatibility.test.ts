@@ -98,7 +98,7 @@ describe("compatibilityIssue", () => {
       ...compatible,
       contracts: {
         ...compatible.contracts,
-        callflow_viewer: "compass.viewer.callflow/1"
+        architecture_viewer: "compass.viewer.architecture/1"
       }
     };
 
@@ -108,9 +108,9 @@ describe("compatibilityIssue", () => {
       ...report,
       contracts: {
         ...report.contracts,
-        callflow_viewer: "compass.viewer.callflow/2"
+        architecture_viewer: "compass.viewer.architecture/2"
       }
     }, undefined, COMPASS_REQUIREMENTS.architecture))
-      .toContain("requires 'compass.viewer.callflow/1'");
+      .toContain("requires 'compass.viewer.architecture/1'");
   });
 });

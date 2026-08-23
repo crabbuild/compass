@@ -5,6 +5,7 @@ mod build_guard;
 mod cache;
 mod detect;
 mod encoding;
+mod generated;
 mod hash;
 mod manifest;
 mod project_config;
@@ -24,6 +25,7 @@ pub use detect::{
     DetectOptions, Detection, FileType, IgnorePolicy, WatchPathFilter, classify_file, detect,
 };
 pub use encoding::read_source_lossy;
+pub use generated::source_is_generated;
 pub use hash::{StatHashIndex, body_content, file_hash, md5_file, prompt_fingerprint};
 pub use manifest::{IncrementalDetection, Manifest, ManifestEntry, ManifestKind};
 pub use project_config::{PROJECT_CONFIG_RELATIVE_PATH, ProjectConfig};

@@ -64,14 +64,15 @@ use compass_model::query_contract::{
     DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ImpactRequest,
 };
 use compass_output::{
-    AffectedLensOptions, AgentOrientation, ArtifactLens, CallflowOptions, CallflowSection,
-    CanvasOptions, HtmlOptions, ObsidianOptions, SourceNavigation, SvgOptions, TreeOptions,
-    WikiOptions, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
-    WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model, callflow_view_model,
+    AffectedLensOptions, AgentOrientation, ArchitectureOverlay, ArchitectureOverlayGroup,
+    ArchitectureProjectionInput, ArchitectureProjectionOptions, ArtifactLens, CallflowOptions,
+    CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SourceNavigation, SvgOptions,
+    TreeOptions, WikiOptions, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel,
+    WorkbenchView, WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model,
     export_obsidian, export_wiki, graph_artifact_identity, graph_community_view_model_document,
     graph_view_model_bundle_document, graph_view_model_document, node_filenames,
-    render_orientation_json, validate_orientation_graph_identity, write_callflow_html,
-    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
+    project_architecture, render_orientation_json, validate_orientation_graph_identity,
+    write_callflow_html, write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
     write_workbench_html_with_source_navigation,
 };
 use compass_prs::{ProcessRunner, SystemRunner};
@@ -2986,6 +2987,7 @@ fn validate_export_options(
             "--labels",
             "--report",
             "--sections",
+            "--architecture-overlay",
             "--output",
             "--lang",
             "--max-sections",
@@ -2998,6 +3000,7 @@ fn validate_export_options(
             "--labels",
             "--report",
             "--sections",
+            "--architecture-overlay",
             "--output",
             "--lang",
             "--max-sections",
@@ -3170,10 +3173,12 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 report_explicit = true;
                 index += 2;
             }
-            "--sections" => {
-                seen_options.insert("--sections");
+            "--sections" | "--architecture-overlay" => {
+                seen_options.insert("--architecture-overlay");
                 let Some(value) = next() else {
-                    return Outcome::failure("error: --sections requires a path".to_owned());
+                    return Outcome::failure(
+                        "error: --architecture-overlay requires a path".to_owned(),
+                    );
                 };
                 sections_path = Some(PathBuf::from(value));
                 index += 2;
@@ -3551,6 +3556,9 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     if let Err(error) = validate_export_options(format, &seen_options, &view_requests) {
         return Outcome::failure(format!("error: {error}"));
     }
+    if sections_path.is_none() && matches!(format, "callflow-html" | "callflow-json") {
+        sections_path = discover_architecture_overlay(&graph_path);
+    }
     graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
         Ok(path) => path,
         Err(error) => {
@@ -3729,7 +3737,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 write_text_atomic(&path, &json)
                     .map_err(|error| error.to_string())
                     .map(|()| {
-                        ExportOutput::text(format!("Call-flow JSON written: {}", path.display()))
+                        ExportOutput::text(format!("Architecture JSON written: {}", path.display()))
                     })
             } else {
                 Ok(ExportOutput::text(json))
@@ -3872,7 +3880,7 @@ fn build_export_workbench(
                 let model = architecture_view_model(inputs, graph_path, &title)?;
                 let coverage = WorkbenchCoverage::bounded(
                     model.statistics.nodes,
-                    model.statistics.edges,
+                    model.statistics.relationships,
                     false,
                 );
                 (
@@ -3880,7 +3888,7 @@ fn build_export_workbench(
                     WorkbenchView {
                         id: String::new(),
                         title: "Architecture".to_owned(),
-                        description: "Subsystems, scopes, and cross-section calls".to_owned(),
+                        description: "Source-scoped subsystems and typed relationships".to_owned(),
                         coverage,
                         content: WorkbenchViewContent::Architecture { model },
                     },
@@ -4123,16 +4131,19 @@ fn architecture_view_model(
     inputs: &ExportInputs,
     graph_path: &Path,
     title: &str,
-) -> Result<compass_output::CallflowViewModel, String> {
-    callflow_view_model(
-        &inputs.document,
-        &inputs.communities,
-        &CallflowOptions {
+) -> Result<compass_output::ArchitectureViewModel, String> {
+    let overlay = load_architecture_overlay(None, graph_path)?;
+    project_architecture(
+        ArchitectureProjectionInput {
+            document: &inputs.document,
+            communities: &inputs.communities,
             community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            report: &inputs.report,
+            overlay: overlay.as_ref(),
             project_name: title,
-            ..CallflowOptions::default()
+            built_at_commit: graph_source_commit(&inputs.document),
+            generated_at: None,
         },
+        &ArchitectureProjectionOptions::default(),
     )
     .map_err(|error| {
         format!(
@@ -4430,7 +4441,7 @@ fn export_callflow_json(
     max_diagram_nodes: usize,
     max_diagram_edges: usize,
 ) -> Result<String, String> {
-    let sections = sections_path.map(load_sections).transpose()?;
+    let overlay = load_architecture_overlay(sections_path, graph_path)?;
     let project = inputs
         .document
         .graph
@@ -4446,21 +4457,31 @@ fn export_callflow_json(
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| "Project".to_owned());
-    let model = callflow_view_model(
-        &inputs.document,
-        &inputs.communities,
-        &CallflowOptions {
-            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            sections: sections.as_deref(),
-            report: &inputs.report,
-            project_name: &project,
-            language,
-            max_sections,
-            diagram_scale,
-            max_diagram_nodes,
-            max_diagram_edges,
-            ..CallflowOptions::default()
+    let defaults = ArchitectureProjectionOptions::default();
+    let options = ArchitectureProjectionOptions {
+        limits: compass_output::ArchitectureProjectionLimits {
+            max_overview_groups: max_sections.max(2),
+            ..defaults.limits
         },
+        ..defaults
+    };
+    let _presentation_options = (
+        language,
+        diagram_scale,
+        max_diagram_nodes,
+        max_diagram_edges,
+    );
+    let model = project_architecture(
+        ArchitectureProjectionInput {
+            document: &inputs.document,
+            communities: &inputs.communities,
+            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+            overlay: overlay.as_ref(),
+            project_name: &project,
+            built_at_commit: graph_source_commit(&inputs.document),
+            generated_at: None,
+        },
+        &options,
     )
     .map_err(|error| error.to_string())?;
     serde_json::to_string(&model).map_err(|error| error.to_string())
@@ -4561,7 +4582,7 @@ fn export_callflow(
     max_diagram_nodes: usize,
     max_diagram_edges: usize,
 ) -> Result<ExportOutput, String> {
-    let sections = sections_path.map(load_sections).transpose()?;
+    let overlay = load_architecture_overlay(sections_path, graph_path)?;
     let project = inputs
         .document
         .graph
@@ -4589,9 +4610,11 @@ fn export_callflow(
         &path,
         &CallflowOptions {
             community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            sections: sections.as_deref(),
+            sections: None,
+            overlay: overlay.as_ref(),
             report: &inputs.report,
             project_name: &project,
+            built_at_commit: graph_source_commit(&inputs.document),
             language,
             max_sections,
             diagram_scale,
@@ -4603,15 +4626,14 @@ fn export_callflow(
     .map_err(|error| error.to_string())?;
     Ok(ExportOutput::html(
         format!(
-            "Loaded: {} nodes, {} edges, {} sections\nGraph: {}\nCall-flow HTML written: {}\n  Sections: {}  |  Mermaid diagrams: {}  |  Call tables: {}\n  Diagrams use Mermaid init directives plus interactive zoom/pan controls.\ncallflow HTML written - open in any browser: {}",
+            "Loaded: {} nodes and {} relationships\nGraph: {}\nArchitecture HTML written: {}\n  Groups: {} total, {} in overview  |  Overview routes: {}\n  The export includes source scopes, relation classes, quality diagnostics, and exact omission metadata.\nArchitecture HTML written - open in any browser: {}",
             inputs.document.nodes.len(),
             inputs.document.links.len(),
-            result.loaded_sections,
             graph_path.display(),
             path.display(),
-            result.rendered_sections,
-            result.mermaid_diagrams,
-            result.call_tables,
+            result.groups,
+            result.overview_groups,
+            result.overview_routes,
             path.display(),
         ),
         path,
@@ -4713,18 +4735,114 @@ fn load_usize_string_map(path: &Path) -> Result<std::collections::BTreeMap<usize
         .collect())
 }
 
-fn load_sections(path: &Path) -> Result<Vec<CallflowSection>, String> {
+const ARCHITECTURE_OVERLAY_MAX_BYTES: u64 = 1024 * 1024;
+
+fn discover_architecture_overlay(graph_path: &Path) -> Option<PathBuf> {
+    let output_root = graph_path.parent()?;
+    if output_root.file_name().and_then(|value| value.to_str()) != Some("compass-out") {
+        return None;
+    }
+    let candidate = output_root
+        .parent()?
+        .join(".compass")
+        .join("architecture.toml");
+    candidate.is_file().then_some(candidate)
+}
+
+fn load_architecture_overlay(
+    explicit_path: Option<&Path>,
+    _graph_path: &Path,
+) -> Result<Option<ArchitectureOverlay>, String> {
+    // Discovery, when allowed, happens before immutable artifacts are resolved
+    // and only for the canonical project/compass-out/graph.json location.
+    // Explicit historical graph paths therefore never observe live config.
+    let path = explicit_path.map(Path::to_path_buf);
+    path.map(|path| parse_architecture_overlay(&path))
+        .transpose()
+}
+
+fn parse_architecture_overlay(path: &Path) -> Result<ArchitectureOverlay, String> {
+    let size = fs::metadata(path)
+        .map_err(|error| format!("error reading {}: {error}", path.display()))?
+        .len();
+    if size > ARCHITECTURE_OVERLAY_MAX_BYTES {
+        return Err(format!(
+            "architecture overlay {} is {size} bytes; limit is {ARCHITECTURE_OVERLAY_MAX_BYTES}",
+            path.display()
+        ));
+    }
     let bytes =
         fs::read(path).map_err(|error| format!("error reading {}: {error}", path.display()))?;
+    if path.extension().and_then(|value| value.to_str()) == Some("toml") {
+        let text = std::str::from_utf8(&bytes).map_err(|error| {
+            format!(
+                "architecture overlay {} is not UTF-8: {error}",
+                path.display()
+            )
+        })?;
+        return toml::from_str(text)
+            .map_err(|error| format!("invalid architecture overlay {}: {error}", path.display()));
+    }
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid JSON at {}: {error}", path.display()))?;
-    let value = value.get("sections").cloned().unwrap_or(value);
-    serde_json::from_value(value).map_err(|_| {
+    if value.get("schema").is_some() {
+        return serde_json::from_value(value)
+            .map_err(|error| format!("invalid architecture overlay {}: {error}", path.display()));
+    }
+    let sections: Vec<CallflowSection> = serde_json::from_value(
+        value.get("sections").cloned().unwrap_or(value),
+    )
+    .map_err(|error| {
         format!(
-            "ERROR: sections file must contain a JSON array: {}",
+            "architecture overlay {} is neither compass.architecture-overlay/1 nor legacy sections JSON: {error}",
             path.display()
         )
+    })?;
+    let groups = sections
+        .into_iter()
+        .filter(|section| section.id != "overview")
+        .map(|section| {
+            let communities = section
+                .communities
+                .iter()
+                .map(|community| {
+                    community.parse::<usize>().map_err(|error| {
+                        format!(
+                            "legacy section {} has invalid community {}: {error}",
+                            section.id, community
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ArchitectureOverlayGroup {
+                id: section.id,
+                name: section.name,
+                path_prefixes: Vec::new(),
+                communities,
+                pin: false,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(ArchitectureOverlay {
+        schema: compass_output::ARCHITECTURE_OVERLAY_SCHEMA.to_owned(),
+        source_rules: Vec::new(),
+        groups,
     })
+}
+
+fn graph_source_commit(document: &compass_model::GraphDocument) -> Option<&str> {
+    document
+        .graph
+        .get("built_at_commit")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            document
+                .graph
+                .get("build")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|build| build.get("sourceCommit"))
+                .and_then(serde_json::Value::as_str)
+        })
 }
 
 fn parse_usize(value: Option<String>, _name: &str) -> Option<usize> {
@@ -4760,7 +4878,7 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output JSON]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
+    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output JSON]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
 }
 
 fn export_workbench_help(format: &str) -> String {
@@ -4848,7 +4966,7 @@ fn export_json_help() -> String {
 }
 
 fn callflow_help() -> String {
-    "Usage: compass export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default compass-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
+    "Usage: compass export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --architecture-overlay PATH  versioned JSON/TOML architecture overlay\n  --sections PATH              deprecated alias; legacy section JSON is adapted\n  --output HTML                output path (default compass-out/<project>-callflow.html)\n  --max-sections N             maximum groups in the bounded overview (default 15)\n  --lang LANG                  accepted for CLI compatibility; the shared viewer localizes UI\n  --diagram-scale N            deprecated compatibility option\n  --max-diagram-nodes N        deprecated compatibility option\n  --max-diagram-edges N        deprecated compatibility option\n\nThe export uses compass.viewer.architecture/1 for both HTML and JSON. Production scope is classified before grouping; omitted groups remain searchable and are never merged into Other.".to_owned()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -6150,11 +6268,6 @@ mod mcp_option_tests {
         assert!(load_usize_string_map(&map_path).is_err());
         assert!(load_usize_string_map(&directory.path().join("missing")).is_err());
 
-        let sections = directory.path().join("sections.json");
-        fs::write(&sections, r#"{"sections":[]}"#)?;
-        assert!(load_sections(&sections)?.is_empty());
-        fs::write(&sections, "{}")?;
-        assert!(load_sections(&sections).is_err());
         Ok(())
     }
 
@@ -6220,6 +6333,52 @@ mod mcp_option_tests {
             1
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn architecture_overlay_loader_accepts_versioned_toml_and_legacy_json()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let toml_path = directory.path().join("architecture.toml");
+        fs::write(
+            &toml_path,
+            "schema = \"compass.architecture-overlay/1\"\n\
+             [[sourceRules]]\npathPrefix = \"generated/client\"\nscope = \"generated\"\n\
+             [[groups]]\nid = \"billing\"\nname = \"Billing Ledger\"\npathPrefixes = [\"crates/billing\"]\npin = true\n",
+        )?;
+        let overlay = parse_architecture_overlay(&toml_path)?;
+        assert_eq!(overlay.source_rules.len(), 1);
+        assert_eq!(overlay.groups.len(), 1);
+
+        let legacy_path = directory.path().join("sections.json");
+        fs::write(
+            &legacy_path,
+            r#"{"sections":[{"id":"billing","name":"Billing Ledger","communities":["7"]}]}"#,
+        )?;
+        let legacy = parse_architecture_overlay(&legacy_path)?;
+        assert_eq!(legacy.groups[0].communities, vec![7]);
+        Ok(())
+    }
+
+    #[test]
+    fn architecture_overlay_discovery_is_limited_to_the_canonical_project_output()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let project = directory.path();
+        let configuration = project.join(".compass/architecture.toml");
+        fs::create_dir_all(configuration.parent().ok_or("configuration parent")?)?;
+        fs::write(
+            &configuration,
+            "schema = \"compass.architecture-overlay/1\"\n",
+        )?;
+        let canonical = project.join("compass-out/graph.json");
+        let historical = project.join("archive/graph.json");
+        assert_eq!(
+            discover_architecture_overlay(&canonical),
+            Some(configuration)
+        );
+        assert_eq!(discover_architecture_overlay(&historical), None);
         Ok(())
     }
 

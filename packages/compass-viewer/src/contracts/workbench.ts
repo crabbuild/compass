@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CallGraphResponseSchema } from "./callGraph";
-import { CallflowViewModelSchema } from "./callflow";
+import { ArchitectureViewModelSchema } from "./architecture";
 import { CodeQueryResponseSchema } from "./codeQuery";
 import { GraphViewModelSchema } from "./graph";
 
@@ -52,7 +52,7 @@ export const WorkbenchViewSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...ViewBase,
     kind: z.literal("architecture"),
-    model: CallflowViewModelSchema
+    model: ArchitectureViewModelSchema
   }),
   z.strictObject({
     ...ViewBase,

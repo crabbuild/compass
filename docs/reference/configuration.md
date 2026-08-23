@@ -22,6 +22,47 @@ Not every option follows one universal resolver. The command's help and source
 remain authoritative. In automation, prefer explicit non-secret options and
 record them.
 
+## Architecture overlay
+
+Architecture exports work without configuration. When repository-owned domain
+vocabulary is more precise than automatic path and declaration evidence, pass
+a bounded overlay explicitly:
+
+```bash
+compass export callflow-html \
+  --architecture-overlay .compass/architecture.toml
+```
+
+The first schema is `compass.architecture-overlay/1`. It supports source-scope
+rules and named groups selected by normalized path prefixes or numeric
+community IDs. IDs and selectors must be unique; empty or overlapping path
+prefixes and communities claimed by multiple groups fail before output is
+published. Overlay names affect presentation, while stable group identity and
+graph relationships remain separate. Source-rule values are `production`,
+`test`, `generated`, `vendor`, `documentation`, and `unknown`.
+
+```toml
+schema = "compass.architecture-overlay/1"
+
+[[sourceRules]]
+pathPrefix = "generated/client"
+scope = "generated"
+
+[[groups]]
+id = "billing-ledger"
+name = "Billing Ledger"
+pathPrefixes = ["crates/billing"]
+pin = true
+```
+
+For the canonical current-project artifact
+`<project>/compass-out/graph.json`, Compass discovers
+`<project>/.compass/architecture.toml`. Arbitrary or historical graph paths do
+not inspect a live checkout; pass their matching overlay explicitly with
+`--architecture-overlay`. An explicit option always wins. `--sections` is a
+deprecated compatibility spelling; legacy JSON sections are converted to
+overlay community selectors.
+
 ## Output root
 
 Default:

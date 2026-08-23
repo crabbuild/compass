@@ -537,6 +537,26 @@ compass export callflow-html --help
 Common inputs include `--graph PATH`, labels/report/sections, output directory,
 node/diagram limits, and database connection arguments.
 
+`callflow-json` and `callflow-html` retain their command names for script
+compatibility but now publish one Rust-owned architecture projection. JSON is
+`compass.viewer.architecture/1`; HTML embeds the same model in the shared
+workbench. Production scope is classified before communities are grouped, and
+Generated, Vendor, Test, Documentation, and Unknown sources cannot influence
+Production names or boundaries. Relationships are classified as Execution, Dependency, Type,
+Structure, Contextual, or Unknown. The default Architecture lens admits only
+Execution and Dependency relationships. Aggregate metrics remain labeled
+relationships because the Execution class also includes handlers, routing,
+messaging, and other executable flow; an individual exact `calls` record keeps
+its original relation name in the inspector.
+
+`--max-sections N` bounds overview groups. It does not discard groups or merge
+them into `Other`: the model reports exact omissions and retains every group
+for search and drill-down. Use `--architecture-overlay PATH` for a strict
+`compass.architecture-overlay/1` JSON or TOML file. The canonical current
+project discovers `.compass/architecture.toml`; arbitrary and historical graph
+paths do not inspect live configuration. `--sections PATH` remains a deprecated
+alias and adapts legacy section JSON.
+
 `html`, `json`, and `workbench-json` accept repeatable graph views. Compass
 preserves their command-line order and puts them in one navigable workbench:
 

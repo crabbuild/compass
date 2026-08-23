@@ -23,7 +23,7 @@ import {
 } from "./layout";
 
 export type ArchitectureSelection =
-  | { kind: "section"; id: string }
+  | { kind: "group"; id: string }
   | { kind: "route"; id: string }
   | undefined;
 
@@ -54,6 +54,7 @@ export function ArchitectureMap({
   selection: ArchitectureSelection;
   onSelect(selection: Exclude<ArchitectureSelection, undefined>): void;
 }) {
+  const relationshipNoun = "relationships";
   const storageKey = [
     "compass.architecture.layout.v1",
     overview.provenance.projectName,
@@ -110,37 +111,37 @@ export function ArchitectureMap({
   );
   const routeSummaries = routeDisplay.routes;
   const displayedSections = useMemo(() => {
-    if (routeMode === "complete" || selection === undefined) return overview.sections;
+    if (routeMode === "complete" || selection === undefined) return overview.groups;
     const ids = new Set<string>();
-    if (selection.kind === "section") ids.add(selection.id);
+    if (selection.kind === "group") ids.add(selection.id);
     for (const route of routeSummaries) {
-      ids.add(route.sourceSection);
-      ids.add(route.targetSection);
+      ids.add(route.sourceGroup);
+      ids.add(route.targetGroup);
     }
-    return overview.sections.filter((section) => ids.has(section.id));
-  }, [overview.sections, routeMode, routeSummaries, selection]);
+    return overview.groups.filter((section) => ids.has(section.id));
+  }, [overview.groups, routeMode, routeSummaries, selection]);
   const layout = useMemo(
     () => layoutArchitecture(
       displayedSections,
       routeSummaries,
       viewportSize,
       positions,
-      routeMode === "key" && selection?.kind === "section" ? selection.id : undefined
+      routeMode === "key" && selection?.kind === "group" ? selection.id : undefined
     ),
     [displayedSections, positions, routeMode, routeSummaries, selection, viewportSize]
   );
   const displayedRoutes = layout.routes;
   const connected = useMemo(() => {
-    if (selection?.kind !== "section") return new Set<string>();
+    if (selection?.kind !== "group") return new Set<string>();
     return new Set(
       displayedRoutes
         .filter((route) =>
-          route.sourceSection === selection.id || route.targetSection === selection.id
+          route.sourceGroup === selection.id || route.targetGroup === selection.id
         )
-        .flatMap((route) => [route.id, route.sourceSection, route.targetSection])
+        .flatMap((route) => [route.id, route.sourceGroup, route.targetGroup])
     );
   }, [displayedRoutes, selection]);
-  const maximumCalls = Math.max(1, ...displayedRoutes.map((route) => route.calls));
+  const maximumCalls = Math.max(1, ...displayedRoutes.map((route) => route.relationships));
   const hiddenRouteCount = overview.routes.length - displayedRoutes.length;
   const canvasSize = {
     width: Math.round(layout.width * zoom),
@@ -266,7 +267,7 @@ export function ArchitectureMap({
     nodeDrag.current = undefined;
     setDraggingId(undefined);
     if (current.moved) savePositions();
-    else activate({ kind: "section", id: draggedNode.id });
+    else activate({ kind: "group", id: draggedNode.id });
   };
   const cancelNodeDrag = (event: PointerEvent<SVGGElement>) => {
     if (nodeDrag.current?.pointerId !== event.pointerId) return;
@@ -279,7 +280,7 @@ export function ArchitectureMap({
   ) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      activate({ kind: "section", id: movedNode.id });
+      activate({ kind: "group", id: movedNode.id });
       return;
     }
     if (!event.altKey || !event.key.startsWith("Arrow")) return;
@@ -336,7 +337,7 @@ export function ArchitectureMap({
       <header className="architecture-map-header">
         <div className="architecture-map-intro">
           <span>Flow canvas</span>
-          <strong id="architecture-map-title">Subsystem call direction</strong>
+          <strong id="architecture-map-title">Subsystem relationship direction</strong>
           <small id="architecture-map-help">
             Scroll sideways or drag open canvas space to follow the complete architecture.
           </small>
@@ -348,7 +349,7 @@ export function ArchitectureMap({
               aria-pressed={routeMode === "key"}
               onClick={() => setRouteMode("key")}
             >
-              {selection?.kind === "section" ? "Neighbors" : "Key routes"}
+              {selection?.kind === "group" ? "Neighbors" : "Key routes"}
             </button>
             <button
               type="button"
@@ -492,25 +493,25 @@ export function ArchitectureMap({
               const selected = selection?.kind === "route" && selection.id === route.id;
               const related = selected
                 || selection === undefined
-                || (selection.kind === "section" && connected.has(route.id));
+                || (selection.kind === "group" && connected.has(route.id));
               const evidence = route.inferred > route.extracted ? "inferred" : "extracted";
-              const focusDirection = selection?.kind === "section"
-                ? route.targetSection === selection.id
+              const focusDirection = selection?.kind === "group"
+                ? route.targetGroup === selection.id
                   ? "incoming"
-                  : route.sourceSection === selection.id
+                  : route.sourceGroup === selection.id
                     ? "outgoing"
                     : undefined
                 : undefined;
               const opacity = routeMode === "key"
-                ? 0.3 + Math.sqrt(route.calls / maximumCalls) * 0.28
-                : 0.1 + Math.sqrt(route.calls / maximumCalls) * 0.2;
+                ? 0.3 + Math.sqrt(route.relationships / maximumCalls) * 0.28
+                : 0.1 + Math.sqrt(route.relationships / maximumCalls) * 0.2;
               return (
                 <g
                   key={route.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={`${route.sourceSection} to ${route.targetSection}, ${route.calls} calls${
-                    reciprocal ? `; bidirectional, ${reciprocal.calls} reverse calls` : ""
+                  aria-label={`${route.sourceGroup} to ${route.targetGroup}, ${route.relationships} ${relationshipNoun}${
+                    reciprocal ? `; bidirectional, ${reciprocal.relationships} reverse ${relationshipNoun}` : ""
                   }${route.direction === "backward" ? ", feedback route" : ""}`}
                   data-direction={route.direction}
                   data-evidence={evidence}
@@ -541,11 +542,11 @@ export function ArchitectureMap({
                     }
                   />
                   <title>
-                    {route.sourceSection} → {route.targetSection}: {route.calls} calls
+                    {route.sourceGroup} → {route.targetGroup}: {route.relationships} {relationshipNoun}
                     {reciprocal && (
-                      ` · ${reciprocal.sourceSection} → ${reciprocal.targetSection}: ${
-                        reciprocal.calls
-                      } calls`
+                      ` · ${reciprocal.sourceGroup} → ${reciprocal.targetGroup}: ${
+                        reciprocal.relationships
+                      } ${relationshipNoun}`
                     )}
                   </title>
                 </g>
@@ -555,14 +556,14 @@ export function ArchitectureMap({
 
           <g className="architecture-map-nodes">
             {layout.nodes.map((node) => {
-              const selected = selection?.kind === "section" && selection.id === node.id;
+              const selected = selection?.kind === "group" && selection.id === node.id;
               const related = selected
                 || selection === undefined
-                || (selection.kind === "section" && connected.has(node.id))
+                || (selection.kind === "group" && connected.has(node.id))
                 || (selection.kind === "route"
                   && overview.routes.some((route) =>
                     route.id === selection.id
-                    && (route.sourceSection === node.id || route.targetSection === node.id)
+                    && (route.sourceGroup === node.id || route.targetGroup === node.id)
                   ));
               return (
                 <g
@@ -570,8 +571,8 @@ export function ArchitectureMap({
                   role="button"
                   tabIndex={0}
                   aria-label={`${node.name}, ${node.nodeCount} visible symbols, ${
-                    node.incomingCalls
-                  } incoming and ${node.outgoingCalls} outgoing calls; drag to reposition`}
+                    node.incomingRelationships
+                  } incoming and ${node.outgoingRelationships} outgoing ${relationshipNoun}; drag to reposition`}
                   transform={`translate(${node.x - node.width / 2} ${node.y - node.height / 2})`}
                   data-selected={selected || undefined}
                   data-dimmed={!related || undefined}
@@ -607,8 +608,8 @@ export function ArchitectureMap({
                   </text>
                   <text x="20" y="48" className="architecture-map-node-meta">
                     {node.nodeCount.toLocaleString()} symbols
-                    {"  ·  "}↓{node.incomingCalls.toLocaleString()}
-                    {"  ↑"}{node.outgoingCalls.toLocaleString()}
+                    {"  ·  "}↓{node.incomingRelationships.toLocaleString()}
+                    {"  ↑"}{node.outgoingRelationships.toLocaleString()}
                   </text>
                   <g className="architecture-map-node-grip" aria-hidden="true">
                     <circle cx={node.width - 18} cy="26" r="1.2" />
@@ -651,13 +652,13 @@ export function ArchitectureMap({
           <summary>View routes as a table</summary>
           <div>
             <table>
-              <thead><tr><th>From</th><th>To</th><th>Calls</th><th>Evidence</th></tr></thead>
+              <thead><tr><th>From</th><th>To</th><th>Relationships</th><th>Evidence</th></tr></thead>
               <tbody>
                 {overview.routes.map((route) => (
                   <tr key={route.id}>
-                    <td>{sectionName(overview, route.sourceSection)}</td>
-                    <td>{sectionName(overview, route.targetSection)}</td>
-                    <td>{route.calls.toLocaleString()}</td>
+                    <td>{groupName(overview, route.sourceGroup)}</td>
+                    <td>{groupName(overview, route.targetGroup)}</td>
+                    <td>{route.relationships.toLocaleString()}</td>
                     <td>{route.extracted} extracted · {route.inferred} inferred</td>
                   </tr>
                 ))}
@@ -710,8 +711,8 @@ function loadPositions(key: string): Record<string, ArchitecturePosition> {
   }
 }
 
-function sectionName(overview: ArchitectureOverview, id: string): string {
-  return overview.sections.find((section) => section.id === id)?.name ?? id;
+function groupName(overview: ArchitectureOverview, id: string): string {
+  return overview.groups.find((section) => section.id === id)?.name ?? id;
 }
 
 function truncate(value: string, limit: number): string {
@@ -724,7 +725,7 @@ function selectKeyRoutes(
 ): Set<string> {
   const strongest = (candidates: readonly ArchitectureOverview["routes"][number][]) =>
     [...candidates].sort((left, right) =>
-      right.calls - left.calls || left.id.localeCompare(right.id)
+      right.relationships - left.relationships || left.id.localeCompare(right.id)
     );
   const selected = new Set<string>();
   if (selection?.kind === "route") {
@@ -732,18 +733,18 @@ function selectKeyRoutes(
     if (selectedRoute) {
       selected.add(selectedRoute.id);
       const reverse = routes.find((route) =>
-        route.sourceSection === selectedRoute.targetSection
-        && route.targetSection === selectedRoute.sourceSection
+        route.sourceGroup === selectedRoute.targetGroup
+        && route.targetGroup === selectedRoute.sourceGroup
       );
       if (reverse) selected.add(reverse.id);
     }
     return selected;
-  } else if (selection?.kind === "section") {
+  } else if (selection?.kind === "group") {
     const incoming = strongest(
-      routes.filter((route) => route.targetSection === selection.id)
+      routes.filter((route) => route.targetGroup === selection.id)
     ).slice(0, 6);
     const outgoing = strongest(
-      routes.filter((route) => route.sourceSection === selection.id)
+      routes.filter((route) => route.sourceGroup === selection.id)
     ).slice(0, 6);
     for (const route of strongest([...incoming, ...outgoing])) {
       selected.add(route.id);
@@ -762,7 +763,7 @@ function collapseReciprocalRoutes(
   preferredRouteId?: string
 ): { routes: ArchitectureRoute[]; reciprocals: Map<string, ArchitectureRoute> } {
   const byDirection = new Map(
-    routes.map((route) => [routePairKey(route.sourceSection, route.targetSection), route])
+    routes.map((route) => [routePairKey(route.sourceGroup, route.targetGroup), route])
   );
   const consumed = new Set<string>();
   const collapsed: ArchitectureRoute[] = [];
@@ -771,7 +772,7 @@ function collapseReciprocalRoutes(
   for (const route of routes) {
     if (consumed.has(route.id)) continue;
     const reverse = byDirection.get(
-      routePairKey(route.targetSection, route.sourceSection)
+      routePairKey(route.targetGroup, route.sourceGroup)
     );
     if (!reverse || reverse.id === route.id || consumed.has(reverse.id)) {
       collapsed.push(route);
@@ -782,8 +783,8 @@ function collapseReciprocalRoutes(
       ? route
       : reverse.id === preferredRouteId
         ? reverse
-        : route.calls > reverse.calls
-          || (route.calls === reverse.calls && route.id.localeCompare(reverse.id) <= 0)
+        : route.relationships > reverse.relationships
+          || (route.relationships === reverse.relationships && route.id.localeCompare(reverse.id) <= 0)
           ? route
           : reverse;
     const reciprocal = primary.id === route.id ? reverse : route;
@@ -792,7 +793,7 @@ function collapseReciprocalRoutes(
     consumed.add(route.id);
     consumed.add(reverse.id);
   }
-  collapsed.sort((left, right) => right.calls - left.calls || left.id.localeCompare(right.id));
+  collapsed.sort((left, right) => right.relationships - left.relationships || left.id.localeCompare(right.id));
   return { routes: collapsed, reciprocals };
 }
 
