@@ -11,10 +11,49 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from benchmarks.performance.compass.occurrences import SourceConstruct  # noqa: E402
+from build_universal_quality_audit import _groovy_overlap_matches  # noqa: E402
 from independent_language_oracle import canonical_bytes, run_oracle  # noqa: E402
 
 
 class UniversalSourceOracleTests(unittest.TestCase):
+    def test_groovy_declaration_overlap_requires_one_target(self) -> None:
+        construct = SourceConstruct(
+            "Module.groovy",
+            "implements",
+            "base_types",
+            "wave.UserStore",
+            "Store",
+            None,
+            100,
+            200,
+            1,
+        )
+        edge = {
+            "anchor": ("Module.groovy", 150, 155),
+            "target": "store-id",
+            "targetNode": {"qualifiedName": "wave.Store"},
+        }
+        self.assertEqual(
+            [edge],
+            _groovy_overlap_matches(
+                "groovy",
+                construct,
+                frozenset(("implements",)),
+                {("Module.groovy", "implements"): [edge]},
+            ),
+        )
+        ambiguous = {**edge, "target": "other-store-id"}
+        self.assertEqual(
+            [],
+            _groovy_overlap_matches(
+                "groovy",
+                construct,
+                frozenset(("implements",)),
+                {("Module.groovy", "implements"): [edge, ambiguous]},
+            ),
+        )
+
     def test_metadata_is_reported_without_changing_inventory_digest(self) -> None:
         cases = (
             ("swift", ".swift", "SwiftSyntax provider unavailable"),

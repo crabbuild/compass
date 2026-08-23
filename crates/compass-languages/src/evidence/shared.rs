@@ -104,6 +104,14 @@ pub(super) trait LanguageProfile: Sized {
         Self::has_source_supplement(declaration_count)
     }
 
+    fn prefers_owner_local_calls() -> bool {
+        false
+    }
+
+    fn prefers_constructor_declarations() -> bool {
+        false
+    }
+
     fn collect_source_supplement<'source>(
         _state: &mut State<'source, Self>,
     ) -> Result<(), EvidenceError> {
@@ -528,13 +536,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             {
                 continue;
             }
-            let qualifier = (start > 0 && bytes[start - 1] == b'.').then(|| {
-                let mut qualifier_start = start.saturating_sub(1);
-                while qualifier_start > 0 && is_identifier_continue(bytes[qualifier_start - 1]) {
-                    qualifier_start = qualifier_start.saturating_sub(1);
-                }
-                String::from_utf8_lossy(&bytes[qualifier_start..start - 1]).into_owned()
-            });
+            let qualifier = source_call_qualifier(bytes, start);
             self.emit_call_site(
                 Some(owner),
                 &spelling,
@@ -977,7 +979,15 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             Some(&owner_scope),
             range,
         )?;
-        let exact = self.resolve_local(spelling, qualifier);
+        let exact = if constructor && P::prefers_constructor_declarations() {
+            self.resolve_local_constructor(spelling, qualifier)
+                .or_else(|| self.resolve_local(spelling, qualifier))
+        } else {
+            P::prefers_owner_local_calls()
+                .then(|| self.resolve_local_for_owner(owner, spelling, qualifier))
+                .flatten()
+                .or_else(|| self.resolve_local(spelling, qualifier))
+        };
         let imported_target = (qualifier.is_none())
             .then(|| {
                 self.imports
@@ -1252,12 +1262,65 @@ impl<'source, P: LanguageProfile> State<'source, P> {
     }
 
     fn resolve_local(&self, spelling: &str, qualifier: Option<&str>) -> Option<usize> {
-        let values = if let Some(qualifier) = qualifier {
-            self.by_qualified.get(&format!("{qualifier}.{spelling}"))
-        } else {
-            self.by_terminal.get(spelling)
-        }?;
+        let values = self.local_candidates(spelling, qualifier)?;
         (values.len() == 1).then_some(values[0])
+    }
+
+    fn resolve_local_for_owner(
+        &self,
+        owner: Option<usize>,
+        spelling: &str,
+        qualifier: Option<&str>,
+    ) -> Option<usize> {
+        if qualifier.is_some() {
+            return None;
+        }
+        let owner = owner.and_then(|index| self.declarations.get(index))?;
+        let owner_type = owner.qualified.rsplit_once('.')?.0;
+        let values = self.by_terminal.get(spelling)?;
+        let local = values
+            .iter()
+            .filter(|index| {
+                self.declarations.get(**index).is_some_and(|declaration| {
+                    declaration.qualified == format!("{owner_type}.{spelling}")
+                })
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        (local.len() == 1).then(|| local[0])
+    }
+
+    fn resolve_local_constructor(&self, spelling: &str, qualifier: Option<&str>) -> Option<usize> {
+        let values = self.local_candidates(spelling, qualifier)?;
+        let constructors = values
+            .iter()
+            .filter(|index| {
+                self.declarations
+                    .get(**index)
+                    .is_some_and(|declaration| declaration.kind == "constructor")
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        (constructors.len() == 1).then(|| constructors[0])
+    }
+
+    fn local_candidates(&self, spelling: &str, qualifier: Option<&str>) -> Option<Vec<usize>> {
+        if let Some(qualifier) = qualifier {
+            let suffix = format!(".{qualifier}.{spelling}");
+            let mut values = self
+                .by_qualified
+                .iter()
+                .filter(|(qualified, _)| {
+                    **qualified == format!("{qualifier}.{spelling}") || qualified.ends_with(&suffix)
+                })
+                .flat_map(|(_, indexes)| indexes.iter().copied())
+                .collect::<Vec<_>>();
+            values.sort_unstable();
+            values.dedup();
+            (!values.is_empty()).then_some(values)
+        } else {
+            self.by_terminal.get(spelling).cloned()
+        }
     }
 
     fn supports(&self, capability: LanguageCapability) -> bool {
@@ -1613,4 +1676,53 @@ fn is_identifier_start(byte: u8) -> bool {
 
 fn is_identifier_continue(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn source_call_qualifier(bytes: &[u8], start: usize) -> Option<String> {
+    if start == 0 || bytes.get(start.saturating_sub(1)) != Some(&b'.') {
+        return None;
+    }
+    let dot = start.saturating_sub(1);
+    let mut qualifier_start = dot;
+    let mut qualifier_end = dot;
+    if dot > 0 && bytes.get(dot.saturating_sub(1)) == Some(&b')') {
+        let mut depth = 0_usize;
+        let mut cursor = dot.saturating_sub(1);
+        loop {
+            match bytes.get(cursor) {
+                Some(b')') => depth = depth.saturating_add(1),
+                Some(b'(') => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        let mut identifier_end = cursor;
+                        while identifier_end > 0
+                            && bytes[identifier_end.saturating_sub(1)].is_ascii_whitespace()
+                        {
+                            identifier_end = identifier_end.saturating_sub(1);
+                        }
+                        let mut identifier_start = identifier_end;
+                        while identifier_start > 0
+                            && is_identifier_continue(bytes[identifier_start - 1])
+                        {
+                            identifier_start = identifier_start.saturating_sub(1);
+                        }
+                        qualifier_start = identifier_start;
+                        qualifier_end = cursor;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            if cursor == 0 {
+                break;
+            }
+            cursor = cursor.saturating_sub(1);
+        }
+    } else {
+        while qualifier_start > 0 && is_identifier_continue(bytes[qualifier_start - 1]) {
+            qualifier_start = qualifier_start.saturating_sub(1);
+        }
+    }
+    let qualifier = String::from_utf8_lossy(&bytes[qualifier_start..qualifier_end]).into_owned();
+    (!qualifier.is_empty()).then_some(qualifier)
 }

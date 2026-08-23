@@ -197,6 +197,68 @@ class UserStore implements Store {
 }
 
 #[test]
+fn groovy_source_calls_exclude_declaration_headers() -> Result<(), Box<dyn Error>> {
+    let source = br#"package wave
+interface Store { void save(String value) }
+class UserStore implements Store {
+    String value
+    UserStore() {}
+    void save(String value) { this.value = value }
+    void route() { save('users') }
+}
+class Specification extends spock.lang.Specification {
+    def "stores users"() { expect: new UserStore().save('ok') }
+}
+"#;
+    let source_file = "Module.groovy";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let mut call_sources = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "calls")
+        .filter_map(|edge| {
+            resolved
+                .nodes
+                .iter()
+                .find(|node| node.id == edge.source)
+                .map(|node| node.string("qualified_name"))
+        })
+        .collect::<Vec<_>>();
+    call_sources.sort_unstable();
+    assert_eq!(
+        call_sources,
+        vec![
+            "wave.Specification.stores users",
+            "wave.Specification.stores users",
+            "wave.UserStore.route"
+        ]
+    );
+    let feature = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "wave.Specification.stores users")
+        .ok_or("missing Spock feature")?;
+    let constructor = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "wave.UserStore.UserStore")
+        .ok_or("missing UserStore constructor")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == feature.id
+            && edge.target == constructor.id
+            && edge.string("relation") == "calls"
+    }));
+    Ok(())
+}
+
+#[test]
 fn scala_local_receiver_dispatch_resolves_inherited_and_extension_calls()
 -> Result<(), Box<dyn Error>> {
     let source = br#"package wave

@@ -256,6 +256,46 @@ def _declaration_index(
     }
 
 
+def _groovy_overlap_matches(
+    language: str,
+    construct: SourceConstruct,
+    aliases: frozenset[str],
+    by_file_relation: dict[tuple[str, str], list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Match Groovy declaration facts when providers choose different spans.
+
+    The compilation-unit oracle reports the complete declaration, while the
+    tree-sitter producer reports the exact type/name token. A source overlap
+    is safe only when the relation family and terminal target identify one
+    graph target in the file; otherwise the construct remains an explicit
+    missing record.
+    """
+
+    if language != "groovy" or construct.relation not in {
+        "contains",
+        "extends",
+        "implements",
+    }:
+        return []
+    terminal = construct.target_spelling.rsplit(".", 1)[-1]
+    overlap_matches = [
+        edge
+        for relation in aliases
+        for edge in by_file_relation.get((construct.source_file, relation), ())
+        if (
+            max(edge["anchor"][1], construct.start_byte)
+            < min(edge["anchor"][2], construct.end_byte)
+            and (
+                edge["targetNode"].get("qualifiedName", "")
+                or edge["target"]
+            ).rsplit(".", 1)[-1]
+            == terminal
+        )
+    ]
+    target_ids = {edge["target"] for edge in overlap_matches}
+    return overlap_matches if len(target_ids) == 1 else []
+
+
 def _owner_is_compatible(
     use: SourceConstruct,
     declaration: SourceConstruct,
@@ -715,27 +755,15 @@ def main() -> int:
                 for relation in aliases
                 for edge in by_anchor.get((relation, construct.source_file, construct.start_byte, construct.end_byte), ())
             ]
-            if (
-                not matches
-                and args.language == "groovy"
-                and construct.relation == "contains"
-            ):
-                terminal = construct.target_spelling.rsplit(".", 1)[-1]
-                overlap_matches = [
-                    edge
-                    for edge in by_file_relation.get((construct.source_file, "contains"), ())
-                    if (
-                        max(edge["anchor"][1], construct.start_byte)
-                        < min(edge["anchor"][2], construct.end_byte)
-                        and (
-                            edge["targetNode"].get("qualifiedName", "")
-                            or edge["target"]
-                        ).rsplit(".", 1)[-1]
-                        == terminal
-                    )
-                ]
-                target_ids = {edge["target"] for edge in overlap_matches}
-                matches = overlap_matches if len(target_ids) == 1 else []
+            overlap_match = False
+            if not matches:
+                matches = _groovy_overlap_matches(
+                    args.language,
+                    construct,
+                    aliases,
+                    by_file_relation,
+                )
+                overlap_match = bool(matches)
             if matches:
                 edge = sorted(matches, key=lambda item: (item["source"], item["target"]))[0]
                 target_node = edge["targetNode"]
@@ -746,18 +774,19 @@ def main() -> int:
                 )
                 if (
                     args.language == "groovy"
-                    and construct.relation == "contains"
+                    and overlap_match
                     and (
                         construct.start_byte != edge["anchor"][1]
                         or construct.end_byte != edge["anchor"][2]
                     )
                 ):
-                    # Groovy's AST declaration span includes leading trivia,
-                    # while the tree-sitter producer may anchor the same
-                    # declaration to its normalized body/name span.  The
-                    # overlap match is still source-grounded; publish the
-                    # graph's exact occurrence and recompute its snippet
-                    # digest so the audit manifest remains self-validating.
+                    # Groovy's compilation-unit oracle anchors ownership and
+                    # base-type facts to the whole declaration, while the
+                    # tree-sitter producer anchors the same fact to the
+                    # normalized name/type span. The overlap match is still
+                    # source-grounded; publish the graph's exact occurrence
+                    # and recompute the snippet digest so the audit manifest
+                    # remains self-validating.
                     matched_construct = replace(
                         matched_construct,
                         start_byte=edge["anchor"][1],
