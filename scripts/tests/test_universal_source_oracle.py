@@ -120,6 +120,48 @@ class UniversalSourceOracleTests(unittest.TestCase):
             ),
         )
 
+    def test_ownership_overlap_prefers_unique_enclosing_declaration_span(self) -> None:
+        construct = SourceConstruct(
+            "lib/cache.dart",
+            "contains",
+            "ownership",
+            "FileContentCache",
+            "FileContentCache",
+            None,
+            100,
+            400,
+            1,
+        )
+        class_edge = {
+            "anchor": ("lib/cache.dart", 110, 400),
+            "target": "class-id",
+            "targetNode": {
+                "kind": "class",
+                "qualifiedName": "FileContentCache",
+                "sourceStart": 90,
+                "sourceEnd": 500,
+            },
+        }
+        constructor_edge = {
+            "anchor": ("lib/cache.dart", 120, 140),
+            "target": "constructor-id",
+            "targetNode": {
+                "kind": "constructor",
+                "qualifiedName": "FileContentCache.FileContentCache",
+                "sourceStart": 115,
+                "sourceEnd": 160,
+            },
+        }
+        self.assertEqual(
+            [class_edge],
+            _declaration_overlap_matches(
+                "dart",
+                construct,
+                frozenset(("contains",)),
+                {("lib/cache.dart", "contains"): [class_edge, constructor_edge]},
+            ),
+        )
+
     def test_metadata_is_reported_without_changing_inventory_digest(self) -> None:
         cases = (
             ("swift", ".swift", "SwiftSyntax provider unavailable"),

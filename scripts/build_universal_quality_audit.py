@@ -112,6 +112,8 @@ def _nodes(graph: Path, language: str) -> dict[str, dict[str, Any]]:
             "qualifiedName": qualified,
             "sourceFile": source_file,
             "kind": kind,
+            "sourceStart": source.get("startByte") if isinstance(source, dict) else None,
+            "sourceEnd": source.get("endByte") if isinstance(source, dict) else None,
         }
     return {key: value for key, value in nodes.items() if value["language"] == language}
 
@@ -320,6 +322,24 @@ def _declaration_overlap_matches(
             == terminal
         )
     ]
+    # A declaration target and a constructor/method target can share the same
+    # terminal spelling.  When the graph publishes source spans, prefer the
+    # unique declaration whose span encloses the independent source
+    # declaration.  This is stronger than terminal-only matching and remains
+    # fail-closed when zero or multiple target IDs enclose the span.
+    enclosing = [
+        edge
+        for edge in overlap_matches
+        if (
+            isinstance(edge["targetNode"].get("sourceStart"), int)
+            and isinstance(edge["targetNode"].get("sourceEnd"), int)
+            and edge["targetNode"]["sourceStart"] <= construct.start_byte
+            and construct.end_byte <= edge["targetNode"]["sourceEnd"]
+        )
+    ]
+    if enclosing:
+        target_ids = {edge["target"] for edge in enclosing}
+        return enclosing if len(target_ids) == 1 else []
     target_ids = {edge["target"] for edge in overlap_matches}
     return overlap_matches if len(target_ids) == 1 else []
 

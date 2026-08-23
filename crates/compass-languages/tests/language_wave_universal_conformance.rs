@@ -548,3 +548,40 @@ object Box {}
     );
     Ok(())
 }
+
+#[test]
+fn scala_typed_and_destructured_values_publish_their_bindings() -> Result<(), Box<dyn Error>> {
+    let source = br#"package sample
+class Store {
+  def read(): Unit = {
+    val typed: String = "value"
+    var mutable: Int = 1
+    val (first, second) = (1, 2)
+  }
+}
+"#;
+    let path = Path::new("src/Store.scala");
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(path, "src/Store.scala", source)?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    for name in ["typed", "mutable", "first", "second"] {
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.kind == "field" && declaration.name == name),
+            "missing Scala value binding {name}: {:#?}",
+            evidence.declarations
+        );
+    }
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .all(|declaration| declaration.name != "String" && declaration.name != "Int"),
+        "Scala type alternatives became declarations: {:#?}",
+        evidence.declarations
+    );
+    Ok(())
+}

@@ -24,6 +24,30 @@ impl LanguageProfile for Scala {
             .or_else(|| (lower.contains("val_") || lower.contains("var_")).then_some("field"))
     }
 
+    fn declaration_name_nodes_for_node(node: Node<'_>) -> Vec<Node<'_>> {
+        // Scala 3 wraps typed `val`/`var` bindings in an
+        // `alternative_pattern` (for example `cache: Foo | Null`).  The
+        // shared profile only checks immediate name children, so it misses
+        // the binding when the pattern is nested and the source oracle sees
+        // a real local field without a corresponding declaration.  Walk only
+        // the pattern child—not the initializer—to recover every binding
+        // while deliberately ignoring type alternatives such as `Null`.
+        if matches!(node.kind(), "val_definition" | "var_definition") {
+            let mut names = Vec::new();
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if matches!(child.kind(), "modifiers" | "access_modifier" | "annotation") {
+                    continue;
+                }
+                collect_scala_pattern_names(child, &mut names);
+                if !names.is_empty() {
+                    return names;
+                }
+            }
+        }
+        shared::declaration_name(node).into_iter().collect()
+    }
+
     fn parse_imports(statement: &str) -> Vec<ParsedImport> {
         parse_scala_import(statement)
     }
@@ -44,6 +68,39 @@ impl LanguageProfile for Scala {
         state: &mut super::shared::State<'source, Self>,
     ) -> Result<(), EvidenceError> {
         collect_scala_receiver_calls(state)
+    }
+}
+
+fn collect_scala_pattern_names<'tree>(node: Node<'tree>, names: &mut Vec<Node<'tree>>) {
+    match node.kind() {
+        "typed_pattern" => {
+            let mut cursor = node.walk();
+            if let Some(name) = node
+                .named_children(&mut cursor)
+                .find(|child| child.kind() == "identifier")
+            {
+                names.push(name);
+            }
+        }
+        // In `x: T | Null`, the `Null` alternative is represented as a bare
+        // identifier.  It is a type, not another binding, so recurse only
+        // through nested typed/pattern nodes here.
+        "alternative_pattern" => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if child.kind() != "identifier" {
+                    collect_scala_pattern_names(child, names);
+                }
+            }
+        }
+        "identifier" => names.push(node),
+        "type_identifier" | "operator_identifier" | "wildcard" => {}
+        _ => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_scala_pattern_names(child, names);
+            }
+        }
     }
 }
 
