@@ -380,6 +380,7 @@ mod tests {
                         edges: Vec::new(),
                         communities: Vec::new(),
                         hyperedges: Vec::new(),
+                        effective_graph: None,
                     },
                     community_details: BTreeMap::new(),
                 },
