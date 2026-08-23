@@ -26,6 +26,30 @@ impl LanguageProfile for Dart {
     }
 
     fn declaration_kind_for_node(node: Node<'_>, _source: &[u8]) -> Option<&'static str> {
+        if node.kind() == "method_signature" {
+            return dart_signature_kind(node);
+        }
+        if matches!(
+            node.kind(),
+            "constructor_signature"
+                | "factory_constructor_signature"
+                | "getter_signature"
+                | "setter_signature"
+                | "function_signature"
+        ) {
+            // These signatures are children of a method_signature wrapper in
+            // the Dart grammar. The wrapper owns the declaration range; keep
+            // the child from publishing a duplicate symbol. Top-level
+            // function_signature and declaration-wrapped constructors remain
+            // first-class evidence.
+            if node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "method_signature")
+            {
+                return None;
+            }
+            return dart_signature_kind(node);
+        }
         if node.kind() == "declaration"
             && node.parent().is_some_and(|parent| {
                 matches!(
@@ -43,6 +67,25 @@ impl LanguageProfile for Dart {
     }
 
     fn declaration_name_nodes_for_node(node: Node<'_>) -> Vec<Node<'_>> {
+        if node.kind() == "method_signature" {
+            return dart_signature_name(node).into_iter().collect();
+        }
+        if matches!(
+            node.kind(),
+            "constructor_signature"
+                | "factory_constructor_signature"
+                | "getter_signature"
+                | "setter_signature"
+                | "function_signature"
+        ) {
+            if node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "method_signature")
+            {
+                return Vec::new();
+            }
+            return dart_signature_name(node).into_iter().collect();
+        }
         if node.kind() == "declaration" {
             let mut cursor = node.walk();
             if let Some(list) = node
@@ -135,6 +178,66 @@ impl LanguageProfile for Dart {
         collect_dart_parts(state)?;
         collect_dart_receiver_calls(state)
     }
+}
+
+fn dart_signature_inner(node: Node<'_>) -> Option<Node<'_>> {
+    if node.kind() != "method_signature" {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor).find(|child| {
+        matches!(
+            child.kind(),
+            "constructor_signature"
+                | "factory_constructor_signature"
+                | "getter_signature"
+                | "setter_signature"
+                | "function_signature"
+        )
+    })
+}
+
+fn dart_signature_kind(node: Node<'_>) -> Option<&'static str> {
+    let node = dart_signature_inner(node)?;
+    match node.kind() {
+        "constructor_signature" | "factory_constructor_signature" => Some("constructor"),
+        "getter_signature" | "setter_signature" => Some("property"),
+        "function_signature" => {
+            let mut current = node.parent();
+            while let Some(parent) = current {
+                if matches!(
+                    parent.kind(),
+                    "class_body" | "extension_body" | "mixin_body" | "enum_body"
+                ) {
+                    return Some("method");
+                }
+                current = parent.parent();
+            }
+            Some("function")
+        }
+        _ => None,
+    }
+}
+
+fn dart_signature_name(node: Node<'_>) -> Option<Node<'_>> {
+    let node = dart_signature_inner(node)?;
+    let mut identifiers = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "identifier" {
+            identifiers.push(child);
+        }
+    }
+    if matches!(
+        node.kind(),
+        "constructor_signature" | "factory_constructor_signature"
+    ) {
+        return identifiers
+            .get(1)
+            .copied()
+            .or_else(|| identifiers.first().copied());
+    }
+    identifiers.first().copied()
 }
 
 pub(super) fn emit_tree_evidence(

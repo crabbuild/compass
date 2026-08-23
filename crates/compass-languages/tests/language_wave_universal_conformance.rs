@@ -368,7 +368,8 @@ class Generated {}
 
 #[test]
 fn dart_instance_fields_publish_field_declarations() -> Result<(), Box<dyn Error>> {
-    let source = br#"library wave;
+    let source = br#"// GENERATED CODE - DO NOT MODIFY BY HAND
+library wave;
 class UserStore {
   final String value, other;
 }
@@ -716,5 +717,197 @@ class Store {
         "Scala type alternatives became declarations: {:#?}",
         evidence.declarations
     );
+    Ok(())
+}
+
+#[test]
+fn scala_nested_objects_symbolic_calls_and_path_types_keep_identity() -> Result<(), Box<dyn Error>>
+{
+    let source = r#"package sample
+trait HasOuter { type Item }
+class Uses {
+  val outer: HasOuter
+  def use(value: outer.Item): outer.Item = value
+  def project(value: HasOuter#Item): HasOuter#Item = value
+}
+object Outer {
+  object Inner {
+    def +(other: Inner): Inner = this
+    def combine(): Inner = this
+  }
+  def run(): Unit = {
+    val value: Inner = Inner
+    value + value
+    Inner.combine()
+  }
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("src/Models.scala"),
+        "src/Models.scala",
+        source.as_bytes(),
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+
+    assert!(
+        evidence.declarations.iter().any(|declaration| {
+            declaration.kind == "function"
+                && declaration.name == "+"
+                && declaration.qualified_name == "sample.Outer.Inner.+"
+        }),
+        "missing nested Scala symbolic method: {:?}",
+        evidence.declarations
+    );
+    assert!(
+        evidence
+            .declarations
+            .iter()
+            .all(|declaration| declaration.qualified_name != "sample.Outer.run.Inner"),
+        "Scala initializer type became a phantom field: {:?}",
+        evidence.declarations
+    );
+    assert!(evidence.declarations.iter().any(|declaration| {
+        declaration.name == "Inner" && declaration.qualified_name == "sample.Outer.Inner"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Owns && candidate.target_spelling == "+"
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "+"
+            && candidate.constraints.hierarchy.is_some()
+            && candidate
+                .constraints
+                .hierarchy
+                .as_ref()
+                .is_some_and(|hierarchy| {
+                    matches!(
+                        hierarchy,
+                        compass_languages::HierarchyConstraint::ReceiverDispatch {
+                            receiver_qualified_name,
+                            ..
+                        } if receiver_qualified_name == "sample.Outer.Inner"
+                    )
+                })
+    }));
+    assert!(evidence.occurrences.iter().any(|occurrence| {
+        occurrence.role == SemanticRole::TypeReference
+            && occurrence.spelling == "Item"
+            && occurrence.qualifier.as_deref() == Some("outer")
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.target_spelling == "Item"
+            && candidate.constraints.qualified_name.as_deref() == Some("sample.HasOuter.Item")
+    }));
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::References
+            && candidate.target_spelling == "Item"
+            && candidate.constraints.qualified_name.as_deref() == Some("sample.HasOuter#Item")
+    }));
+    Ok(())
+}
+
+#[test]
+fn dart_generated_signatures_recover_named_constructors_and_properties()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"library wave;
+part 'generated.g.dart';
+class User {
+  User._();
+  factory User.fromJson(Map<String, dynamic> json) => User._();
+  String get displayName => 'x';
+  set displayName(String value) {}
+  User copyWith() => User._();
+}
+User _$UserFromJson(Map<String, dynamic> json) => User._();
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("lib/user.dart"),
+        "lib/user.dart",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    for (name, kind, qualified) in [
+        ("_", "constructor", "wave.User._"),
+        ("fromJson", "constructor", "wave.User.fromJson"),
+        ("displayName", "property", "wave.User.displayName"),
+        ("copyWith", "method", "wave.User.copyWith"),
+        ("_$UserFromJson", "function", "wave._$UserFromJson"),
+    ] {
+        assert!(
+            evidence.declarations.iter().any(|declaration| {
+                declaration.name == name
+                    && declaration.kind == kind
+                    && declaration.qualified_name == qualified
+            }),
+            "missing Dart generated declaration {name} {kind}: {:#?}",
+            evidence.declarations
+        );
+    }
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Embeds
+            && candidate.target_spelling == "generated.g.dart"
+    }));
+    Ok(())
+}
+
+#[test]
+fn groovy_imports_and_base_types_use_exact_qualified_targets() -> Result<(), Box<dyn Error>> {
+    let source = br#"package sample
+import java.util.List
+import static java.util.Collections.emptyList as empty
+interface Contract {}
+class Base {}
+class Child extends Base implements Contract, List<String> {
+  List<String> values = empty()
+  Base make() { new Base() }
+}
+"#;
+    let mut engine = Engine::default();
+    let evidence = engine.extract_source_universal_evidence(
+        Path::new("src/Child.groovy"),
+        "src/Child.groovy",
+        source,
+    )?;
+    validate_evidence(&evidence, EvidenceLimits::default())?;
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.kind == BindingKind::Import
+            && binding.spelling == "List"
+            && binding.qualified_target == "java.util.List"
+    }));
+    assert!(evidence.bindings.iter().any(|binding| {
+        binding.kind == BindingKind::ImportAlias
+            && binding.spelling == "empty"
+            && binding.qualified_target == "java.util.Collections.emptyList"
+    }));
+    for (relation, spelling, qualified) in [
+        (CandidateRelation::Extends, "Base", Some("sample.Base")),
+        (
+            CandidateRelation::Implements,
+            "Contract",
+            Some("sample.Contract"),
+        ),
+        (
+            CandidateRelation::Implements,
+            "List",
+            Some("java.util.List"),
+        ),
+    ] {
+        assert!(
+            evidence.candidates.iter().any(|candidate| {
+                candidate.relation == relation
+                    && candidate.target_spelling == spelling
+                    && candidate.constraints.qualified_name.as_deref() == qualified
+            }),
+            "missing Groovy base candidate {relation:?} {spelling}: {:#?}",
+            evidence.candidates
+        );
+    }
+    assert!(!evidence.declarations.iter().any(|declaration| {
+        declaration.name == "empty" && declaration.qualified_name == "sample.Child.empty"
+    }));
     Ok(())
 }

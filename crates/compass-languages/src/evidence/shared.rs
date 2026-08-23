@@ -75,6 +75,34 @@ pub(super) trait LanguageProfile: Sized {
         valid_name(name)
     }
 
+    /// Reference spellings can be broader than declaration names. Scala
+    /// symbolic methods are the first current example (`+`, `>>`, and so on).
+    fn reference_name_is_valid(name: &str) -> bool {
+        valid_name(name)
+    }
+
+    fn is_type_reference_node(node: Node<'_>) -> bool {
+        is_type_leaf(node.kind())
+    }
+
+    fn consumes_type_reference_children(_node: Node<'_>) -> bool {
+        false
+    }
+
+    fn split_type_reference(raw: &str) -> (Option<String>, String) {
+        split_qualified(raw)
+    }
+
+    fn qualified_type_reference_target<'source>(
+        _state: &State<'source, Self>,
+        _node: Node<'_>,
+        _raw: &str,
+        _qualifier: Option<&str>,
+        _spelling: &str,
+    ) -> Option<String> {
+        None
+    }
+
     fn ignores_type_reference(_spelling: &str) -> bool {
         false
     }
@@ -596,7 +624,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             .filter(|declaration| {
                 declaration.start <= byte
                     && byte < declaration.end
-                    && is_nominal_type_kind(&declaration.kind)
+                    && is_nominal_type_kind_for::<P>(&declaration.kind)
             })
             .max_by_key(|declaration| declaration.start)
             .map(|declaration| declaration.qualified.clone())
@@ -612,10 +640,67 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         let mut types = values
             .iter()
             .filter_map(|index| self.declarations.get(*index))
-            .filter(|declaration| is_nominal_type_kind(&declaration.kind))
+            .filter(|declaration| is_nominal_type_kind_for::<P>(&declaration.kind))
             .map(|declaration| declaration.qualified.clone())
             .collect::<BTreeSet<_>>();
         (types.len() == 1).then(|| types.pop_first()).flatten()
+    }
+
+    pub(super) fn source_declared_type_at(&self, name: &str, byte: usize) -> Option<String> {
+        let declaration = self
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.name == name
+                    && declaration.start <= byte
+                    && matches!(declaration.kind.as_str(), "field" | "property")
+            })
+            .max_by_key(|declaration| declaration.start)?;
+        let text = std::str::from_utf8(
+            self.source
+                .get(declaration.start..declaration.end)
+                .unwrap_or_default(),
+        )
+        .ok()?;
+        let raw_type = text
+            .split_once(':')?
+            .1
+            .split(['=', ';', '{', '\n', '\r'])
+            .next()?
+            .trim()
+            .trim_end_matches('?')
+            .trim();
+        (!raw_type.is_empty())
+            .then(|| self.source_type_name(raw_type))
+            .flatten()
+    }
+
+    pub(super) fn source_import_target(
+        &self,
+        spelling: &str,
+        qualifier: Option<&str>,
+    ) -> Option<String> {
+        let mut matches = self
+            .imports
+            .iter()
+            .filter(|import| {
+                if let Some(qualifier) = qualifier {
+                    import.qualifier.as_deref() == Some(qualifier)
+                        && (import.spelling == spelling || import.prefix)
+                } else {
+                    (import.qualifier.is_none() && import.spelling == spelling)
+                        || (import.prefix && import.spelling.ends_with(".*"))
+                }
+            })
+            .map(|import| {
+                if import.prefix {
+                    format!("{}.{}", import.target, spelling)
+                } else {
+                    import.target.clone()
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        (matches.len() == 1).then(|| matches.pop_first()).flatten()
     }
 
     pub(super) fn source_type_name_or_namespace(&self, raw: &str) -> Option<String> {
@@ -638,7 +723,9 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         start: usize,
         end: usize,
     ) -> Result<(), EvidenceError> {
-        if !self.supports(LanguageCapability::HierarchyDispatch) || !valid_name(spelling) {
+        if !self.supports(LanguageCapability::HierarchyDispatch)
+            || !P::reference_name_is_valid(spelling)
+        {
             return Ok(());
         }
         let (owner_id, owner_scope) = {
@@ -697,7 +784,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         end: usize,
         constructor_node: bool,
     ) -> Result<(), EvidenceError> {
-        if !valid_name(spelling)
+        if !P::reference_name_is_valid(spelling)
             || (self.name_ranges.contains(&(start, end))
                 && !self.is_ignored_declaration_name(start, end))
         {
@@ -760,8 +847,8 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         end: usize,
         base_set_complete: bool,
     ) -> Result<(), EvidenceError> {
-        let (qualifier, spelling) = split_qualified(raw_target);
-        if !valid_name(&spelling) {
+        let (qualifier, spelling) = P::split_type_reference(raw_target);
+        if !P::reference_name_is_valid(&spelling) {
             return Ok(());
         }
         let (owner_id, owner_scope) = {
@@ -782,6 +869,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         let qualified_name = exact
             .and_then(|index| self.declarations.get(index))
             .map(|declaration| declaration.qualified.clone())
+            .or_else(|| self.source_import_target(&spelling, qualifier.as_deref()))
             .or_else(|| {
                 qualifier
                     .as_deref()
@@ -1002,8 +1090,11 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         if is_call_node(node.kind()) || self.is_identifier_call(node) {
             self.emit_call(node)?;
         }
-        if is_type_leaf(node.kind()) {
+        if P::is_type_reference_node(node) {
             self.emit_type_reference(node)?;
+            if P::consumes_type_reference_children(node) {
+                return Ok(());
+            }
         }
         if self.supports(LanguageCapability::Members) && is_member_node(node.kind()) {
             self.emit_member_access(node)?;
@@ -1028,8 +1119,8 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             return Ok(());
         };
         let raw = self.text(callee);
-        let (qualifier, spelling) = split_qualified(&raw);
-        if !valid_name(&spelling) {
+        let (qualifier, spelling) = P::split_type_reference(&raw);
+        if !P::reference_name_is_valid(&spelling) {
             return Ok(());
         }
         let owner = self
@@ -1094,33 +1185,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
                 .flatten()
                 .or_else(|| self.resolve_local(spelling, qualifier))
         };
-        let imported_target = (qualifier.is_none())
-            .then(|| {
-                self.imports
-                    .iter()
-                    .find(|import| {
-                        import.spelling == spelling && import.qualifier.as_deref() == qualifier
-                    })
-                    .map(|import| import.target.clone())
-            })
-            .flatten()
-            .or_else(|| {
-                qualifier.and_then(|prefix| {
-                    self.imports
-                        .iter()
-                        .find(|import| {
-                            (import.spelling == spelling || import.prefix)
-                                && import.qualifier.as_deref() == Some(prefix)
-                        })
-                        .map(|import| {
-                            if import.prefix {
-                                format!("{}.{}", import.target, spelling)
-                            } else {
-                                import.target.clone()
-                            }
-                        })
-                })
-            });
+        let imported_target = self.source_import_target(spelling, qualifier);
         if exact.is_some() {
             self.resolved_occurrences
                 .insert((role, range_start, range_end, spelling.to_owned()));
@@ -1176,8 +1241,8 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         if P::ignores_type_reference(&raw) {
             return Ok(());
         }
-        let (qualifier, spelling) = split_qualified(&raw);
-        if !valid_name(&spelling) || spelling.len() > 256 {
+        let (qualifier, spelling) = P::split_type_reference(&raw);
+        if !P::reference_name_is_valid(&spelling) || spelling.len() > 256 {
             return Ok(());
         }
         let owner = self.owner_for(node.start_byte());
@@ -1209,6 +1274,8 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             range_for_node(self.source_file, node),
         )?;
         let exact = self.resolve_local(&spelling, qualifier.as_deref());
+        let qualified_target =
+            P::qualified_type_reference_target(self, node, &raw, qualifier.as_deref(), &spelling);
         self.builder.relate(
             relation,
             &owner_id,
@@ -1218,9 +1285,11 @@ impl<'source, P: LanguageProfile> State<'source, P> {
             ResolutionConstraint {
                 exact_target_declaration_id: exact.map(|index| self.declarations[index].id.clone()),
                 exact_language: Some(P::LANGUAGE.to_owned()),
-                qualified_name: qualifier
-                    .as_ref()
-                    .map(|prefix| format!("{prefix}.{spelling}")),
+                qualified_name: qualified_target.or_else(|| {
+                    qualifier
+                        .as_ref()
+                        .map(|prefix| format!("{prefix}.{spelling}"))
+                }),
                 allowed_target_kinds: vec![
                     "class".to_owned(),
                     "enum".to_owned(),
@@ -1246,7 +1315,7 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         let spelling = spelling
             .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '_');
         let qualifier = qualifier.trim();
-        if !valid_name(spelling) || qualifier.is_empty() {
+        if !P::reference_name_is_valid(spelling) || qualifier.is_empty() {
             return Ok(());
         }
         let owner = self.owner_for(node.start_byte());
@@ -1528,7 +1597,13 @@ pub(super) fn shared_declaration_kind(kind: &str) -> Option<&'static str> {
     // phantom nested symbols and can make a real base target ambiguous.
     if matches!(
         lower.as_str(),
-        "interfaces" | "constructor_param" | "constructor_parameter"
+        "interfaces"
+            | "constructor_param"
+            | "constructor_parameter"
+            | "field_expression"
+            | "member_access"
+            | "property_access"
+            | "selector"
     ) || lower.starts_with("generics_")
     {
         // Type-shaped nodes (including generic/class type syntax) carry
@@ -1652,6 +1727,10 @@ fn is_nominal_type_kind(kind: &str) -> bool {
         kind,
         "class" | "enum" | "interface" | "protocol" | "record" | "struct" | "trait"
     )
+}
+
+fn is_nominal_type_kind_for<P: LanguageProfile>(kind: &str) -> bool {
+    is_nominal_type_kind(kind) || (P::LANGUAGE == "scala" && kind == "module")
 }
 
 fn join_name(prefix: &str, name: &str) -> String {

@@ -251,6 +251,60 @@ class UniversalSourceOracleTests(unittest.TestCase):
             )
             self.assertEqual(["lib/main.swift"], [item["path"] for item in document["files"]])
 
+    def test_groovy_oracle_preserves_import_aliases_and_all_base_clauses(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="compass-groovy-oracle-bases-") as directory:
+            root = Path(directory)
+            source = root / "Child.groovy"
+            source.write_text(
+                """package sample
+import java.util.List
+import static java.util.Collections.emptyList as empty
+interface Contract {}
+class Base {}
+class Child extends Base implements Contract, List<String> {
+  List<String> values = empty()
+}
+""",
+                encoding="utf-8",
+            )
+            document = run_oracle(
+                root,
+                language="groovy",
+                provider="groovy-provider",
+                toolchain="pinned test toolchain",
+                suffixes=(".groovy",),
+            )
+            relations = document["files"][0]["relations"]
+            self.assertTrue(
+                any(
+                    relation["relation"] == "imports"
+                    and relation.get("localSpelling") == "List"
+                    and relation.get("qualifiedTarget") == "java.util.List"
+                    for relation in relations
+                )
+            )
+            self.assertTrue(
+                any(
+                    relation["relation"] == "imports"
+                    and relation.get("localSpelling") == "empty"
+                    and relation.get("qualifiedTarget")
+                    == "java.util.Collections.emptyList"
+                    for relation in relations
+                )
+            )
+            self.assertEqual(
+                {
+                    (relation["relation"], relation["targetSpelling"])
+                    for relation in relations
+                    if relation["capability"] == "inheritance"
+                },
+                {
+                    ("extends", "Base"),
+                    ("implements", "Contract"),
+                    ("implements", "List"),
+                },
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
