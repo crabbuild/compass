@@ -416,33 +416,57 @@ def _scan_file(
     import_pattern = re.compile(
         r"\b(?:import|export|part|use)\s+([^;\n{}]+)", re.MULTILINE
     )
+    imported_targets: dict[str, str] = {}
     for match in import_pattern.finditer(masked):
         words = match.group(1).strip().split()
         if not words:
             continue
-        target = words[0].strip("'\"")
+        static_import = language == "groovy" and words[0] == "static"
+        target_index = 1 if static_import else 0
+        if target_index >= len(words):
+            continue
+        target = words[target_index].strip("'\"")
         if not target:
             continue
+        local_spelling = target.rsplit(".", 1)[-1].removesuffix(".*")
+        if language == "groovy":
+            alias_index = next(
+                (
+                    index
+                    for index, word in enumerate(words[target_index + 1 :], target_index + 1)
+                    if word == "as" and index + 1 < len(words)
+                ),
+                None,
+            )
+            if alias_index is not None:
+                local_spelling = words[alias_index + 1].strip("'\"")
+            if local_spelling and target != "*":
+                imported_targets[local_spelling] = target.removesuffix(".*")
+        target_start = match.start(1)
+        if language == "groovy":
+            target_start += match.group(1).find(target)
         start, end, line = _byte_range(
             source,
             offsets,
             line_starts,
-            match.start(1),
-            match.start(1) + len(target),
+            target_start,
+            target_start + len(target),
         )
         relation = "reexports" if match.group(0).lstrip().startswith("export") else "imports"
-        relations.append(
-            {
-                "relation": relation,
-                "capability": "imports",
-                "ownerQualifiedName": package or relative,
-                "targetSpelling": target,
-                "qualifier": None,
-                "startByte": start,
-                "endByte": end,
-                "startLine": line,
-            }
-        )
+        import_relation = {
+            "relation": relation,
+            "capability": "imports",
+            "ownerQualifiedName": package or relative,
+            "targetSpelling": target,
+            "qualifier": None,
+            "startByte": start,
+            "endByte": end,
+            "startLine": line,
+        }
+        if language == "groovy":
+            import_relation["localSpelling"] = local_spelling
+            import_relation["qualifiedTarget"] = target.removesuffix(".*")
+        relations.append(import_relation)
 
     call_pattern = re.compile(
         rf"(?P<callee>{IDENTIFIER}(?:(?:\.|::|#){IDENTIFIER})*)\s*\(",
@@ -493,31 +517,73 @@ def _scan_file(
             }
         )
 
-    base_pattern = re.compile(
-        rf"\b(?:class|struct|enum|actor|trait|object|interface|extension)\s+(?P<name>{IDENTIFIER})\s*:\s*(?P<base>{IDENTIFIER}(?:(?:\.|::){IDENTIFIER})*)",
-        re.MULTILINE,
-    )
-    for match in base_pattern.finditer(masked):
-        start, end, line = _byte_range(
-            source,
-            offsets,
-            line_starts,
-            match.start("base"),
-            match.end("base"),
+    if language == "groovy":
+        groovy_base_pattern = re.compile(
+            rf"\b(?:class|interface|trait|enum)\s+(?P<name>{IDENTIFIER})(?P<clauses>[^{{;\n]*)",
+            re.MULTILINE,
         )
-        owner = _qualified_name(package, match.group("name")) or match.group("name")
-        relations.append(
-            {
-                "relation": "extends",
-                "capability": "inheritance",
-                "ownerQualifiedName": owner,
-                "targetSpelling": match.group("base"),
-                "qualifier": None,
-                "startByte": start,
-                "endByte": end,
-                "startLine": line,
-            }
+        for match in groovy_base_pattern.finditer(masked):
+            owner = _qualified_name(package, match.group("name")) or match.group("name")
+            clauses = match.group("clauses")
+            for clause in re.finditer(
+                rf"\b(?P<keyword>extends|implements)\s+(?P<values>.*?)(?=\b(?:extends|implements)\b|$)",
+                clauses,
+            ):
+                values = re.sub(r"<[^>]*>", "", clause.group("values"))
+                for value_match in re.finditer(
+                    rf"(?P<base>{IDENTIFIER}(?:(?:\.|::){IDENTIFIER})*)",
+                    values,
+                ):
+                    base = value_match.group("base")
+                    start_index = match.start("clauses") + clause.start("values") + value_match.start("base")
+                    end_index = start_index + len(base)
+                    start, end, line = _byte_range(
+                        source,
+                        offsets,
+                        line_starts,
+                        start_index,
+                        end_index,
+                    )
+                    relation = clause.group("keyword")
+                    item = {
+                        "relation": relation,
+                        "capability": "inheritance",
+                        "ownerQualifiedName": owner,
+                        "targetSpelling": base,
+                        "qualifier": None,
+                        "startByte": start,
+                        "endByte": end,
+                        "startLine": line,
+                    }
+                    if base in imported_targets:
+                        item["qualifiedTarget"] = imported_targets[base]
+                    relations.append(item)
+    else:
+        base_pattern = re.compile(
+            rf"\b(?:class|struct|enum|actor|trait|object|interface|extension)\s+(?P<name>{IDENTIFIER})\s*:\s*(?P<base>{IDENTIFIER}(?:(?:\.|::){IDENTIFIER})*)",
+            re.MULTILINE,
         )
+        for match in base_pattern.finditer(masked):
+            start, end, line = _byte_range(
+                source,
+                offsets,
+                line_starts,
+                match.start("base"),
+                match.end("base"),
+            )
+            owner = _qualified_name(package, match.group("name")) or match.group("name")
+            relations.append(
+                {
+                    "relation": "extends",
+                    "capability": "inheritance",
+                    "ownerQualifiedName": owner,
+                    "targetSpelling": match.group("base"),
+                    "qualifier": None,
+                    "startByte": start,
+                    "endByte": end,
+                    "startLine": line,
+                }
+            )
 
     declarations_json = [
         {
@@ -633,7 +699,7 @@ def _validate_provider_relation(
     qualifier = relation.get("qualifier")
     if qualifier is not None and not isinstance(qualifier, str):
         raise OracleError(f"parser provider qualifier in {relative} is not a string")
-    return {
+    normalized = {
         "relation": relation["relation"],
         "capability": relation["capability"],
         "ownerQualifiedName": relation["ownerQualifiedName"],
@@ -643,6 +709,13 @@ def _validate_provider_relation(
         "endByte": end,
         "startLine": line,
     }
+    for field in ("localSpelling", "qualifiedTarget"):
+        value = relation.get(field)
+        if value is not None:
+            if not isinstance(value, str) or not value.strip():
+                raise OracleError(f"parser provider {field} in {relative} is invalid")
+            normalized[field] = value
+    return normalized
 
 
 def _run_parser_provider(

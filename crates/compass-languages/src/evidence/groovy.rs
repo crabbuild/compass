@@ -4,8 +4,9 @@ use std::path::Path;
 
 use tree_sitter::Node;
 
+use super::build::range_for_byte_span;
 use super::model::{CandidateRelation, SemanticEvidenceBatch};
-use super::shared::{self, LanguageProfile, State};
+use super::shared::{self, LanguageProfile, ParsedImport, State};
 use super::validate::EvidenceError;
 
 struct Groovy;
@@ -15,6 +16,10 @@ impl LanguageProfile for Groovy {
 
     fn package_name(source: &[u8]) -> Option<String> {
         shared::package_name_from_source(source)
+    }
+
+    fn parse_imports(statement: &str) -> Vec<ParsedImport> {
+        parse_groovy_import(statement)
     }
 
     fn has_source_supplement(declaration_count: usize) -> bool {
@@ -32,8 +37,13 @@ impl LanguageProfile for Groovy {
     fn should_collect_source_supplement(source: &[u8], declaration_count: usize) -> bool {
         Self::has_source_supplement(declaration_count)
             || std::str::from_utf8(source).is_ok_and(|text| {
-                text.lines()
-                    .any(|line| groovy_spock_feature_declaration(line.trim()).is_some())
+                text.lines().any(|line| {
+                    let line = line.trim();
+                    line.starts_with("import ")
+                        || line.contains(" extends ")
+                        || line.contains(" implements ")
+                        || groovy_spock_feature_declaration(line).is_some()
+                })
             })
     }
 
@@ -58,6 +68,64 @@ pub(super) fn emit_tree_evidence(
     root: Node<'_>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
     shared::emit_tree_evidence::<Groovy>(path, source_file, source, root)
+}
+
+fn parse_groovy_import(statement: &str) -> Vec<ParsedImport> {
+    let trimmed = statement.trim().trim_end_matches(';').trim();
+    let Some(rest) = trimmed.strip_prefix("import") else {
+        return Vec::new();
+    };
+    let mut rest = rest.trim();
+    let _is_static = if let Some(value) = rest.strip_prefix("static") {
+        rest = value.trim();
+        true
+    } else {
+        false
+    };
+    let tokens = rest.split_whitespace().collect::<Vec<_>>();
+    let Some(target_token) = tokens.first() else {
+        return Vec::new();
+    };
+    let target = target_token.trim_matches(['\'', '"']).trim_end_matches(';');
+    if target.is_empty()
+        || !target
+            .split('.')
+            .all(|part| part == "*" || shared::valid_name(part))
+    {
+        return Vec::new();
+    }
+    let alias = tokens
+        .windows(2)
+        .find(|pair| pair[0] == "as")
+        .map(|pair| pair[1].trim_matches(['\'', '"']).trim_end_matches(';'))
+        .filter(|value| shared::valid_name(value));
+    if target.ends_with(".*") {
+        let prefix = target.trim_end_matches(".*");
+        return vec![ParsedImport {
+            target: prefix.to_owned(),
+            binding_spelling: format!("{prefix}.*"),
+            local_spelling: alias.unwrap_or("*").to_owned(),
+            qualifier: Some(prefix.to_owned()),
+            alias: alias.is_some(),
+            prefix: true,
+            reexport: false,
+        }];
+    }
+    let Some(spelling) = alias
+        .map(str::to_owned)
+        .or_else(|| target.rsplit('.').next().map(str::to_owned))
+    else {
+        return Vec::new();
+    };
+    vec![ParsedImport {
+        target: target.to_owned(),
+        binding_spelling: spelling.clone(),
+        local_spelling: spelling,
+        qualifier: None,
+        alias: alias.is_some(),
+        prefix: false,
+        reexport: false,
+    }]
 }
 
 /// The pinned Groovy grammar intentionally exposes each top-level form as a
@@ -96,6 +164,19 @@ fn collect_groovy_source<'source>(state: &mut State<'source, Groovy>) -> Result<
         }
         if method.is_some_and(|(_, end)| line_start >= end) {
             method = None;
+        }
+
+        if trimmed.starts_with("import ") {
+            let trim_offset = line_without_newline
+                .len()
+                .saturating_sub(line_without_newline.trim_start().len());
+            let range = range_for_byte_span(
+                state.source_file,
+                state.source,
+                line_start.saturating_add(trim_offset),
+                line_end,
+            );
+            state.emit_imports(parse_groovy_import(trimmed), range)?;
         }
 
         if let Some((kind, name, name_offset)) = groovy_type_declaration(trimmed) {
@@ -366,6 +447,13 @@ fn valid_groovy_type_name(value: &str) -> bool {
 fn groovy_method_declaration(line: &str) -> Option<(String, bool, usize)> {
     let open = line.find('(')?;
     let before = line.get(..open)?.trim_end();
+    // A property initializer such as `List<String> items = empty()` contains
+    // parentheses but is not a method declaration.  Treating the call as a
+    // declaration invents a method target and makes imported static calls
+    // ambiguous.
+    if before.contains('=') {
+        return None;
+    }
     let name_end = before.len();
     let name_start = before
         .char_indices()

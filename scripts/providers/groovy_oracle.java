@@ -47,6 +47,8 @@ public final class groovy_oracle {
             String owner,
             String target,
             String qualifier,
+            String localSpelling,
+            String qualifiedTarget,
             int start,
             int end,
             int line) {}
@@ -124,15 +126,18 @@ public final class groovy_oracle {
         private final String path;
         private final String source;
         private final SourceText text;
+        private final String packageName;
+        private final Map<String, String> importedTypes = new TreeMap<>();
         private final List<Relation> relations = new ArrayList<>();
         private final List<String> owners = new ArrayList<>();
         private final Set<String> emitted = new HashSet<>();
         private SourceUnit sourceUnit;
 
-        Emitter(String path, String source, SourceText text) {
+        Emitter(String path, String source, SourceText text, String packageName) {
             this.path = path;
             this.source = source;
             this.text = text;
+            this.packageName = packageName == null ? "" : packageName.replaceAll("\\.+$", "");
         }
 
         List<Relation> relations() {
@@ -148,12 +153,24 @@ public final class groovy_oracle {
             this.sourceUnit = sourceUnit;
         }
 
+        void registerTypeImport(String local, String target) {
+            if (local != null && !local.isEmpty() && target != null && !target.isEmpty()) {
+                importedTypes.put(local, target);
+            }
+        }
+
         private String owner() {
             return owners.isEmpty() ? path : String.join(".", owners);
         }
 
         private void add(String relation, String capability, String target, ASTNode node,
                          String qualifier, String explicitOwner) {
+            addQualified(relation, capability, target, node, qualifier, explicitOwner, null, null);
+        }
+
+        private void addQualified(String relation, String capability, String target, ASTNode node,
+                                   String qualifier, String explicitOwner,
+                                   String localSpelling, String qualifiedTarget) {
             if (target == null || target.trim().isEmpty()) return;
             Span span = text.span(node);
             if (span == null || span.end() <= span.start()) return;
@@ -163,7 +180,7 @@ public final class groovy_oracle {
                     + span.start() + "\u0000" + span.end();
             if (emitted.add(key)) {
                 relations.add(new Relation(relation, capability, owner, cleanTarget, qualifier,
-                        span.start(), span.end(), span.line()));
+                        localSpelling, qualifiedTarget, span.start(), span.end(), span.line()));
             }
         }
 
@@ -181,6 +198,15 @@ public final class groovy_oracle {
             String name = node.getName();
             int dollar = name.lastIndexOf('$');
             return dollar >= 0 ? name.substring(dollar + 1) : node.getNameWithoutPackage();
+        }
+
+        private String qualifiedTypeName(ClassNode node) {
+            if (node == null || node.getName() == null || node.getName().isEmpty()) return "";
+            String name = node.getName();
+            String imported = importedTypes.get(name);
+            if (imported != null && !imported.isEmpty()) return imported;
+            if (name.indexOf('.') >= 0 || packageName.isEmpty()) return name;
+            return packageName + "." + name;
         }
 
         private void enter(String name, ASTNode node) {
@@ -207,10 +233,12 @@ public final class groovy_oracle {
             enter(name, node);
             ClassNode superClass = node.getUnresolvedSuperClass();
             if (superClass != null && !"java.lang.Object".equals(superClass.getName())) {
-                add("extends", "base_types", typeName(superClass), node, null, owner());
+                addQualified("extends", "base_types", typeName(superClass), node, null, owner(),
+                        null, qualifiedTypeName(superClass));
             }
             for (ClassNode iface : node.getInterfaces()) {
-                add("implements", "base_types", typeName(iface), node, null, owner());
+                addQualified("implements", "base_types", typeName(iface), node, null, owner(),
+                        null, qualifiedTypeName(iface));
             }
             super.visitClass(node);
             leave();
@@ -330,6 +358,8 @@ public final class groovy_oracle {
                 + ",\"ownerQualifiedName\":" + json(relation.owner())
                 + ",\"targetSpelling\":" + json(relation.target())
                 + ",\"qualifier\":" + json(relation.qualifier())
+                + (relation.localSpelling() == null ? "" : ",\"localSpelling\":" + json(relation.localSpelling()))
+                + (relation.qualifiedTarget() == null ? "" : ",\"qualifiedTarget\":" + json(relation.qualifiedTarget()))
                 + ",\"startByte\":" + relation.start()
                 + ",\"endByte\":" + relation.end()
                 + ",\"startLine\":" + relation.line() + "}";
@@ -350,19 +380,51 @@ public final class groovy_oracle {
             SourceUnit sourceUnit = unit.addSource(relative, source);
             unit.compile(Phases.CONVERSION);
             ModuleNode module = sourceUnit.getAST();
-            Emitter emitter = new Emitter(relative, source, new SourceText(source));
+            Emitter emitter = new Emitter(relative, source, new SourceText(source), module.getPackageName());
             emitter.setSourceUnit(sourceUnit);
             emitter.visitImports(module);
-            for (ImportNode ignored : module.getImports()) {
-                // Imports are emitted below with the exact AST import span.
-            }
             for (ImportNode importNode : module.getImports()) {
-                String target = importNode.getClassName();
-                if (target != null && !target.isEmpty()) emitter.add("imports", "imports", target, importNode, null, null);
+                String className = importNode.getClassName();
+                if (className == null || className.isEmpty()) continue;
+                String fieldName = importNode.getFieldName();
+                String target = importNode.isStatic() && fieldName != null && !fieldName.isEmpty()
+                        ? className + "." + fieldName
+                        : className;
+                String local = importNode.getAlias();
+                if (local == null || local.isEmpty()) {
+                    local = importNode.isStatic() && fieldName != null && !fieldName.isEmpty()
+                            ? fieldName
+                            : className.substring(className.lastIndexOf('.') + 1);
+                }
+                if (!importNode.isStatic()) emitter.registerTypeImport(local, target);
+                emitter.addQualified("imports", "imports", target, importNode, null, null,
+                        local, target);
+            }
+            for (Map.Entry<String, ImportNode> entry : module.getStaticImports().entrySet()) {
+                ImportNode importNode = entry.getValue();
+                String className = importNode.getClassName();
+                String fieldName = importNode.getFieldName();
+                if (className == null || className.isEmpty()
+                        || fieldName == null || fieldName.isEmpty()) continue;
+                String target = className + "." + fieldName;
+                String local = importNode.getAlias();
+                if (local == null || local.isEmpty()) local = entry.getKey();
+                emitter.addQualified("imports", "imports", target, importNode, null, null,
+                        local, target);
             }
             for (ImportNode importNode : module.getStarImports()) {
                 String target = importNode.getPackageName();
-                if (target != null && !target.isEmpty()) emitter.add("imports", "imports", target, importNode, null, null);
+                if (target != null && !target.isEmpty()) {
+                    emitter.addQualified("imports", "imports", target, importNode, null, null,
+                            "*", target);
+                }
+            }
+            for (ImportNode importNode : module.getStaticStarImports().values()) {
+                String target = importNode.getClassName();
+                if (target != null && !target.isEmpty()) {
+                    emitter.addQualified("imports", "imports", target, importNode, null, null,
+                            "*", target);
+                }
             }
             for (ClassNode classNode : module.getClasses()) emitter.visitClass(classNode);
             for (MethodNode method : module.getMethods()) emitter.visitMethod(method);
