@@ -938,6 +938,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "compass-agent-graph"
+version = "0.3.19"
+dependencies = [
+ "compass-model",
+ "compass-store",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "compass-analysis"
 version = "0.3.19"
 dependencies = [
@@ -966,6 +979,7 @@ dependencies = [
 name = "compass-cli"
 version = "0.3.19"
 dependencies = [
+ "compass-agent-graph",
  "compass-analysis",
  "compass-cargo",
  "compass-core",
@@ -1014,6 +1028,7 @@ name = "compass-core"
 version = "0.3.19"
 dependencies = [
  "ahash",
+ "compass-agent-graph",
  "compass-analysis",
  "compass-files",
  "compass-google-workspace",
@@ -1219,6 +1234,7 @@ name = "compass-mcp"
 version = "0.3.19"
 dependencies = [
  "axum",
+ "compass-agent-graph",
  "compass-core",
  "compass-files",
  "compass-graph",
@@ -1269,6 +1285,7 @@ name = "compass-output"
 version = "0.3.19"
 dependencies = [
  "ahash",
+ "compass-agent-graph",
  "compass-analysis",
  "compass-cypher",
  "compass-files",
@@ -1352,6 +1369,7 @@ name = "compass-query"
 version = "0.3.19"
 dependencies = [
  "base64 0.22.1",
+ "compass-agent-graph",
  "compass-analysis",
  "compass-cypher",
  "compass-graph",

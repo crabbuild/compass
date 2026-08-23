@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add Grounded Agent Graph overlays: authorized agents can submit citation-
+  backed node, edge, Challenge, and Retraction operations without mutating the
+  source-derived Base Graph. Compass deterministically issues `GROUNDED`,
+  publishes immutable CAS-activated revisions with bounded audit, supports
+  exact rebase and historical composition, and exposes exact effective reads
+  through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
+  stronger curated masks remain deny-by-default capabilities.
+
 - Replace the predefined flat call-flow architecture model with the native
   `compass.viewer.architecture/1` projection. Production source scope is fixed
   before grouping, generated/vendor/test/documentation content cannot shape Production,

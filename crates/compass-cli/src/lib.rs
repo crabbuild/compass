@@ -1,5 +1,6 @@
 //! Command implementation for the native Compass CLI.
 
+mod agent_graph_commands;
 mod call_graph_commands;
 mod capability_commands;
 mod code_query_commands;
@@ -365,6 +366,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     };
     let outcome = match command.as_str() {
         "history" => history_commands::command(frontend, &args),
+        "agent-graph" => agent_graph_commands::command(&args),
         "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
         "ask" => code_query_commands::command("ask", &args),
@@ -546,13 +548,18 @@ pub fn run_mcp(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut imp
             host: options.host,
             port: options.port,
             api_key: options.api_key,
+            write_api_key: options.write_api_key,
+            agent_graph: options.agent_graph,
             path: options.path,
             json_response: options.json_response,
             stateless: options.stateless,
             session_timeout: options.session_timeout,
         }))
     } else {
-        runtime.block_on(compass_mcp::serve_stdio(options.graph_path))
+        runtime.block_on(compass_mcp::serve_stdio_configured(
+            options.graph_path,
+            options.agent_graph,
+        ))
     };
     match result {
         Ok(()) => 0,
@@ -570,6 +577,8 @@ struct McpOptions {
     host: String,
     port: u16,
     api_key: Option<String>,
+    write_api_key: Option<String>,
+    agent_graph: Option<compass_mcp::AgentGraphMcpConfig>,
     path: String,
     json_response: bool,
     stateless: bool,
@@ -589,6 +598,12 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
     let mut host = "127.0.0.1".to_owned();
     let mut port = 8080_u16;
     let mut api_key = std::env::var("COMPASS_API_KEY").ok();
+    let mut write_api_key = std::env::var("COMPASS_WRITE_API_KEY").ok();
+    let mut agent_projects = std::collections::BTreeSet::new();
+    let mut agent_writes = false;
+    let mut agent_masks = false;
+    let mut agent_principal = "principal:mcp".to_owned();
+    let mut agent_state_root = None;
     let mut path = "/mcp".to_owned();
     let mut json_response = false;
     let mut stateless = false;
@@ -614,6 +629,28 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
                     .map_err(|_| format!("error: argument --port: invalid int value: '{raw}'"))?;
             }
             "--api-key" => api_key = Some(mcp_value(args, &mut index, "--api-key")?.to_owned()),
+            "--write-api-key" => {
+                write_api_key = Some(mcp_value(args, &mut index, "--write-api-key")?.to_owned())
+            }
+            "--agent-graph-project" => {
+                agent_projects.insert(PathBuf::from(mcp_value(
+                    args,
+                    &mut index,
+                    "--agent-graph-project",
+                )?));
+            }
+            "--agent-graph-writes" => agent_writes = true,
+            "--agent-graph-masks" => agent_masks = true,
+            "--agent-graph-principal" => {
+                agent_principal = mcp_value(args, &mut index, "--agent-graph-principal")?.to_owned()
+            }
+            "--agent-graph-state-root" => {
+                agent_state_root = Some(PathBuf::from(mcp_value(
+                    args,
+                    &mut index,
+                    "--agent-graph-state-root",
+                )?))
+            }
             "--path" => path = mcp_value(args, &mut index, "--path")?.to_owned(),
             "--json-response" => json_response = true,
             "--stateless" => stateless = true,
@@ -640,6 +677,18 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
                     .map_err(|_| format!("error: argument --port: invalid int value: '{raw}'"))?;
             }
             _ if value.starts_with("--api-key=") => api_key = Some(value[10..].to_owned()),
+            _ if value.starts_with("--write-api-key=") => {
+                write_api_key = Some(value[16..].to_owned())
+            }
+            _ if value.starts_with("--agent-graph-project=") => {
+                agent_projects.insert(PathBuf::from(&value[22..]));
+            }
+            _ if value.starts_with("--agent-graph-principal=") => {
+                agent_principal = value[24..].to_owned()
+            }
+            _ if value.starts_with("--agent-graph-state-root=") => {
+                agent_state_root = Some(PathBuf::from(&value[25..]))
+            }
             _ if value.starts_with("--path=") => path = value[7..].to_owned(),
             _ if value.starts_with("--session-timeout=") => {
                 let raw = &value[18..];
@@ -660,12 +709,36 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
             PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
                 .join("graph.json")
         });
+    let agent_graph = if agent_projects.is_empty() {
+        if agent_writes || agent_masks || agent_state_root.is_some() {
+            return Err(
+                "error: Agent Graph MCP options require --agent-graph-project PATH".to_owned(),
+            );
+        }
+        None
+    } else {
+        let principal = compass_agent_graph::PrincipalId::parse(agent_principal)
+            .map_err(|error| format!("error: invalid --agent-graph-principal: {error}"))?;
+        Some(
+            compass_mcp::AgentGraphMcpConfig {
+                writes_enabled: agent_writes,
+                masks_enabled: agent_masks,
+                principal,
+                allowed_projects: agent_projects,
+                non_git_state_root: agent_state_root,
+            }
+            .validate()
+            .map_err(|error| format!("error: {error}"))?,
+        )
+    };
     Ok(Some(McpOptions {
         graph_path,
         transport,
         host,
         port,
         api_key,
+        write_api_key,
+        agent_graph,
         path,
         json_response,
         stateless,
@@ -696,7 +769,7 @@ fn parse_session_timeout(raw: &str) -> Result<Option<Duration>, String> {
 }
 
 fn mcp_help() -> String {
-    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]".to_owned()
+    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--write-api-key KEY] [--agent-graph-project PATH] [--agent-graph-writes] [--agent-graph-masks] [--agent-graph-principal ID] [--agent-graph-state-root PATH] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]".to_owned()
 }
 
 /// Run Compass's long-lived native watcher, streaming status as changes arrive.

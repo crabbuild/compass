@@ -31,6 +31,22 @@ Explicit optional boundaries                      |
 
 The default code-only graph path does not need a network or model key.
 
+## Agent Graph write boundary
+
+Agent Graph writes are denied by default. A trusted adapter mints a bounded,
+expiring grant for one canonical repository, overlay, Base Generation,
+expected revision, principal, permission set, and mask policy. Change requests
+cannot self-assign any of those values. Every batch is validated and Grounded
+before immutable objects are published; selector activation is conditional, so
+competing writers receive a conflict rather than losing an update.
+
+HTTP requires a distinct write credential in addition to normal API
+authentication. Project allowlists are canonicalized at startup, a non-Git
+state root may serve only one project, and the write tool is not advertised
+when disabled. Audit records contain bounded digests and trusted adapter/model
+labels only. Prompts, model responses, chain-of-thought, credentials, tokens,
+and source excerpts are outside the audit contract.
+
 ## Data that remains local by default
 
 For structural source analysis:

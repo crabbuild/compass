@@ -43,6 +43,20 @@ export function NodeHoverCard({
             : `${node.change[0]?.toLocaleUpperCase()}${node.change.slice(1)}`}
         </span>
       )}
+      {node.groundingStatus === "GROUNDED" && (
+        <span className="compass-change-badge" data-grounding="grounded">
+          GROUNDED · agent-authored
+        </span>
+      )}
+      {node.agentSummary && <p>{node.agentSummary}</p>}
+      {node.challenge && (
+        <p>
+          Challenge ({node.challenge.effect}): {node.challenge.summary}
+        </p>
+      )}
+      {node.challenged && !node.challenge && (
+        <p>Challenge: this Base Graph fact is disputed.</p>
+      )}
       {node.memberCount !== undefined ? (
         <p>{node.memberCount.toLocaleString()} symbols</p>
       ) : (

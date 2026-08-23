@@ -385,10 +385,25 @@ When Compass returns an edge, ask:
 
 Those seven questions prevent most over-interpretation.
 
+## Agent-authored overlays
+
+The Base Graph remains the immutable source-derived graph. An Agent Graph
+Overlay is a separate append-only sequence of agent-owned Assertions,
+Retractions, and Challenges. Compass composes one exact Base Generation and
+one exact Overlay Revision into an Effective Graph under either the `augment`
+or `curated` profile.
+
+`GROUNDED` means Compass verified the assertion's citations and issued a
+certificate. It describes verification, not authorship, structural extraction
+confidence, runtime truth, or semantic correctness. Agent facts therefore
+retain both `groundingStatus: "GROUNDED"` and the separate conservative
+structural confidence used by graph traversal.
+
 ## Related pages
 
 - [How Compass works](how-it-works.md)
 - [Provenance and confidence](provenance.md)
+- [Agent Graph overlays](agent-graph-overlays.md)
 - [CompassQL concepts](compassql.md)
 - [Output reference](../reference/outputs.md)
 

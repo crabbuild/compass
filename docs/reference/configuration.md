@@ -430,6 +430,25 @@ Project scope writes reviewable repository files. Global scope writes
 platform-specific user configuration. The platform list and exact destinations
 come from `compass install --help`.
 
+## Agent Graph MCP configuration
+
+Agent Graph tools are opt-in server configuration:
+
+```text
+--agent-graph-project PATH       repeatable canonical project allowlist
+--agent-graph-principal ID      trusted owner identity
+--agent-graph-state-root PATH   explicit state for one non-Git project
+--agent-graph-writes            advertise and authorize write batches
+--agent-graph-masks             additionally authorize curated masks
+--write-api-key KEY             HTTP write credential, distinct from --api-key
+```
+
+Setting a state root for multiple projects is rejected. Masks require writes.
+HTTP write startup requires non-empty, distinct read and write keys; the same
+values may be supplied through `COMPASS_API_KEY` and
+`COMPASS_WRITE_API_KEY`. Stdio still requires explicit write enablement but
+does not create a network credential boundary.
+
 ## Reproducibility record
 
 For a reproducible job, record:

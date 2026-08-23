@@ -18,6 +18,23 @@ one practical current result           multiple profiles per commit
 
 Do not use one as if it were the other.
 
+## Agent Graph overlay plane
+
+Agent Graph state is a third, separately owned plane. Git repositories store it
+below the Git common directory; non-Git use requires an explicit confined state
+root. The Base Graph and history realizations are never rewritten.
+
+Each write publishes a content-addressed immutable Overlay Revision and audit
+record before a compare-and-swap head activation. Idempotency records bind one
+key to one request and receipt. Exact revision reads do not depend on the
+current head. Pins keep review revisions and their ancestry reachable; bounded,
+explicitly quiescent GC can sweep only unreachable revision/tree/audit objects.
+
+Historical composition opens the selected trusted realization and an offline
+detached checkout, then combines it with an explicitly selected Overlay
+Revision. It does not change the preferred realization, history roots, or
+stored graph bytes.
+
 ## Current-tree artifacts
 
 The normal pipeline writes:

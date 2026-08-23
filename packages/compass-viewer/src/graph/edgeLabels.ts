@@ -13,7 +13,8 @@ const RELATION_LABELS: Readonly<Record<string, string>> = {
   reads: "reads",
   writes: "writes",
   maps_to: "maps to",
-  depends_on: "depends on"
+  depends_on: "depends on",
+  renders: "renders"
 };
 
 export function formatGraphRelation(

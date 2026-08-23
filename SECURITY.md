@@ -40,6 +40,12 @@ Compass parses untrusted project content and graph files. Its default structural
 
 - Semantic extraction sends selected content to the configured model provider
 - Streamable HTTP exposes the Model Context Protocol server on the configured interface
+- Agent Graph mutation is a separate opt-in capability. HTTP deployments must
+  use distinct non-empty read and write API keys, canonical project allowlists,
+  and server-owned principals/permissions. The write tool is absent when
+  disabled; mask capability must be enabled separately. Never place prompts,
+  responses, chain-of-thought, credentials, or source excerpts in audit
+  metadata.
 - Neo4j and FalkorDB pushes connect to external databases
 - URL acquisition and Google Workspace extraction access configured external services
 - PostgreSQL extraction connects to the supplied database server

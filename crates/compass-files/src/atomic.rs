@@ -109,6 +109,47 @@ where
     result
 }
 
+/// Atomically create a new file without replacing any existing directory entry.
+fn atomic_create_new<F>(path: &Path, write: F) -> Result<(), FileError>
+where
+    F: FnOnce(&mut BufWriter<File>) -> Result<(), FileError>,
+{
+    let destination = path.to_path_buf();
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
+    let temporary = temporary_path(&destination);
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|source| io_error(&temporary, source))?;
+
+    let result = (|| {
+        let mut writer = BufWriter::with_capacity(ATOMIC_WRITE_BUFFER_BYTES, file);
+        write(&mut writer)?;
+        writer
+            .flush()
+            .map_err(|source| io_error(&temporary, source))?;
+        let file = writer
+            .into_inner()
+            .map_err(|error| io_error(&temporary, error.into_error()))?;
+        file.sync_all()
+            .map_err(|source| io_error(&temporary, source))?;
+        drop(file);
+        fs::hard_link(&temporary, &destination).map_err(|source| io_error(&destination, source))?;
+        fs::remove_file(&temporary).map_err(|source| io_error(&temporary, source))?;
+        sync_directory(parent)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 /// Atomically copy an existing file using the platform's native copy path.
 ///
 /// Native copies can use copy-on-write clones or in-kernel copying while the
@@ -270,6 +311,25 @@ pub fn write_json_atomic<T: Serialize>(
     pretty: bool,
 ) -> Result<(), FileError> {
     atomic_replace(path.as_ref(), |writer| {
+        if pretty {
+            serde_json::to_writer_pretty(writer, value)
+        } else {
+            serde_json::to_writer(writer, value)
+        }
+        .map_err(|source| FileError::Json {
+            path: path.as_ref().to_path_buf(),
+            source,
+        })
+    })
+}
+
+/// Atomically serialize JSON only when the destination does not already exist.
+pub fn write_json_atomic_new<T: Serialize>(
+    path: impl AsRef<Path>,
+    value: &T,
+    pretty: bool,
+) -> Result<(), FileError> {
+    atomic_create_new(path.as_ref(), |writer| {
         if pretty {
             serde_json::to_writer_pretty(writer, value)
         } else {

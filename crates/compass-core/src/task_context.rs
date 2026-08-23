@@ -1,5 +1,8 @@
 use std::collections::BTreeSet;
 
+use compass_agent_graph::{
+    ChallengeId, CompositionOmissions, EffectiveGraph, GroundingEvidence, OverlayState,
+};
 use compass_model::code_graph::EdgeKind;
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, ExploreRequest,
@@ -124,7 +127,53 @@ pub struct TaskContextWork {
     pub files_verified: u64,
     pub source_bytes: u64,
     pub knowledge_items_read: u64,
+    #[serde(default)]
+    pub agent_knowledge_records: u64,
+    #[serde(default)]
+    pub agent_knowledge_bytes: u64,
     pub response_bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentKnowledgeAssertion {
+    pub assertion_id: compass_agent_graph::AssertionId,
+    pub projected_id: String,
+    pub owner: compass_agent_graph::PrincipalId,
+    pub version: u64,
+    pub grounding_status: String,
+    pub structural_confidence: String,
+    pub certificate_digest: compass_agent_graph::GroundingCertificateDigest,
+    pub summary: String,
+    pub citations: Vec<GroundingEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentKnowledgeChallenge {
+    pub challenge_id: ChallengeId,
+    pub target_id: String,
+    pub effect: compass_agent_graph::ChallengeEffect,
+    pub masked: bool,
+    pub grounding_status: String,
+    pub certificate_digest: compass_agent_graph::GroundingCertificateDigest,
+    pub summary: String,
+    pub citations: Vec<GroundingEvidence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentKnowledgeSection {
+    pub schema: String,
+    pub effective_identity: compass_agent_graph::Digest,
+    pub base_generation: compass_agent_graph::BaseGenerationId,
+    pub overlay_revision: compass_agent_graph::OverlayRevisionId,
+    pub composition_profile: compass_agent_graph::CompositionProfile,
+    pub assertions: Vec<AgentKnowledgeAssertion>,
+    pub challenges: Vec<AgentKnowledgeChallenge>,
+    pub omissions: CompositionOmissions,
+    pub truncated: bool,
+    pub omitted_records: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -137,6 +186,8 @@ pub struct TaskContext {
     pub graph_identity: String,
     pub build_generation_identity: String,
     pub sections: Vec<TaskContextSection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_knowledge: Option<AgentKnowledgeSection>,
     pub project_knowledge: Vec<TaskContextKnowledge>,
     pub omissions: Vec<TaskContextOmission>,
     pub truncated: bool,
@@ -178,6 +229,20 @@ impl TaskContext {
                 "response byte count mismatch: expected {actual_bytes}, found {}",
                 self.work.response_bytes
             )));
+        }
+        if let Some(agent) = &self.agent_knowledge {
+            if agent.schema != "compass.agent-knowledge/1"
+                || agent.effective_identity.as_str() != self.graph_identity
+                || agent
+                    .assertions
+                    .len()
+                    .saturating_add(agent.challenges.len())
+                    > MAX_KNOWLEDGE_ITEMS as usize
+            {
+                return Err(TaskContextError::InvalidResult(
+                    "Agent knowledge identity, schema, or record bound is invalid".to_owned(),
+                ));
+            }
         }
         Ok(())
     }
@@ -376,6 +441,7 @@ pub fn build_task_context(
         graph_identity: engine.graph_identity().to_owned(),
         build_generation_identity: engine.build_generation_identity().to_owned(),
         sections,
+        agent_knowledge: None,
         project_knowledge: knowledge,
         omissions,
         truncated: preliminary_truncated
@@ -410,6 +476,162 @@ pub fn build_task_context(
     }
     context.validate()?;
     Ok(context)
+}
+
+/// Attach only grounded Agent Assertions directly relevant to the exact target.
+pub fn attach_agent_knowledge(
+    context: &mut TaskContext,
+    effective: &EffectiveGraph,
+    state_revision: &compass_agent_graph::OverlayRevisionId,
+    state: &OverlayState,
+    max_records: usize,
+    max_response_bytes: u64,
+) -> Result<(), TaskContextError> {
+    if max_records == 0 || max_records > MAX_KNOWLEDGE_ITEMS as usize {
+        return Err(TaskContextError::InvalidRequest(format!(
+            "Agent knowledge record limit must be between 1 and {MAX_KNOWLEDGE_ITEMS}"
+        )));
+    }
+    if max_response_bytes == 0 || max_response_bytes > MAX_TASK_CONTEXT_BYTES as u64 {
+        return Err(TaskContextError::InvalidRequest(
+            "Agent knowledge response limit is zero or exceeds the task-context ceiling".to_owned(),
+        ));
+    }
+    if state.base_generation != effective.base_generation
+        || state_revision != &effective.overlay_revision
+    {
+        return Err(TaskContextError::InvalidResult(
+            "Effective Graph and overlay state identities disagree".to_owned(),
+        ));
+    }
+    let TaskContextTarget::Exact { node_id } = &context.target else {
+        return Err(TaskContextError::InvalidRequest(
+            "Agent knowledge requires an exact task-context target".to_owned(),
+        ));
+    };
+    if context.graph_identity != effective.effective_identity.as_str() {
+        return Err(TaskContextError::InvalidResult(
+            "task context is not bound to the selected Effective Graph identity".to_owned(),
+        ));
+    }
+    let incident_agent_edges = effective
+        .graph
+        .links
+        .iter()
+        .filter(|edge| edge.source == *node_id || edge.target == *node_id)
+        .map(|edge| edge.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut assertions = Vec::new();
+    for fact in &effective.agent_facts {
+        if fact.projected_id != *node_id
+            && !incident_agent_edges.contains(fact.projected_id.as_str())
+        {
+            continue;
+        }
+        let assertion = state.assertions.get(&fact.assertion).ok_or_else(|| {
+            TaskContextError::InvalidResult(
+                "Effective Graph metadata references a missing active assertion".to_owned(),
+            )
+        })?;
+        if assertion.certificate_digest != fact.certificate_digest {
+            return Err(TaskContextError::InvalidResult(
+                "Effective Graph assertion certificate digest does not match overlay state"
+                    .to_owned(),
+            ));
+        }
+        assertions.push(AgentKnowledgeAssertion {
+            assertion_id: assertion.id.clone(),
+            projected_id: fact.projected_id.clone(),
+            owner: assertion.owner.clone(),
+            version: assertion.version,
+            grounding_status: "GROUNDED".to_owned(),
+            structural_confidence: "inferred".to_owned(),
+            certificate_digest: assertion.certificate_digest.clone(),
+            summary: assertion.summary.clone(),
+            citations: assertion.grounding.evidence.clone(),
+        });
+    }
+    let mut challenges = Vec::new();
+    for effective_challenge in &effective.challenges {
+        if effective_challenge.target_id != *node_id {
+            continue;
+        }
+        let challenge = state
+            .challenges
+            .get(&effective_challenge.challenge)
+            .ok_or_else(|| {
+                TaskContextError::InvalidResult(
+                    "Effective Graph metadata references a missing active Challenge".to_owned(),
+                )
+            })?;
+        if challenge.certificate_digest != effective_challenge.certificate_digest {
+            return Err(TaskContextError::InvalidResult(
+                "Effective Graph Challenge certificate digest does not match overlay state"
+                    .to_owned(),
+            ));
+        }
+        challenges.push(AgentKnowledgeChallenge {
+            challenge_id: challenge.id.clone(),
+            target_id: effective_challenge.target_id.clone(),
+            effect: challenge.effect,
+            masked: effective_challenge.masked,
+            grounding_status: "GROUNDED".to_owned(),
+            certificate_digest: challenge.certificate_digest.clone(),
+            summary: challenge.summary.clone(),
+            citations: challenge.grounding.evidence.clone(),
+        });
+    }
+    assertions.sort_by(|left, right| left.assertion_id.cmp(&right.assertion_id));
+    challenges.sort_by(|left, right| left.challenge_id.cmp(&right.challenge_id));
+    let available = assertions.len().saturating_add(challenges.len());
+    let mut omitted_records = available.saturating_sub(max_records);
+    if assertions.len() > max_records {
+        assertions.truncate(max_records);
+        challenges.clear();
+    } else {
+        challenges.truncate(max_records.saturating_sub(assertions.len()));
+    }
+    context.agent_knowledge = Some(AgentKnowledgeSection {
+        schema: "compass.agent-knowledge/1".to_owned(),
+        effective_identity: effective.effective_identity.clone(),
+        base_generation: effective.base_generation.clone(),
+        overlay_revision: effective.overlay_revision.clone(),
+        composition_profile: effective.composition_profile,
+        assertions,
+        challenges,
+        omissions: effective.omissions.clone(),
+        truncated: omitted_records > 0,
+        omitted_records: omitted_records as u64,
+    });
+    while u64::try_from(canonical_bytes(context)?.len()).unwrap_or(u64::MAX) > max_response_bytes {
+        let Some(agent) = context.agent_knowledge.as_mut() else {
+            break;
+        };
+        if !agent.trim_one() {
+            return Err(TaskContextError::ResponseLimit {
+                limit: max_response_bytes,
+            });
+        }
+        omitted_records = omitted_records.saturating_add(1);
+        agent.truncated = true;
+        agent.omitted_records = omitted_records as u64;
+        context.truncated = true;
+    }
+    update_work(context);
+    context.result_digest = task_context_digest(context)?;
+    update_response_bytes(context)?;
+    context.validate()
+}
+
+impl AgentKnowledgeSection {
+    fn trim_one(&mut self) -> bool {
+        let removed = self.challenges.pop().is_some() || self.assertions.pop().is_some();
+        if removed {
+            self.omitted_records = self.omitted_records.saturating_add(1);
+            self.truncated = true;
+        }
+        removed
+    }
 }
 
 fn validate_request(request: &TaskContextRequest) -> Result<(), TaskContextError> {
@@ -689,6 +911,25 @@ fn update_work(context: &mut TaskContext) {
         .filter_map(|file| file.source.as_ref())
         .map(|source| u64::try_from(source.len()).unwrap_or(u64::MAX))
         .sum();
+    context.work.agent_knowledge_records = context
+        .agent_knowledge
+        .as_ref()
+        .map(|agent| {
+            u64::try_from(
+                agent
+                    .assertions
+                    .len()
+                    .saturating_add(agent.challenges.len()),
+            )
+            .unwrap_or(u64::MAX)
+        })
+        .unwrap_or(0);
+    context.work.agent_knowledge_bytes = context
+        .agent_knowledge
+        .as_ref()
+        .and_then(|agent| canonical_bytes(agent).ok())
+        .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
 }
 
 fn update_response_bytes(context: &mut TaskContext) -> Result<(), TaskContextError> {
@@ -706,7 +947,16 @@ fn update_response_bytes(context: &mut TaskContext) -> Result<(), TaskContextErr
 
 fn enforce_response_bound(context: &mut TaskContext, limit: u64) -> Result<(), TaskContextError> {
     while u64::try_from(canonical_bytes(context)?.len()).unwrap_or(u64::MAX) > limit {
-        if let Some(section) = context.sections.pop() {
+        if let Some(agent) = context.agent_knowledge.as_mut()
+            && agent.trim_one()
+        {
+            context.truncated = true;
+            context.omissions.push(omission(
+                "agent_knowledge_budget",
+                "omitted lower-priority Agent Graph evidence after reaching maxResponseBytes",
+            ));
+            update_work(context);
+        } else if let Some(section) = context.sections.pop() {
             context.truncated = true;
             context.omissions.push(omission(
                 "response_budget",

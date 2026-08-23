@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use compass_agent_graph::EffectiveGraph;
 use compass_graph::{
     GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
 };
@@ -41,6 +42,52 @@ pub struct JsonGraphEngine {
 pub struct DirectGraphEngine {
     graph: GraphDocument,
     graph_identity: String,
+}
+
+/// Read-only query adapter for one exact, already-composed Effective Graph.
+///
+/// Its cache identity includes the Base Generation, Overlay Revision, and
+/// composition profile through the Effective Graph identity.
+pub struct EffectiveGraphEngine {
+    effective: EffectiveGraph,
+    effective_identity: String,
+}
+
+impl EffectiveGraphEngine {
+    pub fn from_effective(effective: EffectiveGraph) -> Result<Self, QueryError> {
+        validate_graph_schema(&effective.graph)?;
+        compass_model::validate_code_graph(&effective.graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "effective_graph_validation_failed",
+                error.to_string(),
+            )
+        })?;
+        let effective_identity = effective.effective_identity.as_str().to_owned();
+        Ok(Self {
+            effective,
+            effective_identity,
+        })
+    }
+
+    #[must_use]
+    pub fn effective(&self) -> &EffectiveGraph {
+        &self.effective
+    }
+}
+
+impl GraphEngine for EffectiveGraphEngine {
+    fn kind(&self) -> QueryEngineKind {
+        QueryEngineKind::Memory
+    }
+
+    fn graph(&self) -> &GraphDocument {
+        &self.effective.graph
+    }
+
+    fn graph_identity(&self) -> &str {
+        &self.effective_identity
+    }
 }
 
 impl DirectGraphEngine {

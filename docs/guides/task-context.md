@@ -31,6 +31,15 @@ The MCP tool `task_context` exposes the same domain result inside the existing
 `compass.mcp.tool-result/1` transport envelope. MCP transport truncation remains
 separate from domain `truncated` and omissions.
 
+Pass `--agent-overlay`, `--agent-revision`, and optionally
+`--agent-profile augment|curated` to bind task context to one exact Effective
+Graph. Outside Git, also pass `--agent-state-root`. The resulting
+`agentKnowledge` section contains only Assertions and Challenges relevant to
+the resolved exact target, with revision/certificate identities, bounded
+citations, omissions, and separate `groundingStatus` and
+`structuralConfidence` fields. The pair of overlay selectors is mandatory;
+Compass never falls back to an active or first revision.
+
 No embeddings, model credentials, runtime downloads, or network access are
 required. Reflection memory is optional and accepted only when its
 `source_nodes` contains the resolved node identity.
