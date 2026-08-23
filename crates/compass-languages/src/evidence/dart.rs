@@ -64,6 +64,14 @@ impl LanguageProfile for Dart {
         true
     }
 
+    fn prefers_owner_local_calls() -> bool {
+        true
+    }
+
+    fn prefers_constructor_declarations() -> bool {
+        true
+    }
+
     fn collect_source_supplement<'source>(
         state: &mut State<'source, Self>,
     ) -> Result<(), EvidenceError> {
@@ -140,6 +148,10 @@ fn collect_dart_receiver_calls<'source>(
         return Ok(());
     };
     let mut bindings_by_owner = BTreeMap::<usize, BTreeMap<String, String>>::new();
+    let mut lexical_state = DartLexicalState::default();
+    let mut brace_depth = 0_isize;
+    let mut active_owner = None::<(usize, isize)>;
+    let mut pending_owner = None::<usize>;
     let mut line_start = 0_usize;
     for line in text.split_inclusive('\n') {
         let line_without_newline = line.trim_end_matches(['\r', '\n']);
@@ -167,12 +179,46 @@ fn collect_dart_receiver_calls<'source>(
             }
         }
 
-        for call in dart_calls(line_without_newline) {
+        let scan = dart_calls(line_without_newline, &mut lexical_state);
+        let header_owner = trimmed.find('(').and_then(|open| {
+            state.source_callable_owner_for(
+                line_start.saturating_add(trim_offset).saturating_add(open),
+            )
+        });
+        if let Some(owner) = header_owner {
+            if scan.brace_delta > 0 {
+                active_owner = Some((owner, brace_depth.saturating_add(1)));
+                pending_owner = None;
+            } else if line_without_newline.contains(';') {
+                pending_owner = None;
+            } else {
+                pending_owner = Some(owner);
+            }
+        } else if pending_owner.is_some() && scan.brace_delta > 0 {
+            active_owner = pending_owner
+                .take()
+                .map(|owner| (owner, brace_depth.saturating_add(1)));
+        }
+        let inherited_owner = active_owner.map(|(owner, _)| owner);
+        for call in scan.calls {
             let start = line_start.saturating_add(call.start);
             let end = line_start.saturating_add(call.end);
-            let Some(owner) = state.source_callable_owner_for(start).or(line_owner) else {
+            let owner = state
+                .source_callable_owner_for(start)
+                .or(line_owner)
+                .or(inherited_owner);
+            if call.qualifier.is_none() {
+                state.emit_source_local_call(
+                    owner,
+                    &call.spelling,
+                    None,
+                    start,
+                    end,
+                    call.constructor,
+                )?;
                 continue;
-            };
+            }
+            let Some(owner) = owner else { continue };
             let receiver = call.qualifier.as_deref().and_then(|qualifier| {
                 (!qualifier.contains('.'))
                     .then(|| bindings_by_owner.get(&owner))
@@ -185,9 +231,18 @@ fn collect_dart_receiver_calls<'source>(
                             .flatten()
                     })
             });
-            let Some(receiver) = receiver else {
+            if call.constructor {
+                state.emit_source_local_call(
+                    Some(owner),
+                    &call.spelling,
+                    call.qualifier.as_deref(),
+                    start,
+                    end,
+                    true,
+                )?;
                 continue;
-            };
+            }
+            let Some(receiver) = receiver else { continue };
             state.emit_source_receiver_call(
                 owner,
                 &receiver,
@@ -196,6 +251,10 @@ fn collect_dart_receiver_calls<'source>(
                 start,
                 end,
             )?;
+        }
+        brace_depth = brace_depth.saturating_add(scan.brace_delta);
+        if active_owner.is_some_and(|(_, body_depth)| brace_depth < body_depth) {
+            active_owner = None;
         }
         line_start = line_start.saturating_add(line.len());
     }
@@ -208,6 +267,18 @@ struct DartCall {
     spelling: String,
     start: usize,
     end: usize,
+    constructor: bool,
+}
+
+#[derive(Default)]
+struct DartLexicalState {
+    block_comment: bool,
+    triple_quote: Option<u8>,
+}
+
+struct DartScan {
+    calls: Vec<DartCall>,
+    brace_delta: isize,
 }
 
 fn dart_typed_bindings(line: &str) -> Vec<(String, String)> {
@@ -240,12 +311,24 @@ fn dart_typed_bindings(line: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn dart_calls(line: &str) -> Vec<DartCall> {
+fn dart_calls(line: &str, state: &mut DartLexicalState) -> DartScan {
     let bytes = line.as_bytes();
+    let code = dart_code_mask(bytes, state);
     let mut calls = Vec::new();
+    let mut brace_delta = 0_isize;
+    for (index, byte) in bytes.iter().enumerate() {
+        if !code[index] {
+            continue;
+        }
+        match byte {
+            b'{' => brace_delta = brace_delta.saturating_add(1),
+            b'}' => brace_delta = brace_delta.saturating_sub(1),
+            _ => {}
+        }
+    }
     let mut cursor = 0_usize;
     while cursor < bytes.len() {
-        if !dart_identifier_start(bytes[cursor]) {
+        if !code[cursor] || !dart_identifier_start(bytes[cursor]) {
             cursor = cursor.saturating_add(1);
             continue;
         }
@@ -257,6 +340,17 @@ fn dart_calls(line: &str) -> Vec<DartCall> {
         let first_end = cursor;
         let mut lookahead = skip_dart_space(bytes, cursor);
         if bytes.get(lookahead) != Some(&b'.') {
+            if bytes.get(lookahead) == Some(&b'(')
+                && !dart_call_keyword(&line[first_start..first_end])
+            {
+                calls.push(DartCall {
+                    qualifier: None,
+                    spelling: line[first_start..first_end].to_owned(),
+                    start: first_start,
+                    end: first_end,
+                    constructor: dart_previous_word(line, first_start) == Some("new"),
+                });
+            }
             cursor = first_end;
             continue;
         }
@@ -275,13 +369,13 @@ fn dart_calls(line: &str) -> Vec<DartCall> {
             let last_end = lookahead;
             let after = skip_dart_space(bytes, lookahead);
             if bytes.get(after) == Some(&b'(') {
+                let qualifier = line[qualifier_start..last_start]
+                    .trim()
+                    .trim_end_matches('.')
+                    .to_owned();
                 calls.push(DartCall {
-                    qualifier: Some(
-                        line[qualifier_start..last_start]
-                            .trim()
-                            .trim_end_matches('.')
-                            .to_owned(),
-                    ),
+                    constructor: dart_previous_word(line, qualifier_start) == Some("new"),
+                    qualifier: Some(qualifier),
                     spelling: line[last_start..last_end].to_owned(),
                     start: last_start,
                     end: last_end,
@@ -296,7 +390,122 @@ fn dart_calls(line: &str) -> Vec<DartCall> {
             lookahead = after;
         }
     }
-    calls
+    DartScan { calls, brace_delta }
+}
+
+fn dart_code_mask(bytes: &[u8], state: &mut DartLexicalState) -> Vec<bool> {
+    let mut code = vec![true; bytes.len()];
+    let mut index = 0_usize;
+    while index < bytes.len() {
+        if state.block_comment {
+            code[index] = false;
+            if bytes.get(index..index.saturating_add(2)) == Some(b"*/") {
+                code[index.saturating_add(1)] = false;
+                state.block_comment = false;
+                index = index.saturating_add(2);
+            } else {
+                index = index.saturating_add(1);
+            }
+            continue;
+        }
+        if let Some(quote) = state.triple_quote {
+            code[index] = false;
+            if bytes.get(index..index.saturating_add(3)) == Some(&[quote, quote, quote]) {
+                code[index.saturating_add(1)] = false;
+                code[index.saturating_add(2)] = false;
+                state.triple_quote = None;
+                index = index.saturating_add(3);
+            } else {
+                index = index.saturating_add(1);
+            }
+            continue;
+        }
+        if bytes.get(index..index.saturating_add(2)) == Some(b"//") {
+            code[index..].fill(false);
+            break;
+        }
+        if bytes.get(index..index.saturating_add(2)) == Some(b"/*") {
+            code[index] = false;
+            if let Some(next) = code.get_mut(index.saturating_add(1)) {
+                *next = false;
+            }
+            state.block_comment = true;
+            index = index.saturating_add(2);
+            continue;
+        }
+        if matches!(bytes.get(index), Some(b'\'' | b'"')) {
+            let quote = bytes[index];
+            code[index] = false;
+            if bytes.get(index..index.saturating_add(3)) == Some(&[quote, quote, quote]) {
+                code[index.saturating_add(1)] = false;
+                code[index.saturating_add(2)] = false;
+                state.triple_quote = Some(quote);
+                index = index.saturating_add(3);
+                continue;
+            }
+            index = index.saturating_add(1);
+            let mut escaped = false;
+            while index < bytes.len() {
+                code[index] = false;
+                if escaped {
+                    escaped = false;
+                } else if bytes[index] == b'\\' {
+                    escaped = true;
+                } else if bytes[index] == quote {
+                    index = index.saturating_add(1);
+                    break;
+                }
+                index = index.saturating_add(1);
+            }
+            continue;
+        }
+        index = index.saturating_add(1);
+    }
+    code
+}
+
+fn dart_previous_word(line: &str, start: usize) -> Option<&str> {
+    let bytes = line.as_bytes();
+    let mut end = start;
+    while end > 0 && bytes[end.saturating_sub(1)].is_ascii_whitespace() {
+        end = end.saturating_sub(1);
+    }
+    let mut begin = end;
+    while begin > 0 && dart_identifier_continue(bytes[begin.saturating_sub(1)]) {
+        begin = begin.saturating_sub(1);
+    }
+    (begin < end).then(|| line.get(begin..end)).flatten()
+}
+
+fn dart_call_keyword(spelling: &str) -> bool {
+    matches!(
+        spelling,
+        "as" | "assert"
+            | "await"
+            | "case"
+            | "catch"
+            | "const"
+            | "do"
+            | "else"
+            | "for"
+            | "if"
+            | "in"
+            | "is"
+            | "new"
+            | "on"
+            | "rethrow"
+            | "return"
+            | "show"
+            | "super"
+            | "switch"
+            | "this"
+            | "throw"
+            | "try"
+            | "var"
+            | "while"
+            | "with"
+            | "yield"
+    )
 }
 
 fn skip_dart_space(bytes: &[u8], mut index: usize) -> usize {

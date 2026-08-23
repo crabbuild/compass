@@ -659,6 +659,63 @@ impl<'source, P: LanguageProfile> State<'source, P> {
         Ok(())
     }
 
+    /// Emit a source-discovered call only when its local target is unique.
+    ///
+    /// Source supplements use this narrower entry point for constructs that
+    /// the grammar cannot expose as a call node (for example a recovered
+    /// unqualified invocation or a `new Type(...)` expression).  Unlike the
+    /// normal AST call path, an unresolved spelling is deliberately omitted:
+    /// the supplement must not turn dynamic or external uses into local graph
+    /// facts.
+    pub(super) fn emit_source_local_call(
+        &mut self,
+        owner: Option<usize>,
+        spelling: &str,
+        qualifier: Option<&str>,
+        start: usize,
+        end: usize,
+        constructor_node: bool,
+    ) -> Result<(), EvidenceError> {
+        if !valid_name(spelling) || self.name_ranges.contains(&(start, end)) {
+            return Ok(());
+        }
+        let constructor =
+            spelling.chars().next().is_some_and(char::is_uppercase) || constructor_node;
+        let exact = if constructor && P::prefers_constructor_declarations() {
+            self.resolve_local_constructor(spelling, qualifier)
+                .or_else(|| self.resolve_local(spelling, qualifier))
+        } else {
+            P::prefers_owner_local_calls()
+                .then(|| self.resolve_local_for_owner(owner, spelling, qualifier))
+                .flatten()
+                .or_else(|| self.resolve_local(spelling, qualifier))
+        };
+        let Some(index) = exact else {
+            return Ok(());
+        };
+        let Some(declaration) = self.declarations.get(index) else {
+            return Ok(());
+        };
+        let accepted = if constructor {
+            matches!(declaration.kind.as_str(), "class" | "constructor")
+        } else {
+            matches!(
+                declaration.kind.as_str(),
+                "constructor" | "function" | "method"
+            )
+        };
+        if !accepted {
+            return Ok(());
+        }
+        self.emit_call_site(
+            owner,
+            spelling,
+            qualifier,
+            range_for_byte_span(self.source_file, self.source, start, end),
+            constructor_node,
+        )
+    }
+
     pub(super) fn emit_source_base_type(
         &mut self,
         owner: usize,

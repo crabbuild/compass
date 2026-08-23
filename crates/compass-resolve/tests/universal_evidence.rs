@@ -159,6 +159,75 @@ void dynamicCall(dynamic receiver) { receiver.unknown(); }
 }
 
 #[test]
+fn dart_source_supplement_recovers_local_calls_and_constructions() -> Result<(), Box<dyn Error>> {
+    let source = br#"class Store {
+  Store();
+  void save() {}
+  void run() {
+    save();
+    Store();
+    unknown();
+    // save();
+    final text = 'save()';
+  }
+}
+"#;
+    let source_file = "lib/store.dart";
+    let extracted = Engine::default()
+        .extract_source_combined(Path::new(source_file), source_file, source)?
+        .graph;
+    let resolved = resolve(
+        &[extracted],
+        &HashMap::from([(source_file.to_owned(), String::from_utf8(source.to_vec())?)]),
+    );
+    assert!(resolved.error.is_none(), "{:#?}", resolved.error);
+    let node = |qualified_name: &str| {
+        resolved
+            .nodes
+            .iter()
+            .find(|node| node.string("qualified_name") == qualified_name)
+    };
+    let run = node("Store.run").ok_or("missing Store.run")?;
+    let save = node("Store.save").ok_or("missing Store.save")?;
+    let constructor = node("Store.Store").ok_or("missing Store constructor")?;
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == run.id
+                    && edge.target == save.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        1,
+        "local Dart call should be recovered exactly once"
+    );
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.source == run.id
+                    && edge.target == constructor.id
+                    && edge.string("relation") == "calls"
+            })
+            .count(),
+        1,
+        "local Dart construction should resolve to the constructor"
+    );
+    assert!(
+        !resolved.edges.iter().any(|edge| {
+            edge.source == run.id
+                && edge.string("relation") == "calls"
+                && edge.string("label") == "unknown"
+        }),
+        "unresolved Dart calls must remain fail-closed"
+    );
+    Ok(())
+}
+
+#[test]
 fn groovy_local_implements_publishes_direct_base_edge() -> Result<(), Box<dyn Error>> {
     let source = br#"package wave
 interface Store {}
