@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -117,31 +116,15 @@ fn inspect(args: &[String]) -> Outcome {
     let Some(path) = path else {
         return usage_error("document inspect requires a file");
     };
-    let metadata = match fs::metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(error) => {
-            return Outcome::failure(format!("error: could not stat {}: {error}", path.display()));
-        }
-    };
-    if metadata.len() > compass_media::MEDIA_MAX_RAW_BYTES {
-        return Outcome::failure(format!(
-            "error: {} exceeds the document source limit of {} bytes",
-            path.display(),
-            compass_media::MEDIA_MAX_RAW_BYTES
-        ));
-    }
-    let bytes = match fs::read(&path) {
+    let bytes = match compass_media::read_document_bounded(&path) {
         Ok(bytes) => bytes,
         Err(error) => {
-            return Outcome::failure(format!("error: could not read {}: {error}", path.display()));
+            return Outcome::failure(format!(
+                "error: could not read bounded document {}: {error}",
+                path.display()
+            ));
         }
     };
-    if bytes.len() as u64 > compass_media::MEDIA_MAX_RAW_BYTES {
-        return Outcome::failure(format!(
-            "error: {} changed while reading and exceeds the document source limit",
-            path.display()
-        ));
-    }
     languages = match normalize_language_hints(&languages) {
         Ok(languages) => languages,
         Err(error) => return usage_error(&error.to_string()),

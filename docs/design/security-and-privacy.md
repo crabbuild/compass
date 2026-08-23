@@ -287,17 +287,22 @@ malformed UTF-8, and missing executable behavior.
 
 PDF and Office bytes, ZIP members, XML, raster dimensions, OCR observations,
 downloaded model bytes, and document-cache JSON are untrusted. Compass checks
-raw and expanded sizes before allocation, rejects archive traversal and unsafe
-relationships, keeps formulas/macros/OLE inert, never follows document URLs,
-and validates every OCR request/result geometry against the normalized raster.
+raw and expanded sizes before allocation and keeps raw file/cache reads bounded
+at the stream even if a file grows after its metadata check. It rejects archive
+traversal, unsafe relationships, unknown cache fields, and incoherent OCR
+origin, profile, completeness, or geometry. Formulas/macros/OLE stay inert,
+document URLs are never followed, and every OCR request/result is validated
+against the normalized raster.
 
 OCR extraction is network-disabled by construction. `compass models install`
 is the sole download command; it uses fixed HTTPS release hosts, at most three
 validated redirects, immutable `v0.7.0` artifact names, exact sizes and
-SHA-256, temporary same-directory files, and atomic publication. Extraction,
-inspection, watch, and history verify local artifacts and fail explicitly when
-a selected profile is absent. They never downgrade to native-only processing
-after OCR was requested.
+SHA-256, temporary same-directory files, and atomic publication with parent
+directory synchronization. A bounded per-profile lock serializes concurrent
+installers. Symlinked model artifacts, verified markers, and install locks are
+rejected. Extraction, inspection, watch, and history verify local artifacts and
+fail explicitly when a selected profile is absent. They never downgrade to
+native-only processing after OCR was requested.
 
 The ONNX runtime and pure-Rust PDF renderer are linked into Compass. Users do
 not configure an executable or install Python, Tesseract, an office suite,

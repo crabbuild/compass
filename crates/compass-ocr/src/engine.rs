@@ -119,6 +119,9 @@ impl OcrEngine for ManagedOarEngine {
             .into_iter()
             .filter_map(|region| {
                 let text = region.text?.to_string();
+                if text.trim().is_empty() {
+                    return None;
+                }
                 let confidence = region.confidence?;
                 Some((region.bounding_box.points, text, confidence))
             })

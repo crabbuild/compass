@@ -2,7 +2,6 @@
 //! semantic consumers.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -61,6 +60,7 @@ impl Default for PreparedDocumentSet {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct CachedDocumentArtifact {
     schema: String,
     source_digest: String,
@@ -99,23 +99,8 @@ pub fn prepare_document_set(
     let cache_identity = cache_identity(&canonical_options);
     let mut documents = BTreeMap::new();
     for path in rich_paths {
-        let metadata = fs::metadata(&path)
-            .map_err(|error| format!("could not stat {}: {error}", path.display()))?;
-        if metadata.len() > compass_media::MEDIA_MAX_RAW_BYTES {
-            return Err(format!(
-                "{} exceeds the bounded document source size of {} bytes",
-                path.display(),
-                compass_media::MEDIA_MAX_RAW_BYTES
-            ));
-        }
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("could not read {}: {error}", path.display()))?;
-        if bytes.len() as u64 > compass_media::MEDIA_MAX_RAW_BYTES {
-            return Err(format!(
-                "{} changed while reading and exceeds the bounded document source size",
-                path.display()
-            ));
-        }
+        let bytes = compass_media::read_document_bounded(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
         let source_digest = format!("sha256:{:x}", Sha256::digest(&bytes));
         let cache_path = options
             .cache_directory
@@ -189,16 +174,13 @@ fn load_cached_document(
     source_digest: &str,
     cache_identity: &str,
 ) -> Result<DocumentArtifact, String> {
-    let metadata = fs::metadata(path)
-        .map_err(|error| format!("could not stat document cache {}: {error}", path.display()))?;
-    if metadata.len() > MAX_CACHED_DOCUMENT_BYTES {
-        return Err(format!(
-            "document cache {} exceeds the bounded cache size",
-            path.display()
-        ));
-    }
-    let bytes = fs::read(path)
-        .map_err(|error| format!("could not read document cache {}: {error}", path.display()))?;
+    let bytes =
+        compass_files::read_bytes_bounded(path, MAX_CACHED_DOCUMENT_BYTES).map_err(|error| {
+            format!(
+                "could not read bounded document cache {}: {error}",
+                path.display()
+            )
+        })?;
     let cached: CachedDocumentArtifact = serde_json::from_slice(&bytes)
         .map_err(|error| format!("document cache {} is corrupt: {error}", path.display()))?;
     if cached.schema != "compass.document.cache/1"
@@ -419,6 +401,7 @@ fn bounded_label(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io::Write as _;
 
     use super::*;
@@ -462,11 +445,26 @@ mod tests {
                 .get(&document)
                 .map(|value| value.semantic_text.as_ref())
         );
+        let mut unknown: serde_json::Value = serde_json::from_slice(&fs::read(&cache_path)?)?;
+        unknown["unexpected"] = serde_json::json!(true);
+        fs::write(&cache_path, serde_json::to_vec(&unknown)?)?;
+        let error = prepare_document_set(std::slice::from_ref(&document), &options)
+            .err()
+            .ok_or("cache with an unknown field was accepted")?;
+        assert!(error.contains("corrupt"));
+
         fs::write(&cache_path, b"{")?;
         let error = prepare_document_set(std::slice::from_ref(&document), &options)
             .err()
             .ok_or("corrupt cache was accepted")?;
         assert!(error.contains("corrupt"));
+
+        let oversized = fs::File::create(&cache_path)?;
+        oversized.set_len(MAX_CACHED_DOCUMENT_BYTES + 1)?;
+        let error = prepare_document_set(std::slice::from_ref(&document), &options)
+            .err()
+            .ok_or("oversized cache was accepted")?;
+        assert!(error.contains("bounded document cache"));
         Ok(())
     }
 

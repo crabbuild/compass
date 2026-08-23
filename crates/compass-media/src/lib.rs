@@ -7,7 +7,6 @@ mod processing;
 mod raster;
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::io::Cursor;
 use std::path::Path;
 
@@ -68,7 +67,7 @@ pub fn decode_document(
 
 /// Extract compatibility Markdown/text through the versioned artifact path.
 pub fn extract_text(path: &Path) -> Result<String, MediaError> {
-    let bytes = read_bounded(path)?;
+    let bytes = read_document_bounded(path)?;
     let artifact = decode_document(path, &bytes)?;
     render_document_markdown(&artifact)
 }
@@ -80,27 +79,27 @@ pub fn extract_text_compat(path: &Path) -> String {
 }
 
 pub fn extract_pdf_text(path: &Path) -> Result<String, MediaError> {
-    let bytes = read_bounded(path)?;
+    let bytes = read_document_bounded(path)?;
     render_document_markdown(&decode_pdf(&bytes)?)
 }
 
 pub fn docx_to_markdown(path: &Path) -> Result<String, MediaError> {
-    let bytes = read_bounded(path)?;
+    let bytes = read_document_bounded(path)?;
     render_document_markdown(&decode_docx(&bytes)?)
 }
 
 pub fn xlsx_to_markdown(path: &Path) -> Result<String, MediaError> {
-    let bytes = read_bounded(path)?;
+    let bytes = read_document_bounded(path)?;
     render_document_markdown(&decode_xlsx(&bytes)?)
 }
 
 pub fn pptx_to_markdown(path: &Path) -> Result<String, MediaError> {
-    let bytes = read_bounded(path)?;
+    let bytes = read_document_bounded(path)?;
     render_document_markdown(&decode_pptx(&bytes)?)
 }
 
 pub fn validate_office_archive(path: &Path) -> Result<(), MediaError> {
-    let bytes = read_bounded(path)?;
+    let bytes = read_document_bounded(path)?;
     ooxml::Package::open(&bytes).map(|_| ())
 }
 
@@ -176,28 +175,20 @@ fn decode_plain_text(
     Ok(artifact)
 }
 
-fn read_bounded(path: &Path) -> Result<Vec<u8>, DocumentError> {
-    let metadata = fs::metadata(path).map_err(|source| DocumentError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if metadata.len() > MEDIA_MAX_RAW_BYTES {
-        return Err(DocumentError::Rejected(format!(
-            "{} is {} bytes; maximum is {MEDIA_MAX_RAW_BYTES}",
-            path.display(),
-            metadata.len()
-        )));
-    }
-    let bytes = fs::read(path).map_err(|source| DocumentError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if bytes.len() as u64 > MEDIA_MAX_RAW_BYTES {
-        return Err(DocumentError::Rejected(
-            "source grew beyond the media limit while being read".to_owned(),
-        ));
-    }
-    Ok(bytes)
+/// Read one document source through the shared stream-level byte bound.
+pub fn read_document_bounded(path: &Path) -> Result<Vec<u8>, DocumentError> {
+    compass_files::read_bytes_bounded(path, MEDIA_MAX_RAW_BYTES).map_err(|error| match error {
+        compass_files::FileError::Io { path, source } => DocumentError::Io { path, source },
+        compass_files::FileError::TooLarge { path, .. } => DocumentError::Rejected(format!(
+            "{} exceeds the document source limit of {MEDIA_MAX_RAW_BYTES} bytes",
+            path.display()
+        )),
+        compass_files::FileError::NotAFile(path) => DocumentError::Rejected(format!(
+            "document source is not a regular file: {}",
+            path.display()
+        )),
+        other => DocumentError::Rejected(other.to_string()),
+    })
 }
 
 fn render_ordered_blocks(artifact: &DocumentArtifact) -> Result<String, DocumentError> {
@@ -362,7 +353,7 @@ fn extension(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::fs::File;
+    use std::fs::{self, File};
     use std::io::Write;
 
     use tempfile::tempdir;

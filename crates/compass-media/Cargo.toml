@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+compass-files = { path = "../compass-files", version = "0.3.19" }
 compass-ocr = { path = "../compass-ocr", version = "0.3.19" }
 hayro.workspace = true
 image.workspace = true

@@ -1,11 +1,12 @@
 //! Pinned PP-OCRv6 model acquisition and offline verification.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,6 +22,12 @@ const USER_AGENT: &str = "compass/0.3 document-ocr";
 const VERIFIED_MARKER_SCHEMA: &str = "compass.ocr.model-profile/1";
 const MODEL_LICENSE: &str = "Apache-2.0 (PaddleOCR models and OAR-OCR runtime)";
 const MODEL_CARD: &str = "https://github.com/GreatV/oar-ocr/releases/tag/v0.7.0";
+const MODEL_INSTALL_LOCK: &str = ".install.lock";
+const MODEL_INSTALL_LOCK_WAIT: Duration = Duration::from_secs(15 * 60);
+const MODEL_INSTALL_LOCK_RETRY: Duration = Duration::from_millis(50);
+const MODEL_REDIRECT_MAX_BYTES: usize = 8 * 1024;
+const MODEL_ERROR_MAX_CHARS: usize = 1_024;
+const VERIFIED_MARKER_MAX_BYTES: u64 = 16 * 1024;
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -189,14 +196,14 @@ impl ArtifactFetcher for HttpsArtifactFetcher {
                 .get(&current)
                 .header("User-Agent", USER_AGENT)
                 .call()
-                .map_err(|error| OcrError::ModelUnavailable(error.to_string()))?;
+                .map_err(|error| OcrError::ModelUnavailable(bounded_error(&error.to_string())))?;
             if response.status().is_redirection() {
                 if redirect == 3 {
                     return Err(OcrError::ModelVerification(
                         "model download exceeded the redirect limit".to_owned(),
                     ));
                 }
-                current = response
+                let location = response
                     .headers()
                     .get("location")
                     .and_then(|value| value.to_str().ok())
@@ -204,8 +211,13 @@ impl ArtifactFetcher for HttpsArtifactFetcher {
                         OcrError::ModelVerification(
                             "model download redirect has no valid location".to_owned(),
                         )
-                    })?
-                    .to_owned();
+                    })?;
+                if location.len() > MODEL_REDIRECT_MAX_BYTES {
+                    return Err(OcrError::ModelVerification(
+                        "model download redirect exceeds its byte limit".to_owned(),
+                    ));
+                }
+                current = location.to_owned();
                 continue;
             }
             if !response.status().is_success() {
@@ -239,12 +251,78 @@ fn validate_model_url(url: &str, redirected: bool) -> Result<(), OcrError> {
     } else {
         parsed.host() == Some(MODEL_HOST)
     };
-    if parsed.scheme_str() != Some("https") || !allowed_host {
+    let unsafe_authority = parsed
+        .authority()
+        .is_none_or(|authority| authority.as_str().contains('@'));
+    let unsafe_port = parsed.port_u16().is_some_and(|port| port != 443);
+    if parsed.scheme_str() != Some("https") || !allowed_host || unsafe_authority || unsafe_port {
         return Err(OcrError::ModelVerification(
             "model URL is outside the HTTPS host allowlist".to_owned(),
         ));
     }
     Ok(())
+}
+
+fn bounded_error(message: &str) -> String {
+    message.chars().take(MODEL_ERROR_MAX_CHARS).collect()
+}
+
+#[derive(Debug)]
+struct ModelInstallGuard {
+    file: File,
+}
+
+impl ModelInstallGuard {
+    fn acquire(directory: &Path) -> Result<Self, OcrError> {
+        Self::acquire_with_timeout(directory, MODEL_INSTALL_LOCK_WAIT)
+    }
+
+    fn acquire_with_timeout(directory: &Path, timeout: Duration) -> Result<Self, OcrError> {
+        let path = directory.join(MODEL_INSTALL_LOCK);
+        if let Ok(metadata) = fs::symlink_metadata(&path)
+            && (!metadata.is_file() || metadata.file_type().is_symlink())
+        {
+            return Err(OcrError::ModelVerification(format!(
+                "model install lock is not a regular file: {}",
+                path.display()
+            )));
+        }
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let file = options.open(&path).map_err(|source| OcrError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(Self { file }),
+                Err(std::fs::TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    thread::sleep(MODEL_INSTALL_LOCK_RETRY);
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(OcrError::ModelUnavailable(format!(
+                        "timed out waiting for another model installation at {}; retry `compass models install`",
+                        path.display()
+                    )));
+                }
+                Err(std::fs::TryLockError::Error(source)) => {
+                    return Err(OcrError::Io { path, source });
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ModelInstallGuard {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -294,6 +372,7 @@ impl ModelCache {
             path: directory.clone(),
             source,
         })?;
+        let _guard = ModelInstallGuard::acquire(&directory)?;
         for artifact in profile.artifacts() {
             ensure_artifact(&directory, artifact, fetcher)?;
         }
@@ -304,7 +383,6 @@ impl ModelCache {
 
     pub fn verify(&self, profile: ModelProfile) -> Result<ModelFiles, OcrError> {
         let directory = self.profile_dir(profile);
-        let files = verify_artifacts(&directory, profile)?;
         if !verify_marker(&directory, profile)? {
             return Err(OcrError::ModelUnavailable(format!(
                 "profile {} has no current verification marker; run `compass models install {}`",
@@ -312,7 +390,7 @@ impl ModelCache {
                 profile.name()
             )));
         }
-        Ok(files)
+        verify_artifacts(&directory, profile)
     }
 
     #[must_use]
@@ -320,7 +398,7 @@ impl ModelCache {
         let installed = profile
             .artifacts()
             .iter()
-            .all(|artifact| self.profile_dir(profile).join(artifact.name).is_file());
+            .all(|artifact| is_regular_file(&self.profile_dir(profile).join(artifact.name)));
         ModelStatus {
             profile: profile.name().to_owned(),
             installed,
@@ -365,18 +443,38 @@ fn verify_artifacts(directory: &Path, profile: ModelProfile) -> Result<ModelFile
 
 fn verify_marker(directory: &Path, profile: ModelProfile) -> Result<bool, OcrError> {
     let path = directory.join("verified.json");
-    let metadata = match path.metadata() {
+    let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(source) => return Err(OcrError::Io { path, source }),
     };
-    if !metadata.is_file() || metadata.len() > 16 * 1024 {
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > VERIFIED_MARKER_MAX_BYTES
+    {
         return Ok(false);
     }
-    let bytes = fs::read(&path).map_err(|source| OcrError::Io {
+    let file = File::open(&path).map_err(|source| OcrError::Io {
         path: path.clone(),
         source,
     })?;
+    let opened_metadata = file.metadata().map_err(|source| OcrError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    if !opened_metadata.is_file() || opened_metadata.len() > VERIFIED_MARKER_MAX_BYTES {
+        return Ok(false);
+    }
+    let mut bytes = Vec::with_capacity(opened_metadata.len() as usize);
+    file.take(VERIFIED_MARKER_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| OcrError::Io {
+            path: path.clone(),
+            source,
+        })?;
+    if bytes.len() as u64 > VERIFIED_MARKER_MAX_BYTES {
+        return Ok(false);
+    }
     let Ok(value) = serde_json::from_slice::<VerifiedProfileMarker>(&bytes) else {
         return Ok(false);
     };
@@ -410,6 +508,7 @@ fn write_verified_marker(directory: &Path, profile: ModelProfile) -> Result<(), 
             path: destination,
             source: error.error,
         })?;
+    sync_directory(directory)?;
     Ok(())
 }
 
@@ -507,14 +606,15 @@ fn ensure_artifact(
     temporary
         .persist(&destination)
         .map_err(|error| OcrError::Io {
-            path: destination,
+            path: destination.clone(),
             source: error.error,
         })?;
+    sync_directory(directory)?;
     Ok(())
 }
 
 fn verify_artifact(path: &Path, artifact: &ArtifactSpec) -> Result<bool, OcrError> {
-    let metadata = match path.metadata() {
+    let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(source) => {
@@ -524,26 +624,58 @@ fn verify_artifact(path: &Path, artifact: &ArtifactSpec) -> Result<bool, OcrErro
             });
         }
     };
-    if !metadata.is_file() || metadata.len() != artifact.size {
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() != artifact.size {
         return Ok(false);
     }
-    let mut file = File::open(path).map_err(|source| OcrError::Io {
+    let file = File::open(path).map_err(|source| OcrError::Io {
         path: path.to_path_buf(),
         source,
     })?;
+    let opened_metadata = file.metadata().map_err(|source| OcrError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !opened_metadata.is_file() || opened_metadata.len() != artifact.size {
+        return Ok(false);
+    }
     let mut hasher = Sha256::new();
     let mut buffer = vec![0_u8; 1024 * 1024];
+    let mut total = 0_u64;
+    let mut bounded = file.take(artifact.size.saturating_add(1));
     loop {
-        let read = file.read(&mut buffer).map_err(|source| OcrError::Io {
+        let read = bounded.read(&mut buffer).map_err(|source| OcrError::Io {
             path: path.to_path_buf(),
             source,
         })?;
         if read == 0 {
             break;
         }
+        total = total.saturating_add(read as u64);
         hasher.update(&buffer[..read]);
     }
-    Ok(format!("{:x}", hasher.finalize()) == artifact.sha256)
+    Ok(total == artifact.size && format!("{:x}", hasher.finalize()) == artifact.sha256)
+}
+
+fn is_regular_file(path: &Path) -> bool {
+    fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink())
+}
+
+fn sync_directory(path: &Path) -> Result<(), OcrError> {
+    #[cfg(unix)]
+    {
+        File::open(path)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|source| OcrError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -593,6 +725,22 @@ mod tests {
         .is_ok());
         assert!(validate_model_url("http://github.com/model", false).is_err());
         assert!(validate_model_url("https://example.com/model", true).is_err());
+        assert!(validate_model_url("https://user@github.com/model", true).is_err());
+        assert!(validate_model_url("https://github.com:444/model", true).is_err());
+    }
+
+    #[test]
+    fn concurrent_model_install_lock_is_bounded_and_reusable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let first =
+            ModelInstallGuard::acquire_with_timeout(directory.path(), Duration::from_secs(1))?;
+        let blocked = ModelInstallGuard::acquire_with_timeout(directory.path(), Duration::ZERO);
+        assert!(matches!(blocked, Err(OcrError::ModelUnavailable(_))));
+        drop(first);
+        let second = ModelInstallGuard::acquire_with_timeout(directory.path(), Duration::ZERO)?;
+        drop(second);
+        Ok(())
     }
 
     #[test]
@@ -658,6 +806,44 @@ mod tests {
             directory.path().join("verified.json"),
             serde_json::to_vec(&stale)?,
         )?;
+        assert!(!verify_marker(
+            directory.path(),
+            ModelProfile::PpOcrV6Small
+        )?);
+        let oversized = File::create(directory.path().join("verified.json"))?;
+        oversized.set_len(VERIFIED_MARKER_MAX_BYTES + 1)?;
+        assert!(!verify_marker(
+            directory.path(),
+            ModelProfile::PpOcrV6Small
+        )?);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verification_rejects_symlinked_artifacts_and_markers()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir()?;
+        let target = directory.path().join("target.bin");
+        fs::write(&target, b"fixture")?;
+        let link = directory.path().join("fixture.bin");
+        symlink(&target, &link)?;
+        let artifact = ArtifactSpec {
+            role: "fixture",
+            name: "fixture.bin",
+            size: 7,
+            sha256: "f16d05ec6b29248d2c61adb1e9263f78e4f7bace1b955014a2d17872cfe4064d",
+        };
+        assert!(!verify_artifact(&link, &artifact)?);
+
+        let marker_target = directory.path().join("marker-target.json");
+        fs::write(
+            &marker_target,
+            serde_json::to_vec(&expected_verified_marker(ModelProfile::PpOcrV6Small))?,
+        )?;
+        symlink(&marker_target, directory.path().join("verified.json"))?;
         assert!(!verify_marker(
             directory.path(),
             ModelProfile::PpOcrV6Small

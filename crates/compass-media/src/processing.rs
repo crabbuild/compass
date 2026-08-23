@@ -78,12 +78,14 @@ pub fn decode_document_with_ocr_cancellable(
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     let mut requests = Vec::new();
+    let mut aggregate_pixels = 0_u64;
     let mut candidate_failed = false;
     match artifact.format {
         DocumentFormat::Pdf => {
             let selected = selected_pdf_pages(&artifact, options.ocr_mode)?;
             for candidate in rasterize_pdf_pages_cancellable(bytes, &selected, cancellation)? {
                 check_deadline(started)?;
+                reserve_aggregate_pixels(&mut aggregate_pixels, &candidate.raster)?;
                 requests.push((
                     candidate.id,
                     candidate.owner,
@@ -118,6 +120,7 @@ pub fn decode_document_with_ocr_cancellable(
                             });
                             continue;
                         }
+                        reserve_aggregate_pixels(&mut aggregate_pixels, &raster)?;
                         requests.push((
                             candidate.id,
                             candidate.owner,
@@ -141,7 +144,6 @@ pub fn decode_document_with_ocr_cancellable(
             )));
         }
     }
-    let mut aggregate_pixels = 0_u64;
     let mut aggregate_observations = 0_usize;
     let mut aggregate_text = 0_usize;
     let mut profile = Some(engine.identity().clone());
@@ -152,14 +154,6 @@ pub fn decode_document_with_ocr_cancellable(
     for (candidate_id, owner, source_kind, raster) in requests {
         check_cancelled(cancellation)?;
         check_deadline(started)?;
-        aggregate_pixels = aggregate_pixels
-            .checked_add(u64::from(raster.width) * u64::from(raster.height))
-            .ok_or_else(|| DocumentError::Rejected("aggregate OCR pixels overflow".to_owned()))?;
-        if aggregate_pixels > OCR_MAX_AGGREGATE_PIXELS {
-            return Err(DocumentError::Rejected(
-                "aggregate OCR pixels exceed document limit".to_owned(),
-            ));
-        }
         let digest = prepared_raster_digest(&raster);
         let request = OcrRequest {
             schema: OCR_SCHEMA.to_owned(),
@@ -176,7 +170,7 @@ pub fn decode_document_with_ocr_cancellable(
                 reused.request_id.clone_from(&request.request_id);
                 reused
             }
-            None => match recognize_tiled(engine, &request, &raster, cancellation) {
+            None => match recognize_tiled(engine, &request, &raster, cancellation, started) {
                 Ok(response) => response,
                 Err(compass_ocr::OcrError::Cancelled) => {
                     return Err(DocumentError::Ocr(compass_ocr::OcrError::Cancelled));
@@ -332,11 +326,30 @@ fn check_cancelled(cancellation: &AtomicBool) -> Result<(), DocumentError> {
 }
 
 fn check_deadline(started: Instant) -> Result<(), DocumentError> {
+    check_ocr_deadline(started).map_err(DocumentError::Ocr)
+}
+
+fn check_ocr_deadline(started: Instant) -> Result<(), compass_ocr::OcrError> {
     if started.elapsed() > Duration::from_secs(compass_ocr::OCR_MAX_DOCUMENT_WALL_TIME_SECS) {
-        Err(DocumentError::Ocr(compass_ocr::OcrError::Timeout))
+        Err(compass_ocr::OcrError::Timeout)
     } else {
         Ok(())
     }
+}
+
+fn reserve_aggregate_pixels(total: &mut u64, raster: &PreparedRaster) -> Result<(), DocumentError> {
+    let pixels = u64::from(raster.width)
+        .checked_mul(u64::from(raster.height))
+        .ok_or_else(|| DocumentError::Rejected("OCR raster pixel count overflow".to_owned()))?;
+    *total = total
+        .checked_add(pixels)
+        .ok_or_else(|| DocumentError::Rejected("aggregate OCR pixels overflow".to_owned()))?;
+    if *total > OCR_MAX_AGGREGATE_PIXELS {
+        return Err(DocumentError::Rejected(
+            "aggregate OCR pixels exceed document limit".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn selected_pdf_pages(
@@ -415,10 +428,12 @@ fn recognize_tiled(
     request: &OcrRequest,
     raster: &PreparedRaster,
     cancellation: &AtomicBool,
+    started: Instant,
 ) -> Result<OcrResponse, compass_ocr::OcrError> {
     let tiles = tile_raster(raster)?;
     let mut observations = Vec::new();
     for tile in tiles {
+        check_ocr_deadline(started)?;
         check_cancelled(cancellation).map_err(|error| match error {
             DocumentError::Ocr(error) => error,
             other => compass_ocr::OcrError::Inference(other.to_string()),
@@ -434,6 +449,7 @@ fn recognize_tiled(
             image_digest: tile_digest,
         };
         let response = engine.recognize_cancellable(&tile_request, &tile.raster, cancellation)?;
+        check_ocr_deadline(started)?;
         response.validate_for(&tile_request)?;
         if response.profile != *engine.identity() {
             return Err(compass_ocr::OcrError::InvalidOutput(
@@ -960,10 +976,49 @@ mod tests {
             language_hints: Vec::new(),
             image_digest: prepared_raster_digest(&raster),
         };
-        let response = recognize_tiled(&OverlapEngine, &request, &raster, &AtomicBool::new(false))?;
+        let response = recognize_tiled(
+            &OverlapEngine,
+            &request,
+            &raster,
+            &AtomicBool::new(false),
+            Instant::now(),
+        )?;
         assert_eq!(response.observations.len(), 1);
         assert_eq!(response.observations[0].confidence_bps, 9_500);
         assert_eq!(response.observations[0].polygon[0].x, 1_920);
+        Ok(())
+    }
+
+    #[test]
+    fn tiled_recognition_checks_the_document_deadline_before_inference()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let raster = PreparedRaster {
+            image: RgbImage::new(100, 100),
+            width: 100,
+            height: 100,
+        };
+        let request = OcrRequest {
+            schema: OCR_SCHEMA.to_owned(),
+            request_id: "expired-raster".to_owned(),
+            source_kind: OcrSourceKind::EmbeddedImage,
+            width: raster.width,
+            height: raster.height,
+            language_hints: Vec::new(),
+            image_digest: prepared_raster_digest(&raster),
+        };
+        let engine = FixtureEngine {
+            calls: AtomicUsize::new(0),
+            fail: false,
+            invalid: false,
+        };
+        let started = Instant::now()
+            .checked_sub(Duration::from_secs(
+                compass_ocr::OCR_MAX_DOCUMENT_WALL_TIME_SECS + 1,
+            ))
+            .ok_or("could not construct expired deadline")?;
+        let result = recognize_tiled(&engine, &request, &raster, &AtomicBool::new(false), started);
+        assert!(matches!(result, Err(compass_ocr::OcrError::Timeout)));
+        assert_eq!(engine.calls.load(Ordering::Relaxed), 0);
         Ok(())
     }
 }

@@ -89,13 +89,18 @@ response instead.
 
 PDF and OOXML files, XML relationships, compressed members, embedded images,
 model files, OCR output, and document cache entries are untrusted. Compass
-enforces raw/archive/member/ratio/XML-depth/document/raster limits, rejects
-package traversal and duplicate normalized members, never executes spreadsheet
-formulas or embedded objects, and never follows external document links.
+enforces raw/archive/member/ratio/XML-depth/document/raster limits. Raw file and
+cache reads remain stream-bounded if a file grows after its metadata is read.
+Compass rejects package traversal, duplicate normalized members, incoherent OCR
+origin/profile/geometry, and unknown cache fields; it never executes spreadsheet
+formulas or embedded objects and never follows external document links.
 
 `compass models install` is the only OCR download boundary. It accepts only
 the pinned profile catalog, fixed HTTPS host, declared byte size, SHA-256, and
-zero redirects; publication uses temporary files and an atomic verified marker.
+at most three validated redirects to the fixed artifact host. Concurrent
+installation of one profile is serialized with a bounded lock. Publication
+uses temporary files, directory synchronization, and an atomic verified marker;
+model artifacts, markers, and install locks must be regular non-symlink files.
 Inspection, extraction, listing, verification, cache replay, and historical
 materialization never silently fetch or invoke an arbitrary executable. Model
 and document cache paths can contain sensitive derived content and should not

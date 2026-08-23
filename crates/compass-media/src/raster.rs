@@ -11,7 +11,7 @@ use hayro::{RenderCache, RenderSettings, render};
 use image::RgbImage;
 
 use crate::document::{DocumentError, DocumentLocator};
-use crate::limits::OCR_MAX_PDF_PAGES;
+use crate::limits::{OCR_MAX_AGGREGATE_PIXELS, OCR_MAX_PDF_PAGES};
 
 const PDF_OCR_DPI: f64 = 300.0;
 const PDF_POINTS_PER_INCH: f64 = 72.0;
@@ -66,6 +66,7 @@ fn rasterize_owned(
     let cache = RenderCache::new();
     let interpreter = InterpreterSettings::default();
     let mut output = Vec::with_capacity(selected_pages.len());
+    let mut aggregate_pixels = 0_u64;
     for page_number in selected_pages {
         check_cancelled(cancellation)?;
         let index = usize::try_from(page_number.saturating_sub(1))
@@ -75,6 +76,14 @@ fn rasterize_owned(
         })?;
         let (point_width, point_height) = page.render_dimensions();
         let (width, height, scale) = bounded_render_dimensions(point_width, point_height)?;
+        aggregate_pixels = aggregate_pixels
+            .checked_add(u64::from(width) * u64::from(height))
+            .ok_or_else(|| DocumentError::Rejected("PDF raster pixel total overflow".to_owned()))?;
+        if aggregate_pixels > OCR_MAX_AGGREGATE_PIXELS {
+            return Err(DocumentError::Rejected(
+                "PDF raster pixels exceed the document OCR limit".to_owned(),
+            ));
+        }
         let settings = RenderSettings {
             x_scale: scale,
             y_scale: scale,

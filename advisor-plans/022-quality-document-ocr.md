@@ -27,10 +27,13 @@
 - **Category**: direction, security, perf, tests
 - **Planned at**: commit `3471678d`, 2026-08-23
 - **Execution**: IN PROGRESS — production processing and the clean-English
-  installed-model gate are implemented. Full release qualification remains
-  blocked by the machine-reported candidate, multilingual/degraded,
-  cross-architecture, and hostile-corpus measurements, plus review of the
-  prerequisite plan statuses.
+  installed-model gate are implemented. The implementation also stream-bounds
+  mutable inputs and caches, validates derived-artifact coherence, reserves
+  aggregate raster work before rendering, checks deadlines between inference
+  units, and hardens concurrent model publication against races and symlinks.
+  Full release qualification remains blocked by the machine-reported candidate,
+  multilingual/degraded, cross-architecture, and hostile-corpus measurements,
+  plus review of the prerequisite plan statuses.
 
 ## Why this matters
 

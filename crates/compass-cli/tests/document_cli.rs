@@ -145,3 +145,23 @@ fn extract_ocr_uses_the_same_managed_profile_contract() -> Result<(), Box<dyn Er
     assert!(stderr.contains("no system OCR package is required"));
     Ok(())
 }
+
+#[test]
+fn document_inspect_rejects_non_files_without_publishing_output() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let fake_document = directory.path().join("directory.docx");
+    fs::create_dir(&fake_document)?;
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "document",
+            "inspect",
+            fake_document.to_str().ok_or("non-UTF-8 test path")?,
+            "--format",
+            "json",
+        ])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8(output.stderr)?.contains("not a regular file"));
+    Ok(())
+}

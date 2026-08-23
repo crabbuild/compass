@@ -298,6 +298,16 @@ fn validate_observation(
             "OCR observation text exceeds limit".to_owned(),
         ));
     }
+    if observation.text.trim().is_empty() {
+        return Err(OcrError::InvalidOutput(
+            "OCR observation text is empty".to_owned(),
+        ));
+    }
+    if observation.text.chars().any(char::is_control) {
+        return Err(OcrError::InvalidOutput(
+            "OCR observation text contains control characters".to_owned(),
+        ));
+    }
     if observation.confidence_bps > 10_000 {
         return Err(OcrError::InvalidOutput(
             "OCR confidence is outside 0..=10000".to_owned(),
@@ -344,7 +354,10 @@ fn polygon_doubled_area(points: &[OcrPoint]) -> i128 {
 }
 
 fn validate_bounded_field(name: &str, value: &str) -> Result<(), OcrError> {
-    if value.is_empty() || value.len() > OCR_MAX_PROFILE_FIELD_BYTES || value.contains('\0') {
+    if value.is_empty()
+        || value.len() > OCR_MAX_PROFILE_FIELD_BYTES
+        || value.chars().any(char::is_control)
+    {
         return Err(OcrError::InvalidRequest(format!(
             "{name} is empty or exceeds its bound"
         )));
@@ -353,9 +366,13 @@ fn validate_bounded_field(name: &str, value: &str) -> Result<(), OcrError> {
 }
 
 fn validate_digest(value: &str) -> Result<(), OcrError> {
-    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
         return Err(OcrError::InvalidRequest(
-            "digest must be 64 hexadecimal characters".to_owned(),
+            "digest must be 64 canonical lowercase hexadecimal characters".to_owned(),
         ));
     }
     Ok(())
@@ -433,6 +450,36 @@ mod tests {
     }
 
     #[test]
+    fn rejects_empty_control_text_and_noncanonical_digests() {
+        let mut noncanonical_request = request();
+        noncanonical_request.image_digest = "A".repeat(64);
+        assert!(noncanonical_request.validate().is_err());
+
+        let request = request();
+        for text in ["   ", "unsafe\u{1b}[2J"] {
+            let response = OcrResponse {
+                schema: OCR_SCHEMA.to_owned(),
+                request_id: request.request_id.clone(),
+                profile: profile(),
+                observations: vec![OcrObservation {
+                    ordinal: 0,
+                    polygon: vec![
+                        OcrPoint { x: 1, y: 1 },
+                        OcrPoint { x: 10, y: 1 },
+                        OcrPoint { x: 10, y: 10 },
+                        OcrPoint { x: 1, y: 10 },
+                    ],
+                    text: text.to_owned(),
+                    confidence_bps: 9_000,
+                    script: Some("Latn".to_owned()),
+                    orientation_degrees: 0,
+                }],
+            };
+            assert!(response.validate_for(&request).is_err());
+        }
+    }
+
+    #[test]
     fn mode_parser_is_explicit() {
         assert_eq!(OcrMode::from_str("auto").ok(), Some(OcrMode::Auto));
         assert!(OcrMode::from_str("maybe").is_err());
@@ -444,8 +491,45 @@ mod tests {
             normalize_language_hints(&["EN-us".to_owned(), "en-US".to_owned()]).ok(),
             Some(vec!["en-us".to_owned()])
         );
+        assert_eq!(
+            normalize_language_hints(&[
+                "ZH-Hant-TW".to_owned(),
+                "ar".to_owned(),
+                "ja-JP".to_owned(),
+            ])
+            .ok(),
+            Some(vec![
+                "ar".to_owned(),
+                "ja-jp".to_owned(),
+                "zh-hant-tw".to_owned(),
+            ])
+        );
         assert!(normalize_language_hints(&["en--US".to_owned()]).is_err());
         assert!(normalize_language_hints(&["not_a_tag".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn accepts_bounded_multilingual_and_emoji_text() {
+        let request = request();
+        let response = OcrResponse {
+            schema: OCR_SCHEMA.to_owned(),
+            request_id: request.request_id.clone(),
+            profile: profile(),
+            observations: vec![OcrObservation {
+                ordinal: 0,
+                polygon: vec![
+                    OcrPoint { x: 1, y: 1 },
+                    OcrPoint { x: 90, y: 1 },
+                    OcrPoint { x: 90, y: 20 },
+                    OcrPoint { x: 1, y: 20 },
+                ],
+                text: "指南 مرحبا 🧭".to_owned(),
+                confidence_bps: 8_500,
+                script: None,
+                orientation_degrees: 0,
+            }],
+        };
+        assert!(response.validate_for(&request).is_ok());
     }
 
     #[test]

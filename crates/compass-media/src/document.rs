@@ -257,6 +257,7 @@ impl DocumentArtifact {
             ));
         }
         let mut text_chars = 0_usize;
+        let mut saw_ocr_block = false;
         for (index, block) in self.blocks.iter().enumerate() {
             let expected = u32::try_from(index)
                 .map_err(|_| DocumentError::InvalidArtifact("ordinal overflow".to_owned()))?;
@@ -286,6 +287,27 @@ impl DocumentArtifact {
             validate_block_kind(&block.kind)?;
             validate_locator(&block.locator, 0)?;
             validate_origin(&block.origin)?;
+            match (&block.origin, &block.locator) {
+                (DocumentOrigin::Ocr { profile, .. }, DocumentLocator::Ocr { .. }) => {
+                    saw_ocr_block = true;
+                    if self.ocr_profile.as_ref() != Some(profile) {
+                        return Err(DocumentError::InvalidArtifact(
+                            "OCR block profile does not match the document profile".to_owned(),
+                        ));
+                    }
+                }
+                (DocumentOrigin::Ocr { .. }, _) => {
+                    return Err(DocumentError::InvalidArtifact(
+                        "OCR-derived block is missing an OCR locator".to_owned(),
+                    ));
+                }
+                (DocumentOrigin::Native, DocumentLocator::Ocr { .. }) => {
+                    return Err(DocumentError::InvalidArtifact(
+                        "native block must not use an OCR locator".to_owned(),
+                    ));
+                }
+                (DocumentOrigin::Native, _) => {}
+            }
             validate_metadata(&block.metadata)?;
         }
         if text_chars > DOCUMENT_MAX_TEXT_CHARS {
@@ -323,10 +345,33 @@ impl DocumentArtifact {
         if let Some(profile) = &self.ocr_profile {
             profile.validate()?;
         }
-        if self.visual_coverage == VisualCoverage::NotRequested && self.ocr_profile.is_some() {
-            return Err(DocumentError::InvalidArtifact(
-                "OCR profile present when visual coverage was not requested".to_owned(),
-            ));
+        match self.visual_coverage {
+            VisualCoverage::NotRequested => {
+                if self.ocr_profile.is_some() || saw_ocr_block {
+                    return Err(DocumentError::InvalidArtifact(
+                        "OCR evidence is present when visual coverage was not requested".to_owned(),
+                    ));
+                }
+            }
+            VisualCoverage::Complete => {
+                if self.ocr_profile.is_none() {
+                    return Err(DocumentError::InvalidArtifact(
+                        "complete visual coverage is missing its OCR profile".to_owned(),
+                    ));
+                }
+            }
+            VisualCoverage::Partial | VisualCoverage::Failed => {
+                if self.ocr_profile.is_none() {
+                    return Err(DocumentError::InvalidArtifact(
+                        "incomplete visual coverage is missing its OCR profile".to_owned(),
+                    ));
+                }
+                if self.complete {
+                    return Err(DocumentError::InvalidArtifact(
+                        "partial or failed visual coverage cannot be complete".to_owned(),
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -439,6 +484,7 @@ fn validate_locator(locator: &DocumentLocator, depth: usize) -> Result<(), Docum
                 || polygon
                     .iter()
                     .any(|point| point.x >= *width || point.y >= *height)
+                || polygon_doubled_area(polygon) == 0
             {
                 return Err(DocumentError::InvalidArtifact(
                     "invalid OCR locator polygon".to_owned(),
@@ -448,6 +494,17 @@ fn validate_locator(locator: &DocumentLocator, depth: usize) -> Result<(), Docum
         }
         _ => Ok(()),
     }
+}
+
+fn polygon_doubled_area(points: &[OcrPoint]) -> i128 {
+    let mut area = 0_i128;
+    for index in 0..points.len() {
+        let current = points[index];
+        let next = points[(index + 1) % points.len()];
+        area +=
+            i128::from(current.x) * i128::from(next.y) - i128::from(next.x) * i128::from(current.y);
+    }
+    area.abs()
 }
 
 fn validate_package_part(value: &str) -> Result<(), DocumentError> {
@@ -543,6 +600,67 @@ mod tests {
                 path: "body/p[1]".to_owned(),
             },
         )?;
+        assert!(artifact.validate().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_incoherent_ocr_profile_origin_geometry_and_completeness()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let profile = OcrProfileIdentity {
+            engine: "fixture".to_owned(),
+            engine_version: "1".to_owned(),
+            profile: "fixture".to_owned(),
+            model_digests: BTreeMap::from([("model".to_owned(), "a".repeat(64))]),
+            languages: vec!["en".to_owned()],
+            preprocessing_version: compass_ocr::OCR_PREPROCESSING_VERSION,
+        };
+        let owner = DocumentLocator::Package {
+            part: "word/document.xml".to_owned(),
+            path: "body/p[1]".to_owned(),
+        };
+        let mut artifact = DocumentArtifact::new(DocumentFormat::Docx);
+        artifact.ocr_profile = Some(profile.clone());
+        artifact.visual_coverage = VisualCoverage::Complete;
+        artifact.push_block(
+            None,
+            DocumentBlockKind::Paragraph,
+            "OCR text".to_owned(),
+            DocumentLocator::Ocr {
+                owner: Box::new(owner),
+                candidate_id: "image-1".to_owned(),
+                width: 100,
+                height: 100,
+                polygon: vec![
+                    OcrPoint { x: 1, y: 1 },
+                    OcrPoint { x: 10, y: 1 },
+                    OcrPoint { x: 10, y: 10 },
+                    OcrPoint { x: 1, y: 10 },
+                ],
+                occurrence: 0,
+            },
+        )?;
+        artifact.blocks[0].origin = DocumentOrigin::Ocr {
+            profile: profile.clone(),
+            confidence_bps: 9_000,
+        };
+        assert!(artifact.validate().is_ok());
+
+        artifact.blocks[0].origin = DocumentOrigin::Native;
+        assert!(artifact.validate().is_err());
+        artifact.blocks[0].origin = DocumentOrigin::Ocr {
+            profile,
+            confidence_bps: 9_000,
+        };
+        if let DocumentLocator::Ocr { polygon, .. } = &mut artifact.blocks[0].locator {
+            polygon[2] = OcrPoint { x: 20, y: 1 };
+            polygon[3] = OcrPoint { x: 30, y: 1 };
+        }
+        assert!(artifact.validate().is_err());
+
+        artifact.blocks.clear();
+        artifact.visual_coverage = VisualCoverage::Partial;
+        artifact.complete = true;
         assert!(artifact.validate().is_err());
         Ok(())
     }

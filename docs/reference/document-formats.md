@@ -120,6 +120,14 @@ require a verified local profile and never download implicitly. Use
 inspection uses `compass.document.inspect/1` and includes the policy, artifact,
 limits, diagnostics, visual coverage, and exact OCR profile identity.
 
+Document and cache files are capped while streaming, so size checks still hold
+if an input changes during a read. PDF rasterization reserves aggregate pixels
+before rendering each page, and tiled recognition checks the document deadline
+before and after each inference unit. One native inference call cannot be
+preempted midway; its result is discarded as a timeout if the deadline has
+elapsed. Concurrent installation of the same model profile waits on a bounded
+lock, and verification rejects symlinked artifacts or markers.
+
 ## Related contracts
 
 - [Configuration](configuration.md)
