@@ -30,6 +30,9 @@
   cached and OCR-derived artifact coherence, bound aggregate raster work and
   per-tile deadlines, and serialize model installation while rejecting symlinked
   model artifacts and markers.
+  Preserve Intel macOS builds by excluding the unavailable ONNX runtime on that
+  target; native document processing remains available and managed OCR reports
+  an explicit unsupported-platform error before downloading model weights.
 
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes

@@ -527,6 +527,7 @@ fn expected_verified_marker(profile: ModelProfile) -> VerifiedProfileMarker {
 }
 
 pub fn install_profile(profile: ModelProfile) -> Result<ModelFiles, OcrError> {
+    crate::ensure_managed_runtime_available()?;
     ModelCache::from_environment()?.install(profile, &HttpsArtifactFetcher::default())
 }
 

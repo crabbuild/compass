@@ -85,9 +85,14 @@ fn explicit_ocr_missing_profile_has_one_actionable_command() -> Result<(), Box<d
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr)?;
-    let command = "compass models install pp-ocrv6-small";
-    assert_eq!(stderr.matches(command).count(), 1, "{stderr}");
-    assert!(stderr.contains("no system OCR package is required"));
+    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        assert!(stderr.contains("managed local OCR is unavailable on Intel macOS"));
+        assert!(stderr.contains("native PDF, DOCX, PPTX, and XLSX processing remains available"));
+    } else {
+        let command = "compass models install pp-ocrv6-small";
+        assert_eq!(stderr.matches(command).count(), 1, "{stderr}");
+        assert!(stderr.contains("no system OCR package is required"));
+    }
     Ok(())
 }
 
@@ -136,13 +141,35 @@ fn extract_ocr_uses_the_same_managed_profile_contract() -> Result<(), Box<dyn Er
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr)?;
-    assert_eq!(
-        stderr
-            .matches("compass models install pp-ocrv6-small")
-            .count(),
-        1
-    );
-    assert!(stderr.contains("no system OCR package is required"));
+    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        assert!(stderr.contains("managed local OCR is unavailable on Intel macOS"));
+        assert!(stderr.contains("native PDF, DOCX, PPTX, and XLSX processing remains available"));
+    } else {
+        assert_eq!(
+            stderr
+                .matches("compass models install pp-ocrv6-small")
+                .count(),
+            1
+        );
+        assert!(stderr.contains("no system OCR package is required"));
+    }
+    Ok(())
+}
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+#[test]
+fn model_install_rejects_unsupported_runtime_before_download() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let cache = directory.path().join("models");
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["models", "install", "pp-ocrv6-small"])
+        .env("COMPASS_CACHE_DIR", &cache)
+        .output()?;
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr)?;
+    assert!(stderr.contains("managed local OCR is unavailable on Intel macOS"));
+    assert!(!cache.exists(), "unsupported model install created a cache");
     Ok(())
 }
 

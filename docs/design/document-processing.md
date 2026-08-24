@@ -206,12 +206,15 @@ complete cache entry. The same prepared artifact feeds structural publication
 and gap-free Unicode-safe semantic slices. The semantic layer does not load an
 OCR engine or maintain a second document cache.
 
-The PP-OCRv6 runtime is compiled with Compass. Users install no Python,
-Tesseract, office suite, Poppler, Java, or system ONNX package. Model weights
-are deliberately separate: `compass models install pp-ocrv6-small` is the only
-download path and validates a fixed allowlisted HTTPS source, declared size,
-SHA-256, and atomic verified marker. Inspection and extraction never download
-or prompt.
+On supported targets, the PP-OCRv6 runtime is compiled with Compass. Users
+install no Python, Tesseract, office suite, Poppler, Java, or system ONNX
+package. Intel (`x86_64`) macOS is excluded because the pinned ONNX Runtime has
+no self-contained distribution for that target; native document processing
+continues to work, while model installation and OCR-enabled processing fail
+before downloading. Model weights are deliberately separate: `compass models
+install pp-ocrv6-small` is the only download path on supported targets and
+validates a fixed allowlisted HTTPS source, declared size, SHA-256, and atomic
+verified marker. Inspection and extraction never download or prompt.
 
 The production engine identity is OAR-OCR 0.9.2 with its in-process ONNX
 backend. The model source is the immutable GreatV/OAR-OCR `v0.7.0` GitHub

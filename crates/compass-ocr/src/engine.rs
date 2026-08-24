@@ -4,15 +4,22 @@ use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use image::{DynamicImage, ImageDecoder, ImageReader, RgbImage, imageops::FilterType};
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
 use oar_ocr::core::config::OrtSessionConfig;
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
 use oar_ocr::oarocr::OAROCRBuilder;
 use sha2::{Digest, Sha256};
 
-use crate::models::{ModelProfile, verify_profile};
+use crate::models::ModelProfile;
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+use crate::models::verify_profile;
 use crate::{
-    OCR_ENGINE_MAX_SIDE, OCR_ENGINE_THREADS, OCR_MAX_OBSERVATIONS_PER_RASTER,
-    OCR_MAX_RASTER_LONG_EDGE, OCR_MAX_RASTER_PIXELS, OCR_SCHEMA, OCR_TILE_OVERLAP, OcrError,
-    OcrObservation, OcrPoint, OcrRequest, OcrResponse,
+    OCR_ENGINE_MAX_SIDE, OCR_MAX_RASTER_LONG_EDGE, OCR_MAX_RASTER_PIXELS, OCR_TILE_OVERLAP,
+    OcrError, OcrRequest, OcrResponse,
+};
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+use crate::{
+    OCR_ENGINE_THREADS, OCR_MAX_OBSERVATIONS_PER_RASTER, OCR_SCHEMA, OcrObservation, OcrPoint,
 };
 
 #[derive(Clone, Debug)]
@@ -53,35 +60,40 @@ pub trait OcrEngine {
 }
 
 pub struct ManagedOarEngine {
+    #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
     runtime: oar_ocr::oarocr::OAROCR,
     profile: crate::OcrProfileIdentity,
 }
 
 impl ManagedOarEngine {
     pub fn load(profile: ModelProfile) -> Result<Self, OcrError> {
-        let files = verify_profile(profile)?;
-        let session = OrtSessionConfig::default()
-            .with_intra_threads(OCR_ENGINE_THREADS)
-            .with_inter_threads(OCR_ENGINE_THREADS);
-        let runtime = OAROCRBuilder::new(&files.detector, &files.recognizer, &files.dictionary)
-            .ort_session(session)
-            .image_batch_size(1)
-            .region_batch_size(4)
-            .build()
-            .map_err(|error| OcrError::EngineUnavailable(error.to_string()))?;
-        Ok(Self {
-            runtime,
-            profile: files.identity,
-        })
+        crate::ensure_managed_runtime_available()?;
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        {
+            let _ = profile;
+            Err(crate::managed_runtime_unavailable_error())
+        }
+        #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+        {
+            let files = verify_profile(profile)?;
+            let session = OrtSessionConfig::default()
+                .with_intra_threads(OCR_ENGINE_THREADS)
+                .with_inter_threads(OCR_ENGINE_THREADS);
+            let runtime = OAROCRBuilder::new(&files.detector, &files.recognizer, &files.dictionary)
+                .ort_session(session)
+                .image_batch_size(1)
+                .region_batch_size(4)
+                .build()
+                .map_err(|error| OcrError::EngineUnavailable(error.to_string()))?;
+            Ok(Self {
+                runtime,
+                profile: files.identity,
+            })
+        }
     }
-}
 
-impl OcrEngine for ManagedOarEngine {
-    fn identity(&self) -> &crate::OcrProfileIdentity {
-        &self.profile
-    }
-
-    fn recognize(
+    #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+    fn recognize_with_runtime(
         &self,
         request: &OcrRequest,
         raster: &PreparedRaster,
@@ -165,6 +177,28 @@ impl OcrEngine for ManagedOarEngine {
         };
         response.validate_for(request)?;
         Ok(response)
+    }
+}
+
+impl OcrEngine for ManagedOarEngine {
+    fn identity(&self) -> &crate::OcrProfileIdentity {
+        &self.profile
+    }
+
+    fn recognize(
+        &self,
+        request: &OcrRequest,
+        raster: &PreparedRaster,
+    ) -> Result<OcrResponse, OcrError> {
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        {
+            let _ = (request, raster);
+            Err(crate::managed_runtime_unavailable_error())
+        }
+        #[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
+        {
+            self.recognize_with_runtime(request, raster)
+        }
     }
 
     fn recognize_cancellable(
@@ -327,6 +361,7 @@ pub fn prepare_raster_cancellable(
     })
 }
 
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
 fn geometry_key(points: &[oar_ocr::processors::Point]) -> (u32, u32) {
     let min_y = points
         .iter()
@@ -341,6 +376,7 @@ fn geometry_key(points: &[oar_ocr::processors::Point]) -> (u32, u32) {
     (sortable_float(min_y), sortable_float(min_x))
 }
 
+#[cfg(not(all(target_os = "macos", target_arch = "x86_64")))]
 fn sortable_float(value: f32) -> u32 {
     if !value.is_finite() || value <= 0.0 {
         0
@@ -349,6 +385,10 @@ fn sortable_float(value: f32) -> u32 {
     }
 }
 
+#[cfg(any(
+    not(all(target_os = "macos", target_arch = "x86_64")),
+    test
+))]
 fn quantize_coordinate(value: f32, bound: u32) -> Result<u32, OcrError> {
     if !value.is_finite() || value < 0.0 || value > bound as f32 || bound == 0 {
         return Err(OcrError::InvalidOutput(

@@ -151,6 +151,9 @@ PDF, DOCX, PPTX, and XLSX processing requires no additional installation.
 `models install` is the only command here that uses the network. It downloads
 only pinned artifacts from the Compass allowlist, validates size and SHA-256,
 and publishes an atomic verification marker. `list` and `verify` are offline.
+On Intel (`x86_64`) macOS, managed OCR is unavailable because the pinned ONNX
+runtime has no self-contained distribution; `models install` fails before any
+download, while native document processing and `--ocr off` remain available.
 
 `update`, `extract`, and watch rebuilds may succeed with a warning that Compass
 published a partial graph. The warning reports exact omitted node, omitted

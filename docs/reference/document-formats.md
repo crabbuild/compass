@@ -120,6 +120,12 @@ require a verified local profile and never download implicitly. Use
 inspection uses `compass.document.inspect/1` and includes the policy, artifact,
 limits, diagnostics, visual coverage, and exact OCR profile identity.
 
+Managed OCR is unavailable on Intel (`x86_64`) macOS because its pinned ONNX
+runtime has no self-contained distribution for that target. Native extraction
+and `--ocr off` remain available without additional installation. Compass
+rejects model installation and OCR-enabled processing there before any model
+download.
+
 Document and cache files are capped while streaming, so size checks still hold
 if an input changes during a read. PDF rasterization reserves aggregate pixels
 before rendering each page, and tiled recognition checks the document deadline
