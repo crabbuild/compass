@@ -5,11 +5,14 @@ use compass_core::{
     TaskContextTarget, build_task_context,
 };
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument, NodeDetails,
-    NodeKind, NodeRecord, SymbolNodeDetails,
+    BuildMetadata, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, GraphDocument,
+    NodeDetails, NodeKind, NodeRecord, RenderEdgeDetails, RenderKind, RouteNodeDetails, RouteStage,
+    RouteStageDetails, SymbolNodeDetails,
 };
 use compass_model::identity::{edge_id, file_id};
-use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+use compass_model::provenance::{
+    EvidenceConfidence, EvidenceOrigin, Provenance, ResolutionState, SourceAnchor,
+};
 use compass_query::open_with_document;
 use compass_reflect::MemoryDoc;
 use sha2::{Digest, Sha256};
@@ -247,5 +250,119 @@ fn qualification_composes_verified_priority_sections_and_memory_deterministicall
             .iter()
             .any(|omission| { omission.category == "history_project_knowledge" })
     );
+    Ok(())
+}
+
+#[test]
+fn framework_context_reports_render_direction_and_rejects_v1_schema()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = b"component";
+    fs::create_dir_all(directory.path().join("src"))?;
+    fs::write(directory.path().join("src/ui.tsx"), source)?;
+    let mut graph = GraphDocument::empty_v1(BuildMetadata {
+        builder_version: "test".to_owned(),
+        schema_fingerprint: "sha256:schema".to_owned(),
+        source_tree_digest: "sha256:tree".to_owned(),
+        configuration_digest: "sha256:config".to_owned(),
+        generation_id: "sha256:generation".to_owned(),
+        source_commit: None,
+    });
+    graph.graph.files.push(FileRecord {
+        id: file_id("src/ui.tsx"),
+        path: "src/ui.tsx".to_owned(),
+        language: Some("tsx".to_owned()),
+        content_digest: format!("sha256:{:x}", Sha256::digest(source)),
+        byte_size: source.len() as u64,
+        generated: false,
+        extraction_status: ExtractionStatus::Extracted,
+        extractor_versions: vec!["test".to_owned()],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+    let mut component = node("component", "Card", "Card", "src/ui.tsx");
+    component.kind = NodeKind::Component;
+    component.framework = Some("react".to_owned());
+    component.roles = vec![compass_model::code_graph::NodeRole::UiComponent];
+    let mut route = node("route", "Page", "Page", "src/ui.tsx");
+    route.kind = NodeKind::Route;
+    route.framework = Some("next".to_owned());
+    route.details = Some(NodeDetails::Route(RouteNodeDetails {
+        operation: "GET".to_owned(),
+        path: "/".to_owned(),
+        original_path: None,
+        declaring_scope: "src/app/page.tsx".to_owned(),
+        resolution: ResolutionState::Exact,
+        middleware_count: 0,
+        stages: vec![RouteStageDetails {
+            stage: RouteStage::RouteComponent,
+            position: 0,
+            reference: "Page".to_owned(),
+            resolution: ResolutionState::Exact,
+            source_anchor: Some(anchor("src/ui.tsx")),
+            target: Some("component".to_owned()),
+            candidates: Vec::new(),
+        }],
+    }));
+    let mut page_component = node(
+        "page-component",
+        "PageComponent",
+        "PageComponent",
+        "src/ui.tsx",
+    );
+    page_component.kind = NodeKind::Component;
+    page_component.framework = Some("react".to_owned());
+    let mut render = edge(
+        "component",
+        EdgeKind::Renders,
+        "page-component",
+        "src/ui.tsx",
+    );
+    render.details = Some(EdgeDetails::Render(RenderEdgeDetails {
+        render_kind: RenderKind::Jsx,
+        boundary: None,
+    }));
+    graph.nodes = vec![component, route, page_component];
+    graph.links = vec![
+        render,
+        edge("route", EdgeKind::RoutesTo, "page-component", "src/ui.tsx"),
+    ];
+    let graph_path = directory.path().join("graph.json");
+    let engine = open_with_document(graph, &graph_path, None, &directory.path().join("cache"))?;
+    let context = build_task_context(
+        &engine,
+        &TaskContextRequest {
+            intent: TaskContextIntent::Modify,
+            target: "page-component".to_owned(),
+            repository_root: directory.path().to_string_lossy().into_owned(),
+            limits: TaskContextLimits::default(),
+        },
+        &[],
+    )?;
+    let framework = context
+        .framework
+        .as_ref()
+        .ok_or("framework context missing")?;
+    assert!(framework.packs.iter().any(|pack| pack.id == "react-ui"));
+    assert!(framework
+        .packs
+        .iter()
+        .any(|pack| pack.qualification == compass_core::FrameworkQualificationState::Qualifying));
+    assert!(framework.renders.is_empty());
+    assert_eq!(framework.rendered_by.len(), 1);
+    assert_eq!(framework.routes.len(), 1);
+    assert_eq!(
+        framework.routes[0].stages[0].stage,
+        RouteStage::RouteComponent
+    );
+
+    let mut encoded = serde_json::to_value(&context)?;
+    encoded["schema"] = serde_json::Value::String(compass_core::TASK_CONTEXT_SCHEMA_V1.to_owned());
+    let error =
+        TaskContext::from_json(&serde_json::to_vec(&encoded)?).expect_err("v1 must be rejected");
+    assert!(matches!(
+        error,
+        compass_core::TaskContextError::UnsupportedSchema(_)
+    ));
     Ok(())
 }

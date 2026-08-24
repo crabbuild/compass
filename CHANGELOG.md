@@ -35,11 +35,25 @@
   Preserve Intel macOS builds by excluding the unavailable ONNX runtime on that
   target; native document processing remains available and managed OCR reports
   an explicit unsupported-platform error before downloading model weights.
+  The graph viewer now exposes combined/native/OCR evidence tabs, confidence
+  and page/slide/sheet locators, bounded OCR region previews, coverage warnings,
+  and a managed model status/install card during initialization.
 
 - Make semantic provider choice explicit and repeatable with `--backend`,
   `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`. Credential guidance now
   covers all built-in providers and custom provider environment keys without
   exposing secrets in Compass configuration or artifacts.
+
+- Add versioned `compass.task-context/2` framework evidence for React and
+  frontend workflows, including pack versions, route stages, render direction,
+  runtime boundaries, configuration dependencies, provenance, and bounded
+  qualification states.
+
+- Add the first provisional React frontend graph slice: exact JSX `renders`
+  relationships, component/hook/client/server role evidence, strict viewer and
+  query contracts, and framework-pack cache invalidation. The slice remains
+  `Qualifying` until the independent React/Next/TanStack/React Router/Remix/Vite
+  corpus and precision/recall gates are complete.
 
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes

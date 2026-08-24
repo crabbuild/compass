@@ -233,6 +233,7 @@ fn collect_minimal_api_routes(
                 anchor: source_anchor(context.path, context.source, start.start(), end),
                 handler_reference: handler_reference.clone(),
                 middleware_references: Vec::new(),
+                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: None,
                 detail: detail.clone(),
@@ -488,6 +489,26 @@ fn fact_key(fact: &RawFrameworkFact) -> (&str, u64, &str) {
             domain.anchor.source_file.as_str(),
             domain.anchor.start_byte,
             domain.kind.as_str(),
+        ),
+        RawFrameworkFact::Role(role) => (
+            role.anchor.source_file.as_str(),
+            role.anchor.start_byte,
+            role.role.as_str(),
+        ),
+        RawFrameworkFact::Relation(relation) => (
+            relation.anchor.source_file.as_str(),
+            relation.anchor.start_byte,
+            relation.relation.as_str(),
+        ),
+        RawFrameworkFact::Configuration(configuration) => (
+            configuration.anchor.source_file.as_str(),
+            configuration.anchor.start_byte,
+            configuration.field.as_str(),
+        ),
+        RawFrameworkFact::FileSet(file_set) => (
+            file_set.anchor.source_file.as_str(),
+            file_set.anchor.start_byte,
+            file_set.owner_reference.as_str(),
         ),
     }
 }

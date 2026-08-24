@@ -60,10 +60,13 @@ pub use evidence_pipeline::{
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
-    FrameworkCapability, FrameworkLimitError, FrameworkLimits, FrameworkManifestPolicy,
-    FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry,
-    FrameworkPackRegistryError, FrameworkRelation, RawDomainFact, RawFrameworkAnchor,
-    RawFrameworkAnnotationFact, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    FRAMEWORK_PACK_SEMANTICS_VERSION, FrameworkCapability, FrameworkLimitError, FrameworkLimits,
+    FrameworkManifestPolicy, FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind,
+    FrameworkPackRegistry, FrameworkPackRegistryError, FrameworkRelation, RawDomainFact,
+    RawFrameworkAnchor, RawFrameworkAnnotationFact, RawFrameworkConfigurationFact,
+    RawFrameworkFact, RawFrameworkFileSetFact, RawFrameworkOrigin, RawFrameworkRelationFact,
+    RawFrameworkRoleFact, RawRouteFact, RawRouteStageFact, RawRouteStageRole,
+    framework_pack_semantics_version, framework_semantics_digest,
 };
 pub use html::{HtmlError, HtmlNormalization, normalize_html};
 pub use ids::{file_stem, make_id, normalize_id};

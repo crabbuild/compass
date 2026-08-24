@@ -221,6 +221,7 @@ fn collect_go_route_calls(
                     anchor: anchor(path, source, node.start_byte(), node.end_byte()),
                     handler_reference: handler.clone(),
                     middleware_references: middleware.clone(),
+                    stages: Vec::new(),
                     origin: RawFrameworkOrigin::Ast,
                     rule: Some(format!("{framework}-router-call")),
                     detail: Map::from_iter([("receiver".into(), Value::String(receiver.clone()))]),

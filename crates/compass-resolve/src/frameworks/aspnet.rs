@@ -148,6 +148,7 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
                                     .unwrap_or(&annotation.owner_qualified_name)
                             ),
                             middleware_references: Vec::new(),
+                            stages: Vec::new(),
                             origin: RawFrameworkOrigin::Ast,
                             rule: Some(if action_routes.is_empty() {
                                 mapping.rule.to_owned()

@@ -1,0 +1,128 @@
+schema = "compass.frontend-qualification/2"
+mode = "pinned"
+checkoutRoot = "/Volumes/Workspace/Github"
+readOnly = true
+oracleProvider = "typescript_compiler_api_5_9_3_frontend_projection"
+oracleToolchain = "node-24;typescript-5.9.3"
+
+[qualityBudget]
+stableFamilyCount = 7
+minimumAccepted = 2800
+minimumPrecision = 0.995
+minimumRecall = 0.95
+minimumWilsonLower95 = 0.99
+maxColdRegression = 1.10
+maxWarmRegression = 1.10
+maxPeakRssRegression = 1.10
+
+[[repository]]
+id = "react-dev-components"
+family = "react"
+framework = "react"
+stable = true
+url = "https://github.com/reactjs/react.dev.git"
+commit = "12d692da47e77cdc558b928fcfbaf4e71c6d0cec"
+checkout = "/Volumes/Workspace/Github/reactjs/react.dev"
+license = "MIT"
+licenseFile = "LICENSE-DOCS.md"
+licenseSha256 = "61b098d905d9799fc4f4625b476dac117630a1740a02e032594ff2fccbbb6206"
+sourceRoot = "."
+sourceGlobs = ["src/components/**/*.tsx", "src/components/**/*.jsx", "package.json"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/*.dist.js"]
+capabilities = ["react.render.jsx", "react.component.roles", "react.hooks"]
+
+[[repository]]
+id = "next-app-bundle-analyzer"
+family = "next-app-router"
+framework = "next-app"
+stable = true
+url = "https://github.com/vercel/next.js.git"
+commit = "cb463843e78506c6b79518af8125af05e6cbac77"
+checkout = "/Volumes/Workspace/Github/vercel/next.js"
+license = "MIT"
+licenseFile = "license.md"
+licenseSha256 = "ee765244e2d59f5234d474f62e0766fa0c8b99af967fdd4c0cb8dcb0c76ea224"
+sourceRoot = "."
+sourceGlobs = ["test/e2e/app-dir/**/*", "apps/bundle-analyzer/app/**/*", "apps/bundle-analyzer/components/**/*", "apps/bundle-analyzer/lib/**/*", "apps/bundle-analyzer/*.config.*", "apps/bundle-analyzer/package.json"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/.next/**", "test/e2e/app-dir/next-condition/**", "test/e2e/app-dir/not-found-non-document-dynamic/**"]
+capabilities = ["next.app.route", "next.app.hierarchy", "react.render.jsx", "next.client-server-directive"]
+
+[[repository]]
+id = "next-pages-react-dev"
+family = "next-pages-router"
+framework = "next-pages"
+stable = true
+url = "https://github.com/reactjs/react.dev.git"
+commit = "12d692da47e77cdc558b928fcfbaf4e71c6d0cec"
+checkout = "/Volumes/Workspace/Github/reactjs/react.dev"
+license = "MIT"
+licenseFile = "LICENSE-DOCS.md"
+licenseSha256 = "61b098d905d9799fc4f4625b476dac117630a1740a02e032594ff2fccbbb6206"
+sourceRoot = "."
+sourceGlobs = ["src/**/*", "package.json"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/*.dist.js"]
+capabilities = ["next.pages.route", "next.pages.dynamic", "react.render.jsx"]
+
+[[repository]]
+id = "react-router-framework-playground"
+family = "react-router"
+framework = "react-router"
+stable = true
+url = "https://github.com/remix-run/react-router.git"
+commit = "cab1a69054aa7dfba08a81b6e4b4d13957c82a38"
+checkout = "/Volumes/Workspace/Github/remix-run/react-router"
+license = "MIT"
+licenseFile = "LICENSE.md"
+licenseSha256 = "77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49"
+sourceRoot = "."
+sourceGlobs = ["playground/**/*", "package.json"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**", "playground/vite-plugin-cloudflare/workers/app.ts", "playground/rsc-vite-framework/app/entry.rsc.tsx"]
+capabilities = ["react-router.route", "react-router.loader-action", "react-router.hierarchy", "react.render.jsx"]
+
+[[repository]]
+id = "remix-bookstore"
+family = "remix"
+framework = "remix"
+stable = true
+url = "https://github.com/remix-run/remix.git"
+commit = "0b25fab078508d1565fdd68377a2629b53031e2b"
+checkout = "/Volumes/Workspace/Github/remix-run/remix"
+license = "MIT"
+licenseFile = "LICENSE"
+licenseSha256 = "d6baf87f30d13d2d7770c18c858e7a31fa7ceede4bc9469a50f03dbafe455cb4"
+sourceRoot = "."
+sourceGlobs = ["demos/bookstore/app/**/*", "demos/bookstore/*.config.*", "demos/bookstore/package.json"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**"]
+capabilities = ["remix.route.config", "react.render.jsx"]
+
+[[repository]]
+id = "tanstack-router-basic-file-based"
+family = "tanstack-router"
+framework = "tanstack-router"
+stable = true
+url = "https://github.com/TanStack/router.git"
+commit = "a5a5bacc8fdf30b7823caf0a94908c3e0db27aa2"
+checkout = "/Volumes/Workspace/Github/TanStack/router"
+license = "MIT"
+licenseFile = "LICENSE"
+licenseSha256 = "a405ee70c632bb938acb7ac5f210e814409b3760ea9d2329d8ed8ffcfd11a0e7"
+sourceRoot = "."
+sourceGlobs = ["e2e/react-router/basic-file-based/src/**/*", "e2e/react-router/basic-file-based/vite.config.*", "e2e/react-router/basic-file-based/package.json"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/routeTree.gen.*"]
+capabilities = ["tanstack.route", "tanstack.route.hierarchy", "tanstack.loader", "react.render.jsx"]
+
+[[repository]]
+id = "vite-react-template-and-core"
+family = "vite"
+framework = "vite"
+stable = true
+url = "https://github.com/vitejs/vite.git"
+commit = "7bdad37a4a772936d24e0116ac32a1f09fd8a055"
+checkout = "/Volumes/Workspace/Github/vitejs/vite"
+license = "MIT"
+licenseFile = "LICENSE"
+licenseSha256 = "692057af3d664cbb79ac38293eb50aa3c4987f8182e2a440136e59e08f1b4a54"
+sourceRoot = "."
+sourceGlobs = ["packages/create-vite/template-react/**/*", "packages/create-vite/template-react-ts/**/*", "playground/glob-import/root/**/*", "**/vite.config.*", "packages/vite/src/**/*.ts", "packages/vite/src/**/*.tsx"]
+excludeGlobs = ["**/node_modules/**", "**/dist/**", "**/build/**", "**/fixtures/**", "packages/vite/src/module-runner/**", "packages/vite/src/shared/hmr.ts", "packages/vite/src/node/watch.ts", "packages/vite/src/node/__tests__/runnerImport.spec.ts", "packages/vite/src/node/__tests__/plugins/importGlob/fixture-a/**", "playground/glob-import/root/import-meta-glob-pkg/**", "playground/env/**"]
+capabilities = ["vite.config.factory", "vite.plugin.identity", "vite.file_set.glob", "react.render.jsx"]

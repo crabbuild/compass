@@ -1,0 +1,14 @@
+<?php
+
+class ExampleController {
+    public function view() {}
+}
+
+class ExampleForm {}
+
+/**
+ * Implements hook_entity_type_build().
+ */
+function drupal_entity_type_build() {}
+
+function drupal_helper() {}

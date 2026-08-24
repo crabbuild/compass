@@ -1,0 +1,55 @@
+use std::fs;
+use std::sync::Arc;
+
+use compass_languages::{Engine, ProjectEvidenceIndex, RawFrameworkFact};
+use tempfile::tempdir;
+
+#[test]
+fn react_client_modules_mark_private_components_as_client_boundaries() {
+    let directory = tempdir().expect("temporary project");
+    let root = directory.path();
+    let source_path = root.join("src/client.tsx");
+    let source = br#""use client";
+import * as React from 'react';
+
+export function PublicCard() {
+  return <PrivateRow />;
+}
+
+function PrivateRow() {
+  return <span>row</span>;
+}
+"#;
+    fs::write(
+        root.join("package.json"),
+        br#"{"dependencies":{"react":"19.0.0"}}"#,
+    )
+    .expect("package manifest");
+    fs::create_dir_all(source_path.parent().expect("source parent")).expect("source directory");
+    fs::write(&source_path, source).expect("source file");
+
+    let project = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source_path));
+    let mut engine = Engine::with_project_evidence(Arc::new(project));
+    let extraction = engine
+        .extract_source_graph_only(&source_path, "src/client.tsx", source)
+        .expect("React extraction");
+
+    let boundaries = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Domain(domain)
+                if domain.framework == "react"
+                    && domain.kind == "ui_role"
+                    && domain.detail.get("role").and_then(|value| value.as_str())
+                        == Some("client_boundary") =>
+            {
+                Some(domain.name.clone())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(boundaries.len(), 2);
+    assert!(boundaries.iter().any(|name| name == "PublicCard"));
+    assert!(boundaries.iter().any(|name| name == "PrivateRow"));
+}

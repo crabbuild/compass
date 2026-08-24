@@ -388,10 +388,13 @@ compass context explain|modify|debug|test TARGET
   [--max-knowledge-items N] [--max-response-bytes N]
 ```
 
-Emits `compass.task-context/1` after exact target resolution. It composes
-digest-verified source, exact calls, related tests, bounded impact, and
-identity-linked reflection memory. Ambiguous and fuzzy-only targets retain
-candidates but do not compose structural evidence.
+Emits `compass.task-context/2` after exact target resolution. It composes
+digest-verified source, exact calls, related tests, bounded impact, typed
+framework context, and identity-linked reflection memory. The framework
+context includes pack/version and qualification state, routes and stages,
+render direction, runtime boundaries, configuration dependencies, provenance,
+ambiguity, and truncation. Ambiguous and fuzzy-only targets retain candidates
+but do not compose structural evidence.
 
 ### `tree`
 

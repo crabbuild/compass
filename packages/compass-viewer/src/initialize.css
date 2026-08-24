@@ -862,6 +862,159 @@ button.init-scope-disclosure:hover {
   background: var(--compass-focus-soft);
 }
 
+.init-ocr-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 35%, var(--compass-line));
+  border-radius: 6px;
+  background:
+    linear-gradient(130deg, color-mix(in srgb, #e2a94b 10%, transparent), transparent 55%),
+    var(--vscode-editorWidget-background, var(--compass-panel));
+}
+
+.init-ocr-card-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.init-ocr-card-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #e2a94b 58%, var(--compass-line));
+  border-radius: 5px;
+  background: color-mix(in srgb, #e2a94b 12%, transparent);
+  color: #e2a94b;
+}
+
+.init-ocr-card-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.init-ocr-card-heading > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.init-ocr-card-heading small {
+  color: var(--compass-faint);
+  font: 600 9px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.init-ocr-card-heading strong {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.init-ocr-card-status {
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--compass-warning) 48%, var(--compass-line));
+  border-radius: 999px;
+  color: var(--compass-warning);
+  font: 700 9px/1 var(--compass-font-mono);
+  white-space: nowrap;
+}
+
+.init-ocr-card-status[data-status="ready"] {
+  border-color: color-mix(in srgb, var(--compass-success) 48%, var(--compass-line));
+  color: var(--compass-success);
+}
+
+.init-ocr-card-status[data-status="error"],
+.init-ocr-card-status[data-status="invalid"] {
+  border-color: color-mix(in srgb, var(--destructive) 48%, var(--compass-line));
+  color: var(--destructive);
+}
+
+.init-ocr-card > p {
+  margin: 0 0 0 40px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.init-ocr-card > p[role="alert"] {
+  color: var(--destructive);
+}
+
+.init-ocr-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 40px;
+}
+
+.init-ocr-facts span {
+  padding: 4px 7px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  color: var(--compass-faint);
+  font: 9px/1.2 var(--compass-font-mono);
+}
+
+.init-ocr-action {
+  justify-self: start;
+  min-height: 30px;
+  margin-left: 40px;
+  padding-inline: 10px;
+}
+
+.init-ocr-action svg {
+  width: 14px;
+  height: 14px;
+}
+
+.init-ocr-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.init-ocr-progress svg {
+  width: 13px;
+  height: 13px;
+  animation: init-ocr-spin 1s linear infinite;
+}
+
+@keyframes init-ocr-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .init-ocr-card-heading {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .init-ocr-card-status {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .init-ocr-card > p,
+  .init-ocr-facts,
+  .init-ocr-action {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .init-ocr-progress svg {
+    animation: none;
+  }
+}
+
 .init-build-callout > svg {
   width: 17px;
   flex: 0 0 17px;

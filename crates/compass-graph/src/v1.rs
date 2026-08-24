@@ -10,8 +10,9 @@ use compass_model::code_graph::{
     DatabaseNodeDetails, DiagnosticSeverity, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus,
     FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
     ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole,
-    QueryNodeDetails, ResourceKind, ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails,
-    RouteStage, RouteStageDetails, SchemaNodeDetails, SymbolNodeDetails,
+    QueryNodeDetails, RenderEdgeDetails, RenderKind, ResourceKind, ResourceNodeDetails,
+    RouteEdgeDetails, RouteNodeDetails, RouteStage, RouteStageDetails, SchemaNodeDetails,
+    SymbolNodeDetails,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -3373,6 +3374,13 @@ fn insert_raw_edge_details(attributes: &mut Map<String, Value>, details: &EdgeDe
                 Value::String(details.mapping_kind.clone()),
             );
         }
+        EdgeDetails::Render(details) => {
+            attributes.insert(
+                "render_kind".to_owned(),
+                serde_json::to_value(details.render_kind).unwrap_or(Value::Null),
+            );
+            insert_optional_string(attributes, "boundary", details.boundary.as_ref());
+        }
     }
 }
 
@@ -3748,16 +3756,48 @@ fn normalize_edge(
         relationship_site.as_ref(),
         occurrence_rule.as_ref().map(OccurrenceRule::as_str),
     );
-    let details = (kind == EdgeKind::RoutesTo).then(|| {
-        EdgeDetails::Route(RouteEdgeDetails {
+    let details = match kind {
+        EdgeKind::RoutesTo => Some(EdgeDetails::Route(RouteEdgeDetails {
             stage: match optional_string(&raw.attributes, "stage").as_deref() {
+                None | Some("handler") => RouteStage::Handler,
                 Some("middleware") => RouteStage::Middleware,
-                _ => RouteStage::Handler,
+                Some("layout") => RouteStage::Layout,
+                Some("template") => RouteStage::Template,
+                Some("loading") => RouteStage::Loading,
+                Some("default") => RouteStage::Default,
+                Some("error_boundary") => RouteStage::ErrorBoundary,
+                Some("not_found") => RouteStage::NotFound,
+                Some("boundary") => RouteStage::Boundary,
+                Some("loader") => RouteStage::Loader,
+                Some("action") => RouteStage::Action,
+                Some("data_loader") => RouteStage::DataLoader,
+                Some("route_component") => RouteStage::RouteComponent,
+                Some(value) => {
+                    return Err(raw_error(&owner, &format!("unknown route stage {value:?}")));
+                }
             },
             position: optional_u32(&raw.attributes, "position"),
             operation: optional_string(&raw.attributes, "operation"),
-        })
-    });
+        })),
+        EdgeKind::Renders => {
+            let render_kind = match optional_string(&raw.attributes, "render_kind").as_deref() {
+                None => RenderKind::Jsx,
+                Some("jsx") => RenderKind::Jsx,
+                Some("create_element") => RenderKind::CreateElement,
+                Some("root") => RenderKind::Root,
+                Some("lazy") => RenderKind::Lazy,
+                Some("dynamic") => RenderKind::Dynamic,
+                Some(value) => {
+                    return Err(raw_error(&owner, &format!("unknown render kind {value:?}")));
+                }
+            };
+            Some(EdgeDetails::Render(RenderEdgeDetails {
+                render_kind,
+                boundary: optional_string(&raw.attributes, "boundary"),
+            }))
+        }
+        _ => None,
+    };
     Ok(EdgeRecord {
         key: id.clone(),
         id,
@@ -4131,6 +4171,7 @@ fn route_stage_details(
     let mut stages = serde_json::from_value::<Vec<RouteStageDetails>>(stages.clone())
         .map_err(|error| raw_error(record, &format!("invalid route stages: {error}")))?;
     for stage in &mut stages {
+        normalize_optional_anchor(&mut stage.source_anchor, root)?;
         for candidate in &mut stage.candidates {
             normalize_optional_anchor(&mut candidate.anchor, root)?;
         }
@@ -4277,6 +4318,7 @@ fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
         "depends_on" => (EdgeKind::DependsOn, None, false),
         "documents" => (EdgeKind::Documents, None, false),
         "maps_to" => (EdgeKind::MapsTo, None, false),
+        "renders" => (EdgeKind::Renders, None, false),
         "imports_from" => (EdgeKind::Imports, Some("raw-relation:imports_from"), false),
         "re_exports" => (EdgeKind::Exports, Some("raw-relation:re_exports"), false),
         "navigates" => (EdgeKind::References, Some("raw-relation:navigates"), false),
@@ -4467,7 +4509,12 @@ fn node_identity(
             let target_namespace = route
                 .stages
                 .iter()
-                .find(|stage| stage.stage == RouteStage::Handler)
+                .find(|stage| {
+                    matches!(
+                        stage.stage,
+                        RouteStage::Handler | RouteStage::RouteComponent
+                    )
+                })
                 .map(|stage| {
                     if stage.reference.is_empty() {
                         stage.target.as_deref().unwrap_or_default()
@@ -4865,6 +4912,13 @@ fn map_role(value: &str) -> Option<NodeRole> {
         "test" => Some(NodeRole::Test),
         "fixture" => Some(NodeRole::Fixture),
         "generated" => Some(NodeRole::Generated),
+        "ui_component" => Some(NodeRole::UiComponent),
+        "hook" => Some(NodeRole::Hook),
+        "client_boundary" => Some(NodeRole::ClientBoundary),
+        "client_component" => Some(NodeRole::ClientComponent),
+        "server_component" => Some(NodeRole::ServerComponent),
+        "server_function" => Some(NodeRole::ServerFunction),
+        "data_loader" => Some(NodeRole::DataLoader),
         _ => None,
     }
 }

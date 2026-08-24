@@ -4191,6 +4191,10 @@ export class OrdersConsumer {
                 crate::RawFrameworkFact::Route(route) => &route.anchor,
                 crate::RawFrameworkFact::Domain(domain) => &domain.anchor,
                 crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
+                crate::RawFrameworkFact::Role(role) => &role.anchor,
+                crate::RawFrameworkFact::Relation(relation) => &relation.anchor,
+                crate::RawFrameworkFact::Configuration(configuration) => &configuration.anchor,
+                crate::RawFrameworkFact::FileSet(file_set) => &file_set.anchor,
             };
             anchor.source_file == "src/orders.ts"
         }));
@@ -4232,6 +4236,10 @@ public class OrdersController : ControllerBase {
                 crate::RawFrameworkFact::Route(route) => &route.anchor,
                 crate::RawFrameworkFact::Domain(domain) => &domain.anchor,
                 crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
+                crate::RawFrameworkFact::Role(role) => &role.anchor,
+                crate::RawFrameworkFact::Relation(relation) => &relation.anchor,
+                crate::RawFrameworkFact::Configuration(configuration) => &configuration.anchor,
+                crate::RawFrameworkFact::FileSet(file_set) => &file_set.anchor,
             };
             anchor.source_file == "Controllers/OrdersController.cs"
         }));

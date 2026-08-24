@@ -122,6 +122,13 @@ class OracleTests(unittest.TestCase):
             {"kind": "config_key"},
         ))
 
+    def test_endpoint_matrix_accepts_object_variable_properties(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "variable"},
+            {"kind": "contains"},
+            {"kind": "property"},
+        ))
+
     def test_endpoint_matrix_accepts_only_rust_enum_member_instantiations(self) -> None:
         self.assertTrue(endpoint_allowed(
             {"kind": "function"},

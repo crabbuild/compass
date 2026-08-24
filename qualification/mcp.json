@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "qualification": {
+      "command": "node",
+      "args": ["-y", "example-runtime"],
+      "env": {
+        "QUALIFICATION_MODE": "semantic"
+      }
+    }
+  }
+}
