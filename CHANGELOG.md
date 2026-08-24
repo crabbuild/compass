@@ -35,6 +35,9 @@
   Preserve Intel macOS builds by excluding the unavailable ONNX runtime on that
   target; native document processing remains available and managed OCR reports
   an explicit unsupported-platform error before downloading model weights.
+  The graph viewer now exposes combined/native/OCR evidence tabs, confidence
+  and page/slide/sheet locators, bounded OCR region previews, coverage warnings,
+  and a managed model status/install card during initialization.
 
 - Make semantic provider choice explicit and repeatable with `--backend`,
   `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`. Credential guidance now

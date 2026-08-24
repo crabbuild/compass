@@ -199,6 +199,11 @@ Standalone HTML may additionally embed optional, presentation-only source
 navigation metadata for a recognized Git forge and full source commit. This
 metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
 versioned graph/view contracts are unchanged.
+Rich document nodes may carry an optional additive `document` object in
+`compass.viewer.graph/1`. It contains bounded native/OCR provenance, typed
+page/slide/sheet locators, confidence, and OCR geometry for the viewer; older
+readers may ignore the field, while strict readers should preserve unknown
+nested fields and fail closed only on an unknown contract major.
 Structural builds publish a validated `store.sqlite3` sidecar and typed
 `store.ref` selector by default; `--store json` explicitly opts out. Typed code
 queries prefer that validated sidecar by default, while `--engine json`
