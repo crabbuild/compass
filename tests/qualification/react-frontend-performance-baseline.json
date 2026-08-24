@@ -1,0 +1,109 @@
+{
+  "schema": "compass.react-frontend-performance-baseline/1",
+  "manifestSha256": "d8526108aed42c93e9841ce83281bb9c322a54d127929c405c2ea99a1316c891",
+  "recordedFrom": {
+    "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend-audit/qualification/react-frontend-current-3/react-frontend-pinned-result.json",
+    "binarySha256": "cd61fc16abd7d6f8806f096f70cac4a6308bf841ece787e908b9f02636d95b37",
+    "compassRevision": "8a1bb16181bf4cfc3e8678b2648c3a8d6acadaa7",
+    "machine": {
+      "cpuCount": 12,
+      "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+      "python": "3.14.6"
+    },
+    "profile": "release",
+    "resultSha256": "9b351300ad8a2b12b28cab2b5e758412eac91601d7da199331217b2655ecf501"
+  },
+  "repositories": [
+    {
+      "id": "react-dev-components",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 1.9459462920203805, "peakRssBytes": 80822272},
+          {"label": "warm", "seconds": 0.14875883294735104, "peakRssBytes": 15482880},
+          {"label": "semantic-edit", "seconds": 1.6049071659799665, "peakRssBytes": 80920576},
+          {"label": "manifest-edit", "seconds": 1.5938075829762965, "peakRssBytes": 81035264},
+          {"label": "restore", "seconds": 1.584127707988955, "peakRssBytes": 80805888},
+          {"label": "alternate-checkout", "seconds": 1.0988206249894574, "peakRssBytes": 91668480}
+        ]
+      }
+    },
+    {
+      "id": "next-app-bundle-analyzer",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 68.91677216696553, "peakRssBytes": 1352990720},
+          {"label": "warm", "seconds": 1.8321617500623688, "peakRssBytes": 35373056},
+          {"label": "semantic-edit", "seconds": 118.70441054203548, "peakRssBytes": 1339244544},
+          {"label": "manifest-edit", "seconds": 71.00777258304879, "peakRssBytes": 1348501504},
+          {"label": "restore", "seconds": 62.68354004097637, "peakRssBytes": 1348894720},
+          {"label": "alternate-checkout", "seconds": 67.6705141250277, "peakRssBytes": 1408778240}
+        ]
+      }
+    },
+    {
+      "id": "next-pages-react-dev",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 4.098638291005045, "peakRssBytes": 112082944},
+          {"label": "warm", "seconds": 0.30005470907781273, "peakRssBytes": 15826944},
+          {"label": "semantic-edit", "seconds": 3.241362000000663, "peakRssBytes": 112279552},
+          {"label": "manifest-edit", "seconds": 5.123802958056331, "peakRssBytes": 112345088},
+          {"label": "restore", "seconds": 4.0576498749433085, "peakRssBytes": 112164864},
+          {"label": "alternate-checkout", "seconds": 5.867171582998708, "peakRssBytes": 129662976}
+        ]
+      }
+    },
+    {
+      "id": "react-router-framework-playground",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 8.152722875005566, "peakRssBytes": 66600960},
+          {"label": "warm", "seconds": 1.043583667022176, "peakRssBytes": 15859712},
+          {"label": "semantic-edit", "seconds": 3.0938144579995424, "peakRssBytes": 67272704},
+          {"label": "manifest-edit", "seconds": 4.663367334054783, "peakRssBytes": 66764800},
+          {"label": "restore", "seconds": 4.467706833034754, "peakRssBytes": 67125248},
+          {"label": "alternate-checkout", "seconds": 1.4062101249583066, "peakRssBytes": 89145344}
+        ]
+      }
+    },
+    {
+      "id": "remix-bookstore",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 2.1426274169934914, "peakRssBytes": 88227840},
+          {"label": "warm", "seconds": 0.27815295895561576, "peakRssBytes": 15532032},
+          {"label": "semantic-edit", "seconds": 2.079920749994926, "peakRssBytes": 88014848},
+          {"label": "manifest-edit", "seconds": 3.912888083024882, "peakRssBytes": 88096768},
+          {"label": "restore", "seconds": 4.960886917077005, "peakRssBytes": 87965696},
+          {"label": "alternate-checkout", "seconds": 1.680478416965343, "peakRssBytes": 102367232}
+        ]
+      }
+    },
+    {
+      "id": "tanstack-router-basic-file-based",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 1.435848042019643, "peakRssBytes": 51773440},
+          {"label": "warm", "seconds": 0.16565537499263883, "peakRssBytes": 15925248},
+          {"label": "semantic-edit", "seconds": 1.2497274170164019, "peakRssBytes": 51970048},
+          {"label": "manifest-edit", "seconds": 1.36836362502072, "peakRssBytes": 51855360},
+          {"label": "restore", "seconds": 1.3990909580606967, "peakRssBytes": 51904512},
+          {"label": "alternate-checkout", "seconds": 0.9089364160317928, "peakRssBytes": 70369280}
+        ]
+      }
+    },
+    {
+      "id": "vite-react-template-and-core",
+      "performance": {
+        "rows": [
+          {"label": "cold", "seconds": 21.401736792060547, "peakRssBytes": 533872640},
+          {"label": "warm", "seconds": 0.3732094999868423, "peakRssBytes": 16302080},
+          {"label": "semantic-edit", "seconds": 16.47696400003042, "peakRssBytes": 534265856},
+          {"label": "manifest-edit", "seconds": 22.725246499991044, "peakRssBytes": 531824640},
+          {"label": "restore", "seconds": 18.535480000078678, "peakRssBytes": 528990208},
+          {"label": "alternate-checkout", "seconds": 15.530971375061199, "peakRssBytes": 560480256}
+        ]
+      }
+    }
+  ]
+}

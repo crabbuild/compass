@@ -53,3 +53,57 @@ function PrivateRow() {
     assert!(boundaries.iter().any(|name| name == "PublicCard"));
     assert!(boundaries.iter().any(|name| name == "PrivateRow"));
 }
+
+#[test]
+fn alternate_jsx_runtime_does_not_activate_react_from_an_incidental_dependency() {
+    let directory = tempdir().expect("temporary project");
+    let root = directory.path();
+    let source_path = root.join("src/card.tsx");
+    let source = br#"export function Card() { return <article />; }"#;
+    fs::write(
+        root.join("package.json"),
+        br#"{"dependencies":{"react":"19.0.0","preact":"10.0.0"}}"#,
+    )
+    .expect("package manifest");
+    fs::write(
+        root.join("tsconfig.json"),
+        br#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}"#,
+    )
+    .expect("TypeScript configuration");
+    fs::create_dir_all(source_path.parent().expect("source parent")).expect("source directory");
+    fs::write(&source_path, source).expect("source file");
+
+    let project = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source_path));
+    let mut engine = Engine::with_project_evidence(Arc::new(project));
+    let extraction = engine
+        .extract_source_graph_only(&source_path, "src/card.tsx", source)
+        .expect("TSX extraction");
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.framework == "react")
+    }));
+}
+
+#[test]
+fn npm_alias_to_preact_does_not_activate_react() {
+    let directory = tempdir().expect("temporary project");
+    let root = directory.path();
+    let source_path = root.join("src/card.tsx");
+    let source = br#"import React from 'react';
+export function Card() { return <article />; }"#;
+    fs::write(
+        root.join("package.json"),
+        br#"{"dependencies":{"react":"npm:preact@10.0.0"}}"#,
+    )
+    .expect("package manifest");
+    fs::create_dir_all(source_path.parent().expect("source parent")).expect("source directory");
+    fs::write(&source_path, source).expect("source file");
+
+    let project = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source_path));
+    let mut engine = Engine::with_project_evidence(Arc::new(project));
+    let extraction = engine
+        .extract_source_graph_only(&source_path, "src/card.tsx", source)
+        .expect("TSX extraction");
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.framework == "react")
+    }));
+}

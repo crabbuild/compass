@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 
 
@@ -84,6 +85,52 @@ class ReactFrontendQualificationTests(unittest.TestCase):
                 PINNED.run_checked(["python3", "-c", "print('too much output')"], cwd=PINNED.ROOT)
         finally:
             PINNED.MAX_COMMAND_OUTPUT_BYTES = original_limit
+
+    def test_pinned_projection_closes_over_root_typescript_base_config(self) -> None:
+        with tempfile.TemporaryDirectory() as checkout_name, tempfile.TemporaryDirectory() as destination_name:
+            checkout = Path(checkout_name).resolve()
+            destination = Path(destination_name).resolve() / "projection"
+            source = checkout / "playground" / "framework" / "app.tsx"
+            source.parent.mkdir(parents=True)
+            source.write_text("export function App() { return <main />; }\n", encoding="utf-8")
+            (source.parent / "tsconfig.json").write_text(
+                '{"extends":"../../tsconfig.base.json"}\n', encoding="utf-8"
+            )
+            (source.parent / "package.json").write_text(
+                '{"private":true}\n', encoding="utf-8"
+            )
+            (checkout / "tsconfig.base.json").write_text(
+                '{"compilerOptions":{"jsx":"react-jsx"}}\n', encoding="utf-8"
+            )
+            (checkout / "tsconfig.json").write_text(
+                '{"include":["scripts"]}\n', encoding="utf-8"
+            )
+            repository = {
+                "id": "projection-config-closure",
+                "sourceRoot": ".",
+                "sourceGlobs": ["playground/**/*"],
+                "excludeGlobs": [],
+            }
+
+            files, source_files, _ = PINNED.project_repository(
+                repository, checkout, destination
+            )
+
+            self.assertEqual(source_files, 1)
+            self.assertEqual(files, 4)
+            self.assertTrue((destination / "tsconfig.base.json").is_file())
+            self.assertFalse((destination / "tsconfig.json").exists())
+
+    def test_jsonc_extends_parser_is_comment_and_trailing_comma_aware(self) -> None:
+        source = '''{
+          // The word extends in a comment is not evidence.
+          "extends": "../tsconfig.base",
+          "compilerOptions": {"jsx": "react-jsx",},
+        }'''
+        self.assertEqual(
+            PINNED.json.loads(PINNED.strip_jsonc(source))["extends"],
+            "../tsconfig.base",
+        )
 
 
 if __name__ == "__main__":

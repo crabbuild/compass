@@ -12,7 +12,7 @@ use crate::json_config::parse_jsonc;
 
 pub const FRAMEWORK_PROJECT_EVIDENCE_EXTENSION: &str = "_compass_framework_project_evidence";
 
-const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/1";
+const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/3";
 const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DEPENDENCIES_PER_PROJECT: usize = 10_000;
 const MAX_PROJECT_CONFIGURATIONS: usize = 256;
@@ -82,9 +82,12 @@ pub struct ProjectEvidence {
     metadata: BTreeMap<String, String>,
     source_roots: Vec<String>,
     dependencies: BTreeSet<String>,
+    dependency_aliases: BTreeMap<String, String>,
     configuration_files: Vec<String>,
     configuration_keys: BTreeSet<String>,
+    jsx_import_sources: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
+    vite_aliases: Vec<ProjectViteAliasRule>,
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: Vec<ComposerAutoloadRoot>,
@@ -107,6 +110,34 @@ pub struct ProjectEvidenceDiagnostic {
     pub code: String,
     pub manifest: String,
     pub message: String,
+}
+
+/// One source-ordered Vite `resolve.alias` rule recovered without executing
+/// the configuration module.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ProjectViteAliasRule {
+    pub configuration: String,
+    pub ordinal: u32,
+    pub find: String,
+    pub replacement: String,
+    pub kind: ProjectViteAliasKind,
+}
+
+/// The match form used by a Vite alias rule.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ProjectViteAliasKind {
+    String,
+    Regex,
+}
+
+impl ProjectViteAliasKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Regex => "regex",
+        }
+    }
 }
 
 impl ProjectEvidence {
@@ -145,6 +176,13 @@ impl ProjectEvidence {
         &self.dependencies
     }
 
+    /// npm package aliases keyed by the declared import name. A marker such
+    /// as `react: npm:preact@...` must not activate React extraction.
+    #[must_use]
+    pub fn dependency_aliases(&self) -> &BTreeMap<String, String> {
+        &self.dependency_aliases
+    }
+
     #[must_use]
     pub fn configuration_files(&self) -> &[String] {
         &self.configuration_files
@@ -155,9 +193,23 @@ impl ProjectEvidence {
         &self.configuration_keys
     }
 
+    /// Statically declared TypeScript/JavaScript JSX runtime packages.
+    #[must_use]
+    pub fn jsx_import_sources(&self) -> &BTreeSet<String> {
+        &self.jsx_import_sources
+    }
+
     #[must_use]
     pub fn aliases(&self) -> &BTreeMap<String, String> {
         &self.aliases
+    }
+
+    /// Source-ordered aliases owned specifically by Vite configuration.
+    /// These rules are not merged with TypeScript, package-import, or webpack
+    /// aliases.
+    #[must_use]
+    pub fn vite_aliases(&self) -> &[ProjectViteAliasRule] {
+        &self.vite_aliases
     }
 
     #[must_use]
@@ -189,6 +241,10 @@ impl ProjectEvidence {
     pub fn has_dependency(&self, dependency: &str) -> bool {
         let dependency = normalize_dependency(dependency);
         self.dependencies.contains(&dependency)
+            && self
+                .dependency_aliases
+                .get(&dependency)
+                .is_none_or(|target| target == &dependency)
     }
 
     #[must_use]
@@ -335,6 +391,14 @@ impl ProjectEvidenceIndex {
                     builder
                         .dependencies
                         .extend(parsed.dependencies.into_iter().take(remaining));
+                    for (dependency, target) in parsed.dependency_aliases {
+                        if builder.dependency_aliases.len() >= MAX_DEPENDENCIES_PER_PROJECT
+                            && !builder.dependency_aliases.contains_key(&dependency)
+                        {
+                            break;
+                        }
+                        builder.dependency_aliases.insert(dependency, target);
+                    }
                 }
                 if file_name(&project_file).eq_ignore_ascii_case("composer.json") {
                     let (roots, mut diagnostics) = parse_composer_autoload_roots(
@@ -367,11 +431,23 @@ impl ProjectEvidenceIndex {
                                 .saturating_sub(builder.configuration_keys.len()),
                         ),
                     );
+                    builder.jsx_import_sources.extend(
+                        parsed.jsx_import_sources.into_iter().take(
+                            MAX_PROJECT_CONFIGURATION_KEYS
+                                .saturating_sub(builder.jsx_import_sources.len()),
+                        ),
+                    );
                     builder.aliases.extend(
                         parsed
                             .aliases
                             .into_iter()
                             .take(MAX_PROJECT_ALIASES.saturating_sub(builder.aliases.len())),
+                    );
+                    extend_vite_aliases(
+                        &project_root,
+                        &project_file,
+                        &mut builder.vite_aliases,
+                        parsed.vite_aliases,
                     );
                     builder.plugins.extend(
                         parsed
@@ -393,11 +469,23 @@ impl ProjectEvidenceIndex {
                                 .saturating_sub(builder.configuration_keys.len()),
                         ),
                     );
+                    builder.jsx_import_sources.extend(
+                        parsed.jsx_import_sources.into_iter().take(
+                            MAX_PROJECT_CONFIGURATION_KEYS
+                                .saturating_sub(builder.jsx_import_sources.len()),
+                        ),
+                    );
                     builder.aliases.extend(
                         parsed
                             .aliases
                             .into_iter()
                             .take(MAX_PROJECT_ALIASES.saturating_sub(builder.aliases.len())),
+                    );
+                    extend_vite_aliases(
+                        &project_root,
+                        &project_file,
+                        &mut builder.vite_aliases,
+                        parsed.vite_aliases,
                     );
                     builder.plugins.extend(
                         parsed
@@ -476,9 +564,12 @@ struct ProjectBuilder {
     metadata: BTreeMap<String, String>,
     source_roots: BTreeSet<String>,
     dependencies: BTreeSet<String>,
+    dependency_aliases: BTreeMap<String, String>,
     configuration_files: BTreeSet<String>,
     configuration_keys: BTreeSet<String>,
+    jsx_import_sources: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
+    vite_aliases: Vec<ProjectViteAliasRule>,
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: BTreeSet<ComposerAutoloadRoot>,
@@ -488,6 +579,7 @@ struct ProjectBuilder {
 struct ParsedManifest {
     ecosystem: &'static str,
     dependencies: BTreeSet<String>,
+    dependency_aliases: BTreeMap<String, String>,
     metadata: BTreeMap<String, String>,
     source_roots: BTreeSet<String>,
 }
@@ -495,8 +587,39 @@ struct ParsedManifest {
 #[derive(Default)]
 struct ParsedConfiguration {
     configuration_keys: BTreeSet<String>,
+    jsx_import_sources: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
+    vite_aliases: Vec<ParsedViteAliasRule>,
     plugins: BTreeSet<String>,
+}
+
+struct ParsedViteAliasRule {
+    ordinal: u32,
+    find: String,
+    replacement: String,
+    kind: ProjectViteAliasKind,
+}
+
+fn extend_vite_aliases(
+    project_root: &Path,
+    configuration: &Path,
+    output: &mut Vec<ProjectViteAliasRule>,
+    aliases: Vec<ParsedViteAliasRule>,
+) {
+    let remaining = MAX_PROJECT_ALIASES.saturating_sub(output.len());
+    let configuration = relative_project_file(project_root, configuration);
+    output.extend(
+        aliases
+            .into_iter()
+            .take(remaining)
+            .map(|rule| ProjectViteAliasRule {
+                configuration: configuration.clone(),
+                ordinal: rule.ordinal,
+                find: rule.find,
+                replacement: rule.replacement,
+                kind: rule.kind,
+            }),
+    );
 }
 
 fn finish_project(
@@ -509,9 +632,12 @@ fn finish_project(
     let metadata = builder.metadata;
     let source_roots = builder.source_roots.into_iter().collect::<Vec<_>>();
     let dependencies = builder.dependencies;
+    let dependency_aliases = builder.dependency_aliases;
     let configuration_files = builder.configuration_files.into_iter().collect::<Vec<_>>();
     let configuration_keys = builder.configuration_keys;
+    let jsx_import_sources = builder.jsx_import_sources;
     let aliases = builder.aliases;
+    let vite_aliases = builder.vite_aliases;
     let plugins = builder.plugins;
     let route_roots = builder.route_roots;
     let composer_autoload_roots = builder
@@ -551,6 +677,12 @@ fn finish_project(
         digest.update(dependency.as_bytes());
         digest.update([0]);
     }
+    for (dependency, target) in &dependency_aliases {
+        digest.update(dependency.as_bytes());
+        digest.update([0]);
+        digest.update(target.as_bytes());
+        digest.update([0]);
+    }
     for configuration_file in &configuration_files {
         digest.update(configuration_file.as_bytes());
         digest.update([0]);
@@ -559,10 +691,25 @@ fn finish_project(
         digest.update(configuration_key.as_bytes());
         digest.update([0]);
     }
+    for source in &jsx_import_sources {
+        digest.update(source.as_bytes());
+        digest.update([0]);
+    }
     for (alias, target) in &aliases {
         digest.update(alias.as_bytes());
         digest.update([0]);
         digest.update(target.as_bytes());
+        digest.update([0]);
+    }
+    for alias in &vite_aliases {
+        digest.update(alias.configuration.as_bytes());
+        digest.update([0]);
+        digest.update(alias.ordinal.to_le_bytes());
+        digest.update(alias.find.as_bytes());
+        digest.update([0]);
+        digest.update(alias.replacement.as_bytes());
+        digest.update([0]);
+        digest.update(alias.kind.as_str().as_bytes());
         digest.update([0]);
     }
     for plugin in &plugins {
@@ -601,9 +748,12 @@ fn finish_project(
         metadata,
         source_roots,
         dependencies,
+        dependency_aliases,
         configuration_files,
         configuration_keys,
+        jsx_import_sources,
         aliases,
+        vite_aliases,
         plugins,
         route_roots,
         composer_autoload_roots,
@@ -835,6 +985,11 @@ fn parse_manifest(path: &Path) -> Option<ParsedManifest> {
     let source = fs::read_to_string(path).ok()?;
     let name = path.file_name()?.to_str()?;
     let lower = name.to_ascii_lowercase();
+    let dependency_aliases = if lower == "package.json" {
+        npm_dependency_aliases(&source)?
+    } else {
+        BTreeMap::new()
+    };
     let (ecosystem, dependencies, metadata, source_roots) = match lower.as_str() {
         "package.json" => (
             "npm",
@@ -931,6 +1086,7 @@ fn parse_manifest(path: &Path) -> Option<ParsedManifest> {
             .filter(|dependency| !dependency.is_empty())
             .take(MAX_DEPENDENCIES_PER_PROJECT)
             .collect(),
+        dependency_aliases,
         metadata,
         source_roots,
     })
@@ -952,6 +1108,43 @@ fn json_dependencies(source: &str, keys: &[&str]) -> Option<Vec<String>> {
             .flat_map(|dependencies| dependencies.keys().cloned())
             .collect(),
     )
+}
+
+fn npm_dependency_aliases(source: &str) -> Option<BTreeMap<String, String>> {
+    let root = serde_json::from_str::<Value>(source).ok()?;
+    let object = root.as_object()?;
+    let mut aliases = BTreeMap::new();
+    for dependencies in NPM_DEPENDENCY_KEYS
+        .iter()
+        .filter_map(|key| object.get(*key).and_then(Value::as_object))
+    {
+        for (name, specification) in dependencies {
+            let Some(specification) = specification.as_str() else {
+                continue;
+            };
+            let Some(target) = npm_alias_target(specification) else {
+                continue;
+            };
+            if aliases.len() >= MAX_DEPENDENCIES_PER_PROJECT && !aliases.contains_key(name) {
+                return Some(aliases);
+            }
+            aliases.insert(normalize_dependency(name), normalize_dependency(target));
+        }
+    }
+    Some(aliases)
+}
+
+fn npm_alias_target(specification: &str) -> Option<&str> {
+    let alias = specification.strip_prefix("npm:")?;
+    if alias.starts_with('@') {
+        let slash = alias.find('/')?;
+        let version = alias[slash.saturating_add(1)..]
+            .find('@')
+            .map_or(alias.len(), |position| position + slash.saturating_add(1));
+        Some(&alias[..version])
+    } else {
+        Some(alias.split_once('@').map_or(alias, |(package, _)| package))
+    }
 }
 
 fn pyproject_dependencies(source: &str) -> Option<Vec<String>> {
@@ -1422,7 +1615,12 @@ fn parse_package_configuration(source: &str, output: &mut ParsedConfiguration) {
             collect_json_aliases(values, &mut output.aliases);
         }
     }
-    for dependency_key in ["dependencies", "devDependencies", "peerDependencies"] {
+    for dependency_key in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
         let Some(dependencies) = object.get(dependency_key).and_then(Value::as_object) else {
             continue;
         };
@@ -1445,6 +1643,15 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
         output
             .configuration_keys
             .insert("compilerOptions.baseUrl".to_owned());
+    }
+    if let Some(source) = options.get("jsxImportSource").and_then(Value::as_str) {
+        let source = normalize_dependency(source);
+        if !source.is_empty() {
+            output
+                .configuration_keys
+                .insert("compilerOptions.jsxImportSource".to_owned());
+            output.jsx_import_sources.insert(source);
+        }
     }
     if let Some(paths) = options.get("paths").and_then(Value::as_object) {
         output
@@ -1476,7 +1683,7 @@ fn parse_static_vite_config(path: &Path, source: &str, output: &mut ParsedConfig
                         .object()
                         .and_then(|values| values.iter().find(|(key, _)| key == "alias"))
                     {
-                        collect_static_aliases(aliases, &mut output.aliases);
+                        collect_static_vite_aliases(aliases, &mut output.vite_aliases);
                         output.configuration_keys.insert("resolve.alias".to_owned());
                     }
                 }
@@ -1489,12 +1696,6 @@ fn parse_static_vite_config(path: &Path, source: &str, output: &mut ParsedConfig
         }
         collect_syntax_plugins(syntax, output);
     });
-    // `path.resolve(import.meta.dirname, "./src")` is intentionally treated
-    // as an opaque call by the bounded static evaluator. The alias itself is
-    // still recoverable without executing the config, so retain that
-    // source-backed mapping for downstream Vite glob resolution. Dynamic
-    // aliases remain unresolved and therefore fail closed at the matcher.
-    collect_quoted_aliases(source, &mut output.aliases);
 }
 
 fn parse_static_next_config(path: &Path, source: &str, output: &mut ParsedConfiguration) {
@@ -1583,18 +1784,82 @@ fn object_pairs<'tree, 'source>(
         .collect()
 }
 
-fn collect_static_aliases(value: &StaticValue, output: &mut BTreeMap<String, String>) {
-    let Some(values) = value.object() else {
+fn collect_static_vite_aliases(value: &StaticValue, output: &mut Vec<ParsedViteAliasRule>) {
+    match value {
+        StaticValue::Object(values) => {
+            for (ordinal, (find, replacement)) in
+                values.iter().take(MAX_PROJECT_ALIASES).enumerate()
+            {
+                let Some(replacement) = replacement.as_string() else {
+                    continue;
+                };
+                push_vite_alias(
+                    output,
+                    ordinal,
+                    find,
+                    replacement,
+                    ProjectViteAliasKind::String,
+                );
+            }
+        }
+        StaticValue::Array(values) => {
+            for (ordinal, value) in values.iter().take(MAX_PROJECT_ALIASES).enumerate() {
+                let Some(entries) = value.object() else {
+                    continue;
+                };
+                let find = entries
+                    .iter()
+                    .find(|(key, _)| key == "find")
+                    .map(|(_, value)| value);
+                let replacement = entries
+                    .iter()
+                    .find(|(key, _)| key == "replacement")
+                    .and_then(|(_, value)| value.as_string());
+                let (Some(find), Some(replacement)) = (find, replacement) else {
+                    continue;
+                };
+                match find {
+                    StaticValue::String(find) => push_vite_alias(
+                        output,
+                        ordinal,
+                        find,
+                        replacement,
+                        ProjectViteAliasKind::String,
+                    ),
+                    StaticValue::Regex(find) => push_vite_alias(
+                        output,
+                        ordinal,
+                        find,
+                        replacement,
+                        ProjectViteAliasKind::Regex,
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_vite_alias(
+    output: &mut Vec<ParsedViteAliasRule>,
+    ordinal: usize,
+    find: &str,
+    replacement: &str,
+    kind: ProjectViteAliasKind,
+) {
+    if output.len() >= MAX_PROJECT_ALIASES {
+        return;
+    }
+    let Some(ordinal) = u32::try_from(ordinal).ok() else {
         return;
     };
-    for (alias, target) in values.iter().take(MAX_PROJECT_ALIASES) {
-        let Some(target) = target.as_string() else {
-            continue;
-        };
-        output
-            .entry(normalize_alias(alias))
-            .or_insert_with(|| normalize_project_path(target));
-    }
+    output.push(ParsedViteAliasRule {
+        ordinal,
+        find: find.to_owned(),
+        replacement: replacement.to_owned(),
+        kind,
+    });
 }
 
 fn collect_static_plugins(value: &StaticValue, output: &mut ParsedConfiguration) {
@@ -1964,7 +2229,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::ProjectEvidenceIndex;
+    use super::{ProjectEvidenceIndex, ProjectViteAliasKind};
 
     #[test]
     fn nearest_project_merges_manifests_and_is_deterministic() -> Result<(), Box<dyn Error>> {
@@ -2208,7 +2473,14 @@ mod tests {
         assert!(evidence.configuration_keys().contains("resolve.alias"));
         assert!(evidence.configuration_keys().contains("rewrites"));
         assert_eq!(evidence.aliases().get("@/*"), Some(&"src/*".to_owned()));
-        assert_eq!(evidence.aliases().get("~"), Some(&"src".to_owned()));
+        assert!(!evidence.aliases().contains_key("~"));
+        assert_eq!(evidence.vite_aliases().len(), 1);
+        assert_eq!(evidence.vite_aliases()[0].find, "~");
+        assert_eq!(evidence.vite_aliases()[0].replacement, "./src");
+        assert_eq!(
+            evidence.vite_aliases()[0].kind,
+            ProjectViteAliasKind::String
+        );
         assert!(evidence.has_plugin("@vitejs/plugin-react"));
         assert!(evidence.has_plugin("next-plugin-intl"));
         assert!(evidence.has_route_root("next", "src/app"));
@@ -2249,6 +2521,48 @@ mod tests {
                 .contains("compilerOptions.paths")
         );
         assert_eq!(evidence.aliases().get("@/*"), Some(&"src/*".to_owned()));
+        Ok(())
+    }
+
+    #[test]
+    fn npm_aliases_and_jsx_runtime_are_typed_project_evidence() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("src/app.tsx");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "export function App() { return <main />; }\n")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"react":"npm:preact@10","router":"npm:@scope/router@2"}}"#,
+        )?;
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(!evidence.has_dependency("react"));
+        assert_eq!(
+            evidence
+                .dependency_aliases()
+                .get("react")
+                .map(String::as_str),
+            Some("preact")
+        );
+        assert_eq!(
+            evidence
+                .dependency_aliases()
+                .get("router")
+                .map(String::as_str),
+            Some("@scope/router")
+        );
+        assert!(
+            evidence
+                .configuration_keys()
+                .contains("compilerOptions.jsxImportSource")
+        );
+        assert!(evidence.jsx_import_sources().contains("preact"));
         Ok(())
     }
 

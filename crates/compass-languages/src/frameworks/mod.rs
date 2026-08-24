@@ -403,13 +403,7 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::source_versioned(
         "typescript-web",
         &["javascript", "typescript", "tsx"],
-        &[
-            "@angular/router",
-            "@nestjs/common",
-            "react-router",
-            "react-router-dom",
-            "vue-router",
-        ],
+        &["@angular/router", "@nestjs/common", "vue-router"],
         2,
         detect_typescript,
     ),
@@ -1148,6 +1142,22 @@ mod tests {
                 assert!(!pack.dependency_markers.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn react_router_dependency_is_owned_only_by_the_dedicated_route_pack() {
+        let owners = FRAMEWORK_PACKS
+            .iter()
+            .filter(|pack| pack.dependency_markers.contains(&"react-router-dom"))
+            .map(|pack| pack.id)
+            .collect::<Vec<_>>();
+        assert_eq!(owners, vec!["react-ui", "react-router-routes"]);
+        let broad = FRAMEWORK_PACKS
+            .iter()
+            .find(|pack| pack.id == "typescript-web")
+            .expect("TypeScript web pack");
+        assert!(!broad.dependency_markers.contains(&"react-router"));
+        assert!(!broad.dependency_markers.contains(&"react-router-dom"));
     }
 
     #[test]

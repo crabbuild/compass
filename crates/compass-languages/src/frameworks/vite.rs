@@ -250,19 +250,41 @@ fn detect_import_meta_globs(
             ("callee".to_owned(), Value::String(callee)),
             ("complete".to_owned(), Value::Bool(complete)),
         ]);
-        if let Some(project) = project
-            && !project.aliases().is_empty()
-        {
-            detail.insert(
-                "aliases".to_owned(),
-                Value::Object(
-                    project
-                        .aliases()
-                        .iter()
-                        .map(|(alias, target)| (alias.clone(), Value::String(target.clone())))
-                        .collect(),
-                ),
-            );
+        if let Some(project) = project {
+            let configurations = project
+                .vite_aliases()
+                .iter()
+                .map(|rule| rule.configuration.as_str())
+                .collect::<BTreeSet<_>>();
+            if configurations.len() == 1 && !project.vite_aliases().is_empty() {
+                detail.insert(
+                    "aliases_ordered".to_owned(),
+                    Value::Array(
+                        project
+                            .vite_aliases()
+                            .iter()
+                            .map(|rule| {
+                                Value::Object(Map::from_iter([
+                                    ("find".to_owned(), Value::String(rule.find.clone())),
+                                    (
+                                        "replacement".to_owned(),
+                                        Value::String(rule.replacement.clone()),
+                                    ),
+                                    (
+                                        "kind".to_owned(),
+                                        Value::String(rule.kind.as_str().to_owned()),
+                                    ),
+                                    (
+                                        "configuration".to_owned(),
+                                        Value::String(rule.configuration.clone()),
+                                    ),
+                                    ("ordinal".to_owned(), Value::from(rule.ordinal)),
+                                ]))
+                            })
+                            .collect(),
+                    ),
+                );
+            }
         }
         if let Some(options) = static_to_json(&options) {
             detail.insert("options".to_owned(), options);

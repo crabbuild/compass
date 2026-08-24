@@ -40,31 +40,47 @@ const REACT_BUILTIN_HOOKS: &[&str] = &[
 pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
     let syntax = TypeScriptSyntax::new(context.root, context.source);
     let has_project_runtime = context.project.is_some_and(|project| {
-        project.has_any_dependency(&[
-            "react",
-            "react-dom",
-            "react-router",
-            "react-router-dom",
-            "@remix-run/react",
-            "remix",
-            "@tanstack/react-router",
-            "@vitejs/plugin-react",
-            "@vitejs/plugin-react-swc",
-        ])
+        let jsx_runtime_is_react = project.jsx_import_sources().is_empty()
+            || project
+                .jsx_import_sources()
+                .iter()
+                .all(|source| source == "react" || source.ends_with("/react"));
+        jsx_runtime_is_react
+            && project.has_any_dependency(&[
+                "react",
+                "react-dom",
+                "react-router",
+                "react-router-dom",
+                "@remix-run/react",
+                "remix",
+                "@tanstack/react-router",
+                "@vitejs/plugin-react",
+                "@vitejs/plugin-react-swc",
+            ])
     });
     let has_source_runtime = context.evidence.bindings.iter().any(|binding| {
         let module = binding
             .qualified_target
             .split_once("::")
             .map_or(binding.qualified_target.as_str(), |(module, _)| module);
-        matches!(
-            module,
-            "react"
-                | "react-dom"
-                | "react/jsx-runtime"
-                | "react/jsx-dev-runtime"
-                | "react-dom/client"
-        )
+        let import_name = module
+            .split_once('/')
+            .map_or(module, |(package, _)| package);
+        let import_resolves_to_react = context.project.is_none_or(|project| {
+            project
+                .dependency_aliases()
+                .get(import_name)
+                .is_none_or(|target| target == import_name)
+        });
+        import_resolves_to_react
+            && matches!(
+                module,
+                "react"
+                    | "react-dom"
+                    | "react/jsx-runtime"
+                    | "react/jsx-dev-runtime"
+                    | "react-dom/client"
+            )
     });
     if !has_project_runtime && !has_source_runtime {
         return Vec::new();

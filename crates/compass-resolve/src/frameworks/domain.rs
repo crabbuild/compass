@@ -656,18 +656,43 @@ fn normalize_vite_file_set_patterns(
     let base = source.parent().unwrap_or(root);
     let aliases = fact
         .detail
-        .get("aliases")
-        .and_then(Value::as_object)
+        .get("aliases_ordered")
+        .and_then(Value::as_array)
         .map(|values| {
-            let mut values = values
+            values
                 .iter()
-                .filter_map(|(alias, target)| target.as_str().map(|target| (alias, target)))
-                .collect::<Vec<_>>();
-            values
-                .sort_by(|left, right| right.0.len().cmp(&left.0.len()).then(left.0.cmp(right.0)));
-            values
+                .filter_map(|rule| {
+                    let rule = rule.as_object()?;
+                    if rule.get("kind").and_then(Value::as_str) != Some("string") {
+                        return None;
+                    }
+                    Some((
+                        rule.get("find").and_then(Value::as_str)?,
+                        rule.get("replacement").and_then(Value::as_str)?,
+                    ))
+                })
+                .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+
+    if fact
+        .detail
+        .get("aliases_ordered")
+        .and_then(Value::as_array)
+        .is_some_and(|rules| {
+            rules
+                .iter()
+                .any(|rule| rule.get("kind").and_then(Value::as_str) == Some("regex"))
+        })
+    {
+        diagnostics.push(json!({
+            "kind": "file_set_alias_rule_unsupported",
+            "severity": "warning",
+            "framework": fact.framework,
+            "source": fact.anchor.source_file,
+            "aliasKind": "regex",
+        }));
+    }
 
     let normalize = |pattern: &str| normalize_one_vite_pattern(pattern, base, scope, &aliases);
     let mut normalized_includes = Vec::with_capacity(includes.len());
@@ -701,7 +726,7 @@ fn normalize_one_vite_pattern(
     pattern: &str,
     base: &Path,
     scope: &Path,
-    aliases: &[(&String, &str)],
+    aliases: &[(&str, &str)],
 ) -> Option<String> {
     let pattern = pattern.trim().replace('\\', "/");
     if pattern.is_empty() {
@@ -1508,16 +1533,17 @@ mod tests {
     }
 
     #[test]
-    fn vite_file_set_aliases_are_longest_match_and_scope_bounded() {
+    fn vite_file_set_aliases_preserve_declared_order_and_scope_bounds() {
         let root = Path::new("/workspace/repository");
         let scope = root.join("packages/app");
         let mut fact = vite_file_set_fact("packages/app/src/config/vite.config.ts");
         fact.detail.insert(
-            "aliases".to_owned(),
-            json!({
-                "@app/*": "./src/*",
-                "@app/components/*": "./src/components/*"
-            }),
+            "aliases_ordered".to_owned(),
+            json!([
+                {"find":"@app", "replacement":"./first", "kind":"string"},
+                {"find":"@app/components", "replacement":"./second", "kind":"string"},
+                {"find":"^~(.+)", "replacement":"./vendor", "kind":"regex"}
+            ]),
         );
         let mut diagnostics = Vec::new();
 
@@ -1536,10 +1562,14 @@ mod tests {
         assert_eq!(
             includes,
             vec![
-                "src/components/**/*.tsx".to_owned(),
-                "src/utils/**/*.ts".to_owned(),
+                "first/components/**/*.tsx".to_owned(),
+                "first/utils/**/*.ts".to_owned(),
             ]
         );
-        assert!(diagnostics.is_empty());
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].get("kind").and_then(Value::as_str),
+            Some("file_set_alias_rule_unsupported")
+        );
     }
 }

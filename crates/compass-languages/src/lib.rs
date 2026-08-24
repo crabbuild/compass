@@ -74,7 +74,7 @@ pub use json_config::parse_jsonc;
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use project_evidence::{
     ComposerAutoloadRoot, FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidence,
-    ProjectEvidenceDiagnostic, ProjectEvidenceIndex,
+    ProjectEvidenceDiagnostic, ProjectEvidenceIndex, ProjectViteAliasKind, ProjectViteAliasRule,
 };
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};

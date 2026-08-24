@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MOUNT = Path("/Volumes/Workspace/Github").resolve()
 SOURCE_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"}
 CONFIG_NAMES = {
-    "package.json", "tsconfig.json", "jsconfig.json",
+    "package.json", "tsconfig.json", "tsconfig.base.json", "jsconfig.json",
     "vite.config.ts", "vite.config.js", "vite.config.mjs", "vite.config.cjs",
     "next.config.ts", "next.config.js", "next.config.mjs", "next.config.cjs",
     "react-router.config.ts", "react-router.config.js",
@@ -43,6 +43,7 @@ MAX_PROJECT_FILE_BYTES = 8 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 30 * 60
 MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_JSON_BYTES = 512 * 1024 * 1024
+MAX_CONFIG_EXTENDS = 64
 PERFORMANCE_BASELINE_SCHEMA = "compass.react-frontend-performance-baseline/1"
 
 
@@ -429,9 +430,10 @@ def project_repository(repository: dict[str, Any], checkout: Path, destination: 
                 candidate = parent / marker
                 if candidate.is_file() and not candidate.is_symlink():
                     selected.add(candidate)
-            if parent == checkout:
+            if (parent / "package.json").is_file() or parent == checkout:
                 break
             parent = parent.parent
+    close_typescript_config_extends(checkout, selected)
     if len(selected) > MAX_PROJECT_FILES:
         fail(f"{repository['id']} projection exceeds the bounded file limit after config closure")
     oversized = [
@@ -453,6 +455,100 @@ def project_repository(repository: dict[str, Any], checkout: Path, destination: 
     if any(path.is_symlink() for path in destination.rglob("*")):
         fail(f"{repository['id']} projection contains an unsafe symlink")
     return len(selected), sum(path.suffix.lower() in SOURCE_SUFFIXES for path in selected), digest_projection(destination)
+
+
+def close_typescript_config_extends(checkout: Path, selected: set[Path]) -> None:
+    pending = sorted(path for path in selected if is_typescript_config(path))
+    visited: set[Path] = set()
+    while pending:
+        config = pending.pop(0).resolve()
+        if config in visited:
+            continue
+        if len(visited) >= MAX_CONFIG_EXTENDS:
+            fail(f"TypeScript config extends closure exceeds {MAX_CONFIG_EXTENDS} files")
+        visited.add(config)
+        extended = typescript_config_extends(config)
+        if extended is None or not extended.startswith("."):
+            continue
+        candidate = (config.parent / extended).resolve()
+        if candidate.suffix.lower() != ".json":
+            candidate = candidate.with_suffix(".json")
+        try:
+            candidate.relative_to(checkout)
+        except ValueError as error:
+            raise QualificationError(f"TypeScript config extends escapes checkout: {config}") from error
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        if candidate.stat().st_size > MAX_PROJECT_FILE_BYTES:
+            fail(f"TypeScript config extends exceeds the file limit: {candidate}")
+        if candidate not in selected:
+            selected.add(candidate)
+            pending.append(candidate)
+            pending.sort()
+
+
+def is_typescript_config(path: Path) -> bool:
+    name = path.name.lower()
+    return name == "tsconfig.json" or name == "jsconfig.json" or (
+        (name.startswith("tsconfig.") or name.startswith("jsconfig.")) and name.endswith(".json")
+    )
+
+
+def typescript_config_extends(path: Path) -> str | None:
+    try:
+        document = json.loads(strip_jsonc(bounded_read(path, limit=MAX_PROJECT_FILE_BYTES).decode("utf-8")))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    extended = document.get("extends")
+    return extended if isinstance(extended, str) and extended else None
+
+
+def strip_jsonc(source: str) -> str:
+    output: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(source):
+        char = source[index]
+        following = source[index + 1] if index + 1 < len(source) else ""
+        if in_string:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            output.append(char)
+            index += 1
+            continue
+        if char == "/" and following == "/":
+            index += 2
+            while index < len(source) and source[index] not in "\r\n":
+                index += 1
+            continue
+        if char == "/" and following == "*":
+            index += 2
+            while index + 1 < len(source) and source[index : index + 2] != "*/":
+                index += 1
+            index = min(len(source), index + 2)
+            continue
+        if char == ",":
+            lookahead = index + 1
+            while lookahead < len(source) and source[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(source) and source[lookahead] in "}]":
+                index += 1
+                continue
+        output.append(char)
+        index += 1
+    return "".join(output)
 
 
 def active_graph(output: Path) -> Path:
