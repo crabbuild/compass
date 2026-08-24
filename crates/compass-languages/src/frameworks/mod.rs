@@ -128,6 +128,24 @@ impl FrameworkPack {
         semantics_version: u32,
         detector: SourceDetector,
     ) -> Self {
+        Self::source_versioned_with_limits(
+            id,
+            languages,
+            dependency_markers,
+            semantics_version,
+            FrameworkLimits::DEFAULT,
+            detector,
+        )
+    }
+
+    const fn source_versioned_with_limits(
+        id: &'static str,
+        languages: &'static [&'static str],
+        dependency_markers: &'static [&'static str],
+        semantics_version: u32,
+        limits: FrameworkLimits,
+        detector: SourceDetector,
+    ) -> Self {
         Self {
             id,
             semantics_version,
@@ -136,7 +154,7 @@ impl FrameworkPack {
             dependency_markers,
             configuration_markers: &[],
             manifest_policy: FrameworkManifestPolicy::Advisory,
-            limits: FrameworkLimits::DEFAULT,
+            limits,
             adapter: FrameworkPackAdapter::Source(detector),
         }
     }
@@ -368,7 +386,20 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::source_versioned("python-web", &["python"], &[], 1, detect_python),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::universal(&pack::RAILS_RUBY_DESCRIPTOR, ruby::detect_universal),
-    FrameworkPack::source_versioned("go-web", &["go"], &[], 1, detect_go),
+    FrameworkPack::source_versioned_with_limits(
+        "go-web",
+        &["go"],
+        &[],
+        1,
+        FrameworkLimits {
+            // Generated OpenAPI Go files in the pinned qualification corpus
+            // exceed the shared 100k budget while remaining within the
+            // bounded parser-inspection ceiling.
+            max_syntax_nodes: 200_000,
+            ..FrameworkLimits::DEFAULT
+        },
+        detect_go,
+    ),
     FrameworkPack::source_versioned("axum-web", &["rust"], &["axum"], 1, detect_axum),
     FrameworkPack::source_versioned("rust-web", &["rust"], &[], 1, detect_rust),
     FrameworkPack::universal(&pack::VAPOR_SWIFT_DESCRIPTOR, detect_swift_universal),
@@ -505,7 +536,13 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         dependency_markers: &[],
         configuration_markers: &[],
         manifest_policy: FrameworkManifestPolicy::Advisory,
-        limits: FrameworkLimits::DEFAULT,
+        limits: FrameworkLimits {
+            // Generated OpenAPI Go files can also activate the language-wide
+            // enterprise detector, which does not traverse syntax but still
+            // shares this pack-level preflight budget.
+            max_syntax_nodes: 200_000,
+            ..FrameworkLimits::DEFAULT
+        },
         adapter: FrameworkPackAdapter::Source(detect_enterprise),
     },
     FrameworkPack::config_versioned(
@@ -1074,7 +1111,7 @@ fn is_play_routes(path: &Path) -> bool {
 mod tests {
     use std::collections::HashSet;
 
-    use super::{FRAMEWORK_PACKS, FrameworkPackKind};
+    use super::{FRAMEWORK_PACKS, FrameworkLimits, FrameworkPackKind};
 
     #[test]
     fn framework_pack_registry_ids_are_unique_and_well_formed() {
@@ -1142,6 +1179,29 @@ mod tests {
                 assert!(!pack.dependency_markers.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn go_web_uses_explicit_budget_for_large_generated_sources() {
+        let go_web = FRAMEWORK_PACKS
+            .iter()
+            .find(|pack| pack.id == "go-web")
+            .expect("go-web framework pack");
+        assert_eq!(go_web.limits.max_syntax_nodes, 200_000);
+        assert_eq!(
+            FrameworkLimits::DEFAULT.max_syntax_nodes,
+            100_000,
+            "the expanded budget must not change the shared default"
+        );
+    }
+
+    #[test]
+    fn enterprise_domain_pack_matches_large_source_budget() {
+        let enterprise = FRAMEWORK_PACKS
+            .iter()
+            .find(|pack| pack.id == "enterprise-domain-facts")
+            .expect("enterprise-domain-facts framework pack");
+        assert_eq!(enterprise.limits.max_syntax_nodes, 200_000);
     }
 
     #[test]
