@@ -2943,6 +2943,7 @@ fn build_graph_inner_unscoped(
                         path,
                         &prepared.artifact,
                         &prepared.cache_identity,
+                        prepared.ocr_mode,
                     )
                     .map_err(|detail| {
                         compass_languages::ExtractError::InvalidDocumentEvidence {

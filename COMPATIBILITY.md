@@ -77,6 +77,12 @@ with exact source owner, geometry, confidence, and model provenance. Partial
 visual coverage is never labeled complete or finalized as a complete document
 cache entry.
 
+Semantic enrichment accepts explicit provider/model selection through
+`--backend`/`--model` or the non-secret `COMPASS_BACKEND`/`COMPASS_MODEL`
+environment defaults. Provider credentials remain provider-specific
+environment or secret-store values and are excluded from graph artifacts,
+history profiles, and cache identities.
+
 ## Evolving contracts
 
 The Grounded Agent Graph feature is additive and opt-in. It does not change
@@ -91,6 +97,13 @@ proof of semantic truth.
 It calculates exact Base record and source-evidence digests for a selected Base
 Generation; it does not certify, mutate, or publish an assertion. Apply
 re-verifies prepared evidence against the pinned Base Generation.
+
+The bundled Compass skill also supports an explicit continuous-enrichment mode
+for coding sessions. This is an adapter workflow over the existing versioned
+overlay commands, not a new graph or history schema: it keeps a bounded
+session-local candidate ledger, publishes only milestone batches, pins each
+receipt revision, and requires a complete rebase after a Base Generation
+change. Read-only navigation remains the default.
 
 Overlay writes require explicit CLI or server enablement. Existing MCP servers
 without Agent Graph configuration advertise no Agent Graph tools. Configured
@@ -225,6 +238,11 @@ Standalone HTML may additionally embed optional, presentation-only source
 navigation metadata for a recognized Git forge and full source commit. This
 metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
 versioned graph/view contracts are unchanged.
+Rich document nodes may carry an optional additive `document` object in
+`compass.viewer.graph/1`. It contains bounded native/OCR provenance, typed
+page/slide/sheet locators, confidence, and OCR geometry for the viewer; older
+readers may ignore the field, while strict readers should preserve unknown
+nested fields and fail closed only on an unknown contract major.
 Structural builds publish a validated `store.sqlite3` sidecar and typed
 `store.ref` selector by default; `--store json` explicitly opts out. Typed code
 queries prefer that validated sidecar by default, while `--engine json`

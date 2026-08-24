@@ -2097,6 +2097,13 @@ fn command_build_with_validation_inner(
             "error: must specify a path to scan or a --postgres DSN".to_owned(),
         );
     }
+    if extract {
+        // Explicit flags win over environment configuration. The generic
+        // selector is intentionally non-secret: provider transports still
+        // read only their documented provider-specific credential variable.
+        let environment = std::env::vars().collect::<HashMap<_, _>>();
+        apply_provider_environment_defaults(&mut backend, &mut model, &environment);
+    }
     let root = if extract && !has_explicit_root {
         PathBuf::from(".")
     } else {
@@ -2508,9 +2515,30 @@ fn no_llm_api_key_message(semantic_count: usize, dedup_llm: bool) -> String {
         ""
     };
     format!(
-        "no LLM API key found ({}). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key.{hint}",
+        "no LLM API key found ({}). Choose a provider with --backend <NAME> or COMPASS_BACKEND and set its credential: GEMINI_API_KEY/GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), AZURE_OPENAI_API_KEY plus AZURE_OPENAI_ENDPOINT (azure), AWS credentials (bedrock), OLLAMA_BASE_URL for local Ollama, or the env key registered with `compass provider add`. A code-only corpus needs no key.{hint}",
         reasons.join("; ")
     )
+}
+
+fn apply_provider_environment_defaults(
+    backend: &mut Option<String>,
+    model: &mut Option<String>,
+    environment: &HashMap<String, String>,
+) {
+    if backend.is_none() {
+        *backend = environment_value(environment, "COMPASS_BACKEND");
+    }
+    if model.is_none() {
+        *model = environment_value(environment, "COMPASS_MODEL");
+    }
+}
+
+fn environment_value(environment: &HashMap<String, String>, key: &str) -> Option<String> {
+    environment
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
@@ -3002,7 +3030,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--ocr off|auto|always] [--ocr-profile NAME] [--ocr-language BCP47] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--ocr off|auto|always] [--ocr-profile NAME] [--ocr-language BCP47] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]\nProvider selection: --backend/--model override COMPASS_BACKEND/COMPASS_MODEL. Built-ins: claude, kimi, ollama, gemini, openai, deepseek, azure, bedrock, claude-cli. Set the selected provider's documented credential variable; custom providers use `compass provider add`. Credentials are never written to Compass artifacts.".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -6579,5 +6607,25 @@ mod mcp_option_tests {
         assert!(watch_help().contains("--inference-level low|medium|high|max"));
         assert!(extract_help().contains("--inference-level low|medium|high|max"));
         Ok(())
+    }
+
+    #[test]
+    fn provider_environment_defaults_are_non_secret_and_flags_win() {
+        let environment = HashMap::from([
+            ("COMPASS_BACKEND".to_owned(), "  gemini  ".to_owned()),
+            ("COMPASS_MODEL".to_owned(), "  gemini-test  ".to_owned()),
+        ]);
+        let mut backend = None;
+        let mut model = None;
+        apply_provider_environment_defaults(&mut backend, &mut model, &environment);
+        assert_eq!(backend.as_deref(), Some("gemini"));
+        assert_eq!(model.as_deref(), Some("gemini-test"));
+
+        let mut backend = Some("openai".to_owned());
+        let mut model = Some("gpt-test".to_owned());
+        apply_provider_environment_defaults(&mut backend, &mut model, &environment);
+        assert_eq!(backend.as_deref(), Some("openai"));
+        assert_eq!(model.as_deref(), Some("gpt-test"));
+        assert!(extract_help().contains("COMPASS_BACKEND/COMPASS_MODEL"));
     }
 }

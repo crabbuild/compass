@@ -689,6 +689,9 @@ pub(crate) fn node_values(
         );
         output.insert("end_byte".into(), end_byte.map_or(Value::Null, Value::from));
         output.insert("signature".into(), Value::String(signature.clone()));
+        if let Some(document) = document_value(node) {
+            output.insert("document".into(), document);
+        }
         if let Some(counts) = options.member_counts {
             output.insert("is_community".into(), Value::Bool(true));
             output.insert(
@@ -736,6 +739,107 @@ fn source_anchor_unsigned(node: &NodeRecord, legacy_key: &str, v1_key: &str) -> 
             })
             .and_then(|value| value.as_u64())
     })
+}
+
+fn document_value(node: &NodeRecord) -> Option<Value> {
+    const DOCUMENT_VIEWER_TEXT_LIMIT: usize = 4_096;
+    let is_document =
+        node.string("file_type") == "document" || node.property("document_kind").is_some();
+    if !is_document {
+        return None;
+    }
+    let kind = if node.string("document_kind").is_empty() {
+        node.string("symbol_kind")
+    } else {
+        node.string("document_kind")
+    };
+    let role = if kind == "document" { "root" } else { "block" };
+    let mut document = Map::new();
+    document.insert("role".into(), Value::String(role.to_owned()));
+    if !kind.is_empty() {
+        document.insert("kind".into(), Value::String(kind));
+    }
+    for (target, source) in [
+        ("format", "document_format"),
+        ("visualCoverage", "document_visual_coverage"),
+        ("ocrMode", "document_ocr_mode"),
+    ] {
+        if let Some(value) = node
+            .property(source)
+            .and_then(|value| bounded_document_json(&value, 0))
+        {
+            document.insert(target.to_owned(), value);
+        }
+    }
+    if let Some(text) = node
+        .property("document_text")
+        .and_then(|value| value.as_str().map(str::to_owned))
+    {
+        document.insert(
+            "text".to_owned(),
+            Value::String(sanitize_metadata(&text, DOCUMENT_VIEWER_TEXT_LIMIT)),
+        );
+    }
+    if let Some(value) = node
+        .property("document_complete")
+        .and_then(|value| bounded_document_json(&value, 0))
+    {
+        document.insert("complete".into(), value);
+    }
+    if let Some(value) = node
+        .property("block_index")
+        .and_then(|value| bounded_document_json(&value, 0))
+    {
+        document.insert("ordinal".into(), value);
+    }
+    for (target, source) in [
+        ("origin", "document_origin"),
+        ("locator", "document_locator"),
+        ("ocrProfile", "document_ocr_profile"),
+    ] {
+        if let Some(value) = node
+            .property(source)
+            .and_then(|value| bounded_document_json(&value, 0))
+        {
+            document.insert(target.to_owned(), value);
+        }
+    }
+    Some(Value::Object(document))
+}
+
+fn bounded_document_json(value: &Value, depth: usize) -> Option<Value> {
+    const MAX_DEPTH: usize = 5;
+    const MAX_OBJECT_ENTRIES: usize = 128;
+    const MAX_ARRAY_ENTRIES: usize = 512;
+    const MAX_STRING_CHARS: usize = 16_384;
+
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match value {
+        Value::Null => None,
+        Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::String(value) => Some(Value::String(sanitize_metadata(value, MAX_STRING_CHARS))),
+        Value::Array(values) => Some(Value::Array(
+            values
+                .iter()
+                .take(MAX_ARRAY_ENTRIES)
+                .filter_map(|value| bounded_document_json(value, depth + 1))
+                .collect(),
+        )),
+        Value::Object(values) => Some(Value::Object(
+            values
+                .iter()
+                .take(MAX_OBJECT_ENTRIES)
+                .filter_map(|(key, value)| {
+                    Some((
+                        sanitize_metadata(key, 128),
+                        bounded_document_json(value, depth + 1)?,
+                    ))
+                })
+                .collect(),
+        )),
+    }
 }
 
 #[allow(dead_code)]

@@ -10,7 +10,10 @@
   through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
   stronger curated masks remain deny-by-default capabilities. Add read-only
   ingestion preparation so agents can obtain canonical Base references and
-  source evidence without implementing Compass digest rules themselves.
+  source evidence without implementing Compass digest rules themselves. Extend
+  the bundled coding-agent skill with explicit continuous enrichment: bounded
+  milestone batches, revision pinning, source-change rebase gates, and
+  session-end receipts.
 
 - Add versioned `compass.task-context/2` framework evidence for React and
   frontend workflows, including pack versions, route stages, render direction,
@@ -47,6 +50,14 @@
   Preserve Intel macOS builds by excluding the unavailable ONNX runtime on that
   target; native document processing remains available and managed OCR reports
   an explicit unsupported-platform error before downloading model weights.
+  The graph viewer now exposes combined/native/OCR evidence tabs, confidence
+  and page/slide/sheet locators, bounded OCR region previews, coverage warnings,
+  and a managed model status/install card during initialization.
+
+- Make semantic provider choice explicit and repeatable with `--backend`,
+  `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`. Credential guidance now
+  covers all built-in providers and custom provider environment keys without
+  exposing secrets in Compass configuration or artifacts.
 
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes

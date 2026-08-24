@@ -45,6 +45,35 @@ Every batch binds the Base Generation, expected Overlay Revision, principal,
 permissions, limits, and idempotency key. Activation uses compare-and-swap, so
 concurrent writers cannot silently lose an update.
 
+## Continuous coding-session enrichment
+
+An overlay can be enriched throughout an agentic coding session, but the
+session itself is not a second source of truth. The assistant keeps a bounded,
+ephemeral candidate ledger and publishes only durable, source-cited candidates
+at explicit milestones. A useful loop is:
+
+```text
+pin → inspect → collect → prepare → apply → audit/diff → re-pin
+                  ↑                         │
+                  └──── source change ──────┘
+                         rebase gate
+```
+
+The initial `status` response pins the project root, Base Generation, Overlay
+ID, and active revision. Each successful receipt replaces the pinned revision.
+After a refresh, checkout change, or watcher update, writes stop until
+`rebase-plan` has been reviewed and every exact, missing, changed, or ambiguous
+target has an explicit grounded replacement, Retraction, or user decision.
+This prevents an agent from adding facts to a stale Base or silently rebinding
+an assertion to the first similar symbol.
+
+Continuous mode is opt-in. Read-only navigation remains the default, and a
+chat observation without verifiable source evidence stays transient. At
+session end, the assistant reports the Base Generation, overlay, final
+revision, composition profile, applied receipts, deferred candidates, and
+unresolved conflicts. The next session resumes from those immutable selectors,
+not from replayed conversation history.
+
 ## Grounding evidence
 
 Version 1 accepts closed evidence forms for source spans, exact Base facts,

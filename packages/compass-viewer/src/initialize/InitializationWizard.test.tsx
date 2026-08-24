@@ -142,6 +142,33 @@ describe("InitializationWizard", () => {
     root.unmount();
   });
 
+  it("offers a managed OCR model install without blocking the index build", () => {
+    const wizardHost = { ...host(), installOcrModel: vi.fn() };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <InitializationWizard
+        repositoryName="compass"
+        repositoryRoot="/workspace/compass"
+        host={wizardHost}
+        ocrModel={{
+          kind: "missing",
+          profile: "pp-ocrv6-small",
+          installCommand: "compass models install pp-ocrv6-small"
+        }}
+      />
+    ));
+
+    flushSync(() => button(container, "Continue").click());
+    flushSync(() => button(container, "Review configuration").click());
+    expect(container.textContent).toContain("Read text from scans and embedded images");
+    expect(container.textContent).toContain("PP-OCRv6 Small");
+    flushSync(() => button(container, "Install OCR model").click());
+    expect(wizardHost.installOcrModel).toHaveBeenCalledOnce();
+    expect(button(container, "Build Compass index").disabled).toBe(false);
+    root.unmount();
+  });
+
   it("announces cancellation and keeps recovery actions available", () => {
     const container = document.createElement("div");
     const root = createRoot(container);

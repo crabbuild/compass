@@ -118,6 +118,15 @@ compass extract [PATH]
   [--exclude-hubs N]
 ```
 
+`--backend` and `--model` select the semantic provider and model. The
+non-secret `COMPASS_BACKEND` and `COMPASS_MODEL` environment values are used
+when the flags are omitted; explicit flags win. Built-ins are `claude`, `kimi`,
+`ollama`, `gemini`, `openai`, `deepseek`, `azure`, `bedrock`, and `claude-cli`.
+Set only the selected provider's documented credential variable, or register a
+custom OpenAI-compatible provider with `compass provider add`. OCR remains
+local and does not require an LLM credential; document semantic enrichment may
+use the selected provider.
+
 Use `--code-only` for an explicit fully local structural profile; it limits
 structural node and edge extraction to code-classified files while retaining
 the scanned file inventory. Program IR is opt-in with `--program`;
@@ -783,7 +792,10 @@ compass provider add NAME
 compass provider remove NAME
 ```
 
-Built-in provider names cannot be overridden.
+Built-in provider names cannot be overridden. The built-ins are `claude`,
+`kimi`, `ollama`, `gemini`, `openai`, `deepseek`, `azure`, `bedrock`, and
+`claude-cli`; credentials are read from each provider's documented environment
+variable and are never written to the registry.
 
 ### `add`
 
@@ -982,6 +994,14 @@ Apply accepts `compass.agent-graph.batch/1`; rebase commit accepts
 Export writes a self-describing `compass.agent-graph.effective/1` document and
 refuses an unsafe or existing destination. Usage errors exit `2`; typed domain,
 conflict, authorization, verification, storage, and limit errors exit `1`.
+
+For continuous coding-session enrichment, there is no separate long-running
+mutation command. The assistant repeats `status` → `prepare` → `apply` →
+`audit`/`diff` at explicit milestones and pins the receipt revision after each
+successful batch. A changed Base Generation puts the loop behind
+`rebase-plan`/`rebase-commit`; writes must stop until every rebase item is
+resolved. The bundled Compass skill documents this lifecycle while keeping
+ordinary query and watch operations read-only.
 
 ## Output and exit conventions
 

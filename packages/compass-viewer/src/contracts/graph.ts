@@ -44,6 +44,35 @@ export const AgentRetractionsSchema = z.object({
   omittedExamples: z.number().int().nonnegative()
 }).strict();
 
+export const DocumentOcrProfileSchema = z.record(z.string(), z.unknown());
+
+export const DocumentOriginSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("native") }).passthrough(),
+  z.object({
+    kind: z.literal("ocr"),
+    profile: DocumentOcrProfileSchema,
+    confidence_bps: z.number().int().min(0).max(10_000)
+  }).passthrough()
+]);
+
+export const DocumentLocatorSchema = z.object({
+  kind: z.string().min(1)
+}).passthrough();
+
+export const GraphDocumentSchema = z.object({
+  role: z.enum(["root", "block"]).optional(),
+  kind: z.string().optional(),
+  format: z.string().optional(),
+  text: z.string().optional(),
+  ordinal: z.number().int().nonnegative().optional(),
+  complete: z.boolean().optional(),
+  visualCoverage: z.enum(["not_requested", "complete", "partial", "failed"]).optional(),
+  ocrMode: z.enum(["off", "auto", "always"]).optional(),
+  origin: DocumentOriginSchema.optional(),
+  locator: DocumentLocatorSchema.optional(),
+  ocrProfile: DocumentOcrProfileSchema.optional()
+}).passthrough();
+
 export const GraphNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string(),
@@ -72,7 +101,8 @@ export const GraphNodeSchema = z.object({
   color: z.object({
     background: z.string(),
     border: z.string()
-  }).passthrough().optional()
+  }).passthrough().optional(),
+  document: GraphDocumentSchema.optional()
 }).passthrough();
 
 export const GraphEdgeSchema = z.object({
@@ -141,6 +171,10 @@ export const GraphViewModelSchema = z.object({
 export type SourceLocation = z.infer<typeof SourceLocationSchema>;
 export type GraphFieldChange = z.infer<typeof GraphFieldChangeSchema>;
 export type GraphRecordEvidence = z.infer<typeof GraphRecordEvidenceSchema>;
+export type DocumentOcrProfile = z.infer<typeof DocumentOcrProfileSchema>;
+export type DocumentOrigin = z.infer<typeof DocumentOriginSchema>;
+export type DocumentLocator = z.infer<typeof DocumentLocatorSchema>;
+export type GraphDocument = z.infer<typeof GraphDocumentSchema>;
 export type GraphNode = z.infer<typeof GraphNodeSchema>;
 export type GraphEdge = z.infer<typeof GraphEdgeSchema>;
 export type GraphViewModel = z.infer<typeof GraphViewModelSchema>;
