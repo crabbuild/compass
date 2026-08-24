@@ -64,10 +64,10 @@ Plan 021 hardens the React frontend framework graph after Plan 013's
 TypeScript/JavaScript production hard cut. It adds occurrence-preserving render
 evidence, conservative component and runtime-boundary roles, deep Next.js and
 TanStack route semantics, parsed Vite configuration, and agent-facing context
-and impact workflows. The seven stable families now pass the independent
-precision, recall, determinism, safety, precedence, and release-performance
-gates; TanStack Start remains explicitly pre-stable and is not promoted by
-those aggregate results.
+and impact workflows. The seven-family corpus and independent scorecards are
+checked in, but the last pinned release artifact predates the current branch
+revision; the exact release gate must be rerun before promotion. TanStack Start
+remains explicitly pre-stable and is not promoted by aggregate results.
 
 Plan 022 extends the native document program with selective, local OCR for
 scanned PDF pages and images embedded in DOCX, PPTX, and XLSX. Native package
@@ -100,7 +100,7 @@ Compass-owned corpus before support or quality claims ship.
 | 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
 | 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 | 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
-| 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | DONE |
+| 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | IN PROGRESS |
 | 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.

@@ -365,7 +365,7 @@ runs; its provenance retains every result digest because the shared external
 volume has materially variable wall time while peak RSS remains stable. The
 regression budget itself remains 1.10× for both duration and peak RSS.
 
-The final release result is retained outside the checkout at
+The historical release result is retained outside the checkout at
 `/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-evidence/react-frontend-pinned-result-final.json`
 (`sha256=ab7eb4c5961ac9f8cae0c7aae9fb155404e864873bde0da2519ef6d32d515082`).
 It uses release binary
@@ -373,8 +373,10 @@ It uses release binary
 reports 100% precision and recall for every advertised capability, zero
 fabricated targets, stable one/default/max-worker graph digests, a clean
 SIGINT/resume publication, and `performanceComparison.status=compared` with
-all 42 rows within budget. Any future baseline refresh must preserve the same
-manifest, release profile, independent oracle, and explicit
+all 42 rows within budget. Its recorded Compass revision predates the current
+frontend branch, so it is not a release claim for the current checkout. Any
+future baseline refresh must preserve the same manifest, release profile,
+independent oracle, exact source revision, and explicit
 aggregation/provenance rather than weakening the threshold.
 
 The isolated Graphify comparison for this frontend fixture is diagnostic only:
@@ -384,6 +386,17 @@ source-grounded Compass graph preserves typed directed relationships and the
 independent oracle contains 63 anchored facts. The source oracle is the truth
 for correctness; Graphify is a hypothesis generator and is not a Compass
 runtime, dependency, fallback, or promotion gate.
+
+The qualification-only comparator
+`scripts/compare_react_frontend_graphify.py` makes the “surpass Graphify” claim
+repeatable without executing or linking Graphify. It checks strict node/link
+coverage, source anchors, typed directed multigraph output, zero dangling
+Compass targets, and (when supplied) the independent oracle. For the retained
+fixture artifacts it reports 113 Compass nodes / 133 links versus 40 / 44
+Graphify nodes / links, 97 / 133 anchored Compass nodes / links versus 40 / 44,
+zero Compass dangling targets, and a passing independent scorecard. Re-run it
+after each corpus or extractor change; its result is evidence, not a runtime
+promotion dependency.
 
 ### Delta-rs low-inference diagnostic
 

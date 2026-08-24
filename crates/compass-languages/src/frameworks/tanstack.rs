@@ -245,10 +245,11 @@ fn detect_file_route(
     } else {
         format!("/{}", route_segments.join("/"))
     };
-    let has_route_export = syntax.descendants(syntax.root()).into_iter().any(|node| {
-        node.kind() == "export_statement"
-            && syntax.text(node).is_some_and(|text| text.contains("Route"))
-    });
+    let has_route_export = syntax
+        .descendants(syntax.root())
+        .into_iter()
+        .filter(|node| node.kind() == "export_statement")
+        .any(|node| syntax.export_statement_exports_name(node, "Route"));
     if !has_route_export {
         return None;
     }

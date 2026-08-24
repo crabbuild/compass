@@ -8,6 +8,21 @@
 
 use tree_sitter::Node;
 
+/// Return whether an export statement contains the parser token for the
+/// `default` export keyword.  Anonymous children are intentional here:
+/// Tree-sitter represents JavaScript/TypeScript keywords as unnamed tokens,
+/// so `named_children` cannot distinguish `export default` from an arbitrary
+/// source-text occurrence.
+#[must_use]
+pub(crate) fn has_default_export_keyword(node: Node<'_>) -> bool {
+    if node.kind() != "export_statement" {
+        return false;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|child| child.kind() == "default")
+}
+
 pub(crate) const SYNTAX_VIEW_VERSION: &str = "compass.frontend-syntax/2";
 pub(crate) const MAX_SYNTAX_DEPTH: usize = 256;
 pub(crate) const MAX_SYNTAX_NODES: usize = 100_000;
@@ -187,6 +202,54 @@ impl<'tree, 'source> TypeScriptSyntax<'tree, 'source> {
             }
         }
         false
+    }
+
+    /// Return whether an export statement is parser-backed evidence for a
+    /// default export.  This includes both `export default ...` and
+    /// `export { value as default }` forms without scanning source text.
+    #[must_use]
+    pub(crate) fn is_default_export_statement(self, node: Node<'tree>) -> bool {
+        has_default_export_keyword(node)
+            || self
+                .descendants(node)
+                .into_iter()
+                .filter(|candidate| candidate.kind() == "export_specifier")
+                .any(|specifier| {
+                    let name = specifier
+                        .child_by_field_name("name")
+                        .and_then(|child| self.text(child));
+                    let alias = specifier
+                        .child_by_field_name("alias")
+                        .and_then(|child| self.text(child));
+                    name == Some("default") || alias == Some("default")
+                })
+    }
+
+    /// Return whether an export statement binds or re-exports a named symbol.
+    /// The match is restricted to declaration and export-specifier nodes so
+    /// comments and string literals cannot activate a framework convention.
+    #[must_use]
+    pub(crate) fn export_statement_exports_name(
+        self,
+        statement: Node<'tree>,
+        expected: &str,
+    ) -> bool {
+        if statement.kind() != "export_statement" {
+            return false;
+        }
+        self.descendants(statement).into_iter().any(|candidate| {
+            let name = match candidate.kind() {
+                "variable_declarator"
+                | "function_declaration"
+                | "class_declaration"
+                | "abstract_class_declaration" => candidate.child_by_field_name("name"),
+                "export_specifier" => candidate
+                    .child_by_field_name("name")
+                    .or_else(|| candidate.child_by_field_name("alias")),
+                _ => None,
+            };
+            name.and_then(|child| self.text(child)) == Some(expected)
+        })
     }
 
     #[must_use]

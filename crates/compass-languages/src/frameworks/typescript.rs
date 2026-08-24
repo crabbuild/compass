@@ -930,10 +930,7 @@ fn react_router_default_export_reference(
         .into_iter()
         .filter(|node| node.kind() == "export_statement")
     {
-        if !syntax
-            .text(statement)
-            .is_some_and(|text| text.trim_start().starts_with("export default"))
-        {
+        if !syntax.is_default_export_statement(statement) {
             continue;
         }
         let mut cursor = statement.walk();
@@ -1101,9 +1098,7 @@ fn collect_default_export_identities(
     exports: &mut Vec<(String, u64)>,
 ) {
     if node.kind() == "export_statement"
-        && node_text(node, source)
-            .trim_start()
-            .starts_with("export default")
+        && super::typescript_syntax::has_default_export_keyword(node)
     {
         let mut cursor = node.walk();
         if let Some(declaration) = node.named_children(&mut cursor).find(|child| {

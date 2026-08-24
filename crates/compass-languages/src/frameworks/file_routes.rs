@@ -202,6 +202,7 @@ pub(super) fn detect_next(
                         operation: "ANY".to_owned(),
                         reference: "default".to_owned(),
                         module: None,
+                        synthetic_handler: false,
                     };
                     return one_route_with_options(
                         "next",
@@ -243,6 +244,7 @@ pub(super) fn detect_next(
                 operation: "PAGE".to_owned(),
                 reference: "default".to_owned(),
                 module: None,
+                synthetic_handler: has_default_export(syntax),
             });
             let mut facts = one_route_with_options(
                 "next",
@@ -300,6 +302,7 @@ pub(super) fn detect_next(
                 operation: "PAGE".to_owned(),
                 reference: "default".to_owned(),
                 module: None,
+                synthetic_handler: has_default_export(syntax),
             });
             return one_route_with_options(
                 "next",
@@ -458,28 +461,21 @@ fn next_middleware_fact(relative: &str, path: &Path, source: &[u8]) -> Vec<RawFr
     })]
 }
 
+fn has_default_export(syntax: TypeScriptSyntax<'_, '_>) -> bool {
+    syntax
+        .descendants(syntax.root())
+        .into_iter()
+        .filter(|node| node.kind() == "export_statement")
+        .any(|statement| syntax.is_default_export_statement(statement))
+}
+
 fn next_default_export_handler(syntax: TypeScriptSyntax<'_, '_>) -> Option<EndpointHandler> {
     for statement in syntax
         .descendants(syntax.root())
         .into_iter()
         .filter(|node| node.kind() == "export_statement")
     {
-        let is_default = syntax
-            .text(statement)
-            .is_some_and(|text| text.trim_start().starts_with("export default"))
-            || syntax
-                .descendants(statement)
-                .into_iter()
-                .filter(|node| node.kind() == "export_specifier")
-                .any(|specifier| {
-                    let name = specifier
-                        .child_by_field_name("name")
-                        .and_then(|node| syntax.text(node));
-                    let alias = specifier
-                        .child_by_field_name("alias")
-                        .and_then(|node| syntax.text(node));
-                    name == Some("default") || alias == Some("default")
-                });
+        let is_default = syntax.is_default_export_statement(statement);
         if !is_default {
             continue;
         }
@@ -494,6 +490,7 @@ fn next_default_export_handler(syntax: TypeScriptSyntax<'_, '_>) -> Option<Endpo
                     operation: "PAGE".to_owned(),
                     reference: name.to_owned(),
                     module: None,
+                    synthetic_handler: false,
                 });
             }
             if matches!(child.kind(), "identifier" | "member_expression") {
@@ -501,6 +498,7 @@ fn next_default_export_handler(syntax: TypeScriptSyntax<'_, '_>) -> Option<Endpo
                     operation: "PAGE".to_owned(),
                     reference: reference.to_owned(),
                     module: None,
+                    synthetic_handler: false,
                 });
             }
         }
@@ -530,6 +528,7 @@ fn next_default_export_handler(syntax: TypeScriptSyntax<'_, '_>) -> Option<Endpo
                     operation: "PAGE".to_owned(),
                     reference: name.to_owned(),
                     module: Some(module.to_owned()),
+                    synthetic_handler: false,
                 });
             }
         }
@@ -1100,6 +1099,7 @@ fn exported_endpoint_handlers_ast(
                     reference: declaration_name(syntax, declaration)
                         .unwrap_or_else(|| "default".to_owned()),
                     module: module.clone(),
+                    synthetic_handler: false,
                 });
             } else if let Some(name) = declaration_name(syntax, declaration)
                 && accepted.iter().any(|candidate| *candidate == name)
@@ -1108,6 +1108,7 @@ fn exported_endpoint_handlers_ast(
                     operation: normalize_http_operation(&name),
                     reference: name,
                     module: module.clone(),
+                    synthetic_handler: false,
                 });
             }
             continue;
@@ -1136,6 +1137,7 @@ fn exported_endpoint_handlers_ast(
                     },
                     reference: local,
                     module: module.clone(),
+                    synthetic_handler: false,
                 });
             }
         }
@@ -1181,6 +1183,7 @@ fn next_pages_api_route(
         operation: "ANY".to_owned(),
         reference: "default".to_owned(),
         module: None,
+        synthetic_handler: false,
     };
     one_route(
         "next",
@@ -1257,6 +1260,7 @@ fn next_pages_page_route(
         operation: "PAGE".to_owned(),
         reference: "default".to_owned(),
         module: None,
+        synthetic_handler: has_default_export(syntax),
     });
     one_route(
         framework,
@@ -1343,7 +1347,14 @@ fn one_route_with_options(
         normalized_override.unwrap_or_else(|| normalize_dynamic_segments(&original_path));
     let handler_reference = match handler {
         Some(handler) if handler.reference == "default" => {
-            ensure_default_export_handler(path, framework, operation, source, extraction);
+            ensure_default_export_handler(
+                path,
+                framework,
+                operation,
+                source,
+                handler.synthetic_handler,
+                extraction,
+            );
             "default".to_owned()
         }
         Some(handler) => handler.reference.clone(),
@@ -1399,6 +1410,7 @@ struct EndpointHandler {
     operation: String,
     reference: String,
     module: Option<String>,
+    synthetic_handler: bool,
 }
 
 fn endpoint_detail(handler: Option<&EndpointHandler>, path: &Path) -> Map<String, Value> {
@@ -1507,6 +1519,7 @@ fn ensure_default_export_handler(
     framework: &str,
     operation: &str,
     source: &[u8],
+    synthetic_handler: bool,
     extraction: &mut Extraction,
 ) {
     let source_file = path.to_string_lossy().into_owned();
@@ -1528,11 +1541,10 @@ fn ensure_default_export_handler(
             // resolver can prefer the latter when both identities exist.
             (
                 "synthetic_handler".into(),
-                Value::Bool(
-                    source
-                        .windows(b"export default".len())
-                        .any(|window| window == b"export default"),
-                ),
+                // This marker is computed from parser-backed export evidence
+                // by the caller.  Never re-scan source text here: a string or
+                // comment must not turn an unresolved route into a callable.
+                Value::Bool(synthetic_handler),
             ),
             ("file_type".into(), Value::String("code".into())),
             ("framework".into(), Value::String(framework.to_owned())),
@@ -1599,6 +1611,7 @@ fn exported_endpoint_handlers(source: &str, framework: &str) -> Vec<EndpointHand
                 operation,
                 reference: name,
                 module: None,
+                synthetic_handler: false,
             }
         })
         .collect::<Vec<_>>();
@@ -1637,6 +1650,7 @@ fn exported_endpoint_handlers(source: &str, framework: &str) -> Vec<EndpointHand
                     operation,
                     reference: local.to_owned(),
                     module: module.clone(),
+                    synthetic_handler: false,
                 });
             }
         }
@@ -1662,6 +1676,7 @@ fn exported_endpoint_handlers(source: &str, framework: &str) -> Vec<EndpointHand
             operation: "ANY".to_owned(),
             reference: "default".to_owned(),
             module: None,
+            synthetic_handler: true,
         });
     }
     handlers

@@ -177,3 +177,31 @@ function Home() { return null; }
         matches!(fact, RawFrameworkFact::Route(route) if route.framework == "tanstack-router")
     }));
 }
+
+#[test]
+fn tanstack_file_route_requires_a_parser_backed_route_binding() {
+    let directory = tempdir().expect("temporary project");
+    let root = directory.path();
+    let path = root.join("src/routes/notes.tsx");
+    // The word Route occurs only in a string.  A source-text substring check
+    // would incorrectly publish this file as a TanStack route.
+    let source = br#"const documentation = 'Route is exported by TanStack';
+export const routes = { component: Notes };
+function Notes() { return null; }
+"#;
+    fs::write(
+        root.join("package.json"),
+        br#"{"dependencies":{"@tanstack/react-router":"1.0.0"}}"#,
+    )
+    .expect("package manifest");
+    fs::create_dir_all(path.parent().expect("route parent")).expect("route directory");
+    fs::write(&path, source).expect("route source");
+    let project = ProjectEvidenceIndex::build(root, std::slice::from_ref(&path));
+    let mut engine = Engine::with_project_evidence(Arc::new(project));
+    let extraction = engine
+        .extract_source_graph_only(&path, "src/routes/notes.tsx", source)
+        .expect("tanstack extraction");
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Route(route) if route.framework == "tanstack-router")
+    }));
+}

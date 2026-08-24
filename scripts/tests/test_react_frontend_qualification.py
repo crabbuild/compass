@@ -68,6 +68,24 @@ class ReactFrontendQualificationTests(unittest.TestCase):
         self.assertEqual(capability["falseNegatives"], 1)
         self.assertEqual(capability["recall"], 0.5)
 
+    def test_graph_anchor_paths_are_bounded_and_portable(self) -> None:
+        for path in ("src/app/page.tsx", "routes\\index.tsx"):
+            self.assertTrue(MODULE.graph_path_is_safe(path))
+        for path in (
+            "/tmp/page.tsx",
+            "../outside.tsx",
+            "src/../outside.tsx",
+            "C:/workspace/page.tsx",
+            "https://example.test/page.tsx",
+            "src/page\x00.tsx",
+        ):
+            self.assertFalse(MODULE.graph_path_is_safe(path))
+
+    def test_source_anchor_matching_requires_containment(self) -> None:
+        self.assertTrue(MODULE.spans_contain_either(0, 20, 4, 12))
+        self.assertTrue(MODULE.spans_contain_either(4, 12, 0, 20))
+        self.assertFalse(MODULE.spans_contain_either(0, 10, 5, 15))
+
     def test_pinned_runner_normalizes_https_and_ssh_remotes(self) -> None:
         self.assertEqual(
             PINNED.normalized_remote_url("git@github.com:TanStack/router.git"),

@@ -24,18 +24,20 @@ project configuration code.
 
 ## Current status
 
-The current development slice is the registered `react-ui` universal pack. It
-can emit exact `ui_component`, `hook`, `client_boundary`,
-`client_component`, and `server_function` role facts for directly supported
-source forms. The resolver projects exact JSX, `React.createElement`,
-`createRoot(...).render`, and statically linked `React.lazy` imports into
-occurrence-preserving `renders` edges. These facts, plus the in-progress
-Next.js, TanStack, React Router, Remix, and Vite source packs, are still
-provisional and are not a release-qualified support claim until the
-independent fixture and production gates pass.
+The branch contains the registered `react-ui` pack plus parser-backed Next.js,
+React Router, Remix, TanStack Router, and Vite projections. The resolver
+projects exact JSX, `React.createElement`, `createRoot(...).render`, and
+statically linked `React.lazy` imports into occurrence-preserving `renders`
+edges. The seven-family production corpus and independent scorecards are
+qualification evidence, not a promise that every dynamic framework form is
+supported.
 
-The plan's advertised “Qualifying” matrix is a release target, not evidence
-that every framework or capability is currently shipped.
+The latest checked-in qualification artifact predates the current branch
+revision, so the release promotion gate remains open until a fresh exact
+release-binary run records this revision. TanStack Start remains separately
+labelled pre-stable. Consumers must use the pack/version and qualification
+state from the graph result rather than treating an absent fact as proof of
+absence.
 
 ## Activation and ownership
 
@@ -124,14 +126,14 @@ is part of normal extraction.
 
 ## Planned framework coverage
 
-The audited plan adds separate, independently qualified owners for Next.js App
-and Pages Router, React Router, Remix, TanStack Router, TanStack Start, and
+The audited plan defines separate, independently qualified owners for Next.js
+App and Pages Router, React Router, Remix, TanStack Router, TanStack Start, and
 Vite. It also requires typed route stages, route hierarchy identities,
 parser-backed configuration/file-set facts, pack-version cache invalidation,
 agent task-context contracts, and an exact-production qualification gate.
-Until those phases pass, consumers should report a capability as unsupported,
-incomplete, or ambiguous rather than interpreting an absent fact as proof that
-the source has no such behavior.
+Until the current revision passes that gate, consumers should report a
+capability as unsupported, incomplete, or ambiguous rather than interpreting
+an absent fact as proof that the source has no such behavior.
 
 ## Agent interpretation checklist
 

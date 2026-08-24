@@ -59,6 +59,7 @@ fi
 }
 
 cd "$ROOT"
+BUILD_REVISION="$(git rev-parse HEAD)"
 echo "[react-frontend] build release production binary ($MODE mode)"
 PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 CARGO_TARGET_DIR="$TARGET" \
   cargo build --release --locked -p compass-cli --bin compass
@@ -79,7 +80,8 @@ if [[ "$MODE" == "pinned" ]]; then
   PINNED_ARGS=(
     --manifest "$MANIFEST" \
     --compass "$BIN" \
-    --artifact-root "$ARTIFACT_ROOT"
+    --artifact-root "$ARTIFACT_ROOT" \
+    --expected-revision "$BUILD_REVISION"
   )
   if [[ -n "$BASELINE" ]]; then
     PINNED_ARGS+=(--baseline "$BASELINE")

@@ -302,10 +302,10 @@ Residual release gates are narrower but still real:
 
 The current implementation and qualification gates therefore have no hidden
 parser, ownership, graph-consumer, determinism, or safety hole found by this
-audit, but Plan 021 is still **not release-complete**. Keep every phase and
-the `advisor-plans/README.md` row `TODO` until the four residual gates above
-are closed and the exact pinned production command passes with an approved
-baseline (and the fixture gate remains byte-stable on a second run).
+audit, but Plan 021 is still **not release-complete**. Keep the
+`advisor-plans/README.md` row `IN PROGRESS` until the exact pinned production
+command passes against the current revision with an approved baseline (and the
+fixture gate remains byte-stable on a second run).
 
 ### Seventh-pass closure audit (2026-08-24)
 
@@ -350,14 +350,42 @@ the historical sixth-pass text above is retained as the earlier checkpoint.
   source-grounded oracle and typed directed graph contract; Graphify output is
   not a runtime dependency, fallback, or promotion oracle.
 
-The final exact pinned command and both fixture runs pass. The checked-in
-high-water baseline records the shared-volume jitter and preserves the 1.10×
+The historical exact pinned command and both fixture runs passed for the
+recorded release candidate. That artifact was built at an earlier Compass
+revision, so it is not evidence for the current branch. The checked-in
+high-water baseline records shared-volume jitter and preserves the 1.10×
 budget; no threshold was widened to make a noisy run pass. The remaining
 repository-wide baseline exception is the unrelated pre-existing
 `missing_dotnet_references_are_external_and_do_not_abort` publication
 resilience test, which fails before and after this change and is not used as
-frontend evidence. The phase ledger and plan index can be promoted after the
-post-push CI run confirms the same checked-in contracts.
+frontend evidence.
+
+### Eighth-pass current-revision audit (2026-08-24)
+
+This audit rechecked the closure claims against the current checkout rather
+than trusting the historical result artifact.
+
+- The pinned result and performance baseline record Compass revision
+  `7887ffe1f5c3f487ca122d61c3f41d700e389cdf`, while the current PR revision is
+  `88b628402609558b0b32d29cc97f7b070f8d256c`. The old result is therefore
+  stale evidence; the release wrapper now passes and checks the source
+  revision used for the fresh release build.
+- Qualification graph paths are now validated recursively for absolute,
+  traversal, URI, drive-letter, and NUL forms. The scorecard computes
+  `zeroUnsafePaths` from that validation and the pinned gate enforces it; it is
+  no longer a hard-coded success value.
+- Route target matching now requires source identity plus span containment (or
+  an explicitly supported zero-width convention target), not arbitrary span
+  overlap. This closes a false-match path between adjacent declarations.
+- Next.js and React Router default-export selection and TanStack file-route
+  activation now use parser tokens/declaration bindings through the shared
+  bounded syntax view. A regression fixture proves that a `Route` string does
+  not activate a TanStack route.
+
+The focused language tests pass for Next.js, React Router, and TanStack Router.
+Plan 021 remains `IN PROGRESS` until a fresh current-revision pinned run
+recomputes all corpus scorecards, per-capability metrics, performance rows,
+and interruption evidence with the exact release binary.
 
 ## Why this matters
 
@@ -867,7 +895,7 @@ mark the plan-level index row `DONE` until Phase 9 passes.
 | 6 | React Router/Remix migration | 2, 3 | DONE |
 | 7 | Vite hard cut | 2 | DONE |
 | 8 | task context, impact, queries, trust boundary | 1, 3–7 | DONE |
-| 9 | exact-production release qualification | 0–8 | DONE |
+| 9 | exact-production release qualification | 0–8 | IN PROGRESS |
 
 ## Per-phase verification commands
 

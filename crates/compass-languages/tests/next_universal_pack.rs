@@ -310,4 +310,10 @@ fn next_app_unresolved_reexport_route_stays_in_route_tree() {
     assert_eq!(route.operation, "ANY");
     assert_eq!(route.stages[0].role, RawRouteStageRole::Handler);
     assert_eq!(route.stages[0].reference, "default");
+    assert!(!extraction.nodes.iter().any(|node| {
+        node.attributes
+            .get("synthetic_handler")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    }));
 }

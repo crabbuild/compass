@@ -882,6 +882,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if revision_result.returncode != 0:
         fail(f"cannot identify Compass revision: {revision_result.stderr.strip()}")
     compass_revision = revision_result.stdout.strip()
+    if args.expected_revision and compass_revision != args.expected_revision:
+        fail(
+            "qualification source revision does not match the release build revision: "
+            f"{compass_revision} != {args.expected_revision}"
+        )
     manifest_digest = digest_file(manifest_path)
     policy_path = (args.expectation_policy or (ROOT / manifest["expectationPolicy"])).resolve()
     policy = load_expectation_policy(policy_path, manifest, manifest_digest)
@@ -979,9 +984,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     aggregate_candidates = sum(report["scorecard"].get("aggregate", {}).get("candidates", 0) for report in reports)
     result: dict[str, Any] = {
         "schema": "compass.react-frontend-pinned-qualification-result/2", "manifest": str(manifest_path), "manifestSha256": manifest_digest, "artifactRoot": str(run_root),
-        "compass": {"revision": compass_revision, "binary": str(binary), "binarySha256": binary_digest, "profile": "release", "features": "workspace-default"},
+        "compass": {"revision": compass_revision, "expectedRevision": args.expected_revision, "binary": str(binary), "binarySha256": binary_digest, "profile": "release", "features": "workspace-default"},
         "oracle": {"provider": manifest["oracleProvider"], "toolchain": manifest["oracleToolchain"], "execution": "source-only;no-project-code", "expectationPolicy": {"path": str(policy_path), "sha256": digest_file(policy_path), "ledgerDigest": policy["ledgerDigest"]}}, "qualityBudget": manifest["qualityBudget"], "repositories": reports,
-        "aggregate": {"expected": aggregate_expected, "oracleRecords": oracle_records, "matched": aggregate_matched, "candidates": aggregate_candidates, "precision": aggregate_matched / aggregate_candidates if aggregate_candidates else 0.0, "recall": aggregate_matched / aggregate_expected if aggregate_expected else 0.0, "wilsonLower95": wilson_lower(aggregate_matched, aggregate_candidates), "zeroFabricatedTargets": all(report["scorecard"].get("aggregate", {}).get("zeroFabricatedTargets") is True for report in reports), "oracleDiagnosticCount": sum(report["oracleDiagnosticCount"] for report in reports), "corpora": len(reports)},
+        "aggregate": {"expected": aggregate_expected, "oracleRecords": oracle_records, "matched": aggregate_matched, "candidates": aggregate_candidates, "precision": aggregate_matched / aggregate_candidates if aggregate_candidates else 0.0, "recall": aggregate_matched / aggregate_expected if aggregate_expected else 0.0, "wilsonLower95": wilson_lower(aggregate_matched, aggregate_candidates), "zeroFabricatedTargets": all(report["scorecard"].get("aggregate", {}).get("zeroFabricatedTargets") is True for report in reports), "zeroUnsafePaths": all(report["scorecard"].get("aggregate", {}).get("zeroUnsafePaths") is True for report in reports), "oracleDiagnosticCount": sum(report["oracleDiagnosticCount"] for report in reports), "corpora": len(reports)},
         "interruption": interruption, "networkProcessPolicy": network_policy, "readOnly": True, "sourceTreeUnchanged": True, "machine": {"platform": platform.platform(), "python": platform.python_version(), "cpuCount": os.cpu_count()},
     }
     result["performanceComparison"] = performance_comparison(result, args.baseline.resolve() if args.baseline else None)
@@ -1000,6 +1005,7 @@ def main() -> int:
     parser.add_argument("--result", type=Path)
     parser.add_argument("--baseline", type=Path)
     parser.add_argument("--expectation-policy", type=Path)
+    parser.add_argument("--expected-revision", help="require the checked-out source revision used for the release build")
     parser.add_argument("--audit-only", action="store_true", help="emit evidence without applying quality/performance thresholds")
     args = parser.parse_args()
     try:
@@ -1028,6 +1034,8 @@ def main() -> int:
                 fail(f"frontend Wilson lower bound failed: {aggregate}")
             if not aggregate["zeroFabricatedTargets"]:
                 fail("frontend scorecard contains fabricated targets")
+            if not aggregate["zeroUnsafePaths"]:
+                fail("frontend scorecard contains unsafe source anchor paths")
             if not result["interruption"].get("cancellationObserved"):
                 fail("interruption run completed before observing cancellation")
             if result["performanceComparison"].get("status") != "compared":

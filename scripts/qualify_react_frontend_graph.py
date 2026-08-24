@@ -45,6 +45,46 @@ def fail(message: str) -> None:
     raise SystemExit(f"react frontend qualification failed: {message}")
 
 
+GRAPH_PATH_KEYS = {"file", "source_file", "sourceFile", "targetFile"}
+
+
+def graph_path_is_safe(path: str) -> bool:
+    """Return whether a graph anchor uses a bounded corpus-relative path."""
+    portable = path.replace("\\", "/")
+    if not path or "\x00" in path or portable.startswith("/") or portable.startswith("//"):
+        return False
+    if re.match(r"^[A-Za-z]:/", portable) or "://" in portable:
+        return False
+    return ".." not in portable.split("/")
+
+
+def graph_paths(graph: Any) -> list[str]:
+    """Collect only path-bearing graph fields, including nested anchors."""
+    paths: list[str] = []
+
+    def visit(value: Any, depth: int = 0) -> None:
+        if depth > 32:
+            fail("graph metadata nesting exceeds the qualification limit")
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in GRAPH_PATH_KEYS and isinstance(child, str):
+                    paths.append(child)
+                visit(child, depth + 1)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, depth + 1)
+
+    visit(graph)
+    return paths
+
+
+def validate_graph_paths(graph: dict[str, Any]) -> bool:
+    unsafe = sorted({path for path in graph_paths(graph) if not graph_path_is_safe(path)})
+    if unsafe:
+        fail(f"graph contains unsafe source anchor paths: {unsafe[:5]}")
+    return not unsafe
+
+
 def load(path: Path) -> dict[str, Any]:
     try:
         if path.stat().st_size > MAX_INPUT_BYTES:
@@ -109,16 +149,19 @@ def node_anchor(node: dict[str, Any]) -> tuple[str, int, int] | None:
     return None
 
 
-def spans_overlap(left_start: int, left_end: int, right_start: int, right_end: int) -> bool:
-    """Return whether two non-empty source spans identify the same syntax.
+def spans_contain_either(left_start: int, left_end: int, right_start: int, right_end: int) -> bool:
+    """Accept equivalent parser anchors only when one contains the other.
 
     Different parsers legitimately anchor an exported declaration at different
     boundaries: one may include ``export default`` while another starts at the
-    inner function/class node.  Source identity plus a non-empty overlap is a
-    stricter and more portable contract than requiring one parser's span to
-    contain the other's entire modifier list.
+    inner function/class node.  Containment preserves that compatibility while
+    preventing two adjacent declarations from matching merely because their
+    spans happen to overlap.
     """
-    return max(left_start, right_start) < min(left_end, right_end)
+    return (
+        left_start <= right_start <= right_end <= left_end
+        or right_start <= left_start <= left_end <= right_end
+    )
 
 
 def edge_source_file(edge: dict[str, Any], node_by_id: dict[str, Any]) -> str | None:
@@ -243,6 +286,7 @@ def match_source_facts(graph: dict[str, Any], oracle: dict[str, Any]) -> dict[st
     links = graph.get("links")
     if not isinstance(nodes, list) or not isinstance(links, list):
         fail("cannot score a graph without nodes and links")
+    zero_unsafe_paths = validate_graph_paths(graph)
     node_by_id = {node.get("id"): node for node in nodes if isinstance(node, dict)}
     facts = [
         fact for fact in oracle["facts"]
@@ -414,7 +458,7 @@ def match_source_facts(graph: dict[str, Any], oracle: dict[str, Any]) -> dict[st
                         if target_anchor[1] == target_anchor[2] == 0:
                             found = index
                             break
-                        if not spans_overlap(
+                        if not spans_contain_either(
                             target_anchor[1],
                             target_anchor[2],
                             fact.get("targetStartByte"),
@@ -616,7 +660,7 @@ def match_source_facts(graph: dict[str, Any], oracle: dict[str, Any]) -> dict[st
             target_end = fact.get("targetEndByte")
             if target_start is None or target_end is None:
                 return True
-            return spans_overlap(target_anchor[1], target_anchor[2], target_start, target_end)
+            return spans_contain_either(target_anchor[1], target_anchor[2], target_start, target_end)
         if capability == "vite.file_set.glob":
             return (
                 anchor[1] <= fact.get("startByte", 0)
@@ -830,7 +874,7 @@ def match_source_facts(graph: dict[str, Any], oracle: dict[str, Any]) -> dict[st
                 item["falsePositives"] == 0
                 for item in capability_details.values()
             ),
-            "zeroUnsafePaths": True,
+            "zeroUnsafePaths": zero_unsafe_paths,
             "deterministicOracle": True,
         },
     }
@@ -887,6 +931,7 @@ def check_positive(graph: dict[str, Any], expectations: dict[str, Any]) -> dict[
     links = graph.get("links")
     if not isinstance(nodes, list) or not isinstance(links, list):
         fail("nodes and links must be arrays")
+    validate_graph_paths(graph)
     node_by_id = {item.get("id"): item for item in nodes if isinstance(item, dict)}
     if len(node_by_id) != len(nodes):
         fail("node IDs are not unique")
@@ -1068,6 +1113,7 @@ def main() -> int:
         metadata = positive_graph.get("graph")
         if not isinstance(metadata, dict) or metadata.get("schema") != "compass.graph/1":
             fail("score-only graph schema is not compass.graph/1")
+        validate_graph_paths(positive_graph)
         positive = {
             "nodes": len(positive_graph.get("nodes", [])),
             "edges": len(positive_graph.get("links", [])),
