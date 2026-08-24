@@ -749,9 +749,9 @@ const PAGES: &[Page] = &[
     ),
     page!(
         "provider",
-        "Manage custom semantic model providers",
+        "Choose built-in or custom semantic model providers",
         ["compass provider <COMMAND>"],
-        "Examples:\n  compass provider list\n  compass provider show local\n\nTips:\n  Run `compass help provider add` for endpoint and credential configuration."
+        "Examples:\n  compass provider list\n  compass provider show local\n  COMPASS_BACKEND=gemini GEMINI_API_KEY=… compass extract ./docs\n\nBuilt-in providers include claude, kimi, ollama, gemini, openai, deepseek, azure, bedrock, and claude-cli. Use `--backend <NAME>` (or `COMPASS_BACKEND`) when more than one credential is available.\n\nTips:\n  Run `compass help provider add` for custom OpenAI-compatible endpoints and credential configuration. Keys are read from environment variables only; they are not stored in `.compass/config.toml`, provider registries, history profiles, or graph artifacts."
     ),
     page!(
         "provider add",
@@ -765,7 +765,7 @@ const PAGES: &[Page] = &[
         "provider list",
         "List registered custom providers",
         ["compass provider list"],
-        "Examples:\n  compass provider list"
+        "Examples:\n  compass provider list\n\nNotes:\n  This lists custom providers registered in `~/.compass/providers.json`. Built-in providers are selected with `--backend` or `COMPASS_BACKEND`; see `compass help extract` for the supported credential variables."
     ),
     page!(
         "provider show",

@@ -36,6 +36,11 @@
   target; native document processing remains available and managed OCR reports
   an explicit unsupported-platform error before downloading model weights.
 
+- Make semantic provider choice explicit and repeatable with `--backend`,
+  `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`. Credential guidance now
+  covers all built-in providers and custom provider environment keys without
+  exposing secrets in Compass configuration or artifacts.
+
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes
   declarations, scopes, bindings, occurrences, and conservative relationship
