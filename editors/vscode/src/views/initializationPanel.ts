@@ -2,10 +2,24 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import * as vscode from "vscode";
+import { z } from "zod";
 import { buildInitArgs } from "../commands/buildArguments";
 import { parseInitializationRequest } from "../initialize/panelMessages";
 import { discoverScopeFiles } from "../initialize/scopeFiles";
 import type { RepositorySession } from "../workspace/repositorySession";
+
+const OCR_PROFILE = "pp-ocrv6-small";
+const ModelsResponseSchema = z.object({
+  schema: z.literal("compass.models/1"),
+  profiles: z.array(z.object({
+    profile: z.string().min(1).max(128),
+    installed: z.boolean(),
+    verified: z.boolean(),
+    bytes: z.number().int().nonnegative().max(1_000_000_000),
+    license: z.string().max(512)
+  }).passthrough()).max(16)
+}).strict();
+type OcrModelStatus = import("@compass/viewer").OcrModelStatus;
 
 export async function openInitializationPanel(
   context: vscode.ExtensionContext,
@@ -31,6 +45,8 @@ export async function openInitializationPanel(
       cancelRequested: boolean;
     }
     | undefined;
+  let ocrModel: OcrModelStatus = { kind: "checking", profile: OCR_PROFILE };
+  let activeOcrModelInstall: ReturnType<RepositorySession["processes"]["startCommand"]> | undefined;
   const post = (message: unknown): Thenable<boolean> =>
     disposed ? Promise.resolve(false) : panel.webview.postMessage(message);
   const configPath = path.join(session.root, ".compass", "config.toml");
@@ -48,12 +64,111 @@ export async function openInitializationPanel(
       repositoryRoot: session.root,
       configurationExists: await isFile(configPath),
       scopeFiles: discovered.files,
-      scopeFilesTruncated: discovered.truncated
+      scopeFilesTruncated: discovered.truncated,
+      ocrModel
     });
+  };
+
+  const refreshOcrModel = async (): Promise<void> => {
+    ocrModel = { kind: "checking", profile: OCR_PROFILE };
+    await post({ type: "ocrModel", status: ocrModel });
+    try {
+      const response = await session.processes.runJson(
+        session.root,
+        ["models", "list", "--format", "json"],
+        ModelsResponseSchema
+      );
+      const profile = response.profiles.find((candidate) => candidate.profile === OCR_PROFILE);
+      if (!profile) {
+        ocrModel = {
+          kind: "error",
+          profile: OCR_PROFILE,
+          message: `The active Compass CLI does not advertise ${OCR_PROFILE}. Update Compass to enable managed OCR.`,
+          canRetry: false
+        };
+      } else if (profile.verified) {
+        ocrModel = {
+          kind: "ready",
+          profile: OCR_PROFILE,
+          bytes: profile.bytes,
+          engine: "OAR-OCR",
+          engineVersion: "0.9.2"
+        };
+      } else if (profile.installed) {
+        ocrModel = {
+          kind: "invalid",
+          profile: OCR_PROFILE,
+          message: "The OCR model is present but its verification marker is stale or invalid.",
+          installCommand: `compass models install ${OCR_PROFILE}`
+        };
+      } else {
+        ocrModel = {
+          kind: "missing",
+          profile: OCR_PROFILE,
+          installCommand: `compass models install ${OCR_PROFILE}`
+        };
+      }
+    } catch (error) {
+      ocrModel = {
+        kind: "error",
+        profile: OCR_PROFILE,
+        message: firstLine(error instanceof Error ? error.message : String(error)),
+        canRetry: true
+      };
+    }
+    await post({ type: "ocrModel", status: ocrModel });
+  };
+
+  const installOcrModel = async (): Promise<void> => {
+    if (activeOcrModelInstall || session.activeWriter) {
+      ocrModel = {
+        kind: "error",
+        profile: OCR_PROFILE,
+        message: "Finish the active Compass operation before installing the OCR model.",
+        canRetry: true
+      };
+      await post({ type: "ocrModel", status: ocrModel });
+      return;
+    }
+    ocrModel = { kind: "installing", profile: OCR_PROFILE };
+    await post({ type: "ocrModel", status: ocrModel });
+    const command = session.processes.startCommand(
+      session.root,
+      ["models", "install", OCR_PROFILE]
+    );
+    activeOcrModelInstall = command;
+    session.activeWriter = command;
+    try {
+      output.appendLine(`> compass models install ${OCR_PROFILE}`);
+      const result = await command.completed;
+      output.append(result.stdout);
+      output.append(result.stderr);
+      if (result.code !== 0) {
+        throw new Error(result.stderr || `Compass exited with ${result.code}`);
+      }
+      await refreshOcrModel();
+    } catch (error) {
+      ocrModel = {
+        kind: "error",
+        profile: OCR_PROFILE,
+        message: firstLine(error instanceof Error ? error.message : String(error)),
+        canRetry: true
+      };
+      await post({ type: "ocrModel", status: ocrModel });
+    } finally {
+      if (activeOcrModelInstall?.operationId === command.operationId) {
+        activeOcrModelInstall = undefined;
+      }
+      if (session.activeWriter?.operationId === command.operationId) {
+        session.activeWriter = undefined;
+      }
+    }
   };
 
   panel.onDidDispose(() => {
     disposed = true;
+    activeOcrModelInstall?.cancel();
+    activeOcrModelInstall = undefined;
   });
   panel.webview.html = html(context, panel.webview);
   panel.webview.onDidReceiveMessage(async (message) => {
@@ -65,6 +180,15 @@ export async function openInitializationPanel(
         }));
       }
       await hydrate();
+      void refreshOcrModel();
+      return;
+    }
+    if (message?.type === "installOcrModel") {
+      await installOcrModel();
+      return;
+    }
+    if (message?.type === "verifyOcrModel") {
+      await refreshOcrModel();
       return;
     }
     if (message?.type === "showOutput") {
@@ -84,10 +208,10 @@ export async function openInitializationPanel(
     }
     const request = parseInitializationRequest(message);
     if (!request) return;
-    if (session.activeWriter) {
+    if (session.activeWriter || activeOcrModelInstall) {
       await post({
         type: "failed",
-        message: "Another Compass write operation is already running."
+        message: "Another Compass operation is already running."
       });
       return;
     }
@@ -184,7 +308,7 @@ function html(context: vscode.ExtensionContext, webview: vscode.Webview): string
 }
 
 function firstLine(value: string): string {
-  return value.split(/\r?\n/, 1)[0] || "Compass initialization failed.";
+  return (value.split(/\r?\n/, 1)[0] || "Compass initialization failed.").slice(0, 8_192);
 }
 
 async function isFile(target: string): Promise<boolean> {

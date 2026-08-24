@@ -9,6 +9,7 @@ export * from "./contracts/history";
 export * from "./contracts/workbench";
 export * from "./graph/CompassGraph";
 export * from "./graph/CodeEvidence";
+export * from "./graph/DocumentOcrPanel";
 export * from "./graph/CompassBrandMark";
 export * from "./graph/VisNetworkCanvas";
 export * from "./graph/NodeHoverCard";

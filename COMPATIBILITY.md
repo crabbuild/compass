@@ -77,6 +77,12 @@ with exact source owner, geometry, confidence, and model provenance. Partial
 visual coverage is never labeled complete or finalized as a complete document
 cache entry.
 
+Semantic enrichment accepts explicit provider/model selection through
+`--backend`/`--model` or the non-secret `COMPASS_BACKEND`/`COMPASS_MODEL`
+environment defaults. Provider credentials remain provider-specific
+environment or secret-store values and are excluded from graph artifacts,
+history profiles, and cache identities.
+
 ## Evolving contracts
 
 The Grounded Agent Graph feature is additive and opt-in. It does not change
@@ -200,6 +206,11 @@ Standalone HTML may additionally embed optional, presentation-only source
 navigation metadata for a recognized Git forge and full source commit. This
 metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
 versioned graph/view contracts are unchanged.
+Rich document nodes may carry an optional additive `document` object in
+`compass.viewer.graph/1`. It contains bounded native/OCR provenance, typed
+page/slide/sheet locators, confidence, and OCR geometry for the viewer; older
+readers may ignore the field, while strict readers should preserve unknown
+nested fields and fail closed only on an unknown contract major.
 Structural builds publish a validated `store.sqlite3` sidecar and typed
 `store.ref` selector by default; `--store json` explicitly opts out. Typed code
 queries prefer that validated sidecar by default, while `--engine json`

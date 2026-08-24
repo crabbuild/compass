@@ -191,17 +191,35 @@ Current built-in backend code recognizes families including:
 | Backend | Key variables | Endpoint/model examples |
 | --- | --- | --- |
 | Anthropic/Claude | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` |
+| Kimi/Moonshot | `MOONSHOT_API_KEY` | `KIMI_BASE_URL` |
 | Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | `GEMINI_BASE_URL`, `COMPASS_GEMINI_MODEL` |
 | OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `OPENAI_MODEL`, `COMPASS_OPENAI_MODEL` |
+| DeepSeek | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL`, `COMPASS_DEEPSEEK_MODEL` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT` |
 | Ollama-compatible | optional `OLLAMA_API_KEY` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
 | Bedrock | AWS credential chain | `COMPASS_BEDROCK_MODEL` |
+| Claude CLI | local `claude` login | `COMPASS_CLAUDE_CLI_MODEL` |
 
 Some Compass variables retain `COMPASS_` names. Their presence does not
 change the public executable name.
 
-Use `compass extract --help` and current provider documentation before
-deployment; backend support and model defaults can evolve.
+Choose a provider explicitly when more than one credential is present:
+
+```bash
+COMPASS_BACKEND=openai OPENAI_API_KEY="$OPENAI_API_KEY" \
+  COMPASS_MODEL=gpt-4.1-mini compass extract .
+```
+
+`--backend` and `--model` take precedence over `COMPASS_BACKEND` and
+`COMPASS_MODEL`. If neither is supplied, Compass detects the first configured
+built-in provider in this order: Gemini, Kimi, Claude, OpenAI, DeepSeek, Azure,
+Bedrock, then Ollama; custom providers are considered after built-ins. The
+selector and model are not secrets; `COMPASS_MODEL` also takes precedence over
+a provider-specific model variable. Provider credentials remain in the
+provider-specific environment variable or secret store and are never written
+to graph artifacts or history profiles. Use `compass extract --help` and
+current provider documentation before deployment; backend support and model
+defaults can evolve.
 
 ## Custom provider registry
 
@@ -237,6 +255,13 @@ Inspect:
 ```bash
 compass provider list
 compass provider show internal
+```
+
+Use the registered provider without putting its secret in the registry:
+
+```bash
+COMPASS_BACKEND=internal INTERNAL_MODEL_API_KEY="$INTERNAL_MODEL_API_KEY" \
+  compass extract .
 ```
 
 Remove:

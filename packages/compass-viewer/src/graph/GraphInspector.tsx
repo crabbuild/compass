@@ -16,6 +16,10 @@ import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { ChangeEvidence, type GraphSourceRevisions } from "./ChangeEvidence";
 import { ChangedSymbolList } from "./ChangedSymbolList";
 import { CodeEvidence } from "./CodeEvidence";
+import {
+  documentContextForNode,
+  DocumentOcrPanel
+} from "./DocumentOcrPanel";
 import { navigableSource } from "./sourceNavigation";
 
 export const COMMUNITY_CONTROL_LIMIT = 200;
@@ -148,6 +152,7 @@ export function GraphInspector({
   const selectedQueryNode = selected
     ? queryResult?.nodes.find((node) => node.id === selected.id)
     : undefined;
+  const documentContext = selected ? documentContextForNode(model, selected) : undefined;
   const selectedCodeEvidence = selectedQueryNode?.evidence ?? selected?.codeEvidence ?? [];
   const relationshipCodeEvidence = selected
     ? (queryResult
@@ -367,6 +372,13 @@ export function GraphInspector({
             </dl>
             {selected.signature && (
               <code className="compass-signature-block">{selected.signature}</code>
+            )}
+            {documentContext && (
+              <DocumentOcrPanel
+                context={documentContext}
+                selectedId={selected.id}
+                onFocus={onFocus}
+              />
             )}
             {onQueryNode && (
               <div className="compass-code-query-actions" aria-label="Code graph queries">
