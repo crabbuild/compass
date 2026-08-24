@@ -951,6 +951,7 @@ remains accepted as a deprecated compatibility alias.
 
 ```text
 compass agent-graph status [OPTIONS]
+compass agent-graph prepare --source-span FILE:START_BYTE:END_BYTE [OPTIONS]
 compass agent-graph apply --request FILE --enable-writes [OPTIONS]
 compass agent-graph show ASSERTION_ID [OPTIONS]
 compass agent-graph history [OPTIONS]
@@ -968,6 +969,13 @@ with `--graph`, or an exact immutable historical Base Generation with
 `--realization`; these selectors are mutually exclusive. Non-Git current-tree
 use requires `--state-root`. Writes are disabled unless the invocation includes
 `--enable-writes`; curated masks additionally require `--allow-masks`.
+
+`prepare` is read-only. Repeat `--base-node ID`, `--base-edge ID`, and
+`--source-span FILE:START_BYTE:END_BYTE` as needed. Compass returns the selected
+Base Generation, current `expectedRevision`, canonical digest-bound Base
+references, and an apply-ready grounding submission. At least one source span
+is required. Do not pass `--revision`: preparation pins the active revision
+atomically with the selected Base Generation.
 
 Apply accepts `compass.agent-graph.batch/1`; rebase commit accepts
 `compass.agent-graph.rebase-commit/1`. Query remains read-only CompassQL.

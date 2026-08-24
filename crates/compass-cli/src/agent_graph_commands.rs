@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use compass_agent_graph::{
-    AgentGraphError, AgentGraphLimits, ChangeBatch, CompositionProfile, OperationPermission,
-    OverlayId, OverlayRevisionId, PrincipalId, ReadRequest, ReadResult, RebaseCommitRequest,
-    WriteAuthority,
+    AgentGraphError, AgentGraphLimits, ChangeBatch, CompositionProfile,
+    IngestionPreparationRequest, OperationPermission, OverlayId, OverlayRevisionId, PrincipalId,
+    ReadRequest, ReadResult, RebaseCommitRequest, SourceSpanRequest, WriteAuthority,
 };
 use compass_core::{AgentGraphContext, HistoricalAgentGraphContext};
 use compass_model::Graph;
@@ -121,6 +121,7 @@ pub(super) fn command(args: &[String]) -> Outcome {
     if !matches!(
         subcommand.as_str(),
         "status"
+            | "prepare"
             | "apply"
             | "show"
             | "history"
@@ -174,6 +175,7 @@ fn run(subcommand: &str, options: Options) -> Result<Outcome, AgentGraphError> {
                 options.format,
             )
         }
+        "prepare" => prepare(&context, options),
         "apply" => apply(&context, options),
         "show" => show(&context, options),
         "history" => history(&context, options),
@@ -185,6 +187,28 @@ fn run(subcommand: &str, options: Options) -> Result<Outcome, AgentGraphError> {
         "rebase-commit" => rebase_commit(&context, options),
         _ => unreachable!("subcommands are validated before context loading"),
     }
+}
+
+fn prepare(context: &SelectedContext, options: Options) -> Result<Outcome, AgentGraphError> {
+    if options.revision.is_some() {
+        return Err(AgentGraphError::new(
+            compass_agent_graph::AgentGraphErrorCode::InvalidInput,
+            "prepare selects the active Overlay Revision automatically; do not pass --revision",
+        ));
+    }
+    let result = context.read(ReadRequest::PrepareIngestion {
+        overlay: options.overlay,
+        base_generation: context.base_generation().clone(),
+        request: IngestionPreparationRequest {
+            base_node_ids: options.base_nodes,
+            base_edge_ids: options.base_edges,
+            source_spans: options.source_spans,
+        },
+    })?;
+    let ReadResult::IngestionPreparation(prepared) = result else {
+        return Err(unexpected_result());
+    };
+    output(&prepared, options.format)
 }
 
 fn apply(context: &SelectedContext, options: Options) -> Result<Outcome, AgentGraphError> {
@@ -587,6 +611,9 @@ struct Options {
     enable_writes: bool,
     allow_masks: bool,
     limit: usize,
+    base_nodes: Vec<String>,
+    base_edges: Vec<String>,
+    source_spans: Vec<SourceSpanRequest>,
     positionals: Vec<String>,
     query_args: Vec<String>,
 }
@@ -609,6 +636,9 @@ impl Options {
             enable_writes: false,
             allow_masks: false,
             limit: 100,
+            base_nodes: Vec::new(),
+            base_edges: Vec::new(),
+            source_spans: Vec::new(),
             positionals: Vec::new(),
             query_args: Vec::new(),
         };
@@ -697,6 +727,37 @@ impl Options {
                         .map_err(|_| "--limit must be an integer".to_owned())?;
                     index += 2;
                 }
+                "--base-node" => {
+                    if subcommand != "prepare" {
+                        return Err("--base-node is valid only for agent-graph prepare".to_owned());
+                    }
+                    options
+                        .base_nodes
+                        .push(required(args, index, "--base-node")?.to_owned());
+                    index += 2;
+                }
+                "--base-edge" => {
+                    if subcommand != "prepare" {
+                        return Err("--base-edge is valid only for agent-graph prepare".to_owned());
+                    }
+                    options
+                        .base_edges
+                        .push(required(args, index, "--base-edge")?.to_owned());
+                    index += 2;
+                }
+                "--source-span" => {
+                    if subcommand != "prepare" {
+                        return Err(
+                            "--source-span is valid only for agent-graph prepare".to_owned()
+                        );
+                    }
+                    options.source_spans.push(parse_source_span(required(
+                        args,
+                        index,
+                        "--source-span",
+                    )?)?);
+                    index += 2;
+                }
                 "--enable-writes" => {
                     unique(&mut seen, "--enable-writes")?;
                     options.enable_writes = true;
@@ -725,6 +786,31 @@ impl Options {
         }
         Ok(options)
     }
+}
+
+fn parse_source_span(value: &str) -> Result<SourceSpanRequest, String> {
+    let mut fields = value.rsplitn(3, ':');
+    let end = fields
+        .next()
+        .ok_or_else(|| "--source-span must be FILE:START_BYTE:END_BYTE".to_owned())?;
+    let start = fields
+        .next()
+        .ok_or_else(|| "--source-span must be FILE:START_BYTE:END_BYTE".to_owned())?;
+    let file = fields
+        .next()
+        .filter(|file| !file.is_empty())
+        .ok_or_else(|| "--source-span must be FILE:START_BYTE:END_BYTE".to_owned())?;
+    let start_byte = start
+        .parse::<u64>()
+        .map_err(|_| "--source-span START_BYTE must be an unsigned integer".to_owned())?;
+    let end_byte = end
+        .parse::<u64>()
+        .map_err(|_| "--source-span END_BYTE must be an unsigned integer".to_owned())?;
+    Ok(SourceSpanRequest {
+        file: file.to_owned(),
+        start_byte,
+        end_byte,
+    })
 }
 
 fn unique(seen: &mut BTreeSet<&'static str>, option: &'static str) -> Result<(), String> {

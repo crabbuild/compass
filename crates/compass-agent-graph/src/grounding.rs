@@ -783,6 +783,115 @@ fn verify_generation(
     Ok(())
 }
 
+pub(crate) fn prepare_base_node_ref(
+    base: &dyn BaseGenerationView,
+    id: &str,
+) -> Result<BaseNodeRef, AgentGraphError> {
+    let record = find_node(base.graph(), id).ok_or_else(|| {
+        AgentGraphError::new(
+            AgentGraphErrorCode::MissingEndpoint,
+            format!("Base node {id:?} does not exist in the selected generation"),
+        )
+    })?;
+    Ok(BaseNodeRef {
+        base_generation: base.identity().clone(),
+        id: record.id.clone(),
+        kind: record.kind,
+        record_digest: canonical_digest("compass.agent-graph.base-node-record/1", record)?,
+    })
+}
+
+pub(crate) fn prepare_base_edge_ref(
+    base: &dyn BaseGenerationView,
+    id: &str,
+) -> Result<BaseEdgeRef, AgentGraphError> {
+    let record = find_edge(base.graph(), id).ok_or_else(|| {
+        AgentGraphError::new(
+            AgentGraphErrorCode::MissingEndpoint,
+            format!("Base edge {id:?} does not exist in the selected generation"),
+        )
+    })?;
+    Ok(BaseEdgeRef {
+        base_generation: base.identity().clone(),
+        id: record.id.clone(),
+        kind: record.kind,
+        source: record.source.clone(),
+        target: record.target.clone(),
+        record_digest: canonical_digest("compass.agent-graph.base-edge-record/1", record)?,
+    })
+}
+
+pub(crate) fn prepare_source_span(
+    base: &dyn BaseGenerationView,
+    request: &crate::preparation::SourceSpanRequest,
+) -> Result<GroundingEvidence, AgentGraphError> {
+    if Path::new(&request.file)
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return invalid_citation("source span path must be a confined repository-relative path");
+    }
+    let inventory = base
+        .graph()
+        .graph
+        .files
+        .iter()
+        .find(|entry| entry.path == request.file)
+        .ok_or_else(|| {
+            AgentGraphError::new(
+                AgentGraphErrorCode::InvalidCitation,
+                "source span file is not present in the Base Generation inventory",
+            )
+        })?;
+    let bytes = base.source_bytes(&request.file)?.ok_or_else(|| {
+        AgentGraphError::new(
+            AgentGraphErrorCode::InvalidCitation,
+            "source span file bytes are unavailable",
+        )
+    })?;
+    let file_digest = Digest::raw_bytes(&bytes);
+    if inventory.content_digest != file_digest.as_str() || inventory.byte_size != bytes.len() as u64
+    {
+        return invalid_citation("source file bytes do not match the selected Base Generation");
+    }
+    let start = usize::try_from(request.start_byte).map_err(|_| {
+        AgentGraphError::new(
+            AgentGraphErrorCode::InvalidCitation,
+            "source start is out of range",
+        )
+    })?;
+    let end = usize::try_from(request.end_byte).map_err(|_| {
+        AgentGraphError::new(
+            AgentGraphErrorCode::InvalidCitation,
+            "source end is out of range",
+        )
+    })?;
+    let excerpt = bytes.get(start..end).ok_or_else(|| {
+        AgentGraphError::new(
+            AgentGraphErrorCode::InvalidCitation,
+            "source span lies outside the verified file bytes",
+        )
+    })?;
+    let (start_line, start_column) = byte_line_column(&bytes, start);
+    let (end_line, end_column) = byte_line_column(&bytes, end);
+    let evidence = GroundingEvidence::SourceSpan {
+        file: request.file.clone(),
+        anchor: SourceAnchor {
+            file: request.file.clone(),
+            start_byte: request.start_byte,
+            end_byte: request.end_byte,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        },
+        file_digest,
+        excerpt_digest: Digest::raw_bytes(excerpt),
+    };
+    verify_evidence(&evidence, base)?;
+    Ok(evidence)
+}
+
 fn validate_json_pointer(pointer: &str) -> Result<(), AgentGraphError> {
     if pointer.len() > 4_096 || (!pointer.is_empty() && !pointer.starts_with('/')) {
         return invalid_citation("JSON pointer is invalid or exceeds 4096 bytes");
