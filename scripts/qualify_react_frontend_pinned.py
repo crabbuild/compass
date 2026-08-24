@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import selectors
 import shutil
 import signal
@@ -281,6 +282,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(repositories, list) or not repositories:
         fail("frontend qualification manifest must contain repositories")
     ids: set[str] = set()
+    fixture_paths: set[Path] = set()
     for repository in repositories:
         if not isinstance(repository, dict):
             fail("repository entry must be an object")
@@ -306,6 +308,53 @@ def load_manifest(path: Path) -> dict[str, Any]:
         capabilities = repository.get("capabilities", [])
         if not isinstance(capabilities, list) or any(not isinstance(item, str) or not item for item in capabilities):
             fail(f"repository {identifier} has invalid capabilities")
+        fixtures = repository.get("qualificationFixtures", [])
+        if not isinstance(fixtures, list):
+            fail(f"repository {identifier} qualificationFixtures must be an array")
+        fixture_ids: set[str] = set()
+        for fixture in fixtures:
+            if not isinstance(fixture, dict):
+                fail(f"repository {identifier} qualification fixture must be an object")
+            if set(fixture) != {"id", "path", "sha256"}:
+                fail(f"repository {identifier} qualification fixture must contain only id, path, sha256")
+            fixture_id = fixture.get("id")
+            fixture_path_value = fixture.get("path")
+            fixture_sha = fixture.get("sha256")
+            if (
+                not isinstance(fixture_id, str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", fixture_id)
+                or fixture_id in fixture_ids
+            ):
+                fail(f"repository {identifier} qualification fixture ID is empty or duplicated: {fixture_id!r}")
+            fixture_ids.add(fixture_id)
+            if not isinstance(fixture_path_value, str) or not fixture_path_value:
+                fail(f"repository {identifier} qualification fixture path is invalid")
+            fixture_path = (ROOT / fixture_path_value).resolve()
+            try:
+                fixture_path.relative_to(ROOT)
+            except ValueError as error:
+                raise QualificationError(
+                    f"repository {identifier} qualification fixture escapes the Compass root: {fixture_path_value}"
+                ) from error
+            if fixture_path in fixture_paths:
+                fail(f"qualification fixture path is reused: {fixture_path_value}")
+            fixture_paths.add(fixture_path)
+            if not fixture_path.is_dir() or fixture_path.is_symlink():
+                fail(f"repository {identifier} qualification fixture directory is unavailable: {fixture_path}")
+            if (
+                not isinstance(fixture_sha, str)
+                or len(fixture_sha) != 64
+                or any(char not in "0123456789abcdef" for char in fixture_sha.lower())
+            ):
+                fail(f"repository {identifier} qualification fixture sha256 is invalid: {fixture_id}")
+            fixture_files = [path for path in fixture_path.rglob("*") if path.is_file()]
+            if not fixture_files or any(path.is_symlink() for path in fixture_path.rglob("*")):
+                fail(f"repository {identifier} qualification fixture contains no files or an unsafe symlink: {fixture_id}")
+            fixture_bytes = sum(path.stat().st_size for path in fixture_files)
+            if len(fixture_files) > MAX_PROJECT_FILES or fixture_bytes > MAX_PROJECT_BYTES:
+                fail(f"repository {identifier} qualification fixture exceeds bounded file/byte limits: {fixture_id}")
+            if digest_projection(fixture_path) != fixture_sha:
+                fail(f"repository {identifier} qualification fixture checksum drifted: {fixture_id}")
         if not isinstance(repository.get("oracleDiagnosticBudget"), int) or repository["oracleDiagnosticBudget"] < 0:
             fail(f"repository {identifier} must declare a non-negative oracleDiagnosticBudget")
         if repository.get("stable") is not True:
@@ -316,6 +365,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         fail("qualityBudget.stableFamilyCount does not match stable repositories")
     if budget.get("minimumAccepted") != max(2000, 400 * stable_count):
         fail("qualityBudget.minimumAccepted does not equal max(2000, 400 * stableFamilyCount)")
+    if not isinstance(budget.get("minimumCapabilityRecords"), int) or budget["minimumCapabilityRecords"] <= 0:
+        fail("qualityBudget.minimumCapabilityRecords must be a positive integer")
     for key in (
         "minimumPrecision",
         "minimumRecall",
@@ -408,6 +459,12 @@ def load_expectation_policy(
             record_count = counts["exact"] + counts["unresolved"] + counts["ambiguous"]
             if record.get("recordCount") != record_count:
                 fail(f"frontend expectation policy record count is inconsistent: {identifier}:{capability}")
+            if record_count < manifest["qualityBudget"]["minimumCapabilityRecords"]:
+                fail(
+                    f"frontend expectation policy capability floor is not met: "
+                    f"{identifier}:{capability} {record_count} < "
+                    f"{manifest['qualityBudget']['minimumCapabilityRecords']}"
+                )
             digest = record.get("recordDigest")
             if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
                 fail(f"frontend expectation policy record digest is invalid: {identifier}:{capability}")
@@ -589,6 +646,30 @@ def project_repository(repository: dict[str, Any], checkout: Path, destination: 
         target = destination / source.relative_to(checkout)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    fixture_root = destination / "qualification-fixtures"
+    fixture_root.mkdir(parents=True, exist_ok=True)
+    fixture_file_count = 0
+    for fixture in repository.get("qualificationFixtures", []):
+        source_root = (ROOT / fixture["path"]).resolve()
+        fixture_destination = fixture_root / fixture["id"]
+        fixture_destination.mkdir(parents=True, exist_ok=True)
+        for source in sorted(source_root.rglob("*")):
+            if source.is_dir():
+                continue
+            if source.is_symlink() or not source.is_file():
+                fail(f"{repository['id']} qualification fixture contains an unsafe entry: {source}")
+            relative = source.relative_to(source_root)
+            target = fixture_destination / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            fixture_file_count += 1
+            selected_bytes += source.stat().st_size
+            if source.stat().st_size > MAX_PROJECT_FILE_BYTES:
+                fail(f"{repository['id']} qualification fixture contains an oversized file: {source}")
+            if len(selected) + fixture_file_count > MAX_PROJECT_FILES:
+                fail(f"{repository['id']} projection exceeds the bounded file limit with qualification fixtures")
+            if selected_bytes > MAX_PROJECT_BYTES:
+                fail(f"{repository['id']} projection exceeds the bounded byte limit with qualification fixtures")
     if any(path.is_symlink() for path in destination.rglob("*")):
         fail(f"{repository['id']} projection contains an unsafe symlink")
     return len(selected), sum(path.suffix.lower() in SOURCE_SUFFIXES for path in selected), digest_projection(destination)
@@ -818,7 +899,7 @@ def first_source_file(root: Path) -> Path | None:
     return next((path for path in sorted(root.rglob("*")) if path.is_file() and not path.is_symlink() and path.suffix.lower() in SOURCE_SUFFIXES), None)
 
 
-def capability_report(repository: dict[str, Any], scorecard: dict[str, Any]) -> dict[str, Any]:
+def capability_report(repository: dict[str, Any], scorecard: dict[str, Any], minimum_records: int) -> dict[str, Any]:
     advertised = repository.get("capabilities", [])
     observed = scorecard.get("capabilities", {})
     if not isinstance(observed, dict):
@@ -826,7 +907,7 @@ def capability_report(repository: dict[str, Any], scorecard: dict[str, Any]) -> 
     report: dict[str, Any] = {}
     for capability in advertised:
         metric = observed.get(capability)
-        if not isinstance(metric, dict) or metric.get("expected", 0) <= 0:
+        if not isinstance(metric, dict) or metric.get("expected", 0) < minimum_records:
             fail(f"{repository['id']} advertised capability has no independent oracle records: {capability}")
         report[capability] = metric
     return report
@@ -961,7 +1042,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "oracleDiagnostics": oracle_metadata["diagnostics"], "oracleDiagnosticCount": oracle_metadata["diagnosticCount"], "oracleDiagnosticBudget": repository["oracleDiagnosticBudget"],
             "workerDeterminism": {"oneWorker": cold["graphSha256"], "defaultWorker": warm["graphSha256"], "forcedOneWorker": forced["graphSha256"], "maximumWorker": alternate["graphSha256"], "byteIdentical": len({cold["graphSha256"], warm["graphSha256"], forced["graphSha256"], alternate["graphSha256"]}) == 1, "maximumWorkers": max_workers},
             "performance": {"rows": [{key: observation[key] for key in ("label", "seconds", "peakRssBytes", "rssMeasurement", "graphSha256", "command")} for observation in (cold, warm, semantic, manifest_edit, restored, alternate)], "semanticEditRestored": restored["graphSha256"] == cold["graphSha256"]},
-            "scorecard": scorecard, "capabilities": capability_report(repository, scorecard), "oracleRecords": scorecard.get("aggregate", {}).get("oracleRecords", 0), "oracleCapabilities": scorecard.get("aggregate", {}).get("oracleCapabilities", {}),
+            "scorecard": scorecard, "capabilities": capability_report(repository, scorecard, manifest["qualityBudget"]["minimumCapabilityRecords"]), "oracleRecords": scorecard.get("aggregate", {}).get("oracleRecords", 0), "oracleCapabilities": scorecard.get("aggregate", {}).get("oracleCapabilities", {}),
             "artifacts": {"projection": str(projection), "oracle": str(oracle_path), "coldGraph": str(cold["graph"]), "forcedGraph": str(forced["graph"]), "scorecard": str(score_path)},
         }
         if interruption_target is None or source_files > interruption_target[0]:

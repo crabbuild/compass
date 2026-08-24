@@ -178,6 +178,17 @@ class ReactFrontendQualificationTests(unittest.TestCase):
                     PINNED.digest_file(manifest_path),
                 )
 
+    def test_capability_report_enforces_the_per_capability_floor(self) -> None:
+        repository = {"id": "floor", "capabilities": ["react.hooks"]}
+        scorecard = {"capabilities": {"react.hooks": {"expected": 99}}}
+
+        with self.assertRaises(PINNED.QualificationError):
+            PINNED.capability_report(repository, scorecard, 100)
+
+        scorecard["capabilities"]["react.hooks"]["expected"] = 100
+        report = PINNED.capability_report(repository, scorecard, 100)
+        self.assertEqual(report["react.hooks"]["expected"], 100)
+
 
 if __name__ == "__main__":
     unittest.main()

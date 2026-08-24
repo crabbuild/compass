@@ -1,14 +1,14 @@
 {
   "schema": "compass.react-frontend-expectation-policy/1",
-  "manifestSha256": "6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b",
+  "manifestSha256": "fa6980eb743c9365528a6f63fcb917ece269362d5458f38fcabe70073a53b39a",
   "oracle": {
     "provider": "typescript_compiler_api_5_9_3",
     "toolchain": "node-24;typescript-5.9.3",
     "reviewStatus": "reviewed",
-    "reviewMethod": "independent-source-record-ledger",
+    "reviewMethod": "independent-source-record-ledger;checked-in-fixture-augmentation",
     "reviewedAt": "2026-08-24"
   },
-  "ledgerDigest": "13af10ea1bf9ab86895809f3332be25de6aa976cf56590e5c577545a57a4418d",
+  "ledgerDigest": "8b91aed7a79641e4ccb894525ddbb7e697f80dddf3f35b0f6fc5c696974de392",
   "globalDispositions": [
     {
       "state": "unsupported",
@@ -44,25 +44,44 @@
       "capabilities": {
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 219,
-          "counts": {"exact": 219, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "e3730e4dab86230ba6c3b83a1ffe6be10c493bc98125ddb79fb53b22364ca712"
+          "recordCount": 339,
+          "counts": {
+            "exact": 339,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "cebd477d8198000f34e58273dabb0ab061f7c1a881dfdbe8489e95e8247b0788"
         },
         "react.component.roles": {
           "reviewStatus": "reviewed",
-          "recordCount": 150,
-          "counts": {"exact": 150, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "5fe0e6252b50b45bc8f4ec749164830b1b26d1c33f126441320edbe0fc7664a8"
+          "recordCount": 271,
+          "counts": {
+            "exact": 271,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "a9ab887f88588c1221e8e14daeccf7705d8d0f00a73c40278c0676b0ac5deb88"
         },
         "react.hooks": {
           "reviewStatus": "reviewed",
-          "recordCount": 8,
-          "counts": {"exact": 8, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "42f95560eaf70625c0e5e2a26cd56494f16e154fb3a2d4433028c365dac678e0"
+          "recordCount": 128,
+          "counts": {
+            "exact": 128,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "13829ad1793b020882b95337f476eac8c0bcdef979fe4b9e6f892509dd3797b2"
         }
       },
       "dispositions": [
-        {"state": "ambiguous", "case": "react.duplicate-component-name", "reason": "Same-name declarations are retained as distinct identities and are not collapsed."}
+        {
+          "state": "ambiguous",
+          "case": "react.duplicate-component-name",
+          "reason": "Same-name declarations are retained as distinct identities and are not collapsed."
+        }
       ]
     },
     {
@@ -72,32 +91,60 @@
       "capabilities": {
         "next.app.route": {
           "reviewStatus": "reviewed",
-          "recordCount": 4824,
-          "counts": {"exact": 4819, "unresolved": 5, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "3f7894bd241e768ca2694f36158361fa27ffb066d562fa4a104709257953c6c3"
+          "recordCount": 5025,
+          "counts": {
+            "exact": 5020,
+            "unresolved": 5,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "a87ae41e5acfff91e08bd80515e6fcfdf4f1766bc182dd91d8d797f5cedb609e"
         },
         "next.app.hierarchy": {
           "reviewStatus": "reviewed",
-          "recordCount": 4348,
-          "counts": {"exact": 4348, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "1f48e39dd22657362d5862905ae8f5f9b341d379f1e6fe749d463fd027da383b"
+          "recordCount": 4548,
+          "counts": {
+            "exact": 4548,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "0f7785a4937bd933b8b6ac802bf820280d474ec799fe499c543862789bb92d5a"
         },
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 2035,
-          "counts": {"exact": 2035, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "dfd15d1b2274432f6186d28688ac9250eb8104864e1033e1a36c2fbfa9062b17"
+          "recordCount": 2155,
+          "counts": {
+            "exact": 2155,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "a2c4f3b43f4f565a2358491a1ea9c12a4e1ca6adb209e3756155dc4a3a2e9685"
         },
         "next.client-server-directive": {
           "reviewStatus": "reviewed",
-          "recordCount": 61,
-          "counts": {"exact": 61, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "ff6d6a2fcd3ec9359afad62fb987c9d6557a1278fd932b6ee34f52cc73a887e7"
+          "recordCount": 181,
+          "counts": {
+            "exact": 181,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "12f8ecb9fe680f0ff49e5de3e3bdab8bc43d0eaecf1f59d28309a2b795646873"
         }
       },
       "dispositions": [
-        {"state": "unresolved", "case": "next.app.route-target", "reason": "Five route records have no unique declaration target in the compiler oracle and remain explicit unresolved observations."},
-        {"state": "ambiguous", "case": "next.app.parallel-route-parent", "reason": "Multiple convention candidates are not selected by proximity or ordering."}
+        {
+          "state": "unresolved",
+          "case": "next.app.route-target",
+          "reason": "Five route records have no unique declaration target in the compiler oracle and remain explicit unresolved observations."
+        },
+        {
+          "state": "ambiguous",
+          "case": "next.app.parallel-route-parent",
+          "reason": "Multiple convention candidates are not selected by proximity or ordering."
+        }
       ]
     },
     {
@@ -107,25 +154,44 @@
       "capabilities": {
         "next.pages.route": {
           "reviewStatus": "reviewed",
-          "recordCount": 9,
-          "counts": {"exact": 9, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "65a6ff5a0b4d162e279dafebd1f012efb59f12523d0039b351df151944c625c4"
+          "recordCount": 209,
+          "counts": {
+            "exact": 209,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "2a68ba87ac82a8a3a6bb928f725a02fdbeb11bff43333839f07d75fc0b650d71"
         },
         "next.pages.dynamic": {
           "reviewStatus": "reviewed",
-          "recordCount": 3,
-          "counts": {"exact": 3, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "eb61d906e360429885dd1b284befdae5442459ce2534d4c600c57ebcc3c52943"
+          "recordCount": 103,
+          "counts": {
+            "exact": 103,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "b2967e35107dec85705d15c6d4fcbd69b860c1c95b29daf6db118b15ea79ab8a"
         },
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 335,
-          "counts": {"exact": 335, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "824c4b6c6a0e04b5c5b091580866a7ef3fc617126665a27da25670b77cc49e40"
+          "recordCount": 455,
+          "counts": {
+            "exact": 455,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "a42364719b05a049857a8a4feb5b86168765dd9ce338d4530326ede47639ea89"
         }
       },
       "dispositions": [
-        {"state": "unsupported", "case": "next.pages.opaque-dynamic-segment", "reason": "Computed page filenames are not interpreted as dynamic routes without a bounded convention match."}
+        {
+          "state": "unsupported",
+          "case": "next.pages.opaque-dynamic-segment",
+          "reason": "Computed page filenames are not interpreted as dynamic routes without a bounded convention match."
+        }
       ]
     },
     {
@@ -135,32 +201,60 @@
       "capabilities": {
         "react-router.route": {
           "reviewStatus": "reviewed",
-          "recordCount": 77,
-          "counts": {"exact": 49, "unresolved": 28, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "8e9e96312cac55ed7313c401f08a965010277e71dc868c9124e9da52abad0ca3"
+          "recordCount": 178,
+          "counts": {
+            "exact": 150,
+            "unresolved": 28,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "5af669872fc249926da1033223932a6546c80ed417bae26a8d25256e4a6b6577"
         },
         "react-router.loader-action": {
           "reviewStatus": "reviewed",
-          "recordCount": 30,
-          "counts": {"exact": 30, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "fc769e3cac55721eb01fb86e14bd9070b75898bc50957ece2917bf64a93c5cd3"
+          "recordCount": 232,
+          "counts": {
+            "exact": 232,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "4b3dbc677902c1e9339a25b1067dd6b42226f0f1a568dacbefe899c4132f8d7d"
         },
         "react-router.hierarchy": {
           "reviewStatus": "reviewed",
-          "recordCount": 74,
-          "counts": {"exact": 74, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "102a24cc50ce69d8dc7865c40a598bf55fe6c50a04f69e0a4b7958640cad46dc"
+          "recordCount": 175,
+          "counts": {
+            "exact": 175,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "0e97550a986d056027a82ec323ef168f5b47ee7ccf22c6a236bd790f62c28324"
         },
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 11,
-          "counts": {"exact": 11, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "b22632955061075eaedfedca1358df4f3a216bcf6c6148390e94052827976c44"
+          "recordCount": 112,
+          "counts": {
+            "exact": 112,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "4045666c38abf7fd7126bf26833eaf0edbeb9d1ef6376ce745579f43bc382256"
         }
       },
       "dispositions": [
-        {"state": "unresolved", "case": "react-router.route-target", "reason": "Twenty-eight route records lack a unique target under the framework's declaration form and remain unresolved."},
-        {"state": "ambiguous", "case": "react-router.route-parent", "reason": "Route parentage with competing candidates is retained as ambiguous."}
+        {
+          "state": "unresolved",
+          "case": "react-router.route-target",
+          "reason": "Twenty-eight route records lack a unique target under the framework's declaration form and remain unresolved."
+        },
+        {
+          "state": "ambiguous",
+          "case": "react-router.route-parent",
+          "reason": "Route parentage with competing candidates is retained as ambiguous."
+        }
       ]
     },
     {
@@ -170,19 +264,33 @@
       "capabilities": {
         "remix.route.config": {
           "reviewStatus": "reviewed",
-          "recordCount": 30,
-          "counts": {"exact": 0, "unresolved": 30, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "7ee0206563a2035bbd4b3fbd25226d8e8c3be07e8c204da5774b7fb03be38ef3"
+          "recordCount": 150,
+          "counts": {
+            "exact": 0,
+            "unresolved": 150,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "4cf2c12da0586ec80528bdda8b858ac24d91cbca4f8141ce7c65d0df9db0ecd2"
         },
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 104,
-          "counts": {"exact": 104, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "7e86f6bc331e1115c8830ccafe9a2eb65b157ba628c7655906b84097edf968ac"
+          "recordCount": 224,
+          "counts": {
+            "exact": 224,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "a381cfb8a4d5f3447295bb0aba5cdd945ec18bf328ec4cfb35145e0877490639"
         }
       },
       "dispositions": [
-        {"state": "unresolved", "case": "remix.route-config-target", "reason": "The compiler oracle cannot assign a unique declaration target for thirty config route observations; Compass preserves the route observation without inventing a target."}
+        {
+          "state": "unresolved",
+          "case": "remix.route-config-target",
+          "reason": "The compiler oracle cannot assign a unique declaration target for thirty config route observations; Compass preserves the route observation without inventing a target."
+        }
       ]
     },
     {
@@ -192,31 +300,55 @@
       "capabilities": {
         "tanstack.route": {
           "reviewStatus": "reviewed",
-          "recordCount": 95,
-          "counts": {"exact": 95, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "2ffbefacfb5ad03eb1800c4ec301f4cc24e0698ed0401fd9e3589056c97dd4f7"
+          "recordCount": 196,
+          "counts": {
+            "exact": 196,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "c597d2c919d2d9ba8d4ffc44bf5f3a8fe5ae38b5c1d39f4c2e907534d7f877a9"
         },
         "tanstack.route.hierarchy": {
           "reviewStatus": "reviewed",
-          "recordCount": 123,
-          "counts": {"exact": 123, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "99d19c0c69d3e6ec673792b6ec076ee08a112627c8d8567b4b7628dbeaa27197"
+          "recordCount": 224,
+          "counts": {
+            "exact": 224,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "75311e05f35af3346d28f8f36651bb8f1bb72345c87a02518b429f3dc8554344"
         },
         "tanstack.loader": {
           "reviewStatus": "reviewed",
-          "recordCount": 1,
-          "counts": {"exact": 1, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "cd08c68aab5fa60f2c77a3088a99f417d9299fa4c1880cd6505d7e90e894736c"
+          "recordCount": 102,
+          "counts": {
+            "exact": 102,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "3406f3dfdd520e90b406115325e3b609291eb321cfc9620766f14db7146b350f"
         },
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 3,
-          "counts": {"exact": 3, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "4ffafca55d32df91cb5603ba6ac5c7c5e7fb5d4f4d98dd19ae1e2ab97290e077"
+          "recordCount": 104,
+          "counts": {
+            "exact": 104,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "bb2394d6e4607cf0f1f2c3d4b6b3e9b85ed0d6e3e635acc0057e29d115078942"
         }
       },
       "dispositions": [
-        {"state": "unsupported", "case": "tanstack.start-pre-stable", "reason": "TanStack Start is separately labelled pre-stable and is not promoted by this Router corpus."}
+        {
+          "state": "unsupported",
+          "case": "tanstack.start-pre-stable",
+          "reason": "TanStack Start is separately labelled pre-stable and is not promoted by this Router corpus."
+        }
       ]
     },
     {
@@ -226,32 +358,60 @@
       "capabilities": {
         "vite.config.factory": {
           "reviewStatus": "reviewed",
-          "recordCount": 75,
-          "counts": {"exact": 75, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "d22a8e5eaa918ccae2bee38967cc9953181888c61404ea3c2674a1d2a506b2c7"
+          "recordCount": 185,
+          "counts": {
+            "exact": 185,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "d801625b20e348cf5b21387483b4dceb1789d8f42ea3e9aaf3569551f5806d5b"
         },
         "vite.plugin.identity": {
           "reviewStatus": "reviewed",
-          "recordCount": 22,
-          "counts": {"exact": 22, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "a19850e986d3a63442129143c69e0bdf09a64d8e70dc3daf807828b4b20c4bbf"
+          "recordCount": 242,
+          "counts": {
+            "exact": 242,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "40848aac3c33913d361b07fb4f7d4b1da3efeb064b5ac96ff540f13fbd02e762"
         },
         "vite.file_set.glob": {
           "reviewStatus": "reviewed",
-          "recordCount": 13,
-          "counts": {"exact": 13, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "a37d4afcd965ae5ba51089bdd8b50f049e16ebb8cff3f666109a22e65df79c46"
+          "recordCount": 133,
+          "counts": {
+            "exact": 133,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "451ee9bec580601cfaa6fbfd67cb5f0d533ba90c4259ee5fdaaf043d50e8a063"
         },
         "react.render.jsx": {
           "reviewStatus": "reviewed",
-          "recordCount": 2,
-          "counts": {"exact": 2, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
-          "recordDigest": "f1de3e3c2ae94c4eea39ca532e4af3e428acdbbf1c6b3541254a7ea699b77ac7"
+          "recordCount": 122,
+          "counts": {
+            "exact": 122,
+            "unresolved": 0,
+            "ambiguous": 0,
+            "unsupported": 0
+          },
+          "recordDigest": "f0952ebdd05f037cf4bb07414bc4056be5b0b9af3f3154d3b66384d4f1cad438"
         }
       },
       "dispositions": [
-        {"state": "unsupported", "case": "vite.dynamic-plugin-factory", "reason": "Plugins whose identity depends on runtime execution are not published as exact plugin facts."},
-        {"state": "ambiguous", "case": "vite.alias-shadowing", "reason": "Shadowed aliases retain source order and are not collapsed into a guessed winner."}
+        {
+          "state": "unsupported",
+          "case": "vite.dynamic-plugin-factory",
+          "reason": "Plugins whose identity depends on runtime execution are not published as exact plugin facts."
+        },
+        {
+          "state": "ambiguous",
+          "case": "vite.alias-shadowing",
+          "reason": "Shadowed aliases retain source order and are not collapsed into a guessed winner."
+        }
       ]
     }
   ]

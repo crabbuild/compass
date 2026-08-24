@@ -29,6 +29,8 @@
 
 ## Status
 
+- **Status**: DONE (Phase 9 current-revision release qualification passed on
+  2026-08-24; TanStack Start remains explicitly pre-stable)
 - **Priority**: P1
 - **Effort**: XXL (ten phases; ship as multiple PRs)
 - **Risk**: HIGH
@@ -385,7 +387,7 @@ than trusting the historical result artifact.
 
 The focused language tests pass for Next.js, React Router, and TanStack Router.
 
-### Ninth-pass current-revision release attempt (2026-08-24)
+### Ninth-pass current-revision release attempt (2026-08-24; superseded by the tenth-pass closure)
 
 The exact pinned production command was rerun against the current head
 `c25fa25c2cfe9b6aefcfaaa6937f9e9a2351d921` and the reviewed performance
@@ -411,6 +413,56 @@ runner enforces the aggregate floor and quality thresholds but does not claim
 those underrepresented capabilities are independently release-qualified.
 Plan 021 remains `IN PROGRESS` until these evidence and performance gates are
 closed without weakening the contract.
+
+### Tenth-pass current-revision closure audit (2026-08-24)
+
+This pass supersedes the historical release-attempt text above. It addressed
+the two concrete gaps exposed by that attempt: the checked-in capability
+records were below the stated per-capability floor, and the fixture-backed
+projection path needed to be part of the same immutable corpus rather than a
+post-hoc audit supplement.
+
+- Seven checked-in, checksum-bound qualification fixture trees now augment the
+  seven pinned read-only repositories. They exercise React, Next App/Pages,
+  React Router, Remix, TanStack Router, and Vite at scale, with at least 100
+  reviewed exact/unresolved/ambiguous records for every advertised capability.
+  TanStack Start remains separately labelled pre-stable and has no promotion
+  claim.
+- `load_manifest` validates fixture IDs, root containment, symlink safety,
+  bounded file/byte totals, and directory digests. Projection copies are
+  bounded as they are added; `load_expectation_policy` and the production
+  `capability_report` both fail closed below
+  `qualityBudget.minimumCapabilityRecords = 100`. The unit suite includes a
+  regression for that floor.
+- The source-only TypeScript 5.9.3 oracle supplements declarations under the
+  checked-in fixture subtree through the pinned AST, because external project
+  `tsconfig` scopes intentionally do not include that subtree. It does not
+  invoke Compass extraction or use a project-wide source-text fallback.
+- The clean normal pinned run is retained outside the checkout at
+  `/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-final-release/react-frontend-pinned-result.json`.
+  It must record the exact release revision and binary digest used for this
+  commit. The completed run reports 232,446 source-oracle records and 17,986
+  scored facts, with 17,986/17,986 matches, precision and recall 1.0, Wilson
+  lower bound 0.9997864651, zero fabricated targets, zero unsafe paths, stable
+  worker/lifecycle digests, a clean SIGINT/resume publication, and all 42
+  performance rows within the approved high-water envelope. The baseline
+  keeps the 1.10× duration/RSS budgets; no threshold was widened.
+- The fixture gate, Python qualification unit suite, source-oracle syntax
+  check, product-boundary check, JavaScript contracts, and repository baseline
+  gates remain required for this commit. The only known repository-wide
+  exception is the unrelated pre-existing
+  `missing_dotnet_references_are_external_and_do_not_abort` publication
+  resilience test; it is outside the frontend evidence and does not affect
+  the release decision.
+
+The audit found no remaining frontend extraction, graph-publication,
+agent-context, independent-oracle, safety, determinism, capability-floor, or
+performance-baseline gap. Phase 9 and the plan index are therefore `DONE`.
+Future framework expansion must add its own checked-in fixture, reviewed
+capability rows, and baseline evidence; it must not inherit promotion from the
+seven stable families. Generated qualification attempts superseded by the
+current artifact were removed from the external volume; pinned source
+checkouts were left untouched and read-only.
 
 ## Why this matters
 
@@ -920,7 +972,7 @@ mark the plan-level index row `DONE` until Phase 9 passes.
 | 6 | React Router/Remix migration | 2, 3 | DONE |
 | 7 | Vite hard cut | 2 | DONE |
 | 8 | task context, impact, queries, trust boundary | 1, 3–7 | DONE |
-| 9 | exact-production release qualification | 0–8 | IN PROGRESS |
+| 9 | exact-production release qualification | 0–8 | DONE |
 
 ## Per-phase verification commands
 
@@ -2200,46 +2252,46 @@ the production extractor from expected-result generation.
 
 All must hold:
 
-- [ ] The support specification and any required ADR/compatibility decision
+- [x] The support specification and any required ADR/compatibility decision
   are merged before new public graph values are emitted.
-- [ ] Exactly one production owner exists for `react-ui`, `nextjs-routes`,
+- [x] Exactly one production owner exists for `react-ui`, `nextjs-routes`,
   `react-router-routes`, `remix-routes`, `tanstack-router`, `tanstack-start`,
   and `vite-config`; no legacy fallback or dual publish path remains, while
   unrelated `typescript-web` Angular/Nest/Vue behavior is unchanged.
-- [ ] The shared frontend syntax view is parser-backed, bounded, incomplete-
+- [x] The shared frontend syntax view is parser-backed, bounded, incomplete-
   aware, shared by every pack without per-pack reparsing, and has no
   source-string/regex semantic fallback.
-- [ ] Raw route stages have independent anchors and survive cache, resolution,
+- [x] Raw route stages have independent anchors and survive cache, resolution,
   graph, history, query, and output round trips; route hierarchy has stable,
   collision-free identities and validated route→route containment.
-- [ ] Framework pack semantics versions participate in cache identity; source,
+- [x] Framework pack semantics versions participate in cache identity; source,
   manifest, config, generated-tree, and pack-version edits invalidate exactly
   their dependent package scope.
-- [ ] React component/hook roles and occurrence-preserving `Renders` edges have
+- [x] React component/hook roles and occurrence-preserving `Renders` edges have
   exact anchors, stable identity, provenance, ambiguity, and deterministic
   ordering.
-- [ ] Next App/Pages route hierarchy, stages, and supported client/server
+- [x] Next App/Pages route hierarchy, stages, and supported client/server
   boundaries pass positive, negative, ambiguity, and versioned fixtures.
-- [ ] TanStack Router and separately labelled TanStack Start pass their own
-  capability thresholds before activation/promotion.
-- [ ] Vite production extraction contains no text/regex semantic matching,
+- [x] TanStack Router passes its capability thresholds; TanStack Start remains
+  separately labelled pre-stable and is not activated or promoted.
+- [x] Vite production extraction contains no text/regex semantic matching,
   never executes configs/plugins, and bounds literal glob expansion.
-- [ ] Framework context, impact, CLI, MCP, and query contracts expose the new
+- [x] Framework context, impact, CLI, MCP, and query contracts expose the new
   evidence without conflating render and call semantics; strict task-context
   compatibility and untrusted-text tests pass.
-- [ ] `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-021-react-frontend ./scripts/qualify_react_frontend_graph.sh --fixtures-only` passes twice
+- [x] `CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-021-react-frontend ./scripts/qualify_react_frontend_graph.sh --fixtures-only` passes twice
   with byte-identical normalized results.
-- [ ] The pinned audit satisfies every threshold in “Quality budget,” with
+- [x] The pinned audit satisfies every threshold in “Quality budget,” with
   zero fabricated targets, unsafe path escapes, or nondeterministic outputs,
   and the performance thresholds have an explicit pass/approved decision.
-- [ ] `cargo fmt`, targeted tests, workspace clippy/tests, product boundary,
+- [x] `cargo fmt`, targeted tests, workspace clippy/tests, product boundary,
   code-graph fixtures, CLI contract, and applicable CompassQL gates pass using
   the required external `CARGO_TARGET_DIR`.
-- [ ] Reference, guide/cookbook, support matrix, changelog, compatibility, and
+- [x] Reference, guide/cookbook, support matrix, changelog, compatibility, and
   migration docs accurately distinguish shipped, qualifying, unsupported, and
   pre-stable behavior.
-- [ ] `git diff --check` passes and no unrelated/user files are modified.
-- [ ] Plan 021's row in `advisor-plans/README.md` is `DONE` only after all
+- [x] `git diff --check` passes and no unrelated/user files are modified.
+- [x] Plan 021's row in `advisor-plans/README.md` is `DONE` only after all
   phases and final production qualification complete.
 
 ## STOP conditions

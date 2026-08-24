@@ -28,18 +28,16 @@ The branch contains the registered `react-ui` pack plus parser-backed Next.js,
 React Router, Remix, TanStack Router, and Vite projections. The resolver
 projects exact JSX, `React.createElement`, `createRoot(...).render`, and
 statically linked `React.lazy` imports into occurrence-preserving `renders`
-edges. The seven-family production corpus and independent scorecards are
-qualification evidence, not a promise that every dynamic framework form is
-supported.
+edges. The seven-family production corpus, checked-in capability-floor
+fixtures, and independent scorecards are release qualification evidence, not a
+promise that every dynamic framework form is supported.
 
-The current exact release-binary run records this branch revision and passes
-the seven-family correctness, safety, and interruption scorecards, but the Vite
-warm performance row exceeded the reviewed 1.10× budget. The release
-promotion gate therefore remains open pending a repeat/baseline decision;
-several advertised capability rows also remain below the plan's evidence floor.
-TanStack Start remains separately labelled pre-stable. Consumers must use the
-pack/version and qualification state from the graph result rather than treating
-an absent fact as proof of absence.
+The current exact release-binary run passes the seven-family correctness,
+safety, interruption, worker-determinism, and approved high-water performance
+gates. Every advertised capability has at least 100 reviewed
+exact/unresolved/ambiguous records. TanStack Start remains separately labelled
+pre-stable. Consumers must use the pack/version and qualification state from
+the graph result rather than treating an absent fact as proof of absence.
 
 ## Activation and ownership
 
@@ -133,9 +131,11 @@ App and Pages Router, React Router, Remix, TanStack Router, TanStack Start, and
 Vite. It also requires typed route stages, route hierarchy identities,
 parser-backed configuration/file-set facts, pack-version cache invalidation,
 agent task-context contracts, and an exact-production qualification gate.
-Until the current revision passes that gate, consumers should report a
-capability as unsupported, incomplete, or ambiguous rather than interpreting
-an absent fact as proof that the source has no such behavior.
+The seven stable families have passed the current revision's exact-production
+gate. New framework forms and TanStack Start remain unsupported, incomplete,
+ambiguous, or pre-stable until they receive their own fixture, reviewed
+capability rows, and production-qualification evidence; an absent fact is never
+proof that the source has no such behavior.
 
 ## Agent interpretation checklist
 

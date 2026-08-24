@@ -64,12 +64,12 @@ Plan 021 hardens the React frontend framework graph after Plan 013's
 TypeScript/JavaScript production hard cut. It adds occurrence-preserving render
 evidence, conservative component and runtime-boundary roles, deep Next.js and
 TanStack route semantics, parsed Vite configuration, and agent-facing context
-and impact workflows. The current pinned run covers all seven families and
-passes correctness, safety, and interruption evidence, but its Vite warm
-performance row exceeded the reviewed 1.10× budget; the release gate remains
-open for that repeat/baseline decision. Several advertised capabilities are
-also under the plan's 100-record evidence floor. TanStack Start remains
-explicitly pre-stable and is not promoted by aggregate results.
+and impact workflows. The current pinned release qualification covers all
+seven stable families, checked-in capability-floor fixtures, independent
+source-oracle matching, worker/interruption lifecycle evidence, and the
+approved high-water performance envelope without widening the 1.10× budget.
+TanStack Start remains explicitly pre-stable and is not promoted by aggregate
+results.
 
 Plan 022 extends the native document program with selective, local OCR for
 scanned PDF pages and images embedded in DOCX, PPTX, and XLSX. Native package
@@ -102,7 +102,7 @@ Compass-owned corpus before support or quality claims ship.
 | 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
 | 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 | 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
-| 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | IN PROGRESS |
+| 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | DONE |
 | 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.

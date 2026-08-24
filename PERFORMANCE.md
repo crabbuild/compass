@@ -354,18 +354,23 @@ and durable publication contract, not an unresolved duplicate atomic flush.
 
 Plan 021 uses the pinned seven-corpus manifest and a source-only TypeScript
 5.9.3 oracle. The manifest digest is
-`6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b` and the
+`fa6980eb743c9365528a6f63fcb917ece269362d5458f38fcabe70073a53b39a` and the
 reviewed expectation ledger is recorded in
 [`tests/qualification/react-frontend-expectation-policy.json`](tests/qualification/react-frontend-expectation-policy.json)
-(`ledgerDigest=13af10ea1bf9ab86895809f3332be25de6aa976cf56590e5c577545a57a4418d`).
+(`ledgerDigest=8b91aed7a79641e4ccb894525ddbb7e697f80dddf3f35b0f6fc5c696974de392`).
+The policy is reviewed, source-derived, and augmented by seven checksum-bound
+checked-in fixture trees. Every advertised capability has at least 100
+reviewed exact, unresolved, or ambiguous records; the runner rejects a lower
+count rather than silently treating aggregate evidence as promotion evidence.
 The checked-in performance baseline is
 [`tests/qualification/react-frontend-performance-baseline.json`](tests/qualification/react-frontend-performance-baseline.json).
-It is a post-origin/main high-water envelope over five byte-identical release
-runs; its provenance retains every result digest because the shared external
-volume has materially variable wall time while peak RSS remains stable. The
-regression budget itself remains 1.10× for both duration and peak RSS.
+It is a post-origin/main high-water envelope over the approved fixture-backed
+release observations plus the prior approved external-volume envelope; its
+provenance retains every result digest because the shared external volume has
+materially variable wall time while peak RSS remains stable. The regression
+budget itself remains 1.10× for both duration and peak RSS.
 
-The historical release result is retained outside the checkout at
+The historical pre-fixture release result is retained outside the checkout at
 `/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-evidence/react-frontend-pinned-result-final.json`
 (`sha256=ab7eb4c5961ac9f8cae0c7aae9fb155404e864873bde0da2519ef6d32d515082`).
 It uses release binary
@@ -379,16 +384,16 @@ future baseline refresh must preserve the same manifest, release profile,
 independent oracle, exact source revision, and explicit
 aggregation/provenance rather than weakening the threshold.
 
-A fresh current-head attempt at
-`c25fa25c2cfe9b6aefcfaaa6937f9e9a2351d921` is retained at
-`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-current-c25fa25c/react-frontend-pinned-result.json`
-(`sha256=fedda8d8b97df8dbf15cb77c6144190976fa31bf0e28d03c6e2dbecd8d878e89`).
-Its seven scorecards, 227,696 oracle records, 13,236 exact matches, zero
-fabricated targets, zero unsafe paths, and interruption evidence pass. The
-performance gate remains open because only the Vite warm row exceeded budget
-(1.5928499× duration versus 1.10×; RSS passed). Treat this as current
-correctness evidence, not a release approval; repeat it under a stable volume
-or record a reviewed baseline decision without widening the threshold.
+A current-revision release result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-final-release/react-frontend-pinned-result.json`.
+The artifact records the exact Compass revision and release-binary digest used
+for this change. Its seven scorecards contain 232,446 independent oracle
+records and 17,986 scored facts, all 17,986 matched (precision and recall 1.0;
+Wilson lower bound 0.9997864651), with zero fabricated targets, zero unsafe
+paths, stable worker/lifecycle digests, a clean SIGINT/resume publication, and
+all 42 duration/RSS rows within the approved envelope. This is the current
+release evidence; the earlier Vite-warm failure remains historical diagnostic
+context and did not cause a threshold increase.
 
 The isolated Graphify comparison for this frontend fixture is diagnostic only:
 Graphify 0.9.48 at `b2cd36267456c166788c95be6e68574064a92a42` emitted 40 nodes

@@ -399,7 +399,12 @@ function discoverSourceFiles(root) {
 }
 
 function sourceFacts(root, framework, records) {
-  const declarations = records.filter((record) => record.recordType === "declaration");
+  // External repositories may have narrow tsconfig include scopes. Reviewed
+  // qualification fixtures are intentionally projected outside those scopes,
+  // so supplement only that bounded, named subtree with the same pinned AST
+  // declaration view. This keeps the independent oracle compiler-backed while
+  // avoiding a project-wide fallback that could reinterpret external sources.
+  let declarations = records.filter((record) => record.recordType === "declaration");
   const references = records.filter((record) => record.recordType === "reference");
   const calls = records.filter((record) => record.recordType === "call");
   const constructs = records.filter((record) => record.recordType === "construct");
@@ -478,6 +483,37 @@ function sourceFacts(root, framework, records) {
     astFiles.set(file, {
       source,
       ast: ts.createSourceFile(absolute, source, ts.ScriptTarget.Latest, true, scriptKindFor(file)),
+    });
+  }
+  for (const [file, entry] of astFiles) {
+    if (!file.startsWith("qualification-fixtures/")) continue;
+    const existing = new Set(
+      declarations
+        .filter((declaration) => declaration.sourceFile === file)
+        .map((declaration) => `${declaration.name}:${declaration.startByte}:${declaration.endByte}`),
+    );
+    visitAst(entry.ast, (node) => {
+      if (
+        !ts.isFunctionDeclaration(node)
+        && !ts.isClassDeclaration(node)
+        && !ts.isVariableDeclaration(node)
+      ) return;
+      const name = node.name && ts.isIdentifier(node.name) ? node.name : null;
+      if (!name) return;
+      const range = byteRange(entry.source, entry.ast, name);
+      const key = `${name.text}:${range.startByte}:${range.endByte}`;
+      if (existing.has(key)) return;
+      existing.add(key);
+      declarations.push({
+        recordType: "declaration",
+        sourceFile: file,
+        kind: ts.isFunctionDeclaration(node) ? "function" : ts.isClassDeclaration(node) ? "class" : "variable",
+        name: name.text,
+        qualifiedName: `${file}:${name.text}`,
+        ownerQualifiedName: file,
+        namespace: "value",
+        ...range,
+      });
     });
   }
   function importedTargetFromAstFile(file, localName, visited) {
