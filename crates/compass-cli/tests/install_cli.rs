@@ -106,6 +106,10 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(body.contains("references/operations.md"));
     assert!(body.contains("references/command-reference.md"));
     assert!(body.contains("references/agent-graph.md"));
+    assert!(body.contains("continuous overlay enrichment during coding sessions"));
+    assert!(body.contains("## Continuous enrichment mode"));
+    assert!(body.contains("rebase_required"));
+    assert!(body.contains("Load the continuous-enrichment reference"));
     assert!(body.contains("references/labeling.md"));
     assert!(body.contains("references/security-and-boundaries.md"));
     assert!(body.contains("run `compass update .`\nonce and continue"));
@@ -118,6 +122,7 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     let openai_metadata = fs::read_to_string(openai_metadata)?;
     assert!(openai_metadata.contains("display_name: \"Compass\""));
     assert!(openai_metadata.contains("default_prompt: \"Use $compass"));
+    assert!(openai_metadata.contains("continuous enrichment"));
     assert!(
         skill
             .with_file_name("references")
@@ -141,11 +146,17 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(agent_graph.contains("do not need to compose commands or JSON"));
     assert!(agent_graph.contains("Requests cannot award themselves"));
     assert!(agent_graph.contains("Never translate “delete this relation”"));
+    let continuous = fs::read_to_string(references.join("continuous-enrichment.md"))?;
+    assert!(continuous.contains("READ_ONLY"));
+    assert!(continuous.contains("READY_TO_FLUSH"));
+    assert!(continuous.contains("rebase-plan"));
+    assert!(continuous.contains("revision_conflict"));
+    assert!(continuous.contains("distinct read and write credentials"));
     assert_eq!(
         fs::read_dir(&references)?
             .collect::<Result<Vec<_>, _>>()?
             .len(),
-        16
+        17
     );
     let hooks: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.project.join(".codex/hooks.json"))?)?;

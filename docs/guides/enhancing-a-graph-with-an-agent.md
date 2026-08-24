@@ -28,6 +28,34 @@ the user explicitly asks to add, update, retract, challenge, or enhance overlay
 knowledge. `GROUNDED` is awarded by Compass verification, not asserted by the
 assistant.
 
+## Continuous mode during a coding session
+
+Use continuous mode when the assistant should preserve several durable
+discoveries while it works, rather than waiting for one final batch:
+
+```text
+Use Compass in continuous enrichment mode with overlay overlay:review for this
+coding session. Keep navigation read-only by default. At useful milestones,
+preserve only source-cited GROUNDED assertions, show each receipt, and pin the
+new revision. Stop writes after any Base Graph refresh and resolve the rebase
+plan before continuing. Do not mask Base facts.
+```
+
+The skill keeps a bounded candidate ledger in session context. At orientation,
+after a durable design decision, before a commit, and at session end it queries
+the exact Effective Graph, removes duplicates, prepares evidence, applies one
+bounded strict batch, audits and diffs the receipt, and updates the revision
+pin. Transient observations and unsupported chat claims are discarded. The
+overlay audit trail contains only bounded attestations and digests, never the
+prompt or chain-of-thought.
+
+If `compass update .`, `compass watch`, a checkout change, or another refresh
+produces a new Base Generation, the assistant enters a rebase gate. It must
+finish `rebase-plan` and resolve every exact, missing, changed, or ambiguous
+target before it can publish another assertion. A later session resumes with
+the reported Base Generation and overlay revision; it does not replay the old
+conversation.
+
 ## 1. Inspect the selected Base Generation
 
 For a Git repository:
