@@ -26,12 +26,31 @@ Second problem.
         let extraction = Engine::default().extract(path)?;
         let flexible = build_from_extraction(&extraction, true, Some(root));
         let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
-        assert!(graph.nodes.iter().filter(|node| {
-            node.kind == NodeKind::Resource && node.name == "Problem"
-        }).all(|node| matches!(
-            node.details.as_ref(),
-            Some(NodeDetails::Resource(resource)) if resource.uri.as_deref() == Some("#problem")
-        )));
+        let uris = graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind == NodeKind::Resource && node.name == "Problem")
+            .map(|node| {
+                let uri = match node.details.as_ref() {
+                    Some(NodeDetails::Resource(resource)) => resource.uri.clone(),
+                    _ => None,
+                };
+                (node.qualified_name.clone(), uri)
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            uris,
+            BTreeMap::from([
+                (
+                    "Cookbook::Recipe 1::Problem".to_owned(),
+                    Some("#problem".to_owned())
+                ),
+                (
+                    "Cookbook::Recipe 2::Problem".to_owned(),
+                    Some("#problem-1".to_owned())
+                ),
+            ])
+        );
         Ok(graph
             .nodes
             .iter()

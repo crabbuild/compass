@@ -1,5 +1,5 @@
 {
-  "schema": "compass.code-graph-qualification/1",
+  "schema": "compass.code-graph-qualification/2",
   "flows": [
     {
       "id": "flow-django",
@@ -1566,6 +1566,17 @@
         "ast"
       ],
       "detailType": "route"
+    },
+    {
+      "id": "edge-renders",
+      "kind": "renders",
+      "source": "fixtures/code-graph/routes/typescript/react-router.tsx",
+      "qualifiedName": "*",
+      "producer": "compass.resolve.typescript.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "render"
     },
     {
       "id": "edge-reads",

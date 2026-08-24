@@ -350,6 +350,70 @@ These cross-tool observations are diagnostic evidence rather than a promoted
 Compass baseline. The remaining build gap is primarily the richer graph size
 and durable publication contract, not an unresolved duplicate atomic flush.
 
+### Plan 021 React/frontend release qualification
+
+Plan 021 uses the pinned seven-corpus manifest and a source-only TypeScript
+5.9.3 oracle. The manifest digest is
+`fa6980eb743c9365528a6f63fcb917ece269362d5458f38fcabe70073a53b39a` and the
+reviewed expectation ledger is recorded in
+[`tests/qualification/react-frontend-expectation-policy.json`](tests/qualification/react-frontend-expectation-policy.json)
+(`ledgerDigest=8b91aed7a79641e4ccb894525ddbb7e697f80dddf3f35b0f6fc5c696974de392`).
+The policy is reviewed, source-derived, and augmented by seven checksum-bound
+checked-in fixture trees. Every advertised capability has at least 100
+reviewed exact, unresolved, or ambiguous records; the runner rejects a lower
+count rather than silently treating aggregate evidence as promotion evidence.
+The checked-in performance baseline is
+[`tests/qualification/react-frontend-performance-baseline.json`](tests/qualification/react-frontend-performance-baseline.json).
+It is a post-origin/main high-water envelope over the approved fixture-backed
+release observations plus the prior approved external-volume envelope; its
+provenance retains every result digest because the shared external volume has
+materially variable wall time while peak RSS remains stable. The regression
+budget itself remains 1.10× for both duration and peak RSS.
+
+The historical pre-fixture release result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-evidence/react-frontend-pinned-result-final.json`
+(`sha256=ab7eb4c5961ac9f8cae0c7aae9fb155404e864873bde0da2519ef6d32d515082`).
+It uses release binary
+`sha256=68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e`,
+reports 100% precision and recall for every advertised capability, zero
+fabricated targets, stable one/default/max-worker graph digests, a clean
+SIGINT/resume publication, and `performanceComparison.status=compared` with
+all 42 rows within budget. Its recorded Compass revision predates the current
+frontend branch, so it is not a release claim for the current checkout. Any
+future baseline refresh must preserve the same manifest, release profile,
+independent oracle, exact source revision, and explicit
+aggregation/provenance rather than weakening the threshold.
+
+A current-revision release result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-final-release/react-frontend-pinned-result.json`.
+The artifact records the exact Compass revision and release-binary digest used
+for this change. Its seven scorecards contain 232,446 independent oracle
+records and 17,986 scored facts, all 17,986 matched (precision and recall 1.0;
+Wilson lower bound 0.9997864651), with zero fabricated targets, zero unsafe
+paths, stable worker/lifecycle digests, a clean SIGINT/resume publication, and
+all 42 duration/RSS rows within the approved envelope. This is the current
+release evidence; the earlier Vite-warm failure remains historical diagnostic
+context and did not cause a threshold increase.
+
+The isolated Graphify comparison for this frontend fixture is diagnostic only:
+Graphify 0.9.48 at `b2cd36267456c166788c95be6e68574064a92a42` emitted 40 nodes
+and 44 undirected links, including dangling `ref_*` link targets, while the
+source-grounded Compass graph preserves typed directed relationships and the
+independent oracle contains 63 anchored facts. The source oracle is the truth
+for correctness; Graphify is a hypothesis generator and is not a Compass
+runtime, dependency, fallback, or promotion gate.
+
+The qualification-only comparator
+`scripts/compare_react_frontend_graphify.py` makes the “surpass Graphify” claim
+repeatable without executing or linking Graphify. It checks strict node/link
+coverage, source anchors, typed directed multigraph output, zero dangling
+Compass targets, and (when supplied) the independent oracle. For the retained
+fixture artifacts it reports 113 Compass nodes / 133 links versus 40 / 44
+Graphify nodes / links, 97 / 133 anchored Compass nodes / links versus 40 / 44,
+zero Compass dangling targets, and a passing independent scorecard. Re-run it
+after each corpus or extractor change; its result is evidence, not a runtime
+promotion dependency.
+
 ### Delta-rs low-inference diagnostic
 
 A 2026-08-10 follow-up compared the new `low` inference profile with Graphify

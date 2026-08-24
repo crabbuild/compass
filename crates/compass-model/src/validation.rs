@@ -661,6 +661,16 @@ fn endpoint_kinds_are_valid(
                         | NodeKind::Class
                         | NodeKind::Component
                 )
+                // JavaScript/TypeScript frameworks commonly expose a route
+                // handler through an alias (`export const GET = handler`,
+                // `const Page = withData(...)`). Preserve the structural
+                // `variable` kind while accepting it only after the route
+                // resolver has explicitly promoted the node to the typed
+                // route-handler role; arbitrary variables must remain
+                // invalid route targets.
+                || (source.kind == NodeKind::Route
+                    && target.kind == NodeKind::Variable
+                    && target.roles.contains(&NodeRole::RouteHandler))
         }
         EdgeKind::MapsTo => {
             matches!(
@@ -750,6 +760,28 @@ fn endpoint_kinds_are_valid(
         EdgeKind::References => {
             is_reference_source(source.kind) && is_reference_target(target.kind)
         }
+        EdgeKind::Renders => {
+            matches!(
+                source.kind,
+                NodeKind::File
+                    | NodeKind::Module
+                    | NodeKind::Function
+                    | NodeKind::Closure
+                    | NodeKind::Method
+                    | NodeKind::Class
+                    | NodeKind::Component
+                    | NodeKind::Variable
+            ) && matches!(
+                target.kind,
+                NodeKind::Function
+                    | NodeKind::Closure
+                    | NodeKind::Method
+                    | NodeKind::Class
+                    | NodeKind::Variable
+                    | NodeKind::Property
+                    | NodeKind::Component
+            )
+        }
         EdgeKind::DependsOn => {
             is_dependency_endpoint(source.kind) && is_dependency_endpoint(target.kind)
         }
@@ -759,7 +791,9 @@ fn endpoint_kinds_are_valid(
 const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
     if matches!(
         (source, target),
-        (NodeKind::Enum, NodeKind::EnumMember) | (NodeKind::Schema, NodeKind::ConfigKey)
+        (NodeKind::Enum, NodeKind::EnumMember)
+            | (NodeKind::Schema, NodeKind::ConfigKey)
+            | (NodeKind::Route, NodeKind::Route)
     ) {
         return true;
     }
@@ -903,6 +937,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
             NodeKind::File | NodeKind::Resource | NodeKind::ConfigKey
         ) | (NodeKind::Schema, NodeKind::ConfigKey)
             | (NodeKind::ConfigKey, NodeKind::ConfigKey)
+            | (NodeKind::Variable, NodeKind::Property)
     ) || database_contains(source, target)
 }
 
@@ -1049,6 +1084,7 @@ const fn is_export_target(kind: NodeKind) -> bool {
                 | NodeKind::Export
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
+                | NodeKind::Property
                 | NodeKind::Constant
                 | NodeKind::Macro
         )
@@ -1077,6 +1113,7 @@ const fn is_alias_target(kind: NodeKind) -> bool {
                 | NodeKind::Export
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
+                | NodeKind::Property
                 | NodeKind::Constant
         )
 }
@@ -1344,6 +1381,14 @@ mod tests {
             NodeKind::Property
         ));
         assert!(is_import_target(NodeKind::Property));
+    }
+
+    #[test]
+    fn object_variables_can_contain_properties() {
+        assert!(contains_endpoint_pair(
+            NodeKind::Variable,
+            NodeKind::Property
+        ));
     }
 
     #[test]

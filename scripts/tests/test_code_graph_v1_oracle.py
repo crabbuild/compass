@@ -94,6 +94,39 @@ class OracleTests(unittest.TestCase):
     def test_endpoint_matrix_rejects_inheritance_to_variable(self) -> None:
         self.assertFalse(endpoint_allowed({"kind": "class"}, {"kind": "extends"}, {"kind": "variable"}))
 
+    def test_endpoint_matrix_accepts_explicit_route_handler_variables(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "route"},
+            {"kind": "routes_to"},
+            {"kind": "variable", "roles": ["route_handler"]},
+        ))
+        self.assertFalse(endpoint_allowed(
+            {"kind": "route"},
+            {"kind": "routes_to"},
+            {"kind": "variable", "roles": []},
+        ))
+
+    def test_validate_graph_accepts_unresolved_route_stage_placeholder(self) -> None:
+        route = node("route:1", "route")
+        placeholder = node("symbol:1", "variable")
+        placeholder.update({
+            "language": "typescript",
+            "qualifiedName": "./handlers::authenticate",
+            "details": {"type": "symbol", "data": {}},
+            "evidence": [{
+                "extractor": "compass.graph.external-placeholder",
+                "origin": "heuristic",
+                "confidence": "inferred",
+                "rule": "external-symbol-placeholder",
+                "wiringSite": anchor("sample.py", 0, 1),
+            }],
+        })
+        route["details"] = {"type": "route", "data": {"stages": [{
+            "sourceAnchor": anchor("sample.py", 0, 1),
+            "candidates": [{"nodeId": placeholder["id"]}],
+        }]}}
+        validate_graph(self.graph([route, placeholder]), self.manifest)
+
     def test_endpoint_matrix_accepts_dart_implicit_interface_classes(self) -> None:
         self.assertTrue(endpoint_allowed(
             {"kind": "class", "language": "dart"},
@@ -120,6 +153,13 @@ class OracleTests(unittest.TestCase):
             {"kind": "config_key"},
             {"kind": "contains"},
             {"kind": "config_key"},
+        ))
+
+    def test_endpoint_matrix_accepts_object_variable_properties(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "variable"},
+            {"kind": "contains"},
+            {"kind": "property"},
         ))
 
     def test_endpoint_matrix_accepts_only_rust_enum_member_instantiations(self) -> None:

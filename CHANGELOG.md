@@ -15,6 +15,18 @@
   milestone batches, revision pinning, source-change rebase gates, and
   session-end receipts.
 
+- Add versioned `compass.task-context/2` framework evidence for React and
+  frontend workflows, including pack versions, route stages, render direction,
+  runtime boundaries, configuration dependencies, provenance, and bounded
+  qualification states.
+
+- Complete the React frontend framework graph hardening slice: exact JSX
+  `renders` relationships, component/hook/client/server role evidence, typed
+  Next.js, React Router/Remix, TanStack Router, and Vite semantics, bounded
+  project/configuration precedence and cache invalidation, strict viewer/query
+  contracts, and the seven-family independent precision/recall and release
+  performance gates. TanStack Start remains explicitly pre-stable.
+
 - Replace the predefined flat call-flow architecture model with the native
   `compass.viewer.architecture/1` projection. Production source scope is fixed
   before grouping, generated/vendor/test/documentation content cannot shape Production,

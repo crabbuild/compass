@@ -113,6 +113,7 @@ fn detect_selected(
             anchor: anchor(path, source, whole.start(), whole.end()),
             handler_reference: handler.clone(),
             middleware_references: Vec::new(),
+            stages: Vec::new(),
             origin: RawFrameworkOrigin::Ast,
             rule: Some("rust-route-attribute".to_owned()),
             detail: Map::new(),
@@ -124,6 +125,10 @@ fn detect_selected(
                 RawFrameworkFact::Route(route) => route.framework.as_str(),
                 RawFrameworkFact::Domain(domain) => domain.framework.as_str(),
                 RawFrameworkFact::Annotation(annotation) => annotation.framework.as_str(),
+                RawFrameworkFact::Role(role) => role.framework.as_str(),
+                RawFrameworkFact::Relation(relation) => relation.framework.as_str(),
+                RawFrameworkFact::Configuration(configuration) => configuration.framework.as_str(),
+                RawFrameworkFact::FileSet(file_set) => file_set.framework.as_str(),
             };
             if selected == "non-axum" {
                 framework != "axum"
@@ -1010,6 +1015,7 @@ fn route_fact(
         anchor: super::text::anchor(path, source, start, end),
         handler_reference: handler.replace("::", "."),
         middleware_references: Vec::new(),
+        stages: Vec::new(),
         origin: RawFrameworkOrigin::Ast,
         rule: Some(rule.to_owned()),
         detail: Map::new(),

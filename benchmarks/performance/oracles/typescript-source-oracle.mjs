@@ -159,6 +159,10 @@ function diagnosticText(diagnostic) {
   return ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
 }
 
+function normalizeDiagnosticMessage(root, message) {
+  return message.split(root).join("<root>");
+}
+
 function insideRoot(root, fileName) {
   const absolute = path.resolve(fileName);
   return absolute === root || absolute.startsWith(`${root}${path.sep}`);
@@ -1286,7 +1290,12 @@ function main() {
         .sort(),
       configDigest: project.configDigest,
     })),
-    diagnostics: diagnostics.slice(0, MAX_DIAGNOSTICS),
+    diagnostics: diagnostics
+      .slice(0, MAX_DIAGNOSTICS)
+      .map((diagnostic) => ({
+        ...diagnostic,
+        message: normalizeDiagnosticMessage(root, diagnostic.message),
+      })),
     constructs,
     scopes: typedFacts.scopes,
     declarations: typedFacts.declarations,

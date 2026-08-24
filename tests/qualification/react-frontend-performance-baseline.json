@@ -1,0 +1,300 @@
+{
+  "schema": "compass.react-frontend-performance-baseline/1",
+  "manifestSha256": "fa6980eb743c9365528a6f63fcb917ece269362d5458f38fcabe70073a53b39a",
+  "recordedFrom": [
+    {
+      "source": "git:b037cdaf:tests/qualification/react-frontend-performance-baseline.json",
+      "manifestSha256": "6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b",
+      "decision": "approved prior high-water baseline for external-volume jitter"
+    },
+    {
+      "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-fixture-audit-b037/react-frontend-pinned-result.json",
+      "binarySha256": "c4ef2e0da4b3c4b061a524713549d5118c7e269553d42669abd74d88ea62e4a5",
+      "compassRevision": "b037cdafc669e71fa1fe0387a2c9ec4e9c721423",
+      "resultSha256": "c41eacf533162699b482c15c0072c19c9e274d4b5acbe1270f780fc3dcb6bd6e"
+    },
+    {
+      "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-final3-b037/react-frontend-pinned-result.json",
+      "binarySha256": "c4ef2e0da4b3c4b061a524713549d5118c7e269553d42669abd74d88ea62e4a5",
+      "compassRevision": "b037cdafc669e71fa1fe0387a2c9ec4e9c721423",
+      "resultSha256": "97673d0b8c3e415555c13e7867a8abda01218a3c4e0b2370730f2bd697c7255b"
+    },
+    {
+      "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-final4-b037/react-frontend-pinned-result.json",
+      "binarySha256": "c4ef2e0da4b3c4b061a524713549d5118c7e269553d42669abd74d88ea62e4a5",
+      "compassRevision": "b037cdafc669e71fa1fe0387a2c9ec4e9c721423",
+      "resultSha256": "12a8cc3d462418321d9c792894a817e684093ffdc4e78777369c44a96fd24c1b"
+    }
+  ],
+  "aggregation": "maximum-of-approved-prior-high-water-and-three-fixture-backed-release-observations",
+  "binarySha256": "c4ef2e0da4b3c4b061a524713549d5118c7e269553d42669abd74d88ea62e4a5",
+  "compassRevision": "b037cdafc669e71fa1fe0387a2c9ec4e9c721423",
+  "machine": {
+    "cpuCount": 12,
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.14.6"
+  },
+  "profile": "release",
+  "decision": "approved corpus-migration high-water baseline; includes the completed final4 observation to bind TanStack timing jitter without widening the 1.10 gate",
+  "repositories": [
+    {
+      "id": "next-app-bundle-analyzer",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 70.8444289159961,
+            "peakRssBytes": 1454374912
+          },
+          {
+            "label": "cold",
+            "seconds": 167.7168503749417,
+            "peakRssBytes": 1371258880
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 133.84674987499602,
+            "peakRssBytes": 1368948736
+          },
+          {
+            "label": "restore",
+            "seconds": 183.0813037500484,
+            "peakRssBytes": 1369309184
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 133.30486279190518,
+            "peakRssBytes": 1369587712
+          },
+          {
+            "label": "warm",
+            "seconds": 14.517977375071496,
+            "peakRssBytes": 38535168
+          }
+        ]
+      }
+    },
+    {
+      "id": "next-pages-react-dev",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 5.30492429190781,
+            "peakRssBytes": 151601152
+          },
+          {
+            "label": "cold",
+            "seconds": 48.96965133305639,
+            "peakRssBytes": 132775936
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 6.68026283395011,
+            "peakRssBytes": 132415488
+          },
+          {
+            "label": "restore",
+            "seconds": 7.4897727080387995,
+            "peakRssBytes": 132317184
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 36.337205666000955,
+            "peakRssBytes": 132513792
+          },
+          {
+            "label": "warm",
+            "seconds": 7.531293125008233,
+            "peakRssBytes": 19890176
+          }
+        ]
+      }
+    },
+    {
+      "id": "react-dev-components",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 3.488596708048135,
+            "peakRssBytes": 110411776
+          },
+          {
+            "label": "cold",
+            "seconds": 12.198034250061028,
+            "peakRssBytes": 96354304
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 15.478843207936734,
+            "peakRssBytes": 96354304
+          },
+          {
+            "label": "restore",
+            "seconds": 23.65511212509591,
+            "peakRssBytes": 96452608
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 28.585258583072573,
+            "peakRssBytes": 96468992
+          },
+          {
+            "label": "warm",
+            "seconds": 12.590416624909267,
+            "peakRssBytes": 19480576
+          }
+        ]
+      }
+    },
+    {
+      "id": "react-router-framework-playground",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 3.320370541070588,
+            "peakRssBytes": 108036096
+          },
+          {
+            "label": "cold",
+            "seconds": 4.195140165975317,
+            "peakRssBytes": 87228416
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 3.889554625027813,
+            "peakRssBytes": 87375872
+          },
+          {
+            "label": "restore",
+            "seconds": 3.8491244999459013,
+            "peakRssBytes": 87490560
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 5.546465374995023,
+            "peakRssBytes": 87572480
+          },
+          {
+            "label": "warm",
+            "seconds": 0.9801132079446688,
+            "peakRssBytes": 20709376
+          }
+        ]
+      }
+    },
+    {
+      "id": "remix-bookstore",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 2.5821903749601915,
+            "peakRssBytes": 111837184
+          },
+          {
+            "label": "cold",
+            "seconds": 4.123508875025436,
+            "peakRssBytes": 96108544
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 3.8819468748988584,
+            "peakRssBytes": 96124928
+          },
+          {
+            "label": "restore",
+            "seconds": 3.501010459032841,
+            "peakRssBytes": 95993856
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 2.411243583075702,
+            "peakRssBytes": 96075776
+          },
+          {
+            "label": "warm",
+            "seconds": 0.4804252079920843,
+            "peakRssBytes": 18628608
+          }
+        ]
+      }
+    },
+    {
+      "id": "tanstack-router-basic-file-based",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 2.855114334030077,
+            "peakRssBytes": 100909056
+          },
+          {
+            "label": "cold",
+            "seconds": 3.6137019579764456,
+            "peakRssBytes": 78299136
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 8.382782500004396,
+            "peakRssBytes": 78217216
+          },
+          {
+            "label": "restore",
+            "seconds": 3.7850571669405326,
+            "peakRssBytes": 78544896
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 2.678463082993403,
+            "peakRssBytes": 78626816
+          },
+          {
+            "label": "warm",
+            "seconds": 0.897307625040412,
+            "peakRssBytes": 19693568
+          }
+        ]
+      }
+    },
+    {
+      "id": "vite-react-template-and-core",
+      "performance": {
+        "rows": [
+          {
+            "label": "alternate-checkout",
+            "seconds": 28.56129529105965,
+            "peakRssBytes": 587022336
+          },
+          {
+            "label": "cold",
+            "seconds": 45.82212679204531,
+            "peakRssBytes": 557056000
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 27.232077582972124,
+            "peakRssBytes": 557072384
+          },
+          {
+            "label": "restore",
+            "seconds": 39.73644879204221,
+            "peakRssBytes": 557023232
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 25.823602083022706,
+            "peakRssBytes": 556810240
+          },
+          {
+            "label": "warm",
+            "seconds": 0.6418495420366526,
+            "peakRssBytes": 22495232
+          }
+        ]
+      }
+    }
+  ]
+}

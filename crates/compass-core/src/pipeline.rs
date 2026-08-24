@@ -286,6 +286,23 @@ fn compact_extraction(extraction: &mut Extraction) {
                 compact_json_map(&mut annotation.arguments);
                 compact_json_map(&mut annotation.detail);
             }
+            compass_languages::RawFrameworkFact::Role(role) => {
+                compact_json_map(&mut role.detail);
+            }
+            compass_languages::RawFrameworkFact::Relation(relation) => {
+                compact_json_map(&mut relation.detail);
+            }
+            compass_languages::RawFrameworkFact::Configuration(configuration) => {
+                if let Some(value) = configuration.value.as_mut() {
+                    compact_json_value(value);
+                }
+                compact_json_map(&mut configuration.detail);
+            }
+            compass_languages::RawFrameworkFact::FileSet(file_set) => {
+                compact_vec(&mut file_set.patterns);
+                compact_vec(&mut file_set.negative_patterns);
+                compact_json_map(&mut file_set.detail);
+            }
         }
     }
     if let Some(evidence) = extraction.semantic_evidence.as_mut() {
@@ -462,11 +479,15 @@ fn build_profile_digest(profile: &BuildProfile, output_dir: &Path) -> Result<Str
         compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
         compass_graph::V1_PUBLICATION_SEMANTICS_VERSION,
         compass_languages::EXTRACTION_SEMANTICS_VERSION,
+        compass_languages::FRAMEWORK_PACK_SEMANTICS_VERSION,
         compass_files::AST_CACHE_VERSION,
     ] {
         digest.update((component.len() as u64).to_le_bytes());
         digest.update(component.as_bytes());
     }
+    let framework_digest = compass_languages::framework_semantics_digest();
+    digest.update((framework_digest.len() as u64).to_le_bytes());
+    digest.update(framework_digest.as_bytes());
     digest.update((bytes.len() as u64).to_le_bytes());
     digest.update(bytes);
     Ok(format!("sha256:{:x}", digest.finalize()))
@@ -2503,6 +2524,19 @@ fn build_graph_inner_unscoped(
         );
     }
 
+    // Project/configuration inputs are intentionally outside the source-file
+    // manifest (lockfiles and workspace metadata are not graph source files),
+    // but they still participate in framework activation, aliases, JSX
+    // runtime selection, and cache scope. Build the bounded evidence index
+    // before the verified-output fast paths so a lock/config edit cannot be
+    // mistaken for an unchanged graph merely because source discovery stayed
+    // byte-identical.
+    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
+    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
+    let project_evidence_matches_prior = prior_fact_digest_state
+        .as_ref()
+        .is_some_and(|state| state.project_evidence_digest == project_evidence_digest);
+
     let reusable_semantic_layer = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
             && semantic.is_some_and(semantic_layer_is_empty));
@@ -2512,7 +2546,10 @@ fn build_graph_inner_unscoped(
     let profile_digest = build_profile_digest(&build_profile, &output_dir)?;
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let verified_state = if reusable_semantic_layer && supplemental.is_empty() && manifest_unchanged
+    let verified_state = if reusable_semantic_layer
+        && supplemental.is_empty()
+        && manifest_unchanged
+        && project_evidence_matches_prior
     {
         load_verified(
             &output_dir,
@@ -2598,6 +2635,7 @@ fn build_graph_inner_unscoped(
     if reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
+        && project_evidence_matches_prior
         && verified_output
         && (!options.program_analysis || unchanged_program_available)
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
@@ -2679,8 +2717,6 @@ fn build_graph_inner_unscoped(
         || CacheOptions::output_directory(output_cache_root),
         CacheOptions::shared_history,
     );
-    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
-    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
     let early_missing = fact_neutral_pre_cache_sources(
         options,
         semantic,
@@ -5232,6 +5268,10 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
             RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
+            RawFrameworkFact::Role(role) => &mut role.anchor.source_file,
+            RawFrameworkFact::Relation(relation) => &mut relation.anchor.source_file,
+            RawFrameworkFact::Configuration(configuration) => &mut configuration.anchor.source_file,
+            RawFrameworkFact::FileSet(file_set) => &mut file_set.anchor.source_file,
         };
         *source_file = normalize_portable_origin_path(
             source_file,
@@ -6784,7 +6824,18 @@ fn prepare_extraction_for_publication(
     partials.insert(identity, portable_diagnostic_reason(reason, path, root));
     extraction.edges.clear();
     extraction.hyperedges.clear();
-    extraction.framework_facts.clear();
+    // Parser recovery invalidates ordinary AST edges, but a filesystem route
+    // declaration remains a bounded convention fact. Preserve only those
+    // convention-owned route facts so Next/Remix/React Router inventories and
+    // hierarchy stay useful; target resolution remains fail-closed when the
+    // recovered syntax does not expose a unique declaration.
+    extraction.framework_facts.retain(|fact| {
+        matches!(
+            fact,
+            RawFrameworkFact::Route(route)
+                if route.origin == compass_languages::RawFrameworkOrigin::Convention
+        )
+    });
     extraction.raw_calls = None;
 }
 
@@ -6797,6 +6848,10 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
             RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
+            RawFrameworkFact::Role(role) => &mut role.anchor.source_file,
+            RawFrameworkFact::Relation(relation) => &mut relation.anchor.source_file,
+            RawFrameworkFact::Configuration(configuration) => &mut configuration.anchor.source_file,
+            RawFrameworkFact::FileSet(file_set) => &mut file_set.anchor.source_file,
         };
         let path = Path::new(source_file);
         if !path.is_absolute() {
@@ -8321,6 +8376,10 @@ mod tests {
                 RawFrameworkFact::Route(route) => &route.anchor.source_file,
                 RawFrameworkFact::Domain(domain) => &domain.anchor.source_file,
                 RawFrameworkFact::Annotation(annotation) => &annotation.anchor.source_file,
+                RawFrameworkFact::Role(role) => &role.anchor.source_file,
+                RawFrameworkFact::Relation(relation) => &relation.anchor.source_file,
+                RawFrameworkFact::Configuration(configuration) => &configuration.anchor.source_file,
+                RawFrameworkFact::FileSet(file_set) => &file_set.anchor.source_file,
             };
             framework_source == expected
         }));

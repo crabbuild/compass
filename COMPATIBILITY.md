@@ -112,6 +112,22 @@ a distinct write key. Historical composition is selected explicitly and never
 changes realization preference or stored history content. No migration of
 existing graphs or history is required.
 
+The frontend graph vocabulary is also additive within the pre-release
+`compass.graph/1` contract. React-oriented builds may publish the typed
+`renders` relationship and the `ui_component`, `hook`, `client_boundary`,
+`client_component`, `server_component`, `server_function`, and `data_loader`
+node roles. A reader that validates closed edge or role enums must update to a
+release containing these values before consuming such a graph; older readers
+must fail closed rather than silently dropping them. These values do not make
+the corresponding framework pack a completed quality claim: promotion remains
+gated by the independent qualification corpus, precision/recall, ambiguity,
+limit, and determinism checks in the frontend graph plan.
+
+The checked-in `compass.query/1` enum manifest and fingerprint widen in lockstep
+with this vocabulary. Strict query, MCP, CLI, VS Code, and viewer consumers
+must use the matching manifest; they must reject an unknown `edgeKind` or
+`nodeRole` instead of filtering it into an older response shape.
+
 Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
 universal evidence pipelines. The four pipelines are intentionally
 `Qualifying`: they use one bounded, source-grounded publication route and may
@@ -184,6 +200,22 @@ The additive `compass.graph/1` endpoint matrix accepts exact `calls` edges to
 `property` nodes. This represents source-proven callable fields, callbacks,
 and object properties without changing node or edge identity; consumers that
 validate endpoint kinds should accept this existing-major widening.
+
+The frontend graph vocabulary is also additive within the pre-release
+`compass.graph/1` contract. React-oriented builds may publish the typed
+`renders` relationship and the `ui_component`, `hook`, `client_boundary`,
+`client_component`, `server_component`, `server_function`, and `data_loader`
+node roles. A reader that validates closed edge or role enums must update to a
+release containing these values before consuming such a graph; older readers
+must fail closed rather than silently dropping them. These values do not make
+the corresponding framework pack a completed quality claim: promotion remains
+gated by the independent qualification corpus, precision/recall, ambiguity,
+limit, and determinism checks in the frontend graph plan.
+
+The checked-in `compass.query/1` enum manifest and fingerprint widen in lockstep
+with this vocabulary. Strict query, MCP, CLI, VS Code, and viewer consumers
+must use the matching manifest; they must reject an unknown `edgeKind` or
+`nodeRole` instead of filtering it into an older response shape.
 
 Large universal-evidence collections now degrade explicitly instead of
 silently publishing file scaffolding. Compass retains source declarations and
@@ -264,7 +296,7 @@ instead of publishing a partial semantic result.
 Natural discovery results additionally expose the same query-owned
 `semanticResultDigest` in this transport envelope, enabling direct/persistent
 result parity checks without requiring an agent client to invent a digest.
-Task-oriented results use strict `compass.task-context/1` and
+Task-oriented results use strict `compass.task-context/2` and
 `compass.task-context-profile/1` contracts through `compass context` and MCP
 `task_context`. Exact identity resolution, digest-verified source, provenance,
 omissions, and domain truncation remain inside the result; fuzzy candidates

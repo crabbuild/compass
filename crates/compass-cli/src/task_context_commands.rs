@@ -221,6 +221,21 @@ fn render_text(context: &TaskContext) -> String {
         context.intent, context.target
     );
     let _ = writeln!(output, "Graph: {}", context.graph_identity);
+    if let Some(framework) = &context.framework {
+        let _ = writeln!(
+            output,
+            "Framework context: {} packs, {} routes, {} renders, {} config dependencies{}",
+            framework.packs.len(),
+            framework.routes.len(),
+            framework.rendered_by.len() + framework.renders.len(),
+            framework.config_dependencies.len(),
+            if framework.truncated {
+                " (truncated)"
+            } else {
+                ""
+            }
+        );
+    }
     if let Some(agent) = &context.agent_knowledge {
         let _ = writeln!(
             output,

@@ -173,8 +173,8 @@ pub enum WorkbenchViewContent {
     History {
         base_revision: String,
         target_revision: String,
-        before: GraphViewModel,
-        after: GraphViewModel,
+        before: Box<GraphViewModel>,
+        after: Box<GraphViewModel>,
     },
     Affected {
         root: String,

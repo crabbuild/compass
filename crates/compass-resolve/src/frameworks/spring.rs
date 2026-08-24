@@ -177,6 +177,7 @@ fn expand_pack(
                         anchor: annotation.anchor.clone(),
                         handler_reference: annotation.owner_graph_node_id.clone(),
                         middleware_references: Vec::new(),
+                        stages: Vec::new(),
                         origin: RawFrameworkOrigin::Ast,
                         rule: Some(mapping.rule.to_owned()),
                         detail,
@@ -221,6 +222,12 @@ fn rewrite_fact_packs(facts: &mut [RawFrameworkFact], pack_id: &str) {
                     Value::String(pack_id.to_owned()),
                 );
             }
+            RawFrameworkFact::Role(role) => role.pack_id = pack_id.to_owned(),
+            RawFrameworkFact::Relation(relation) => relation.pack_id = pack_id.to_owned(),
+            RawFrameworkFact::Configuration(configuration) => {
+                configuration.pack_id = pack_id.to_owned();
+            }
+            RawFrameworkFact::FileSet(file_set) => file_set.pack_id = pack_id.to_owned(),
         }
     }
 }
@@ -692,6 +699,7 @@ fn derive_inherited_method_routes(
                                 anchor: annotation.anchor.clone(),
                                 handler_reference: method.id.clone(),
                                 middleware_references: Vec::new(),
+                                stages: Vec::new(),
                                 origin: RawFrameworkOrigin::Ast,
                                 rule: Some("spring-inherited-request-mapping".to_owned()),
                                 detail: Map::from_iter([

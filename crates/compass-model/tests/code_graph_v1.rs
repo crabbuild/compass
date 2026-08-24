@@ -1,6 +1,6 @@
 use compass_model::code_graph::{
     BuildMetadata, CODE_GRAPH_SCHEMA_V1, DiagnosticSeverity, EdgeKind, EdgeRecord, GraphMetadata,
-    NodeDetails, NodeKind, NodeRecord, NodeRole, RouteStage,
+    NodeDetails, NodeKind, NodeRecord, NodeRole, RenderEdgeDetails, RenderKind, RouteStage,
 };
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
 use serde::Serialize;
@@ -95,12 +95,24 @@ fn v1_vocabularies_serialize_to_the_closed_contract() -> Result<(), Box<dyn std:
         (EdgeKind::DependsOn, "depends_on"),
         (EdgeKind::Documents, "documents"),
         (EdgeKind::MapsTo, "maps_to"),
+        (EdgeKind::Renders, "renders"),
     ];
     for (kind, expected) in edge_kinds {
         assert_eq!(serialized(kind)?, expected);
     }
 
     assert_eq!(serialized(NodeRole::RouteHandler)?, "route_handler");
+    for (role, expected) in [
+        (NodeRole::UiComponent, "ui_component"),
+        (NodeRole::Hook, "hook"),
+        (NodeRole::ClientBoundary, "client_boundary"),
+        (NodeRole::ClientComponent, "client_component"),
+        (NodeRole::ServerComponent, "server_component"),
+        (NodeRole::ServerFunction, "server_function"),
+        (NodeRole::DataLoader, "data_loader"),
+    ] {
+        assert_eq!(serialized(role)?, expected);
+    }
     assert_eq!(serialized(EvidenceOrigin::Config)?, "config");
     assert_eq!(serialized(EvidenceOrigin::Artifact)?, "artifact");
     assert_eq!(serialized(EvidenceConfidence::Ambiguous)?, "ambiguous");
@@ -179,6 +191,15 @@ fn typed_records_use_camel_case_fields_and_networkx_edge_identity()
     assert_eq!(value["kind"], "routes_to");
     assert_eq!(value["key"], value["id"]);
     assert!(value.get("relation").is_none());
+
+    let render_details = compass_model::code_graph::EdgeDetails::Render(RenderEdgeDetails {
+        render_kind: RenderKind::Jsx,
+        boundary: Some("client".to_owned()),
+    });
+    let render_value = serde_json::to_value(render_details)?;
+    assert_eq!(render_value["type"], "render");
+    assert_eq!(render_value["data"]["renderKind"], "jsx");
+    assert_eq!(render_value["data"]["boundary"], "client");
     Ok(())
 }
 
