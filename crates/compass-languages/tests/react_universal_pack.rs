@@ -107,3 +107,38 @@ export function Card() { return <article />; }"#;
         matches!(fact, RawFrameworkFact::Domain(domain) if domain.framework == "react")
     }));
 }
+
+#[test]
+fn remix_workspace_dependency_activates_react_roles_in_nested_package() {
+    let directory = tempdir().expect("temporary project");
+    let root = directory.path();
+    let source_path = root.join("demos/bookstore/app/ui/card.tsx");
+    let source = br#"export function Card() { return <article />; }"#;
+    fs::create_dir_all(source_path.parent().expect("source parent")).expect("source directory");
+    fs::write(
+        root.join("demos/bookstore/package.json"),
+        br#"{"dependencies":{"remix":"workspace:*"}}"#,
+    )
+    .expect("package manifest");
+    fs::write(
+        root.join("demos/bookstore/tsconfig.json"),
+        br#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"remix/ui"}}"#,
+    )
+    .expect("TypeScript configuration");
+    fs::write(&source_path, source).expect("source file");
+
+    let project = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source_path));
+    let evidence = project.evidence_for(&source_path);
+    assert!(
+        evidence.has_dependency("remix"),
+        "dependencies: {:?}",
+        evidence.dependencies()
+    );
+    let mut engine = Engine::with_project_evidence(Arc::new(project));
+    let extraction = engine
+        .extract_source_graph_only(&source_path, "demos/bookstore/app/ui/card.tsx", source)
+        .expect("TSX extraction");
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.framework == "react")
+    }));
+}

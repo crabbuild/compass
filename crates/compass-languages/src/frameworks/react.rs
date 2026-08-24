@@ -44,7 +44,7 @@ pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFram
             || project
                 .jsx_import_sources()
                 .iter()
-                .all(|source| source == "react" || source.ends_with("/react"));
+                .all(|source| react_jsx_runtime(project, source));
         jsx_runtime_is_react
             && project.has_any_dependency(&[
                 "react",
@@ -195,6 +195,28 @@ pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFram
 
     facts.sort_by_key(fact_key);
     facts
+}
+
+fn react_jsx_runtime(project: &crate::ProjectEvidence, source: &str) -> bool {
+    if source == "react" || source.ends_with("/react") {
+        return true;
+    }
+    // Remix's documented `remix/ui` automatic JSX runtime is a React-backed
+    // runtime. It is only accepted when the owning package also proves Remix
+    // activation; a package name or JSX-shaped source alone is insufficient.
+    if matches!(source, "remix/ui" | "@remix-run/react")
+        && project.has_any_dependency(&[
+            "remix",
+            "@remix-run/dev",
+            "@remix-run/node",
+            "@remix-run/react",
+            "@remix-run/router",
+            "@remix-run/serve",
+        ])
+    {
+        return true;
+    }
+    false
 }
 
 fn react_factory_component_targets(
