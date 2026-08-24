@@ -1133,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "compass-agent-graph"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-model",
  "compass-store",
@@ -1146,7 +1146,7 @@ dependencies = [
 
 [[package]]
 name = "compass-analysis"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-ir",
  "compass-model",
@@ -1159,7 +1159,7 @@ dependencies = [
 
 [[package]]
 name = "compass-cargo"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-model",
  "glob",
@@ -1171,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "compass-cli"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-agent-graph",
  "compass-analysis",
@@ -1222,7 +1222,7 @@ dependencies = [
 
 [[package]]
 name = "compass-core"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "ahash",
  "compass-agent-graph",
@@ -1261,7 +1261,7 @@ dependencies = [
 
 [[package]]
 name = "compass-cypher"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-model",
  "regex",
@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "compass-files"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "atomicwrites",
  "glob",
@@ -1293,7 +1293,7 @@ dependencies = [
 
 [[package]]
 name = "compass-global"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-files",
  "compass-model",
@@ -1306,7 +1306,7 @@ dependencies = [
 
 [[package]]
 name = "compass-google-workspace"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-media",
  "serde_json",
@@ -1319,7 +1319,7 @@ dependencies = [
 
 [[package]]
 name = "compass-graph"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "ahash",
  "compass-languages",
@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "compass-graphdb"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-model",
  "rustls",
@@ -1353,7 +1353,7 @@ dependencies = [
 
 [[package]]
 name = "compass-history"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "atomicwrites",
  "compass-analysis",
@@ -1373,7 +1373,7 @@ dependencies = [
 
 [[package]]
 name = "compass-ingest"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-files",
  "compass-languages",
@@ -1391,7 +1391,7 @@ dependencies = [
 
 [[package]]
 name = "compass-ir"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "serde",
  "serde_json",
@@ -1401,7 +1401,7 @@ dependencies = [
 
 [[package]]
 name = "compass-languages"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "ahash",
  "compass-files",
@@ -1431,7 +1431,7 @@ dependencies = [
 
 [[package]]
 name = "compass-mcp"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "axum",
  "compass-agent-graph",
@@ -1457,7 +1457,7 @@ dependencies = [
 
 [[package]]
 name = "compass-media"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-files",
  "compass-ocr",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "compass-model"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "rayon",
  "rmp-serde",
@@ -1490,7 +1490,7 @@ dependencies = [
 
 [[package]]
 name = "compass-ocr"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "image",
  "oar-ocr",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "compass-output"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "ahash",
  "compass-agent-graph",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "compass-postgres"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-languages",
  "rustls",
@@ -1545,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "compass-pr-intelligence"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-semantic-diff",
  "serde",
@@ -1556,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "compass-program"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "ahash",
  "base64 0.22.1",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "compass-prs"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-files",
  "compass-model",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "compass-query"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "base64 0.22.1",
  "compass-agent-graph",
@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "compass-reflect"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-files",
  "compass-model",
@@ -1630,7 +1630,7 @@ dependencies = [
 
 [[package]]
 name = "compass-resolve"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "ahash",
  "compass-files",
@@ -1650,7 +1650,7 @@ dependencies = [
 
 [[package]]
 name = "compass-semantic"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "aws-config",
  "aws-sdk-bedrockruntime",
@@ -1672,7 +1672,7 @@ dependencies = [
 
 [[package]]
 name = "compass-semantic-diff"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-analysis",
  "compass-history",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "compass-store"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "rusqlite",
  "serde",
@@ -1700,7 +1700,7 @@ dependencies = [
 
 [[package]]
 name = "compass-store-qualification"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-cypher",
  "compass-graph",
@@ -1716,7 +1716,7 @@ dependencies = [
 
 [[package]]
 name = "compass-store-redb"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-graph",
  "compass-model",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "compass-transcribe"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "compass-ingest",
  "compass-whisper",
@@ -1764,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "compass-whisper"
-version = "0.3.19"
+version = "0.3.20"
 dependencies = [
  "anyhow",
  "candle-core",

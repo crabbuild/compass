@@ -2,93 +2,6 @@
 
 ## Unreleased
 
-- Add Grounded Agent Graph overlays: authorized agents can submit citation-
-  backed node, edge, Challenge, and Retraction operations without mutating the
-  source-derived Base Graph. Compass deterministically issues `GROUNDED`,
-  publishes immutable CAS-activated revisions with bounded audit, supports
-  exact rebase and historical composition, and exposes exact effective reads
-  through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
-  stronger curated masks remain deny-by-default capabilities. Add read-only
-  ingestion preparation so agents can obtain canonical Base references and
-  source evidence without implementing Compass digest rules themselves. Extend
-  the bundled coding-agent skill with explicit continuous enrichment: bounded
-  milestone batches, revision pinning, source-change rebase gates, and
-  session-end receipts.
-
-- Add versioned `compass.task-context/2` framework evidence for React and
-  frontend workflows, including pack versions, route stages, render direction,
-  runtime boundaries, configuration dependencies, provenance, and bounded
-  qualification states.
-
-- Complete the React frontend framework graph hardening slice: exact JSX
-  `renders` relationships, component/hook/client/server role evidence, typed
-  Next.js, React Router/Remix, TanStack Router, and Vite semantics, bounded
-  project/configuration precedence and cache invalidation, strict viewer/query
-  contracts, and the seven-family independent precision/recall and release
-  performance gates. TanStack Start remains explicitly pre-stable.
-
-- Replace the predefined flat call-flow architecture model with the native
-  `compass.viewer.architecture/1` projection. Production source scope is fixed
-  before grouping, generated/vendor/test/documentation content cannot shape Production,
-  relationships have explicit classes and lenses, owner/leaf groups use
-  source-grounded unique names, overview overflow is exact omission metadata
-  rather than `Other`, and HTML plus VS Code share the same Rust semantics.
-  Add architecture quality diagnostics, complete-group search, compact
-  index-based memberships, bounded
-  drill-down, explicit versioned overlays, and migration guidance for direct
-  `compass.viewer.callflow/1` consumers.
-
-- Add bounded native PDF, DOCX, PPTX, and XLSX document artifacts and graph
-  projection, gap-free semantic slicing, pure-Rust PDF rasterization, optional
-  local PP-OCRv6 OCR, explicit pinned model management, and the
-  `document inspect` and `models` command families. OCR remains off by default
-  and requires no Python, Tesseract, office suite, or system PDF installation.
-  Harden document reads against files that grow while being read, validate
-  cached and OCR-derived artifact coherence, bound aggregate raster work and
-  per-tile deadlines, and serialize model installation while rejecting symlinked
-  model artifacts and markers.
-  Preserve Intel macOS builds by excluding the unavailable ONNX runtime on that
-  target; native document processing remains available and managed OCR reports
-  an explicit unsupported-platform error before downloading model weights.
-  The graph viewer now exposes combined/native/OCR evidence tabs, confidence
-  and page/slide/sheet locators, bounded OCR region previews, coverage warnings,
-  and a managed model status/install card during initialization.
-
-- Make semantic provider choice explicit and repeatable with `--backend`,
-  `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`. Credential guidance now
-  covers all built-in providers and custom provider environment keys without
-  exposing secrets in Compass configuration or artifacts.
-
-- Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
-  universal evidence pipelines. The bounded AST-first producer publishes
-  declarations, scopes, bindings, occurrences, and conservative relationship
-  candidates with exact language constraints; Swift Vapor routes now use the
-  `vapor-swift` evidence-backed pack, bounded `pubspec.yaml`/`build.sbt`/
-  `Package.swift`/Gradle project metadata participates in fingerprints, and
-  legacy Swift member-table plus broad JVM stub rewiring no longer selects
-  targets for these languages.
-
-- Complete the independent SwiftSyntax, Dart Analyzer, scala.meta, and Groovy
-  CompilationUnit qualification providers. Clean pinned Swift, Dart, Scala,
-  and Groovy corpora now pass the graph-backed precision/recall audits and
-  fixture performance gates; the four production pipelines remain
-  `Qualifying` pending a separate promotion decision.
-
-- Turn the VS Code codebase query view into a multi-command workbench with
-  separate Ask, Explain, and CompassQL composers and durable result tabs.
-  Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
-  now render as readable UI instead of raw JSON. Typed `compass ask` also
-  accepts `--at REV` for immutable revision graphs.
-
-- Let VS Code users open a call graph by entering a function name, qualified
-  name, or stable symbol ID in the Call Graph pane, with callers, callees, or
-  both selectable before tracing. The existing cursor workflow remains
-  available in the same pane.
-
-- Keep Codebase Evolution strict when a stored revision uses an unsupported
-  artifact layout, and offer to rebuild the affected revision with the current
-  Compass version instead of mapping legacy history records.
-
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,
@@ -149,6 +62,43 @@
   already materialized. Rebuilding does not order or allowlist Compass release
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
+
+## 0.3.20 - 2026-08-24
+
+- Add Grounded Agent Graph overlays with citation-backed node, edge, Challenge,
+  and Retraction operations, immutable CAS-activated revisions, exact rebase,
+  historical composition, bounded audit, and read-only ingestion preparation.
+  Continuous enrichment is now documented in the bundled coding-agent skill.
+
+- Add versioned `compass.task-context/2` framework evidence for React and
+  frontend workflows, including route stages, render direction, runtime
+  boundaries, configuration dependencies, provenance, and qualification state.
+
+- Harden React frontend graph extraction with exact JSX `renders` edges,
+  component/hook/client/server role evidence, typed Next.js, React
+  Router/Remix, TanStack Router, and Vite semantics, bounded configuration
+  precedence, and strict viewer/query contracts.
+
+- Replace the flat call-flow model with the native
+  `compass.viewer.architecture/1` projection, including production-first
+  scoping, explicit relationship classes, source-grounded group names, exact
+  overflow metadata, bounded drill-down, and shared HTML/VS Code semantics.
+
+- Add bounded native PDF, DOCX, PPTX, and XLSX artifacts with pure-Rust
+  rasterization, optional managed PP-OCRv6, pinned model management, document
+  inspection, OCR evidence views, and explicit Intel-macOS limitations.
+
+- Make semantic provider and model selection explicit with `--backend`,
+  `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`, while keeping credentials
+  out of Compass configuration and artifacts.
+
+- Move Swift, Dart, Scala, and Groovy/Gradle onto qualifying universal
+  evidence pipelines and complete their independent precision/recall and
+  fixture performance qualification providers.
+
+- Turn the VS Code codebase query view into a multi-command Ask, Explain, and
+  CompassQL workbench, add direct symbol-based caller/callee graphs, and keep
+  historical views strict about unsupported artifact layouts.
 
 ## 0.3.19 - 2026-08-21
 
