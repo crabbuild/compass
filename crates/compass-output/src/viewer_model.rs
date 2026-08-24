@@ -91,35 +91,6 @@ pub struct GraphViewNode {
     pub challenged: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub challenge: Option<compass_agent_graph::EffectiveChallenge>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub document: Option<GraphViewDocument>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphViewDocument {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub role: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub kind: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub format: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ordinal: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub complete: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub visual_coverage: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ocr_mode: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub origin: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub locator: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ocr_profile: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -232,7 +203,6 @@ pub fn graph_view_model(
                 grounding_status: None,
                 challenged: None,
                 challenge: None,
-                document: object.get("document").and_then(document_from_value),
             })
         })
         .collect::<Vec<_>>();
@@ -502,23 +472,6 @@ fn non_empty(object: &Map<String, Value>, key: &str) -> Option<String> {
     string(object, key).filter(|value| !value.is_empty())
 }
 
-fn document_from_value(value: &Value) -> Option<GraphViewDocument> {
-    let object = value.as_object()?;
-    Some(GraphViewDocument {
-        role: string(object, "role"),
-        kind: string(object, "kind"),
-        format: string(object, "format"),
-        text: string(object, "text"),
-        ordinal: object.get("ordinal").and_then(Value::as_u64),
-        complete: object.get("complete").and_then(Value::as_bool),
-        visual_coverage: string(object, "visualCoverage"),
-        ocr_mode: string(object, "ocrMode"),
-        origin: object.get("origin").cloned(),
-        locator: object.get("locator").cloned(),
-        ocr_profile: object.get("ocrProfile").cloned(),
-    })
-}
-
 fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -586,73 +539,6 @@ mod tests {
             node.source.as_ref().and_then(|source| source.end_line),
             Some(8)
         );
-        Ok(())
-    }
-
-    #[test]
-    fn graph_model_exposes_document_ocr_provenance_for_the_viewer()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let document: GraphDocument = serde_json::from_value(json!({
-            "nodes": [{
-                "id": "scan",
-                "label": "scan.pdf",
-                "file_type": "document",
-                "document_kind": "document",
-                "document_format": "pdf",
-                "document_visual_coverage": "partial",
-                "document_ocr_mode": "auto",
-                "document_complete": false,
-                "document_ocr_profile": {
-                    "engine": "OAR-OCR",
-                    "engine_version": "0.9.2",
-                    "profile": "pp-ocrv6-small"
-                },
-                "source_file": "docs/scan.pdf"
-            }, {
-                "id": "region",
-                "label": "Invoice total",
-                "file_type": "document",
-                "document_kind": "paragraph",
-                "document_text": "Invoice total",
-                "document_origin": {
-                    "kind": "ocr",
-                    "profile": {
-                        "engine": "OAR-OCR",
-                        "engine_version": "0.9.2",
-                        "profile": "pp-ocrv6-small"
-                    },
-                    "confidence_bps": 9234
-                },
-                "document_locator": {
-                    "kind": "ocr",
-                    "owner": {"kind": "pdf", "page": 4, "item": 1},
-                    "candidate_id": "page-4",
-                    "width": 1000,
-                    "height": 800,
-                    "polygon": [{"x": 10, "y": 12}],
-                    "occurrence": 0
-                },
-                "block_index": 1,
-                "source_file": "docs/scan.pdf"
-            }],
-            "links": []
-        }))?;
-        let communities: Communities =
-            BTreeMap::from([(0, vec!["scan".to_owned(), "region".to_owned()])]);
-        let model = graph_view_model(
-            &document,
-            &communities,
-            "OCR",
-            &HtmlOptions::default(),
-            false,
-        );
-        let json = serde_json::to_value(&model.nodes)?;
-        assert_eq!(json[0]["document"]["role"], "root");
-        assert_eq!(json[0]["document"]["ocrMode"], "auto");
-        assert_eq!(json[0]["document"]["visualCoverage"], "partial");
-        assert_eq!(json[1]["document"]["origin"]["kind"], "ocr");
-        assert_eq!(json[1]["document"]["origin"]["confidence_bps"], 9234);
-        assert_eq!(json[1]["document"]["locator"]["owner"]["page"], 4);
         Ok(())
     }
 

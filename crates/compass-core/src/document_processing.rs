@@ -42,7 +42,6 @@ pub struct PreparedDocument {
     pub artifact: Arc<DocumentArtifact>,
     pub semantic_text: Arc<str>,
     pub cache_identity: String,
-    pub ocr_mode: OcrMode,
 }
 
 #[derive(Clone, Debug)]
@@ -153,7 +152,6 @@ pub fn prepare_document_set(
                 artifact: Arc::new(artifact),
                 semantic_text: Arc::<str>::from(semantic_text),
                 cache_identity: cache_identity.clone(),
-                ocr_mode: options.ocr_mode,
             },
         );
     }
@@ -254,7 +252,6 @@ pub(crate) fn project_document(
     path: &Path,
     artifact: &DocumentArtifact,
     cache_identity: &str,
-    ocr_mode: OcrMode,
 ) -> Result<compass_languages::Extraction, String> {
     artifact.validate().map_err(|error| error.to_string())?;
     let file_id = compass_languages::make_id(&[source_file]);
@@ -296,10 +293,6 @@ pub(crate) fn project_document(
     root.insert(
         "document_visual_coverage".to_owned(),
         serde_json::to_value(artifact.visual_coverage).map_err(|error| error.to_string())?,
-    );
-    root.insert(
-        "document_ocr_mode".to_owned(),
-        serde_json::to_value(ocr_mode).map_err(|error| error.to_string())?,
     );
     if !artifact.metadata.is_empty() {
         root.insert(
@@ -493,7 +486,6 @@ mod tests {
             Path::new("report.docx"),
             &artifact,
             "fixture-identity",
-            OcrMode::Off,
         )?;
         assert_eq!(extraction.nodes.len(), 2);
         assert_eq!(extraction.edges.len(), 1);
@@ -503,10 +495,6 @@ mod tests {
                 .get("document_text")
                 .and_then(serde_json::Value::as_str),
             Some("Projected sentinel")
-        );
-        assert_eq!(
-            extraction.nodes[0].attributes.get("document_ocr_mode"),
-            Some(&serde_json::json!("off"))
         );
         assert_eq!(
             extraction.extensions.get("document_cache_identity"),

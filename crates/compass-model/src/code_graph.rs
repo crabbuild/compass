@@ -200,13 +200,6 @@ pub enum NodeRole {
     Test,
     Fixture,
     Generated,
-    UiComponent,
-    Hook,
-    ClientBoundary,
-    ClientComponent,
-    ServerComponent,
-    ServerFunction,
-    DataLoader,
 }
 
 /// The closed relationship vocabulary for `compass.graph/1`.
@@ -243,7 +236,6 @@ pub enum EdgeKind {
     DependsOn,
     Documents,
     MapsTo,
-    Renders,
 }
 
 impl EdgeKind {
@@ -280,7 +272,6 @@ impl EdgeKind {
             Self::DependsOn => "depends_on",
             Self::Documents => "documents",
             Self::MapsTo => "maps_to",
-            Self::Renders => "renders",
         }
     }
 }
@@ -468,8 +459,6 @@ pub struct RouteStageDetails {
     pub reference: String,
     pub resolution: ResolutionState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_anchor: Option<SourceAnchor>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<ResolutionCandidate>,
@@ -626,18 +615,7 @@ pub struct CallEdgeDetails {
 #[serde(rename_all = "snake_case")]
 pub enum RouteStage {
     Middleware,
-    Layout,
-    Template,
-    Loading,
-    Default,
-    ErrorBoundary,
-    NotFound,
-    Boundary,
-    Loader,
-    Action,
     Handler,
-    DataLoader,
-    RouteComponent,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -670,24 +648,6 @@ pub struct MappingEdgeDetails {
     pub mapping_kind: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RenderKind {
-    Jsx,
-    CreateElement,
-    Root,
-    Lazy,
-    Dynamic,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RenderEdgeDetails {
-    pub render_kind: RenderKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub boundary: Option<String>,
-}
-
 /// Closed, category-specific relationship payloads.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -697,7 +657,6 @@ pub enum EdgeDetails {
     Messaging(MessagingEdgeDetails),
     Schedule(ScheduleEdgeDetails),
     Mapping(MappingEdgeDetails),
-    Render(RenderEdgeDetails),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

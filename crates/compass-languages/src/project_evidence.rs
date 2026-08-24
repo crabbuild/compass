@@ -5,9 +5,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tree_sitter::Parser;
 
-use crate::frameworks::typescript_syntax::{StaticValue, TypeScriptSyntax};
 use crate::json_config::parse_jsonc;
 
 pub const FRAMEWORK_PROJECT_EVIDENCE_EXTENSION: &str = "_compass_framework_project_evidence";
@@ -1393,12 +1391,8 @@ fn parse_configuration(path: &Path) -> Option<ParsedConfiguration> {
         name if name.starts_with("tsconfig.") || name.starts_with("jsconfig.") => {
             parse_typescript_configuration(&source, &mut parsed)
         }
-        name if name.starts_with("vite.config.") => {
-            parse_static_vite_config(path, &source, &mut parsed)
-        }
-        name if name.starts_with("next.config.") => {
-            parse_static_next_config(path, &source, &mut parsed)
-        }
+        name if name.starts_with("vite.config.") => parse_vite_configuration(&source, &mut parsed),
+        name if name.starts_with("next.config.") => parse_next_configuration(&source, &mut parsed),
         name if (name.starts_with("application.") || name.starts_with("application-"))
             || (name.starts_with("bootstrap.") || name.starts_with("bootstrap-")) =>
         {
@@ -1454,178 +1448,30 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
     }
 }
 
-fn parse_static_vite_config(path: &Path, source: &str, output: &mut ParsedConfiguration) {
-    inspect_frontend_config(path, source, |syntax| {
-        let Some(object) = config_object(syntax) else {
-            return;
-        };
-        for pair in object_pairs(syntax, object) {
-            let Some(name) = syntax.property_name(pair) else {
-                continue;
-            };
-            let Some(value_node) = pair
-                .child_by_field_name("value")
-                .or_else(|| pair.named_child(1))
-            else {
-                continue;
-            };
-            let value = syntax.static_value(value_node);
-            match name.as_str() {
-                "resolve" => {
-                    if let Some((_, aliases)) = value
-                        .object()
-                        .and_then(|values| values.iter().find(|(key, _)| key == "alias"))
-                    {
-                        collect_static_aliases(aliases, &mut output.aliases);
-                        output.configuration_keys.insert("resolve.alias".to_owned());
-                    }
-                }
-                "plugins" => {
-                    output.configuration_keys.insert("plugins".to_owned());
-                    collect_static_plugins(&value, output);
-                }
-                _ => {}
-            }
-        }
-        collect_syntax_plugins(syntax, output);
-    });
-    // `path.resolve(import.meta.dirname, "./src")` is intentionally treated
-    // as an opaque call by the bounded static evaluator. The alias itself is
-    // still recoverable without executing the config, so retain that
-    // source-backed mapping for downstream Vite glob resolution. Dynamic
-    // aliases remain unresolved and therefore fail closed at the matcher.
+fn parse_vite_configuration(source: &str, output: &mut ParsedConfiguration) {
+    if source.contains("resolve") && source.contains("alias") {
+        output.configuration_keys.insert("resolve.alias".to_owned());
+    }
+    if source.contains("plugins") {
+        output.configuration_keys.insert("plugins".to_owned());
+    }
     collect_quoted_aliases(source, &mut output.aliases);
+    collect_config_plugins(source, output);
 }
 
-fn parse_static_next_config(path: &Path, source: &str, output: &mut ParsedConfiguration) {
-    inspect_frontend_config(path, source, |syntax| {
-        let Some(object) = config_object(syntax) else {
-            return;
-        };
-        let names = object_pairs(syntax, object)
-            .into_iter()
-            .filter_map(|pair| syntax.property_name(pair))
-            .collect::<BTreeSet<_>>();
-        for key in [
-            "rewrites",
-            "redirects",
-            "headers",
-            "experimental",
-            "pageExtensions",
-        ] {
-            if names.contains(key) {
-                output.configuration_keys.insert(key.to_owned());
-            }
-        }
-        collect_syntax_plugins(syntax, output);
-    });
-}
-
-fn inspect_frontend_config(
-    path: &Path,
-    source: &str,
-    inspect: impl FnOnce(TypeScriptSyntax<'_, '_>),
-) {
-    let language_name = match path.extension().and_then(|extension| extension.to_str()) {
-        Some("ts" | "mts" | "cts") => "typescript",
-        Some("tsx") => "tsx",
-        Some("jsx") => "jsx",
-        Some("js" | "mjs" | "cjs") => "javascript",
-        _ => return,
-    };
-    let Ok(language) = tree_sitter_language_pack::get_language(language_name) else {
-        return;
-    };
-    let mut parser = Parser::new();
-    if parser.set_language(&language).is_err() {
-        return;
-    }
-    let Some(tree) = parser.parse(source.as_bytes(), None) else {
-        return;
-    };
-    inspect(TypeScriptSyntax::new(tree.root_node(), source.as_bytes()));
-}
-
-fn config_object<'tree, 'source>(
-    syntax: TypeScriptSyntax<'tree, 'source>,
-) -> Option<tree_sitter::Node<'tree>> {
-    let define_call = syntax.descendants(syntax.root()).into_iter().find(|node| {
-        let Some(callee) = syntax.call_callee(*node) else {
-            return false;
-        };
-        (callee == "defineConfig"
-            && !syntax
-                .imported_local_names("vite", "defineConfig")
-                .is_empty())
-            || syntax
-                .imported_local_names("vite", "*")
-                .iter()
-                .any(|name| callee == format!("{name}.defineConfig"))
-    });
-    define_call
-        .and_then(|call| syntax.config_object_from_call(call))
-        .or_else(|| syntax.exported_default_config_object())
-}
-
-fn object_pairs<'tree, 'source>(
-    syntax: TypeScriptSyntax<'tree, 'source>,
-    object: tree_sitter::Node<'tree>,
-) -> Vec<tree_sitter::Node<'tree>> {
-    let mut cursor = object.walk();
-    object
-        .named_children(&mut cursor)
-        .filter(|node| {
-            matches!(
-                node.kind(),
-                "pair" | "method_definition" | "public_field_definition"
-            ) && !syntax.is_incomplete(*node)
-        })
-        .collect()
-}
-
-fn collect_static_aliases(value: &StaticValue, output: &mut BTreeMap<String, String>) {
-    let Some(values) = value.object() else {
-        return;
-    };
-    for (alias, target) in values.iter().take(MAX_PROJECT_ALIASES) {
-        let Some(target) = target.as_string() else {
-            continue;
-        };
-        output
-            .entry(normalize_alias(alias))
-            .or_insert_with(|| normalize_project_path(target));
-    }
-}
-
-fn collect_static_plugins(value: &StaticValue, output: &mut ParsedConfiguration) {
-    let Some(values) = value.array() else {
-        return;
-    };
-    for plugin in values.iter().filter_map(StaticValue::as_string) {
-        if is_plugin_name(plugin) {
-            output.plugins.insert(normalize_dependency(plugin));
+fn parse_next_configuration(source: &str, output: &mut ParsedConfiguration) {
+    for key in [
+        "rewrites",
+        "redirects",
+        "headers",
+        "experimental",
+        "pageExtensions",
+    ] {
+        if source.contains(key) {
+            output.configuration_keys.insert(key.to_owned());
         }
     }
-}
-
-fn collect_syntax_plugins(syntax: TypeScriptSyntax<'_, '_>, output: &mut ParsedConfiguration) {
-    for node in syntax.descendants(syntax.root()) {
-        let import_like = node.kind() == "import_statement"
-            || syntax.call_callee(node).as_deref() == Some("require");
-        if !import_like {
-            continue;
-        }
-        let Some(value) = syntax
-            .descendants(node)
-            .into_iter()
-            .find_map(|child| syntax.literal_string(child))
-        else {
-            continue;
-        };
-        if is_plugin_name(&value) {
-            output.plugins.insert(normalize_dependency(&value));
-        }
-    }
+    collect_config_plugins(source, output);
 }
 
 fn parse_spring_configuration(source: &str, output: &mut ParsedConfiguration) {
@@ -1717,10 +1563,14 @@ fn collect_config_plugins(source: &str, output: &mut ParsedConfiguration) {
 
 fn is_plugin_name(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    lower.starts_with("@vitejs/plugin-")
+    lower.contains("plugin")
+        || lower.starts_with("@vitejs/")
         || lower.starts_with("vite-plugin-")
-        || lower.starts_with("unplugin-")
         || lower.starts_with("next-plugin-")
+        || matches!(
+            lower.as_str(),
+            "react" | "vue" | "svelte" | "solid" | "legacy"
+        )
 }
 
 fn normalize_alias(value: &str) -> String {

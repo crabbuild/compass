@@ -665,10 +665,7 @@ fn real_framework_limit_failure_isolated_from_healthy_file() -> Result<(), Box<d
         "src/healthy.rs",
         "pub fn target() {}\npub fn healthy() { target(); }\n",
     )?;
-    // Keep the fixture below the pack's byte budget so the fact budget is the
-    // first and explicit limit reached. This distinguishes fact truncation
-    // from the independent config-byte guard.
-    let overflow = "GET /a x\n".repeat(100_001);
+    let overflow = "GET /overflow controllers.Example.view()\n".repeat(100_001);
     write(directory.path(), "conf/routes", &overflow)?;
 
     let graph = build(directory.path())?;

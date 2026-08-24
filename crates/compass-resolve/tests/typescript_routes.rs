@@ -781,15 +781,10 @@ fn file_routes_emit_convention_components_and_exact_bindings()
         assert!(
             resolved.iter().all(|route| {
                 route.state == ResolutionState::Exact
-                    // Convention pages use the typed RouteComponent role;
-                    // endpoint/resource routes retain Handler. Both are
-                    // exact terminal stages in the typed route contract.
-                    && route.stages.last().is_some_and(|stage| {
-                        matches!(
-                            stage.role,
-                            RouteStageRole::Handler | RouteStageRole::RouteComponent
-                        )
-                    })
+                    && route
+                        .stages
+                        .last()
+                        .is_some_and(|stage| stage.role == RouteStageRole::Handler)
             }),
             "{name}: {:?}",
             resolved
@@ -1013,7 +1008,7 @@ fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact
     )?;
     fs::write(
         &vite_config,
-        "import react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; const pages = import.meta.glob('./src/**/*.tsx', { eager: true }); export default defineConfig({ plugins: [react()], resolve: { alias: { '~': './src' } } });",
+        "import react from '@vitejs/plugin-react'; import { defineConfig } from 'vite'; export default defineConfig({ plugins: [react()], resolve: { alias: { '~': './src' } } });",
     )?;
     fs::write(
         root.join("package.json"),
@@ -1072,31 +1067,6 @@ fn next_app_and_pages_routes_use_project_evidence_and_vite_publishes_config_fact
         node.string("symbol_kind") == "config_key"
             && node.string("framework") == "vite"
             && node.string("component_type") == "framework_configuration"
-    }));
-    assert!(graph.nodes.iter().any(|node| {
-        node.string("symbol_kind") == "config_key"
-            && node.string("framework") == "vite"
-            && node.string("component_type") == "framework_configuration_field"
-            && node.string("field") == "resolve"
-    }));
-    let file_set = graph.nodes.iter().find(|node| {
-        node.string("symbol_kind") == "resource"
-            && node.string("framework") == "vite"
-            && node.string("component_type") == "framework_file_set"
-    });
-    assert!(
-        file_set.is_some(),
-        "Vite import.meta.glob must publish a resource"
-    );
-    let file_set_id = file_set.map(|node| node.id.clone()).unwrap_or_default();
-    assert!(graph.edges.iter().any(|edge| {
-        edge.target == file_set_id
-            && edge.string("relation") == "contains"
-            && graph
-                .nodes
-                .iter()
-                .find(|node| node.id == edge.source)
-                .is_some_and(|node| node.string("symbol_kind") == "file")
     }));
 
     let config_only = tempdir()?;

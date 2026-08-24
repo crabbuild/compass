@@ -12,7 +12,6 @@ use compass_languages::{
 fn valid_universal_framework_pack(id: &'static str) -> FrameworkPackDescriptor {
     FrameworkPackDescriptor {
         id,
-        semantics_version: 1,
         kind: FrameworkPackKind::Source,
         languages: &["go", "python"],
         required_capabilities: &[LanguageCapability::Calls],
@@ -34,7 +33,7 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 10);
+    assert_eq!(FrameworkPackRegistry::descriptors().len(), 9);
     assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
     assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "php-frameworks");
     assert_eq!(FrameworkPackRegistry::descriptors()[2].id, "spring-java");
@@ -47,7 +46,6 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         "dart-flutter-navigation"
     );
     assert_eq!(FrameworkPackRegistry::descriptors()[8].id, "dart-riverpod");
-    assert_eq!(FrameworkPackRegistry::descriptors()[9].id, "react-ui");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -161,17 +159,6 @@ fn universal_framework_pack_registry_enforces_evidence_activation_and_limits() {
             pack: descriptor.id,
             limit: "max_candidates",
         })
-    );
-
-    let zero_semantics_version = FrameworkPackDescriptor {
-        semantics_version: 0,
-        ..descriptor
-    };
-    assert_eq!(
-        FrameworkPackRegistry::validate_descriptors(&[zero_semantics_version]),
-        Err(FrameworkPackRegistryError::InvalidSemanticsVersion(
-            descriptor.id,
-        ))
     );
 
     assert_eq!(

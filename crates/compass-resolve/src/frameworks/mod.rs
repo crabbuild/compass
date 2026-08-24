@@ -8,8 +8,6 @@ mod node;
 mod php;
 mod python;
 mod qualification;
-mod react;
-mod relations;
 mod routes;
 mod ruby;
 mod spring;
@@ -17,8 +15,6 @@ mod swift;
 mod target_index;
 mod typescript;
 
-pub(crate) use react::project_render_relations;
-pub(crate) use relations::resolve_and_publish as resolve_and_publish_relations;
 pub(crate) use typescript::edge_targets_declared_callable;
 
 use compass_languages::{RawNodeRecord, make_id};
@@ -116,21 +112,15 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
         id: "dart-riverpod",
         expand: dart::expand,
     },
-    UniversalFrameworkPack {
-        id: "react-ui",
-        expand: react::expand,
-    },
 ];
 
 pub use domain::{
-    ResolvedDomainFact, publish_resolved_domains, publish_resolved_domains_with_root,
-    resolve_and_publish_framework_domains, resolve_domains,
+    ResolvedDomainFact, publish_resolved_domains, resolve_and_publish_framework_domains,
+    resolve_domains,
 };
 pub use qualification::{
-    FRAMEWORK_EVIDENCE_EXPECTATIONS_SCHEMA, FrameworkEvidenceExpectation,
-    FrameworkEvidenceExpectationError, FrameworkEvidenceExpectationSet, FrameworkQualificationCase,
-    FrameworkQualificationError, FrameworkQualificationReport, FrameworkRouteExpectation,
-    MAX_FRAMEWORK_EVIDENCE_EXPECTATIONS, qualify_framework_case,
+    FrameworkQualificationCase, FrameworkQualificationError, FrameworkQualificationReport,
+    FrameworkRouteExpectation, qualify_framework_case,
 };
 pub use routes::{
     FrameworkResolutionError, ResolvedRoute, RouteStage, RouteStageRole, publish_resolved_routes,
@@ -171,10 +161,6 @@ pub(super) fn expand_framework_routes(
             }
             compass_languages::RawFrameworkFact::Domain(_)
             | compass_languages::RawFrameworkFact::Annotation(_)
-            | compass_languages::RawFrameworkFact::Role(_)
-            | compass_languages::RawFrameworkFact::Relation(_)
-            | compass_languages::RawFrameworkFact::Configuration(_)
-            | compass_languages::RawFrameworkFact::FileSet(_)
             | compass_languages::RawFrameworkFact::Route(_) => None,
         })
         .collect::<Vec<_>>();
@@ -193,11 +179,7 @@ pub(super) fn expand_framework_routes(
             .filter_map(|fact| match fact {
                 compass_languages::RawFrameworkFact::Route(route) => Some(route.clone()),
                 compass_languages::RawFrameworkFact::Domain(_)
-                | compass_languages::RawFrameworkFact::Annotation(_)
-                | compass_languages::RawFrameworkFact::Role(_)
-                | compass_languages::RawFrameworkFact::Relation(_)
-                | compass_languages::RawFrameworkFact::Configuration(_)
-                | compass_languages::RawFrameworkFact::FileSet(_) => None,
+                | compass_languages::RawFrameworkFact::Annotation(_) => None,
             })
             .collect::<Vec<_>>();
         let expanded = (adapter.expand)(&adapter_facts, adapter_routes, limits)?;
@@ -222,12 +204,6 @@ fn fact_framework(fact: &compass_languages::RawFrameworkFact) -> &str {
         compass_languages::RawFrameworkFact::Route(route) => &route.framework,
         compass_languages::RawFrameworkFact::Domain(domain) => &domain.framework,
         compass_languages::RawFrameworkFact::Annotation(annotation) => &annotation.framework,
-        compass_languages::RawFrameworkFact::Role(role) => &role.framework,
-        compass_languages::RawFrameworkFact::Relation(relation) => &relation.framework,
-        compass_languages::RawFrameworkFact::Configuration(configuration) => {
-            &configuration.framework
-        }
-        compass_languages::RawFrameworkFact::FileSet(file_set) => &file_set.framework,
     }
 }
 
@@ -549,7 +525,6 @@ mod tests {
             },
             handler_reference: "handler".to_owned(),
             middleware_references: Vec::new(),
-            stages: Vec::new(),
             origin: RawFrameworkOrigin::Ast,
             rule: None,
             detail: serde_json::Map::new(),

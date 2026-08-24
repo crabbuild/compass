@@ -61,12 +61,7 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -105,12 +100,7 @@ Route::resource('/categories', CategoryController::class)->only(['index', 'show'
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(constrained_routes.len(), 2);
@@ -174,12 +164,7 @@ Route::prefix('/wrong')->group(function () {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 4, "routes={routes:#?}");
@@ -300,12 +285,7 @@ end
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 3, "routes={routes:#?}");

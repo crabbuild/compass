@@ -59,7 +59,6 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::DependsOn,
     EdgeKind::Documents,
     EdgeKind::MapsTo,
-    EdgeKind::Renders,
 ];
 
 const MAX_SCOPE_AMBIGUITY_CANDIDATES: usize = 8;

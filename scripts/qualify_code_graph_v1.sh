@@ -9,7 +9,6 @@ trap 'chmod -R u+w "$QUALIFY_TMP" 2>/dev/null || true; rm -rf -- "$QUALIFY_TMP"'
 # intentionally exercises large repositories and must not fill the checkout's
 # disk with a second target tree.
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-/Volumes/Workspace/crabbuild-target/compass-main}"
-PARSER_ROOT="${TSLP_PARSER_SOURCE_DIR:-/Volumes/Workspace/crabbuild-target/compass-parser-sources}"
 
 usage() {
   cat >&2 <<EOF
@@ -45,11 +44,6 @@ case "${1:-}" in
 esac
 [[ "$#" -eq 0 ]] || usage
 
-[[ -f "$PARSER_ROOT/sources/language_definitions.json" && -d "$PARSER_ROOT/parsers" ]] || {
-  echo "[code-graph-v1] offline qualification requires a pre-provisioned parser source bundle at $PARSER_ROOT (set TSLP_PARSER_SOURCE_DIR)" >&2
-  exit 1
-}
-
 cd "$QUALIFY_ROOT"
 MANIFEST="$QUALIFY_ROOT/tests/qualification/code-graph-v1-semantic.json"
 CORPUS_MANIFEST="$QUALIFY_ROOT/tests/qualification/code-graph-v1-corpus.json"
@@ -74,8 +68,7 @@ PY
 }
 
 echo "[code-graph-v1] build qualifying production binary once"
-PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 CARGO_NET_OFFLINE=true \
-  cargo build --locked -p compass-cli --bin compass
+cargo build --locked -p compass-cli --bin compass
 QUALIFY_TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c \
   'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
 COMPASS_BIN="$QUALIFY_TARGET/debug/compass"
@@ -395,9 +388,3 @@ if (
 if summary.get("output_consistency", {}).get("stats_match_graph") is False:
     raise SystemExit("fixture output stats do not match canonical graph counts")
 PY
-
-if [[ "$MODE" == fixtures ]]; then
-  echo "[code-graph-v1] execute independent React frontend qualification"
-  TSLP_PARSER_SOURCE_DIR="$PARSER_ROOT" \
-    "$QUALIFY_ROOT/scripts/qualify_react_frontend_graph.sh" --fixtures-only
-fi

@@ -332,11 +332,7 @@ Other::get('/not-a-route', [UserController::class, 'ignored']);
             RawFrameworkFact::Route(route) if route.framework == "laravel" => Some(route),
             RawFrameworkFact::Route(_)
             | RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -381,11 +377,7 @@ function hook_help(): void {}
             RawFrameworkFact::Route(route) if route.framework == "drupal" => Some(route),
             RawFrameworkFact::Route(_)
             | RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(hooks.len(), 2, "facts={:#?}", drupal.graph.framework_facts);

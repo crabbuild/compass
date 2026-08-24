@@ -18,14 +18,13 @@ export const CODE_QUERY_EDGE_KINDS = [
   "references", "type_of", "returns", "instantiates", "overrides", "decorates",
   "routes_to", "reads", "writes", "aliases", "registers", "handles",
   "publishes", "subscribes", "produces", "consumes", "schedules", "triggers",
-  "tests", "depends_on", "documents", "maps_to", "renders"
+  "tests", "depends_on", "documents", "maps_to"
 ] as const;
 
 export const CODE_QUERY_NODE_ROLES = [
   "controller", "route_handler", "middleware", "service", "resolver",
   "consumer", "producer", "subscriber", "repository", "model", "test",
-  "fixture", "generated", "ui_component", "hook", "client_boundary",
-  "client_component", "server_component", "server_function", "data_loader"
+  "fixture", "generated"
 ] as const;
 
 export const CODE_QUERY_OPERATIONS = [
@@ -162,20 +161,6 @@ const ImportExportNodeDetailsSchema = z.strictObject({
     typeOnly: z.boolean()
   })
 });
-export const CodeRouteStageSchema = z.enum([
-  "middleware", "layout", "template", "loading", "default", "error_boundary",
-  "not_found", "boundary", "loader", "action", "handler", "data_loader",
-  "route_component"
-]);
-const RouteStageDetailsSchema = z.strictObject({
-  stage: CodeRouteStageSchema,
-  position: z.number().int().nonnegative(),
-  reference: z.string().min(1),
-  resolution: CodeResolutionSchema,
-  sourceAnchor: CodeSourceAnchorSchema.nullable(),
-  target: z.string().nullable().optional(),
-  candidates: z.array(CodeResolutionCandidateSchema).max(20).default([])
-});
 const RouteNodeDetailsSchema = z.strictObject({
   type: z.literal("route"),
   data: z.strictObject({
@@ -184,8 +169,7 @@ const RouteNodeDetailsSchema = z.strictObject({
     originalPath: z.string().nullable().optional(),
     declaringScope: z.string(),
     resolution: CodeResolutionSchema,
-    middlewareCount: z.number().int().nonnegative(),
-    stages: z.array(RouteStageDetailsSchema).max(256).default([])
+    middlewareCount: z.number().int().nonnegative()
   })
 });
 const ComponentNodeDetailsSchema = z.strictObject({
@@ -269,7 +253,7 @@ const CallEdgeDetailsSchema = z.strictObject({
 const RouteEdgeDetailsSchema = z.strictObject({
   type: z.literal("route"),
   data: z.strictObject({
-    stage: CodeRouteStageSchema,
+    stage: z.enum(["middleware", "handler"]),
     position: z.number().int().nonnegative().nullable().optional(),
     operation: z.string().nullable().optional()
   })
@@ -286,21 +270,13 @@ const MappingEdgeDetailsSchema = z.strictObject({
   type: z.literal("mapping"),
   data: z.strictObject({ mappingKind: z.string() })
 });
-const RenderEdgeDetailsSchema = z.strictObject({
-  type: z.literal("render"),
-  data: z.strictObject({
-    renderKind: z.enum(["jsx", "create_element", "root", "lazy", "dynamic"]),
-    boundary: z.string().nullable().optional()
-  })
-});
 
 export const CodeEdgeDetailsSchema = z.discriminatedUnion("type", [
   CallEdgeDetailsSchema,
   RouteEdgeDetailsSchema,
   MessagingEdgeDetailsSchema,
   ScheduleEdgeDetailsSchema,
-  MappingEdgeDetailsSchema,
-  RenderEdgeDetailsSchema
+  MappingEdgeDetailsSchema
 ]);
 
 export const CodeQueryLimitsSchema = z.strictObject({

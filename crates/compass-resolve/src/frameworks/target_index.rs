@@ -18,11 +18,6 @@ pub(super) struct IndexedTarget<'a> {
 
 pub(super) struct FrameworkTargetIndex<'a> {
     pub targets: Vec<IndexedTarget<'a>>,
-    /// All source-backed nodes are retained for exact framework annotations.
-    /// Framework role facts carry a graph identity produced by the language
-    /// evidence layer; resolving that identity must not depend on whether the
-    /// structural node happens to belong to a callable/type lookup family.
-    all_nodes: &'a [RawNodeRecord],
     root: Option<&'a Path>,
     by_id: HashMap<(TargetFamily, &'a str), Vec<usize>>,
     by_qualified: HashMap<(TargetFamily, String), Vec<usize>>,
@@ -78,7 +73,6 @@ impl<'a> FrameworkTargetIndex<'a> {
 
         let mut index = Self {
             targets: Vec::with_capacity(extraction.nodes.len()),
-            all_nodes: &extraction.nodes,
             root,
             by_id: HashMap::new(),
             by_qualified: HashMap::new(),
@@ -187,55 +181,6 @@ impl<'a> FrameworkTargetIndex<'a> {
             positions.dedup();
         }
         index
-    }
-
-    pub fn exact_node(&self, reference: &str, limit: usize) -> (Vec<&'a RawNodeRecord>, bool) {
-        if reference.trim().is_empty() {
-            return (Vec::new(), false);
-        }
-        let mut matches = self
-            .all_nodes
-            .iter()
-            .filter(|node| node.id == reference)
-            .take(limit.saturating_add(1))
-            .collect::<Vec<_>>();
-        let truncated = matches.len() > limit;
-        if truncated {
-            matches.truncate(limit);
-        }
-        (matches, truncated)
-    }
-
-    /// Resolve a relation endpoint with no explicit reference only when the
-    /// source file itself provides a bounded, unambiguous candidate set.  A
-    /// node id is never the same thing as a source path, so using `exact_node`
-    /// for this case would silently turn every anchor-only relation into an
-    /// unresolved diagnostic.
-    pub fn by_source_file(
-        &self,
-        source_file: &str,
-        limit: usize,
-    ) -> (Vec<&'a RawNodeRecord>, bool) {
-        let expected = source_key(source_file, self.root);
-        if expected.is_empty() {
-            return (Vec::new(), false);
-        }
-        let mut matches = self
-            .all_nodes
-            .iter()
-            .filter(|node| {
-                node.attributes
-                    .get("source_file")
-                    .and_then(Value::as_str)
-                    .is_some_and(|file| source_key(file, self.root) == expected)
-            })
-            .take(limit.saturating_add(1))
-            .collect::<Vec<_>>();
-        let truncated = matches.len() > limit;
-        if truncated {
-            matches.truncate(limit);
-        }
-        (matches, truncated)
     }
 
     pub fn by_id(
@@ -443,21 +388,6 @@ fn target_families(node: &RawNodeRecord) -> &'static [TargetFamily] {
     const ROUTE: &[TargetFamily] = &[TargetFamily::Route];
     const TYPE: &[TargetFamily] = &[TargetFamily::Type];
     const DATABASE_TABLE: &[TargetFamily] = &[TargetFamily::DatabaseTable];
-    // File-route extraction may synthesize a convention handler for an
-    // anonymous/default export so that the route inventory remains visible.
-    // The parser-backed universal evidence is the authoritative callable
-    // target whenever it exists; indexing both creates an artificial
-    // same-source ambiguity and suppresses a valid route edge. Keep the
-    // synthetic node published, but do not use it as a callable target.
-    if node.attributes.get("_origin").and_then(Value::as_str) == Some("convention")
-        && node
-            .attributes
-            .get("framework")
-            .and_then(Value::as_str)
-            .is_some()
-    {
-        return &[];
-    }
     let kind = node
         .attributes
         .get("symbol_kind")
@@ -465,11 +395,6 @@ fn target_families(node: &RawNodeRecord) -> &'static [TargetFamily] {
         .and_then(Value::as_str);
     match kind {
         Some("function" | "method") => ROUTE_CALLABLE,
-        // React/Next route modules commonly export a component through a
-        // variable (`const Page = withData(...)`).  A same-source route
-        // reference is bounded and deterministic, so variables belong to the
-        // route target family as well.
-        Some("variable") => ROUTE,
         Some("class") => ROUTE_TYPE,
         Some("component") => ROUTE,
         Some("struct" | "interface" | "trait" | "protocol" | "enum") => TYPE,

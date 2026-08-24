@@ -104,7 +104,6 @@ fn route(index: usize) -> RawRouteFact {
         anchor: anchor(index),
         handler_reference: format!("handler_{index:05}"),
         middleware_references: Vec::new(),
-        stages: Vec::new(),
         origin: RawFrameworkOrigin::Ast,
         rule: None,
         detail: Map::new(),

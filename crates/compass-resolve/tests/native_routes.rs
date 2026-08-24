@@ -105,11 +105,7 @@ func routes() {
                 }
                 RawFrameworkFact::Route(_)
                 | RawFrameworkFact::Domain(_)
-                | RawFrameworkFact::Annotation(_)
-                | RawFrameworkFact::Role(_)
-                | RawFrameworkFact::Relation(_)
-                | RawFrameworkFact::Configuration(_)
-                | RawFrameworkFact::FileSet(_) => None,
+                | RawFrameworkFact::Annotation(_) => None,
             })
             .ok_or("missing Echo/Fiber route")?;
         assert_eq!(route.handler_reference, "show");
@@ -228,11 +224,7 @@ app.Run();
             RawFrameworkFact::Route(route) if route.framework == "aspnet" => Some(route),
             RawFrameworkFact::Route(_)
             | RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     let exact = minimal_routes
@@ -355,12 +347,7 @@ func configure(r *mux.Router) {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 1);
@@ -390,12 +377,7 @@ fn router() -> Router {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(
@@ -439,12 +421,7 @@ func configure(r *gin.Engine) {
         .iter()
         .find_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .ok_or("missing multiline Go route")?;
     assert_eq!(go_route.normalized_path, "/users");
@@ -468,12 +445,7 @@ func configure(r chi.Router) {
         .iter()
         .find_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .ok_or("missing chi closure route")?;
     assert_eq!(chi_route.framework, "chi");
@@ -494,12 +466,7 @@ func configure(r *mux.Router) {
         .iter()
         .find_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .ok_or("missing gorilla subrouter route")?;
     assert_eq!(gorilla_route.framework, "gorilla");
@@ -525,12 +492,7 @@ fn configure() -> App {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(actix_routes.iter().any(|route| {
@@ -823,12 +785,7 @@ func routes(_ app: Application) throws {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(routes.iter().any(|route| route.normalized_path == "/"));

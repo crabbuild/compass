@@ -51,13 +51,10 @@ pub use review::{
 };
 pub use task_context::{
     AgentKnowledgeAssertion, AgentKnowledgeChallenge, AgentKnowledgeSection,
-    FRAMEWORK_CONTEXT_SCHEMA, FrameworkAmbiguity, FrameworkBoundaryContext,
-    FrameworkCapabilityStatus, FrameworkContext, FrameworkPackContext, FrameworkQualificationState,
-    FrameworkRelationContext, FrameworkRouteContext, FrameworkStageContext,
-    TASK_CONTEXT_PROFILE_SCHEMA, TASK_CONTEXT_SCHEMA, TASK_CONTEXT_SCHEMA_V1, TaskContext,
-    TaskContextError, TaskContextIntent, TaskContextKnowledge, TaskContextLimits,
-    TaskContextOmission, TaskContextRequest, TaskContextSection, TaskContextSectionKind,
-    TaskContextTarget, TaskContextWork, attach_agent_knowledge, build_task_context,
+    TASK_CONTEXT_PROFILE_SCHEMA, TASK_CONTEXT_SCHEMA, TaskContext, TaskContextError,
+    TaskContextIntent, TaskContextKnowledge, TaskContextLimits, TaskContextOmission,
+    TaskContextRequest, TaskContextSection, TaskContextSectionKind, TaskContextTarget,
+    TaskContextWork, attach_agent_knowledge, build_task_context,
 };
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,

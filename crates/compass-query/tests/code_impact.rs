@@ -1,9 +1,5 @@
 mod support;
 
-use std::fs;
-
-use compass_model::code_graph::{EdgeKind, GraphDocument};
-use compass_model::identity::edge_id;
 use compass_model::query_contract::{CodeQueryLimits, ImpactRequest};
 use compass_query::open;
 
@@ -105,60 +101,5 @@ fn impact_excludes_graph_assembly_endpoint_remaps_by_default()
                 && evidence.wiring_site.is_some()
         })
     }));
-    Ok(())
-}
-
-#[test]
-fn impact_includes_inbound_renderers_without_promoting_them_to_callers()
--> Result<(), Box<dyn std::error::Error>> {
-    let directory = tempfile::tempdir()?;
-    let graph_path = directory.path().join("graph.json");
-    support::write_graph(&graph_path)?;
-    let mut graph = GraphDocument::load(&graph_path)?;
-    let template = graph
-        .links
-        .iter()
-        .find(|edge| edge.source == "n:caller" && edge.target == "n:list")
-        .cloned()
-        .ok_or("missing renderer template")?;
-    let id = edge_id(
-        "n:caller",
-        EdgeKind::Renders,
-        "n:list",
-        template.relationship_site.as_ref(),
-        Some("react-jsx-render"),
-    );
-    let mut render = template;
-    render.id.clone_from(&id);
-    render.key = id;
-    render.kind = EdgeKind::Renders;
-    render.occurrence_rule = compass_model::provenance::OccurrenceRule::new("react-jsx-render");
-    graph.links.push(render);
-    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
-
-    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
-    let impact = engine.impact(ImpactRequest {
-        symbol: "UserService.list".to_owned(),
-        include_heuristic: false,
-        limits: CodeQueryLimits::default(),
-    })?;
-    assert!(
-        impact
-            .edges
-            .iter()
-            .any(|edge| edge.kind == EdgeKind::Renders)
-    );
-
-    let callers = engine.callers(compass_model::query_contract::CallRequest {
-        symbol: "UserService.list".to_owned(),
-        include_heuristic: false,
-        limits: CodeQueryLimits::default(),
-    })?;
-    assert!(
-        callers
-            .edges
-            .iter()
-            .all(|edge| edge.kind != EdgeKind::Renders)
-    );
     Ok(())
 }

@@ -17,7 +17,6 @@ pub const DEFAULT_AFFECTED_RELATIONS: &[&str] = &[
     "uses",
     "mixes_in",
     "embeds",
-    "renders",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -257,10 +256,5 @@ mod tests {
         assert!(format_affected(&graph, "missing", &relations, 2).contains("No unique"));
         assert!(format_affected(&graph, "file", &relations, 0).contains("No affected"));
         Ok(())
-    }
-
-    #[test]
-    fn default_affected_relations_include_frontend_renderers() {
-        assert!(DEFAULT_AFFECTED_RELATIONS.contains(&"renders"));
     }
 }

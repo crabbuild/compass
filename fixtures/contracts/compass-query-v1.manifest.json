@@ -3,8 +3,8 @@
   "enums": {
     "operation": ["search", "callers", "callees", "impact", "explore", "node_trail"],
     "nodeKind": ["file", "module", "package", "namespace", "class", "struct", "interface", "trait", "protocol", "enum", "enum_member", "type_alias", "function", "method", "constructor", "property", "field", "variable", "constant", "parameter", "import", "export", "macro", "annotation", "route", "component", "event", "message", "topic", "queue", "job", "resource", "schema", "query", "migration", "config_key", "database", "database_schema", "database_table", "database_view", "database_column", "database_index", "database_constraint", "database_procedure", "database_trigger"],
-    "nodeRole": ["controller", "route_handler", "middleware", "service", "resolver", "consumer", "producer", "subscriber", "repository", "model", "test", "fixture", "generated", "ui_component", "hook", "client_boundary", "client_component", "server_component", "server_function", "data_loader"],
-    "edgeKind": ["contains", "calls", "imports", "exports", "extends", "implements", "references", "type_of", "returns", "instantiates", "overrides", "decorates", "routes_to", "reads", "writes", "aliases", "registers", "handles", "publishes", "subscribes", "produces", "consumes", "schedules", "triggers", "tests", "depends_on", "documents", "maps_to", "renders"],
+    "nodeRole": ["controller", "route_handler", "middleware", "service", "resolver", "consumer", "producer", "subscriber", "repository", "model", "test", "fixture", "generated"],
+    "edgeKind": ["contains", "calls", "imports", "exports", "extends", "implements", "references", "type_of", "returns", "instantiates", "overrides", "decorates", "routes_to", "reads", "writes", "aliases", "registers", "handles", "publishes", "subscribes", "produces", "consumes", "schedules", "triggers", "tests", "depends_on", "documents", "maps_to"],
     "evidenceLayer": ["structural_graph", "program_ir"],
     "evidenceOrigin": ["ast", "config", "convention", "artifact", "heuristic"],
     "confidence": ["exact", "inferred", "ambiguous"],

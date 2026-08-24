@@ -136,7 +136,6 @@ pub(super) fn detect_drupal_routing(path: &Path, source: &[u8]) -> Vec<RawFramew
                 anchor: anchor.clone(),
                 handler_reference: handler_reference.clone(),
                 middleware_references: Vec::new(),
-                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Config,
                 rule: Some("drupal-routing-yaml".to_owned()),
                 detail: Map::new(),
@@ -231,7 +230,6 @@ fn detect_laravel(
                 anchor: call_anchor.clone(),
                 handler_reference: handler.clone(),
                 middleware_references: Vec::new(),
-                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("laravel-route-facade".to_owned()),
                 detail: Map::new(),
@@ -419,7 +417,6 @@ fn resource_routes(
             anchor: call_anchor.clone(),
             handler_reference: format!("{controller}.{action}"),
             middleware_references: Vec::new(),
-            stages: Vec::new(),
             origin: RawFrameworkOrigin::Ast,
             rule: Some("laravel-resource-expansion".to_owned()),
             detail: Map::from_iter([(
@@ -557,7 +554,6 @@ fn detect_drupal_hooks(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFr
                 anchor: framework_anchor(&declaration.range),
                 handler_reference: declaration.qualified_name.replace('\\', "."),
                 middleware_references: Vec::new(),
-                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("drupal-hook-implementation".to_owned()),
                 detail: Map::from_iter([

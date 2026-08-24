@@ -71,7 +71,6 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::DependsOn,
     EdgeKind::Documents,
     EdgeKind::MapsTo,
-    EdgeKind::Renders,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -272,7 +271,6 @@ const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::Schedules,
     EdgeKind::Triggers,
     EdgeKind::MapsTo,
-    EdgeKind::Renders,
 ];
 
 pub struct CodeQueryEngine {

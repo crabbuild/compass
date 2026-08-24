@@ -10,29 +10,19 @@ compass context modify 'node:stable-id' --format json
 compass context test 'PaymentGateway.charge' --max-depth 4
 ```
 
-The result schema is `compass.task-context/2`. Evidence is ordered by product
+The result schema is `compass.task-context/1`. Evidence is ordered by product
 priority: declaration and verified source, exact callers and callees,
 implementation/type evidence when available, related tests, transitive impact
-for modify/debug/test intents, then typed framework context and reflection
-memory linked to the exact node identity. Every embedded structural record
-retains query provenance.
-
-`framework` is a bounded, versioned section. It reports registered pack IDs and
-semantics versions, qualification state (`qualified`, `qualifying`,
-`incomplete`, `unsupported`, or `ambiguous`), route stages, `renders` and
-`renderedBy` direction, runtime boundaries, configuration dependencies,
-provenance, and explicit ambiguity/incomplete records. Unknown pack IDs or
-qualification states are rejected by strict readers; an agent must not treat
-unsupported or truncated evidence as proof that a relation is absent.
+for modify/debug/test intents, then reflection memory linked to the exact node
+identity. Every embedded structural record retains query provenance.
 
 Fuzzy search results are candidates only. If zero or multiple exact identities
 match, the result contains `not_found` or `ambiguous`, the candidates, and a
 `target_resolution` omission. Compass does not select the first result.
 
 `work` uses `compass.task-context-profile/1` and reports query, node, edge,
-verified-file, source-byte, framework-record, framework-byte, memory-read, and
-response-byte counts. Query, source, framework, knowledge, and aggregate
-response bounds are explicit. Lower-priority
+verified-file, source-byte, memory-read, and response-byte counts. Query,
+source, knowledge, and aggregate response bounds are explicit. Lower-priority
 sections are omitted deterministically when the aggregate response bound is
 reached. The `resultDigest` excludes only its own value and the observational
 response-byte count, so equivalent semantic evidence has a stable identity.

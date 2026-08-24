@@ -10,10 +10,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-# The graph wire contract remains compass.graph/1.  This expectation schema is
-# independently versioned so adding frontend vocabulary cannot make an older
-# oracle silently accept a newer manifest.
-SCHEMA = "compass.code-graph-qualification/2"
+SCHEMA = "compass.code-graph-qualification/1"
 GRAPH_SCHEMA = "compass.graph/1"
 NODE_KINDS = (
     "file", "module", "package", "namespace", "class", "struct", "interface",
@@ -32,14 +29,12 @@ EDGE_KINDS = (
     "decorates", "routes_to", "reads", "writes", "aliases", "registers",
     "handles", "publishes", "subscribes", "produces", "consumes", "schedules",
     "triggers", "tests", "depends_on", "documents", "maps_to",
-    "renders",
 )
 DETAIL_TYPES = {
     "file": {"file"},
     "symbol": set(NODE_KINDS[1:25]) | {"migration"},
     "import_export": {"import", "export"},
     "route": {"route"},
-    "render": {"function", "method", "class", "component", "variable", "property"},
     "component": {"component"},
     "resource": {"resource"},
     "messaging": {"event", "message", "topic", "queue"},
@@ -53,11 +48,7 @@ TRUSTED_ORIGINS = {"ast", "config", "convention", "artifact"}
 ALL_ORIGINS = TRUSTED_ORIGINS | {"heuristic"}
 CONFIDENCES = {"exact", "inferred", "ambiguous"}
 RESOLUTIONS = {"exact", "ambiguous", "unresolved"}
-STAGES = {
-    "handler", "middleware", "layout", "template", "loading", "default",
-    "error_boundary", "not_found", "boundary", "loader", "action",
-    "data_loader", "route_component",
-}
+STAGES = {"handler", "middleware"}
 ENTERPRISE_KINDS = {
     "event", "message", "topic", "queue", "job", "resource", "schema", "query",
     "migration", "config_key", "database", "database_schema", "database_table",
@@ -351,14 +342,6 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
         return (
             (s == "schema" and t == "config_key")
             or (s == "config_key" and t == "config_key")
-            # Framework route hierarchy is an explicit parent-route to
-            # child-route containment relation. Keep this allowance narrow;
-            # do not turn every route into a generic container endpoint.
-            or (s == "route" and t == "route")
-            # Object-valued JavaScript/TypeScript bindings expose their
-            # literal members as properties. This is a declaration-level
-            # containment edge, not an inferred type relationship.
-            or (s == "variable" and t == "property")
             or (s == "file" and t in CONTAINS_FILE_TARGETS)
             or (s in {"module", "package", "namespace"} and t in CONTAINS_SCOPE_TARGETS)
             or (s in TYPE_KINDS | {"component", "schema"} and t in CONTAINS_TYPE_TARGETS)
@@ -432,12 +415,6 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
         return s in {"annotation", "macro"} and t in CALLABLE | TYPE_KINDS | VALUE_KINDS | {"component", "route", "resource"}
     if kind == "routes_to":
         return s == "route" and t in {"file", "function", "method", "class", "component"}
-    if kind == "renders":
-        # Top-level JSX/createElement has no callable owner; production uses
-        # the smallest source module/file as the conservative renderer.
-        return s in EXECUTABLE | {"file", "module", "variable"} and t in {
-            "function", "method", "class", "component", "variable", "property",
-        }
     if kind == "maps_to":
         return s in {"class", "struct", "schema", "database_table", "database_view"} and t in {"database_table", "database_view"}
     if kind == "reads":

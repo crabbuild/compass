@@ -867,21 +867,6 @@ fn restore_framework_callable_names(
             compass_languages::RawFrameworkFact::Annotation(annotation) => {
                 framework_sources.insert(annotation.anchor.source_file.clone());
             }
-            compass_languages::RawFrameworkFact::Role(role) => {
-                framework_sources.insert(role.anchor.source_file.clone());
-            }
-            compass_languages::RawFrameworkFact::Relation(relation) => {
-                framework_sources.insert(relation.anchor.source_file.clone());
-                if let Some(target_anchor) = relation.target_anchor.as_ref() {
-                    framework_sources.insert(target_anchor.source_file.clone());
-                }
-            }
-            compass_languages::RawFrameworkFact::Configuration(configuration) => {
-                framework_sources.insert(configuration.anchor.source_file.clone());
-            }
-            compass_languages::RawFrameworkFact::FileSet(file_set) => {
-                framework_sources.insert(file_set.anchor.source_file.clone());
-            }
         }
     }
     let nodes_by_id = extraction
@@ -1152,11 +1137,6 @@ fn finish_resolution(
         );
         append_universal_resolution_report(&mut merged, &report);
     }
-    // React render relations are a semantic projection over the exact JSX
-    // references emitted by the universal TypeScript/JavaScript evidence
-    // pipeline. Keep the language `references` edge and publish one typed
-    // `renders` occurrence only after universal target selection is complete.
-    frameworks::project_render_relations(&mut merged);
     profile_internal("resolver universal evidence", &mut profile_started);
     restore_framework_callable_names(&mut merged, sources, &canonical_root);
     canonicalize_file_targets(&mut merged, root);
@@ -1245,9 +1225,7 @@ fn finish_resolution(
     }
     profile_internal("resolver framework routes", &mut profile_started);
     match domains {
-        Ok(domains) => {
-            frameworks::publish_resolved_domains_with_root(&mut merged, &domains, &canonical_root)
-        }
+        Ok(domains) => frameworks::publish_resolved_domains(&mut merged, &domains),
         Err(error) => {
             merged
                 .error
@@ -1255,16 +1233,6 @@ fn finish_resolution(
         }
     }
     profile_internal("resolver framework domains", &mut profile_started);
-    if let Err(error) = frameworks::resolve_and_publish_relations(
-        &mut merged,
-        compass_languages::FrameworkLimits::default(),
-        Some(&canonical_root),
-    ) {
-        merged
-            .error
-            .get_or_insert_with(|| format!("framework relation resolution failed: {error}"));
-    }
-    profile_internal("resolver framework relations", &mut profile_started);
     merged
 }
 
@@ -2463,12 +2431,8 @@ fn read_typescript_config_source(
         .filter(|(candidate, _)| source_key(candidate, root) == source)
         .collect::<Vec<_>>();
     in_memory.sort_by_key(|(candidate, _)| *candidate);
-    let non_empty = in_memory
-        .iter()
-        .filter(|(_, contents)| !contents.is_empty())
-        .collect::<Vec<_>>();
-    if let Some((_, contents)) = non_empty.first() {
-        if non_empty
+    if let Some((_, contents)) = in_memory.first() {
+        if in_memory
             .iter()
             .skip(1)
             .any(|(_, candidate)| *candidate != *contents)
@@ -2476,6 +2440,9 @@ fn read_typescript_config_source(
             return Err(format!(
                 "multiple in-memory contents disagree for TypeScript config {source:?}"
             ));
+        }
+        if contents.is_empty() {
+            return Ok(None);
         }
         if contents.len() as u64 <= MAX_TYPESCRIPT_CONFIG_BYTES {
             return Ok(Some((*contents).clone()));
@@ -3130,17 +3097,7 @@ fn typescript_config_owns_source(
                 .any(|pattern| typescript_pattern_matches(pattern, &source_path, true))
         },
     );
-    // Framework toolchains commonly enable `allowJs` while keeping a narrow
-    // TypeScript `include` (for example, `src/**/*.source.js`).  JavaScript
-    // files outside that compiler program still participate in the bundler's
-    // module graph and must use the same `baseUrl`/`paths` mapping.  Permit
-    // those importers only when they are contained by this config, explicitly
-    // allow JavaScript, and are not excluded; target ownership remains strict.
-    let js_project_importer = config.allow_js
-        && matches!(extension.as_str(), "js" | "jsx" | "mjs" | "cjs")
-        && source_path.starts_with(&config.directory)
-        && config.files.is_none();
-    if !explicitly_included && !js_project_importer {
+    if !explicitly_included {
         return false;
     }
 
@@ -4914,31 +4871,6 @@ fn disambiguate_colliding_node_ids_with_calls(
             raw.caller_nid.clone_from(new_id);
         }
     }
-    // Universal framework role facts carry the graph identity they annotate.
-    // Keep that reference aligned with source-scoped collision disambiguation
-    // so later role publication cannot become spuriously unresolved.
-    for fact in &mut extraction.framework_facts {
-        let compass_languages::RawFrameworkFact::Domain(domain) = fact else {
-            continue;
-        };
-        if domain.kind != "ui_role" {
-            continue;
-        }
-        let Some(reference) = domain
-            .detail
-            .get("source_reference")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-        else {
-            continue;
-        };
-        let key = source_key(&domain.anchor.source_file, root);
-        if let Some(new_id) = remap.get(&(reference, key)) {
-            domain
-                .detail
-                .insert("source_reference".to_owned(), Value::String(new_id.clone()));
-        }
-    }
 }
 
 fn node_source_key(node: &NodeRecord, root: &Path) -> String {
@@ -5828,7 +5760,6 @@ mod tests {
                     },
                     handler_reference: "HandlerAlias".to_owned(),
                     middleware_references: Vec::new(),
-                    stages: Vec::new(),
                     origin: compass_languages::RawFrameworkOrigin::Ast,
                     rule: None,
                     detail: Map::new(),
@@ -6124,28 +6055,6 @@ mod tests {
             nodes: vec![first, second],
             edges: vec![import],
             raw_calls: Some(vec![raw("duplicate", "work", "src/thing.cpp")]),
-            framework_facts: vec![compass_languages::RawFrameworkFact::Domain(
-                compass_languages::RawDomainFact {
-                    framework: "react".to_owned(),
-                    kind: "ui_role".to_owned(),
-                    name: "Thing".to_owned(),
-                    declaring_scope: String::new(),
-                    anchor: compass_languages::RawFrameworkAnchor {
-                        source_file: "src/thing.cpp".to_owned(),
-                        start_byte: 0,
-                        end_byte: 1,
-                        start_line: 1,
-                        start_column: 0,
-                        end_line: 1,
-                        end_column: 1,
-                    },
-                    origin: compass_languages::RawFrameworkOrigin::Ast,
-                    detail: Map::from_iter([(
-                        "source_reference".to_owned(),
-                        Value::String("duplicate".to_owned()),
-                    )]),
-                },
-            )],
             extensions: Map::from_iter([("fixture".to_owned(), json!(true))]),
             ..Extraction::default()
         };
@@ -6161,17 +6070,6 @@ mod tests {
             Some(&extraction.nodes[1].id)
         );
         assert!(!extraction.edges[0].attributes.contains_key("target_file"));
-        let role_reference = extraction
-            .framework_facts
-            .first()
-            .and_then(|fact| match fact {
-                compass_languages::RawFrameworkFact::Domain(domain) => domain
-                    .detail
-                    .get("source_reference")
-                    .and_then(Value::as_str),
-                _ => None,
-            });
-        assert_eq!(role_reference, Some(extraction.nodes[1].id.as_str()));
     }
 
     #[test]

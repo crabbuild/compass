@@ -1,5 +1,0 @@
-<Project>
-  <ItemGroup>
-    <ProjectReference Include="absent/Dependency.csproj" />
-  </ItemGroup>
-</Project>

@@ -114,7 +114,6 @@ fn collect_django_routes(
                     anchor: anchor(path, node),
                     handler_reference,
                     middleware_references: Vec::new(),
-                    stages: Vec::new(),
                     origin: RawFrameworkOrigin::Config,
                     rule: None,
                     detail,
@@ -198,7 +197,6 @@ fn collect_decorated_routes(
                         anchor: anchor(path, decorator),
                         handler_reference: name.clone(),
                         middleware_references: middleware_references.clone(),
-                        stages: Vec::new(),
                         origin: RawFrameworkOrigin::Ast,
                         rule: (!mount_prefix.is_empty())
                             .then(|| "python-mounted-router".to_owned()),

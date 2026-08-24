@@ -1392,16 +1392,6 @@ fn normalization_rejects_unknown_aliases_and_missing_wiring_sites() {
     missing_site.edges[0].attributes.remove("source_anchor");
     let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
     assert!(normalize_v1(missing_site, evidence).is_err());
-
-    let mut unknown_render = extraction(root);
-    unknown_render.edges[0]
-        .attributes
-        .insert("relation".to_owned(), json!("renders"));
-    unknown_render.edges[0]
-        .attributes
-        .insert("render_kind".to_owned(), json!("future_kind"));
-    let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
-    assert!(normalize_v1(unknown_render, evidence).is_err());
 }
 
 #[test]

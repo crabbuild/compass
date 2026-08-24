@@ -92,7 +92,6 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
-| [React frontend graph](reference/react-framework-graph.md) | React-family roles, render evidence, activation, and qualification boundaries |
 | [PR Intelligence](reference/pr-intelligence.md) | Canonical report, fingerprints, completeness, risk rubric, and gates |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |

@@ -52,7 +52,6 @@ impl ArtifactLens {
                 "depends_on",
                 "uses",
                 "references",
-                "renders",
             ],
             Self::Routes => &["routes_to", "handles", "registers", "decorates"],
             Self::Data => &["reads", "writes", "maps_to"],
@@ -457,16 +456,6 @@ mod tests {
         assert_eq!(projection.model.stats.edges, 1);
         assert_eq!(projection.model.edges[0].relation, "writes");
         Ok(())
-    }
-
-    #[test]
-    fn dependency_lens_includes_frontend_renderers() {
-        assert!(
-            ArtifactLens::Dependencies
-                .relations()
-                .iter()
-                .any(|relation| relation == "renders")
-        );
     }
 
     #[test]

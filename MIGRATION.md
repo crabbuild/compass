@@ -5,27 +5,6 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
-## Frontend graph vocabulary
-
-Recent pre-release builds can add React-oriented `renders` edges and UI/server
-roles to `compass.graph/1`. Consumers with strict enum validation must upgrade
-their graph reader before opening a graph produced by a frontend-enabled
-build; the old reader must reject the new values rather than treating them as
-unknown calls or silently omitting them. Rebuild cached graph and query
-artifacts after upgrading so the frontend extraction semantics and framework
-pack digest are applied consistently. The matching `compass.query/1` manifest
-and fingerprint must be deployed with the reader as well.
-
-## Framework task context
-
-Frontend-enabled builds emit `compass.task-context/2` (the previous
-`compass.task-context/1` packet is intentionally rejected). Upgrade CLI, MCP,
-and agent readers together, then rebuild cached context artifacts. The new
-typed `framework` section carries pack/version and qualification state, route
-stages, render direction, runtime boundaries, configuration dependencies, and
-explicit ambiguity or truncation; unknown pack IDs and qualification states
-must fail closed.
-
 ## Ruby universal evidence rebuild
 
 The current release publishes Ruby through the version-1 universal evidence

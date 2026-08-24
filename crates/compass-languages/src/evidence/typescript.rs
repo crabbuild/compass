@@ -12291,40 +12291,14 @@ fn collect_import_bindings<'tree>(
         collect_nodes_of_kind(clause, "export_specifier", &mut specifiers);
         for specifier in specifiers {
             let identifiers = direct_identifier_children(specifier, source);
-            if let Some(imported) = identifiers.first().copied() {
-                let local = identifiers.get(1).copied().unwrap_or(imported);
-                output.push(ImportBinding {
-                    local_name: node_text(source, local),
-                    imported_name: node_text(source, imported),
-                    anchor: local,
-                    type_only: statement_type_only
-                        || node_text(source, specifier)
-                            .trim_start()
-                            .starts_with("type "),
-                });
-                continue;
-            }
-            // Tree-sitter represents keyword-only specifiers such as
-            // `export { default } from "./component"` without named child
-            // identifier nodes. Recover the bounded spelling from the
-            // specifier text instead of silently dropping the re-export.
-            let specifier_text = node_text(source, specifier);
-            let spelling = specifier_text
-                .trim()
-                .strip_prefix("type ")
-                .unwrap_or_else(|| specifier_text.trim());
-            let mut names = spelling.splitn(2, " as ").map(str::trim);
-            let Some(imported) = names.next().filter(|name| !name.is_empty()) else {
+            let Some(imported) = identifiers.first().copied() else {
                 continue;
             };
-            let local = names
-                .next()
-                .filter(|name| !name.is_empty())
-                .unwrap_or(imported);
+            let local = identifiers.get(1).copied().unwrap_or(imported);
             output.push(ImportBinding {
-                local_name: local.to_owned(),
-                imported_name: imported.to_owned(),
-                anchor: specifier,
+                local_name: node_text(source, local),
+                imported_name: node_text(source, imported),
+                anchor: local,
                 type_only: statement_type_only
                     || node_text(source, specifier)
                         .trim_start()

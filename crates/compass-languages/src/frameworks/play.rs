@@ -61,7 +61,6 @@ pub(super) fn detect(path: &Path, source: &[u8]) -> Vec<RawFrameworkFact> {
             anchor: line_anchor_at(path, source, offset, line, line_index.saturating_add(1)),
             handler_reference: handler,
             middleware_references: Vec::new(),
-            stages: Vec::new(),
             origin: RawFrameworkOrigin::Config,
             rule: Some("play-conf-routes".to_owned()),
             detail: Map::new(),

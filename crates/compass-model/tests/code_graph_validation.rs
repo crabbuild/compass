@@ -122,17 +122,6 @@ fn whole_document_validation_accepts_the_supported_route_shape() {
 }
 
 #[test]
-fn route_validation_accepts_role_promoted_javascript_alias_targets() {
-    let mut graph = document();
-    graph.nodes[1].kind = NodeKind::Variable;
-    graph.nodes[1].roles = vec![NodeRole::RouteHandler];
-    assert!(validate_code_graph(&graph).is_ok());
-
-    graph.nodes[1].roles.clear();
-    assert!(validate_code_graph(&graph).is_err());
-}
-
-#[test]
 fn structured_validation_classifies_document_node_and_edge_failures() -> Result<(), Box<dyn Error>>
 {
     let mut graph = document();
@@ -557,8 +546,6 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
             NodeKind::Function,
             NodeKind::DatabaseTable,
         ),
-        (EdgeKind::Renders, NodeKind::Route, NodeKind::Function),
-        (EdgeKind::Renders, NodeKind::Function, NodeKind::Route),
     ] {
         let mut graph = document();
         graph.nodes[0].kind = source_kind;

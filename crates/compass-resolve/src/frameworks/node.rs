@@ -41,11 +41,7 @@ pub(super) fn expand_routes(
             }
             RawFrameworkFact::Route(_)
             | RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            | RawFrameworkFact::Annotation(_) => None,
         })
         .collect::<Vec<_>>();
     if mounts.is_empty() {

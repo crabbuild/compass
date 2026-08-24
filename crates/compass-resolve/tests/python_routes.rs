@@ -467,12 +467,7 @@ fn routes(extraction: &Extraction) -> Vec<&compass_languages::RawRouteFact> {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_)
-            | RawFrameworkFact::Role(_)
-            | RawFrameworkFact::Relation(_)
-            | RawFrameworkFact::Configuration(_)
-            | RawFrameworkFact::FileSet(_) => None,
+            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
         })
         .collect()
 }

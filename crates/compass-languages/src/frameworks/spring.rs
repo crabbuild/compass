@@ -155,12 +155,6 @@ fn set_fact_pack(fact: &mut RawFrameworkFact, pack_id: &str) {
                 Value::String(pack_id.to_owned()),
             );
         }
-        RawFrameworkFact::Role(role) => role.pack_id = pack_id.to_owned(),
-        RawFrameworkFact::Relation(relation) => relation.pack_id = pack_id.to_owned(),
-        RawFrameworkFact::Configuration(configuration) => {
-            configuration.pack_id = pack_id.to_owned()
-        }
-        RawFrameworkFact::FileSet(file_set) => file_set.pack_id = pack_id.to_owned(),
     }
 }
 
@@ -775,30 +769,6 @@ fn annotation_fact_key(fact: &RawFrameworkFact) -> (&str, u64, &str, &str) {
             fact.anchor.start_byte,
             fact.declaring_scope.as_str(),
             fact.kind.as_str(),
-        ),
-        RawFrameworkFact::Role(fact) => (
-            fact.anchor.source_file.as_str(),
-            fact.anchor.start_byte,
-            fact.subject_reference.as_deref().unwrap_or_default(),
-            fact.role.as_str(),
-        ),
-        RawFrameworkFact::Relation(fact) => (
-            fact.anchor.source_file.as_str(),
-            fact.anchor.start_byte,
-            fact.source_reference.as_deref().unwrap_or_default(),
-            fact.relation.as_str(),
-        ),
-        RawFrameworkFact::Configuration(fact) => (
-            fact.anchor.source_file.as_str(),
-            fact.anchor.start_byte,
-            fact.config_id.as_str(),
-            fact.field.as_str(),
-        ),
-        RawFrameworkFact::FileSet(fact) => (
-            fact.anchor.source_file.as_str(),
-            fact.anchor.start_byte,
-            fact.owner_reference.as_str(),
-            fact.framework.as_str(),
         ),
     }
 }

@@ -44,7 +44,6 @@ pub enum FrameworkCapability {
     Persistence,
     Transactions,
     Security,
-    Ui,
 }
 
 /// Closed framework relationship vocabulary advertised by a universal pack.
@@ -66,7 +65,6 @@ pub enum FrameworkRelation {
     Triggers,
     DependsOn,
     MapsTo,
-    Renders,
 }
 
 impl FrameworkRelation {
@@ -85,7 +83,6 @@ impl FrameworkRelation {
             Self::Triggers => "triggers",
             Self::DependsOn => "depends_on",
             Self::MapsTo => "maps_to",
-            Self::Renders => "renders",
         }
     }
 
@@ -103,7 +100,6 @@ impl FrameworkRelation {
             Self::Schedules | Self::Triggers => Some(FrameworkCapability::Scheduling),
             Self::MapsTo => Some(FrameworkCapability::Persistence),
             Self::Decorates => None,
-            Self::Renders => Some(FrameworkCapability::Ui),
         };
         required.map_or_else(
             || {
@@ -119,12 +115,6 @@ impl FrameworkRelation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FrameworkPackDescriptor {
     pub id: &'static str,
-    /// Manually reviewed semantic version for this pack's evidence contract.
-    ///
-    /// The registry digest includes this value so detector changes cannot
-    /// silently reuse a cache entry. It is intentionally not derived from a
-    /// function pointer, which would be unstable across builds.
-    pub semantics_version: u32,
     pub kind: FrameworkPackKind,
     pub languages: &'static [&'static str],
     pub required_capabilities: &'static [LanguageCapability],
@@ -142,8 +132,6 @@ pub struct FrameworkPackDescriptor {
 pub enum FrameworkPackRegistryError {
     #[error("framework pack ID must not be empty")]
     EmptyId,
-    #[error("framework pack {0:?} must declare a non-zero semantics version")]
-    InvalidSemanticsVersion(&'static str),
     #[error("duplicate framework pack ID {0:?}")]
     DuplicateId(&'static str),
     #[error("framework pack {0:?} must declare at least one language")]
@@ -241,11 +229,6 @@ fn validate_descriptor(
 ) -> Result<(), FrameworkPackRegistryError> {
     if descriptor.id.trim().is_empty() {
         return Err(FrameworkPackRegistryError::EmptyId);
-    }
-    if descriptor.semantics_version == 0 {
-        return Err(FrameworkPackRegistryError::InvalidSemanticsVersion(
-            descriptor.id,
-        ));
     }
     if descriptor.languages.is_empty() {
         return Err(FrameworkPackRegistryError::EmptyLanguages(descriptor.id));
@@ -364,33 +347,6 @@ fn validate_descriptor(
             descriptor.limits.max_alias_expansions,
         ),
         ("max_facts_per_file", descriptor.limits.max_facts_per_file),
-        ("max_source_bytes", descriptor.limits.max_source_bytes),
-        ("max_config_bytes", descriptor.limits.max_config_bytes),
-        ("max_syntax_nodes", descriptor.limits.max_syntax_nodes),
-        ("max_syntax_depth", descriptor.limits.max_syntax_depth),
-        (
-            "max_retained_literal_bytes",
-            descriptor.limits.max_retained_literal_bytes,
-        ),
-        ("max_role_facts", descriptor.limits.max_role_facts),
-        ("max_relation_facts", descriptor.limits.max_relation_facts),
-        ("max_diagnostics", descriptor.limits.max_diagnostics),
-        ("max_route_nodes", descriptor.limits.max_route_nodes),
-        ("max_route_stages", descriptor.limits.max_route_stages),
-        ("max_glob_patterns", descriptor.limits.max_glob_patterns),
-        (
-            "max_glob_matches_per_pattern",
-            descriptor.limits.max_glob_matches_per_pattern,
-        ),
-        ("max_file_set_edges", descriptor.limits.max_file_set_edges),
-        (
-            "max_regex_pattern_length",
-            descriptor.limits.max_regex_pattern_length,
-        ),
-        (
-            "max_regex_complexity",
-            descriptor.limits.max_regex_complexity,
-        ),
     ] {
         if value == 0 {
             return Err(FrameworkPackRegistryError::ZeroLimit {
@@ -413,7 +369,6 @@ fn validate_strings(values: &[&str]) -> Result<(), ()> {
 
 pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "spring-java",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["java"],
     required_capabilities: &[
@@ -477,13 +432,11 @@ pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPack
         max_include_depth: 32,
         max_alias_expansions: 1_000,
         max_facts_per_file: 100_000,
-        ..FrameworkLimits::DEFAULT
     },
 };
 
 pub(super) const SPRING_KOTLIN_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "spring-kotlin",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["kotlin"],
     required_capabilities: &[
@@ -548,13 +501,11 @@ pub(super) const SPRING_KOTLIN_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPa
         max_include_depth: 32,
         max_alias_expansions: 1_000,
         max_facts_per_file: 100_000,
-        ..FrameworkLimits::DEFAULT
     },
 };
 
 pub(super) const RAILS_RUBY_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "rails-ruby",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["ruby"],
     required_capabilities: &[
@@ -578,13 +529,11 @@ pub(super) const RAILS_RUBY_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackD
         max_include_depth: 32,
         max_alias_expansions: 1_000,
         max_facts_per_file: 100_000,
-        ..FrameworkLimits::DEFAULT
     },
 };
 
 pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "aspnet-csharp",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["csharp"],
     required_capabilities: &[
@@ -617,13 +566,11 @@ pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPa
         max_include_depth: 32,
         max_alias_expansions: 1_000,
         max_facts_per_file: 100_000,
-        ..FrameworkLimits::DEFAULT
     },
 };
 
 pub(super) const PHP_FRAMEWORKS_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "php-frameworks",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["php"],
     required_capabilities: &[
@@ -656,7 +603,6 @@ pub(super) const PHP_FRAMEWORKS_DESCRIPTOR: FrameworkPackDescriptor = FrameworkP
 
 pub(super) const VAPOR_SWIFT_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "vapor-swift",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["swift"],
     required_capabilities: &[
@@ -683,7 +629,6 @@ pub(super) const VAPOR_SWIFT_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPack
 pub(super) const DART_FLUTTER_NAVIGATION_DESCRIPTOR: FrameworkPackDescriptor =
     FrameworkPackDescriptor {
         id: "dart-flutter-navigation",
-        semantics_version: 1,
         kind: FrameworkPackKind::Source,
         languages: &["dart"],
         required_capabilities: &[
@@ -707,7 +652,6 @@ pub(super) const DART_FLUTTER_NAVIGATION_DESCRIPTOR: FrameworkPackDescriptor =
 
 pub(super) const DART_BLOC_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "dart-bloc",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["dart"],
     required_capabilities: &[
@@ -731,7 +675,6 @@ pub(super) const DART_BLOC_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDe
 
 pub(super) const DART_RIVERPOD_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "dart-riverpod",
-    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["dart"],
     required_capabilities: &[LanguageCapability::Calls, LanguageCapability::Members],
@@ -745,33 +688,6 @@ pub(super) const DART_RIVERPOD_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPa
     limits: FrameworkLimits::DEFAULT,
 };
 
-pub(super) const REACT_UI_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
-    id: "react-ui",
-    semantics_version: 1,
-    kind: FrameworkPackKind::Source,
-    languages: &["javascript", "typescript"],
-    required_capabilities: &[
-        LanguageCapability::Declarations,
-        LanguageCapability::Calls,
-        LanguageCapability::Ownership,
-    ],
-    framework_capabilities: &[FrameworkCapability::Ui],
-    dependency_markers: &[
-        "@vitejs/plugin-react",
-        "@vitejs/plugin-react-swc",
-        "react",
-        "react-dom",
-        "react-router",
-        "react-router-dom",
-    ],
-    manifest_policy: FrameworkManifestPolicy::Advisory,
-    activation_rules: &["jsx-component", "react-hook", "react-runtime-import"],
-    accepted_roles: &[SemanticRole::CallableReference],
-    emitted_relation_families: &[FrameworkRelation::Renders],
-    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
-    limits: FrameworkLimits::DEFAULT,
-};
-
 const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     ASPNET_CSHARP_DESCRIPTOR,
     PHP_FRAMEWORKS_DESCRIPTOR,
@@ -782,5 +698,4 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     DART_BLOC_DESCRIPTOR,
     DART_FLUTTER_NAVIGATION_DESCRIPTOR,
     DART_RIVERPOD_DESCRIPTOR,
-    REACT_UI_DESCRIPTOR,
 ];
