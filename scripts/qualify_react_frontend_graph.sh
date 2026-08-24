@@ -53,7 +53,7 @@ fi
 
 cd "$ROOT"
 echo "[react-frontend] build release production binary ($MODE mode)"
-PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 CARGO_NET_OFFLINE=true CARGO_TARGET_DIR="$TARGET" \
+PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 CARGO_TARGET_DIR="$TARGET" \
   cargo build --release --locked -p compass-cli --bin compass
 BIN="$TARGET/release/compass"
 [[ -x "$BIN" ]] || { echo "missing production binary: $BIN" >&2; exit 1; }
@@ -112,7 +112,7 @@ run_update() {
   # TSLP_OFFLINE applies to parser-source acquisition only. The production
   # binary is statically linked; this proves runtime qualification needs no
   # network or credential boundary.
-  TSLP_OFFLINE=1 CARGO_NET_OFFLINE=true "$BIN" update "$project" --out "$output" --no-cluster --no-viz \
+  TSLP_OFFLINE=1 "$BIN" update "$project" --out "$output" --no-cluster --no-viz \
     --no-gitignore --inference-level max "$@" >"$TMP/$(basename "$output").log"
   active_graph "$output"
 }

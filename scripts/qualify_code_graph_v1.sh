@@ -74,7 +74,7 @@ PY
 }
 
 echo "[code-graph-v1] build qualifying production binary once"
-PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 CARGO_NET_OFFLINE=true \
+PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 \
   cargo build --locked -p compass-cli --bin compass
 QUALIFY_TARGET="$(cargo metadata --format-version 1 --no-deps | python3 -c \
   'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
