@@ -17,11 +17,12 @@
   runtime boundaries, configuration dependencies, provenance, and bounded
   qualification states.
 
-- Add the first provisional React frontend graph slice: exact JSX `renders`
-  relationships, component/hook/client/server role evidence, strict viewer and
-  query contracts, and framework-pack cache invalidation. The slice remains
-  `Qualifying` until the independent React/Next/TanStack/React Router/Remix/Vite
-  corpus and precision/recall gates are complete.
+- Complete the React frontend framework graph hardening slice: exact JSX
+  `renders` relationships, component/hook/client/server role evidence, typed
+  Next.js, React Router/Remix, TanStack Router, and Vite semantics, bounded
+  project/configuration precedence and cache invalidation, strict viewer/query
+  contracts, and the seven-family independent precision/recall and release
+  performance gates. TanStack Start remains explicitly pre-stable.
 
 - Replace the predefined flat call-flow architecture model with the native
   `compass.viewer.architecture/1` projection. Production source scope is fixed

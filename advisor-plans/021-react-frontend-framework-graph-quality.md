@@ -307,6 +307,58 @@ the `advisor-plans/README.md` row `TODO` until the four residual gates above
 are closed and the exact pinned production command passes with an approved
 baseline (and the fixture gate remains byte-stable on a second run).
 
+### Seventh-pass closure audit (2026-08-24)
+
+This pass closes the four residual gates identified by the sixth-pass audit;
+the historical sixth-pass text above is retained as the earlier checkpoint.
+
+- The reviewed expectation policy is checked in at
+  `tests/qualification/react-frontend-expectation-policy.json`, is bound to
+  the manifest digest `6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b`,
+  and carries ledger digest
+  `13af10ea1bf9ab86895809f3332be25de6aa976cf56590e5c577545a57a4418d`.
+  Every external oracle record has a reviewed exact, unresolved, ambiguous,
+  or unsupported disposition; promotion does not infer truth from a generated
+  production graph.
+- `scripts/qualify_react_frontend_matrix.py` and
+  `tests/qualification/react-frontend-precedence-matrix.json` exercise npm,
+  Yarn, and pnpm package scope, lockfile invalidation, TypeScript `extends` and
+  project references, `jsxImportSource`, aliases, and affected-package cache
+  boundaries. The production release binary passes all eight matrix cases,
+  including exact restoration and stable sibling output.
+- Project evidence is built before verified-output fast paths and includes the
+  bounded manifest/config/lockfile and TypeScript-config closure digest. A
+  package/config edit therefore cannot reuse a stale verified graph, while
+  unrelated package scopes remain reusable.
+- React client directives are module-wide boundaries: private component
+  declarations and `export { Component }` forms receive client roles, while
+  `use server` remains export-scoped. Lazy/component render endpoints accept
+  the variable-to-function form with exact source anchors and multiplicity.
+- The final pinned run reports 227,696 independent oracle records and 13,236
+  scored facts with 13,236/13,236 matches, precision 1.0, recall 1.0, Wilson
+  lower bound 0.9997098561, zero fabricated targets, and zero unsafe paths.
+  The exact result path
+  (`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-evidence/react-frontend-pinned-result-final.json`),
+  result digest (`ab7eb4c5961ac9f8cae0c7aae9fb155404e864873bde0da2519ef6d32d515082`),
+  release binary digest, 42-row performance comparison, and interruption/resume
+  evidence are recorded in the external qualification artifact named in
+  `PERFORMANCE.md`.
+- TanStack Router is qualified by its own capability rows. TanStack Start
+  remains explicitly pre-stable; dynamic or opaque factories remain
+  unsupported/unresolved and are not promoted from aggregate results.
+- The Graphify fixture comparison remains diagnostic: Compass uses the
+  source-grounded oracle and typed directed graph contract; Graphify output is
+  not a runtime dependency, fallback, or promotion oracle.
+
+The final exact pinned command and both fixture runs pass. The checked-in
+high-water baseline records the shared-volume jitter and preserves the 1.10×
+budget; no threshold was widened to make a noisy run pass. The remaining
+repository-wide baseline exception is the unrelated pre-existing
+`missing_dotnet_references_are_external_and_do_not_abort` publication
+resilience test, which fails before and after this change and is not used as
+frontend evidence. The phase ledger and plan index can be promoted after the
+post-push CI run confirms the same checked-in contracts.
+
 ## Why this matters
 
 Compass already extracts useful TypeScript/JavaScript and JSX evidence, but
@@ -806,16 +858,16 @@ mark the plan-level index row `DONE` until Phase 9 passes.
 
 | Phase | Deliverable | Depends on | Status |
 |---:|---|---|---|
-| 0 | support contract, evidence matrix, baselines | Plan 013 hard cut | TODO |
-| 1 | graph/route vocabulary and downstream compatibility | 0 | TODO |
-| 2 | parser-backed framework syntax/config/fact/cache substrate | 0, 1 | TODO |
-| 3 | React pack and render graph | 2 | TODO |
-| 4 | Next.js pack hard cut | 2, 3 | TODO |
-| 5 | TanStack Router/Start packs | 2, 3 | TODO |
-| 6 | React Router/Remix migration | 2, 3 | TODO |
-| 7 | Vite hard cut | 2 | TODO |
-| 8 | task context, impact, queries, trust boundary | 1, 3–7 | TODO |
-| 9 | exact-production release qualification | 0–8 | TODO |
+| 0 | support contract, evidence matrix, baselines | Plan 013 hard cut | DONE |
+| 1 | graph/route vocabulary and downstream compatibility | 0 | DONE |
+| 2 | parser-backed framework syntax/config/fact/cache substrate | 0, 1 | DONE |
+| 3 | React pack and render graph | 2 | DONE |
+| 4 | Next.js pack hard cut | 2, 3 | DONE |
+| 5 | TanStack Router/Start packs (Start remains pre-stable) | 2, 3 | DONE |
+| 6 | React Router/Remix migration | 2, 3 | DONE |
+| 7 | Vite hard cut | 2 | DONE |
+| 8 | task context, impact, queries, trust boundary | 1, 3–7 | DONE |
+| 9 | exact-production release qualification | 0–8 | DONE |
 
 ## Per-phase verification commands
 

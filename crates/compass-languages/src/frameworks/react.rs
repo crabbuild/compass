@@ -118,11 +118,11 @@ pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFram
         if is_hook {
             roles.insert("hook");
         }
-        // A client directive marks an exported component boundary. Private
-        // helpers remain ordinary UI components until they are exported (or
-        // re-exported through a separately evidenced declaration), avoiding a
-        // false client contract for implementation details.
-        if has_client_directive && is_component && node.is_some_and(is_exported_declaration) {
+        // A Next/React client module marks every component declaration in the
+        // module as client code, including private helpers rendered by an
+        // exported component. This also covers `export { Component }` forms,
+        // where the declaration itself has no export ancestor.
+        if has_client_directive && is_component {
             roles.insert("client_boundary");
             roles.insert("client_component");
         }

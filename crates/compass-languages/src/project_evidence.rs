@@ -27,6 +27,7 @@ const MAX_COMPOSER_DIRECTORY_BYTES: usize = 4_096;
 const MAX_PROJECT_EVIDENCE_DIAGNOSTICS: usize = 4_096;
 const MAX_PROJECT_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_PROJECT_DIRECTORY_ENTRIES: usize = 4_096;
+const MAX_TYPESCRIPT_CONFIG_CLOSURE: usize = 64;
 const FIXED_MANIFEST_NAMES: &[&str] = &[
     "package.json",
     "composer.json",
@@ -72,6 +73,12 @@ const FIXED_CONFIGURATION_NAMES: &[&str] = &[
     "vite.config.ts",
     "webpack.config.js",
     "webpack.config.ts",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "yarn.lock",
+    ".yarnrc.yml",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,6 +98,9 @@ pub struct ProjectEvidence {
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: Vec<ComposerAutoloadRoot>,
+    input_digests: BTreeMap<String, String>,
+    typescript_extends: BTreeSet<String>,
+    typescript_project_references: BTreeSet<String>,
     diagnostics: Vec<ProjectEvidenceDiagnostic>,
     fingerprint: String,
 }
@@ -225,6 +235,27 @@ impl ProjectEvidence {
     #[must_use]
     pub fn composer_autoload_roots(&self) -> &[ComposerAutoloadRoot] {
         &self.composer_autoload_roots
+    }
+
+    /// SHA-256 digests of bounded project inputs that affect framework scope
+    /// or compiler/configuration semantics. Lockfiles are inputs only; they
+    /// never authorize package-manager execution.
+    #[must_use]
+    pub fn input_digests(&self) -> &BTreeMap<String, String> {
+        &self.input_digests
+    }
+
+    /// Relative TypeScript config paths followed through a bounded `extends`
+    /// closure. Non-relative or over-limit forms remain diagnostics.
+    #[must_use]
+    pub fn typescript_extends(&self) -> &BTreeSet<String> {
+        &self.typescript_extends
+    }
+
+    /// Relative TypeScript project-reference paths observed in configuration.
+    #[must_use]
+    pub fn typescript_project_references(&self) -> &BTreeSet<String> {
+        &self.typescript_project_references
     }
 
     #[must_use]
@@ -365,6 +396,14 @@ impl ProjectEvidenceIndex {
             let project_root =
                 project_root_for_file(&repository_root, &manifest_roots, &project_file);
             let builder = builders.entry(project_root.clone()).or_default();
+            if let Some(digest) = project_file_digest(&project_file) {
+                builder
+                    .input_digests
+                    .insert(relative_project_file(&project_root, &project_file), digest);
+            }
+            if is_typescript_configuration(&project_file) {
+                builder.typescript_configs.insert(project_file.clone());
+            }
             if is_recognized_manifest(&project_file) {
                 builder.manifests.insert(file_name(&project_file));
                 if let Some(parsed) = parse_manifest(&project_file) {
@@ -425,6 +464,7 @@ impl ProjectEvidenceIndex {
                         .extend(diagnostics.into_iter().take(diagnostic_capacity));
                 }
                 if let Some(parsed) = parse_configuration(&project_file) {
+                    record_typescript_configuration(builder, &project_root, &parsed);
                     builder.configuration_keys.extend(
                         parsed.configuration_keys.into_iter().take(
                             MAX_PROJECT_CONFIGURATION_KEYS
@@ -463,6 +503,7 @@ impl ProjectEvidenceIndex {
                         .insert(relative_project_file(&project_root, &project_file));
                 }
                 if let Some(parsed) = parse_configuration(&project_file) {
+                    record_typescript_configuration(builder, &project_root, &parsed);
                     builder.configuration_keys.extend(
                         parsed.configuration_keys.into_iter().take(
                             MAX_PROJECT_CONFIGURATION_KEYS
@@ -496,6 +537,8 @@ impl ProjectEvidenceIndex {
                 }
             }
         }
+
+        merge_inherited_project_inputs(&repository_root, &mut builders);
 
         for source in sources {
             let source = absolute_path(&repository_root, source);
@@ -573,6 +616,10 @@ struct ProjectBuilder {
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: BTreeSet<ComposerAutoloadRoot>,
+    input_digests: BTreeMap<String, String>,
+    typescript_configs: BTreeSet<PathBuf>,
+    typescript_extends: BTreeSet<String>,
+    typescript_project_references: BTreeSet<String>,
     diagnostics: BTreeSet<ProjectEvidenceDiagnostic>,
 }
 
@@ -591,6 +638,8 @@ struct ParsedConfiguration {
     aliases: BTreeMap<String, String>,
     vite_aliases: Vec<ParsedViteAliasRule>,
     plugins: BTreeSet<String>,
+    typescript_extends: BTreeSet<String>,
+    typescript_project_references: BTreeSet<String>,
 }
 
 struct ParsedViteAliasRule {
@@ -644,6 +693,9 @@ fn finish_project(
         .composer_autoload_roots
         .into_iter()
         .collect::<Vec<_>>();
+    let input_digests = builder.input_digests;
+    let typescript_extends = builder.typescript_extends;
+    let typescript_project_references = builder.typescript_project_references;
     let diagnostics = builder.diagnostics.into_iter().collect::<Vec<_>>();
     let relative_root = project_root
         .strip_prefix(repository_root)
@@ -733,6 +785,20 @@ fn finish_project(
         digest.update(root.manifest.as_bytes());
         digest.update([0]);
     }
+    for (path, input_digest) in &input_digests {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+        digest.update(input_digest.as_bytes());
+        digest.update([0]);
+    }
+    for path in &typescript_extends {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+    }
+    for path in &typescript_project_references {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+    }
     for diagnostic in &diagnostics {
         digest.update(diagnostic.code.as_bytes());
         digest.update([0]);
@@ -757,9 +823,260 @@ fn finish_project(
         plugins,
         route_roots,
         composer_autoload_roots,
+        input_digests,
+        typescript_extends,
+        typescript_project_references,
         diagnostics,
         fingerprint: format!("sha256:{:x}", digest.finalize()),
     }
+}
+
+fn project_file_digest(path: &Path) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_MANIFEST_BYTES
+    {
+        return None;
+    }
+    let source = fs::read(path).ok()?;
+    let mut digest = Sha256::new();
+    digest.update(source);
+    Some(format!("sha256:{:x}", digest.finalize()))
+}
+
+fn is_typescript_configuration(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            (name.starts_with("tsconfig.") || name.starts_with("jsconfig."))
+                && name.ends_with(".json")
+        })
+}
+
+fn record_typescript_configuration(
+    builder: &mut ProjectBuilder,
+    project_root: &Path,
+    parsed: &ParsedConfiguration,
+) {
+    builder.typescript_extends.extend(
+        parsed
+            .typescript_extends
+            .iter()
+            .map(|value| normalize_project_path(value)),
+    );
+    builder.typescript_project_references.extend(
+        parsed
+            .typescript_project_references
+            .iter()
+            .map(|value| normalize_project_path(value)),
+    );
+    let _ = project_root;
+}
+
+fn merge_inherited_project_inputs(
+    repository_root: &Path,
+    builders: &mut BTreeMap<PathBuf, ProjectBuilder>,
+) {
+    let roots = builders.keys().cloned().collect::<Vec<_>>();
+    let snapshots = roots
+        .iter()
+        .filter_map(|root| {
+            builders.get(root).map(|builder| {
+                (
+                    root.clone(),
+                    builder.input_digests.clone(),
+                    builder.typescript_configs.clone(),
+                    builder.configuration_keys.clone(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for target_root in &roots {
+        for (source_root, inputs, _, source_configuration_keys) in &snapshots {
+            if source_root == target_root || !target_root.starts_with(source_root) {
+                continue;
+            }
+            for (relative, digest) in inputs {
+                let source_path = source_root.join(relative);
+                if !is_inherited_project_input(&source_path) {
+                    continue;
+                }
+                let target_relative = relative_project_file(target_root, &source_path);
+                if let Some(builder) = builders.get_mut(target_root) {
+                    builder
+                        .input_digests
+                        .entry(target_relative)
+                        .or_insert_with(|| digest.clone());
+                }
+            }
+            if source_root != target_root
+                && target_root.starts_with(source_root)
+                && let Some(target_builder) = builders.get_mut(target_root)
+            {
+                for key in ["workspaces", "packageManager"] {
+                    if source_configuration_keys.contains(key) {
+                        target_builder.configuration_keys.insert(key.to_owned());
+                    }
+                }
+            }
+        }
+
+        let configs = builders
+            .get(target_root)
+            .map(|builder| builder.typescript_configs.clone())
+            .unwrap_or_default();
+        let Some(builder) = builders.get_mut(target_root) else {
+            continue;
+        };
+        let mut visited = BTreeSet::new();
+        for config in configs {
+            merge_typescript_config_closure(
+                repository_root,
+                target_root,
+                &config,
+                builder,
+                &mut visited,
+                0,
+            );
+        }
+    }
+}
+
+fn is_inherited_project_input(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    is_typescript_configuration(path)
+        || matches!(
+            name.as_str(),
+            "package.json"
+                | "package-lock.json"
+                | "npm-shrinkwrap.json"
+                | "pnpm-lock.yaml"
+                | "pnpm-workspace.yaml"
+                | "yarn.lock"
+                | ".yarnrc.yml"
+        )
+}
+
+fn merge_typescript_config_closure(
+    repository_root: &Path,
+    project_root: &Path,
+    config: &Path,
+    builder: &mut ProjectBuilder,
+    visited: &mut BTreeSet<PathBuf>,
+    depth: usize,
+) {
+    let config = config.to_path_buf();
+    if !visited.insert(config.clone()) {
+        return;
+    }
+    if depth >= MAX_TYPESCRIPT_CONFIG_CLOSURE {
+        builder.diagnostics.insert(project_diagnostic(
+            "typescript_config_extends_limit",
+            &relative_project_file(repository_root, &config),
+            "TypeScript config extends closure exceeded the bounded limit",
+        ));
+        return;
+    }
+    let Some(parsed) = parse_configuration(&config) else {
+        return;
+    };
+    builder.configuration_keys.extend(
+        parsed
+            .configuration_keys
+            .iter()
+            .take(MAX_PROJECT_CONFIGURATION_KEYS.saturating_sub(builder.configuration_keys.len()))
+            .cloned(),
+    );
+    builder.jsx_import_sources.extend(
+        parsed
+            .jsx_import_sources
+            .iter()
+            .take(MAX_PROJECT_CONFIGURATION_KEYS.saturating_sub(builder.jsx_import_sources.len()))
+            .cloned(),
+    );
+    builder.aliases.extend(
+        parsed
+            .aliases
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .take(MAX_PROJECT_ALIASES.saturating_sub(builder.aliases.len())),
+    );
+    record_typescript_configuration(builder, project_root, &parsed);
+    if let Some(digest) = project_file_digest(&config) {
+        builder
+            .input_digests
+            .insert(relative_project_file(project_root, &config), digest);
+    }
+    for reference in &parsed.typescript_project_references {
+        let Some(reference_path) =
+            resolve_typescript_config_path(repository_root, &config, reference)
+        else {
+            builder.diagnostics.insert(project_diagnostic(
+                "typescript_project_reference_unsupported",
+                &relative_project_file(repository_root, &config),
+                "TypeScript project reference must be a contained relative path",
+            ));
+            continue;
+        };
+        builder
+            .typescript_project_references
+            .insert(relative_project_file(project_root, &reference_path));
+        if let Some(digest) = project_file_digest(&reference_path) {
+            builder
+                .input_digests
+                .insert(relative_project_file(project_root, &reference_path), digest);
+        }
+    }
+    for extended in &parsed.typescript_extends {
+        let Some(extended_path) =
+            resolve_typescript_config_path(repository_root, &config, extended)
+        else {
+            builder.diagnostics.insert(project_diagnostic(
+                "typescript_config_extends_unsupported",
+                &relative_project_file(repository_root, &config),
+                "TypeScript config extends must be a contained relative path",
+            ));
+            continue;
+        };
+        builder
+            .typescript_extends
+            .insert(relative_project_file(project_root, &extended_path));
+        merge_typescript_config_closure(
+            repository_root,
+            project_root,
+            &extended_path,
+            builder,
+            visited,
+            depth.saturating_add(1),
+        );
+    }
+}
+
+fn resolve_typescript_config_path(
+    repository_root: &Path,
+    config: &Path,
+    value: &str,
+) -> Option<PathBuf> {
+    if !value.starts_with('.') {
+        return None;
+    }
+    let mut candidate = config.parent()?.join(value);
+    if candidate.is_dir() {
+        candidate.push("tsconfig.json");
+    } else if candidate.extension().is_none() {
+        candidate.set_extension("json");
+    }
+    if !candidate.starts_with(repository_root) || !regular_project_file(&candidate) {
+        return None;
+    }
+    Some(candidate)
 }
 
 fn parse_composer_autoload_roots(
@@ -1597,6 +1914,7 @@ fn parse_configuration(path: &Path) -> Option<ParsedConfiguration> {
         {
             parse_spring_configuration(&source, &mut parsed)
         }
+        name if is_lockfile_name(name) => {}
         _ => parse_generic_configuration(&source, &mut parsed),
     }
     Some(parsed)
@@ -1613,6 +1931,11 @@ fn parse_package_configuration(source: &str, output: &mut ParsedConfiguration) {
         if let Some(values) = object.get(key).and_then(Value::as_object) {
             output.configuration_keys.insert(key.to_owned());
             collect_json_aliases(values, &mut output.aliases);
+        }
+    }
+    for key in ["workspaces", "packageManager", "exports"] {
+        if object.contains_key(key) {
+            output.configuration_keys.insert(key.to_owned());
         }
     }
     for dependency_key in [
@@ -1636,6 +1959,20 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
     let Some(root) = parse_jsonc(source) else {
         return;
     };
+    if let Some(extended) = root.get("extends").and_then(Value::as_str) {
+        output.configuration_keys.insert("extends".to_owned());
+        if !extended.is_empty() {
+            output.typescript_extends.insert(extended.to_owned());
+        }
+    }
+    if let Some(references) = root.get("references").and_then(Value::as_array) {
+        output.configuration_keys.insert("references".to_owned());
+        for reference in references.iter().take(MAX_TYPESCRIPT_CONFIG_CLOSURE) {
+            if let Some(path) = reference.get("path").and_then(Value::as_str) {
+                output.typescript_project_references.insert(path.to_owned());
+            }
+        }
+    }
     let Some(options) = root.get("compilerOptions").and_then(Value::as_object) else {
         return;
     };
@@ -1643,6 +1980,13 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
         output
             .configuration_keys
             .insert("compilerOptions.baseUrl".to_owned());
+    }
+    for key in ["jsx", "moduleResolution", "allowJs"] {
+        if options.contains_key(key) {
+            output
+                .configuration_keys
+                .insert(format!("compilerOptions.{key}"));
+        }
     }
     if let Some(source) = options.get("jsxImportSource").and_then(Value::as_str) {
         let source = normalize_dependency(source);
@@ -1986,6 +2330,18 @@ fn is_plugin_name(value: &str) -> bool {
         || lower.starts_with("vite-plugin-")
         || lower.starts_with("unplugin-")
         || lower.starts_with("next-plugin-")
+}
+
+fn is_lockfile_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "package-lock.json"
+            | "npm-shrinkwrap.json"
+            | "pnpm-lock.yaml"
+            | "pnpm-workspace.yaml"
+            | "yarn.lock"
+            | ".yarnrc.yml"
+    )
 }
 
 fn normalize_alias(value: &str) -> String {
@@ -2563,6 +2919,154 @@ mod tests {
                 .contains("compilerOptions.jsxImportSource")
         );
         assert!(evidence.jsx_import_sources().contains("preact"));
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_lockfiles_invalidate_only_the_workspace_scope() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let web = root.join("apps/web/src/App.tsx");
+        let admin = root.join("apps/admin/src/App.tsx");
+        fs::create_dir_all(web.parent().ok_or("web source has no parent")?)?;
+        fs::create_dir_all(admin.parent().ok_or("admin source has no parent")?)?;
+        fs::write(&web, "export function App() { return <main />; }\n")?;
+        fs::write(&admin, "export function App() { return <main />; }\n")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"private":true,"workspaces":["apps/*"],"packageManager":"pnpm@10"}"#,
+        )?;
+        fs::write(
+            root.join("apps/web/package.json"),
+            r#"{"dependencies":{"react":"19.0.0"}}"#,
+        )?;
+        fs::write(
+            root.join("apps/admin/package.json"),
+            r#"{"dependencies":{"preact":"10.0.0"}}"#,
+        )?;
+        fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - apps/*\n")?;
+        fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")?;
+
+        let first = ProjectEvidenceIndex::build(root, &[web.clone(), admin.clone()]);
+        let web_evidence = first.evidence_for(&web);
+        let admin_evidence = first.evidence_for(&admin);
+        assert!(web_evidence.has_dependency("react"));
+        assert!(!admin_evidence.has_dependency("react"));
+        assert!(web_evidence.configuration_keys().contains("workspaces"));
+        assert!(
+            web_evidence
+                .input_digests()
+                .keys()
+                .any(|path| path.ends_with("pnpm-lock.yaml"))
+        );
+        assert!(
+            admin_evidence
+                .input_digests()
+                .keys()
+                .any(|path| path.ends_with("pnpm-lock.yaml"))
+        );
+        let old_web = web_evidence.fingerprint().to_owned();
+        let old_admin = admin_evidence.fingerprint().to_owned();
+
+        fs::write(
+            root.join("pnpm-lock.yaml"),
+            "lockfileVersion: '9'\nimporters: {}\n",
+        )?;
+        let second = ProjectEvidenceIndex::build(root, &[web, admin]);
+        assert_ne!(
+            old_web,
+            second.fingerprint_for(root.join("apps/web/src/App.tsx").as_path())
+        );
+        assert_ne!(
+            old_admin,
+            second.fingerprint_for(root.join("apps/admin/src/App.tsx").as_path())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typescript_extends_and_references_are_bounded_project_evidence() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("apps/web/src/App.tsx");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::create_dir_all(root.join("apps/shared"))?;
+        fs::write(&source, "export function App() { return <main />; }\n")?;
+        fs::write(root.join("package.json"), r#"{"private":true}"#)?;
+        fs::write(
+            root.join("apps/web/package.json"),
+            r#"{"dependencies":{"react":"19"}}"#,
+        )?;
+        fs::write(
+            root.join("tsconfig.base.json"),
+            r#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"react","baseUrl":"."}}"#,
+        )?;
+        fs::write(
+            root.join("apps/web/tsconfig.json"),
+            r#"{"extends":"../../tsconfig.base.json","references":[{"path":"../shared"}],"compilerOptions":{"paths":{"@/*":["./src/*"]}}}"#,
+        )?;
+        fs::write(
+            root.join("apps/shared/tsconfig.json"),
+            r#"{"compilerOptions":{"composite":true}}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(evidence.jsx_import_sources().contains("react"));
+        assert!(evidence.configuration_keys().contains("extends"));
+        assert!(evidence.configuration_keys().contains("references"));
+        assert!(
+            evidence
+                .configuration_keys()
+                .contains("compilerOptions.jsx")
+        );
+        assert!(
+            evidence
+                .typescript_extends()
+                .iter()
+                .any(|path| path.ends_with("tsconfig.base.json"))
+        );
+        assert!(
+            evidence
+                .typescript_project_references()
+                .iter()
+                .any(|path| path.ends_with("shared/tsconfig.json"))
+        );
+        assert!(
+            evidence
+                .input_digests()
+                .keys()
+                .any(|path| path.ends_with("tsconfig.base.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_relative_typescript_extends_fails_closed_with_a_diagnostic() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("src/App.tsx");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "export function App() { return <main />; }\n")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"react":"19"}}"#,
+        )?;
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"extends":"@tsconfig/strictest/tsconfig.json"}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(
+            evidence
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "typescript_config_extends_unsupported")
+        );
         Ok(())
     }
 

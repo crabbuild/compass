@@ -157,7 +157,7 @@ fn jsx_in_a_non_react_runtime_does_not_activate_react_semantics() {
 }
 
 #[test]
-fn react_directives_are_scoped_to_exported_declarations() {
+fn react_client_directives_mark_module_components_and_server_directives_stay_export_scoped() {
     let directory = tempdir().expect("temporary project");
     let root = directory.path();
     fs::write(
@@ -194,7 +194,7 @@ function helper() { return false; }
                         == Some("client_component")
         )
     }));
-    assert!(!client.framework_facts.iter().any(|fact| {
+    assert!(client.framework_facts.iter().any(|fact| {
         matches!(
             fact,
             compass_languages::RawFrameworkFact::Domain(domain)

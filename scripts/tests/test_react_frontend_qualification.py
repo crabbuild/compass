@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -131,6 +132,33 @@ class ReactFrontendQualificationTests(unittest.TestCase):
             PINNED.json.loads(PINNED.strip_jsonc(source))["extends"],
             "../tsconfig.base",
         )
+
+    def test_expectation_policy_is_manifest_bound_and_reviewed(self) -> None:
+        manifest_path = PINNED.ROOT / "tests/qualification/react-frontend-repositories.toml"
+        manifest = PINNED.load_manifest(manifest_path)
+        policy_path = PINNED.ROOT / manifest["expectationPolicy"]
+        policy = PINNED.load_expectation_policy(
+            policy_path,
+            manifest,
+            PINNED.digest_file(manifest_path),
+        )
+        self.assertEqual(policy["schema"], PINNED.EXPECTATION_POLICY_SCHEMA)
+        self.assertEqual(
+            {item["id"] for item in policy["repositories"]},
+            {item["id"] for item in manifest["repository"]},
+        )
+
+        tampered = json.loads(policy_path.read_text(encoding="utf-8"))
+        tampered["oracle"]["reviewStatus"] = "generated"
+        with tempfile.NamedTemporaryFile("w", suffix=".json", encoding="utf-8") as stream:
+            json.dump(tampered, stream)
+            stream.flush()
+            with self.assertRaises(PINNED.QualificationError):
+                PINNED.load_expectation_policy(
+                    Path(stream.name),
+                    manifest,
+                    PINNED.digest_file(manifest_path),
+                )
 
 
 if __name__ == "__main__":

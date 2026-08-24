@@ -1,0 +1,258 @@
+{
+  "schema": "compass.react-frontend-expectation-policy/1",
+  "manifestSha256": "6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b",
+  "oracle": {
+    "provider": "typescript_compiler_api_5_9_3",
+    "toolchain": "node-24;typescript-5.9.3",
+    "reviewStatus": "reviewed",
+    "reviewMethod": "independent-source-record-ledger",
+    "reviewedAt": "2026-08-24"
+  },
+  "ledgerDigest": "13af10ea1bf9ab86895809f3332be25de6aa976cf56590e5c577545a57a4418d",
+  "globalDispositions": [
+    {
+      "state": "unsupported",
+      "case": "react.opaque-runtime-factory",
+      "reason": "Arbitrary runtime element factories are not statically attributable; Compass emits no invented render target."
+    },
+    {
+      "state": "unsupported",
+      "case": "react-native-expo-platform-api",
+      "reason": "React Native and Expo semantics are outside the web-framework qualification contract."
+    },
+    {
+      "state": "unsupported",
+      "case": "vite.dynamic-config-or-glob",
+      "reason": "Dynamic config/plugin execution and non-literal glob expansion are fail-closed."
+    },
+    {
+      "state": "ambiguous",
+      "case": "route-parentage-with-multiple-candidates",
+      "reason": "Ambiguous route hierarchy remains unresolved rather than selecting a convenient parent."
+    },
+    {
+      "state": "unresolved",
+      "case": "route-target-without-unique-declaration",
+      "reason": "The independent oracle records unresolved route targets explicitly and excludes them from exact-target claims."
+    }
+  ],
+  "repositories": [
+    {
+      "id": "react-dev-components",
+      "family": "react",
+      "framework": "react",
+      "capabilities": {
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 219,
+          "counts": {"exact": 219, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "e3730e4dab86230ba6c3b83a1ffe6be10c493bc98125ddb79fb53b22364ca712"
+        },
+        "react.component.roles": {
+          "reviewStatus": "reviewed",
+          "recordCount": 150,
+          "counts": {"exact": 150, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "5fe0e6252b50b45bc8f4ec749164830b1b26d1c33f126441320edbe0fc7664a8"
+        },
+        "react.hooks": {
+          "reviewStatus": "reviewed",
+          "recordCount": 8,
+          "counts": {"exact": 8, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "42f95560eaf70625c0e5e2a26cd56494f16e154fb3a2d4433028c365dac678e0"
+        }
+      },
+      "dispositions": [
+        {"state": "ambiguous", "case": "react.duplicate-component-name", "reason": "Same-name declarations are retained as distinct identities and are not collapsed."}
+      ]
+    },
+    {
+      "id": "next-app-bundle-analyzer",
+      "family": "next-app-router",
+      "framework": "next-app",
+      "capabilities": {
+        "next.app.route": {
+          "reviewStatus": "reviewed",
+          "recordCount": 4824,
+          "counts": {"exact": 4819, "unresolved": 5, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "3f7894bd241e768ca2694f36158361fa27ffb066d562fa4a104709257953c6c3"
+        },
+        "next.app.hierarchy": {
+          "reviewStatus": "reviewed",
+          "recordCount": 4348,
+          "counts": {"exact": 4348, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "1f48e39dd22657362d5862905ae8f5f9b341d379f1e6fe749d463fd027da383b"
+        },
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 2035,
+          "counts": {"exact": 2035, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "dfd15d1b2274432f6186d28688ac9250eb8104864e1033e1a36c2fbfa9062b17"
+        },
+        "next.client-server-directive": {
+          "reviewStatus": "reviewed",
+          "recordCount": 61,
+          "counts": {"exact": 61, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "ff6d6a2fcd3ec9359afad62fb987c9d6557a1278fd932b6ee34f52cc73a887e7"
+        }
+      },
+      "dispositions": [
+        {"state": "unresolved", "case": "next.app.route-target", "reason": "Five route records have no unique declaration target in the compiler oracle and remain explicit unresolved observations."},
+        {"state": "ambiguous", "case": "next.app.parallel-route-parent", "reason": "Multiple convention candidates are not selected by proximity or ordering."}
+      ]
+    },
+    {
+      "id": "next-pages-react-dev",
+      "family": "next-pages-router",
+      "framework": "next-pages",
+      "capabilities": {
+        "next.pages.route": {
+          "reviewStatus": "reviewed",
+          "recordCount": 9,
+          "counts": {"exact": 9, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "65a6ff5a0b4d162e279dafebd1f012efb59f12523d0039b351df151944c625c4"
+        },
+        "next.pages.dynamic": {
+          "reviewStatus": "reviewed",
+          "recordCount": 3,
+          "counts": {"exact": 3, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "eb61d906e360429885dd1b284befdae5442459ce2534d4c600c57ebcc3c52943"
+        },
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 335,
+          "counts": {"exact": 335, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "824c4b6c6a0e04b5c5b091580866a7ef3fc617126665a27da25670b77cc49e40"
+        }
+      },
+      "dispositions": [
+        {"state": "unsupported", "case": "next.pages.opaque-dynamic-segment", "reason": "Computed page filenames are not interpreted as dynamic routes without a bounded convention match."}
+      ]
+    },
+    {
+      "id": "react-router-framework-playground",
+      "family": "react-router",
+      "framework": "react-router",
+      "capabilities": {
+        "react-router.route": {
+          "reviewStatus": "reviewed",
+          "recordCount": 77,
+          "counts": {"exact": 49, "unresolved": 28, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "8e9e96312cac55ed7313c401f08a965010277e71dc868c9124e9da52abad0ca3"
+        },
+        "react-router.loader-action": {
+          "reviewStatus": "reviewed",
+          "recordCount": 30,
+          "counts": {"exact": 30, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "fc769e3cac55721eb01fb86e14bd9070b75898bc50957ece2917bf64a93c5cd3"
+        },
+        "react-router.hierarchy": {
+          "reviewStatus": "reviewed",
+          "recordCount": 74,
+          "counts": {"exact": 74, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "102a24cc50ce69d8dc7865c40a598bf55fe6c50a04f69e0a4b7958640cad46dc"
+        },
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 11,
+          "counts": {"exact": 11, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "b22632955061075eaedfedca1358df4f3a216bcf6c6148390e94052827976c44"
+        }
+      },
+      "dispositions": [
+        {"state": "unresolved", "case": "react-router.route-target", "reason": "Twenty-eight route records lack a unique target under the framework's declaration form and remain unresolved."},
+        {"state": "ambiguous", "case": "react-router.route-parent", "reason": "Route parentage with competing candidates is retained as ambiguous."}
+      ]
+    },
+    {
+      "id": "remix-bookstore",
+      "family": "remix",
+      "framework": "remix",
+      "capabilities": {
+        "remix.route.config": {
+          "reviewStatus": "reviewed",
+          "recordCount": 30,
+          "counts": {"exact": 0, "unresolved": 30, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "7ee0206563a2035bbd4b3fbd25226d8e8c3be07e8c204da5774b7fb03be38ef3"
+        },
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 104,
+          "counts": {"exact": 104, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "7e86f6bc331e1115c8830ccafe9a2eb65b157ba628c7655906b84097edf968ac"
+        }
+      },
+      "dispositions": [
+        {"state": "unresolved", "case": "remix.route-config-target", "reason": "The compiler oracle cannot assign a unique declaration target for thirty config route observations; Compass preserves the route observation without inventing a target."}
+      ]
+    },
+    {
+      "id": "tanstack-router-basic-file-based",
+      "family": "tanstack-router",
+      "framework": "tanstack-router",
+      "capabilities": {
+        "tanstack.route": {
+          "reviewStatus": "reviewed",
+          "recordCount": 95,
+          "counts": {"exact": 95, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "2ffbefacfb5ad03eb1800c4ec301f4cc24e0698ed0401fd9e3589056c97dd4f7"
+        },
+        "tanstack.route.hierarchy": {
+          "reviewStatus": "reviewed",
+          "recordCount": 123,
+          "counts": {"exact": 123, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "99d19c0c69d3e6ec673792b6ec076ee08a112627c8d8567b4b7628dbeaa27197"
+        },
+        "tanstack.loader": {
+          "reviewStatus": "reviewed",
+          "recordCount": 1,
+          "counts": {"exact": 1, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "cd08c68aab5fa60f2c77a3088a99f417d9299fa4c1880cd6505d7e90e894736c"
+        },
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 3,
+          "counts": {"exact": 3, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "4ffafca55d32df91cb5603ba6ac5c7c5e7fb5d4f4d98dd19ae1e2ab97290e077"
+        }
+      },
+      "dispositions": [
+        {"state": "unsupported", "case": "tanstack.start-pre-stable", "reason": "TanStack Start is separately labelled pre-stable and is not promoted by this Router corpus."}
+      ]
+    },
+    {
+      "id": "vite-react-template-and-core",
+      "family": "vite",
+      "framework": "vite",
+      "capabilities": {
+        "vite.config.factory": {
+          "reviewStatus": "reviewed",
+          "recordCount": 75,
+          "counts": {"exact": 75, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "d22a8e5eaa918ccae2bee38967cc9953181888c61404ea3c2674a1d2a506b2c7"
+        },
+        "vite.plugin.identity": {
+          "reviewStatus": "reviewed",
+          "recordCount": 22,
+          "counts": {"exact": 22, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "a19850e986d3a63442129143c69e0bdf09a64d8e70dc3daf807828b4b20c4bbf"
+        },
+        "vite.file_set.glob": {
+          "reviewStatus": "reviewed",
+          "recordCount": 13,
+          "counts": {"exact": 13, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "a37d4afcd965ae5ba51089bdd8b50f049e16ebb8cff3f666109a22e65df79c46"
+        },
+        "react.render.jsx": {
+          "reviewStatus": "reviewed",
+          "recordCount": 2,
+          "counts": {"exact": 2, "unresolved": 0, "ambiguous": 0, "unsupported": 0},
+          "recordDigest": "f1de3e3c2ae94c4eea39ca532e4af3e428acdbbf1c6b3541254a7ea699b77ac7"
+        }
+      },
+      "dispositions": [
+        {"state": "unsupported", "case": "vite.dynamic-plugin-factory", "reason": "Plugins whose identity depends on runtime execution are not published as exact plugin facts."},
+        {"state": "ambiguous", "case": "vite.alias-shadowing", "reason": "Shadowed aliases retain source order and are not collapsed into a guessed winner."}
+      ]
+    }
+  ]
+}

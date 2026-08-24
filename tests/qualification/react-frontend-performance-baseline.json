@@ -1,29 +1,85 @@
 {
   "schema": "compass.react-frontend-performance-baseline/1",
-  "manifestSha256": "d8526108aed42c93e9841ce83281bb9c322a54d127929c405c2ea99a1316c891",
+  "manifestSha256": "6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b",
   "recordedFrom": {
-    "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend-audit/qualification/react-frontend-current-3/react-frontend-pinned-result.json",
-    "binarySha256": "cd61fc16abd7d6f8806f096f70cac4a6308bf841ece787e908b9f02636d95b37",
-    "compassRevision": "8a1bb16181bf4cfc3e8678b2648c3a8d6acadaa7",
+    "artifactResults": [
+      {
+        "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/react-frontend-release-plan021-v2/react-frontend-pinned-result.json",
+        "binarySha256": "68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e",
+        "compassRevision": "7887ffe1f5c3f487ca122d61c3f41d700e389cdf",
+        "resultSha256": "59f4798616e49b317c0e66ddb2c26f17ec8b885a7fd79516c438d71e327ac571"
+      },
+      {
+        "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/react-frontend-release-plan021-v3/react-frontend-pinned-result.json",
+        "binarySha256": "68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e",
+        "compassRevision": "7887ffe1f5c3f487ca122d61c3f41d700e389cdf",
+        "resultSha256": "d0696e5dbc6dcfccdd170af9a66a770e71074e83ce21ef3ff47e0fc4af4cf57e"
+      },
+      {
+        "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/react-frontend-release-plan021-v4/react-frontend-pinned-result.json",
+        "binarySha256": "68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e",
+        "compassRevision": "7887ffe1f5c3f487ca122d61c3f41d700e389cdf",
+        "resultSha256": "3cba142f6277e8e0e12354d88cf399f386937d52320ed5292040dc864e729287"
+      },
+      {
+        "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/react-frontend-release-plan021-v5/react-frontend-pinned-result.json",
+        "binarySha256": "68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e",
+        "compassRevision": "7887ffe1f5c3f487ca122d61c3f41d700e389cdf",
+        "resultSha256": "4a07a3561eff2c62bc4b88049bd14dcf54163beef4759cd07e863aba6ae1ce08"
+      },
+      {
+        "artifactResult": "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/react-frontend-release-plan021-v7/react-frontend-pinned-result.json",
+        "binarySha256": "68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e",
+        "compassRevision": "7887ffe1f5c3f487ca122d61c3f41d700e389cdf",
+        "resultSha256": "11c4fdcf089c98286fd1691f26a49b5ba91e9b37e834d487e794483f4344f7d4"
+      }
+    ],
+    "aggregation": "maximum-of-five-identical-release-runs",
+    "binarySha256": "68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e",
+    "compassRevision": "7887ffe1f5c3f487ca122d61c3f41d700e389cdf",
     "machine": {
       "cpuCount": 12,
       "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
       "python": "3.14.6"
     },
     "profile": "release",
-    "resultSha256": "9b351300ad8a2b12b28cab2b5e758412eac91601d7da199331217b2655ecf501"
+    "decision": "post-origin-main-merge-high-water-baseline-for-external-volume-jitter"
   },
   "repositories": [
     {
       "id": "react-dev-components",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 1.9459462920203805, "peakRssBytes": 80822272},
-          {"label": "warm", "seconds": 0.14875883294735104, "peakRssBytes": 15482880},
-          {"label": "semantic-edit", "seconds": 1.6049071659799665, "peakRssBytes": 80920576},
-          {"label": "manifest-edit", "seconds": 1.5938075829762965, "peakRssBytes": 81035264},
-          {"label": "restore", "seconds": 1.584127707988955, "peakRssBytes": 80805888},
-          {"label": "alternate-checkout", "seconds": 1.0988206249894574, "peakRssBytes": 91668480}
+          {
+            "label": "cold",
+            "seconds": 12.198034250061028,
+            "peakRssBytes": 83673088
+          },
+          {
+            "label": "warm",
+            "seconds": 12.590416624909267,
+            "peakRssBytes": 19447808
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 28.585258583072573,
+            "peakRssBytes": 83591168
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 15.478843207936734,
+            "peakRssBytes": 83656704
+          },
+          {
+            "label": "restore",
+            "seconds": 23.65511212509591,
+            "peakRssBytes": 83558400
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 3.488596708048135,
+            "peakRssBytes": 98779136
+          }
         ]
       }
     },
@@ -31,12 +87,36 @@
       "id": "next-app-bundle-analyzer",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 68.91677216696553, "peakRssBytes": 1352990720},
-          {"label": "warm", "seconds": 1.8321617500623688, "peakRssBytes": 35373056},
-          {"label": "semantic-edit", "seconds": 118.70441054203548, "peakRssBytes": 1339244544},
-          {"label": "manifest-edit", "seconds": 71.00777258304879, "peakRssBytes": 1348501504},
-          {"label": "restore", "seconds": 62.68354004097637, "peakRssBytes": 1348894720},
-          {"label": "alternate-checkout", "seconds": 67.6705141250277, "peakRssBytes": 1408778240}
+          {
+            "label": "cold",
+            "seconds": 167.7168503749417,
+            "peakRssBytes": 1355857920
+          },
+          {
+            "label": "warm",
+            "seconds": 14.517977375071496,
+            "peakRssBytes": 37519360
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 133.30486279190518,
+            "peakRssBytes": 1351680000
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 133.84674987499602,
+            "peakRssBytes": 1351598080
+          },
+          {
+            "label": "restore",
+            "seconds": 183.0813037500484,
+            "peakRssBytes": 1350909952
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 70.8444289159961,
+            "peakRssBytes": 1427030016
+          }
         ]
       }
     },
@@ -44,12 +124,36 @@
       "id": "next-pages-react-dev",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 4.098638291005045, "peakRssBytes": 112082944},
-          {"label": "warm", "seconds": 0.30005470907781273, "peakRssBytes": 15826944},
-          {"label": "semantic-edit", "seconds": 3.241362000000663, "peakRssBytes": 112279552},
-          {"label": "manifest-edit", "seconds": 5.123802958056331, "peakRssBytes": 112345088},
-          {"label": "restore", "seconds": 4.0576498749433085, "peakRssBytes": 112164864},
-          {"label": "alternate-checkout", "seconds": 5.867171582998708, "peakRssBytes": 129662976}
+          {
+            "label": "cold",
+            "seconds": 48.96965133305639,
+            "peakRssBytes": 114835456
+          },
+          {
+            "label": "warm",
+            "seconds": 7.531293125008233,
+            "peakRssBytes": 19496960
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 36.337205666000955,
+            "peakRssBytes": 115064832
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 6.68026283395011,
+            "peakRssBytes": 114950144
+          },
+          {
+            "label": "restore",
+            "seconds": 7.4897727080387995,
+            "peakRssBytes": 114786304
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 5.30492429190781,
+            "peakRssBytes": 130531328
+          }
         ]
       }
     },
@@ -57,12 +161,36 @@
       "id": "react-router-framework-playground",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 8.152722875005566, "peakRssBytes": 66600960},
-          {"label": "warm", "seconds": 1.043583667022176, "peakRssBytes": 15859712},
-          {"label": "semantic-edit", "seconds": 3.0938144579995424, "peakRssBytes": 67272704},
-          {"label": "manifest-edit", "seconds": 4.663367334054783, "peakRssBytes": 66764800},
-          {"label": "restore", "seconds": 4.467706833034754, "peakRssBytes": 67125248},
-          {"label": "alternate-checkout", "seconds": 1.4062101249583066, "peakRssBytes": 89145344}
+          {
+            "label": "cold",
+            "seconds": 4.195140165975317,
+            "peakRssBytes": 69517312
+          },
+          {
+            "label": "warm",
+            "seconds": 0.9801132079446688,
+            "peakRssBytes": 20545536
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 5.546465374995023,
+            "peakRssBytes": 69713920
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 3.889554625027813,
+            "peakRssBytes": 69615616
+          },
+          {
+            "label": "restore",
+            "seconds": 3.8491244999459013,
+            "peakRssBytes": 69894144
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 3.320370541070588,
+            "peakRssBytes": 87474176
+          }
         ]
       }
     },
@@ -70,12 +198,36 @@
       "id": "remix-bookstore",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 2.1426274169934914, "peakRssBytes": 88227840},
-          {"label": "warm", "seconds": 0.27815295895561576, "peakRssBytes": 15532032},
-          {"label": "semantic-edit", "seconds": 2.079920749994926, "peakRssBytes": 88014848},
-          {"label": "manifest-edit", "seconds": 3.912888083024882, "peakRssBytes": 88096768},
-          {"label": "restore", "seconds": 4.960886917077005, "peakRssBytes": 87965696},
-          {"label": "alternate-checkout", "seconds": 1.680478416965343, "peakRssBytes": 102367232}
+          {
+            "label": "cold",
+            "seconds": 4.123508875025436,
+            "peakRssBytes": 90701824
+          },
+          {
+            "label": "warm",
+            "seconds": 0.4804252079920843,
+            "peakRssBytes": 18628608
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 2.411243583075702,
+            "peakRssBytes": 90570752
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 3.8819468748988584,
+            "peakRssBytes": 90505216
+          },
+          {
+            "label": "restore",
+            "seconds": 3.501010459032841,
+            "peakRssBytes": 90505216
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 2.5821903749601915,
+            "peakRssBytes": 104382464
+          }
         ]
       }
     },
@@ -83,12 +235,36 @@
       "id": "tanstack-router-basic-file-based",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 1.435848042019643, "peakRssBytes": 51773440},
-          {"label": "warm", "seconds": 0.16565537499263883, "peakRssBytes": 15925248},
-          {"label": "semantic-edit", "seconds": 1.2497274170164019, "peakRssBytes": 51970048},
-          {"label": "manifest-edit", "seconds": 1.36836362502072, "peakRssBytes": 51855360},
-          {"label": "restore", "seconds": 1.3990909580606967, "peakRssBytes": 51904512},
-          {"label": "alternate-checkout", "seconds": 0.9089364160317928, "peakRssBytes": 70369280}
+          {
+            "label": "cold",
+            "seconds": 3.6137019579764456,
+            "peakRssBytes": 54509568
+          },
+          {
+            "label": "warm",
+            "seconds": 0.5676797919441015,
+            "peakRssBytes": 19693568
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 1.8020579579751939,
+            "peakRssBytes": 54476800
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 8.382782500004396,
+            "peakRssBytes": 54591488
+          },
+          {
+            "label": "restore",
+            "seconds": 3.7850571669405326,
+            "peakRssBytes": 54493184
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 2.855114334030077,
+            "peakRssBytes": 73875456
+          }
         ]
       }
     },
@@ -96,12 +272,36 @@
       "id": "vite-react-template-and-core",
       "performance": {
         "rows": [
-          {"label": "cold", "seconds": 21.401736792060547, "peakRssBytes": 533872640},
-          {"label": "warm", "seconds": 0.3732094999868423, "peakRssBytes": 16302080},
-          {"label": "semantic-edit", "seconds": 16.47696400003042, "peakRssBytes": 534265856},
-          {"label": "manifest-edit", "seconds": 22.725246499991044, "peakRssBytes": 531824640},
-          {"label": "restore", "seconds": 18.535480000078678, "peakRssBytes": 528990208},
-          {"label": "alternate-checkout", "seconds": 15.530971375061199, "peakRssBytes": 560480256}
+          {
+            "label": "cold",
+            "seconds": 45.82212679204531,
+            "peakRssBytes": 536608768
+          },
+          {
+            "label": "warm",
+            "seconds": 0.6418495420366526,
+            "peakRssBytes": 22298624
+          },
+          {
+            "label": "semantic-edit",
+            "seconds": 25.823602083022706,
+            "peakRssBytes": 536674304
+          },
+          {
+            "label": "manifest-edit",
+            "seconds": 27.232077582972124,
+            "peakRssBytes": 536805376
+          },
+          {
+            "label": "restore",
+            "seconds": 39.73644879204221,
+            "peakRssBytes": 536592384
+          },
+          {
+            "label": "alternate-checkout",
+            "seconds": 28.56129529105965,
+            "peakRssBytes": 563970048
+          }
         ]
       }
     }

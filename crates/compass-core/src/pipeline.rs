@@ -2524,6 +2524,19 @@ fn build_graph_inner_unscoped(
         );
     }
 
+    // Project/configuration inputs are intentionally outside the source-file
+    // manifest (lockfiles and workspace metadata are not graph source files),
+    // but they still participate in framework activation, aliases, JSX
+    // runtime selection, and cache scope. Build the bounded evidence index
+    // before the verified-output fast paths so a lock/config edit cannot be
+    // mistaken for an unchanged graph merely because source discovery stayed
+    // byte-identical.
+    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
+    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
+    let project_evidence_matches_prior = prior_fact_digest_state
+        .as_ref()
+        .is_some_and(|state| state.project_evidence_digest == project_evidence_digest);
+
     let reusable_semantic_layer = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
             && semantic.is_some_and(semantic_layer_is_empty));
@@ -2533,7 +2546,10 @@ fn build_graph_inner_unscoped(
     let profile_digest = build_profile_digest(&build_profile, &output_dir)?;
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let verified_state = if reusable_semantic_layer && supplemental.is_empty() && manifest_unchanged
+    let verified_state = if reusable_semantic_layer
+        && supplemental.is_empty()
+        && manifest_unchanged
+        && project_evidence_matches_prior
     {
         load_verified(
             &output_dir,
@@ -2619,6 +2635,7 @@ fn build_graph_inner_unscoped(
     if reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
+        && project_evidence_matches_prior
         && verified_output
         && (!options.program_analysis || unchanged_program_available)
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
@@ -2700,8 +2717,6 @@ fn build_graph_inner_unscoped(
         || CacheOptions::output_directory(output_cache_root),
         CacheOptions::shared_history,
     );
-    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
-    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
     let early_missing = fact_neutral_pre_cache_sources(
         options,
         semantic,

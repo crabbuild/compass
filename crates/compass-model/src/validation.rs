@@ -770,6 +770,7 @@ fn endpoint_kinds_are_valid(
                     | NodeKind::Method
                     | NodeKind::Class
                     | NodeKind::Component
+                    | NodeKind::Variable
             ) && matches!(
                 target.kind,
                 NodeKind::Function

@@ -1,0 +1,14 @@
+{
+  "schema": "compass.react-frontend-precedence-matrix/1",
+  "fixture": "bounded-two-package-workspace",
+  "cases": [
+    {"id": "npm-package-scope", "manager": "npm", "mutation": "web-package-runtime", "input": "apps/web/package.json", "affected": "apps/web", "expectGraphChange": true},
+    {"id": "yarn-package-scope", "manager": "yarn", "mutation": "web-package-runtime", "input": "apps/web/package.json", "affected": "apps/web", "expectGraphChange": true},
+    {"id": "pnpm-package-scope", "manager": "pnpm", "mutation": "web-package-runtime", "input": "apps/web/package.json", "affected": "apps/web", "expectGraphChange": true},
+    {"id": "pnpm-lockfile-invalidation", "manager": "pnpm", "mutation": "lockfile", "input": "pnpm-lock.yaml", "affected": "apps/web", "expectGraphChange": false},
+    {"id": "typescript-extends-precedence", "manager": "pnpm", "mutation": "root-tsconfig-runtime", "input": "tsconfig.base.json", "affected": "apps/web", "expectGraphChange": true},
+    {"id": "jsx-import-source-precedence", "manager": "pnpm", "mutation": "web-jsx-import-source", "input": "apps/web/tsconfig.json", "affected": "apps/web", "expectGraphChange": true},
+    {"id": "typescript-reference-invalidation", "manager": "pnpm", "mutation": "shared-reference", "input": "apps/shared/tsconfig.json", "affected": "apps/web", "expectGraphChange": false},
+    {"id": "alias-invalidation", "manager": "pnpm", "mutation": "web-alias", "input": "apps/web/tsconfig.json", "affected": "apps/web", "expectGraphChange": true}
+  ]
+}

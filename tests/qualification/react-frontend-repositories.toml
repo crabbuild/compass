@@ -4,6 +4,7 @@ checkoutRoot = "/Volumes/Workspace/Github"
 readOnly = true
 oracleProvider = "typescript_compiler_api_5_9_3_frontend_projection"
 oracleToolchain = "node-24;typescript-5.9.3"
+expectationPolicy = "tests/qualification/react-frontend-expectation-policy.json"
 
 [qualityBudget]
 stableFamilyCount = 7

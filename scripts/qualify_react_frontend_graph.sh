@@ -42,10 +42,17 @@ elif [[ "$#" -ne 0 ]]; then
 fi
 [[ "$#" -eq 0 ]] || { echo "unexpected argument: $1" >&2; exit 2; }
 
-[[ -d /Volumes/Workspace && -d "$(dirname "$TARGET")" && -w "$(dirname "$TARGET")" ]] || {
-  echo "[react-frontend] /Volumes/Workspace and the selected target parent must be mounted and writable" >&2
-  exit 1
-}
+if [[ "$TARGET" == /Volumes/Workspace/* ]]; then
+  [[ -d /Volumes/Workspace && -d "$(dirname "$TARGET")" && -w "$(dirname "$TARGET")" ]] || {
+    echo "[react-frontend] /Volumes/Workspace and the selected target parent must be mounted and writable" >&2
+    exit 1
+  }
+else
+  [[ -d "$(dirname "$TARGET")" && -w "$(dirname "$TARGET")" ]] || {
+    echo "[react-frontend] the selected target parent must be mounted and writable: $TARGET" >&2
+    exit 1
+  }
+fi
 [[ -f "$PARSER_ROOT/sources/language_definitions.json" && -d "$PARSER_ROOT/parsers" ]] || {
   echo "[react-frontend] offline qualification requires a pre-provisioned parser source bundle at $PARSER_ROOT (set TSLP_PARSER_SOURCE_DIR)" >&2
   exit 1
@@ -57,6 +64,11 @@ PROJECT_ROOT="$PARSER_ROOT" TSLP_OFFLINE=1 CARGO_TARGET_DIR="$TARGET" \
   cargo build --release --locked -p compass-cli --bin compass
 BIN="$TARGET/release/compass"
 [[ -x "$BIN" ]] || { echo "missing production binary: $BIN" >&2; exit 1; }
+
+if [[ "$MODE" == "fixtures" ]]; then
+  echo "[react-frontend] run package/config precedence matrix with the production binary"
+  python3 "$ROOT/scripts/qualify_react_frontend_matrix.py" --compass "$BIN"
+fi
 
 if [[ "$MODE" == "pinned" ]]; then
   if [[ "$AUDIT_ONLY" -eq 0 && -z "$BASELINE" ]]; then

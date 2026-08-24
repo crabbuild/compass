@@ -350,6 +350,41 @@ These cross-tool observations are diagnostic evidence rather than a promoted
 Compass baseline. The remaining build gap is primarily the richer graph size
 and durable publication contract, not an unresolved duplicate atomic flush.
 
+### Plan 021 React/frontend release qualification
+
+Plan 021 uses the pinned seven-corpus manifest and a source-only TypeScript
+5.9.3 oracle. The manifest digest is
+`6de700895d36ecb7b38f3964878936ad397d419a113d55ed2fbdc6586f971e6b` and the
+reviewed expectation ledger is recorded in
+[`tests/qualification/react-frontend-expectation-policy.json`](tests/qualification/react-frontend-expectation-policy.json)
+(`ledgerDigest=13af10ea1bf9ab86895809f3332be25de6aa976cf56590e5c577545a57a4418d`).
+The checked-in performance baseline is
+[`tests/qualification/react-frontend-performance-baseline.json`](tests/qualification/react-frontend-performance-baseline.json).
+It is a post-origin/main high-water envelope over five byte-identical release
+runs; its provenance retains every result digest because the shared external
+volume has materially variable wall time while peak RSS remains stable. The
+regression budget itself remains 1.10× for both duration and peak RSS.
+
+The final release result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-evidence/react-frontend-pinned-result-final.json`
+(`sha256=ab7eb4c5961ac9f8cae0c7aae9fb155404e864873bde0da2519ef6d32d515082`).
+It uses release binary
+`sha256=68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e`,
+reports 100% precision and recall for every advertised capability, zero
+fabricated targets, stable one/default/max-worker graph digests, a clean
+SIGINT/resume publication, and `performanceComparison.status=compared` with
+all 42 rows within budget. Any future baseline refresh must preserve the same
+manifest, release profile, independent oracle, and explicit
+aggregation/provenance rather than weakening the threshold.
+
+The isolated Graphify comparison for this frontend fixture is diagnostic only:
+Graphify 0.9.48 at `b2cd36267456c166788c95be6e68574064a92a42` emitted 40 nodes
+and 44 undirected links, including dangling `ref_*` link targets, while the
+source-grounded Compass graph preserves typed directed relationships and the
+independent oracle contains 63 anchored facts. The source oracle is the truth
+for correctness; Graphify is a hypothesis generator and is not a Compass
+runtime, dependency, fallback, or promotion gate.
+
 ### Delta-rs low-inference diagnostic
 
 A 2026-08-10 follow-up compared the new `low` inference profile with Graphify

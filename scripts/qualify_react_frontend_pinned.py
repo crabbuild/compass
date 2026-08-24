@@ -45,6 +45,8 @@ MAX_COMMAND_OUTPUT_BYTES = 8 * 1024 * 1024
 MAX_JSON_BYTES = 512 * 1024 * 1024
 MAX_CONFIG_EXTENDS = 64
 PERFORMANCE_BASELINE_SCHEMA = "compass.react-frontend-performance-baseline/1"
+EXPECTATION_POLICY_SCHEMA = "compass.react-frontend-expectation-policy/1"
+MAX_EXPECTATION_POLICY_RECORDS = 100_000
 
 
 class QualificationError(RuntimeError):
@@ -273,6 +275,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         fail("frontend qualification manifest has an unexpected oracle provider")
     if document.get("oracleToolchain") != "node-24;typescript-5.9.3":
         fail("frontend qualification manifest has an unexpected oracle toolchain")
+    if not isinstance(document.get("expectationPolicy"), str) or not document["expectationPolicy"]:
+        fail("frontend qualification manifest must declare expectationPolicy")
     repositories = document.get("repository")
     if not isinstance(repositories, list) or not repositories:
         fail("frontend qualification manifest must contain repositories")
@@ -328,6 +332,139 @@ def load_manifest(path: Path) -> dict[str, Any]:
         if budget[key] > 1:
             fail(f"qualityBudget.{key} must not exceed 1")
     return document
+
+
+def expectation_fact_digest(facts: list[dict[str, Any]]) -> str:
+    """Digest the reviewed, capability-scoped oracle records deterministically."""
+    ordered = sorted(facts, key=lambda fact: canonical(fact))
+    return hashlib.sha256(canonical(ordered)).hexdigest()
+
+
+def load_expectation_policy(
+    path: Path,
+    manifest: dict[str, Any],
+    manifest_digest: str,
+) -> dict[str, Any]:
+    try:
+        document = json.loads(bounded_read(path).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"cannot read frontend expectation policy: {error}")
+    if not isinstance(document, dict) or document.get("schema") != EXPECTATION_POLICY_SCHEMA:
+        fail(f"frontend expectation policy schema must be {EXPECTATION_POLICY_SCHEMA}")
+    if document.get("manifestSha256") != manifest_digest:
+        fail("frontend expectation policy was recorded against a different corpus manifest")
+    oracle = document.get("oracle")
+    if not isinstance(oracle, dict) or oracle.get("provider") != "typescript_compiler_api_5_9_3":
+        fail("frontend expectation policy has an unexpected oracle provider")
+    if oracle.get("toolchain") != manifest["oracleToolchain"] or oracle.get("reviewStatus") != "reviewed":
+        fail("frontend expectation policy must identify the pinned toolchain and reviewed status")
+    global_dispositions = document.get("globalDispositions")
+    if not isinstance(global_dispositions, list) or not global_dispositions:
+        fail("frontend expectation policy must declare reviewed global dispositions")
+    for disposition in global_dispositions:
+        if not isinstance(disposition, dict):
+            fail("frontend expectation policy global disposition must be an object")
+        if disposition.get("state") not in {"unresolved", "ambiguous", "unsupported"}:
+            fail("frontend expectation policy global disposition state is invalid")
+        if not isinstance(disposition.get("case"), str) or not disposition["case"]:
+            fail("frontend expectation policy global disposition case is missing")
+        if not isinstance(disposition.get("reason"), str) or not disposition["reason"]:
+            fail("frontend expectation policy global disposition reason is missing")
+    repositories = document.get("repositories")
+    if not isinstance(repositories, list) or not repositories:
+        fail("frontend expectation policy must contain repositories")
+    expected_ids = {repository["id"] for repository in manifest["repository"]}
+    policy_ids: set[str] = set()
+    total_records = 0
+    for repository in repositories:
+        if not isinstance(repository, dict):
+            fail("frontend expectation policy repository must be an object")
+        identifier = repository.get("id")
+        if not isinstance(identifier, str) or not identifier or identifier in policy_ids:
+            fail(f"frontend expectation policy repository ID is empty or duplicated: {identifier!r}")
+        policy_ids.add(identifier)
+        manifest_repository = next((item for item in manifest["repository"] if item["id"] == identifier), None)
+        if manifest_repository is None:
+            fail(f"frontend expectation policy references unknown repository: {identifier}")
+        if repository.get("family") != manifest_repository["family"] or repository.get("framework") != manifest_repository["framework"]:
+            fail(f"frontend expectation policy metadata disagrees for {identifier}")
+        capabilities = repository.get("capabilities")
+        if not isinstance(capabilities, dict):
+            fail(f"frontend expectation policy capabilities must be an object: {identifier}")
+        advertised = set(manifest_repository.get("capabilities", []))
+        if set(capabilities) != advertised:
+            fail(f"frontend expectation policy capabilities disagree for {identifier}")
+        for capability, record in capabilities.items():
+            if not isinstance(record, dict):
+                fail(f"frontend expectation policy record must be an object: {identifier}:{capability}")
+            if record.get("reviewStatus") != "reviewed":
+                fail(f"frontend expectation policy record is not reviewed: {identifier}:{capability}")
+            counts = record.get("counts")
+            if not isinstance(counts, dict):
+                fail(f"frontend expectation policy counts are missing: {identifier}:{capability}")
+            for key in ("exact", "unresolved", "ambiguous", "unsupported"):
+                if not isinstance(counts.get(key), int) or counts[key] < 0:
+                    fail(f"frontend expectation policy count is invalid: {identifier}:{capability}:{key}")
+            record_count = counts["exact"] + counts["unresolved"] + counts["ambiguous"]
+            if record.get("recordCount") != record_count:
+                fail(f"frontend expectation policy record count is inconsistent: {identifier}:{capability}")
+            digest = record.get("recordDigest")
+            if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                fail(f"frontend expectation policy record digest is invalid: {identifier}:{capability}")
+            total_records += record_count
+            if total_records > MAX_EXPECTATION_POLICY_RECORDS:
+                fail("frontend expectation policy record limit exceeded")
+        dispositions = repository.get("dispositions")
+        if not isinstance(dispositions, list) or any(not isinstance(item, dict) for item in dispositions):
+            fail(f"frontend expectation policy dispositions are invalid: {identifier}")
+        for disposition in dispositions:
+            if disposition.get("state") not in {"unresolved", "ambiguous", "unsupported"}:
+                fail(f"frontend expectation policy disposition state is invalid: {identifier}")
+            if not isinstance(disposition.get("case"), str) or not disposition["case"]:
+                fail(f"frontend expectation policy disposition case is missing: {identifier}")
+            if not isinstance(disposition.get("reason"), str) or not disposition["reason"]:
+                fail(f"frontend expectation policy disposition reason is missing: {identifier}")
+    if policy_ids != expected_ids:
+        fail(f"frontend expectation policy repositories disagree with manifest: {sorted(policy_ids ^ expected_ids)}")
+    ledger_digest = document.get("ledgerDigest")
+    ledger_rows = []
+    for repository in repositories:
+        for capability, record in sorted(repository["capabilities"].items()):
+            ledger_rows.append({
+                "repository": repository["id"],
+                "capability": capability,
+                "recordCount": record["recordCount"],
+                "counts": record["counts"],
+                "recordDigest": record["recordDigest"],
+            })
+    expected_ledger_digest = hashlib.sha256(canonical(ledger_rows)).hexdigest()
+    if ledger_digest != expected_ledger_digest:
+        fail("frontend expectation policy ledgerDigest does not match its records")
+    document["path"] = str(path)
+    return document
+
+
+def validate_oracle_expectations(
+    repository: dict[str, Any],
+    oracle_document: dict[str, Any],
+    policy_repository: dict[str, Any],
+) -> None:
+    capabilities = policy_repository["capabilities"]
+    for capability, reviewed in capabilities.items():
+        facts = [fact for fact in oracle_document["facts"] if fact.get("capability") == capability]
+        counts = {"exact": 0, "unresolved": 0, "ambiguous": 0}
+        for fact in facts:
+            resolution = fact.get("resolution", "exact")
+            if resolution not in counts:
+                fail(f"{repository['id']}:{capability} has an unknown oracle resolution: {resolution!r}")
+            counts[resolution] += 1
+        expected_counts = reviewed["counts"]
+        if counts != {key: expected_counts[key] for key in counts}:
+            fail(f"{repository['id']}:{capability} oracle resolution counts drifted: {counts} != {expected_counts}")
+        if len(facts) != reviewed["recordCount"]:
+            fail(f"{repository['id']}:{capability} oracle record count drifted")
+        if expectation_fact_digest(facts) != reviewed["recordDigest"]:
+            fail(f"{repository['id']}:{capability} oracle record digest drifted")
 
 
 def checkout_for(repository: dict[str, Any]) -> Path:
@@ -746,6 +883,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         fail(f"cannot identify Compass revision: {revision_result.stderr.strip()}")
     compass_revision = revision_result.stdout.strip()
     manifest_digest = digest_file(manifest_path)
+    policy_path = (args.expectation_policy or (ROOT / manifest["expectationPolicy"])).resolve()
+    policy = load_expectation_policy(policy_path, manifest, manifest_digest)
+    policy_by_id = {repository["id"]: repository for repository in policy["repositories"]}
     artifact_root = Path(args.artifact_root or "/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/react-frontend").resolve()
     artifact_root.mkdir(parents=True, exist_ok=True)
     run_base = artifact_root / f"run-{manifest_digest[:12]}-{binary_digest[:12]}"
@@ -758,7 +898,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     max_workers = max(2, min(os.cpu_count() or 2, 8))
     reports: list[dict[str, Any]] = []
     interruption_target: tuple[int, Path, Path, str] | None = None
-    policy = {"network": "disabled-by-contract;no-network-command-allow-listed", "allowedProcesses": sorted(ALLOWED_COMMANDS), "projectCodeExecuted": False, "projectCheckoutWritable": False}
+    network_policy = {"network": "disabled-by-contract;no-network-command-allow-listed", "allowedProcesses": sorted(ALLOWED_COMMANDS), "projectCodeExecuted": False, "projectCheckoutWritable": False}
     for repository in manifest["repository"]:
         checkout = verify_checkout(repository)
         status_before = git_status(checkout)
@@ -768,6 +908,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         oracle_path.parent.mkdir(parents=True, exist_ok=True)
         run_oracle(projection, repository["framework"], oracle_path)
         oracle_document = load_oracle(oracle_path, repository["id"])
+        validate_oracle_expectations(repository, oracle_document, policy_by_id[repository["id"]])
         oracle_metadata = oracle_document["sourceOracle"]
         if oracle_metadata["diagnosticCount"] > repository["oracleDiagnosticBudget"]:
             fail(
@@ -839,9 +980,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schema": "compass.react-frontend-pinned-qualification-result/2", "manifest": str(manifest_path), "manifestSha256": manifest_digest, "artifactRoot": str(run_root),
         "compass": {"revision": compass_revision, "binary": str(binary), "binarySha256": binary_digest, "profile": "release", "features": "workspace-default"},
-        "oracle": {"provider": manifest["oracleProvider"], "toolchain": manifest["oracleToolchain"], "execution": "source-only;no-project-code"}, "qualityBudget": manifest["qualityBudget"], "repositories": reports,
+        "oracle": {"provider": manifest["oracleProvider"], "toolchain": manifest["oracleToolchain"], "execution": "source-only;no-project-code", "expectationPolicy": {"path": str(policy_path), "sha256": digest_file(policy_path), "ledgerDigest": policy["ledgerDigest"]}}, "qualityBudget": manifest["qualityBudget"], "repositories": reports,
         "aggregate": {"expected": aggregate_expected, "oracleRecords": oracle_records, "matched": aggregate_matched, "candidates": aggregate_candidates, "precision": aggregate_matched / aggregate_candidates if aggregate_candidates else 0.0, "recall": aggregate_matched / aggregate_expected if aggregate_expected else 0.0, "wilsonLower95": wilson_lower(aggregate_matched, aggregate_candidates), "zeroFabricatedTargets": all(report["scorecard"].get("aggregate", {}).get("zeroFabricatedTargets") is True for report in reports), "oracleDiagnosticCount": sum(report["oracleDiagnosticCount"] for report in reports), "corpora": len(reports)},
-        "interruption": interruption, "networkProcessPolicy": policy, "readOnly": True, "sourceTreeUnchanged": True, "machine": {"platform": platform.platform(), "python": platform.python_version(), "cpuCount": os.cpu_count()},
+        "interruption": interruption, "networkProcessPolicy": network_policy, "readOnly": True, "sourceTreeUnchanged": True, "machine": {"platform": platform.platform(), "python": platform.python_version(), "cpuCount": os.cpu_count()},
     }
     result["performanceComparison"] = performance_comparison(result, args.baseline.resolve() if args.baseline else None)
     result_path = Path(args.result or artifact_root / "react-frontend-pinned-result.json").resolve()
@@ -858,6 +999,7 @@ def main() -> int:
     parser.add_argument("--artifact-root", type=Path)
     parser.add_argument("--result", type=Path)
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument("--expectation-policy", type=Path)
     parser.add_argument("--audit-only", action="store_true", help="emit evidence without applying quality/performance thresholds")
     args = parser.parse_args()
     try:
