@@ -64,10 +64,12 @@ Plan 021 hardens the React frontend framework graph after Plan 013's
 TypeScript/JavaScript production hard cut. It adds occurrence-preserving render
 evidence, conservative component and runtime-boundary roles, deep Next.js and
 TanStack route semantics, parsed Vite configuration, and agent-facing context
-and impact workflows. The seven-family corpus and independent scorecards are
-checked in, but the last pinned release artifact predates the current branch
-revision; the exact release gate must be rerun before promotion. TanStack Start
-remains explicitly pre-stable and is not promoted by aggregate results.
+and impact workflows. The current pinned run covers all seven families and
+passes correctness, safety, and interruption evidence, but its Vite warm
+performance row exceeded the reviewed 1.10× budget; the release gate remains
+open for that repeat/baseline decision. Several advertised capabilities are
+also under the plan's 100-record evidence floor. TanStack Start remains
+explicitly pre-stable and is not promoted by aggregate results.
 
 Plan 022 extends the native document program with selective, local OCR for
 scanned PDF pages and images embedded in DOCX, PPTX, and XLSX. Native package

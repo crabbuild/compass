@@ -366,10 +366,11 @@ This audit rechecked the closure claims against the current checkout rather
 than trusting the historical result artifact.
 
 - The pinned result and performance baseline record Compass revision
-  `7887ffe1f5c3f487ca122d61c3f41d700e389cdf`, while the current PR revision is
-  `88b628402609558b0b32d29cc97f7b070f8d256c`. The old result is therefore
+  `7887ffe1f5c3f487ca122d61c3f41d700e389cdf`, predating both the merge
+  revision `88b628402609558b0b32d29cc97f7b070f8d256c` and current head
+  `c25fa25c2cfe9b6aefcfaaa6937f9e9a2351d921`. The old result is therefore
   stale evidence; the release wrapper now passes and checks the source
-  revision used for the fresh release build.
+  revision used for each fresh release build.
 - Qualification graph paths are now validated recursively for absolute,
   traversal, URI, drive-letter, and NUL forms. The scorecard computes
   `zeroUnsafePaths` from that validation and the pinned gate enforces it; it is
@@ -383,9 +384,33 @@ than trusting the historical result artifact.
   not activate a TanStack route.
 
 The focused language tests pass for Next.js, React Router, and TanStack Router.
-Plan 021 remains `IN PROGRESS` until a fresh current-revision pinned run
-recomputes all corpus scorecards, per-capability metrics, performance rows,
-and interruption evidence with the exact release binary.
+
+### Ninth-pass current-revision release attempt (2026-08-24)
+
+The exact pinned production command was rerun against the current head
+`c25fa25c2cfe9b6aefcfaaa6937f9e9a2351d921` and the reviewed performance
+baseline. The result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-current-c25fa25c/react-frontend-pinned-result.json`
+(`sha256=fedda8d8b97df8dbf15cb77c6144190976fa31bf0e28d03c6e2dbecd8d878e89`).
+All seven corpus scorecards and interruption evidence completed: 227,696
+independent oracle records, 13,236/13,236 matched facts, precision and recall
+1.0, Wilson lower bound 0.9997098561, zero fabricated targets, and zero unsafe
+paths. The release binary revision check also passed.
+
+The normal promotion gate did not pass: the only failed performance row was
+`vite-react-template-and-core / warm`, at a 1.5928499× duration ratio against
+the 1.10× budget (RSS passed); the other 41 rows passed. No threshold was
+widened. The run is therefore correctness evidence, not a release approval,
+until a repeat under a stable volume or a reviewed baseline decision closes the
+performance gate.
+
+The explicit quality-budget floor of 100 records per advertised capability is
+also not yet met by several low-volume rows (for example `react.hooks=8`,
+`tanstack.loader=1`, and `vite.file_set.glob=13` in the current corpus). The
+runner enforces the aggregate floor and quality thresholds but does not claim
+those underrepresented capabilities are independently release-qualified.
+Plan 021 remains `IN PROGRESS` until these evidence and performance gates are
+closed without weakening the contract.
 
 ## Why this matters
 

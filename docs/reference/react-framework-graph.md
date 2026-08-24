@@ -32,12 +32,14 @@ edges. The seven-family production corpus and independent scorecards are
 qualification evidence, not a promise that every dynamic framework form is
 supported.
 
-The latest checked-in qualification artifact predates the current branch
-revision, so the release promotion gate remains open until a fresh exact
-release-binary run records this revision. TanStack Start remains separately
-labelled pre-stable. Consumers must use the pack/version and qualification
-state from the graph result rather than treating an absent fact as proof of
-absence.
+The current exact release-binary run records this branch revision and passes
+the seven-family correctness, safety, and interruption scorecards, but the Vite
+warm performance row exceeded the reviewed 1.10× budget. The release
+promotion gate therefore remains open pending a repeat/baseline decision;
+several advertised capability rows also remain below the plan's evidence floor.
+TanStack Start remains separately labelled pre-stable. Consumers must use the
+pack/version and qualification state from the graph result rather than treating
+an absent fact as proof of absence.
 
 ## Activation and ownership
 

@@ -379,6 +379,17 @@ future baseline refresh must preserve the same manifest, release profile,
 independent oracle, exact source revision, and explicit
 aggregation/provenance rather than weakening the threshold.
 
+A fresh current-head attempt at
+`c25fa25c2cfe9b6aefcfaaa6937f9e9a2351d921` is retained at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-current-c25fa25c/react-frontend-pinned-result.json`
+(`sha256=fedda8d8b97df8dbf15cb77c6144190976fa31bf0e28d03c6e2dbecd8d878e89`).
+Its seven scorecards, 227,696 oracle records, 13,236 exact matches, zero
+fabricated targets, zero unsafe paths, and interruption evidence pass. The
+performance gate remains open because only the Vite warm row exceeded budget
+(1.5928499× duration versus 1.10×; RSS passed). Treat this as current
+correctness evidence, not a release approval; repeat it under a stable volume
+or record a reviewed baseline decision without widening the threshold.
+
 The isolated Graphify comparison for this frontend fixture is diagnostic only:
 Graphify 0.9.48 at `b2cd36267456c166788c95be6e68574064a92a42` emitted 40 nodes
 and 44 undirected links, including dangling `ref_*` link targets, while the
