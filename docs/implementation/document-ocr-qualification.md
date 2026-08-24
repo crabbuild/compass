@@ -36,6 +36,10 @@ Installation is the only network step. The gate itself performs no download.
 It verifies the immutable OAR-OCR 0.9.2 / `v0.7.0` profile, executes inference,
 validates geometry and profile identity, and enforces at most 5% CER on the
 deterministic clean-English smoke raster. The smoke raster is CC0 synthetic.
+Run this installed-model gate only on managed-runtime targets. Intel
+(`x86_64`) macOS intentionally supports the offline fixture gate and native
+document processing but not managed OCR because the pinned ONNX Runtime has no
+self-contained distribution for that target.
 
 The v1 manifest intentionally does not claim photographed pages, handwriting,
 table reconstruction, or any script/platform absent from measured fixtures.

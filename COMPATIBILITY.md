@@ -65,6 +65,12 @@ by source digest, schema, normalizer, rasterizer, OCR policy, preprocessing,
 profile manifest/model digests, and languages. An incompatible cache entry is
 a miss or explicit corruption error, never a fallback to flattened text.
 
+Managed OCR is unavailable on Intel (`x86_64`) macOS because the pinned ONNX
+Runtime distribution has no self-contained build for that target. Compass
+therefore omits the OCR runtime dependency on Intel macOS instead of requiring
+a system ONNX installation. Native document processing and `--ocr off` remain
+fully available; `models install` and OCR-enabled processing fail explicitly.
+
 The selected OCR identity is included in graph build and immutable history
 profiles. Native text remains authoritative; OCR is additive derived evidence
 with exact source owner, geometry, confidence, and model provenance. Partial

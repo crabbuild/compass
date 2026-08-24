@@ -35,6 +35,30 @@ pub const OCR_MAX_TEXT_CHARS_PER_DOCUMENT: usize = 5_000_000;
 pub const OCR_MAX_LANGUAGE_HINTS: usize = 32;
 pub const OCR_MAX_PROFILE_FIELD_BYTES: usize = 256;
 
+fn managed_runtime_supported_for(target_os: &str, target_arch: &str) -> bool {
+    target_os != "macos" || target_arch != "x86_64"
+}
+
+#[must_use]
+pub fn managed_runtime_available() -> bool {
+    managed_runtime_supported_for(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+pub(crate) fn ensure_managed_runtime_available() -> Result<(), OcrError> {
+    if managed_runtime_available() {
+        Ok(())
+    } else {
+        Err(managed_runtime_unavailable_error())
+    }
+}
+
+pub(crate) fn managed_runtime_unavailable_error() -> OcrError {
+    OcrError::EngineUnavailable(
+        "managed local OCR is unavailable on Intel macOS because the pinned ONNX Runtime does not provide a self-contained x86_64 macOS build; native PDF, DOCX, PPTX, and XLSX processing remains available with OCR off"
+            .to_owned(),
+    )
+}
+
 pub fn normalize_language_hints(hints: &[String]) -> Result<Vec<String>, OcrError> {
     if hints.len() > OCR_MAX_LANGUAGE_HINTS {
         return Err(OcrError::InvalidRequest(
@@ -537,5 +561,13 @@ mod tests {
         assert!(validate_dimensions(6_000, 4_000).is_ok());
         assert!(validate_dimensions(6_000, 4_001).is_err());
         assert!(validate_dimensions(6_001, 1).is_err());
+    }
+
+    #[test]
+    fn managed_runtime_support_matrix_excludes_intel_macos() {
+        assert!(!managed_runtime_supported_for("macos", "x86_64"));
+        assert!(managed_runtime_supported_for("macos", "aarch64"));
+        assert!(managed_runtime_supported_for("linux", "x86_64"));
+        assert!(managed_runtime_supported_for("windows", "x86_64"));
     }
 }

@@ -5,8 +5,9 @@
 Compass links OAR-OCR 0.9.2 and its `ort`/ONNX Runtime integration for optional
 local OCR. OAR-OCR is Apache-2.0; the Rust `ort` crates are MIT or Apache-2.0.
 Compass also links Hayro 0.7.1 for pure-Rust PDF rendering under MIT or
-Apache-2.0. The corresponding license texts are covered by `LICENSE-MIT` and
-`LICENSE-APACHE` in release bundles.
+Apache-2.0. OAR-OCR's text-region geometry stack links clipper2-rust 1.1.0
+under BSL-1.0. The corresponding license texts are covered by `LICENSE-MIT`,
+`LICENSE-APACHE`, and `LICENSE-BOOST` in release bundles.
 
 The separately installed `pp-ocrv6-small` and `pp-ocrv6-medium` model files
 come from the immutable GreatV/OAR-OCR `v0.7.0` release and originate from the

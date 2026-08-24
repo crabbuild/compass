@@ -37,6 +37,7 @@ cp "$repo_root/README.md" "$bundle/"
 cp "$repo_root/LICENSE" "$bundle/"
 cp "$repo_root/LICENSE-MIT" "$bundle/"
 cp "$repo_root/LICENSE-APACHE" "$bundle/"
+cp "$repo_root/LICENSE-BOOST" "$bundle/"
 cp "$repo_root/THIRD_PARTY_NOTICES.md" "$bundle/"
 cp -R "$repo_root/completions" "$bundle/"
 
