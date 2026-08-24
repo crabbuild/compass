@@ -10,7 +10,10 @@
   through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
   stronger curated masks remain deny-by-default capabilities. Add read-only
   ingestion preparation so agents can obtain canonical Base references and
-  source evidence without implementing Compass digest rules themselves.
+  source evidence without implementing Compass digest rules themselves. Extend
+  the bundled coding-agent skill with explicit continuous enrichment: bounded
+  milestone batches, revision pinning, source-change rebase gates, and
+  session-end receipts.
 
 - Replace the predefined flat call-flow architecture model with the native
   `compass.viewer.architecture/1` projection. Production source scope is fixed

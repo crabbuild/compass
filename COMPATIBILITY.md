@@ -92,6 +92,13 @@ It calculates exact Base record and source-evidence digests for a selected Base
 Generation; it does not certify, mutate, or publish an assertion. Apply
 re-verifies prepared evidence against the pinned Base Generation.
 
+The bundled Compass skill also supports an explicit continuous-enrichment mode
+for coding sessions. This is an adapter workflow over the existing versioned
+overlay commands, not a new graph or history schema: it keeps a bounded
+session-local candidate ledger, publishes only milestone batches, pins each
+receipt revision, and requires a complete rebase after a Base Generation
+change. Read-only navigation remains the default.
+
 Overlay writes require explicit CLI or server enablement. Existing MCP servers
 without Agent Graph configuration advertise no Agent Graph tools. Configured
 read-only servers advertise inspection only; HTTP writes additionally require

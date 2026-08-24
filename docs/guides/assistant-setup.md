@@ -73,6 +73,14 @@ enhancements that will help later coding sessions. Show every applied change,
 pin the resulting revision, and do not mask or delete Base Graph facts.
 ```
 
+For enrichment throughout one coding session, opt in explicitly:
+
+```text
+Use Compass in continuous enrichment mode with overlay overlay:auth-review.
+Keep navigation read-only, flush only source-cited milestones, pin each
+receipt, and stop for a complete rebase after any Base Graph refresh.
+```
+
 Read-only analysis does not authorize overlay writes. “Add,” “update,”
 “retract,” “challenge,” or “enhance” makes that intent explicit; masking still
 requires a separate request. The assistant should report the exact Base
