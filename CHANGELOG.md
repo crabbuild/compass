@@ -65,6 +65,9 @@
 
 ## 0.3.20 - 2026-08-24
 
+- Keep large generated Go/OpenAPI sources within bounded framework extraction
+  budgets, preserving zero-error qualification for complete enterprise graphs.
+
 - Add Grounded Agent Graph overlays with citation-backed node, edge, Challenge,
   and Retraction operations, immutable CAS-activated revisions, exact rebase,
   historical composition, bounded audit, and read-only ingestion preparation.

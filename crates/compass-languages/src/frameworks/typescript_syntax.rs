@@ -25,7 +25,10 @@ pub(crate) fn has_default_export_keyword(node: Node<'_>) -> bool {
 
 pub(crate) const SYNTAX_VIEW_VERSION: &str = "compass.frontend-syntax/2";
 pub(crate) const MAX_SYNTAX_DEPTH: usize = 256;
-pub(crate) const MAX_SYNTAX_NODES: usize = 100_000;
+/// Shared traversal ceiling. Individual framework packs may choose a lower
+/// budget; the view must be able to distinguish those pack-level limits from
+/// the hard parser-inspection ceiling.
+pub(crate) const MAX_SYNTAX_NODES: usize = 200_000;
 pub(crate) const MAX_STATIC_DEPTH: usize = 32;
 pub(crate) const MAX_STATIC_ITEMS: usize = 2_048;
 pub(crate) const MAX_STATIC_BYTES: usize = 64 * 1024;
