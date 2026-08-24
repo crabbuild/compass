@@ -37,7 +37,7 @@ export const COMPASS_REQUIREMENTS = {
   architecture: {
     workflow: "open the architecture flow",
     features: ["graph"],
-    contracts: { callflow_viewer: "compass.viewer.callflow/1" }
+    contracts: { architecture_viewer: "compass.viewer.architecture/1" }
   },
   query: {
     workflow: "query the codebase",

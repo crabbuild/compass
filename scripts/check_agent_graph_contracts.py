@@ -15,6 +15,7 @@ EXPECTED_SCHEMAS = {
     "batch-v1.json": "compass.agent-graph.batch/1",
     "effective-v1.json": "compass.agent-graph.effective/1",
     "errors-v1.json": "compass.agent-graph.errors/1",
+    "ingestion-preparation-v1.json": "compass.agent-graph.ingestion-preparation/1",
     "limits-v1.json": "compass.agent-graph.limits/1",
     "overlay-v1.json": "compass.agent-graph.overlay/1",
     "rebase-plan-v1.json": "compass.agent-graph.rebase-plan/1",

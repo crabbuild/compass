@@ -1,8 +1,8 @@
 //! Safe, deterministic output formats for Compass graphs.
 
+mod architecture_projection;
 mod backup;
 mod callflow;
-mod callflow_model;
 mod canvas;
 mod cql;
 mod cypher;
@@ -21,15 +21,23 @@ mod viewer_model;
 mod wiki;
 mod workbench;
 
+pub use architecture_projection::{
+    ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA, ArchitectureClassCounts,
+    ArchitectureCoverage, ArchitectureDiagnosticSeverity, ArchitectureEvidenceCounts,
+    ArchitectureGroup, ArchitectureGroupKind, ArchitectureGroupName, ArchitectureLens,
+    ArchitectureMembership, ArchitectureNameProvenance, ArchitectureNode, ArchitectureOmissions,
+    ArchitectureOverlay, ArchitectureOverlayGroup, ArchitectureOverlaySourceRule,
+    ArchitectureProjectionError, ArchitectureProjectionInput, ArchitectureProjectionLimits,
+    ArchitectureProjectionOptions, ArchitectureProvenance, ArchitectureQuality,
+    ArchitectureQualityDiagnostic, ArchitectureQualityMetrics, ArchitectureQualityStatus,
+    ArchitectureRelationClass, ArchitectureRelationship, ArchitectureRoute, ArchitectureRouteLevel,
+    ArchitectureScope, ArchitectureScopeProjection, ArchitectureSourceCounts,
+    ArchitectureSourceScope, ArchitectureStatistics, ArchitectureViewModel, project_architecture,
+};
 pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,
-};
-pub use callflow_model::{
-    CALLFLOW_VIEWER_SCHEMA, CallflowCoverage, CallflowCrossSectionCall, CallflowProvenance,
-    CallflowSourceScope, CallflowStatistics, CallflowViewEdge, CallflowViewLink, CallflowViewModel,
-    CallflowViewNode, CallflowViewSection, callflow_view_model,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
@@ -132,6 +140,8 @@ pub enum OutputError {
     EmptyCallflowGraph,
     #[error("no sections defined")]
     NoCallflowSections,
+    #[error("invalid architecture projection: {0}")]
+    InvalidArchitectureProjection(String),
     #[error(
         "communities dict is empty — refusing to clear wiki/. Run `compass extract .` or `compass cluster-only .` first."
     )]

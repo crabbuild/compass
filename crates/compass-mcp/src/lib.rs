@@ -15,8 +15,9 @@ use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use compass_agent_graph::{
-    AgentGraphLimits, ChangeBatch, CompositionProfile, OperationPermission, OverlayId,
-    OverlayRevisionId, PrincipalId, ReadRequest, ReadResult, RebaseCommitRequest, WriteAuthority,
+    AgentGraphLimits, ChangeBatch, CompositionProfile, IngestionPreparationRequest,
+    OperationPermission, OverlayId, OverlayRevisionId, PrincipalId, ReadRequest, ReadResult,
+    RebaseCommitRequest, SourceSpanRequest, WriteAuthority,
 };
 use compass_core::{AgentGraphContext, LoadedGraph};
 use compass_graph::{
@@ -654,6 +655,9 @@ fn invoke_agent_graph_read(
             "profile",
             "limit",
             "query",
+            "base_nodes",
+            "base_edges",
+            "source_spans",
         ],
         "inspect_agent_graph",
     )?;
@@ -676,6 +680,36 @@ fn invoke_agent_graph_read(
         "overlay" => {
             let revision = optional_revision(arguments, "revision")?;
             serialize_agent_read(context.read(ReadRequest::Overlay { overlay, revision }))?
+        }
+        "prepare" => {
+            if arguments.contains_key("revision") {
+                return Err(InvocationError::InvalidParams(
+                    "prepare selects the active Overlay Revision automatically; do not pass revision"
+                        .to_owned(),
+                ));
+            }
+            let base_node_ids = string_array_argument(arguments, "base_nodes")?;
+            let base_edge_ids = string_array_argument(arguments, "base_edges")?;
+            let source_spans = arguments
+                .get("source_spans")
+                .cloned()
+                .map(serde_json::from_value::<Vec<SourceSpanRequest>>)
+                .transpose()
+                .map_err(|error| {
+                    InvocationError::InvalidParams(format!(
+                        "source_spans must be strict source span requests: {error}"
+                    ))
+                })?
+                .unwrap_or_default();
+            serialize_agent_read(context.read(ReadRequest::PrepareIngestion {
+                overlay,
+                base_generation: context.base_generation().clone(),
+                request: IngestionPreparationRequest {
+                    base_node_ids,
+                    base_edge_ids,
+                    source_spans,
+                },
+            }))?
         }
         "effective" => {
             let revision = required_revision(arguments, "revision")?;
@@ -807,6 +841,8 @@ fn serialize_agent_read(
         }),
         ReadResult::EffectiveGraph(value) => serde_json::to_value(value)
             .map_err(|error| InvocationError::Internal(error.to_string()))?,
+        ReadResult::IngestionPreparation(value) => serde_json::to_value(value)
+            .map_err(|error| InvocationError::Internal(error.to_string()))?,
         ReadResult::History(value) => serde_json::to_value(value)
             .map_err(|error| InvocationError::Internal(error.to_string()))?,
         ReadResult::Diff(value) => serde_json::to_value(value)
@@ -819,6 +855,31 @@ fn serialize_agent_read(
     .map_err(|error| InvocationError::Internal(error.to_string()))
 }
 
+fn string_array_argument(
+    arguments: &Map<String, Value>,
+    name: &str,
+) -> Result<Vec<String>, InvocationError> {
+    let Some(value) = arguments.get(name) else {
+        return Ok(Vec::new());
+    };
+    let values = value.as_array().ok_or_else(|| {
+        InvocationError::InvalidParams(format!("{name} must be an array of strings"))
+    })?;
+    values
+        .iter()
+        .map(|value| {
+            let value = value.as_str().ok_or_else(|| {
+                InvocationError::InvalidParams(format!("{name} must contain only strings"))
+            })?;
+            if value.is_empty() || value.len() > 4_096 || value.chars().any(char::is_control) {
+                return Err(InvocationError::InvalidParams(format!(
+                    "{name} values must contain 1..=4096 non-control bytes"
+                )));
+            }
+            Ok(value.to_owned())
+        })
+        .collect()
+}
 fn invoke_agent_graph_write(
     context: &AgentGraphContext,
     config: &AgentGraphMcpConfig,
@@ -1332,14 +1393,17 @@ fn configured_tool_specs(config: Option<&AgentGraphMcpConfig>) -> Vec<Tool> {
             "additionalProperties":false,
             "properties":{
                 "project_path":{"type":"string","minLength":1,"maxLength":32768},
-                "operation":{"type":"string","enum":["status","overlay","effective","query","history","audit","diff","rebase_plan"]},
+                "operation":{"type":"string","enum":["status","prepare","overlay","effective","query","history","audit","diff","rebase_plan"]},
                 "overlay":{"type":"string","pattern":"^overlay:"},
                 "revision":{"type":"string","pattern":"^[0-9a-f]{64}$"},
                 "old_revision":{"type":"string","pattern":"^[0-9a-f]{64}$"},
                 "new_revision":{"type":"string","pattern":"^[0-9a-f]{64}$"},
                 "profile":{"type":"string","enum":["augment","curated"]},
                 "limit":{"type":"integer","minimum":1,"maximum":1000},
-                "query":{"type":"string","minLength":1,"maxLength":16384}
+                "query":{"type":"string","minLength":1,"maxLength":16384},
+                "base_nodes":{"type":"array","maxItems":10,"items":{"type":"string","minLength":1,"maxLength":4096}},
+                "base_edges":{"type":"array","maxItems":10,"items":{"type":"string","minLength":1,"maxLength":4096}},
+                "source_spans":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"object","additionalProperties":false,"properties":{"file":{"type":"string","minLength":1,"maxLength":4096},"startByte":{"type":"integer","minimum":0},"endByte":{"type":"integer","minimum":1}},"required":["file","startByte","endByte"]}}
             },
             "required":["project_path","operation","overlay"]
         }),

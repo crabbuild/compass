@@ -275,6 +275,23 @@ the graph-local community ID. These labels are deterministic navigation aids,
 not community identity; consumers that need identity should use the community
 ID and member set instead.
 
+The architecture view is a separate, versioned projection rather than a
+presentation alias for raw communities. It classifies Production and All-code
+source scopes before grouping, derives project-specific owner and subsystem
+names from source paths, declarations, and optional overlays, and keeps names
+separate from stable membership-derived IDs. Relation classes and lenses are
+explicit in the model. Large graphs remain bounded by an overview whose exact
+omission counts link to the searchable group directory; omitted groups are
+never merged into a synthetic `Other` subsystem or connected to invented
+routes.
+
+Production excludes Test, Generated, Vendor, Documentation, and Unknown
+sources before grouping. All-code retains them with exact counts. Memberships
+use validated `nodeIndex` and `groupIndex` references into deterministic arrays
+to keep large payloads bounded without discarding drill-down data. Extraction
+completeness, overview omissions, and architecture quality are separate
+signals.
+
 The Architecture Map and Community Directory omit communities made entirely
 of Markdown pipe-table parser blocks. Those communities count toward the
 report's omitted-community coverage and their source-backed nodes remain in
@@ -686,7 +703,8 @@ First-party editor and offline-viewer contracts are versioned independently:
 - `compass.graph-overview/1` — rebuildable prepared graph projection used by
   editor integrations;
 - `compass.program.call_graph/1` — bounded symbol-centered caller/callee graph;
-- `compass.viewer.callflow/1` — broader subsystem architecture flow;
+- `compass.viewer.architecture/1` — source-scoped subsystem architecture with
+  typed relationships, hierarchy, omissions, and quality diagnostics;
 - `compass.history.timeline/1` — commit and materialization states;
 - `compass.history.change_counts/1` — lazy structural counts between existing
   realizations;
@@ -702,6 +720,9 @@ First-party editor and offline-viewer contracts are versioned independently:
   the CLI HTML report and editor comparison views;
 - `compass.ide.progress/1` — newline-delimited guided-operation events.
 - `compass.agent-graph.overlay/1` — one immutable logical Overlay state;
+- `compass.agent-graph.ingestion-preparation/1` — read-only, verifier-owned
+  Base references, source evidence, and current expected revision for drafting
+  a change batch;
 - `compass.agent-graph.receipt/1` — atomic publication receipt;
 - `compass.agent-graph.effective/1` — Base Graph plus one exact Overlay
   Revision and composition profile;

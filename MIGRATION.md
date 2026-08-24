@@ -48,6 +48,33 @@ candidate exports, and TypeScript scorecards likewise require their `/2`
 schemas and use `producer` for the language evidence identity; regenerate
 those audit inputs rather than trying to load the old field names.
 
+## Architecture viewer contract
+
+`compass export callflow-json` now emits
+`compass.viewer.architecture/1`, replacing `compass.viewer.callflow/1`. Update
+direct consumers as follows:
+
+- negotiate `contracts.architecture_viewer` instead of `callflow_viewer`;
+- read `relationships` and `relationClass` instead of treating every edge as a
+  call;
+- select `projections[].scope` (`production` or `all_code`) and join
+  `memberships`, `groups`, and `routes` rather than reading flat `sections`;
+- resolve each membership's `nodeIndex` against top-level `nodes` and
+  `groupIndex` against that projection's `groups` array;
+- use `overviewGroupIds`, `overviewRouteIds`, and `omissions` instead of an
+  `Other` overflow section; and
+- surface `quality` independently from extraction status.
+
+Production excludes Documentation as well as Test, Generated, Vendor, and
+Unknown. Select All-code when documentation architecture is intentionally in
+scope.
+
+The old major is rejected rather than silently translated. The CLI command
+names remain compatible. Rename project section files to a versioned
+`compass.architecture-overlay/1` JSON/TOML overlay and pass
+`--architecture-overlay PATH`; `--sections` is temporarily retained as a
+deprecated adapter.
+
 ## Install Compass
 
 Install the latest macOS release:
@@ -291,6 +318,22 @@ Current VSIX builds require Compass CLI 0.3.0 or newer. If **Select Compass
 CLI** labels an installation unsupported, upgrade that CLI or select another
 detected installation. Releases below 0.3.0 and 0.3.0 prereleases cannot be
 activated, even if they advertise some current capabilities.
+
+## Optional document OCR
+
+No migration is required for existing projects because OCR defaults to off.
+PDF and Office files now produce native structural blocks, so run `compass
+update --force` once if an existing output predates `compass.document/1`.
+To opt into local OCR, install one profile explicitly and rebuild under its new
+fingerprint:
+
+```bash
+compass models install pp-ocrv6-small
+compass extract . --ocr auto --force
+```
+
+Do not copy or rename old flattened document caches; incompatible schema,
+normalizer, renderer, OCR, and model identities are intentionally not migrated.
 
 ## Replace commands
 

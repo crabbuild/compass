@@ -1,8 +1,11 @@
 use std::process::Command;
 
 use compass_agent_graph::{Digest, canonical_bytes};
-use compass_model::code_graph::{BuildMetadata, ExtractionStatus, FileRecord, GraphDocument};
+use compass_model::code_graph::{
+    BuildMetadata, ExtractionStatus, FileRecord, GraphDocument, NodeKind, NodeRecord,
+};
 use compass_model::identity::file_id;
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
 
 #[test]
 fn status_is_versioned_and_apply_is_write_disabled_by_default()
@@ -105,6 +108,216 @@ fn repeated_options_are_usage_errors() -> Result<(), Box<dyn std::error::Error>>
     assert_eq!(output.status.code(), Some(2));
     let error: serde_json::Value = serde_json::from_slice(&output.stderr)?;
     assert_eq!(error["code"], "invalid_input");
+    Ok(())
+}
+
+#[test]
+fn prepare_returns_apply_ready_base_ref_and_source_grounding()
+-> Result<(), Box<dyn std::error::Error>> {
+    const SOURCE_PATH: &str = "src/lib.rs";
+    const SOURCE: &[u8] = b"pub fn target() {}\n";
+    const NODE_ID: &str = "node:target";
+
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().canonicalize()?;
+    std::fs::create_dir(root.join("src"))?;
+    std::fs::write(root.join(SOURCE_PATH), SOURCE)?;
+    let anchor = SourceAnchor {
+        file: SOURCE_PATH.to_owned(),
+        start_byte: 0,
+        end_byte: 18,
+        start_line: 1,
+        start_column: 0,
+        end_line: 1,
+        end_column: 18,
+    };
+    let mut graph = GraphDocument::empty_v1(BuildMetadata {
+        builder_version: "test".to_owned(),
+        schema_fingerprint: "test".to_owned(),
+        source_tree_digest: "test".to_owned(),
+        configuration_digest: "test".to_owned(),
+        generation_id: "generation-cli-prepare".to_owned(),
+        source_commit: None,
+    });
+    graph.graph.files.push(FileRecord {
+        id: file_id(SOURCE_PATH),
+        path: SOURCE_PATH.to_owned(),
+        language: Some("rust".to_owned()),
+        content_digest: Digest::raw_bytes(SOURCE).as_str().to_owned(),
+        byte_size: SOURCE.len() as u64,
+        generated: false,
+        extraction_status: ExtractionStatus::Extracted,
+        extractor_versions: vec!["cli-prepare-test".to_owned()],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+    graph.nodes.push(NodeRecord {
+        id: NODE_ID.to_owned(),
+        kind: NodeKind::Function,
+        roles: Vec::new(),
+        name: "target".to_owned(),
+        qualified_name: "crate::target".to_owned(),
+        language: Some("rust".to_owned()),
+        framework: None,
+        source: Some(anchor.clone()),
+        details: None,
+        evidence: vec![Provenance::direct(
+            EvidenceOrigin::Ast,
+            "test.extractor",
+            EvidenceConfidence::Exact,
+            anchor,
+        )?],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+        community: None,
+    });
+    let graph_path = root.join("graph.json");
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let state_root = root.join("agent-state");
+    let output = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "agent-graph",
+            "prepare",
+            "--graph",
+            graph_path.to_str().ok_or("non-UTF-8 graph path")?,
+            "--root",
+            root.to_str().ok_or("non-UTF-8 project path")?,
+            "--state-root",
+            state_root.to_str().ok_or("non-UTF-8 state path")?,
+            "--overlay",
+            "overlay:review",
+            "--base-node",
+            NODE_ID,
+            "--source-span",
+            "src/lib.rs:0:18",
+            "--format",
+            "json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let prepared: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        prepared["schema"],
+        "compass.agent-graph.ingestion-preparation/1"
+    );
+    assert_eq!(prepared["overlay"], "overlay:review");
+    assert_eq!(prepared["baseNodes"][0]["id"], NODE_ID);
+    assert_eq!(
+        prepared["baseNodes"][0]["recordDigest"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert_eq!(
+        prepared["grounding"]["evidence"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(prepared["grounding"]["evidence"][0]["anchor"]["endLine"], 1);
+    assert!(prepared.get("expectedRevision").is_none());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("GROUNDED"));
+
+    let request_path = root.join("prepared-batch.json");
+    let request = serde_json::json!({
+        "schema": "compass.agent-graph.batch/1",
+        "overlay": prepared["overlay"].clone(),
+        "baseGeneration": prepared["baseGeneration"].clone(),
+        "idempotencyKey": "idempotency:cli-prepared-ingestion",
+        "operations": [
+            {
+                "operation": "put_assertion",
+                "assertion": {
+                    "selector": {"selector": "new", "key": "key:prepared-caller"},
+                    "fact": {
+                        "factType": "node",
+                        "kind": "function",
+                        "name": "prepared_caller",
+                        "qualifiedName": "crate::prepared_caller",
+                        "language": "rust"
+                    },
+                    "grounding": prepared["grounding"].clone(),
+                    "summary": "Prepared source-backed caller."
+                }
+            },
+            {
+                "operation": "put_assertion",
+                "assertion": {
+                    "selector": {"selector": "new", "key": "key:prepared-edge"},
+                    "fact": {
+                        "factType": "edge",
+                        "source": {
+                            "referenceType": "created_in_this_batch",
+                            "key": "key:prepared-caller"
+                        },
+                        "target": {
+                            "referenceType": "base",
+                            "node": prepared["baseNodes"][0].clone()
+                        },
+                        "kind": "calls",
+                        "context": "Prepared exact endpoint"
+                    },
+                    "grounding": prepared["grounding"].clone(),
+                    "summary": "Prepared caller reaches the exact Base node."
+                }
+            }
+        ]
+    });
+    std::fs::write(&request_path, serde_json::to_vec(&request)?)?;
+    let applied = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "agent-graph",
+            "apply",
+            "--graph",
+            graph_path.to_str().ok_or("non-UTF-8 graph path")?,
+            "--root",
+            root.to_str().ok_or("non-UTF-8 project path")?,
+            "--state-root",
+            state_root.to_str().ok_or("non-UTF-8 state path")?,
+            "--overlay",
+            "overlay:review",
+            "--request",
+            request_path.to_str().ok_or("non-UTF-8 request path")?,
+            "--principal",
+            "principal:local",
+            "--enable-writes",
+            "--format",
+            "json",
+        ])
+        .output()?;
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let receipt: serde_json::Value = serde_json::from_slice(&applied.stdout)?;
+    assert_eq!(receipt["schema"], "compass.agent-graph.receipt/1");
+    assert_eq!(receipt["activeAssertions"], 2);
+
+    std::fs::write(root.join(SOURCE_PATH), b"pub fn changed() {}\n")?;
+    let stale = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "agent-graph",
+            "prepare",
+            "--graph",
+            graph_path.to_str().ok_or("non-UTF-8 graph path")?,
+            "--root",
+            root.to_str().ok_or("non-UTF-8 project path")?,
+            "--state-root",
+            state_root.to_str().ok_or("non-UTF-8 state path")?,
+            "--overlay",
+            "overlay:review",
+            "--source-span",
+            "src/lib.rs:0:18",
+            "--format",
+            "json",
+        ])
+        .output()?;
+    assert_eq!(stale.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&stale.stderr)?;
+    assert_eq!(error["code"], "invalid_citation");
     Ok(())
 }
 

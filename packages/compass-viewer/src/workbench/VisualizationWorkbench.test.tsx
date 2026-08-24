@@ -242,4 +242,77 @@ describe("VisualizationWorkbench graph filters", () => {
     expect(screen.getByTestId("visible-nodes")).toHaveTextContent("2");
     expect(screen.queryByText("No nodes match these filters")).toBeNull();
   });
+
+  it("separates extraction completeness from architecture quality and exposes omitted groups", () => {
+    const counts = {
+      production: 2, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0
+    };
+    const groups = ["api", "storage"].map((id, index) => ({
+      id, parentId: null, kind: "subsystem" as const, rank: index + 1,
+      name: {
+        value: id === "api" ? "API" : "Storage", provenance: "path" as const,
+        membershipSignature: `signature-${id}`, quality: 90, evidence: [`path:${id}`]
+      },
+      ownerKey: `crates/${id}`, communityIds: [index], nodeCount: 1,
+      relationshipCount: 0, neighborCount: 0, cohesion: 1,
+      sourceScopes: { ...counts, production: 1 }, pinned: false
+    }));
+    const workbench: WorkbenchModel = {
+      schema: "compass.viewer.workbench/1", title: "Fixture workbench",
+      graphIdentity: "fixture-identity", defaultView: "architecture",
+      views: [{
+        id: "architecture", kind: "architecture", title: "Architecture",
+        description: "Fixture architecture",
+        coverage: { status: "complete", truncated: false, nodes: 2, edges: 0, limitations: [] },
+        model: {
+          schema: "compass.viewer.architecture/1", title: "Fixture architecture",
+          nodes: [
+            { id: "a", label: "Handler", kind: "function", sourceFile: "src/a.ts", sourceScope: "production", scopeReason: "source_path", community: 0 },
+            { id: "b", label: "Store", kind: "struct", sourceFile: "src/b.ts", sourceScope: "production", scopeReason: "source_path", community: 1 }
+          ],
+          relationships: [],
+          projections: [{
+            scope: "production", defaultLens: "architecture", groups,
+            memberships: [{ nodeIndex: 0, groupIndex: 0 }, { nodeIndex: 1, groupIndex: 1 }],
+            routes: [], overviewGroupIds: ["api"], overviewRouteIds: [],
+            coverage: {
+              admitted: 0, internal: 0, crossGroup: 0, unassigned: 0,
+              relationClasses: { execution: 0, dependency: 0, type: 0, structure: 0, contextual: 0, unknown: 0 }
+            },
+            omissions: {
+              totalGroups: 2, shownGroups: 1, omittedGroups: 1,
+              representedNodes: 1, omittedNodes: 1,
+              representedRelationships: 0, omittedRelationships: 0,
+              witnessGroupIds: ["storage"], maxOverviewGroups: 1, maxOverviewRoutes: 1
+            },
+            quality: {
+              status: "good", metrics: {
+                sourceScopes: counts, unknownSourceFraction: 0, generatedVendorLeakage: 0,
+                representedNodeFraction: 0.5, representedRelationshipFraction: 1,
+                duplicateNames: 0, fallbackNames: 0, largestGroupFraction: 0.5,
+                unknownRelations: 0, unassignedNodes: 0, unassignedRelationships: 0
+              }, diagnostics: []
+            }
+          }],
+          statistics: { nodes: 2, relationships: 0, communities: 2, extracted: 0, inferred: 0, ambiguous: 0 },
+          provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null },
+          limits: {
+            maxNodes: 250000, maxRelationships: 1000000, maxGroups: 100000,
+            maxRoutes: 250000, maxOverviewGroups: 1, maxOverviewRoutes: 1,
+            maxNameCandidates: 12, maxNameEvidence: 4, maxDiagnostics: 128,
+            maxOmissionWitnesses: 8
+          }
+        }
+      }]
+    };
+
+    render(<VisualizationWorkbench workbench={workbench} host={{ openSource: vi.fn() }} />);
+    expect(screen.getByText("Extraction complete")).toBeVisible();
+    expect(screen.getByText("Architecture quality: good")).toBeVisible();
+    expect(screen.getByText(/1 of 2 groups shown · 1 available in directory/)).toBeVisible();
+    fireEvent.change(screen.getByRole("combobox", { name: "Subsystem directory" }), {
+      target: { value: "storage" }
+    });
+    expect(screen.getByRole("heading", { name: "Storage" })).toBeVisible();
+  });
 });

@@ -812,16 +812,16 @@ fn callflow_json_exposes_the_shared_architecture_model() -> Result<(), Box<dyn E
         String::from_utf8_lossy(&output.stderr)
     );
     let value: Value = serde_json::from_slice(&output.stdout)?;
-    assert_eq!(value["schema"], "compass.viewer.callflow/1");
+    assert_eq!(value["schema"], "compass.viewer.architecture/1");
     assert_eq!(value["statistics"]["inferred"], 1);
-    assert_eq!(value["coverage"]["crossSection"], 1);
-    assert_eq!(value["crossSectionCalls"][0]["source"], "run");
-    assert_eq!(value["crossSectionCalls"][0]["target"], "store");
-    assert_eq!(value["crossSectionCalls"][0]["confidence"], "inferred");
+    assert_eq!(value["relationships"][0]["source"], "run");
+    assert_eq!(value["relationships"][0]["target"], "store");
+    assert_eq!(value["relationships"][0]["confidence"], "inferred");
+    assert_eq!(value["relationships"][0]["relationClass"], "execution");
     assert!(
-        value["sections"]
+        value["projections"]
             .as_array()
-            .is_some_and(|sections| sections.len() >= 2)
+            .is_some_and(|projections| projections.len() == 2)
     );
 
     let output_path = directory.path().join("callflow.json");
@@ -842,8 +842,50 @@ fn callflow_json_exposes_the_shared_architecture_model() -> Result<(), Box<dyn E
         "{}",
         String::from_utf8_lossy(&written.stderr)
     );
-    assert!(String::from_utf8_lossy(&written.stdout).contains("Call-flow JSON written:"));
+    assert!(String::from_utf8_lossy(&written.stdout).contains("Architecture JSON written:"));
     let written_value: Value = serde_json::from_slice(&std::fs::read(&output_path)?)?;
-    assert_eq!(written_value["schema"], "compass.viewer.callflow/1");
+    assert_eq!(written_value["schema"], "compass.viewer.architecture/1");
+    Ok(())
+}
+
+#[test]
+fn invalid_architecture_overlay_fails_without_publishing_partial_output()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    let overlay = directory.path().join("architecture.toml");
+    let output_path = directory.path().join("architecture.json");
+    std::fs::write(
+        &graph,
+        serde_json::to_vec(&json!({
+            "directed": true,
+            "multigraph": false,
+            "graph": {"project_name":"Fixture"},
+            "nodes": [{"id":"run","label":"run","community":0,"source_file":"src/lib.rs"}],
+            "links": []
+        }))?,
+    )?;
+    std::fs::write(
+        &overlay,
+        "schema = \"compass.architecture-overlay/1\"\n\
+         [[sourceRules]]\npathPrefix = \"src\"\nscope = \"production\"\n\
+         [[sourceRules]]\npathPrefix = \"src/generated\"\nscope = \"generated\"\n",
+    )?;
+    let result = support::compass_command()
+        .args([
+            "export",
+            "callflow-json",
+            "--graph",
+            graph.to_string_lossy().as_ref(),
+            "--architecture-overlay",
+            overlay.to_string_lossy().as_ref(),
+            "--output",
+            output_path.to_string_lossy().as_ref(),
+        ])
+        .current_dir(directory.path())
+        .output()?;
+    assert!(!result.status.success());
+    assert!(String::from_utf8_lossy(&result.stderr).contains("invalid architecture overlay"));
+    assert!(!output_path.exists());
     Ok(())
 }

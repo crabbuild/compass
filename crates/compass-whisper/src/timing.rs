@@ -72,6 +72,17 @@ pub fn dtw(x: &[f64], n: usize, m: usize) -> (Vec<usize>, Vec<usize>) {
     let mut text_indices = Vec::new();
     let mut time_indices = Vec::new();
     while i > 0 || j > 0 {
+        // Boundary cells do not represent a text/time pair. They are
+        // unreachable for finite costs, but can be selected after a caller
+        // supplies a non-finite cost matrix.
+        if i == 0 {
+            j -= 1;
+            continue;
+        }
+        if j == 0 {
+            i -= 1;
+            continue;
+        }
         text_indices.push(i - 1);
         time_indices.push(j - 1);
         match trace[i * w + j] {
@@ -179,8 +190,17 @@ pub fn find_alignment(
                 var += d * d;
             }
             let std = (var / seq_len as f64).sqrt();
-            for t in 0..seq_len {
-                w[t * half + f] = ((w[t * half + f] as f64 - mean) / std) as f32;
+            if std.is_finite() && std > 0.0 {
+                for t in 0..seq_len {
+                    w[t * half + f] = ((w[t * half + f] as f64 - mean) / std) as f32;
+                }
+            } else {
+                // A constant or non-finite attention column has no usable
+                // alignment signal. Keep it neutral instead of creating NaNs
+                // that can send DTW through an invalid boundary path.
+                for t in 0..seq_len {
+                    w[t * half + f] = 0.0;
+                }
             }
         }
         median_filter_rows(w, half, medfilt_width);
@@ -479,6 +499,15 @@ mod tests {
     }
 
     #[test]
+    fn dtw_keeps_boundary_indices_in_range_for_non_finite_costs() {
+        let (text, time) = dtw(&[f64::NAN, 0.0], 2, 1);
+        assert_eq!(text.len(), time.len());
+        assert!(!text.is_empty());
+        assert!(text.iter().all(|&index| index < 2));
+        assert!(time.iter().all(|&index| index < 1));
+    }
+
+    #[test]
     fn empty_alignment_and_segment_sets_are_noops() -> Result<()> {
         let device = Device::Cpu;
         let mut model = WhisperModel::for_test(tiny_config())?;
@@ -486,6 +515,32 @@ mod tests {
         let mel = Tensor::zeros((1, 2, 8), DType::F32, &device)?;
         assert!(find_alignment(&mut model, &tokenizer, &[], &mel, 8, 3, 1.0)?.is_empty());
         add_word_timestamps(&mut [], &mut model, &tokenizer, &mel, 8, "(", "!", 0.0)?;
+        Ok(())
+    }
+
+    #[test]
+    fn zero_cross_attention_has_finite_word_alignment() -> Result<()> {
+        let device = Device::Cpu;
+        let mut model = WhisperModel::for_test(tiny_config())?;
+        let tokenizer = get_tokenizer(false, 99, Some("en"), Some(Task::Transcribe))?;
+        let mel = Tensor::zeros((1, 2, 8), DType::F32, &device)?;
+
+        let alignment = find_alignment(
+            &mut model,
+            &tokenizer,
+            &tokenizer.encode(" hello"),
+            &mel,
+            8,
+            3,
+            1.0,
+        )?;
+        assert!(!alignment.is_empty());
+        assert!(alignment.iter().all(|timing| {
+            timing.start.is_finite()
+                && timing.end.is_finite()
+                && timing.start <= timing.end
+                && timing.probability.is_finite()
+        }));
         Ok(())
     }
 

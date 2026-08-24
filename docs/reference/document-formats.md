@@ -92,15 +92,47 @@ lexically against the validated source/base URL, never fetched.
 | Format | Discovery classification | Structural extractor in this release |
 | --- | --- | --- |
 | HTML / HTM | document | structural Tree-sitter adapter and shared ingestion renderer |
-| DOCX | document/media | media conversion surface; no native block graph |
-| PPTX | not a general local document adapter | not yet |
+| PDF | document | native page/text blocks; optional page OCR |
+| DOCX | document | ordered paragraphs, headings, lists, tables, notes, links, embedded-image OCR |
+| PPTX | document | relationship-ordered slides, shapes, tables, notes, links, embedded-image OCR |
 | RTF | not a general local document adapter | not yet |
-| XLSX | document/media | media conversion surface; no native block graph |
+| XLSX | document | sparse typed sheets/rows/cells, formulas as inert metadata, embedded-image OCR |
 | TXT / RST | document | generic/document fallback only |
 
-This distinction keeps product claims honest: future office and rich-text work
-must add bounded parsing, exact or explicitly normalized locators, security
-tests, and cache/version contracts before it becomes graph evidence.
+PDF and Office adapters emit `compass.document/1`. Locators are typed as PDF
+page/item, OOXML package part/path, slide/shape, sheet/row/column, or OCR owner
+plus pixel polygon. Structural graph nodes preserve the serialized locator and
+document origin. Unknown schema or normalizer versions fail rather than being
+flattened through a compatibility adapter.
+
+### OCR commands and defaults
+
+```text
+compass document inspect FILE --ocr off|auto|always --format text|json
+compass extract PATH --ocr off|auto|always
+compass models list|install|verify
+```
+
+OCR defaults to `off`. Native extraction needs no model. `auto` and `always`
+require a verified local profile and never download implicitly. Use
+`--ocr-language TAG` repeatedly for bounded language hints and
+`--allow-partial` only when incomplete visual coverage is acceptable. JSON
+inspection uses `compass.document.inspect/1` and includes the policy, artifact,
+limits, diagnostics, visual coverage, and exact OCR profile identity.
+
+Managed OCR is unavailable on Intel (`x86_64`) macOS because its pinned ONNX
+runtime has no self-contained distribution for that target. Native extraction
+and `--ocr off` remain available without additional installation. Compass
+rejects model installation and OCR-enabled processing there before any model
+download.
+
+Document and cache files are capped while streaming, so size checks still hold
+if an input changes during a read. PDF rasterization reserves aggregate pixels
+before rendering each page, and tiled recognition checks the document deadline
+before and after each inference unit. One native inference call cannot be
+preempted midway; its result is discarded as a timeout if the deadline has
+elapsed. Concurrent installation of the same model profile waits on a bounded
+lock, and verification rejects symlinked artifacts or markers.
 
 ## Related contracts
 

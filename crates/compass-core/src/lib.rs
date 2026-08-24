@@ -4,6 +4,7 @@ mod agent_graph;
 mod build_state;
 mod cluster_existing;
 mod diagnostics;
+mod document_processing;
 mod history;
 mod merge;
 mod pipeline;
@@ -26,6 +27,9 @@ pub use compass_graph::InferenceLevel;
 pub use diagnostics::{
     diagnose_graph_file, diagnose_graph_quality, format_diagnostic_json, format_diagnostic_report,
     format_quality_json, format_quality_report,
+};
+pub use document_processing::{
+    CoreDocumentProcessingOptions, PreparedDocument, PreparedDocumentSet, prepare_document_set,
 };
 pub use history::{
     CompleteGraphBuilder, MaterializeError, MaterializeObserver, MaterializeRequest,

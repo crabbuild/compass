@@ -111,6 +111,7 @@ jobs:
           "dist/verify/$name/${{ matrix.binary }}" query --help
           test -f "dist/verify/$name/LICENSE-MIT"
           test -f "dist/verify/$name/LICENSE-APACHE"
+          test -f "dist/verify/$name/LICENSE-BOOST"
           test -f "dist/verify/$name/THIRD_PARTY_NOTICES.md"
           (
             cd dist

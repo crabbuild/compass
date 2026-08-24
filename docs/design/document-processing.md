@@ -4,8 +4,8 @@ meta:
   title: Structural document processing
   navLabel: Document Processing
   category: Design
-  overview: How Compass turns Markdown and HTML bytes into bounded, deterministic graph evidence.
-  goal: Define the ownership, provenance, and cache rules for local text documents.
+  overview: How Compass turns text, PDF, and Office bytes into bounded native and OCR evidence.
+  goal: Define ownership, provenance, cache, OCR, and graph rules for local documents.
   audience:
     - Compass contributors
     - technical evaluators
@@ -20,9 +20,10 @@ meta:
 # Structural document processing
 
 Compass treats a document as an ordered source artifact, not as a bag of
-extracted strings. The current structural implementation is Markdown-first:
-the same bounded bytes read by the build pipeline are parsed into a document
-root, structural blocks, and provenance-preserving relationships.
+extracted strings. Markdown and HTML retain exact source ranges. PDF, DOCX,
+PPTX, and XLSX use the versioned `compass.document/1` intermediate artifact,
+typed logical locators, and one shared projection into graph blocks and
+semantic slices.
 
 ## Ownership and data flow
 
@@ -175,16 +176,64 @@ partial response cannot replace a deterministic structural realization.
 
 ## Other document formats
 
-File discovery recognizes several document extensions, but recognition is not
-the same as structural extraction. DOCX and XLSX retain their bounded media
-conversion surfaces; PPTX and RTF remain future format adapters. See the
-[document format reference](../reference/document-formats.md) for the current
-matrix. Markdown and HTML links may point at those formats, but Compass does
-not fetch or execute a linked resource during extraction.
+PDF and OOXML packages are decoded in pure Rust under centralized raw-byte,
+archive-member, expansion-ratio, XML-depth, block, link, row, cell, page, and
+raster limits. DOCX body order, PPTX relationship slide order, and sparse XLSX
+coordinates are preserved. Spreadsheet formulas are evidence and are never
+executed. External OOXML relationships remain inert.
+
+OCR is an optional derived layer and is off by default. `auto` selects PDF
+pages with little native text and eligible embedded Office images; `always`
+selects every bounded candidate. Native text remains authoritative and OCR
+observations retain the owning page/image locator, polygon, confidence, exact
+engine version, profile, model digests, and preprocessing version. OCR never
+replaces or silently deduplicates native blocks.
+
+Preprocessing version 2 applies declared EXIF orientation exactly once,
+composites alpha onto white, resizes with the fixed triangle filter, and tiles
+rasters above the 2,048-pixel engine side with 128 pixels of overlap. Tile
+regions are mapped back to the normalized source raster and equal overlapping
+regions are deduplicated deterministically. Decoding, PDF page rendering,
+candidate iteration, and inference boundaries honor cancellation; the document
+deadline is 600 seconds. The in-process runtime uses one inter-op and one
+intra-op thread.
+
+`compass-core` prepares each rich document once. Complete artifacts are cached
+atomically by source SHA-256 plus document schema, normalizer, renderer, OCR
+policy, profile manifest, preprocessing version, and language hints. Corrupt
+or incompatible entries fail explicitly; partial OCR is never finalized as a
+complete cache entry. The same prepared artifact feeds structural publication
+and gap-free Unicode-safe semantic slices. The semantic layer does not load an
+OCR engine or maintain a second document cache.
+
+On supported targets, the PP-OCRv6 runtime is compiled with Compass. Users
+install no Python, Tesseract, office suite, Poppler, Java, or system ONNX
+package. Intel (`x86_64`) macOS is excluded because the pinned ONNX Runtime has
+no self-contained distribution for that target; native document processing
+continues to work, while model installation and OCR-enabled processing fail
+before downloading. Model weights are deliberately separate: `compass models
+install pp-ocrv6-small` is the only download path on supported targets and
+validates a fixed allowlisted HTTPS source, declared size, SHA-256, and atomic
+verified marker. Inspection and extraction never download or prompt.
+
+The production engine identity is OAR-OCR 0.9.2 with its in-process ONNX
+backend. The model source is the immutable GreatV/OAR-OCR `v0.7.0` GitHub
+release: the small profile is 31,114,837 bytes and the medium profile is
+138,662,763 bytes across detector, recognizer, and shared dictionary. Each
+artifact has a compiled SHA-256. Hayro 0.7.1 is the sole PDF renderer and is
+fingerprinted as `hayro/0.7.1@300dpi`. Neither boundary invokes a system tool.
+
+The checked installed-model smoke gate currently establishes only clean,
+synthetic English recognition and runtime availability; it recorded 0 CER for
+`COMPASS OCR 2026` on the development aarch64 macOS host. This is not a broad
+multilingual, photographed-document, handwriting, or comparative quality
+claim. Release promotion for additional input classes and architectures must
+come from the corpus and gates in the qualification guide.
 
 ## Related pages
 
 - [Document format reference](../reference/document-formats.md)
 - [Language architecture](language-architecture.md)
 - [Extraction pipeline](../implementation/extraction-pipeline.md)
+- [Document OCR qualification](../implementation/document-ocr-qualification.md)
 - [Graph model](../concepts/graph-model.md)

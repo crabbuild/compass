@@ -335,7 +335,14 @@ fn project_lazy_render_relations(
         if !node_kinds.get(owner.as_str()).is_some_and(|kind| {
             matches!(
                 kind.as_str(),
-                "file" | "module" | "function" | "closure" | "method" | "class" | "component"
+                "file"
+                    | "module"
+                    | "function"
+                    | "closure"
+                    | "method"
+                    | "class"
+                    | "component"
+                    | "variable"
             )
         }) {
             continue;

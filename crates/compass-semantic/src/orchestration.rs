@@ -94,8 +94,38 @@ pub fn extract_semantic_units_custom(
 /// Expand oversized splittable documents into complete, gap-free slices.
 #[must_use]
 pub fn expand_oversized_semantic_files(paths: &[PathBuf], max_chars: usize) -> Vec<SemanticUnit> {
+    let prepared = PreparedDocumentInputs::default();
+    paths
+        .iter()
+        .flat_map(|path| {
+            expand_semantic_files_with_prepared_documents(
+                std::slice::from_ref(path),
+                max_chars,
+                &prepared,
+            )
+            .unwrap_or_else(|_| vec![SemanticUnit::File(path.clone())])
+        })
+        .collect()
+}
+
+/// Expand semantic files from application-prepared document text. This layer
+/// never runs OCR or creates a second document cache.
+pub fn expand_semantic_files_with_prepared_documents(
+    paths: &[PathBuf],
+    max_chars: usize,
+    prepared_documents: &PreparedDocumentInputs,
+) -> Result<Vec<SemanticUnit>, SemanticError> {
     let mut units = Vec::new();
     for path in paths {
+        if is_rich_document(path) {
+            let slices = prepare_document_slices(
+                path,
+                max_chars,
+                prepared_documents.documents.get(path).cloned(),
+            )?;
+            units.extend(slices.into_iter().map(SemanticUnit::DocumentSlice));
+            continue;
+        }
         let splittable = path
             .extension()
             .and_then(|extension| extension.to_str())
@@ -115,7 +145,80 @@ pub fn expand_oversized_semantic_files(paths: &[PathBuf], max_chars: usize) -> V
             _ => units.push(SemanticUnit::File(path.clone())),
         }
     }
-    units
+    Ok(units)
+}
+
+fn is_rich_document(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["pdf", "docx", "xlsx", "pptx"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
+fn prepare_document_slices(
+    path: &Path,
+    max_chars: usize,
+    prepared_content: Option<Arc<str>>,
+) -> Result<Vec<DocumentSlice>, SemanticError> {
+    if max_chars == 0 {
+        return Err(SemanticError::DocumentProcessing(
+            "document slice size must be positive".to_owned(),
+        ));
+    }
+    let content = match prepared_content {
+        Some(content) => content,
+        None => {
+            let bytes = fs::read(path).map_err(|source| SemanticError::Read {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let artifact = compass_media::decode_document(path, &bytes).map_err(|error| {
+                SemanticError::DocumentProcessing(format!("{}: {error}", path.display()))
+            })?;
+            Arc::<str>::from(compass_media::render_document_markdown(&artifact).map_err(
+                |error| SemanticError::DocumentProcessing(format!("{}: {error}", path.display())),
+            )?)
+        }
+    };
+    let mut boundaries = vec![0_usize];
+    let mut chars = 0_usize;
+    for (byte, _) in content.char_indices() {
+        if chars == max_chars {
+            boundaries.push(byte);
+            chars = 0;
+        }
+        chars = chars.saturating_add(1);
+    }
+    if boundaries.last().copied() != Some(content.len()) {
+        boundaries.push(content.len());
+    }
+    if boundaries.len() == 1 {
+        boundaries.push(content.len());
+    }
+    let total = u32::try_from(boundaries.len().saturating_sub(1)).map_err(|_| {
+        SemanticError::DocumentProcessing("document slice count overflow".to_owned())
+    })?;
+    boundaries
+        .windows(2)
+        .enumerate()
+        .map(|(index, bounds)| {
+            Ok(DocumentSlice {
+                path: path.to_path_buf(),
+                content: Arc::clone(&content),
+                start: bounds[0],
+                end: bounds[1],
+                ordinal: u32::try_from(index).map_err(|_| {
+                    SemanticError::DocumentProcessing("document slice ordinal overflow".to_owned())
+                })?,
+                total,
+                schema: compass_media::DOCUMENT_SCHEMA,
+                normalizer_version: compass_media::DOCUMENT_NORMALIZER_VERSION,
+            })
+        })
+        .collect()
 }
 
 /// Estimate prompt cost using Compass's deterministic chars-per-token
@@ -127,6 +230,10 @@ pub fn estimate_semantic_unit_tokens(unit: &SemanticUnit) -> usize {
     }
     let chars = match unit {
         SemanticUnit::Slice(slice) => slice.end.saturating_sub(slice.start).min(FILE_CHAR_CAP),
+        SemanticUnit::DocumentSlice(slice) => slice
+            .text()
+            .map(|text| text.chars().count())
+            .unwrap_or_default(),
         SemanticUnit::File(path) => match fs::metadata(path) {
             Ok(metadata) => usize::try_from(metadata.len())
                 .unwrap_or(usize::MAX)
@@ -269,6 +376,26 @@ fn split_semantic_chunk(
         return Some((
             vec![SemanticUnit::Slice(left)],
             vec![SemanticUnit::Slice(right)],
+        ));
+    }
+    if let [SemanticUnit::DocumentSlice(slice)] = chunk {
+        let text = slice.text().ok()?;
+        if text.chars().count() < 2 {
+            return None;
+        }
+        let midpoint_chars = text.chars().count() / 2;
+        let relative = text
+            .char_indices()
+            .nth(midpoint_chars)
+            .map(|(byte, _)| byte)?;
+        let midpoint = slice.start.checked_add(relative)?;
+        let mut left = slice.clone();
+        left.end = midpoint;
+        let mut right = slice.clone();
+        right.start = midpoint;
+        return Some((
+            vec![SemanticUnit::DocumentSlice(left)],
+            vec![SemanticUnit::DocumentSlice(right)],
         ));
     }
     if chunk.len() <= 1 {
@@ -465,6 +592,25 @@ pub struct CorpusExtractionOptions {
     pub max_retry_depth: usize,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedDocumentInputs {
+    pub documents: BTreeMap<PathBuf, Arc<str>>,
+    pub cache_identity: String,
+}
+
+impl Default for PreparedDocumentInputs {
+    fn default() -> Self {
+        Self {
+            documents: BTreeMap::new(),
+            cache_identity: format!(
+                "schema={};normalizer={};mode=off",
+                compass_media::DOCUMENT_SCHEMA,
+                compass_media::DOCUMENT_NORMALIZER_VERSION
+            ),
+        }
+    }
+}
+
 impl Default for CorpusExtractionOptions {
     fn default() -> Self {
         Self {
@@ -494,6 +640,7 @@ pub struct CorpusExtractionResult {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CachedCorpusExtractionOptions {
     pub extraction: CorpusExtractionOptions,
+    pub prepared_documents: PreparedDocumentInputs,
     pub deep_mode: bool,
     pub force: bool,
     pub cache_enabled: bool,
@@ -506,6 +653,7 @@ impl Default for CachedCorpusExtractionOptions {
     fn default() -> Self {
         Self {
             extraction: CorpusExtractionOptions::default(),
+            prepared_documents: PreparedDocumentInputs::default(),
             deep_mode: false,
             force: false,
             cache_enabled: true,
@@ -620,7 +768,34 @@ where
     F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError> + Sync,
     P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
 {
-    let units = expand_oversized_semantic_files(files, FILE_CHAR_CAP);
+    extract_corpus_parallel_with_progress_prepared_documents(
+        files,
+        root,
+        options,
+        &PreparedDocumentInputs::default(),
+        environment,
+        extract,
+        on_chunk_done,
+    )
+}
+
+/// Progress-aware corpus extraction with an explicit local document OCR
+/// profile. OCR and document normalization complete before worker dispatch.
+pub fn extract_corpus_parallel_with_progress_prepared_documents<F, P>(
+    files: &[PathBuf],
+    root: &Path,
+    options: &CorpusExtractionOptions,
+    prepared_documents: &PreparedDocumentInputs,
+    environment: &HashMap<String, String>,
+    extract: &F,
+    on_chunk_done: &mut P,
+) -> Result<CorpusExtractionResult, SemanticError>
+where
+    F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError> + Sync,
+    P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
+{
+    let units =
+        expand_semantic_files_with_prepared_documents(files, FILE_CHAR_CAP, prepared_documents)?;
     let chunks = if let Some(token_budget) = options.token_budget {
         pack_semantic_chunks(&units, token_budget)?
     } else {
@@ -749,7 +924,7 @@ where
     F: Fn(&[SemanticUnit]) -> Result<Value, SemanticError> + Sync,
     P: FnMut(usize, usize, &[SemanticUnit], &Value) + Send,
 {
-    let prompt = extraction_prompt(options.deep_mode);
+    let prompt = semantic_cache_prompt(options.deep_mode, &options.prepared_documents);
     let cache_enabled =
         options.cache_enabled && !environment.contains_key("COMPASS_NO_INCREMENTAL_CACHE");
     let cache_options = cache_root.map_or_else(
@@ -817,10 +992,11 @@ where
                 }
                 on_chunk_done(index, total, chunk, fragment);
             };
-        extract_corpus_parallel_with_progress(
+        extract_corpus_parallel_with_progress_prepared_documents(
             &checked.uncached,
             root,
             &options.extraction,
+            &options.prepared_documents,
             environment,
             extract,
             &mut checkpoint,
@@ -1016,7 +1192,7 @@ impl SemanticCacheSaveOptions {
             allowed_source_files: None,
             partial_source_files: Vec::new(),
             deep_mode,
-            prompt: extraction_prompt(deep_mode),
+            prompt: semantic_cache_prompt(deep_mode, &PreparedDocumentInputs::default()),
         }
     }
 }
@@ -1041,6 +1217,17 @@ fn semantic_cache_kind(deep_mode: bool) -> CacheKind {
     } else {
         CacheKind::Semantic
     }
+}
+
+pub(crate) fn semantic_cache_prompt(
+    deep_mode: bool,
+    prepared_documents: &PreparedDocumentInputs,
+) -> String {
+    format!(
+        "{}\n[compass-document-cache {}]",
+        extraction_prompt(deep_mode),
+        prepared_documents.cache_identity
+    )
 }
 
 /// Replay complete per-file semantic entries produced by the same prompt.

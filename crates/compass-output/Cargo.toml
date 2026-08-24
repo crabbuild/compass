@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 ahash.workspace = true
 rayon.workspace = true
 serde.workspace = true
@@ -22,7 +23,6 @@ thiserror.workspace = true
 time.workspace = true
 compass-files = { path = "../compass-files", version = "0.3.19" }
 compass-analysis = { path = "../compass-analysis", version = "0.3.19" }
-compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 compass-cypher = { path = "../compass-cypher", version = "0.3.19" }
 compass-graph = { path = "../compass-graph", version = "0.3.19" }
 compass-history = { path = "../compass-history", version = "0.3.19" }

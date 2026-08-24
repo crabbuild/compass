@@ -4,11 +4,12 @@ import {
   ArchitectureFlow,
   type ArchitectureEvidence,
   type ArchitectureHost,
+  type ArchitectureLens,
   type ArchitectureOverview,
   type ArchitectureRoutePage,
   type ArchitectureScope,
   type ArchitectureSearchPage,
-  type ArchitectureSectionPage
+  type ArchitectureGroupPage
 } from "@compass/viewer";
 import { HostToArchitectureMessageSchema } from "../transport/architectureMessages";
 import { GraphLoadingState, type GraphLoadingCopy } from "./GraphLoadingState";
@@ -22,12 +23,12 @@ const root = createRoot(element);
 const ARCHITECTURE_LOADING_COPY: GraphLoadingCopy = {
   eyebrow: "Compass architecture",
   title: "Deriving architecture flow",
-  steps: ["Exporting evidence", "Indexing complete call flow", "Laying out subsystem routes"]
+  steps: ["Exporting evidence", "Indexing typed relationships", "Laying out subsystem routes"]
 };
 
 type ArchitectureState = {
   overview?: ArchitectureOverview | undefined;
-  sectionPage?: ArchitectureSectionPage | undefined;
+  groupPage?: ArchitectureGroupPage | undefined;
   routePage?: ArchitectureRoutePage | undefined;
   searchPage?: ArchitectureSearchPage | undefined;
   repositoryId: string;
@@ -72,12 +73,12 @@ function ArchitectureApp() {
               ...current,
               ...identity,
               overview: message.model,
-              sectionPage: undefined,
+              groupPage: undefined,
               routePage: undefined
             };
           }
-          if (message.type === "architectureSectionPage") {
-            return { ...current, ...identity, sectionPage: message.model };
+          if (message.type === "architectureGroupPage") {
+            return { ...current, ...identity, groupPage: message.model };
           }
           if (message.type === "architectureRoutePage") {
             return { ...current, ...identity, routePage: message.model };
@@ -92,7 +93,7 @@ function ArchitectureApp() {
 
   const host = useMemo<ArchitectureHost>(() => {
     const dataRequest = (
-      type: "requestSection" | "requestRoute" | "searchArchitecture",
+      type: "requestGroup" | "requestRoute" | "searchArchitecture",
       payload: Record<string, unknown>
     ) => {
       vscode.postMessage({
@@ -102,22 +103,24 @@ function ArchitectureApp() {
         generation: state.generation,
         scope: state.overview?.scope ?? "production",
         evidence: state.overview?.evidence ?? "all",
+        lens: state.overview?.lens ?? "architecture",
         pageSize: 100,
         ...payload
       });
     };
     return {
-      setFilters(scope: ArchitectureScope, evidence: ArchitectureEvidence) {
+      setFilters(scope: ArchitectureScope, evidence: ArchitectureEvidence, lens: ArchitectureLens) {
         vscode.postMessage({
           type: "setArchitectureFilters",
           requestId: crypto.randomUUID(),
           repositoryId: state.repositoryId,
           scope,
-          evidence
+          evidence,
+          lens
         });
       },
-      requestSection(sectionId, kind, page, query) {
-        dataRequest("requestSection", { sectionId, kind, page, query });
+      requestGroup(groupId, kind, page, query) {
+        dataRequest("requestGroup", { groupId, kind, page, query });
       },
       requestRoute(routeId, page, query) {
         dataRequest("requestRoute", { routeId, page, query });
@@ -134,7 +137,13 @@ function ArchitectureApp() {
         });
       }
     };
-  }, [state.generation, state.overview?.evidence, state.overview?.scope, state.repositoryId]);
+  }, [
+    state.generation,
+    state.overview?.evidence,
+    state.overview?.lens,
+    state.overview?.scope,
+    state.repositoryId
+  ]);
 
   if (state.error) {
     return (
@@ -164,7 +173,7 @@ function ArchitectureApp() {
   return (
     <ArchitectureFlow
       overview={state.overview}
-      sectionPage={state.sectionPage}
+      groupPage={state.groupPage}
       routePage={state.routePage}
       searchPage={state.searchPage}
       loadingMessage={state.loadingMessage}

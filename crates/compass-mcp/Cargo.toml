@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 axum.workspace = true
 rmcp.workspace = true
 serde_json.workspace = true
@@ -20,7 +21,6 @@ tokio.workspace = true
 tokio-util.workspace = true
 tower-http.workspace = true
 compass-core = { path = "../compass-core", version = "0.3.19" }
-compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 compass-files = { path = "../compass-files", version = "0.3.19" }
 compass-graph = { path = "../compass-graph", version = "0.3.19" }
 compass-history = { path = "../compass-history", version = "0.3.19" }

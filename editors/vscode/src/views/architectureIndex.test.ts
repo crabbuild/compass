@@ -1,178 +1,164 @@
 import { describe, expect, it } from "vitest";
-import type { CallflowViewModel } from "@compass/viewer/contracts/callflow";
+import type { ArchitectureViewModel } from "@compass/viewer/contracts/architecture";
 import { ArchitectureIndex, routeId } from "./architectureIndex";
 
-const model: CallflowViewModel = {
-  schema: "compass.viewer.callflow/1",
-  title: "Fixture — Architecture Flow",
-  sections: [
-    {
-      id: "overview",
-      name: "Architecture Overview",
-      communities: [],
-      nodeCount: 0,
-      internalCallCount: 0,
-      nodes: [],
-      edges: []
-    },
-    {
-      id: "api",
-      name: "API",
-      communities: ["0"],
-      nodeCount: 3,
-      internalCallCount: 1,
-      nodes: [
-        {
-          id: "handler", label: "request_handler", kind: "function",
-          sourceFile: "src/api.ts", scope: "production"
-        },
-        {
-          id: "helper", label: "helper", kind: "function",
-          sourceFile: "src/helper.ts", scope: "production"
-        },
-        {
-          id: "api_test", label: "request_handler_test", kind: "function",
-          sourceFile: "tests/api.test.ts", scope: "test"
-        }
-      ],
-      edges: [
-        {
-          source: "handler", target: "helper",
-          relation: "calls", confidence: "extracted"
-        }
-      ]
-    },
-    {
-      id: "storage",
-      name: "Storage",
-      communities: ["1"],
-      nodeCount: 2,
-      internalCallCount: 0,
-      nodes: [
-        {
-          id: "store", label: "save_record", kind: "function",
-          sourceFile: "src/store.ts", scope: "production"
-        },
-        {
-          id: "generated", label: "GeneratedModel", kind: "class",
-          sourceFile: "generated/model.ts", scope: "generated"
-        }
-      ],
-      edges: []
-    }
-  ],
-  overviewLinks: [{ sourceSection: "api", targetSection: "storage", calls: 3 }],
-  crossSectionCalls: [
-    {
-      source: "handler", target: "store", sourceSection: "api",
-      targetSection: "storage", relation: "calls", confidence: "extracted"
-    },
-    {
-      source: "api_test", target: "store", sourceSection: "api",
-      targetSection: "storage", relation: "calls", confidence: "inferred"
-    },
-    {
-      source: "handler", target: "generated", sourceSection: "api",
-      targetSection: "storage", relation: "references", confidence: "ambiguous"
-    }
-  ],
-  coverage: { internal: 1, crossSection: 3, unassigned: 0 },
-  reportHighlights: [],
-  statistics: {
-    nodes: 5,
-    edges: 4,
-    communities: 2,
-    hyperedges: 0,
-    extracted: 2,
-    inferred: 1,
-    ambiguous: 1
+const counts = { production: 2, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 };
+const quality = {
+  status: "good" as const,
+  metrics: {
+    sourceScopes: counts,
+    unknownSourceFraction: 0,
+    generatedVendorLeakage: 0,
+    representedNodeFraction: 1,
+    representedRelationshipFraction: 1,
+    duplicateNames: 0,
+    fallbackNames: 0,
+    largestGroupFraction: 0.5,
+    unknownRelations: 0,
+    unassignedNodes: 0,
+    unassignedRelationships: 0
   },
-  provenance: { projectName: "Fixture", builtAtCommit: "abc123", generatedAt: null }
+  diagnostics: []
+};
+const group = (id: string, name: string, rank: number) => ({
+  id,
+  parentId: null,
+  kind: "subsystem" as const,
+  rank,
+  name: {
+    value: name,
+    provenance: "path" as const,
+    membershipSignature: `signature-${id}`,
+    quality: 90,
+    evidence: [`path:${name}`]
+  },
+  ownerKey: `crates/${id}`,
+  communityIds: [rank - 1],
+  nodeCount: 1,
+  relationshipCount: 1,
+  neighborCount: 1,
+  cohesion: 0.8,
+  sourceScopes: { ...counts, production: 1 },
+  pinned: false
+});
+
+const model: ArchitectureViewModel = {
+  schema: "compass.viewer.architecture/1",
+  title: "Fixture architecture",
+  nodes: [
+    { id: "api", label: "ApiHandler", kind: "function", sourceFile: "src/api.ts", sourceScope: "production", scopeReason: "source_path", community: 0 },
+    { id: "store", label: "LedgerStore", kind: "struct", sourceFile: "src/store.ts", sourceScope: "production", scopeReason: "source_path", community: 1 },
+    { id: "fixture", label: "ApiFixture", kind: "function", sourceFile: "tests/api.test.ts", sourceScope: "test", scopeReason: "test_path", community: 0 }
+  ],
+  relationships: [
+    { id: "r-call", source: "api", target: "store", relation: "calls", relationClass: "execution", confidence: "extracted" },
+    { id: "r-type", source: "api", target: "store", relation: "type_of", relationClass: "type", confidence: "inferred" },
+    { id: "r-test", source: "fixture", target: "api", relation: "calls", relationClass: "execution", confidence: "extracted" }
+  ],
+  projections: [
+    {
+      scope: "production",
+      defaultLens: "architecture",
+      groups: [group("api-group", "API", 1), group("storage-group", "Storage", 2)],
+      memberships: [
+        { nodeIndex: 0, groupIndex: 0 },
+        { nodeIndex: 1, groupIndex: 1 }
+      ],
+      routes: [],
+      overviewGroupIds: ["api-group", "storage-group"],
+      overviewRouteIds: [],
+      coverage: {
+        admitted: 1,
+        internal: 0,
+        crossGroup: 1,
+        unassigned: 0,
+        relationClasses: { execution: 1, dependency: 0, type: 1, structure: 0, contextual: 0, unknown: 0 }
+      },
+      omissions: {
+        totalGroups: 2, shownGroups: 2, omittedGroups: 0,
+        representedNodes: 2, omittedNodes: 0,
+        representedRelationships: 1, omittedRelationships: 0,
+        witnessGroupIds: [], maxOverviewGroups: 24, maxOverviewRoutes: 64
+      },
+      quality
+    },
+    {
+      scope: "all_code",
+      defaultLens: "architecture",
+      groups: [
+        { ...group("api-group", "API", 1), nodeCount: 2, sourceScopes: { ...counts, production: 1, test: 1 } },
+        group("storage-group", "Storage", 2)
+      ],
+      memberships: [
+        { nodeIndex: 0, groupIndex: 0 },
+        { nodeIndex: 2, groupIndex: 0 },
+        { nodeIndex: 1, groupIndex: 1 }
+      ],
+      routes: [],
+      overviewGroupIds: ["api-group", "storage-group"],
+      overviewRouteIds: [],
+      coverage: {
+        admitted: 2,
+        internal: 1,
+        crossGroup: 1,
+        unassigned: 0,
+        relationClasses: { execution: 2, dependency: 0, type: 1, structure: 0, contextual: 0, unknown: 0 }
+      },
+      omissions: {
+        totalGroups: 2, shownGroups: 2, omittedGroups: 0,
+        representedNodes: 3, omittedNodes: 0,
+        representedRelationships: 2, omittedRelationships: 0,
+        witnessGroupIds: [], maxOverviewGroups: 24, maxOverviewRoutes: 64
+      },
+      quality: { ...quality, metrics: { ...quality.metrics, sourceScopes: { ...counts, test: 1 } } }
+    }
+  ],
+  statistics: { nodes: 3, relationships: 3, communities: 2, extracted: 2, inferred: 1, ambiguous: 0 },
+  provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null },
+  limits: {
+    maxNodes: 250000, maxRelationships: 1000000, maxGroups: 100000, maxRoutes: 250000,
+    maxOverviewGroups: 24, maxOverviewRoutes: 64, maxNameCandidates: 12,
+    maxNameEvidence: 4, maxDiagnostics: 128, maxOmissionWitnesses: 8
+  }
 };
 
 describe("ArchitectureIndex", () => {
-  it("defaults projections to production while disclosing complete totals", () => {
-    const overview = new ArchitectureIndex(model).overview("production", "all");
-
-    expect(overview.statistics).toMatchObject({
-      visibleNodes: 3,
-      totalNodes: 5,
-      visibleCalls: 2,
-      totalCalls: 4
-    });
-    expect(overview.routes).toEqual([
-      expect.objectContaining({
-        sourceSection: "api",
-        targetSection: "storage",
-        calls: 1,
-        extracted: 1
-      })
-    ]);
-    expect(overview.sections.find((section) => section.id === "api")?.scopes.test).toBe(1);
-  });
-
-  it("restores test and generated calls in all-code scope", () => {
-    const overview = new ArchitectureIndex(model).overview("all", "all");
-    expect(overview.statistics.visibleNodes).toBe(5);
-    expect(overview.statistics.visibleCalls).toBe(4);
-    expect(overview.routes[0]).toMatchObject({
-      calls: 3,
-      extracted: 1,
-      inferred: 1,
-      ambiguous: 1
-    });
-  });
-
-  it("filters evidence and pages every call behind a route", () => {
+  it("uses Rust-owned production memberships and typed lenses", () => {
     const index = new ArchitectureIndex(model);
-    const page = index.routePage({
-      routeId: routeId("api", "storage"),
-      scope: "all",
-      evidence: "all",
-      page: 2,
-      pageSize: 2
-    });
-    expect(page).toMatchObject({ total: 3, start: 3, end: 3 });
-    expect(page.items).toHaveLength(1);
+    const production = index.overview("production", "all", "architecture");
+    expect(production.statistics.totalNodes).toBe(2);
+    expect(production.statistics.visibleRelationships).toBe(1);
+    expect(production.routes[0]?.id).toBe(routeId("api-group", "storage-group"));
 
-    const inferred = index.overview("all", "inferred");
-    expect(inferred.routes[0]).toMatchObject({ calls: 1, inferred: 1 });
+    const allCode = index.overview("all", "all", "architecture");
+    expect(allCode.statistics.totalNodes).toBe(3);
+    expect(allCode.groups.find((item) => item.id === "api-group")?.scopes.test).toBe(1);
+
+    const typeLens = index.overview("production", "all", "type");
+    expect(typeLens.statistics.visibleRelationships).toBe(1);
+    expect(typeLens.lens).toBe("type");
   });
 
-  it("searches the complete retained model rather than one visible page", () => {
-    const results = new ArchitectureIndex(model).search({
-      query: "GeneratedModel",
-      scope: "all",
-      evidence: "all",
-      page: 1,
-      pageSize: 10
+  it("pages group evidence and keeps hidden-scope nodes out of production", () => {
+    const index = new ArchitectureIndex(model);
+    const production = index.groupPage({
+      groupId: "api-group", kind: "symbols", page: 1, pageSize: 100,
+      scope: "production", evidence: "all", lens: "architecture"
     });
-    expect(results.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: "symbol",
-        label: "GeneratedModel",
-        sectionId: "storage"
-      })
-    ]));
+    expect(production.items.map((item) => item.id)).toEqual(["api"]);
+    const all = index.groupPage({
+      groupId: "api-group", kind: "symbols", page: 1, pageSize: 100,
+      scope: "all", evidence: "all", lens: "architecture"
+    });
+    expect(all.items.map((item) => item.id)).toEqual(["fixture", "api"]);
   });
 
-  it("returns bounded section pages with complete range metadata", () => {
-    const page = new ArchitectureIndex(model).sectionPage({
-      sectionId: "api",
-      kind: "symbols",
-      scope: "all",
-      evidence: "all",
-      page: 1,
-      pageSize: 2
+  it("searches complete scoped groups and source evidence", () => {
+    const index = new ArchitectureIndex(model);
+    const result = index.search({
+      query: "ledger", page: 1, pageSize: 100,
+      scope: "production", evidence: "all", lens: "architecture"
     });
-    expect(page).toMatchObject({
-      kind: "symbols",
-      total: 3,
-      start: 1,
-      end: 2,
-      pageCount: 2
-    });
-    expect(page.items).toHaveLength(2);
+    expect(result.items.some((item) => item.label === "LedgerStore")).toBe(true);
   });
-
 });

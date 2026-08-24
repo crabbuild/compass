@@ -105,6 +105,7 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(body.contains("references/semantic-extraction.md"));
     assert!(body.contains("references/operations.md"));
     assert!(body.contains("references/command-reference.md"));
+    assert!(body.contains("references/agent-graph.md"));
     assert!(body.contains("references/labeling.md"));
     assert!(body.contains("references/security-and-boundaries.md"));
     assert!(body.contains("run `compass update .`\nonce and continue"));
@@ -133,11 +134,18 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(!query.contains("--context CheckoutService"));
     assert!(!query.contains("anchor a common term inside a subsystem"));
     let references = skill.with_file_name("references");
+    let agent_graph = fs::read_to_string(references.join("agent-graph.md"))?;
+    assert!(agent_graph.contains("What the user can ask"));
+    assert!(agent_graph.contains("compass agent-graph apply"));
+    assert!(agent_graph.contains("compass agent-graph rebase-plan"));
+    assert!(agent_graph.contains("do not need to compose commands or JSON"));
+    assert!(agent_graph.contains("Requests cannot award themselves"));
+    assert!(agent_graph.contains("Never translate “delete this relation”"));
     assert_eq!(
         fs::read_dir(&references)?
             .collect::<Result<Vec<_>, _>>()?
             .len(),
-        15
+        16
     );
     let hooks: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.project.join(".codex/hooks.json"))?)?;

@@ -9,12 +9,24 @@ images, external schemas, or when provider configuration is involved.
 compass update .
 compass extract . --code-only
 compass extract docs --backend BACKEND --model MODEL
+compass document inspect scan.pdf --ocr auto
+compass models install pp-ocrv6-small
 ```
 
 - `update` is deterministic structural extraction.
 - `extract --code-only` guarantees no model invocation.
 - `extract` without `--code-only` may send selected content to the configured
   provider.
+- Document parsing and OCR are local. Native PDF/Office extraction requires no
+  model; OCR uses a pinned Compass-managed profile and never requires a system
+  OCR installation.
+
+Use `compass document inspect FILE --format json` to diagnose document content
+without publishing a graph. `--ocr off` is the deterministic native-only path;
+`--ocr auto` OCRs scanned PDF pages and eligible embedded Office images while
+preserving native text; `--ocr always` OCRs every eligible visual. If a profile
+is absent, install it explicitly with `compass models install
+pp-ocrv6-small`, then confirm its digest with `compass models verify`.
 
 Do not assume credentials or a provider. Run `compass extract --help` and
 `compass provider list`, then use only configuration already in scope. Never

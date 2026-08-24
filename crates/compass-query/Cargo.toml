@@ -12,6 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 base64.workspace = true
 regex.workspace = true
 rusqlite.workspace = true
@@ -22,7 +23,6 @@ thiserror.workspace = true
 compass-cypher = { path = "../compass-cypher", version = "0.3.19" }
 compass-model = { path = "../compass-model", version = "0.3.19" }
 compass-analysis = { path = "../compass-analysis", version = "0.3.19" }
-compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.19" }
 compass-ir = { path = "../compass-ir", version = "0.3.19" }
 compass-store = { path = "../compass-store", version = "0.3.19" }
 compass-graph = { path = "../compass-graph", version = "0.3.19" }

@@ -50,6 +50,33 @@ CI covers Linux, macOS, and Windows targets listed in
 performance checks are owned by Compass workflows and require no external
 product checkout.
 
+## Document and OCR compatibility
+
+Native PDF, DOCX, PPTX, and XLSX processing is part of the local Rust product
+boundary. It does not require Python, Tesseract, LibreOffice, Poppler, Java, a
+runtime grammar download, or provider credentials. The stable artifact majors
+introduced here are `compass.document/1`, `compass.document.inspect/1`, and
+`compass.ocr/1`; unknown majors and normalizer versions fail explicitly.
+
+OCR is off by default. Enabling `auto` or `always` requires one exact verified
+Compass-managed profile. Extraction never downloads models, and `models
+verify` never accesses the network. Document and semantic caches are hard-cut
+by source digest, schema, normalizer, rasterizer, OCR policy, preprocessing,
+profile manifest/model digests, and languages. An incompatible cache entry is
+a miss or explicit corruption error, never a fallback to flattened text.
+
+Managed OCR is unavailable on Intel (`x86_64`) macOS because the pinned ONNX
+Runtime distribution has no self-contained build for that target. Compass
+therefore omits the OCR runtime dependency on Intel macOS instead of requiring
+a system ONNX installation. Native document processing and `--ocr off` remain
+fully available; `models install` and OCR-enabled processing fail explicitly.
+
+The selected OCR identity is included in graph build and immutable history
+profiles. Native text remains authoritative; OCR is additive derived evidence
+with exact source owner, geometry, confidence, and model provenance. Partial
+visual coverage is never labeled complete or finalized as a complete document
+cache entry.
+
 ## Evolving contracts
 
 The Grounded Agent Graph feature is additive and opt-in. It does not change
@@ -60,12 +87,33 @@ majors and unknown fields fail closed. `GROUNDED` is a Compass-issued citation
 verification state and must not be interpreted as `INFERRED`, `EXTRACTED`, or
 proof of semantic truth.
 
+`compass.agent-graph.ingestion-preparation/1` is a read-only additive contract.
+It calculates exact Base record and source-evidence digests for a selected Base
+Generation; it does not certify, mutate, or publish an assertion. Apply
+re-verifies prepared evidence against the pinned Base Generation.
+
 Overlay writes require explicit CLI or server enablement. Existing MCP servers
 without Agent Graph configuration advertise no Agent Graph tools. Configured
 read-only servers advertise inspection only; HTTP writes additionally require
 a distinct write key. Historical composition is selected explicitly and never
 changes realization preference or stored history content. No migration of
 existing graphs or history is required.
+
+The frontend graph vocabulary is also additive within the pre-release
+`compass.graph/1` contract. React-oriented builds may publish the typed
+`renders` relationship and the `ui_component`, `hook`, `client_boundary`,
+`client_component`, `server_component`, `server_function`, and `data_loader`
+node roles. A reader that validates closed edge or role enums must update to a
+release containing these values before consuming such a graph; older readers
+must fail closed rather than silently dropping them. These values do not make
+the corresponding framework pack a completed quality claim: promotion remains
+gated by the independent qualification corpus, precision/recall, ambiguity,
+limit, and determinism checks in the frontend graph plan.
+
+The checked-in `compass.query/1` enum manifest and fingerprint widen in lockstep
+with this vocabulary. Strict query, MCP, CLI, VS Code, and viewer consumers
+must use the matching manifest; they must reject an unknown `edgeKind` or
+`nodeRole` instead of filtering it into an older response shape.
 
 Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
 universal evidence pipelines. The four pipelines are intentionally
@@ -84,6 +132,18 @@ A user-visible incompatible change requires:
 
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
+
+The architecture viewer is a coordinated hard cut from
+`compass.viewer.callflow/1` to `compass.viewer.architecture/1`. Capability
+negotiation advertises `architecture_viewer`; consumers must reject an unknown
+major. The new payload does not reinterpret old `sections` or `calls` fields:
+it publishes typed nodes and relationships once plus source-specific group,
+membership, route, omission, and quality projections. The `callflow-json` and
+`callflow-html` command names remain available, but direct v1 callflow JSON
+consumers must migrate.
+Membership records are compact validated indexes into the deterministic node
+and per-projection group arrays. Documentation is a first-class All-code source
+scope and cannot influence Production architecture.
 
 Before the first compatibility-stable release, Compass hard-resets active
 internal extraction, cache, publication, store-index, query-index/ranker,

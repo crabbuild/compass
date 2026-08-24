@@ -61,6 +61,21 @@ impl HistoryBuildOptions {
         if profile.value("semantic_mode") == Some("deep") {
             forwarded.extend(["--mode".to_owned(), "deep".to_owned()]);
         }
+        push_profile_option(&profile, &mut forwarded, "ocr_mode", "--ocr", "off");
+        push_profile_option(
+            &profile,
+            &mut forwarded,
+            "ocr_profile",
+            "--ocr-profile",
+            "none",
+        );
+        for (key, value) in profile
+            .entries()
+            .filter(|(key, _)| key.starts_with("ocr_language."))
+        {
+            let _ = key;
+            forwarded.extend(["--ocr-language".to_owned(), value.to_owned()]);
+        }
         if code_only {
             forwarded.push("--code-only".to_owned());
         }
@@ -125,6 +140,18 @@ impl HistoryBuildOptions {
             }
         };
         insert_current_engine_profile(&mut profile, deep)?;
+        if profile.value("ocr_mode").is_none() {
+            profile.insert("ocr_mode", "off")?;
+        }
+        if profile.value("ocr_profile").is_none() {
+            profile.insert("ocr_profile", "pp-ocrv6-small")?;
+        }
+        if profile.value("ocr_model_manifest").is_none() {
+            profile.insert(
+                "ocr_model_manifest",
+                &compass_ocr::profile_manifest_digest(compass_ocr::ModelProfile::PpOcrV6Small),
+            )?;
+        }
         Self::from_profile(profile)
     }
 
@@ -149,12 +176,20 @@ impl HistoryBuildOptions {
     }
 
     fn from_values(mut values: HistoryBuildValues) -> Result<Self, HistoryError> {
+        let ocr_profile = values
+            .ocr_profile
+            .parse::<compass_ocr::ModelProfile>()
+            .map_err(|error| HistoryError::InvalidFingerprint(error.to_string()))?;
+        values.ocr_profile = ocr_profile.name().to_owned();
+        values.ocr_languages = compass_ocr::normalize_language_hints(&values.ocr_languages)
+            .map_err(|error| HistoryError::InvalidFingerprint(error.to_string()))?;
         if values.code_only {
             if values.backend.is_some()
                 || values.model.is_some()
                 || values.deep
                 || values.dedup_llm
                 || values.token_budget.is_some()
+                || values.ocr_mode != "off"
             {
                 return Err(HistoryError::InvalidFingerprint(
                     "--code-only cannot be combined with semantic-provider options".to_owned(),
@@ -170,6 +205,12 @@ impl HistoryBuildOptions {
             ("code_only", values.code_only.to_string()),
             ("cargo", values.cargo.to_string()),
             ("dedup_llm", values.dedup_llm.to_string()),
+            ("ocr_mode", values.ocr_mode.clone()),
+            ("ocr_profile", values.ocr_profile.clone()),
+            (
+                "ocr_model_manifest",
+                compass_ocr::profile_manifest_digest(ocr_profile),
+            ),
             (
                 "semantic_mode",
                 if values.deep { "deep" } else { "standard" }.to_owned(),
@@ -227,6 +268,9 @@ impl HistoryBuildOptions {
         for (index, exclude) in values.excludes.iter().enumerate() {
             profile.insert(&format!("exclude.{index:06}"), exclude)?;
         }
+        for (index, language) in values.ocr_languages.iter().enumerate() {
+            profile.insert(&format!("ocr_language.{index:06}"), language)?;
+        }
 
         let mut forwarded = Vec::new();
         if let Some(backend) = &values.backend {
@@ -234,6 +278,13 @@ impl HistoryBuildOptions {
         }
         if let Some(model) = &values.model {
             forwarded.extend(["--model".to_owned(), model.clone()]);
+        }
+        if values.ocr_mode != "off" {
+            forwarded.extend(["--ocr".to_owned(), values.ocr_mode.clone()]);
+            forwarded.extend(["--ocr-profile".to_owned(), values.ocr_profile.clone()]);
+            for language in &values.ocr_languages {
+                forwarded.extend(["--ocr-language".to_owned(), language.clone()]);
+            }
         }
         if values.code_only {
             forwarded.push("--code-only".to_owned());
@@ -288,6 +339,73 @@ fn insert_current_engine_profile(
         ("extractor_version", "compass-languages/v1".to_owned()),
         ("resolver_version", "compass-resolve/v1".to_owned()),
         ("pipeline_version", "compass-core/v1".to_owned()),
+        ("document_schema", compass_media::DOCUMENT_SCHEMA.to_owned()),
+        (
+            "document_normalizer_version",
+            compass_media::DOCUMENT_NORMALIZER_VERSION.to_string(),
+        ),
+        ("ocr_protocol", compass_ocr::OCR_PROTOCOL_SCHEMA.to_owned()),
+        ("ocr_policy", compass_ocr::OCR_POLICY_VERSION.to_string()),
+        (
+            "ocr_preprocessing",
+            compass_ocr::OCR_PREPROCESSING_VERSION.to_string(),
+        ),
+        (
+            "pdf_rasterizer",
+            compass_media::PDF_RASTERIZER_IDENTITY.to_owned(),
+        ),
+        (
+            "document_raw_bytes_limit",
+            compass_media::MEDIA_MAX_RAW_BYTES.to_string(),
+        ),
+        (
+            "ocr_pdf_pages_limit",
+            compass_media::OCR_MAX_PDF_PAGES.to_string(),
+        ),
+        (
+            "ocr_office_images_limit",
+            compass_media::OCR_MAX_OOXML_IMAGES.to_string(),
+        ),
+        (
+            "ocr_raster_pixels_limit",
+            compass_ocr::OCR_MAX_RASTER_PIXELS.to_string(),
+        ),
+        (
+            "ocr_raster_edge_limit",
+            compass_ocr::OCR_MAX_RASTER_LONG_EDGE.to_string(),
+        ),
+        (
+            "ocr_engine_side_limit",
+            compass_ocr::OCR_ENGINE_MAX_SIDE.to_string(),
+        ),
+        (
+            "ocr_tile_overlap",
+            compass_ocr::OCR_TILE_OVERLAP.to_string(),
+        ),
+        (
+            "ocr_aggregate_pixels_limit",
+            compass_media::OCR_MAX_AGGREGATE_PIXELS.to_string(),
+        ),
+        (
+            "ocr_regions_raster_limit",
+            compass_ocr::OCR_MAX_OBSERVATIONS_PER_RASTER.to_string(),
+        ),
+        (
+            "ocr_regions_document_limit",
+            compass_ocr::OCR_MAX_OBSERVATIONS_PER_DOCUMENT.to_string(),
+        ),
+        (
+            "ocr_text_region_limit",
+            compass_ocr::OCR_MAX_TEXT_BYTES_PER_OBSERVATION.to_string(),
+        ),
+        (
+            "ocr_text_document_limit",
+            compass_ocr::OCR_MAX_TEXT_CHARS_PER_DOCUMENT.to_string(),
+        ),
+        (
+            "ocr_wall_time_seconds",
+            compass_ocr::OCR_MAX_DOCUMENT_WALL_TIME_SECS.to_string(),
+        ),
         (
             "program_provider_policy",
             "offline-artifacts-first".to_owned(),
@@ -331,6 +449,25 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 | "extractor_version"
                 | "resolver_version"
                 | "pipeline_version"
+                | "document_schema"
+                | "document_normalizer_version"
+                | "ocr_protocol"
+                | "ocr_policy"
+                | "ocr_preprocessing"
+                | "pdf_rasterizer"
+                | "document_raw_bytes_limit"
+                | "ocr_pdf_pages_limit"
+                | "ocr_office_images_limit"
+                | "ocr_raster_pixels_limit"
+                | "ocr_raster_edge_limit"
+                | "ocr_engine_side_limit"
+                | "ocr_tile_overlap"
+                | "ocr_aggregate_pixels_limit"
+                | "ocr_regions_raster_limit"
+                | "ocr_regions_document_limit"
+                | "ocr_text_region_limit"
+                | "ocr_text_document_limit"
+                | "ocr_wall_time_seconds"
                 | "program_provider_policy"
                 | "program_ir_schema"
                 | "program_merger_version"
@@ -344,6 +481,9 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 | "code_only"
                 | "cargo"
                 | "dedup_llm"
+                | "ocr_mode"
+                | "ocr_profile"
+                | "ocr_model_manifest"
                 | "semantic_mode"
                 | "semantic_prompt_sha256"
                 | "provider"
@@ -356,6 +496,7 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 | "provider_max_output_tokens"
                 | "provider_region"
         ) && !key.starts_with("exclude.")
+            && !key.starts_with("ocr_language.")
         {
             return Err(HistoryError::InvalidFingerprint(format!(
                 "unsupported persisted build-profile field {key:?}"
@@ -368,6 +509,9 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
         ("extractor_version", "compass-languages/v1"),
         ("resolver_version", "compass-resolve/v1"),
         ("pipeline_version", "compass-core/v1"),
+        ("document_schema", compass_media::DOCUMENT_SCHEMA),
+        ("ocr_protocol", compass_ocr::OCR_PROTOCOL_SCHEMA),
+        ("pdf_rasterizer", compass_media::PDF_RASTERIZER_IDENTITY),
         ("program_provider_policy", "offline-artifacts-first"),
         ("enabled_features", "workspace-default"),
         ("direction", "native-source-semantics"),
@@ -375,6 +519,80 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
         ("cluster_seed", "42"),
     ] {
         if profile.value(key) != Some(expected) {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "persisted {key} is incompatible with {expected}"
+            )));
+        }
+    }
+    for (key, expected) in [
+        (
+            "document_raw_bytes_limit",
+            compass_media::MEDIA_MAX_RAW_BYTES.to_string(),
+        ),
+        (
+            "ocr_pdf_pages_limit",
+            compass_media::OCR_MAX_PDF_PAGES.to_string(),
+        ),
+        (
+            "ocr_office_images_limit",
+            compass_media::OCR_MAX_OOXML_IMAGES.to_string(),
+        ),
+        (
+            "ocr_raster_pixels_limit",
+            compass_ocr::OCR_MAX_RASTER_PIXELS.to_string(),
+        ),
+        (
+            "ocr_raster_edge_limit",
+            compass_ocr::OCR_MAX_RASTER_LONG_EDGE.to_string(),
+        ),
+        (
+            "ocr_engine_side_limit",
+            compass_ocr::OCR_ENGINE_MAX_SIDE.to_string(),
+        ),
+        (
+            "ocr_tile_overlap",
+            compass_ocr::OCR_TILE_OVERLAP.to_string(),
+        ),
+        (
+            "ocr_aggregate_pixels_limit",
+            compass_media::OCR_MAX_AGGREGATE_PIXELS.to_string(),
+        ),
+        (
+            "ocr_regions_raster_limit",
+            compass_ocr::OCR_MAX_OBSERVATIONS_PER_RASTER.to_string(),
+        ),
+        (
+            "ocr_regions_document_limit",
+            compass_ocr::OCR_MAX_OBSERVATIONS_PER_DOCUMENT.to_string(),
+        ),
+        (
+            "ocr_text_region_limit",
+            compass_ocr::OCR_MAX_TEXT_BYTES_PER_OBSERVATION.to_string(),
+        ),
+        (
+            "ocr_text_document_limit",
+            compass_ocr::OCR_MAX_TEXT_CHARS_PER_DOCUMENT.to_string(),
+        ),
+        (
+            "ocr_wall_time_seconds",
+            compass_ocr::OCR_MAX_DOCUMENT_WALL_TIME_SECS.to_string(),
+        ),
+    ] {
+        if profile.value(key) != Some(expected.as_str()) {
+            return Err(HistoryError::InvalidFingerprint(format!(
+                "persisted {key} is incompatible with {expected}"
+            )));
+        }
+    }
+    for (key, expected) in [
+        (
+            "document_normalizer_version",
+            compass_media::DOCUMENT_NORMALIZER_VERSION,
+        ),
+        ("ocr_policy", compass_ocr::OCR_POLICY_VERSION),
+        ("ocr_preprocessing", compass_ocr::OCR_PREPROCESSING_VERSION),
+    ] {
+        if profile.value(key).and_then(|value| value.parse().ok()) != Some(expected) {
             return Err(HistoryError::InvalidFingerprint(format!(
                 "persisted {key} is incompatible with {expected}"
             )));
@@ -408,6 +626,36 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
     if !matches!(profile.value("code_only"), None | Some("true" | "false")) {
         return Err(HistoryError::InvalidFingerprint(
             "persisted code_only is not boolean".to_owned(),
+        ));
+    }
+    if !matches!(profile.value("ocr_mode"), Some("off" | "auto" | "always")) {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted OCR mode is invalid".to_owned(),
+        ));
+    }
+    let ocr_profile = profile
+        .value("ocr_profile")
+        .ok_or_else(|| {
+            HistoryError::InvalidFingerprint("persisted OCR profile is missing".to_owned())
+        })?
+        .parse::<compass_ocr::ModelProfile>()
+        .map_err(|error| HistoryError::InvalidFingerprint(error.to_string()))?;
+    let expected_manifest = compass_ocr::profile_manifest_digest(ocr_profile);
+    if profile.value("ocr_model_manifest") != Some(expected_manifest.as_str()) {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted OCR model manifest does not match the pinned profile".to_owned(),
+        ));
+    }
+    let languages = profile
+        .entries()
+        .filter(|(key, _)| key.starts_with("ocr_language."))
+        .map(|(_, language)| language.to_owned())
+        .collect::<Vec<_>>();
+    let normalized = compass_ocr::normalize_language_hints(&languages)
+        .map_err(|error| HistoryError::InvalidFingerprint(error.to_string()))?;
+    if normalized != languages {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted OCR languages are not canonical".to_owned(),
         ));
     }
     let resolution = profile
@@ -596,6 +844,9 @@ struct HistoryBuildValues {
     deep: bool,
     cargo: bool,
     dedup_llm: bool,
+    ocr_mode: String,
+    ocr_profile: String,
+    ocr_languages: Vec<String>,
     token_budget: Option<usize>,
     resolution: f64,
     exclude_hubs: Option<f64>,
@@ -616,6 +867,9 @@ impl Default for HistoryBuildValues {
             deep: false,
             cargo: false,
             dedup_llm: false,
+            ocr_mode: "off".to_owned(),
+            ocr_profile: "pp-ocrv6-small".to_owned(),
+            ocr_languages: Vec::new(),
             token_budget: None,
             resolution: 1.0,
             exclude_hubs: None,
@@ -680,8 +934,8 @@ pub(crate) fn parse_build_command(
                     _ => unreachable!(),
                 }
             }
-            "--backend" | "--model" | "--mode" | "--token-budget" | "--resolution"
-            | "--exclude-hubs" | "--format" | "--profile-from" => {
+            "--backend" | "--model" | "--mode" | "--ocr" | "--ocr-profile" | "--token-budget"
+            | "--resolution" | "--exclude-hubs" | "--format" | "--profile-from" => {
                 if !seen.insert(name.to_owned()) {
                     return Err(format!("duplicate {name}"));
                 }
@@ -691,6 +945,16 @@ pub(crate) fn parse_build_command(
                     "--model" => values.model = Some(nonempty(name, value)?.to_owned()),
                     "--mode" if value == "deep" => values.deep = true,
                     "--mode" => return Err("--mode must be deep".to_owned()),
+                    "--ocr" if matches!(value, "off" | "auto" | "always") => {
+                        values.ocr_mode = value.to_owned()
+                    }
+                    "--ocr" => return Err("--ocr must be off, auto, or always".to_owned()),
+                    "--ocr-profile" => {
+                        value
+                            .parse::<compass_ocr::ModelProfile>()
+                            .map_err(|error| error.to_string())?;
+                        values.ocr_profile = value.to_owned();
+                    }
                     "--token-budget" => values.token_budget = Some(positive_usize(name, value)?),
                     "--resolution" => values.resolution = positive_float(name, value)?,
                     "--exclude-hubs" => values.exclude_hubs = Some(finite_float(name, value)?),
@@ -702,6 +966,13 @@ pub(crate) fn parse_build_command(
             "--exclude" => {
                 let value = option_value(args, &mut index, name, inline)?;
                 values.excludes.push(nonempty(name, value)?.to_owned());
+            }
+            "--ocr-language" => {
+                let value = nonempty(name, option_value(args, &mut index, name, inline)?)?;
+                if value.len() > 64 {
+                    return Err("--ocr-language is too long".to_owned());
+                }
+                values.ocr_languages.push(value.to_owned());
             }
             "--allow-partial" | "--no-cluster" => {
                 return Err(format!(

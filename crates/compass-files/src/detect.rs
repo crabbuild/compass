@@ -25,7 +25,7 @@ const CODE_EXTENSIONS: &[&str] = &[
 ];
 const DOCUMENT_EXTENSIONS: &[&str] = &[
     "md", "markdown", "mdx", "qmd", "skill", "txt", "rst", "html", "htm", "yaml", "yml", "docx",
-    "xlsx", "gdoc", "gsheet", "gslides",
+    "xlsx", "pptx", "gdoc", "gsheet", "gslides",
 ];
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
 const VIDEO_EXTENSIONS: &[&str] = &[
@@ -835,7 +835,7 @@ fn sensitive(path: &Path) -> bool {
 }
 
 fn count_words(path: &Path) -> u64 {
-    if matches!(extension(path).as_str(), "pdf" | "docx" | "xlsx") {
+    if matches!(extension(path).as_str(), "pdf" | "docx" | "xlsx" | "pptx") {
         return 0;
     }
     fs::read(path).map_or(0, |bytes| {
@@ -1142,7 +1142,7 @@ fn collect_memory_files(directory: &Path, files: &mut Vec<PathBuf>, errors: &mut
 
 #[cfg(test)]
 mod tests {
-    use super::is_noise_dir;
+    use super::{FileType, classify_file, is_noise_dir};
     use std::path::Path;
 
     #[test]
@@ -1154,6 +1154,13 @@ mod tests {
         ));
         assert!(is_noise_dir(Path::new("repo/target"), "compass-out"));
         assert!(is_noise_dir(Path::new("repo/build/target"), "compass-out"));
+    }
+
+    #[test]
+    fn office_documents_are_discovered_as_documents() {
+        for name in ["report.docx", "workbook.xlsx", "deck.pptx"] {
+            assert_eq!(classify_file(Path::new(name)), Some(FileType::Document));
+        }
     }
 }
 

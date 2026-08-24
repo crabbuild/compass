@@ -8,7 +8,9 @@
   publishes immutable CAS-activated revisions with bounded audit, supports
   exact rebase and historical composition, and exposes exact effective reads
   through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
-  stronger curated masks remain deny-by-default capabilities.
+  stronger curated masks remain deny-by-default capabilities. Add read-only
+  ingestion preparation so agents can obtain canonical Base references and
+  source evidence without implementing Compass digest rules themselves.
 
 - Add versioned `compass.task-context/2` framework evidence for React and
   frontend workflows, including pack versions, route stages, render direction,
@@ -20,6 +22,30 @@
   query contracts, and framework-pack cache invalidation. The slice remains
   `Qualifying` until the independent React/Next/TanStack/React Router/Remix/Vite
   corpus and precision/recall gates are complete.
+
+- Replace the predefined flat call-flow architecture model with the native
+  `compass.viewer.architecture/1` projection. Production source scope is fixed
+  before grouping, generated/vendor/test/documentation content cannot shape Production,
+  relationships have explicit classes and lenses, owner/leaf groups use
+  source-grounded unique names, overview overflow is exact omission metadata
+  rather than `Other`, and HTML plus VS Code share the same Rust semantics.
+  Add architecture quality diagnostics, complete-group search, compact
+  index-based memberships, bounded
+  drill-down, explicit versioned overlays, and migration guidance for direct
+  `compass.viewer.callflow/1` consumers.
+
+- Add bounded native PDF, DOCX, PPTX, and XLSX document artifacts and graph
+  projection, gap-free semantic slicing, pure-Rust PDF rasterization, optional
+  local PP-OCRv6 OCR, explicit pinned model management, and the
+  `document inspect` and `models` command families. OCR remains off by default
+  and requires no Python, Tesseract, office suite, or system PDF installation.
+  Harden document reads against files that grow while being read, validate
+  cached and OCR-derived artifact coherence, bound aggregate raster work and
+  per-tile deadlines, and serialize model installation while rejecting symlinked
+  model artifacts and markers.
+  Preserve Intel macOS builds by excluding the unavailable ONNX runtime on that
+  target; native document processing remains available and managed OCR reports
+  an explicit unsupported-platform error before downloading model weights.
 
 - Hard-cut Swift, Dart, Scala, and Groovy/Gradle onto version-1 qualifying
   universal evidence pipelines. The bounded AST-first producer publishes

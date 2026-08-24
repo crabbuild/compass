@@ -1,0 +1,55 @@
+{
+  "baseEdges": [],
+  "baseGeneration": {
+    "generationId": "generation-1",
+    "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "baseNodes": [
+    {
+      "baseGeneration": {
+        "generationId": "generation-1",
+        "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "id": "node:target",
+      "kind": "function",
+      "recordDigest": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ],
+  "grounding": {
+    "evidence": [
+      {
+        "anchor": {
+          "endByte": 10,
+          "endColumn": 10,
+          "endLine": 1,
+          "file": "src/lib.rs",
+          "startByte": 0,
+          "startColumn": 0,
+          "startLine": 1
+        },
+        "evidenceType": "source_span",
+        "excerptDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "file": "src/lib.rs",
+        "fileDigest": "3333333333333333333333333333333333333333333333333333333333333333"
+      },
+      {
+        "evidenceType": "base_fact",
+        "fact": {
+          "baseGeneration": {
+            "generationId": "generation-1",
+            "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "factType": "node",
+          "id": "node:target",
+          "kind": "function",
+          "recordDigest": "1111111111111111111111111111111111111111111111111111111111111111"
+        },
+        "recordDigest": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    ],
+    "policyId": "compass.agent-graph.topology-source-span",
+    "schema": "compass.agent-graph.grounding/1"
+  },
+  "overlay": "overlay:review",
+  "schema": "compass.agent-graph.ingestion-preparation/1"
+}

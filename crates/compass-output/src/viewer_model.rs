@@ -24,7 +24,7 @@ pub struct GraphViewModel {
     pub communities: Vec<GraphViewCommunity>,
     pub hyperedges: Vec<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub effective_graph: Option<EffectiveGraphViewContext>,
+    pub effective_graph: Option<Box<EffectiveGraphViewContext>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -348,14 +348,14 @@ pub fn effective_graph_view_model(
             .map(|value| (*value).clone());
         edge.challenged = edge.challenge.as_ref().map(|_| true);
     }
-    model.effective_graph = Some(EffectiveGraphViewContext {
+    model.effective_graph = Some(Box::new(EffectiveGraphViewContext {
         effective_identity: effective.effective_identity.clone(),
         base_generation: effective.base_generation.clone(),
         overlay_revision: effective.overlay_revision.clone(),
         composition_profile: effective.composition_profile,
         retractions: effective.retractions.clone(),
         omissions: effective.omissions.clone(),
-    });
+    }));
     Ok(model)
 }
 

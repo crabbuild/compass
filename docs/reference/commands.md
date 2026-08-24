@@ -96,6 +96,9 @@ compass extract [PATH]
   [--backend NAME]
   [--model MODEL]
   [--mode deep]
+  [--ocr off|auto|always]
+  [--ocr-profile NAME]
+  [--ocr-language BCP47]
   [--token-budget N]
   [--max-concurrency N]
   [--max-workers N]
@@ -120,6 +123,37 @@ structural node and edge extraction to code-classified files while retaining
 the scanned file inventory. Program IR is opt-in with `--program`;
 `--program-artifact` also enables it. `--no-program` is retained for callers
 that already use the structural-only spelling.
+
+OCR is off by default. `auto` processes scanned/low-text PDF pages and eligible
+embedded Office images; `always` processes every bounded visual candidate.
+Both are local and require an explicitly installed verified profile. Extraction
+never downloads a model. `--ocr-language` is repeatable, and
+`--allow-partial` also authorizes visibly incomplete OCR coverage.
+
+### `document` and `models`
+
+```text
+compass document inspect FILE
+  [--format text|json]
+  [--ocr off|auto|always]
+  [--ocr-profile NAME]
+  [--ocr-language BCP47]
+  [--allow-partial]
+
+compass models list [--format text|json]
+compass models install pp-ocrv6-small|pp-ocrv6-medium
+compass models verify pp-ocrv6-small|pp-ocrv6-medium
+```
+
+`document inspect` is read-only and does not publish a graph. JSON uses
+`compass.document.inspect/1`; text marks OCR-derived evidence visibly. Native
+PDF, DOCX, PPTX, and XLSX processing requires no additional installation.
+`models install` is the only command here that uses the network. It downloads
+only pinned artifacts from the Compass allowlist, validates size and SHA-256,
+and publishes an atomic verification marker. `list` and `verify` are offline.
+On Intel (`x86_64`) macOS, managed OCR is unavailable because the pinned ONNX
+runtime has no self-contained distribution; `models install` fails before any
+download, while native document processing and `--ocr off` remain available.
 
 `update`, `extract`, and watch rebuilds may succeed with a warning that Compass
 published a partial graph. The warning reports exact omitted node, omitted
@@ -345,13 +379,10 @@ compass context explain|modify|debug|test TARGET
   [--max-knowledge-items N] [--max-response-bytes N]
 ```
 
-Emits `compass.task-context/2` after exact target resolution. It composes
-digest-verified source, exact calls, related tests, bounded impact, typed
-framework context, and identity-linked reflection memory. The framework
-context includes pack/version and qualification state, routes and stages,
-render direction, runtime boundaries, configuration dependencies, provenance,
-ambiguity, and truncation. Ambiguous and fuzzy-only targets retain candidates
-but do not compose structural evidence.
+Emits `compass.task-context/1` after exact target resolution. It composes
+digest-verified source, exact calls, related tests, bounded impact, and
+identity-linked reflection memory. Ambiguous and fuzzy-only targets retain
+candidates but do not compose structural evidence.
 
 ### `tree`
 
@@ -539,6 +570,26 @@ compass export callflow-html --help
 
 Common inputs include `--graph PATH`, labels/report/sections, output directory,
 node/diagram limits, and database connection arguments.
+
+`callflow-json` and `callflow-html` retain their command names for script
+compatibility but now publish one Rust-owned architecture projection. JSON is
+`compass.viewer.architecture/1`; HTML embeds the same model in the shared
+workbench. Production scope is classified before communities are grouped, and
+Generated, Vendor, Test, Documentation, and Unknown sources cannot influence
+Production names or boundaries. Relationships are classified as Execution, Dependency, Type,
+Structure, Contextual, or Unknown. The default Architecture lens admits only
+Execution and Dependency relationships. Aggregate metrics remain labeled
+relationships because the Execution class also includes handlers, routing,
+messaging, and other executable flow; an individual exact `calls` record keeps
+its original relation name in the inspector.
+
+`--max-sections N` bounds overview groups. It does not discard groups or merge
+them into `Other`: the model reports exact omissions and retains every group
+for search and drill-down. Use `--architecture-overlay PATH` for a strict
+`compass.architecture-overlay/1` JSON or TOML file. The canonical current
+project discovers `.compass/architecture.toml`; arbitrary and historical graph
+paths do not inspect live configuration. `--sections PATH` remains a deprecated
+alias and adapts legacy section JSON.
 
 `html`, `json`, and `workbench-json` accept repeatable graph views. Compass
 preserves their command-line order and puts them in one navigable workbench:
@@ -900,6 +951,7 @@ remains accepted as a deprecated compatibility alias.
 
 ```text
 compass agent-graph status [OPTIONS]
+compass agent-graph prepare --source-span FILE:START_BYTE:END_BYTE [OPTIONS]
 compass agent-graph apply --request FILE --enable-writes [OPTIONS]
 compass agent-graph show ASSERTION_ID [OPTIONS]
 compass agent-graph history [OPTIONS]
@@ -917,6 +969,13 @@ with `--graph`, or an exact immutable historical Base Generation with
 `--realization`; these selectors are mutually exclusive. Non-Git current-tree
 use requires `--state-root`. Writes are disabled unless the invocation includes
 `--enable-writes`; curated masks additionally require `--allow-masks`.
+
+`prepare` is read-only. Repeat `--base-node ID`, `--base-edge ID`, and
+`--source-span FILE:START_BYTE:END_BYTE` as needed. Compass returns the selected
+Base Generation, current `expectedRevision`, canonical digest-bound Base
+references, and an apply-ready grounding submission. At least one source span
+is required. Do not pass `--revision`: preparation pins the active revision
+atomically with the selected Base Generation.
 
 Apply accepts `compass.agent-graph.batch/1`; rebase commit accepts
 `compass.agent-graph.rebase-commit/1`. Query remains read-only CompassQL.

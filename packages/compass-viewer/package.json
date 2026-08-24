@@ -6,8 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./contracts/callGraph": "./src/contracts/callGraph.ts",
-    "./contracts/callflow": "./src/contracts/callflow.ts",
     "./contracts/architecture": "./src/contracts/architecture.ts",
+    "./architecture/projection": "./src/architecture/projection.ts",
     "./contracts/codeQuery": "./src/contracts/codeQuery.ts",
     "./contracts/taskContext": "./src/contracts/taskContext.ts",
     "./contracts/graph": "./src/contracts/graph.ts",

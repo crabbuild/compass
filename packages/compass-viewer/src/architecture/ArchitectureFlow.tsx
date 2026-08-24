@@ -12,20 +12,21 @@ import {
 } from "lucide-react";
 import type {
   ArchitectureEvidence,
+  ArchitectureLens,
   ArchitectureOverview,
   ArchitectureRoutePage,
   ArchitectureScope,
   ArchitectureSearchPage,
-  ArchitectureSectionPage
+  ArchitectureGroupPage
 } from "../contracts/architecture";
 import { Pagination } from "../components/workbench/Pagination";
 import { ArchitectureMap, type ArchitectureSelection } from "./ArchitectureMap";
 
 export type ArchitectureHost = {
-  setFilters(scope: ArchitectureScope, evidence: ArchitectureEvidence): void;
-  requestSection(
-    sectionId: string,
-    kind: "symbols" | "calls",
+  setFilters(scope: ArchitectureScope, evidence: ArchitectureEvidence, lens: ArchitectureLens): void;
+  requestGroup(
+    groupId: string,
+    kind: "symbols" | "relationships",
     page: number,
     query: string
   ): void;
@@ -36,68 +37,84 @@ export type ArchitectureHost = {
 
 export function ArchitectureFlow({
   overview,
-  sectionPage,
+  groupPage,
   routePage,
   searchPage,
   loadingMessage,
   host
 }: {
   overview: ArchitectureOverview;
-  sectionPage: ArchitectureSectionPage | undefined;
+  groupPage: ArchitectureGroupPage | undefined;
   routePage: ArchitectureRoutePage | undefined;
   searchPage: ArchitectureSearchPage | undefined;
   loadingMessage: string | undefined;
   host: ArchitectureHost;
 }) {
-  const firstSection = overview.sections.find((section) => section.nodeCount > 0);
+  const firstGroup = overview.groups.find((section) => section.nodeCount > 0);
   const [selection, setSelection] = useState<ArchitectureSelection>(
-    firstSection ? { kind: "section", id: firstSection.id } : undefined
+    firstGroup ? { kind: "group", id: firstGroup.id } : undefined
   );
-  const [sectionTab, setSectionTab] = useState<"symbols" | "calls">("symbols");
+  const [groupTab, setSectionTab] = useState<"symbols" | "relationships">("symbols");
   const [detailQuery, setDetailQuery] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [hiddenSelection, setHiddenSelection] = useState<{ id: string; name: string }>();
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const relationshipNoun = "relationships";
 
   useEffect(() => {
-    const selectionExists = selection?.kind === "section"
-      ? overview.sections.some((section) => section.id === selection.id)
+    const selectionExists = selection?.kind === "group"
+      ? overview.groups.some((section) => section.id === selection.id)
+        || hiddenSelection?.id === selection.id
       : selection?.kind === "route"
         ? overview.routes.some((route) => route.id === selection.id)
         : false;
     if (selection && !selectionExists) {
-      setSelection(firstSection ? { kind: "section", id: firstSection.id } : undefined);
+      setSelection(firstGroup ? { kind: "group", id: firstGroup.id } : undefined);
       return;
     }
-    if (!selection && firstSection) {
-      setSelection({ kind: "section", id: firstSection.id });
+    if (!selection && firstGroup) {
+      setSelection({ kind: "group", id: firstGroup.id });
       return;
     }
-    if (selection?.kind === "section") {
-      host.requestSection(selection.id, sectionTab, 1, detailQuery);
+    if (selection?.kind === "group") {
+      host.requestGroup(selection.id, groupTab, 1, detailQuery);
     } else if (selection?.kind === "route") {
       host.requestRoute(selection.id, 1, detailQuery);
     }
-  }, [detailQuery, firstSection, host, overview.routes, overview.sections, sectionTab, selection]);
+  }, [detailQuery, firstGroup, hiddenSelection, host, overview.routes, overview.groups, groupTab, selection]);
 
-  const selectedSection = selection?.kind === "section"
-    ? overview.sections.find((section) => section.id === selection.id)
+  const selectedGroup = selection?.kind === "group"
+    ? overview.groups.find((section) => section.id === selection.id)
+      ?? (hiddenSelection?.id === selection.id ? {
+        id: hiddenSelection.id,
+        name: hiddenSelection.name,
+        nodeCount: 0,
+        totalNodeCount: 0,
+        internalRelationshipCount: 0,
+        incomingRelationships: 0,
+        outgoingRelationships: 0,
+        scopes: { production: 0, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 }
+      } : undefined)
     : undefined;
   const selectedRoute = selection?.kind === "route"
     ? overview.routes.find((route) => route.id === selection.id)
     : undefined;
-  const displayedSectionPage = sectionPage && sectionPage.sectionId === selectedSection?.id
-    && sectionPage.kind === sectionTab ? sectionPage : undefined;
+  const displayedGroupPage = groupPage && groupPage.groupId === selectedGroup?.id
+    && groupPage.kind === groupTab ? groupPage : undefined;
   const displayedRoutePage = routePage?.routeId === selectedRoute?.id ? routePage : undefined;
 
   const select = (next: Exclude<ArchitectureSelection, undefined>) => {
+    setHiddenSelection(undefined);
     setSelection(next);
     setDetailQuery("");
-    if (next.kind === "section") {
+    if (next.kind === "group") {
       setSectionTab("symbols");
     }
   };
 
   const updateSearch = (value: string) => {
+    setDirectoryOpen(false);
     setSearchQuery(value);
     host.search(value, 1);
   };
@@ -114,17 +131,17 @@ export function ArchitectureFlow({
           </p>
         </header>
         <nav aria-label="Architecture subsystems">
-          {overview.sections.map((section) => (
+          {overview.groups.map((section) => (
             <button
               key={section.id}
               type="button"
               aria-current={
-                selection?.kind === "section" && selection.id === section.id
+                selection?.kind === "group" && selection.id === section.id
                   ? "page"
                   : undefined
               }
               data-empty={section.nodeCount === 0 || undefined}
-              onClick={() => select({ kind: "section", id: section.id })}
+              onClick={() => select({ kind: "group", id: section.id })}
             >
               <BoxIcon aria-hidden="true" />
               <span>
@@ -134,13 +151,13 @@ export function ArchitectureFlow({
                   {section.totalNodeCount.toLocaleString()} total
                 </small>
               </span>
-              <i>{section.incomingCalls + section.outgoingCalls}</i>
+              <i>{section.incomingRelationships + section.outgoingRelationships}</i>
             </button>
           ))}
         </nav>
         <footer className="architecture-scope-totals">
           <span><strong>{overview.statistics.totalNodes.toLocaleString()}</strong>symbols</span>
-          <span><strong>{overview.statistics.totalCalls.toLocaleString()}</strong>calls</span>
+          <span><strong>{overview.statistics.totalRelationships.toLocaleString()}</strong>{relationshipNoun}</span>
           <span><strong>{overview.statistics.communities.toLocaleString()}</strong>groups</span>
         </footer>
       </aside>
@@ -156,10 +173,10 @@ export function ArchitectureFlow({
               aria-label="Search the complete architecture"
               onChange={(event) => updateSearch(event.target.value)}
             />
-            {searchQuery && (
+            {(searchQuery || directoryOpen) && (
               <span role="status">{searchPage?.total.toLocaleString() ?? "…"} matches</span>
             )}
-            {searchQuery && searchPage && (
+            {(searchQuery || directoryOpen) && searchPage && (
               <div className="architecture-search-popover" role="listbox">
                 {searchPage.items.length > 0 ? searchPage.items.map((result) => (
                   <button
@@ -169,17 +186,40 @@ export function ArchitectureFlow({
                     aria-selected="false"
                     onClick={() => {
                       if (result.routeId) select({ kind: "route", id: result.routeId });
-                      else if (result.sectionId) {
-                        select({ kind: "section", id: result.sectionId });
+                      else if (result.groupId) {
+                        if (!overview.groups.some((section) => section.id === result.groupId)) {
+                          setHiddenSelection({ id: result.groupId, name: result.label });
+                          setSelection({ kind: "group", id: result.groupId });
+                          setDetailQuery("");
+                          setSectionTab("symbols");
+                        } else {
+                          select({ kind: "group", id: result.groupId });
+                        }
                       }
                       if (result.sourceFile) host.openSource(result.sourceFile);
                       setSearchQuery("");
+                      setDirectoryOpen(false);
                     }}
                   >
                     <strong>{result.label}</strong>
                     <small>{result.kind} · {result.detail}</small>
                   </button>
                 )) : <p>No matches for “{searchQuery}”</p>}
+                {searchPage.pageCount > 1 && (
+                  <div className="architecture-directory-pagination" role="group" aria-label="Group directory pages">
+                    <button
+                      type="button"
+                      disabled={searchPage.page <= 1}
+                      onClick={() => host.search(searchQuery, searchPage.page - 1)}
+                    >Previous</button>
+                    <span>Page {searchPage.page} of {searchPage.pageCount}</span>
+                    <button
+                      type="button"
+                      disabled={searchPage.page >= searchPage.pageCount}
+                      onClick={() => host.search(searchQuery, searchPage.page + 1)}
+                    >Next</button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -187,14 +227,14 @@ export function ArchitectureFlow({
             <button
               type="button"
               aria-pressed={overview.scope === "production"}
-              onClick={() => host.setFilters("production", overview.evidence)}
+              onClick={() => host.setFilters("production", overview.evidence, overview.lens)}
             >
               Production
             </button>
             <button
               type="button"
               aria-pressed={overview.scope === "all"}
-              onClick={() => host.setFilters("all", overview.evidence)}
+              onClick={() => host.setFilters("all", overview.evidence, overview.lens)}
             >
               All code
             </button>
@@ -206,13 +246,36 @@ export function ArchitectureFlow({
               value={overview.evidence}
               aria-label="Filter architecture evidence"
               onChange={(event) =>
-                host.setFilters(overview.scope, event.target.value as ArchitectureEvidence)
+                host.setFilters(
+                  overview.scope,
+                  event.target.value as ArchitectureEvidence,
+                  overview.lens
+                )
               }
             >
               <option value="all">All evidence</option>
               <option value="extracted">Extracted</option>
               <option value="inferred">Inferred</option>
               <option value="ambiguous">Ambiguous</option>
+            </select>
+          </label>
+          <label className="architecture-evidence-filter">
+            <span className="sr-only">Relationship lens</span>
+            <select
+              value={overview.lens}
+              aria-label="Architecture relationship lens"
+              onChange={(event) => host.setFilters(
+                overview.scope,
+                overview.evidence,
+                event.target.value as ArchitectureLens
+              )}
+            >
+              <option value="architecture">Architecture</option>
+              <option value="execution">Execution</option>
+              <option value="dependency">Dependency</option>
+              <option value="type">Type</option>
+              <option value="structure">Structure</option>
+              <option value="all">All typed</option>
             </select>
           </label>
           <button
@@ -236,14 +299,27 @@ export function ArchitectureFlow({
             {overview.statistics.totalNodes.toLocaleString()} symbols
           </strong>
           <span>
-            {overview.statistics.visibleCalls.toLocaleString()} visible calls ·{" "}
+            {overview.statistics.visibleRelationships.toLocaleString()} visible {relationshipNoun} ·{" "}
             {overview.routes.length.toLocaleString()} subsystem routes
           </span>
           {loadingMessage && <span role="status">{loadingMessage}</span>}
           {overview.coverage.unassigned > 0 && (
             <span className="architecture-coverage-warning" role="status">
               <AlertTriangleIcon aria-hidden="true" />
-              {overview.coverage.unassigned.toLocaleString()} unassigned calls disclosed
+              {overview.coverage.unassigned.toLocaleString()} unassigned relationships disclosed
+            </span>
+          )}
+          <span className="architecture-quality-status" data-status={overview.quality.status}>
+            Architecture quality: {overview.quality.status}
+          </span>
+          {overview.omissions.omittedGroups > 0 && (
+            <span role="status">
+              Overview shows {overview.omissions.shownGroups} of {overview.omissions.totalGroups} groups;{" "}
+              {overview.omissions.omittedGroups} remain searchable.{" "}
+              <button type="button" onClick={() => {
+                setDirectoryOpen(true);
+                host.search("", 1);
+              }}>Browse all groups</button>
             </span>
           )}
         </div>
@@ -257,32 +333,41 @@ export function ArchitectureFlow({
 
       {inspectorOpen && (
         <aside className="architecture-inspector" aria-label="Architecture selection details">
-          {selectedSection ? (
-            <SectionInspector
-              section={selectedSection}
-              page={displayedSectionPage}
-              tab={sectionTab}
-              query={detailQuery}
-              onTab={(tab) => {
-                setSectionTab(tab);
-              }}
-              onQuery={setDetailQuery}
-              onPage={(page) =>
-                host.requestSection(selectedSection.id, sectionTab, page, detailQuery)
-              }
-              onOpenSource={host.openSource}
-            />
+          {selectedGroup ? (
+            <>
+              {hiddenSelection?.id === selectedGroup.id && (
+                <p className="architecture-omitted-selection" role="status">
+                  This group is outside the bounded map overview.
+                </p>
+              )}
+              <GroupInspector
+                section={selectedGroup}
+                page={displayedGroupPage}
+                tab={groupTab}
+                query={detailQuery}
+                onTab={(tab) => {
+                  setSectionTab(tab);
+                }}
+                onQuery={setDetailQuery}
+                onPage={(page) =>
+                  host.requestGroup(selectedGroup.id, groupTab, page, detailQuery)
+                }
+                onOpenSource={host.openSource}
+                relationshipNoun={relationshipNoun}
+              />
+            </>
           ) : selectedRoute ? (
             <RouteInspector
               route={selectedRoute}
               page={displayedRoutePage}
               query={detailQuery}
-              sectionName={(id) =>
-                overview.sections.find((section) => section.id === id)?.name ?? id
+              groupName={(id) =>
+                overview.groups.find((section) => section.id === id)?.name ?? id
               }
               onQuery={setDetailQuery}
               onPage={(page) => host.requestRoute(selectedRoute.id, page, detailQuery)}
               onOpenSource={host.openSource}
+              relationshipNoun={relationshipNoun}
             />
           ) : (
             <div className="architecture-inspector-empty">
@@ -295,7 +380,7 @@ export function ArchitectureFlow({
   );
 }
 
-function SectionInspector({
+function GroupInspector({
   section,
   page,
   tab,
@@ -303,16 +388,18 @@ function SectionInspector({
   onTab,
   onQuery,
   onPage,
-  onOpenSource
+  onOpenSource,
+  relationshipNoun
 }: {
-  section: ArchitectureOverview["sections"][number];
-  page: ArchitectureSectionPage | undefined;
-  tab: "symbols" | "calls";
+  section: ArchitectureOverview["groups"][number];
+  page: ArchitectureGroupPage | undefined;
+  tab: "symbols" | "relationships";
   query: string;
-  onTab(tab: "symbols" | "calls"): void;
+  onTab(tab: "symbols" | "relationships"): void;
   onQuery(query: string): void;
   onPage(page: number): void;
   onOpenSource(file: string): void;
+  relationshipNoun: string;
 }) {
   return (
     <>
@@ -320,8 +407,8 @@ function SectionInspector({
         <span>Subsystem</span>
         <h2>{section.name}</h2>
         <div className="architecture-route-metrics">
-          <span><ArrowDownLeftIcon aria-hidden="true" /> {section.incomingCalls} incoming</span>
-          <span><ArrowUpRightIcon aria-hidden="true" /> {section.outgoingCalls} outgoing</span>
+          <span><ArrowDownLeftIcon aria-hidden="true" /> {section.incomingRelationships} incoming</span>
+          <span><ArrowUpRightIcon aria-hidden="true" /> {section.outgoingRelationships} outgoing</span>
         </div>
       </header>
       <div className="architecture-inspector-tabs" role="tablist">
@@ -336,10 +423,10 @@ function SectionInspector({
         <button
           type="button"
           role="tab"
-          aria-selected={tab === "calls"}
-          onClick={() => onTab("calls")}
+          aria-selected={tab === "relationships"}
+          onClick={() => onTab("relationships")}
         >
-          Internal calls
+          Internal {relationshipNoun}
         </button>
       </div>
       <DetailFilter value={query} onChange={onQuery} />
@@ -361,8 +448,8 @@ function SectionInspector({
               </article>
             ))}
           </div>
-        ) : page.kind === "calls" ? (
-          <CallList calls={page.items} onOpenSource={onOpenSource} />
+        ) : page.kind === "relationships" ? (
+          <RelationshipList relationships={page.items} onOpenSource={onOpenSource} relationshipNoun={relationshipNoun} />
         ) : (
           <div className="architecture-inspector-empty">
             No symbols match this filter.
@@ -372,7 +459,7 @@ function SectionInspector({
       {page && (
         <Pagination
           {...page}
-          label={page.kind === "symbols" ? "symbols" : "calls"}
+          label={page.kind === "symbols" ? "symbols" : relationshipNoun}
           onPageChange={onPage}
         />
       )}
@@ -384,25 +471,27 @@ function RouteInspector({
   route,
   page,
   query,
-  sectionName,
+  groupName,
   onQuery,
   onPage,
-  onOpenSource
+  onOpenSource,
+  relationshipNoun
 }: {
   route: ArchitectureOverview["routes"][number];
   page: ArchitectureRoutePage | undefined;
   query: string;
-  sectionName(id: string): string;
+  groupName(id: string): string;
   onQuery(query: string): void;
   onPage(page: number): void;
   onOpenSource(file: string): void;
+  relationshipNoun: string;
 }) {
   return (
     <>
       <header className="architecture-inspector-header">
         <span>Directed route</span>
-        <h2>{sectionName(route.sourceSection)} → {sectionName(route.targetSection)}</h2>
-        <p>{route.calls.toLocaleString()} complete cross-subsystem calls</p>
+        <h2>{groupName(route.sourceGroup)} → {groupName(route.targetGroup)}</h2>
+        <p>{route.relationships.toLocaleString()} complete cross-subsystem {relationshipNoun}</p>
         <div className="architecture-evidence-counts">
           <span>{route.extracted} extracted</span>
           <span>{route.inferred} inferred</span>
@@ -411,47 +500,50 @@ function RouteInspector({
       </header>
       <DetailFilter value={query} onChange={onQuery} />
       <div className="architecture-inspector-scroll">
-        {page ? <CallList calls={page.items} onOpenSource={onOpenSource} /> : <LoadingRows />}
+        {page ? <RelationshipList relationships={page.items} onOpenSource={onOpenSource} relationshipNoun={relationshipNoun} /> : <LoadingRows />}
       </div>
-      {page && <Pagination {...page} label="calls" onPageChange={onPage} />}
+      {page && <Pagination {...page} label={relationshipNoun} onPageChange={onPage} />}
     </>
   );
 }
 
-function CallList({
-  calls,
-  onOpenSource
+function RelationshipList({
+  relationships,
+  onOpenSource,
+  relationshipNoun
 }: {
-  calls: readonly {
+  relationships: readonly {
     id: string;
     sourceLabel: string;
     targetLabel: string;
     sourceFile: string | null;
     targetFile: string | null;
     relation: string;
+    relationClass: string;
     confidence: string;
   }[];
   onOpenSource(file: string): void;
+  relationshipNoun: string;
 }) {
-  return calls.length > 0 ? (
-    <div className="architecture-call-list">
-      {calls.map((call) => (
-        <article key={call.id}>
+  return relationships.length > 0 ? (
+    <div className="architecture-relationship-list">
+      {relationships.map((relationship) => (
+        <article key={relationship.id}>
           <div>
-            <strong title={call.sourceLabel}>{call.sourceLabel}</strong>
+            <strong title={relationship.sourceLabel}>{relationship.sourceLabel}</strong>
             <span>→</span>
-            <strong title={call.targetLabel}>{call.targetLabel}</strong>
+            <strong title={relationship.targetLabel}>{relationship.targetLabel}</strong>
           </div>
-          <small>{call.relation} · {call.confidence}</small>
+          <small>{relationship.relation} · {relationship.relationClass} · {relationship.confidence}</small>
           <div>
-            {call.sourceFile && (
-              <button type="button" onClick={() => onOpenSource(call.sourceFile!)}>
-                caller source
+            {relationship.sourceFile && (
+              <button type="button" onClick={() => onOpenSource(relationship.sourceFile!)}>
+                source
               </button>
             )}
-            {call.targetFile && (
-              <button type="button" onClick={() => onOpenSource(call.targetFile!)}>
-                callee source
+            {relationship.targetFile && (
+              <button type="button" onClick={() => onOpenSource(relationship.targetFile!)}>
+                target
               </button>
             )}
           </div>
@@ -459,7 +551,7 @@ function CallList({
       ))}
     </div>
   ) : (
-    <div className="architecture-inspector-empty">No calls match this filter.</div>
+    <div className="architecture-inspector-empty">No {relationshipNoun} match this filter.</div>
   );
 }
 
