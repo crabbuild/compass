@@ -46,19 +46,43 @@ implicit non-Git storage location.
 The returned `baseGeneration` must be copied into the request. Do not compute a
 replacement identity from a label or path.
 
-## 2. Prepare a strict change batch
+## 2. Prepare exact ingestion material
+
+Ask Compass to calculate canonical Base references and source evidence. Byte
+ranges are repository-relative source byte offsets; repeat each selector as
+needed:
+
+```bash
+compass agent-graph prepare \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:review \
+  --base-node NODE_ID \
+  --source-span src/lib.rs:120:188 \
+  --format json > prepared.json
+```
+
+The versioned response includes `baseGeneration`, the active
+`expectedRevision`, exact `baseNodes` and `baseEdges`, and a complete
+`grounding` submission. Compass reads the selected source inventory, calculates
+line/column anchors plus file, excerpt, and record digests, and rejects stale,
+missing, duplicate, uninventoried, or out-of-range input. Preparation is
+read-only and never emits `GROUNDED`.
+
+## 3. Draft a strict change batch
 
 Start from
 [`fixtures/contracts/agent-graph/batch-v1.json`](../../fixtures/contracts/agent-graph/batch-v1.json).
-Replace its exact Base Generation, source anchor, file digest, and excerpt
-digest with values from the selected project. Requests cannot contain a
-Grounding certificate or `GROUNDED` status.
+Copy the exact Base Generation, expected revision, Base references, and
+grounding payload from `prepared.json`. Do not calculate or edit Compass-owned
+digests. Call `prepare` separately when assertions rely on different source
+spans. Requests cannot contain a Grounding certificate or `GROUNDED` status.
 
 Use `selector: new` with a durable `key:` for creation. For replacement, use
 `selector: existing` with both the Assertion ID and current assertion digest.
 Use Retraction for an agent-owned assertion and Challenge for a Base fact.
 
-## 3. Apply with explicit local authority
+## 4. Apply with explicit local authority
 
 ```bash
 compass agent-graph apply \
@@ -76,7 +100,7 @@ contains the immutable revision, sequence, exact counts, and batch digest.
 Retrying the same idempotency key and content returns the original receipt;
 different content under the same key fails.
 
-## 4. Read and query an exact Effective Graph
+## 5. Read and query an exact Effective Graph
 
 ```bash
 compass agent-graph query \
@@ -119,7 +143,7 @@ Compass opens the trusted graph and an offline detached checkout for that
 realization. It does not update the preferred realization or any history root.
 `--realization` is rejected with `--graph` or `--state-root`.
 
-## 5. Inspect history, audit, or rebase
+## 6. Inspect history, audit, or rebase
 
 ```bash
 compass agent-graph history --overlay overlay:review --format json
@@ -141,7 +165,9 @@ Agent Graph tools appear only when the server has a canonical project
 allowlist. `apply_agent_graph` is omitted unless writes are explicitly enabled.
 HTTP writes require a read credential and a distinct write-capability
 credential; the request cannot choose its principal, permissions, mask
-capability, expiry, or limits. `inspect_agent_graph` supports `effective`,
+capability, expiry, or limits. `inspect_agent_graph` operation `prepare`
+accepts `base_nodes`, `base_edges`, and strict `source_spans` objects and returns
+the same read-only ingestion-preparation contract. It also supports `effective`,
 `query`, `audit`, history, diff, and rebase-plan reads.
 
 ## Related pages

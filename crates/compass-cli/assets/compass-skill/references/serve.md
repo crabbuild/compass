@@ -43,6 +43,12 @@ versioned change batches. Add `--agent-graph-masks` only for separately approved
 curated masking. Outside Git, also choose an explicit
 `--agent-graph-state-root`.
 
+Before drafting a batch, call `inspect_agent_graph` with operation `prepare`,
+the relevant `base_nodes` or `base_edges`, and one or more `source_spans`
+objects containing `file`, `startByte`, and `endByte`. Compass returns the exact
+Base references, evidence digests, and current expected revision; do not
+calculate them in the client.
+
 HTTP write access requires a distinct `--write-api-key` in addition to the read
 API key. Never accept the principal, allowed project, permissions, expiry, or
 limits from a model request; configure those on the Compass server. Clients

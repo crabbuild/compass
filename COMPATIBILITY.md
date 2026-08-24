@@ -60,6 +60,11 @@ majors and unknown fields fail closed. `GROUNDED` is a Compass-issued citation
 verification state and must not be interpreted as `INFERRED`, `EXTRACTED`, or
 proof of semantic truth.
 
+`compass.agent-graph.ingestion-preparation/1` is a read-only additive contract.
+It calculates exact Base record and source-evidence digests for a selected Base
+Generation; it does not certify, mutate, or publish an assertion. Apply
+re-verifies prepared evidence against the pinned Base Generation.
+
 Overlay writes require explicit CLI or server enablement. Existing MCP servers
 without Agent Graph configuration advertise no Agent Graph tools. Configured
 read-only servers advertise inspection only; HTTP writes additionally require

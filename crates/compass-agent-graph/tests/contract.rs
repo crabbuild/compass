@@ -87,6 +87,13 @@ fn checked_in_v1_fixtures_match_the_rust_contracts() -> Result<(), Box<dyn std::
         "../../../fixtures/contracts/agent-graph/receipt-v1.json"
     ))?;
     assert_eq!(receipt.schema, "compass.agent-graph.receipt/1");
+    let preparation = serde_json::from_str::<compass_agent_graph::IngestionPreparation>(
+        include_str!("../../../fixtures/contracts/agent-graph/ingestion-preparation-v1.json"),
+    )?;
+    assert_eq!(
+        preparation.schema,
+        "compass.agent-graph.ingestion-preparation/1"
+    );
     let overlay = serde_json::from_str::<compass_agent_graph::OverlayState>(include_str!(
         "../../../fixtures/contracts/agent-graph/overlay-v1.json"
     ))?;

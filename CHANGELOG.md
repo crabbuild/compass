@@ -8,7 +8,9 @@
   publishes immutable CAS-activated revisions with bounded audit, supports
   exact rebase and historical composition, and exposes exact effective reads
   through CLI, MCP, CompassQL, task context, export, and the viewer. Writes and
-  stronger curated masks remain deny-by-default capabilities.
+  stronger curated masks remain deny-by-default capabilities. Add read-only
+  ingestion preparation so agents can obtain canonical Base references and
+  source evidence without implementing Compass digest rules themselves.
 
 - Replace the predefined flat call-flow architecture model with the native
   `compass.viewer.architecture/1` projection. Production source scope is fixed

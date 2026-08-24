@@ -720,6 +720,9 @@ First-party editor and offline-viewer contracts are versioned independently:
   the CLI HTML report and editor comparison views;
 - `compass.ide.progress/1` — newline-delimited guided-operation events.
 - `compass.agent-graph.overlay/1` — one immutable logical Overlay state;
+- `compass.agent-graph.ingestion-preparation/1` — read-only, verifier-owned
+  Base references, source evidence, and current expected revision for drafting
+  a change batch;
 - `compass.agent-graph.receipt/1` — atomic publication receipt;
 - `compass.agent-graph.effective/1` — Base Graph plus one exact Overlay
   Revision and composition profile;

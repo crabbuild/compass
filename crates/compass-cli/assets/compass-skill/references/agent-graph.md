@@ -91,17 +91,36 @@ intends approved masks to affect the view.
 
 ## Prepare and apply a verified change
 
+First ask Compass to prepare the verifier-owned values:
+
+```bash
+compass agent-graph prepare \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:auth-review \
+  --base-node NODE_ID \
+  --base-edge EDGE_ID \
+  --source-span src/lib.rs:120:188 \
+  --format json
+```
+
+Selectors are repeatable. Use only the Base facts the assertion actually
+depends on, and call `prepare` separately for assertions backed by different
+source spans. The response pins the Base Generation and active
+`expectedRevision`, then supplies canonical Base references and an apply-ready
+grounding submission. Do not calculate, edit, or reuse these digests across a
+different Base Generation.
+
 Start from `fixtures/contracts/agent-graph/batch-v1.json` and preserve its
-strict `compass.agent-graph.batch/1` shape. Populate the exact Base Generation,
-Overlay ID, and current `expectedRevision`; omit the expected revision only for
-an overlay with no active revision. Give each logical retry a stable
-idempotency key.
+strict `compass.agent-graph.batch/1` shape. Copy the prepared Base Generation,
+Overlay ID, `expectedRevision`, Base references, and grounding submission.
+Omit the expected revision only when preparation omits it. Give each logical
+retry a stable idempotency key.
 
 Every proposed assertion must carry the evidence required by its grounding
-policy. For source-backed topology, use exact repository-relative source spans,
-file digests, and excerpt digests from the selected Base Generation. Do not
-copy evidence from a different build. Requests cannot award themselves a
-Grounding certificate or `GROUNDED` status.
+policy. Preparation is read-only and does not certify a claim; apply re-reads
+and verifies its evidence. Requests cannot award themselves a Grounding
+certificate or `GROUNDED` status.
 
 Apply one bounded batch atomically:
 
@@ -209,6 +228,8 @@ Prefer local stdio for one-user coding sessions. Agent Graph tools are exposed
 only when `compass serve` receives a canonical `--agent-graph-project`.
 `inspect_agent_graph` remains read-only. `apply_agent_graph` appears only with
 `--agent-graph-writes`; masks additionally require `--agent-graph-masks`.
+Use `inspect_agent_graph` operation `prepare` with `base_nodes`, `base_edges`,
+and `source_spans` before drafting a mutation request.
 For HTTP, configure separate read and write credentials and keep the server on
 loopback unless remote access is explicitly needed. The server—not model input—
 selects the principal, project scope, permissions, expiry, and limits. Load

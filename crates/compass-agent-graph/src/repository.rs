@@ -19,11 +19,12 @@ use crate::{
     AssertionSelector, BaseGenerationId, BaseGenerationView, ChallengeEffect, ChallengeId,
     ChallengeSelector, ChangeBatch, ChangeOperation, CommitReceipt, CompositionProfile, Digest,
     EffectiveGraph, GroundedEffect, GroundingPolicy, IdempotencyKey, IdempotencyRecord,
-    InMemoryBaseGeneration, NodeRef, OperationPermission, OverlayId, OverlayRevision,
-    OverlayRevisionId, OverlayState, PinId, PrincipalId, QuiescentGcGrant, RebaseCommitRequest,
-    RebasePlan, RepositoryId, ResolvedAgentEdge, ResolvedAgentFact, ResolvedNodeRef, Retraction,
-    RevisionPin, WriteGrant, canonical_bytes, canonical_digest, compose_effective,
-    ground_assertion, ground_challenge,
+    InMemoryBaseGeneration, IngestionPreparation, IngestionPreparationRequest, NodeRef,
+    OperationPermission, OverlayId, OverlayRevision, OverlayRevisionId, OverlayState, PinId,
+    PrincipalId, QuiescentGcGrant, RebaseCommitRequest, RebasePlan, RepositoryId,
+    ResolvedAgentEdge, ResolvedAgentFact, ResolvedNodeRef, Retraction, RevisionPin, WriteGrant,
+    canonical_bytes, canonical_digest, compose_effective, ground_assertion, ground_challenge,
+    prepare_ingestion,
 };
 
 const NAMESPACE: &[u8] = b"compass.agent-graph.v1";
@@ -95,6 +96,11 @@ pub enum ReadRequest {
         revision: OverlayRevisionId,
         profile: CompositionProfile,
     },
+    PrepareIngestion {
+        overlay: OverlayId,
+        base_generation: BaseGenerationId,
+        request: IngestionPreparationRequest,
+    },
     History {
         overlay: OverlayId,
         limit: usize,
@@ -122,6 +128,7 @@ pub enum ReadResult {
         state: OverlayState,
     },
     EffectiveGraph(EffectiveGraph),
+    IngestionPreparation(IngestionPreparation),
     History(HistoryResult),
     Diff(DiffResult),
     RebasePlan(RebasePlan),
@@ -1045,6 +1052,43 @@ where
                     revision,
                     &state,
                     profile,
+                    crate::AgentGraphLimits::default(),
+                )?))
+            }
+            ReadRequest::PrepareIngestion {
+                overlay,
+                base_generation,
+                request,
+            } => {
+                let base = self.provider.open(&base_generation)?;
+                let grounding_base = OverlayAwareBase {
+                    repository: self,
+                    base: base.as_ref(),
+                };
+                let expected_revision = match self.active_revision(&overlay)? {
+                    Some(revision) => {
+                        let (manifest, state) = self.read_revision(&revision)?;
+                        if manifest.overlay != overlay {
+                            return corrupt(
+                                "active ingestion overlay revision belongs to another overlay",
+                            );
+                        }
+                        if manifest.base_generation != base_generation {
+                            return Err(AgentGraphError::new(
+                                AgentGraphErrorCode::RebaseRequired,
+                                "active overlay belongs to a different Base Generation",
+                            ));
+                        }
+                        self.validate_reopened(&manifest, &state, &grounding_base)?;
+                        Some(revision)
+                    }
+                    None => None,
+                };
+                Ok(ReadResult::IngestionPreparation(prepare_ingestion(
+                    &grounding_base,
+                    overlay,
+                    expected_revision,
+                    &request,
                     crate::AgentGraphLimits::default(),
                 )?))
             }

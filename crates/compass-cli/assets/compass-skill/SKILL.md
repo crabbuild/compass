@@ -132,10 +132,12 @@ for this or a later coding session.
 3. Query and verify source before proposing an enhancement. For task work, use
    `compass context` with paired `--agent-overlay` and `--agent-revision`
    selectors so Base evidence and agent knowledge remain distinguishable.
-4. Start a strict change batch from
-   `fixtures/contracts/agent-graph/batch-v1.json`. Include exact source anchors
-   and digests. Never put a Grounding certificate or `GROUNDED` status in the
-   request; Compass issues them only after deterministic citation checks.
+4. Run `compass agent-graph prepare` with the exact Base node or edge IDs and
+   repository-relative source byte spans. Copy its Base Generation, active
+   expected revision, Base references, and grounding submission into a strict
+   batch based on `fixtures/contracts/agent-graph/batch-v1.json`. Never
+   calculate or edit Compass-owned digests, and never put a Grounding
+   certificate or `GROUNDED` status in the request.
 5. Apply only with clear local write intent, using `compass agent-graph apply
    --request FILE --enable-writes`. Read the receipt and replace the pinned
    revision with its new immutable revision before any further read or write.

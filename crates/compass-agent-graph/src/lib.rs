@@ -17,6 +17,7 @@ mod maintenance;
 mod overlay;
 mod paths;
 mod policy;
+mod preparation;
 mod rebase;
 mod repository;
 
@@ -54,6 +55,10 @@ pub use overlay::{
 };
 pub use paths::{AGENT_GRAPH_DATABASE_NAME, AgentGraphPaths};
 pub use policy::{OperationPermission, WriteAuthority, WriteGrant};
+pub use preparation::{
+    AGENT_GRAPH_INGESTION_PREPARATION_SCHEMA_V1, IngestionPreparation, IngestionPreparationRequest,
+    SourceSpanRequest, prepare_ingestion,
+};
 pub use rebase::{
     AGENT_GRAPH_REBASE_COMMIT_SCHEMA_V1, AGENT_GRAPH_REBASE_PLAN_SCHEMA_V1, RebaseCommitRequest,
     RebaseDisposition, RebaseItem, RebasePlan, RebaseSubject,
