@@ -120,6 +120,8 @@ pub struct GraphViewDocument {
     pub locator: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ocr_profile: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previews: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -516,6 +518,7 @@ fn document_from_value(value: &Value) -> Option<GraphViewDocument> {
         origin: object.get("origin").cloned(),
         locator: object.get("locator").cloned(),
         ocr_profile: object.get("ocrProfile").cloned(),
+        previews: object.get("previews").cloned(),
     })
 }
 
@@ -607,6 +610,17 @@ mod tests {
                     "engine_version": "0.9.2",
                     "profile": "pp-ocrv6-small"
                 },
+                "document_previews": [{
+                    "schema": "compass.document.preview/1",
+                    "kind": "page",
+                    "locator": {"kind": "page", "page": 1},
+                    "label": "Page 1 · Normalized preview",
+                    "width": 100,
+                    "height": 100,
+                    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>",
+                    "regions": [],
+                    "digest": "sha256:ab968df6659867783ee1bf8296158be7b199ea12776cc0b1f1df5c213ac83421"
+                }],
                 "source_file": "docs/scan.pdf"
             }, {
                 "id": "region",
@@ -650,6 +664,7 @@ mod tests {
         assert_eq!(json[0]["document"]["role"], "root");
         assert_eq!(json[0]["document"]["ocrMode"], "auto");
         assert_eq!(json[0]["document"]["visualCoverage"], "partial");
+        assert_eq!(json[0]["document"]["previews"][0]["kind"], "page");
         assert_eq!(json[1]["document"]["origin"]["kind"], "ocr");
         assert_eq!(json[1]["document"]["origin"]["confidence_bps"], 9234);
         assert_eq!(json[1]["document"]["locator"]["owner"]["page"], 4);

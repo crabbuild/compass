@@ -3022,6 +3022,75 @@ button:not(:disabled),
   color: var(--compass-focus);
 }
 
+.compass-document-preview-stage {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 4px;
+  background: var(--compass-ocr-preview-surface);
+  isolation: isolate;
+}
+
+.compass-document-preview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+}
+
+.compass-document-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--compass-focus);
+  pointer-events: none;
+}
+
+.compass-document-preview-overlay .compass-ocr-preview-box {
+  pointer-events: auto;
+}
+
+.compass-document-preview-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--compass-faint);
+  font: 8px/1 var(--compass-font-mono);
+}
+
+.compass-document-preview-controls button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--compass-focus);
+}
+
+.compass-document-preview-controls button:hover:not(:disabled),
+.compass-document-preview-controls button:focus-visible {
+  border-color: var(--compass-focus);
+  background: var(--compass-focus-soft);
+}
+
+.compass-document-preview-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.compass-document-preview-controls svg {
+  width: 13px;
+  height: 13px;
+}
+
 .compass-ocr-preview-box {
   fill: color-mix(in srgb, var(--compass-ocr-accent) 18%, transparent);
   stroke: var(--compass-ocr-accent);

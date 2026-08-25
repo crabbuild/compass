@@ -59,6 +59,26 @@ export const DocumentLocatorSchema = z.object({
   kind: z.string().min(1)
 }).passthrough();
 
+export const DocumentPreviewRegionSchema = z.object({
+  candidate_id: z.string().min(1),
+  x: z.number().int().nonnegative(),
+  y: z.number().int().nonnegative(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive()
+}).passthrough();
+
+export const DocumentPreviewSchema = z.object({
+  schema: z.literal("compass.document.preview/1"),
+  kind: z.enum(["page", "slide", "sheet"]),
+  locator: DocumentLocatorSchema,
+  label: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  svg: z.string().min(1).max(512 * 1024),
+  regions: z.array(DocumentPreviewRegionSchema).max(256).default([]),
+  digest: z.string().regex(/^sha256:[0-9a-f]{64}$/)
+}).passthrough();
+
 export const GraphDocumentSchema = z.object({
   role: z.enum(["root", "block"]).optional(),
   kind: z.string().optional(),
@@ -70,7 +90,8 @@ export const GraphDocumentSchema = z.object({
   ocrMode: z.enum(["off", "auto", "always"]).optional(),
   origin: DocumentOriginSchema.optional(),
   locator: DocumentLocatorSchema.optional(),
-  ocrProfile: DocumentOcrProfileSchema.optional()
+  ocrProfile: DocumentOcrProfileSchema.optional(),
+  previews: z.array(DocumentPreviewSchema).max(256).optional()
 }).passthrough();
 
 export const GraphNodeSchema = z.object({
@@ -174,6 +195,8 @@ export type GraphRecordEvidence = z.infer<typeof GraphRecordEvidenceSchema>;
 export type DocumentOcrProfile = z.infer<typeof DocumentOcrProfileSchema>;
 export type DocumentOrigin = z.infer<typeof DocumentOriginSchema>;
 export type DocumentLocator = z.infer<typeof DocumentLocatorSchema>;
+export type DocumentPreviewRegion = z.infer<typeof DocumentPreviewRegionSchema>;
+export type DocumentPreview = z.infer<typeof DocumentPreviewSchema>;
 export type GraphDocument = z.infer<typeof GraphDocumentSchema>;
 export type GraphNode = z.infer<typeof GraphNodeSchema>;
 export type GraphEdge = z.infer<typeof GraphEdgeSchema>;

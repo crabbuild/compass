@@ -211,9 +211,10 @@ fn cache_identity(options: &CoreDocumentProcessingOptions) -> String {
         OcrMode::Always => "always",
     };
     format!(
-        "schema={};normalizer={};ocr_schema={};ocr_protocol={};ocr_policy={};preprocess={};rasterizer={};mode={};profile={};model_manifest={};languages={};raw_bytes={};pdf_pages={};office_images={};raster_pixels={};raster_edge={};engine_side={};tile_overlap={};aggregate_pixels={};regions_raster={};regions_document={};text_region={};text_document={};wall_time_seconds={}",
+        "schema={};normalizer={};preview_schema={};ocr_schema={};ocr_protocol={};ocr_policy={};preprocess={};rasterizer={};mode={};profile={};model_manifest={};languages={};raw_bytes={};pdf_pages={};office_images={};raster_pixels={};raster_edge={};engine_side={};tile_overlap={};aggregate_pixels={};regions_raster={};regions_document={};text_region={};text_document={};wall_time_seconds={}",
         compass_media::DOCUMENT_SCHEMA,
         compass_media::DOCUMENT_NORMALIZER_VERSION,
+        compass_media::DOCUMENT_PREVIEW_SCHEMA,
         OCR_SCHEMA,
         OCR_PROTOCOL_SCHEMA,
         OCR_POLICY_VERSION,
@@ -311,6 +312,12 @@ pub(crate) fn project_document(
         root.insert(
             "document_ocr_profile".to_owned(),
             serde_json::to_value(profile).map_err(|error| error.to_string())?,
+        );
+    }
+    if !artifact.previews.is_empty() {
+        root.insert(
+            "document_previews".to_owned(),
+            serde_json::to_value(&artifact.previews).map_err(|error| error.to_string())?,
         );
     }
     extraction.nodes.push(compass_languages::RawNodeRecord {
@@ -488,6 +495,21 @@ mod tests {
                 path: "body/p[1]".to_owned(),
             },
         )?;
+        let preview_svg =
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>";
+        artifact
+            .previews
+            .push(compass_media::document::DocumentPreview {
+                schema: compass_media::document::DOCUMENT_PREVIEW_SCHEMA.to_owned(),
+                kind: compass_media::document::DocumentPreviewKind::Page,
+                locator: compass_media::document::DocumentLocator::Page { page: 1 },
+                label: "Page 1 · Normalized preview".to_owned(),
+                width: 100,
+                height: 100,
+                svg: preview_svg.to_owned(),
+                regions: Vec::new(),
+                digest: format!("sha256:{:x}", Sha256::digest(preview_svg.as_bytes())),
+            });
         let extraction = project_document(
             "docs/report.docx",
             Path::new("report.docx"),
@@ -507,6 +529,14 @@ mod tests {
         assert_eq!(
             extraction.nodes[0].attributes.get("document_ocr_mode"),
             Some(&serde_json::json!("off"))
+        );
+        assert_eq!(
+            extraction.nodes[0]
+                .attributes
+                .get("document_previews")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(1)
         );
         assert_eq!(
             extraction.extensions.get("document_cache_identity"),

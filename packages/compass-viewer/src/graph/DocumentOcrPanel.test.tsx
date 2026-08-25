@@ -142,4 +142,42 @@ describe("DocumentOcrPanel", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Document extraction is incomplete");
     expect(screen.getByRole("alert")).not.toHaveTextContent("OCR coverage is partial");
   });
+
+  it("renders a safe Office snapshot and maps OCR boxes onto its image region", () => {
+    const previewModel: GraphViewModel = {
+      ...model,
+      nodes: model.nodes.map((node) => node.id === "document"
+        ? {
+          ...node,
+          document: {
+            ...node.document,
+            format: "docx",
+            previews: [{
+              schema: "compass.document.preview/1",
+              kind: "page",
+              locator: { kind: "page", page: 1 },
+              label: "Page 1 · Normalized preview",
+              width: 100,
+              height: 100,
+              svg: "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"><rect width=\"100\" height=\"100\" fill=\"#fff\"/></svg>",
+              regions: [{ candidate_id: "page-4", x: 10, y: 10, width: 80, height: 70 }],
+              digest: "sha256:ab968df6659867783ee1bf8296158be7b199ea12776cc0b1f1df5c213ac83421"
+            }]
+          }
+        }
+        : node)
+    };
+    const context = documentContextForNode(previewModel, ocr);
+    if (!context) throw new Error("document context missing");
+    const onFocus = vi.fn();
+    render(<DocumentOcrPanel context={context} selectedId={ocr.id} onFocus={onFocus} />);
+
+    expect(screen.getByRole("img", { name: /document preview/i })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /OCR bounding boxes over Page 1/i })).toBeInTheDocument();
+    const box = screen.getAllByRole("button", { name: /Invoice total/ })
+      .find((button) => button.classList.contains("compass-ocr-preview-box"));
+    if (!box) throw new Error("OCR overlay box missing");
+    fireEvent.click(box);
+    expect(onFocus).toHaveBeenCalledWith("ocr");
+  });
 });

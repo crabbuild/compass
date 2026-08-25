@@ -169,6 +169,61 @@ describe("InitializationWizard", () => {
     root.unmount();
   });
 
+  it("shows honest install progress and a cancellation affordance", () => {
+    const wizardHost = { ...host(), cancelOcrModel: vi.fn() };
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <InitializationWizard
+        repositoryName="compass"
+        repositoryRoot="/workspace/compass"
+        host={wizardHost}
+        ocrModel={{
+          kind: "installing",
+          profile: "pp-ocrv6-small",
+          phase: "downloading"
+        }}
+      />
+    ));
+
+    flushSync(() => button(container, "Continue").click());
+    flushSync(() => button(container, "Review configuration").click());
+    const progress = container.querySelector('[role="progressbar"]');
+    expect(progress?.getAttribute("aria-valuenow")).toBeNull();
+    expect(progress?.getAttribute("aria-valuetext")).toContain("Downloading model files");
+    expect(container.textContent).toContain("Compass verifies every file before enabling OCR");
+    expect(button(container, "Installing OCR model…").disabled).toBe(true);
+    flushSync(() => button(container, "Cancel install").click());
+    expect(wizardHost.cancelOcrModel).toHaveBeenCalledOnce();
+    root.unmount();
+  });
+
+  it("makes verified installation explicit before the build", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    flushSync(() => root.render(
+      <InitializationWizard
+        repositoryName="compass"
+        repositoryRoot="/workspace/compass"
+        host={host()}
+        ocrModel={{
+          kind: "ready",
+          profile: "pp-ocrv6-small",
+          bytes: 31_114_837,
+          engine: "OAR-OCR",
+          engineVersion: "0.9.2"
+        }}
+      />
+    ));
+
+    flushSync(() => button(container, "Continue").click());
+    flushSync(() => button(container, "Review configuration").click());
+    expect(container.textContent).toContain("Installed and verified");
+    expect(container.textContent).toContain("OCR is ready for the next Compass build");
+    expect(button(container, "Build Compass index").disabled).toBe(false);
+    root.unmount();
+  });
+
   it("announces cancellation and keeps recovery actions available", () => {
     const container = document.createElement("div");
     const root = createRoot(container);

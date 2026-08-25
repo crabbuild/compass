@@ -3,6 +3,7 @@
 pub mod document;
 pub mod limits;
 mod ooxml;
+mod preview;
 mod processing;
 mod raster;
 
@@ -17,8 +18,9 @@ use document::{
 use oxidize_pdf::parser::{PdfDocument, PdfReader};
 
 pub use document::{
-    DOCUMENT_INSPECT_SCHEMA, DOCUMENT_NORMALIZER_VERSION, DOCUMENT_SCHEMA, DiagnosticSeverity,
-    DocumentDiagnostic, DocumentLink, DocumentLinkKind, DocumentOrigin, VisualCoverage,
+    DOCUMENT_INSPECT_SCHEMA, DOCUMENT_NORMALIZER_VERSION, DOCUMENT_PREVIEW_SCHEMA, DOCUMENT_SCHEMA,
+    DiagnosticSeverity, DocumentDiagnostic, DocumentLink, DocumentLinkKind, DocumentOrigin,
+    DocumentPreview, DocumentPreviewKind, DocumentPreviewRegion, VisualCoverage,
 };
 pub use limits::{
     MEDIA_MAX_RAW_BYTES, OCR_MAX_AGGREGATE_PIXELS, OCR_MAX_OOXML_IMAGES, OCR_MAX_PDF_PAGES,
@@ -46,7 +48,7 @@ pub fn decode_document(
             bytes.len()
         )));
     }
-    let artifact = match extension(logical_path).as_str() {
+    let mut artifact = match extension(logical_path).as_str() {
         "pdf" => decode_pdf(bytes)?,
         "docx" => decode_docx(bytes)?,
         "xlsx" => decode_xlsx(bytes)?,
@@ -61,6 +63,12 @@ pub fn decode_document(
         }
         _ => decode_plain_text(bytes, DocumentFormat::Text)?,
     };
+    match extension(logical_path).as_str() {
+        "docx" | "xlsx" | "pptx" => {
+            preview::attach_office_previews(logical_path, bytes, &mut artifact);
+        }
+        _ => {}
+    }
     artifact.validate()?;
     Ok(artifact)
 }
@@ -398,6 +406,11 @@ mod tests {
             docx_to_markdown(&path)?,
             "# Title\n| Name | Value |\n| --- | --- |\n| A | 1 |\nAfter"
         );
+        let bytes = fs::read(&path)?;
+        let artifact = decode_document(&path, &bytes)?;
+        assert_eq!(artifact.previews.len(), 1);
+        assert_eq!(artifact.previews[0].kind, DocumentPreviewKind::Page);
+        assert!(artifact.previews[0].svg.contains("Normalized preview"));
         Ok(())
     }
 
@@ -427,6 +440,8 @@ mod tests {
             ],
         )?;
         let artifact = decode_document(&path, &fs::read(&path)?)?;
+        assert_eq!(artifact.previews.len(), 1);
+        assert_eq!(artifact.previews[0].kind, DocumentPreviewKind::Sheet);
         assert_eq!(
             artifact
                 .blocks

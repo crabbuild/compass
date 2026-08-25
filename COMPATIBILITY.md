@@ -57,6 +57,15 @@ boundary. It does not require Python, Tesseract, LibreOffice, Poppler, Java, a
 runtime grammar download, or provider credentials. The stable artifact majors
 introduced here are `compass.document/1`, `compass.document.inspect/1`, and
 `compass.ocr/1`; unknown majors and normalizer versions fail explicitly.
+The additive `compass.document.preview/1` payload is carried by Office
+artifacts and the optional `document.previews` field in
+`compass.viewer.graph/1`. It contains bounded, deterministic SVG snapshots for
+DOCX normalized pages, PPTX slides, and XLSX sheet windows. Snapshots are
+self-contained (only escaped text and data-URI PNG thumbnails), digest-bound,
+and validated against script, external-resource, size, and geometry limits;
+older readers may ignore them. They are an inspectable presentation surface,
+not a claim of pixel-perfect Office layout, and native blocks remain
+authoritative.
 
 OCR is off by default. Enabling `auto` or `always` requires one exact verified
 Compass-managed profile. Extraction never downloads models, and `models
@@ -300,6 +309,10 @@ Rich document nodes may carry an optional additive `document` object in
 page/slide/sheet locators, confidence, and OCR geometry for the viewer; older
 readers may ignore the field, while strict readers should preserve unknown
 nested fields and fail closed only on an unknown contract major.
+When present, `document.previews` lets viewers display the normalized Office
+snapshot selected by an OCR candidate and map its source polygon into the
+embedded-image region. Missing or omitted preview images remain explicit
+diagnostics and never erase native/OCR evidence.
 Structural builds publish a validated `store.sqlite3` sidecar and typed
 `store.ref` selector by default; `--store json` explicitly opts out. Typed code
 queries prefer that validated sidecar by default, while `--engine json`
