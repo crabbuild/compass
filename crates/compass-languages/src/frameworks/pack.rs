@@ -39,6 +39,7 @@ pub enum FrameworkCapability {
     HttpRoutes,
     Beans,
     DependencyInjection,
+    DataModeling,
     Messaging,
     Scheduling,
     Persistence,
@@ -94,7 +95,11 @@ impl FrameworkRelation {
         let required = match self {
             Self::RoutesTo => Some(FrameworkCapability::HttpRoutes),
             Self::Registers => Some(FrameworkCapability::Beans),
-            Self::DependsOn => Some(FrameworkCapability::DependencyInjection),
+            Self::DependsOn => {
+                return capabilities.contains(&FrameworkCapability::DependencyInjection)
+                    || capabilities.contains(&FrameworkCapability::Security)
+                    || capabilities.contains(&FrameworkCapability::DataModeling);
+            }
             Self::Handles
             | Self::Publishes
             | Self::Subscribes

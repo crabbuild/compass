@@ -294,15 +294,23 @@ fn framework_context_reports_render_direction_and_rejects_v1_schema()
         declaring_scope: "src/app/page.tsx".to_owned(),
         resolution: ResolutionState::Exact,
         middleware_count: 0,
-        stages: vec![RouteStageDetails {
-            stage: RouteStage::RouteComponent,
-            position: 0,
-            reference: "Page".to_owned(),
+        stages: [
+            (RouteStage::Dependency, "provide_session"),
+            (RouteStage::Security, "require_user"),
+            (RouteStage::RouteComponent, "Page"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(position, (stage, reference))| RouteStageDetails {
+            stage,
+            position: u32::try_from(position).unwrap_or_else(|_| std::process::abort()),
+            reference: reference.to_owned(),
             resolution: ResolutionState::Exact,
             source_anchor: Some(anchor("src/ui.tsx")),
             target: Some("component".to_owned()),
             candidates: Vec::new(),
-        }],
+        })
+        .collect(),
     }));
     let mut page_component = node(
         "page-component",
@@ -352,8 +360,16 @@ fn framework_context_reports_render_direction_and_rejects_v1_schema()
     assert_eq!(framework.rendered_by.len(), 1);
     assert_eq!(framework.routes.len(), 1);
     assert_eq!(
-        framework.routes[0].stages[0].stage,
-        RouteStage::RouteComponent
+        framework.routes[0]
+            .stages
+            .iter()
+            .map(|stage| stage.stage)
+            .collect::<Vec<_>>(),
+        vec![
+            RouteStage::Dependency,
+            RouteStage::Security,
+            RouteStage::RouteComponent,
+        ]
     );
 
     let mut encoded = serde_json::to_value(&context)?;

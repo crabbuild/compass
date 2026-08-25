@@ -26,7 +26,7 @@ const frameworkText = z.string().min(1).max(16_384).refine(
 );
 
 const routeStageSchema = z.enum([
-  "middleware", "layout", "template", "loading", "default", "error_boundary",
+  "middleware", "dependency", "security", "layout", "template", "loading", "default", "error_boundary",
   "not_found", "boundary", "loader", "action", "handler", "data_loader",
   "route_component"
 ]);

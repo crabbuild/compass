@@ -85,6 +85,15 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+The closed route-stage vocabulary used by `compass.graph/1`,
+`compass.query/1`, and `compass.framework-context/1` now includes the additive
+`dependency` and `security` values. The query contract manifest and fingerprint
+changed with that enum list. CLI and MCP output use the same typed model, and
+the bundled viewer validates the same list. Deploy strict readers, manifests,
+and generated viewer assets together. Older strict readers must reject these
+values; consumers must not coerce either one to `middleware`. The existing
+graph and context schema majors are unchanged.
+
 Python structural evidence now uses producer version 13. The evidence schema
 is unchanged, but previously empty universal callable/type fields can contain
 source-proven parameter shapes, literal call types, `type_of`, `returns`, and

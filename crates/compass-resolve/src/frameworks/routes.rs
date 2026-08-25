@@ -23,6 +23,8 @@ use super::target_index::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RouteStageRole {
     Middleware,
+    Dependency,
+    Security,
     Layout,
     Template,
     Loading,
@@ -856,6 +858,8 @@ fn resolved_stage(
 fn route_stage_role(role: RawRouteStageRole) -> RouteStageRole {
     match role {
         RawRouteStageRole::Middleware => RouteStageRole::Middleware,
+        RawRouteStageRole::Dependency => RouteStageRole::Dependency,
+        RawRouteStageRole::Security => RouteStageRole::Security,
         RawRouteStageRole::Layout => RouteStageRole::Layout,
         RawRouteStageRole::Template => RouteStageRole::Template,
         RawRouteStageRole::Loading => RouteStageRole::Loading,
@@ -1105,6 +1109,8 @@ fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRo
     // edge; publishing them as node roles would make the graph unverifiable.
     let Some(role) = (match role {
         RouteStageRole::Middleware => Some("middleware"),
+        RouteStageRole::Dependency => Some("service"),
+        RouteStageRole::Security => Some("middleware"),
         RouteStageRole::Loader | RouteStageRole::DataLoader => Some("data_loader"),
         RouteStageRole::Action | RouteStageRole::Handler | RouteStageRole::RouteComponent => {
             Some("route_handler")
@@ -1134,6 +1140,8 @@ fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRo
 fn published_route_stage(role: RouteStageRole) -> PublishedRouteStage {
     match role {
         RouteStageRole::Middleware => PublishedRouteStage::Middleware,
+        RouteStageRole::Dependency => PublishedRouteStage::Dependency,
+        RouteStageRole::Security => PublishedRouteStage::Security,
         RouteStageRole::Layout => PublishedRouteStage::Layout,
         RouteStageRole::Template => PublishedRouteStage::Template,
         RouteStageRole::Loading => PublishedRouteStage::Loading,
@@ -1152,6 +1160,8 @@ fn published_route_stage(role: RouteStageRole) -> PublishedRouteStage {
 fn route_stage_name(role: RouteStageRole) -> &'static str {
     match role {
         RouteStageRole::Middleware => "middleware",
+        RouteStageRole::Dependency => "dependency",
+        RouteStageRole::Security => "security",
         RouteStageRole::Layout => "layout",
         RouteStageRole::Template => "template",
         RouteStageRole::Loading => "loading",

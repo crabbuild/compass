@@ -26,6 +26,13 @@ stages, render direction, runtime boundaries, configuration dependencies, and
 explicit ambiguity or truncation; unknown pack IDs and qualification states
 must fail closed.
 
+Route-stage readers must also add the `dependency` and `security` variants to
+their closed enum. Update the `compass.query/1` manifest fingerprint and viewer
+assets with the reader. Do not map these stages to `middleware`:
+`middlewareCount` continues to count HTTP middleware only. An older strict
+reader should reject a packet containing either new value, then be upgraded;
+cached graph, query, or task-context packets may be rebuilt after deployment.
+
 ## Ruby universal evidence rebuild
 
 The current release publishes Ruby through the version-1 universal evidence

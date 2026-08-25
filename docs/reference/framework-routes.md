@@ -19,10 +19,22 @@ Each registration becomes a `route` node with these details:
 - **Framework and operation**: the framework family and HTTP, page, hook, messaging, or subscription operation
 - **Path**: the normalized path plus the original path expression
 - **Declaration**: the source scope and anchor that declared the route
-- **Stages**: ordered middleware and handler stages, with the handler last
+- **Stages**: ordered framework stages, including middleware, dependency,
+  security, loader/action, layout/boundary, and handler roles
 - **Resolution**: the exact target, bounded candidates, or an explicit unresolved state
 
-A `routes_to` edge points from the route to each exact middleware and handler target. Compass preserves declaration order. It does not create an exact edge when several targets remain valid.
+A `routes_to` edge points from the route to each exact stage target. Compass
+preserves declaration order and repeated registrations. `dependency` identifies
+a dependency-injection provider, while `security` identifies an authorization
+or authentication provider; neither value contributes to `middlewareCount`.
+The terminal handler remains last when a framework supplies one. Compass does
+not create an exact edge when several targets remain valid.
+
+`dependency` and `security` are additive values in the strict Code Graph v1,
+query, task-context, CLI/MCP, and viewer contracts. Strict consumers must accept
+those exact spellings and continue rejecting unknown values; readers built
+against the older closed stage list must fail rather than silently translating
+them to middleware.
 
 Configuration and file-convention routes keep the rule and source that produced them. Equivalent inputs receive deterministic route identities and ordering.
 

@@ -181,6 +181,39 @@ fn universal_framework_pack_registry_enforces_evidence_activation_and_limits() {
 }
 
 #[test]
+fn depends_on_accepts_only_declared_dependency_semantics() {
+    let descriptor = valid_universal_framework_pack("dependency-pack");
+    const DEPENDENCY_INJECTION: &[FrameworkCapability] =
+        &[FrameworkCapability::DependencyInjection];
+    const DATA_MODELING: &[FrameworkCapability] = &[FrameworkCapability::DataModeling];
+    const SECURITY: &[FrameworkCapability] = &[FrameworkCapability::Security];
+    for capabilities in [DEPENDENCY_INJECTION, DATA_MODELING, SECURITY] {
+        let dependency_pack = FrameworkPackDescriptor {
+            framework_capabilities: capabilities,
+            emitted_relation_families: &[FrameworkRelation::DependsOn],
+            ..descriptor
+        };
+        assert_eq!(
+            FrameworkPackRegistry::validate_descriptors(&[dependency_pack]),
+            Ok(())
+        );
+    }
+
+    let persistence_only = FrameworkPackDescriptor {
+        framework_capabilities: &[FrameworkCapability::Persistence],
+        emitted_relation_families: &[FrameworkRelation::DependsOn],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[persistence_only]),
+        Err(FrameworkPackRegistryError::RelationCapabilityNotDeclared {
+            pack: descriptor.id,
+            relation: FrameworkRelation::DependsOn,
+        })
+    );
+}
+
+#[test]
 fn caller_supplied_source_matches_file_based_generic_extraction() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("source.rs");

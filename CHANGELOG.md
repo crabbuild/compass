@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Generalize framework role facts across the existing public node-role
+  vocabulary and add exact `dependency` and `security` route stages throughout
+  graph normalization, query/task-context serialization, CLI/MCP output, and
+  strict viewer contracts. Dependency and security providers retain distinct
+  route-edge stages without increasing the HTTP middleware count; unknown
+  stage values still fail closed.
+
 - Make Python module identity source-proven for flat, `src/`, namespace, and
   statically configured setuptools, Poetry, and Hatch layouts. Register `.pyi`
   files, keep paired `.py` declarations authoritative, publish stub-only
