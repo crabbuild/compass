@@ -939,7 +939,8 @@ button.init-scope-disclosure:hover {
 }
 
 .init-ocr-card > p {
-  margin: 0 0 0 40px;
+  margin-block: 0;
+  margin-inline-start: 40px;
   color: var(--muted-foreground);
   font-size: 11px;
   line-height: 1.5;
@@ -953,7 +954,7 @@ button.init-scope-disclosure:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-left: 40px;
+  margin-inline-start: 40px;
 }
 
 .init-ocr-facts span {
@@ -964,10 +965,45 @@ button.init-scope-disclosure:hover {
   font: 9px/1.2 var(--compass-font-mono);
 }
 
+.init-ocr-ready-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-inline-start: 40px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--compass-success) 36%, var(--compass-line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--compass-success) 8%, transparent);
+}
+
+.init-ocr-ready-banner > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  margin-top: 1px;
+  color: var(--compass-success);
+}
+
+.init-ocr-ready-banner span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.init-ocr-ready-banner strong {
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.init-ocr-ready-banner small {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
 .init-ocr-action {
   justify-self: start;
   min-height: 30px;
-  margin-left: 40px;
+  margin-inline-start: 40px;
   padding-inline: 10px;
 }
 
@@ -988,6 +1024,88 @@ button.init-scope-disclosure:hover {
   animation: init-ocr-spin 1s linear infinite;
 }
 
+.init-ocr-install-progress {
+  display: grid;
+  gap: 8px;
+  margin-inline-start: 40px;
+}
+
+.init-ocr-progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.init-ocr-progress-meta > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.init-ocr-progress-meta strong {
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.init-ocr-progress-meta small,
+.init-ocr-progress-state {
+  color: var(--compass-faint);
+  font: 9px/1.2 var(--compass-font-mono);
+}
+
+.init-ocr-progress-state {
+  flex: 0 0 auto;
+  color: var(--compass-focus);
+  text-transform: uppercase;
+}
+
+.init-ocr-progress-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--compass-focus) 16%, var(--compass-line));
+}
+
+.init-ocr-progress-bar {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--compass-focus), #e2a94b);
+  transform: translateX(-125%);
+}
+
+.init-ocr-progress-bar.is-indeterminate {
+  animation: init-ocr-progress 1.35s ease-in-out infinite;
+}
+
+@keyframes init-ocr-progress {
+  0% { transform: translateX(-125%); }
+  55% { transform: translateX(165%); }
+  100% { transform: translateX(280%); }
+}
+
+.init-ocr-progress-detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.init-ocr-progress-detail svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  margin-top: 1px;
+  animation: init-ocr-spin 1s linear infinite;
+  color: var(--compass-focus);
+}
+
 @keyframes init-ocr-spin {
   to { transform: rotate(360deg); }
 }
@@ -1004,14 +1122,23 @@ button.init-scope-disclosure:hover {
 
   .init-ocr-card > p,
   .init-ocr-facts,
-  .init-ocr-action {
-    margin-left: 0;
+  .init-ocr-action,
+  .init-ocr-ready-banner,
+  .init-ocr-install-progress {
+    margin-inline-start: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .init-ocr-progress svg {
+  .init-ocr-progress svg,
+  .init-ocr-progress-detail svg {
     animation: none;
+  }
+
+  .init-ocr-progress-bar.is-indeterminate {
+    width: 45%;
+    animation: none;
+    transform: none;
   }
 }
 

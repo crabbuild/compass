@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   FileImage,
   MapPin,
@@ -11,6 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 import type {
   DocumentLocator,
   DocumentOrigin,
+  DocumentPreview,
   GraphDocument,
   GraphNode,
   GraphViewModel
@@ -248,11 +251,15 @@ export function DocumentOcrPanel({
         <OcrPreview
           block={previewBlock}
           siblings={ocrBlocks}
+          {...(rootDocument?.previews ? { previews: rootDocument.previews } : {})}
           onFocus={(nodeId) => {
             setPreviewId(nodeId);
             onFocus(nodeId);
           }}
         />
+      )}
+      {!previewBlock && rootDocument?.previews && rootDocument.previews.length > 0 && (
+        <DocumentPreviewGallery previews={rootDocument.previews} />
       )}
     </section>
   );
@@ -338,13 +345,63 @@ function ConfidenceBadge({ confidence }: { confidence: number }) {
   );
 }
 
+function DocumentPreviewGallery({ previews }: { previews: DocumentPreview[] }) {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    setIndex((current) => Math.min(current, Math.max(0, previews.length - 1)));
+  }, [previews.length]);
+  const preview = previews[index];
+  if (!preview) return null;
+  return (
+    <div className="compass-ocr-preview compass-document-preview-gallery" aria-label="Document preview">
+      <header>
+        <span>
+          <strong>{preview.label}</strong>
+          <small>{formatLocator(preview.locator)} · Normalized preview</small>
+        </span>
+        {previews.length > 1 && (
+          <span className="compass-document-preview-controls">
+            <button
+              type="button"
+              aria-label="Previous document preview"
+              disabled={index === 0}
+              onClick={() => setIndex((current) => Math.max(0, current - 1))}
+            >
+              <ChevronLeft aria-hidden="true" />
+            </button>
+            <span>{index + 1} / {previews.length}</span>
+            <button
+              type="button"
+              aria-label="Next document preview"
+              disabled={index === previews.length - 1}
+              onClick={() => setIndex((current) => Math.min(previews.length - 1, current + 1))}
+            >
+              <ChevronRight aria-hidden="true" />
+            </button>
+          </span>
+        )}
+      </header>
+      <div className="compass-document-preview-stage">
+        <img
+          className="compass-document-preview-image"
+          src={previewDataUrl(preview.svg)}
+          alt={`${preview.label} document preview`}
+        />
+      </div>
+      <p>Compass generated a bounded local snapshot. Native text remains the authoritative evidence.</p>
+    </div>
+  );
+}
+
 function OcrPreview({
   block,
   siblings,
+  previews,
   onFocus
 }: {
   block: OcrBlock;
   siblings: OcrBlock[];
+  previews?: DocumentPreview[];
   onFocus(nodeId: string): void;
 }) {
   const locator = block.document.locator;
@@ -358,57 +415,95 @@ function OcrPreview({
       && candidateLocator.height === locator.height;
   });
   if (!width || !height) return null;
+  const preview = previewForLocator(previews, locator);
   return (
     <div className="compass-ocr-preview" aria-label="OCR region preview">
       <header>
         <span>
-          <strong>Visual region</strong>
+          <strong>{preview?.label ?? "Visual region"}</strong>
           <small>{formatLocator(locator.owner)} · {width} × {height}px</small>
         </span>
-        <span className="compass-ocr-preview-key"><i />OCR boxes</span>
+        <span className="compass-ocr-preview-key">
+          <i />OCR boxes{preview ? " · normalized preview" : ""}
+        </span>
       </header>
-      <svg
-        className="compass-ocr-preview-canvas"
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-label={`OCR bounding boxes for ${formatLocator(locator.owner)}`}
-      >
-        <defs>
-          <pattern id="compass-ocr-preview-grid" width="32" height="32" patternUnits="userSpaceOnUse">
-            <path d="M 32 0 L 0 0 0 32" fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1" />
-          </pattern>
-        </defs>
-        <rect width={width} height={height} fill="var(--compass-ocr-preview-surface)" />
-        <rect width={width} height={height} fill="url(#compass-ocr-preview-grid)" />
-        {regions.map((candidate) => {
-          const candidateLocator = candidate.document.locator;
-          const points = polygonPoints(candidateLocator.polygon, width, height);
-          if (!points) return null;
-          const active = candidate.id === block.id;
-          return (
-            <polygon
-              key={candidate.id}
-              className="compass-ocr-preview-box"
-              data-active={active}
-              points={points}
-              role="button"
-              tabIndex={0}
-              aria-label={`${candidate.document.text ?? candidate.label} · ${formatLocator(candidateLocator)}`}
-              onClick={() => onFocus(candidate.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onFocus(candidate.id);
-                }
-              }}
-            >
-              <title>{candidate.document.text ?? candidate.label}</title>
-            </polygon>
-          );
-        })}
-      </svg>
-      <p>Click a highlighted region to inspect its text and confidence.</p>
+      {preview ? (
+        <div className="compass-document-preview-stage">
+          <img
+            className="compass-document-preview-image"
+            src={previewDataUrl(preview.svg)}
+            alt={`${preview.label} document preview`}
+          />
+          <svg
+            className="compass-document-preview-overlay"
+            viewBox={`0 0 ${preview.width} ${preview.height}`}
+            role="img"
+            aria-label={`OCR bounding boxes over ${preview.label}`}
+            preserveAspectRatio="none"
+          >
+            {regions.map((candidate) => {
+              const points = polygonPointsForPreview(candidate.document.locator, preview);
+              if (!points) return null;
+              return ocrPolygon(candidate, points, candidate.id === block.id, onFocus);
+            })}
+          </svg>
+        </div>
+      ) : (
+        <svg
+          className="compass-ocr-preview-canvas"
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={`OCR bounding boxes for ${formatLocator(locator.owner)}`}
+        >
+          <defs>
+            <pattern id="compass-ocr-preview-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="currentColor" strokeOpacity="0.12" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width={width} height={height} fill="var(--compass-ocr-preview-surface)" />
+          <rect width={width} height={height} fill="url(#compass-ocr-preview-grid)" />
+          {regions.map((candidate) => {
+            const candidateLocator = candidate.document.locator;
+            const points = polygonPoints(candidateLocator.polygon, width, height);
+            if (!points) return null;
+            return ocrPolygon(candidate, points, candidate.id === block.id, onFocus);
+          })}
+        </svg>
+      )}
+      <p>
+        {preview
+          ? "OCR boxes are mapped to the embedded image region. Click a box to inspect its text and confidence."
+          : "Click a highlighted region to inspect its text and confidence."}
+      </p>
     </div>
+  );
+}
+
+function ocrPolygon(
+  candidate: OcrBlock,
+  points: string,
+  active: boolean,
+  onFocus: (nodeId: string) => void
+) {
+  return (
+    <polygon
+      key={candidate.id}
+      className="compass-ocr-preview-box"
+      data-active={active}
+      points={points}
+      role="button"
+      tabIndex={0}
+      aria-label={`${candidate.document.text ?? candidate.label} · ${formatLocator(candidate.document.locator)}`}
+      onClick={() => onFocus(candidate.id)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onFocus(candidate.id);
+        }
+      }}
+    >
+      <title>{candidate.document.text ?? candidate.label}</title>
+    </polygon>
   );
 }
 
@@ -473,6 +568,8 @@ function formatLocator(locator: DocumentLocator | undefined): string {
     }
     case "pdf":
       return `Page ${numberValue(field(locator, "page")) ?? "?"}`;
+    case "page":
+      return `Page ${numberValue(field(locator, "page")) ?? "?"}`;
     case "slide":
       return `Slide ${numberValue(field(locator, "slide")) ?? "?"}${field(locator, "shape") !== undefined ? ` · Shape ${String(field(locator, "shape"))}` : ""}`;
     case "spreadsheet": {
@@ -501,6 +598,70 @@ function formatLocator(locator: DocumentLocator | undefined): string {
     default:
       return "Document location";
   }
+}
+
+function previewForLocator(
+  previews: DocumentPreview[] | undefined,
+  locator: OcrLocator
+): DocumentPreview | undefined {
+  if (!previews || previews.length === 0) return undefined;
+  const candidateId = locator.candidate_id;
+  if (candidateId) {
+    const candidatePreview = previews.find((preview) =>
+      preview.regions.some((region) => region.candidate_id === candidateId)
+    );
+    if (candidatePreview) return candidatePreview;
+  }
+  const owner = locator.owner;
+  if (isLocator(owner)) {
+    if (owner.kind === "slide") {
+      const slide = numberValue(field(owner, "slide"));
+      const slidePreview = previews.find((preview) =>
+        preview.kind === "slide"
+        && preview.locator.kind === "slide"
+        && numberValue(field(preview.locator, "slide")) === slide
+      );
+      if (slidePreview) return slidePreview;
+    }
+    if (owner.kind === "spreadsheet") {
+      const sheet = field(owner, "sheet");
+      const sheetPreview = previews.find((preview) =>
+        preview.kind === "sheet"
+        && preview.locator.kind === "spreadsheet"
+        && field(preview.locator, "sheet") === sheet
+      );
+      if (sheetPreview) return sheetPreview;
+    }
+  }
+  return previews[0];
+}
+
+function previewDataUrl(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function polygonPointsForPreview(
+  locator: OcrLocator,
+  preview: DocumentPreview
+): string | undefined {
+  const candidateId = locator.candidate_id;
+  const region = candidateId
+    ? preview.regions.find((value) => value.candidate_id === candidateId)
+    : undefined;
+  const sourceWidth = boundedDimension(locator.width);
+  const sourceHeight = boundedDimension(locator.height);
+  if (!region || !sourceWidth || !sourceHeight) return undefined;
+  if (!Array.isArray(locator.polygon)) return undefined;
+  const points = locator.polygon.slice(0, 256).flatMap((point) => {
+    if (typeof point !== "object" || point === null) return [];
+    const x = numberValue(field(point, "x"));
+    const y = numberValue(field(point, "y"));
+    if (x === undefined || y === undefined) return [];
+    const mappedX = region.x + clamp(x / sourceWidth, 0, 1) * region.width;
+    const mappedY = region.y + clamp(y / sourceHeight, 0, 1) * region.height;
+    return [`${mappedX},${mappedY}`];
+  });
+  return points.length >= 3 ? points.join(" ") : undefined;
 }
 
 function field(value: object, key: string): unknown {

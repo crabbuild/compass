@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add safe, local-only DOCX page, PPTX slide, and XLSX sheet preview artifacts
+  with bounded SVG snapshots, embedded image thumbnails, digest validation,
+  and viewer overlays that map OCR boxes directly onto the preview surface.
+
+- Make managed OCR model installation easier to follow with phase-aware
+  progress, explicit verification completion, cancellation, and retry actions
+  in the initialization experience.
+
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,
