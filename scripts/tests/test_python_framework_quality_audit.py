@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -15,6 +17,33 @@ import qualify_python_frameworks as qualification  # noqa: E402
 
 
 class PythonFrameworkQualificationTests(unittest.TestCase):
+    def test_checkout_root_defaults_to_mounted_github_root(self) -> None:
+        environment = dict(os.environ)
+        environment.pop(qualification.CHECKOUT_ROOT_ENV, None)
+        self.assertEqual(
+            qualification.checkout_root(environment),
+            Path("/Volumes/Workspace/Github"),
+        )
+
+    def test_checkout_root_accepts_contained_absolute_override(self) -> None:
+        root = Path("/Volumes/Workspace/Github/qualification-clean")
+        with mock.patch.dict(os.environ, {qualification.CHECKOUT_ROOT_ENV: str(root)}):
+            self.assertEqual(qualification.checkout_root(), root)
+            self.assertEqual(
+                qualification.checkout_for("https://github.com/fastapi/fastapi.git", root),
+                root / "fastapi" / "fastapi",
+            )
+
+    def test_checkout_root_rejects_relative_and_escaping_overrides(self) -> None:
+        for override in (
+            "qualification-clean",
+            "/Volumes/Workspace/Github/../outside",
+            "/tmp/qualification-clean",
+        ):
+            with self.subTest(override=override):
+                with self.assertRaises(qualification.QualificationError):
+                    qualification.checkout_root({qualification.CHECKOUT_ROOT_ENV: override})
+
     def test_fixture_report_is_deterministic_and_explicitly_unqualified(self) -> None:
         first = qualification.fixture_report()
         second = qualification.fixture_report()

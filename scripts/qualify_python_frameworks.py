@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tomllib
@@ -31,6 +32,8 @@ REPOSITORIES = ROOT / "tests" / "qualification" / "python-framework-repositories
 FRAMEWORK_EXPECTATIONS_SCHEMA = "compass.framework-evidence/1"
 GAPS_SCHEMA = "compass.python-framework-expected-gaps/1"
 BASELINE_SCHEMA = "compass.python-framework-baseline/1"
+MOUNTED_CHECKOUT_ROOT = Path("/Volumes/Workspace/Github")
+CHECKOUT_ROOT_ENV = "COMPASS_PYTHON_FRAMEWORK_CHECKOUT_ROOT"
 
 
 class QualificationError(RuntimeError):
@@ -163,15 +166,30 @@ def fixture_report() -> dict[str, Any]:
     }
 
 
-def checkout_for(url: str) -> Path:
+def checkout_root(environment: dict[str, str] | None = None) -> Path:
+    values = os.environ if environment is None else environment
+    configured = values.get(CHECKOUT_ROOT_ENV)
+    candidate = MOUNTED_CHECKOUT_ROOT if configured is None else Path(configured)
+    if not candidate.is_absolute():
+        raise QualificationError(f"{CHECKOUT_ROOT_ENV} must be an absolute path")
+    mounted_root = MOUNTED_CHECKOUT_ROOT.resolve()
+    resolved = candidate.resolve()
+    if resolved != mounted_root and mounted_root not in resolved.parents:
+        raise QualificationError(
+            f"{CHECKOUT_ROOT_ENV} must remain under {MOUNTED_CHECKOUT_ROOT}"
+        )
+    return resolved
+
+
+def checkout_for(url: str, root: Path) -> Path:
     pieces = url.rstrip("/").split("/")
     if len(pieces) < 2:
         raise QualificationError(f"cannot infer mounted checkout for {url!r}")
-    return Path("/Volumes/Workspace/Github") / pieces[-2] / pieces[-1].removesuffix(".git")
+    return root / pieces[-2] / pieces[-1].removesuffix(".git")
 
 
-def verify_checkout(repository: dict[str, Any]) -> tuple[Path, str]:
-    checkout = checkout_for(repository["url"])
+def verify_checkout(repository: dict[str, Any], root: Path) -> tuple[Path, str]:
+    checkout = checkout_for(repository["url"], root)
     if not checkout.is_dir():
         raise QualificationError(f"missing pinned checkout {checkout}")
     revision = subprocess.run(
@@ -203,9 +221,10 @@ def pinned_report(baseline_path: Path) -> dict[str, Any]:
     repositories = manifest.get("repository")
     if not isinstance(repositories, list) or not repositories:
         raise QualificationError("pinned repository manifest is empty")
+    root = checkout_root()
     reports = []
     for repository in repositories:
-        checkout, revision = verify_checkout(repository)
+        checkout, revision = verify_checkout(repository, root)
         inventory = python_framework_oracle.build_inventory(checkout)
         reports.append(
             {
