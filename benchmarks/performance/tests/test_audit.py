@@ -128,6 +128,7 @@ class AuditTests(unittest.TestCase):
                 {
                     "scannedFiles": inventory.scanned_files,
                     "parsedFiles": inventory.parsed_files,
+                    "rejectedFiles": list(inventory.rejected_files),
                     "inventorySha256": source_construct_inventory_sha256(
                         "python", inventory
                     ),
@@ -138,8 +139,10 @@ class AuditTests(unittest.TestCase):
                 BASE_GRAPH,
                 root,
             )
+            loaded = load_manifest(self.write_manifest(partial, root))
 
         self.assertEqual(1, result.source_coverage["python"]["unsupportedFiles"])
+        self.assertEqual(("broken.py",), loaded.source_oracles[0].rejected_files)
         self.assertTrue(
             any("complete source coverage is required" in failure for failure in result.failures),
             result.failures,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import fnmatch
 import hashlib
 import json
 import os
@@ -38,6 +39,7 @@ class SourceConstruct:
     start_byte: int
     end_byte: int
     start_line: int
+    framework_pack: str | None = None
 
 
 def _source_construct_key(construct: SourceConstruct) -> tuple[object, ...]:
@@ -51,6 +53,7 @@ def _source_construct_key(construct: SourceConstruct) -> tuple[object, ...]:
         construct.start_byte,
         construct.end_byte,
         construct.start_line,
+        construct.framework_pack or "",
     )
 
 
@@ -282,6 +285,359 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
 
     Visitor().visit(tree)
     return tuple(sorted(set(constructs), key=_source_construct_key))
+
+
+_PYTHON_FRAMEWORK_MAX_FILES = 20_000
+_PYTHON_FRAMEWORK_MAX_FILE_BYTES = 8 * 1024 * 1024
+_PYTHON_ROUTE_METHODS = frozenset(
+    {
+        "route",
+        "api_route",
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "options",
+        "head",
+        "websocket",
+        "websocket_route",
+    }
+)
+_PYTHON_RECEIVER_CONSTRUCTORS = {
+    "fastapi.FastAPI": "fastapi-python",
+    "fastapi.APIRouter": "fastapi-python",
+    "flask.Flask": "flask-python",
+    "flask.Blueprint": "flask-python",
+    "starlette.applications.Starlette": "starlette-python",
+    "starlette.routing.Router": "starlette-python",
+}
+
+
+def _python_dotted_name(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        owner = _python_dotted_name(node.value)
+        return f"{owner}.{node.attr}" if owner else None
+    return None
+
+
+def _python_framework_constructs(
+    root: Path,
+    path: Path,
+) -> tuple[SourceConstruct, ...] | None:
+    """Collect exact Python framework relations without importing corpus code."""
+
+    try:
+        raw = path.read_bytes()
+        if len(raw) > _PYTHON_FRAMEWORK_MAX_FILE_BYTES:
+            return None
+        bom = len(tokenize.BOM_UTF8) if raw.startswith(tokenize.BOM_UTF8) else 0
+        source = raw.decode("utf-8-sig")
+        tree = ast.parse(source, filename=str(path), type_comments=True)
+    except (OSError, SyntaxError, UnicodeError, ValueError):
+        return None
+
+    encoded_lines = [line.encode("utf-8") for line in source.splitlines(keepends=True)]
+    line_offsets: list[int] = []
+    offset = bom
+    for line in encoded_lines:
+        line_offsets.append(offset)
+        offset += len(line)
+
+    def byte_range(node: ast.AST) -> tuple[int, int, int] | None:
+        start_line = getattr(node, "lineno", None)
+        end_line = getattr(node, "end_lineno", None)
+        start_column = getattr(node, "col_offset", None)
+        end_column = getattr(node, "end_col_offset", None)
+        if (
+            not isinstance(start_line, int)
+            or not isinstance(end_line, int)
+            or not isinstance(start_column, int)
+            or not isinstance(end_column, int)
+            or start_line < 1
+            or end_line < start_line
+            or end_line > len(line_offsets)
+        ):
+            return None
+        start = line_offsets[start_line - 1] + start_column
+        end = line_offsets[end_line - 1] + end_column
+        if start < bom or end <= start or end > len(raw):
+            return None
+        return start, end, start_line
+
+    def definition_name_range(
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> tuple[int, int, int] | None:
+        if node.lineno < 1 or node.lineno > len(line_offsets):
+            return None
+        line_start = line_offsets[node.lineno - 1]
+        line_end = (
+            line_offsets[node.lineno]
+            if node.lineno < len(line_offsets)
+            else len(raw)
+        )
+        search_start = line_start + node.col_offset
+        name = node.name.encode("utf-8")
+        start = raw.find(name, search_start, line_end)
+        if start < 0:
+            return None
+        end = start + len(name)
+        before = raw[start - 1 : start] if start else b""
+        after = raw[end : end + 1]
+        identifier = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+        if before and before in identifier or after and after in identifier:
+            return None
+        return start, end, node.lineno
+
+    bindings: dict[str, str] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bindings[alias.asname or alias.name.split(".", 1)[0]] = alias.name
+        elif isinstance(statement, ast.ImportFrom):
+            module = "." * statement.level + (statement.module or "")
+            if statement.level == 0:
+                for alias in statement.names:
+                    if alias.name != "*":
+                        bindings[alias.asname or alias.name] = f"{module}.{alias.name}"
+
+    for statement in tree.body:
+        shadowed: list[str] = []
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            shadowed.append(statement.name)
+        elif isinstance(statement, ast.Assign):
+            shadowed.extend(
+                target.id for target in statement.targets if isinstance(target, ast.Name)
+            )
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            shadowed.append(statement.target.id)
+        for name in shadowed:
+            if not (
+                isinstance(statement, (ast.Assign, ast.AnnAssign))
+                and isinstance(statement.value, ast.Call)
+                and _python_dotted_name(statement.value.func) == name
+            ):
+                bindings.pop(name, None)
+
+    def resolved_name(node: ast.AST | None) -> str | None:
+        dotted = _python_dotted_name(node)
+        if dotted is None:
+            return None
+        head, separator, tail = dotted.partition(".")
+        bound = bindings.get(head)
+        if bound is None:
+            return dotted
+        return f"{bound}.{tail}" if separator else bound
+
+    receivers: dict[str, str] = {}
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = statement.value
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            framework_pack = (
+                _PYTHON_RECEIVER_CONSTRUCTORS.get(resolved_name(value.func) or "")
+                if isinstance(value, ast.Call)
+                else None
+            )
+            if framework_pack is None:
+                receivers.pop(target.id, None)
+            else:
+                receivers[target.id] = framework_pack
+
+    declarations: dict[str, list[tuple[int, int, int]]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            bounded = definition_name_range(node)
+            if bounded is not None:
+                declarations.setdefault(node.name, []).append(bounded)
+
+    relative = path.relative_to(root).as_posix()
+    module = _python_module(root, path)
+    constructs: list[SourceConstruct] = []
+
+    def add(
+        relation: str,
+        capability: str,
+        owner: str,
+        target: str,
+        bounded: tuple[int, int, int] | None,
+        framework_pack: str,
+        qualifier: str | None = None,
+    ) -> None:
+        if bounded is None:
+            return
+        start, end, line = bounded
+        constructs.append(
+            SourceConstruct(
+                relative,
+                relation,
+                capability,
+                owner,
+                target,
+                qualifier,
+                start,
+                end,
+                line,
+                framework_pack,
+            )
+        )
+
+    def local_declaration(name: str) -> tuple[int, int, int] | None:
+        values = declarations.get(name, ())
+        return values[0] if len(values) == 1 else None
+
+    def handler_argument(call: ast.Call, position: int, keyword: str) -> ast.AST | None:
+        for item in call.keywords:
+            if item.arg == keyword:
+                return item.value
+        return call.args[position] if len(call.args) > position else None
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.owners = [module]
+
+        @property
+        def owner(self) -> str:
+            return ".".join(part for part in self.owners if part)
+
+        def _visit_function(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            bounded = definition_name_range(node)
+            for decorator in node.decorator_list:
+                if not isinstance(decorator, ast.Call) or not isinstance(decorator.func, ast.Attribute):
+                    continue
+                receiver = _python_dotted_name(decorator.func.value)
+                framework_pack = receivers.get(receiver or "")
+                if framework_pack is None or decorator.func.attr not in _PYTHON_ROUTE_METHODS:
+                    continue
+                add(
+                    "routes_to",
+                    "http_routes",
+                    self.owner,
+                    node.name,
+                    bounded,
+                    framework_pack,
+                    receiver,
+                )
+            self.owners.append(node.name)
+            self.generic_visit(node)
+            self.owners.pop()
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            self._visit_function(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+            self._visit_function(node)
+
+        def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+            called = resolved_name(node.func)
+            framework_pack: str | None = None
+            handler: ast.AST | None = None
+            if called in {"starlette.routing.Route", "starlette.routing.WebSocketRoute"}:
+                framework_pack = "starlette-python"
+                handler = handler_argument(node, 1, "endpoint")
+            elif called in {"django.urls.path", "django.urls.re_path"}:
+                framework_pack = "django-python"
+                handler = handler_argument(node, 1, "view")
+            elif isinstance(node.func, ast.Attribute):
+                receiver = _python_dotted_name(node.func.value)
+                candidate_pack = receivers.get(receiver or "")
+                if candidate_pack in {"fastapi-python", "starlette-python"} and node.func.attr in {
+                    "add_api_route",
+                    "add_route",
+                    "add_websocket_route",
+                }:
+                    framework_pack = candidate_pack
+                    handler = handler_argument(node, 1, "endpoint")
+                elif candidate_pack == "flask-python" and node.func.attr == "add_url_rule":
+                    framework_pack = candidate_pack
+                    handler = handler_argument(node, 1, "view_func")
+            if framework_pack is not None and isinstance(handler, ast.Name):
+                add(
+                    "routes_to",
+                    "http_routes",
+                    self.owner,
+                    handler.id,
+                    local_declaration(handler.id),
+                    framework_pack,
+                )
+
+            if called in {"fastapi.Depends", "fastapi.Security"}:
+                provider = handler_argument(node, 0, "dependency")
+                if isinstance(provider, (ast.Name, ast.Attribute)):
+                    target = _python_dotted_name(provider)
+                    if target:
+                        add(
+                            "depends_on",
+                            "dependency_injection",
+                            self.owner,
+                            target,
+                            byte_range(provider),
+                            "fastapi-python",
+                        )
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return tuple(sorted(set(constructs), key=_source_construct_key))
+
+
+def _qualification_glob_matches(relative: str, pattern: str) -> bool:
+    if fnmatch.fnmatchcase(relative, pattern):
+        return True
+    return "**/" in pattern and fnmatch.fnmatchcase(
+        relative,
+        pattern.replace("**/", ""),
+    )
+
+
+def _python_framework_inventory(
+    root: Path,
+    include_globs: tuple[str, ...],
+    exclude_globs: tuple[str, ...],
+) -> SourceConstructInventory:
+    paths = sorted(path for path in root.rglob("*.py") if path.is_file())
+    if len(paths) > _PYTHON_FRAMEWORK_MAX_FILES:
+        raise RuntimeError(
+            f"Python framework source file count {len(paths)} exceeds {_PYTHON_FRAMEWORK_MAX_FILES}"
+        )
+    constructs: list[SourceConstruct] = []
+    rejected: list[str] = []
+    scanned = 0
+    parsed = 0
+    for path in paths:
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rejected.append(path.relative_to(root).as_posix())
+            continue
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        if any(_qualification_glob_matches(relative, pattern) for pattern in exclude_globs):
+            continue
+        scanned += 1
+        extracted = _python_framework_constructs(root, resolved)
+        if extracted is None:
+            rejected.append(relative)
+        else:
+            parsed += 1
+            constructs.extend(extracted)
+    return SourceConstructInventory(
+        tuple(sorted(set(constructs), key=_source_construct_key)),
+        scanned,
+        parsed,
+        tuple(sorted(rejected)),
+    )
 
 
 _TYPESCRIPT_ORACLE_SCHEMA = "compass.typescript-source-oracle/1"
@@ -1885,6 +2241,12 @@ DEFAULT_STATEMENT_PROVIDERS: Mapping[str, StatementProvider] = {
 
 DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
     "python": ConstructProvider("python_ast", (".py",), _python_constructs),
+    "python-frameworks": ConstructProvider(
+        "python_framework_ast_v1",
+        (".py",),
+        _collector_only_construct_parser,
+        _python_framework_inventory,
+    ),
     "typescript": ConstructProvider(
         _TYPESCRIPT_ORACLE_PROVIDER,
         (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".d.ts"),
@@ -1980,15 +2342,23 @@ def independent_source_inventory(
     for path in sorted(paths):
         resolved = path.resolve()
         try:
-            resolved.relative_to(root)
+            relative = resolved.relative_to(root).as_posix()
         except ValueError:
             rejected.append(path.relative_to(root).as_posix())
+            continue
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        if any(
+            _qualification_glob_matches(relative, pattern) for pattern in exclude_globs
+        ):
             continue
         if resolved.is_file():
             scanned += 1
             extracted = provider.parse(root, resolved)
             if extracted is None:
-                rejected.append(resolved.relative_to(root).as_posix())
+                rejected.append(relative)
             else:
                 parsed += 1
                 constructs.extend(extracted)
@@ -2025,6 +2395,11 @@ def source_construct_inventory_sha256(
                 "startByte": construct.start_byte,
                 "endByte": construct.end_byte,
                 "startLine": construct.start_line,
+                **(
+                    {"frameworkPack": construct.framework_pack}
+                    if construct.framework_pack is not None
+                    else {}
+                ),
             }
             for construct in inventory.constructs
         ],

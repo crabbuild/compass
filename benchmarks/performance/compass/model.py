@@ -235,6 +235,7 @@ class AuditSourceOracle:
     scanned_files: int
     parsed_files: int
     inventory_sha256: str
+    rejected_files: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

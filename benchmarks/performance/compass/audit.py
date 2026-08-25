@@ -796,6 +796,7 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
             "parsedFiles",
             "inventorySha256",
         ),
+        optional=("rejectedFiles",),
         context=context,
     )
     scanned = item["scannedFiles"]
@@ -813,6 +814,24 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
             f"{context} must contain a non-empty source population with parsedFiles "
             "between zero and scannedFiles"
         )
+    raw_rejected = item.get("rejectedFiles")
+    if raw_rejected is None:
+        rejected_files = None
+    elif not isinstance(raw_rejected, list):
+        raise AuditError(f"{context}.rejectedFiles must be an array")
+    else:
+        rejected_files = tuple(
+            _safe_path(value, f"{context}.rejectedFiles[{index}]")
+            for index, value in enumerate(raw_rejected)
+        )
+    if rejected_files is not None and rejected_files != tuple(sorted(set(rejected_files))):
+        raise AuditError(
+            f"{context}.rejectedFiles must be sorted and contain no duplicates"
+        )
+    if rejected_files is not None and len(rejected_files) != scanned - parsed:
+        raise AuditError(
+            f"{context}.rejectedFiles must identify every unparsed source file"
+        )
     return AuditSourceOracle(
         corpus=_text(item["corpus"], f"{context}.corpus", identity=True),
         producer=_text(item["producer"], f"{context}.producer", identity=True),
@@ -823,6 +842,7 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
             item["inventorySha256"],
             f"{context}.inventorySha256",
         ),
+        rejected_files=rejected_files,
     )
 
 
@@ -1244,6 +1264,16 @@ def _validate_record_inputs(
                 f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
                 "inventory digest mismatch: "
                 f"expected {source_oracle.inventory_sha256}, observed {observed_digest}"
+            )
+        if (
+            source_oracle.rejected_files is not None
+            and inventory.rejected_files != source_oracle.rejected_files
+        ):
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
+                "rejected-file ledger mismatch: "
+                f"expected {source_oracle.rejected_files!r}, "
+                f"observed {inventory.rejected_files!r}"
             )
         metadata = dict(inventory.provider_metadata)
         # Legacy providers (for example the built-in Python AST oracle) do
