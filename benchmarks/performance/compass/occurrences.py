@@ -122,7 +122,12 @@ def _python_name(node: ast.AST, source: str) -> tuple[str, str | None]:
     return spelling.strip(), None
 
 
-def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | None:
+def _python_constructs(
+    root: Path,
+    path: Path,
+    local_modules: frozenset[str] = frozenset(),
+    import_module: str | None = None,
+) -> tuple[SourceConstruct, ...] | None:
     try:
         raw = path.read_bytes()
         bom = len(tokenize.BOM_UTF8) if raw.startswith(tokenize.BOM_UTF8) else 0
@@ -160,7 +165,28 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
         return start, end, start_line
 
     module = _python_module(root, path)
+    import_module = import_module or module
     relative = path.relative_to(root).as_posix()
+    is_package_initializer = path.name == "__init__.py"
+    direct_module_imports = {
+        id(statement) for statement in tree.body if isinstance(statement, ast.ImportFrom)
+    }
+
+    def absolute_import_module(node: ast.ImportFrom) -> str | None:
+        if node.level == 0:
+            return node.module
+        package = (
+            import_module.split(".")
+            if is_package_initializer
+            else import_module.split(".")[:-1]
+        )
+        parents = node.level - 1
+        if parents > len(package):
+            return None
+        base = package[: len(package) - parents]
+        if node.module:
+            base.extend(node.module.split("."))
+        return ".".join(base) or None
     constructs: list[SourceConstruct] = []
 
     class Visitor(ast.NodeVisitor):
@@ -263,17 +289,24 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
 
         def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
             module_name = "." * node.level + (node.module or "")
+            absolute_module = absolute_import_module(node)
             for alias in node.names:
                 bounded = byte_range(alias)
                 if bounded is None:
                     continue
                 start, end, line = bounded
                 qualified = f"{module_name}.{alias.name}".strip(".")
+                is_reexport = (
+                    is_package_initializer
+                    and id(node) in direct_module_imports
+                    and alias.name != "*"
+                    and absolute_module in local_modules
+                )
                 constructs.append(
                     SourceConstruct(
                         relative,
-                        "imports",
-                        "imports",
+                        "reexports" if is_reexport else "imports",
+                        "aliases" if is_reexport else "imports",
                         self.owner,
                         qualified or alias.name,
                         module_name or None,
@@ -1429,6 +1462,77 @@ def _qualification_glob_matches(relative: str, pattern: str) -> bool:
     return "**/" in pattern and fnmatch.fnmatchcase(
         relative,
         pattern.replace("**/", ""),
+    )
+
+
+def _python_inventory(
+    root: Path,
+    include_globs: tuple[str, ...],
+    exclude_globs: tuple[str, ...],
+) -> SourceConstructInventory:
+    paths = sorted(path for path in root.rglob("*.py") if path.is_file())
+    if len(paths) > _PYTHON_FRAMEWORK_MAX_FILES:
+        raise RuntimeError(
+            f"Python source file count {len(paths)} exceeds {_PYTHON_FRAMEWORK_MAX_FILES}"
+        )
+    selected: list[tuple[Path, str]] = []
+    rejected: list[str] = []
+    for path in paths:
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rejected.append(path.relative_to(root).as_posix())
+            continue
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        if any(_qualification_glob_matches(relative, pattern) for pattern in exclude_globs):
+            continue
+        selected.append((resolved, relative))
+
+    source_roots = {root}
+    for pattern in include_globs:
+        prefix, separator, _ = pattern.partition("/**/")
+        if not separator or not prefix:
+            continue
+        candidate = (root / prefix).resolve()
+        if candidate.is_dir() and not (candidate / "__init__.py").is_file():
+            source_roots.add(candidate)
+    local_modules = frozenset(
+        _python_module(source_root, path)
+        for path, _ in selected
+        for source_root in source_roots
+        if path.is_relative_to(source_root)
+    )
+    constructs: list[SourceConstruct] = []
+    parsed = 0
+    for path, relative in selected:
+        import_root = max(
+            (
+                source_root
+                for source_root in source_roots
+                if path.is_relative_to(source_root)
+            ),
+            key=lambda source_root: len(source_root.parts),
+        )
+        extracted = _python_constructs(
+            root,
+            path,
+            local_modules,
+            _python_module(import_root, path),
+        )
+        if extracted is None:
+            rejected.append(relative)
+        else:
+            parsed += 1
+            constructs.extend(extracted)
+    return SourceConstructInventory(
+        tuple(sorted(set(constructs), key=_source_construct_key)),
+        len(selected),
+        parsed,
+        tuple(sorted(rejected)),
     )
 
 
@@ -3172,7 +3276,12 @@ DEFAULT_STATEMENT_PROVIDERS: Mapping[str, StatementProvider] = {
 }
 
 DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
-    "python": ConstructProvider("python_ast", (".py",), _python_constructs),
+    "python": ConstructProvider(
+        "python_ast",
+        (".py",),
+        _python_constructs,
+        _python_inventory,
+    ),
     "python-frameworks": ConstructProvider(
         "python_framework_ast_v1",
         (".py",),

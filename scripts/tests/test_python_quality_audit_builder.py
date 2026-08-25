@@ -727,6 +727,69 @@ class PythonQualityAuditBuilderTests(unittest.TestCase):
             )
         )
 
+    def test_package_initializer_explicit_imports_are_source_reexports(self) -> None:
+        temporary = tempfile.TemporaryDirectory(prefix="compass-python-reexports-")
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        package = root / "package"
+        package.mkdir()
+        (package / "__init__.py").write_text(
+            "from .widgets import MultiWidget as Widget\n"
+            "from external import External\n"
+            "from .dynamic import *\n"
+            "def nested():\n"
+            "    from .internal import Hidden\n"
+            "if enabled:\n"
+            "    from .conditional import Conditional\n",
+            encoding="utf-8",
+        )
+        (package / "widgets.py").write_text(
+            "class MultiWidget: pass\n",
+            encoding="utf-8",
+        )
+        (package / "consumer.py").write_text(
+            "from .widgets import MultiWidget\n",
+            encoding="utf-8",
+        )
+        inventory = independent_source_inventory(
+            root,
+            "python",
+            include_globs=("package/**/*.py",),
+        )
+        reexports = [
+            construct
+            for construct in inventory.constructs
+            if construct.relation == "reexports"
+        ]
+        self.assertEqual(1, len(reexports))
+        self.assertEqual("aliases", reexports[0].capability)
+        self.assertEqual("widgets.MultiWidget", reexports[0].target_spelling)
+        self.assertEqual(".widgets", reexports[0].qualifier)
+        self.assertTrue(
+            _target_matches(
+                reexports[0],
+                self.edge("package.widgets::MultiWidget"),
+            )
+        )
+        self.assertTrue(
+            _source_target_is_exact(reexports[0], Counter(), Counter())
+        )
+        imports = [
+            construct
+            for construct in inventory.constructs
+            if construct.relation == "imports"
+        ]
+        self.assertEqual(
+            {
+                "conditional.Conditional",
+                "dynamic.*",
+                "external.External",
+                "internal.Hidden",
+                "widgets.MultiWidget",
+            },
+            {construct.target_spelling for construct in imports},
+        )
+
     def test_dynamic_member_call_is_not_proven_by_unrelated_corpus_declaration(self) -> None:
         construct = self.construct("calls", "errors", "exc_info.value")
         declared = Counter({"errors": 1})

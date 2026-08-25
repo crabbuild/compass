@@ -78,13 +78,16 @@ PACK_RELATION_CAPABILITY = {
     },
 }
 UNIVERSAL_RELATION_CAPABILITY = {
+    "exports": "aliases",
     "calls": "calls",
     "imports": "imports",
     "instantiates": "construction",
 }
 SOURCE_RELATION_ALIASES = {
     "calls": frozenset(("calls", "instantiates")),
+    "reexports": frozenset(("exports",)),
 }
+SOURCE_PUBLISHED_RELATION = {"reexports": "exports"}
 
 
 def _sha256(path: Path) -> str:
@@ -220,7 +223,7 @@ def _graph_edges(
 def _target_matches(construct: SourceConstruct, edge: dict[str, Any]) -> bool:
     qualified = edge["targetNode"]["qualifiedName"].removesuffix("()")
     spelling = construct.target_spelling.removesuffix("()")
-    if construct.relation == "imports":
+    if construct.relation in {"imports", "reexports"}:
         if qualified == spelling or qualified.endswith("." + spelling):
             return True
         qualifier = _absolute_import_qualifier(construct)
@@ -492,6 +495,8 @@ def _source_target_is_exact(
     declared_names: Counter[str],
     local_declared_names: Counter[tuple[str, str]],
 ) -> bool:
+    if construct.relation == "reexports":
+        return True
     terminal = construct.target_spelling.rsplit(".", 1)[-1]
     if construct.relation == "calls":
         return (
@@ -722,6 +727,20 @@ def main(argv: list[str] | None = None) -> int:
                     and construct.relation
                     in {"consumes", "maps_to", "produces", "schedules", "subscribes"}
                 )
+                published_relation = SOURCE_PUBLISHED_RELATION.get(
+                    construct.relation,
+                    construct.relation,
+                )
+                published_capability = (
+                    UNIVERSAL_RELATION_CAPABILITY[published_relation]
+                    if construct.framework_pack is None
+                    else construct.capability
+                )
+                published_construct = replace(
+                    construct,
+                    relation=published_relation,
+                    capability=published_capability,
+                )
                 representation_candidates = _django_route_representation_candidates(
                     construct,
                     bool(facts),
@@ -748,14 +767,13 @@ def main(argv: list[str] | None = None) -> int:
                 target_id = "oracle-target-" + hashlib.sha256(
                     f"{name}:{construct.target_spelling}".encode()
                 ).hexdigest()[:16]
-                capability = construct.capability
                 source_part.append(
                     _record(
                         corpus=name,
                         producer=producer,
-                        construct=construct,
-                        relation=construct.relation,
-                        capability=capability,
+                        construct=published_construct,
+                        relation=published_relation,
+                        capability=published_capability,
                         pool="source_oracle",
                         source=source_id,
                         target=target_id,
@@ -766,7 +784,7 @@ def main(argv: list[str] | None = None) -> int:
                             "exact Django child route is represented by one source-proven parent include graph fact"
                             if judgment == "represented_elsewhere"
                             else (
-                                "independent local stdlib AST construct has no exact Compass graph fact"
+                                "independent exact stdlib AST construct has no exact Compass graph fact"
                                 if judgment == "missing"
                                 else "independent stdlib AST construct has zero or multiple safe target identities"
                             )
