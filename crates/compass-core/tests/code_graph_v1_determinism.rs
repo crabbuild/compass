@@ -898,7 +898,7 @@ urlpatterns = [path("health/", views.health, name="health")]
             && edge
                 .evidence
                 .iter()
-                .any(|evidence| evidence.origin == EvidenceOrigin::Config)
+                .any(|evidence| evidence.origin == EvidenceOrigin::Ast)
     }));
 
     options.force = true;

@@ -95,9 +95,24 @@ official SCIP artifact decoder. Offline SCIP facts enter Program evidence with
 provider descriptors, capability coverage, source freshness, resource limits,
 and conflict-preserving merge behavior.
 
-The graph projection is intentionally narrower: current compiler projection
-only strengthens exact Java calls. This design generalizes the fact boundary
-while retaining language-specific projection policies.
+The graph projection is intentionally narrower: compiler projection strengthens
+exact Java calls and verified managed `scip-python` calls. Python projection is
+artifact-only; Compass does not run, install, download, or discover an analyzer
+environment. A Python artifact is admitted only when its companion manifest has
+the `compass.managed-analyzer-profile/1` profile, identifies `scip-python`,
+matches the SCIP producer version, reports a complete offline run, and freezes
+the Python version, platform, source/import roots, project configuration,
+typeshed, stubs, namespace policy, and library-code policy. The profile and
+artifact digests form the provider identity and cache fingerprint.
+
+Managed Python calls are projected only where the SCIP definition and call
+anchors exactly match current Python AST evidence, both endpoints are local,
+and the same admitted provider proves both endpoints. Generic Python SCIP,
+stale sources, incomplete/timeout/cancelled/permission-denied results,
+conflicting targets, conflicting companions, unsupported profile versions, and
+inexact anchors remain Program evidence or fail closed without changing native
+relationships. This artifact seam does not implement the planned analyzer
+lifecycle or grant permission to execute project code.
 
 ### Qualification gap
 

@@ -19,10 +19,22 @@ Each registration becomes a `route` node with these details:
 - **Framework and operation**: the framework family and HTTP, page, hook, messaging, or subscription operation
 - **Path**: the normalized path plus the original path expression
 - **Declaration**: the source scope and anchor that declared the route
-- **Stages**: ordered middleware and handler stages, with the handler last
+- **Stages**: ordered framework stages, including middleware, dependency,
+  security, loader/action, layout/boundary, and handler roles
 - **Resolution**: the exact target, bounded candidates, or an explicit unresolved state
 
-A `routes_to` edge points from the route to each exact middleware and handler target. Compass preserves declaration order. It does not create an exact edge when several targets remain valid.
+A `routes_to` edge points from the route to each exact stage target. Compass
+preserves declaration order and repeated registrations. `dependency` identifies
+a dependency-injection provider, while `security` identifies an authorization
+or authentication provider; neither value contributes to `middlewareCount`.
+The terminal handler remains last when a framework supplies one. Compass does
+not create an exact edge when several targets remain valid.
+
+`dependency` and `security` are additive values in the strict Code Graph v1,
+query, task-context, CLI/MCP, and viewer contracts. Strict consumers must accept
+those exact spellings and continue rejecting unknown values; readers built
+against the older closed stage list must fail rather than silently translating
+them to middleware.
 
 Configuration and file-convention routes keep the rule and source that produced them. Equivalent inputs receive deterministic route identities and ordering.
 
@@ -42,9 +54,52 @@ Compass activates a framework pack only when the repository contains direct evid
 
 ### Python web frameworks
 
-- **Django**: `path`, `re_path`, legacy `url`, and `include` in an activated URL module; positional or named `route` and `view` arguments; function views, dotted string handlers, and class-based `.as_view()` handlers
-- **Flask**: `Flask` and `Blueprint` route decorators, constructor and registration-time `url_prefix`, positional or named `rule`, and literal `methods` lists
-- **FastAPI**: `FastAPI` and `APIRouter` decorators for `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `trace`; `api_route` and `route` method lists; literal `path`; constructor and `include_router(prefix=...)` prefixes; `Depends` stages
+- **Django (`django-python` v2)**: exact imported `path`, `re_path`, legacy
+  `url`, and `include` calls reached through one source-ordered `urlpatterns`
+  assignment plus `+=`; local and imported list/tuple/set collections,
+  concatenation, literal application names/namespaces, exact
+  `i18n_patterns`, converters, function views, dotted string handlers, and
+  class-based `.as_view()` handlers. Exact model subclasses retain anchored
+  field descriptors; unique local foreign-key, many-to-many, one-to-one, and
+  custom-manager targets use `depends_on`. Exact `django.dispatch.receiver`
+  subscriptions use `subscribes`, with a separate exact sender dependency.
+  Dynamic collections, ambiguous assignments/models, same-named helpers, and
+  calls outside the proven flow do not activate those facts.
+- **Django REST Framework (`django-rest-framework-python` v1)**: exact local
+  `SimpleRouter` and `DefaultRouter` receivers, literal registrations and
+  mounts, unique local viewsets, and closed `drf-simple-router-v1` or
+  `drf-default-router-v1` templates. Only source-declared standard viewset
+  methods and exact `@action` methods generate routes; literal lookup fields
+  and URL keyword overrides set the detail parameter. Serializer, permission,
+  authentication, filter, throttle, and serializer-to-model assignments emit
+  exact dependencies. Custom routers, dynamic lookup configuration, dynamic
+  tuple application names, external inherited viewset methods, and ambiguous
+  serializer/model targets remain unresolved; the DefaultRouter API-root
+  convenience route is not synthesized without an exact handler declaration.
+- **Flask (`flask-python` v2)**: exact `Flask` and `Blueprint` receivers at module or application-factory scope; `route` plus HTTP shortcut decorators; imperative `add_url_rule`; source-declared `MethodView` methods; nested blueprints; literal constructor and registration-time `url_prefix` values; and exact request hooks and error handlers as route stages. A registration with no declared methods records `GET`; implicit HEAD/OPTIONS behavior is metadata only and is not published as additional routes. Dynamic prefixes, rebound receivers, and lookalike `MethodView` bases remain unresolved.
+- **FastAPI (`fastapi-python` v2)**: exact `FastAPI` and `APIRouter` receiver declarations; HTTP and WebSocket decorators; `api_route`, `route`, `add_api_route`, and `add_api_websocket_route`; literal paths and method lists; and constructor plus `include_router` prefixes. Application, router, include, route, parameter-default, and `Annotated` `Depends`/`Security` evidence becomes ordered dependency/security stages. Exact subdependencies use `depends_on`, and `yield` providers retain lifecycle detail without executing Python.
+- **Starlette (`starlette-python` v1)**: exact `Starlette` and `Router` receivers; `route` and `websocket_route` decorators; imperative `add_route` and `add_websocket_route`; `Route` and `WebSocketRoute` constructors; inline and receiver-backed `Mount` composition; literal paths and method lists. Dynamic endpoints, paths, and mounts remain unresolved.
+- **Pydantic (`pydantic-python` v1)**: exact `BaseModel` subclasses and source-proven model inheritance receive the existing `model` role. Existing field, validator, serializer, and computed-field declarations are retained rather than replaced with synthetic schema nodes. FastAPI parameter/return annotations and exact literal `response_model` values publish `depends_on` edges from handlers to request/response models.
+- **SQLAlchemy (`sqlalchemy-python` v1)**: exact SQLAlchemy 2 `DeclarativeBase` descendants receive the existing `model` role. Exact `Mapped`, `mapped_column`, `relationship`, and `ForeignKey` forms retain anchored field detail; unique source-declared relationship targets use `depends_on`, and literal `__tablename__` mappings use `maps_to` only when the database table already exists in the graph. Sessions, rows, string relationship targets, dynamic metadata, and ambiguous declarations are not inferred.
+- **Celery (`celery-python` v1)**: exact `Celery` receivers and `shared_task`/application task decorators publish existing job and queue nodes. Literal task names and queues, `.delay`, `apply_async`, `send_task`, task signatures inside `chain`/`group`/`chord`, bound `retry`, and literal beat schedules reuse `produces`, `consumes`, `schedules`, and `triggers`. String task names remain message or schedule subjects rather than guessed callable targets; rebound receivers and same-named decorators fail closed.
+
+FastAPI routers, Starlette applications/routers, and Flask blueprints compose through a bounded receiver-
+identity multigraph. Repeated mounts retain their source anchors and
+multiplicity, nested prefixes compose outer-to-inner, cycles publish no
+invented route, and an over-depth traversal is an explicit limit error.
+Computed paths/prefixes, rebound receivers, wrong-framework imports, and
+ambiguous receiver identities remain unresolved. These Python packs are
+fixture-qualified but remain `Qualifying` until the pinned independent audit
+meets the production thresholds.
+
+FastAPI/Starlette middleware, lifespan, and background-task registrations are
+not published as route or dependency edges by these pack versions. Their
+registration meaning needs an independently reviewed relation-capability
+contract; same-named or dynamic calls are not approximated in the meantime.
+The same contract boundary applies to Django `MIDDLEWARE`, settings app lists,
+and `admin.site.register`: `registers` currently requires bean-container
+capability, which Django does not truthfully advertise. Those registrations
+remain source-visible but do not become synthetic edges.
 
 ### JavaScript and TypeScript frameworks
 

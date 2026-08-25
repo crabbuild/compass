@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import fnmatch
 import hashlib
 import json
 import os
@@ -38,6 +39,7 @@ class SourceConstruct:
     start_byte: int
     end_byte: int
     start_line: int
+    framework_pack: str | None = None
 
 
 def _source_construct_key(construct: SourceConstruct) -> tuple[object, ...]:
@@ -51,6 +53,7 @@ def _source_construct_key(construct: SourceConstruct) -> tuple[object, ...]:
         construct.start_byte,
         construct.end_byte,
         construct.start_line,
+        construct.framework_pack or "",
     )
 
 
@@ -119,7 +122,12 @@ def _python_name(node: ast.AST, source: str) -> tuple[str, str | None]:
     return spelling.strip(), None
 
 
-def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | None:
+def _python_constructs(
+    root: Path,
+    path: Path,
+    local_modules: frozenset[str] = frozenset(),
+    import_module: str | None = None,
+) -> tuple[SourceConstruct, ...] | None:
     try:
         raw = path.read_bytes()
         bom = len(tokenize.BOM_UTF8) if raw.startswith(tokenize.BOM_UTF8) else 0
@@ -157,7 +165,28 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
         return start, end, start_line
 
     module = _python_module(root, path)
+    import_module = import_module or module
     relative = path.relative_to(root).as_posix()
+    is_package_initializer = path.name == "__init__.py"
+    direct_module_imports = {
+        id(statement) for statement in tree.body if isinstance(statement, ast.ImportFrom)
+    }
+
+    def absolute_import_module(node: ast.ImportFrom) -> str | None:
+        if node.level == 0:
+            return node.module
+        package = (
+            import_module.split(".")
+            if is_package_initializer
+            else import_module.split(".")[:-1]
+        )
+        parents = node.level - 1
+        if parents > len(package):
+            return None
+        base = package[: len(package) - parents]
+        if node.module:
+            base.extend(node.module.split("."))
+        return ".".join(base) or None
     constructs: list[SourceConstruct] = []
 
     class Visitor(ast.NodeVisitor):
@@ -260,17 +289,24 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
 
         def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
             module_name = "." * node.level + (node.module or "")
+            absolute_module = absolute_import_module(node)
             for alias in node.names:
                 bounded = byte_range(alias)
                 if bounded is None:
                     continue
                 start, end, line = bounded
                 qualified = f"{module_name}.{alias.name}".strip(".")
+                is_reexport = (
+                    is_package_initializer
+                    and id(node) in direct_module_imports
+                    and alias.name != "*"
+                    and absolute_module in local_modules
+                )
                 constructs.append(
                     SourceConstruct(
                         relative,
-                        "imports",
-                        "imports",
+                        "reexports" if is_reexport else "imports",
+                        "aliases" if is_reexport else "imports",
                         self.owner,
                         qualified or alias.name,
                         module_name or None,
@@ -282,6 +318,1362 @@ def _python_constructs(root: Path, path: Path) -> tuple[SourceConstruct, ...] | 
 
     Visitor().visit(tree)
     return tuple(sorted(set(constructs), key=_source_construct_key))
+
+
+_PYTHON_FRAMEWORK_MAX_FILES = 20_000
+_PYTHON_FRAMEWORK_MAX_FILE_BYTES = 8 * 1024 * 1024
+_PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS = 100_000
+_PYTHON_ROUTE_METHODS = frozenset(
+    {
+        "route",
+        "api_route",
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "options",
+        "head",
+        "websocket",
+        "websocket_route",
+    }
+)
+_PYTHON_RECEIVER_CONSTRUCTORS = {
+    "celery.Celery": "celery-python",
+    "fastapi.FastAPI": "fastapi-python",
+    "fastapi.APIRouter": "fastapi-python",
+    "flask.Flask": "flask-python",
+    "flask.Blueprint": "flask-python",
+    "rest_framework.routers.DefaultRouter": "django-rest-framework-python",
+    "rest_framework.routers.SimpleRouter": "django-rest-framework-python",
+    "starlette.applications.Starlette": "starlette-python",
+    "starlette.routing.Router": "starlette-python",
+}
+
+
+def _python_dotted_name(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        owner = _python_dotted_name(node.value)
+        return f"{owner}.{node.attr}" if owner else None
+    return None
+
+
+@dataclass(frozen=True)
+class _PythonDjangoIncludeMount:
+    source_file: str
+    owner_qualified_name: str
+    target_reference: str
+    start_byte: int
+    end_byte: int
+    start_line: int
+
+
+@dataclass(frozen=True)
+class _PythonDjangoUrlModule:
+    module: str
+    source_file: str
+    pattern_ranges: frozenset[tuple[int, int]]
+    include_mounts: tuple[_PythonDjangoIncludeMount, ...]
+
+
+def _python_absolute_import_module(
+    current_module: str,
+    package_module: bool,
+    imported_module: str,
+    level: int,
+) -> str | None:
+    if level == 0:
+        return imported_module or None
+    package = current_module if package_module else current_module.rpartition(".")[0]
+    parts = package.split(".") if package else []
+    ascend = level - 1
+    if ascend > len(parts):
+        return None
+    prefix = parts[: len(parts) - ascend]
+    suffix = imported_module.split(".") if imported_module else []
+    resolved = ".".join((*prefix, *suffix))
+    return resolved or None
+
+
+def _python_django_url_module(
+    root: Path,
+    path: Path,
+) -> _PythonDjangoUrlModule | None:
+    """Index exact, module-level Django URL-list includes without executing code."""
+
+    try:
+        raw = path.read_bytes()
+        if len(raw) > _PYTHON_FRAMEWORK_MAX_FILE_BYTES:
+            return None
+        bom = len(tokenize.BOM_UTF8) if raw.startswith(tokenize.BOM_UTF8) else 0
+        source = raw.decode("utf-8-sig")
+        tree = ast.parse(source, filename=str(path), type_comments=True)
+    except (OSError, SyntaxError, UnicodeError, ValueError):
+        return None
+
+    encoded_lines = [line.encode("utf-8") for line in source.splitlines(keepends=True)]
+    line_offsets: list[int] = []
+    offset = bom
+    for line in encoded_lines:
+        line_offsets.append(offset)
+        offset += len(line)
+
+    def byte_range(node: ast.AST) -> tuple[int, int, int] | None:
+        start_line = getattr(node, "lineno", None)
+        end_line = getattr(node, "end_lineno", None)
+        start_column = getattr(node, "col_offset", None)
+        end_column = getattr(node, "end_col_offset", None)
+        if (
+            not isinstance(start_line, int)
+            or not isinstance(end_line, int)
+            or not isinstance(start_column, int)
+            or not isinstance(end_column, int)
+            or start_line < 1
+            or end_line < start_line
+            or end_line > len(line_offsets)
+        ):
+            return None
+        start = line_offsets[start_line - 1] + start_column
+        end = line_offsets[end_line - 1] + end_column
+        if start < bom or end <= start or end > len(raw):
+            return None
+        return start, end, start_line
+
+    module = _python_module(root, path)
+    package_module = path.stem == "__init__"
+    relative = path.relative_to(root).as_posix()
+    bindings: dict[str, str] = {}
+    imported_modules: set[str] = set()
+    for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                imported_modules.add(alias.name)
+                if alias.asname is not None:
+                    bindings[alias.asname] = alias.name
+                else:
+                    bindings[alias.name.split(".", 1)[0]] = alias.name.split(".", 1)[0]
+        elif isinstance(statement, ast.ImportFrom):
+            imported = _python_absolute_import_module(
+                module,
+                package_module,
+                statement.module or "",
+                statement.level,
+            )
+            if imported is None:
+                continue
+            for alias in statement.names:
+                if alias.name == "*":
+                    continue
+                bindings[alias.asname or alias.name] = f"{imported}.{alias.name}"
+
+    for statement in tree.body:
+        shadowed: list[str] = []
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            shadowed.append(statement.name)
+        elif isinstance(statement, ast.Assign):
+            shadowed.extend(
+                target.id for target in statement.targets if isinstance(target, ast.Name)
+            )
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            shadowed.append(statement.target.id)
+        for name in shadowed:
+            bindings.pop(name, None)
+
+    def resolved_name(node: ast.AST | None) -> str | None:
+        dotted = _python_dotted_name(node)
+        if dotted is None:
+            return None
+        head, separator, tail = dotted.partition(".")
+        bound = bindings.get(head)
+        if bound is None:
+            return dotted
+        return f"{bound}.{tail}" if separator else bound
+
+    definitions: dict[str, list[ast.AST]] = {}
+    pattern_roots: list[ast.AST] = []
+    for statement in tree.body:
+        target: ast.Name | None = None
+        value: ast.AST | None = None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            candidate = statement.targets[0]
+            if isinstance(candidate, ast.Name):
+                target = candidate
+                value = statement.value
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            target = statement.target
+            value = statement.value
+        if target is not None and value is not None:
+            definitions.setdefault(target.id, []).append(value)
+            if target.id == "urlpatterns":
+                pattern_roots = [value]
+        elif (
+            isinstance(statement, ast.AugAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.target.id == "urlpatterns"
+            and isinstance(statement.op, ast.Add)
+        ):
+            pattern_roots.append(statement.value)
+
+    unique_definitions = {
+        name: values[0]
+        for name, values in definitions.items()
+        if name != "urlpatterns" and len(values) == 1
+    }
+
+    def pattern_calls(node: ast.AST, active: frozenset[str]) -> tuple[ast.Call, ...]:
+        if isinstance(node, ast.Call):
+            called = resolved_name(node.func)
+            return (
+                (node,)
+                if called
+                in {
+                    "django.urls.path",
+                    "django.urls.re_path",
+                    "django.conf.urls.url",
+                }
+                else ()
+            )
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return tuple(
+                call
+                for element in node.elts
+                for call in pattern_calls(element, active)
+            )
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return (*pattern_calls(node.left, active), *pattern_calls(node.right, active))
+        if isinstance(node, ast.Name) and node.id not in active:
+            definition = unique_definitions.get(node.id)
+            if definition is not None:
+                return pattern_calls(definition, active | {node.id})
+        return ()
+
+    calls = tuple(
+        call for root_node in pattern_roots for call in pattern_calls(root_node, frozenset())
+    )
+    if len(calls) > _PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS:
+        raise RuntimeError(
+            "Python Django URL pattern count "
+            f"{len(calls)} exceeds {_PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS}"
+        )
+
+    def handler_argument(call: ast.Call, position: int, keyword: str) -> ast.AST | None:
+        for item in call.keywords:
+            if item.arg == keyword:
+                return item.value
+        return call.args[position] if len(call.args) > position else None
+
+    def static_module(node: ast.AST | None) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            candidate = node.value
+        elif isinstance(node, (ast.Tuple, ast.List)) and node.elts:
+            return static_module(node.elts[0])
+        else:
+            candidate = resolved_name(node)
+            if candidate is None:
+                return None
+            head = (_python_dotted_name(node) or "").partition(".")[0]
+            if head not in bindings and candidate not in imported_modules:
+                return None
+        if not candidate or any(not part.isidentifier() for part in candidate.split(".")):
+            return None
+        return candidate
+
+    pattern_ranges: set[tuple[int, int]] = set()
+    mounts: list[_PythonDjangoIncludeMount] = []
+    for call in calls:
+        bounded = byte_range(call)
+        if bounded is None:
+            continue
+        start, end, line = bounded
+        pattern_ranges.add((start, end))
+        handler = handler_argument(call, 1, "view")
+        if not isinstance(handler, ast.Call) or resolved_name(handler.func) not in {
+            "django.urls.include",
+            "django.conf.urls.include",
+        }:
+            continue
+        reference = static_module(handler_argument(handler, 0, "arg"))
+        if reference is None:
+            continue
+        mounts.append(
+            _PythonDjangoIncludeMount(
+                relative,
+                module,
+                reference,
+                start,
+                end,
+                line,
+            )
+        )
+
+    return _PythonDjangoUrlModule(
+        module,
+        relative,
+        frozenset(pattern_ranges),
+        tuple(
+            sorted(
+                set(mounts),
+                key=lambda mount: (
+                    mount.source_file,
+                    mount.start_byte,
+                    mount.end_byte,
+                    mount.target_reference,
+                ),
+            )
+        ),
+    )
+
+
+def _python_framework_constructs(
+    root: Path,
+    path: Path,
+) -> tuple[SourceConstruct, ...] | None:
+    """Collect exact Python framework relations without importing corpus code."""
+
+    try:
+        raw = path.read_bytes()
+        if len(raw) > _PYTHON_FRAMEWORK_MAX_FILE_BYTES:
+            return None
+        bom = len(tokenize.BOM_UTF8) if raw.startswith(tokenize.BOM_UTF8) else 0
+        source = raw.decode("utf-8-sig")
+        tree = ast.parse(source, filename=str(path), type_comments=True)
+    except (OSError, SyntaxError, UnicodeError, ValueError):
+        return None
+
+    encoded_lines = [line.encode("utf-8") for line in source.splitlines(keepends=True)]
+    line_offsets: list[int] = []
+    offset = bom
+    for line in encoded_lines:
+        line_offsets.append(offset)
+        offset += len(line)
+
+    def byte_range(node: ast.AST) -> tuple[int, int, int] | None:
+        start_line = getattr(node, "lineno", None)
+        end_line = getattr(node, "end_lineno", None)
+        start_column = getattr(node, "col_offset", None)
+        end_column = getattr(node, "end_col_offset", None)
+        if (
+            not isinstance(start_line, int)
+            or not isinstance(end_line, int)
+            or not isinstance(start_column, int)
+            or not isinstance(end_column, int)
+            or start_line < 1
+            or end_line < start_line
+            or end_line > len(line_offsets)
+        ):
+            return None
+        start = line_offsets[start_line - 1] + start_column
+        end = line_offsets[end_line - 1] + end_column
+        if start < bom or end <= start or end > len(raw):
+            return None
+        return start, end, start_line
+
+    def definition_name_range(
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> tuple[int, int, int] | None:
+        if node.lineno < 1 or node.lineno > len(line_offsets):
+            return None
+        line_start = line_offsets[node.lineno - 1]
+        line_end = (
+            line_offsets[node.lineno]
+            if node.lineno < len(line_offsets)
+            else len(raw)
+        )
+        search_start = line_start + node.col_offset
+        name = node.name.encode("utf-8")
+        start = raw.find(name, search_start, line_end)
+        if start < 0:
+            return None
+        end = start + len(name)
+        before = raw[start - 1 : start] if start else b""
+        after = raw[end : end + 1]
+        identifier = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+        if before and before in identifier or after and after in identifier:
+            return None
+        return start, end, node.lineno
+
+    bindings: dict[str, str] = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bindings[alias.asname or alias.name.split(".", 1)[0]] = alias.name
+        elif isinstance(statement, ast.ImportFrom):
+            module = "." * statement.level + (statement.module or "")
+            if statement.level == 0:
+                for alias in statement.names:
+                    if alias.name != "*":
+                        bindings[alias.asname or alias.name] = f"{module}.{alias.name}"
+
+    for statement in tree.body:
+        shadowed: list[str] = []
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            shadowed.append(statement.name)
+        elif isinstance(statement, ast.Assign):
+            shadowed.extend(
+                target.id for target in statement.targets if isinstance(target, ast.Name)
+            )
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+            shadowed.append(statement.target.id)
+        for name in shadowed:
+            if not (
+                isinstance(statement, (ast.Assign, ast.AnnAssign))
+                and isinstance(statement.value, ast.Call)
+                and _python_dotted_name(statement.value.func) == name
+            ):
+                bindings.pop(name, None)
+
+    def resolved_name(node: ast.AST | None) -> str | None:
+        dotted = _python_dotted_name(node)
+        if dotted is None:
+            return None
+        head, separator, tail = dotted.partition(".")
+        bound = bindings.get(head)
+        if bound is None:
+            return dotted
+        return f"{bound}.{tail}" if separator else bound
+
+    receivers: dict[str, str] = {}
+    for statement in tree.body:
+        if not isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = statement.value
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            framework_pack = (
+                _PYTHON_RECEIVER_CONSTRUCTORS.get(resolved_name(value.func) or "")
+                if isinstance(value, ast.Call)
+                else None
+            )
+            if framework_pack is None:
+                receivers.pop(target.id, None)
+            else:
+                receivers[target.id] = framework_pack
+
+    declarations: dict[str, list[tuple[int, int, int]]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            bounded = definition_name_range(node)
+            if bounded is not None:
+                declarations.setdefault(node.name, []).append(bounded)
+    module_functions = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and len(declarations.get(node.name, ())) == 1
+    }
+
+    relative = path.relative_to(root).as_posix()
+    module = _python_module(root, path)
+    constructs: list[SourceConstruct] = []
+
+    def add(
+        relation: str,
+        capability: str,
+        owner: str,
+        target: str,
+        bounded: tuple[int, int, int] | None,
+        framework_pack: str,
+        qualifier: str | None = None,
+    ) -> None:
+        if bounded is None:
+            return
+        start, end, line = bounded
+        constructs.append(
+            SourceConstruct(
+                relative,
+                relation,
+                capability,
+                owner,
+                target,
+                qualifier,
+                start,
+                end,
+                line,
+                framework_pack,
+            )
+        )
+
+    def local_declaration(name: str) -> tuple[int, int, int] | None:
+        values = declarations.get(name, ())
+        return values[0] if len(values) == 1 else None
+
+    def handler_argument(call: ast.Call, position: int, keyword: str) -> ast.AST | None:
+        for item in call.keywords:
+            if item.arg == keyword:
+                return item.value
+        return call.args[position] if len(call.args) > position else None
+
+    def keyword_argument(call: ast.Call, keyword: str) -> ast.AST | None:
+        return next((item.value for item in call.keywords if item.arg == keyword), None)
+
+    def static_string(node: ast.AST | None) -> str | None:
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def decorator_range(node: ast.AST) -> tuple[int, int, int] | None:
+        bounded = byte_range(node)
+        if bounded is None:
+            return None
+        start, end, line = bounded
+        if start > bom and raw[start - 1 : start] == b"@":
+            start -= 1
+        return start, end, line
+
+    classes_by_name: dict[str, list[ast.ClassDef]] = {}
+    for candidate in ast.walk(tree):
+        if isinstance(candidate, ast.ClassDef):
+            classes_by_name.setdefault(candidate.name, []).append(candidate)
+    unique_classes = {
+        name: values[0] for name, values in classes_by_name.items() if len(values) == 1
+    }
+    module_classes_by_name: dict[str, list[ast.ClassDef]] = {}
+    for candidate in tree.body:
+        if isinstance(candidate, ast.ClassDef):
+            module_classes_by_name.setdefault(candidate.name, []).append(candidate)
+    unique_module_classes = {
+        name: values[0]
+        for name, values in module_classes_by_name.items()
+        if len(values) == 1
+    }
+
+    def descendant_class_names(
+        external_bases: set[str],
+        definitions: dict[str, ast.ClassDef] | None = None,
+    ) -> tuple[set[str], set[str]]:
+        definitions = unique_classes if definitions is None else definitions
+        selected: set[str] = set()
+        direct: set[str] = set()
+        for _ in range(len(definitions) + 1):
+            previous = len(selected)
+            for name, definition in definitions.items():
+                bases = {resolved_name(base) for base in definition.bases}
+                if bases & external_bases:
+                    selected.add(name)
+                    direct.add(name)
+                elif any(
+                    isinstance(base, ast.Name) and base.id in selected
+                    for base in definition.bases
+                ):
+                    selected.add(name)
+            if len(selected) == previous:
+                break
+        return selected, direct
+
+    django_models, _ = descendant_class_names({"django.db.models.Model"})
+    django_managers, _ = descendant_class_names({"django.db.models.Manager"})
+    drf_serializers, _ = descendant_class_names(
+        {
+            "rest_framework.serializers.Serializer",
+            "rest_framework.serializers.ModelSerializer",
+        }
+    )
+    drf_viewsets, _ = descendant_class_names(
+        {
+            "rest_framework.viewsets.ViewSet",
+            "rest_framework.viewsets.GenericViewSet",
+            "rest_framework.viewsets.ModelViewSet",
+            "rest_framework.viewsets.ReadOnlyModelViewSet",
+        }
+    )
+    module_drf_viewsets, _ = descendant_class_names(
+        {
+            "rest_framework.viewsets.ViewSet",
+            "rest_framework.viewsets.GenericViewSet",
+            "rest_framework.viewsets.ModelViewSet",
+            "rest_framework.viewsets.ReadOnlyModelViewSet",
+        },
+        unique_module_classes,
+    )
+    pydantic_models, _ = descendant_class_names({"pydantic.BaseModel"})
+    sqlalchemy_descendants, sqlalchemy_bases = descendant_class_names(
+        {"sqlalchemy.orm.DeclarativeBase"}
+    )
+    sqlalchemy_models = sqlalchemy_descendants - sqlalchemy_bases
+
+    def assignment_parts(
+        statement: ast.stmt,
+    ) -> tuple[ast.Name, ast.AST] | None:
+        if isinstance(statement, ast.AnnAssign):
+            if isinstance(statement.target, ast.Name) and statement.value is not None:
+                return statement.target, statement.value
+            return None
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name):
+                return target, statement.value
+        return None
+
+    def nested_class(definition: ast.ClassDef, name: str) -> ast.ClassDef | None:
+        matches = [
+            statement
+            for statement in definition.body
+            if isinstance(statement, ast.ClassDef) and statement.name == name
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def local_model_from_expression(node: ast.AST | None, models: set[str]) -> str | None:
+        return node.id if isinstance(node, ast.Name) and node.id in models else None
+
+    def local_models_in_annotation(node: ast.AST | None, models: set[str]) -> set[str]:
+        if node is None:
+            return set()
+        return {
+            candidate.id
+            for candidate in ast.walk(node)
+            if isinstance(candidate, ast.Name) and candidate.id in models
+        }
+
+    def exact_static_references(node: ast.AST) -> tuple[str, ...]:
+        if isinstance(node, ast.Name):
+            bound = bindings.get(node.id)
+            if bound is not None:
+                return (bound,)
+            if node.id in unique_classes or len(declarations.get(node.id, ())) == 1:
+                return (node.id,)
+            return ()
+        if isinstance(node, ast.Attribute):
+            dotted = _python_dotted_name(node)
+            if dotted is None or dotted.partition(".")[0] not in bindings:
+                return ()
+            resolved = resolved_name(node)
+            return (resolved,) if resolved is not None else ()
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            values = {
+                reference
+                for element in node.elts
+                for reference in exact_static_references(element)
+            }
+            return tuple(sorted(values))
+        return ()
+
+    def celery_task_info(
+        decorator: ast.AST,
+        function_name: str,
+    ) -> tuple[str, str | None] | None:
+        call = decorator if isinstance(decorator, ast.Call) else None
+        target = call.func if call is not None else decorator
+        called = resolved_name(target)
+        exact = called == "celery.shared_task"
+        if not exact and isinstance(target, ast.Attribute) and target.attr == "task":
+            receiver = _python_dotted_name(target.value)
+            exact = receivers.get(receiver or "") == "celery-python"
+        if not exact:
+            return None
+        configured = static_string(keyword_argument(call, "name")) if call is not None else None
+        queue = static_string(keyword_argument(call, "queue")) if call is not None else None
+        return configured or ".".join(part for part in (module, function_name) if part), queue
+
+    celery_tasks: dict[str, tuple[str, str | None]] = {}
+    for candidate in ast.walk(tree):
+        if not isinstance(candidate, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        infos = [
+            info
+            for decorator in candidate.decorator_list
+            if (info := celery_task_info(decorator, candidate.name)) is not None
+        ]
+        if len(infos) == 1 and len(declarations.get(candidate.name, ())) == 1:
+            celery_tasks[candidate.name] = infos[0]
+
+    mounted_drf_routers: set[str] = set()
+    for statement in tree.body:
+        value: ast.AST | None = None
+        targets: tuple[ast.AST, ...] = ()
+        if isinstance(statement, ast.Assign):
+            value = statement.value
+            targets = tuple(statement.targets)
+        elif isinstance(statement, ast.AnnAssign):
+            value = statement.value
+            targets = (statement.target,)
+        elif isinstance(statement, ast.AugAssign):
+            value = statement.value
+            targets = (statement.target,)
+        if value is None or not any(
+            isinstance(target, ast.Name) and target.id == "urlpatterns"
+            for target in targets
+        ):
+            continue
+        for candidate in ast.walk(value):
+            if (
+                isinstance(candidate, ast.Attribute)
+                and candidate.attr == "urls"
+                and isinstance(candidate.value, ast.Name)
+                and receivers.get(candidate.value.id)
+                == "django-rest-framework-python"
+            ):
+                mounted_drf_routers.add(candidate.value.id)
+
+    def drf_viewset_route_targets(viewset: str) -> tuple[str, ...]:
+        methods: set[str] = set()
+        standard = {
+            "list",
+            "create",
+            "retrieve",
+            "update",
+            "partial_update",
+            "destroy",
+        }
+        definition = unique_module_classes.get(viewset) or unique_classes[viewset]
+        for statement in definition.body:
+            if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if statement.name in standard:
+                methods.add(statement.name)
+                continue
+            if any(
+                resolved_name(
+                    decorator.func if isinstance(decorator, ast.Call) else decorator
+                )
+                == "rest_framework.decorators.action"
+                for decorator in statement.decorator_list
+            ):
+                methods.add(statement.name)
+        return tuple(sorted(methods))
+
+    def collect_class_relations() -> None:
+        django_relationships = {
+            "django.db.models.ForeignKey",
+            "django.db.models.ManyToManyField",
+            "django.db.models.OneToOneField",
+        }
+        for model_name in sorted(django_models):
+            definition = unique_classes[model_name]
+            for statement in definition.body:
+                parts = assignment_parts(statement)
+                if parts is None:
+                    continue
+                field, value = parts
+                if not isinstance(value, ast.Call):
+                    continue
+                constructor = resolved_name(value.func)
+                if constructor in django_relationships:
+                    related = local_model_from_expression(
+                        handler_argument(value, 0, "to"), django_models
+                    )
+                    if related is not None:
+                        add(
+                            "depends_on",
+                            "persistence",
+                            model_name,
+                            related,
+                            byte_range(field),
+                            "django-python",
+                        )
+                elif (
+                    isinstance(value.func, ast.Name)
+                    and value.func.id in django_managers
+                ):
+                    add(
+                        "depends_on",
+                        "persistence",
+                        model_name,
+                        value.func.id,
+                        byte_range(statement),
+                        "django-python",
+                    )
+
+        for model_name in sorted(sqlalchemy_models):
+            definition = unique_classes[model_name]
+            for statement in definition.body:
+                parts = assignment_parts(statement)
+                if parts is None:
+                    continue
+                field, value = parts
+                if field.id == "__tablename__":
+                    table = static_string(value)
+                    if table:
+                        add(
+                            "maps_to",
+                            "persistence",
+                            model_name,
+                            table,
+                            byte_range(value),
+                            "sqlalchemy-python",
+                        )
+                    continue
+                if not isinstance(value, ast.Call):
+                    continue
+                if resolved_name(value.func) != "sqlalchemy.orm.relationship":
+                    continue
+                related = local_model_from_expression(
+                    handler_argument(value, 0, "argument"), sqlalchemy_models
+                )
+                if related is None and isinstance(statement, ast.AnnAssign):
+                    candidates = local_models_in_annotation(
+                        statement.annotation, sqlalchemy_models
+                    )
+                    related = next(iter(candidates)) if len(candidates) == 1 else None
+                if related is not None:
+                    add(
+                        "depends_on",
+                        "data_modeling",
+                        model_name,
+                        related,
+                        byte_range(statement),
+                        "sqlalchemy-python",
+                    )
+
+        for serializer_name in sorted(drf_serializers):
+            meta = nested_class(unique_classes[serializer_name], "Meta")
+            if meta is None:
+                continue
+            for statement in meta.body:
+                parts = assignment_parts(statement)
+                if parts is None or parts[0].id != "model":
+                    continue
+                target = local_model_from_expression(parts[1], django_models)
+                if target is not None:
+                    add(
+                        "depends_on",
+                        "dependency_injection",
+                        serializer_name,
+                        target,
+                        byte_range(parts[1]),
+                        "django-rest-framework-python",
+                    )
+
+        viewset_fields = {
+            "serializer_class",
+            "permission_classes",
+            "authentication_classes",
+            "filter_backends",
+            "throttle_classes",
+        }
+        for viewset_name in sorted(drf_viewsets):
+            for statement in unique_classes[viewset_name].body:
+                parts = assignment_parts(statement)
+                if parts is None or parts[0].id not in viewset_fields:
+                    continue
+                for target in exact_static_references(parts[1]):
+                    add(
+                        "depends_on",
+                        "dependency_injection",
+                        viewset_name,
+                        target,
+                        byte_range(parts[1]),
+                        "django-rest-framework-python",
+                    )
+
+    collect_class_relations()
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.owners = [module]
+
+        @property
+        def owner(self) -> str:
+            return ".".join(part for part in self.owners if part)
+
+        def _visit_function(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            bounded = definition_name_range(node)
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call) and isinstance(
+                    decorator.func, ast.Attribute
+                ):
+                    receiver = _python_dotted_name(decorator.func.value)
+                    framework_pack = receivers.get(receiver or "")
+                    if (
+                        framework_pack is not None
+                        and decorator.func.attr in _PYTHON_ROUTE_METHODS
+                    ):
+                        add(
+                            "routes_to",
+                            "http_routes",
+                            self.owner,
+                            node.name,
+                            bounded,
+                            framework_pack,
+                            receiver,
+                        )
+                    if (
+                        framework_pack == "fastapi-python"
+                        and decorator.func.attr in _PYTHON_ROUTE_METHODS
+                    ):
+                        route_models = local_models_in_annotation(
+                            node.returns, pydantic_models
+                        )
+                        for parameter in (
+                            *node.args.posonlyargs,
+                            *node.args.args,
+                            *node.args.kwonlyargs,
+                        ):
+                            route_models.update(
+                                local_models_in_annotation(
+                                    parameter.annotation, pydantic_models
+                                )
+                            )
+                        explicit_model = local_model_from_expression(
+                            keyword_argument(decorator, "response_model"),
+                            pydantic_models,
+                        )
+                        if explicit_model is not None:
+                            route_models.add(explicit_model)
+                        for model in sorted(route_models):
+                            add(
+                                "depends_on",
+                                "data_modeling",
+                                self.owner,
+                                model,
+                                decorator_range(decorator),
+                                "pydantic-python",
+                            )
+
+                task = celery_task_info(decorator, node.name)
+                if task is not None:
+                    task_name, queue = task
+                    add(
+                        "schedules",
+                        "scheduling",
+                        self.owner,
+                        task_name,
+                        decorator_range(decorator),
+                        "celery-python",
+                    )
+                    add(
+                        "triggers",
+                        "messaging",
+                        self.owner,
+                        node.name,
+                        decorator_range(decorator),
+                        "celery-python",
+                    )
+                    if queue is not None:
+                        add(
+                            "consumes",
+                            "messaging",
+                            self.owner,
+                            queue,
+                            decorator_range(decorator),
+                            "celery-python",
+                        )
+
+                if (
+                    isinstance(decorator, ast.Call)
+                    and resolved_name(decorator.func) == "django.dispatch.receiver"
+                ):
+                    signal_node = handler_argument(decorator, 0, "signal")
+                    signal = resolved_name(signal_node)
+                    if signal is not None and signal.startswith(
+                        "django.db.models.signals."
+                    ):
+                        add(
+                            "subscribes",
+                            "messaging",
+                            self.owner,
+                            signal,
+                            decorator_range(decorator),
+                            "django-python",
+                        )
+                        sender_node = keyword_argument(decorator, "sender")
+                        sender = local_model_from_expression(sender_node, django_models)
+                        if sender is not None:
+                            add(
+                                "depends_on",
+                                "persistence",
+                                self.owner,
+                                sender,
+                                byte_range(sender_node),
+                                "django-python",
+                            )
+            self.owners.append(node.name)
+            self.generic_visit(node)
+            self.owners.pop()
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            self._visit_function(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+            self._visit_function(node)
+
+        def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+            called = resolved_name(node.func)
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "connect":
+                signal = resolved_name(node.func.value)
+                handler_node = handler_argument(node, 0, "receiver")
+                if (
+                    signal is not None
+                    and signal.startswith("django.db.models.signals.")
+                    and isinstance(handler_node, ast.Name)
+                    and handler_node.id in module_functions
+                ):
+                    add(
+                        "subscribes",
+                        "messaging",
+                        f"{module}.{handler_node.id}",
+                        signal,
+                        byte_range(node),
+                        "django-python",
+                    )
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "register"
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in mounted_drf_routers
+                and static_string(keyword_argument(node, "basename")) is not None
+            ):
+                viewset_node = handler_argument(node, 1, "viewset")
+                if (
+                    isinstance(viewset_node, ast.Name)
+                    and viewset_node.id in module_drf_viewsets
+                ):
+                    for method in drf_viewset_route_targets(viewset_node.id):
+                        add(
+                            "routes_to",
+                            "http_routes",
+                            self.owner,
+                            method,
+                            byte_range(node),
+                            "django-rest-framework-python",
+                            node.func.value.id,
+                        )
+            framework_pack: str | None = None
+            handler: ast.AST | None = None
+            handler_anchor: tuple[int, int, int] | None = None
+            if called in {"starlette.routing.Route", "starlette.routing.WebSocketRoute"}:
+                framework_pack = "starlette-python"
+                handler = handler_argument(node, 1, "endpoint")
+            elif called in {
+                "django.urls.path",
+                "django.urls.re_path",
+                "django.conf.urls.url",
+            }:
+                framework_pack = "django-python"
+                handler = handler_argument(node, 1, "view")
+                handler_anchor = byte_range(node)
+            elif isinstance(node.func, ast.Attribute):
+                receiver = _python_dotted_name(node.func.value)
+                candidate_pack = receivers.get(receiver or "")
+                if candidate_pack in {"fastapi-python", "starlette-python"} and node.func.attr in {
+                    "add_api_route",
+                    "add_route",
+                    "add_websocket_route",
+                }:
+                    framework_pack = candidate_pack
+                    handler = handler_argument(node, 1, "endpoint")
+                elif candidate_pack == "flask-python" and node.func.attr == "add_url_rule":
+                    framework_pack = candidate_pack
+                    handler = handler_argument(node, 1, "view_func")
+            route_target: str | None = None
+            target_node = handler.func if isinstance(handler, ast.Call) else handler
+            if framework_pack == "django-python" and isinstance(handler, ast.Call):
+                handler_called = resolved_name(handler.func)
+                if handler_called in {
+                    "django.urls.include",
+                    "django.conf.urls.include",
+                }:
+                    target_node = None
+                elif isinstance(handler.func, ast.Attribute) and handler.func.attr == "as_view":
+                    target_node = handler.func.value
+            if isinstance(target_node, (ast.Name, ast.Attribute)):
+                route_target = _python_dotted_name(target_node)
+            if framework_pack is not None and route_target is not None:
+                add(
+                    "routes_to",
+                    "http_routes",
+                    self.owner,
+                    route_target,
+                    handler_anchor
+                    or (
+                        local_declaration(route_target)
+                        if isinstance(handler, ast.Name)
+                        else byte_range(target_node)
+                    ),
+                    framework_pack,
+                )
+
+            if called in {"fastapi.Depends", "fastapi.Security"}:
+                provider = handler_argument(node, 0, "dependency")
+                if isinstance(provider, (ast.Name, ast.Attribute)):
+                    target = _python_dotted_name(provider)
+                    if target:
+                        add(
+                            "depends_on",
+                            "dependency_injection",
+                            self.owner,
+                            target,
+                            byte_range(node),
+                            "fastapi-python",
+                        )
+
+            if isinstance(node.func, ast.Attribute):
+                member = node.func.attr
+                receiver_node = node.func.value
+                if (
+                    isinstance(receiver_node, ast.Name)
+                    and receiver_node.id in celery_tasks
+                    and member in {"delay", "apply_async", "s", "si", "signature"}
+                ):
+                    add(
+                        "triggers",
+                        "messaging",
+                        self.owner,
+                        receiver_node.id,
+                        byte_range(node),
+                        "celery-python",
+                    )
+                    queue = static_string(keyword_argument(node, "queue"))
+                    if queue is not None:
+                        add(
+                            "produces",
+                            "messaging",
+                            self.owner,
+                            queue,
+                            byte_range(node),
+                            "celery-python",
+                        )
+                elif member == "send_task":
+                    receiver = _python_dotted_name(receiver_node)
+                    if receivers.get(receiver or "") == "celery-python":
+                        task_name = static_string(handler_argument(node, 0, "name"))
+                        if task_name is not None:
+                            add(
+                                "produces",
+                                "messaging",
+                                self.owner,
+                                task_name,
+                                byte_range(node),
+                                "celery-python",
+                            )
+                        queue = static_string(keyword_argument(node, "queue"))
+                        if queue is not None:
+                            add(
+                                "produces",
+                                "messaging",
+                                self.owner,
+                                queue,
+                                byte_range(node),
+                                "celery-python",
+                            )
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return tuple(sorted(set(constructs), key=_source_construct_key))
+
+
+def _qualification_glob_matches(relative: str, pattern: str) -> bool:
+    if fnmatch.fnmatchcase(relative, pattern):
+        return True
+    return "**/" in pattern and fnmatch.fnmatchcase(
+        relative,
+        pattern.replace("**/", ""),
+    )
+
+
+def _python_inventory(
+    root: Path,
+    include_globs: tuple[str, ...],
+    exclude_globs: tuple[str, ...],
+) -> SourceConstructInventory:
+    paths = sorted(path for path in root.rglob("*.py") if path.is_file())
+    if len(paths) > _PYTHON_FRAMEWORK_MAX_FILES:
+        raise RuntimeError(
+            f"Python source file count {len(paths)} exceeds {_PYTHON_FRAMEWORK_MAX_FILES}"
+        )
+    selected: list[tuple[Path, str]] = []
+    rejected: list[str] = []
+    for path in paths:
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rejected.append(path.relative_to(root).as_posix())
+            continue
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        if any(_qualification_glob_matches(relative, pattern) for pattern in exclude_globs):
+            continue
+        selected.append((resolved, relative))
+
+    source_roots = {root}
+    for pattern in include_globs:
+        prefix, separator, _ = pattern.partition("/**/")
+        if not separator or not prefix:
+            continue
+        candidate = (root / prefix).resolve()
+        if candidate.is_dir() and not (candidate / "__init__.py").is_file():
+            source_roots.add(candidate)
+    local_modules = frozenset(
+        _python_module(source_root, path)
+        for path, _ in selected
+        for source_root in source_roots
+        if path.is_relative_to(source_root)
+    )
+    constructs: list[SourceConstruct] = []
+    parsed = 0
+    for path, relative in selected:
+        import_root = max(
+            (
+                source_root
+                for source_root in source_roots
+                if path.is_relative_to(source_root)
+            ),
+            key=lambda source_root: len(source_root.parts),
+        )
+        extracted = _python_constructs(
+            root,
+            path,
+            local_modules,
+            _python_module(import_root, path),
+        )
+        if extracted is None:
+            rejected.append(relative)
+        else:
+            parsed += 1
+            constructs.extend(extracted)
+    return SourceConstructInventory(
+        tuple(sorted(set(constructs), key=_source_construct_key)),
+        len(selected),
+        parsed,
+        tuple(sorted(rejected)),
+    )
+
+
+def _python_framework_inventory(
+    root: Path,
+    include_globs: tuple[str, ...],
+    exclude_globs: tuple[str, ...],
+) -> SourceConstructInventory:
+    paths = sorted(path for path in root.rglob("*.py") if path.is_file())
+    if len(paths) > _PYTHON_FRAMEWORK_MAX_FILES:
+        raise RuntimeError(
+            f"Python framework source file count {len(paths)} exceeds {_PYTHON_FRAMEWORK_MAX_FILES}"
+        )
+    constructs: list[SourceConstruct] = []
+    django_modules: list[_PythonDjangoUrlModule] = []
+    rejected: list[str] = []
+    scanned = 0
+    parsed = 0
+    for path in paths:
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rejected.append(path.relative_to(root).as_posix())
+            continue
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        if any(_qualification_glob_matches(relative, pattern) for pattern in exclude_globs):
+            continue
+        scanned += 1
+        extracted = _python_framework_constructs(root, resolved)
+        if extracted is None:
+            rejected.append(relative)
+        else:
+            parsed += 1
+            constructs.extend(extracted)
+            django_module = _python_django_url_module(root, resolved)
+            if django_module is not None:
+                django_modules.append(django_module)
+
+    module_counts: dict[str, int] = {}
+    for django_module in django_modules:
+        module_counts[django_module.module] = module_counts.get(django_module.module, 0) + 1
+    modules = {
+        django_module.module: django_module
+        for django_module in django_modules
+        if module_counts[django_module.module] == 1
+    }
+    direct_targets: dict[str, set[tuple[str, str]]] = {
+        module: set() for module in modules
+    }
+    module_by_source = {
+        django_module.source_file: django_module
+        for django_module in modules.values()
+    }
+    for construct in constructs:
+        django_module = module_by_source.get(construct.source_file)
+        if (
+            django_module is not None
+            and construct.framework_pack == "django-python"
+            and construct.relation == "routes_to"
+            and (construct.start_byte, construct.end_byte)
+            in django_module.pattern_ranges
+        ):
+            direct_targets[django_module.module].add(
+                (django_module.module, construct.target_spelling)
+            )
+
+    def mounted_module(reference: str) -> str | None:
+        if reference in modules:
+            return reference
+        for suffix in (".urlpatterns", ".urls"):
+            if reference.endswith(suffix):
+                candidate = reference[: -len(suffix)]
+                if candidate in modules:
+                    return candidate
+        return None
+
+    memoized_targets: dict[str, frozenset[tuple[str, str]]] = {}
+
+    def downstream_targets(
+        module: str,
+        active: frozenset[str],
+    ) -> frozenset[tuple[str, str]]:
+        cached = memoized_targets.get(module)
+        if cached is not None:
+            return cached
+        if module in active:
+            return frozenset()
+        selected = set(direct_targets[module])
+        next_active = active | {module}
+        for mount in modules[module].include_mounts:
+            child = mounted_module(mount.target_reference)
+            if child is not None:
+                selected.update(downstream_targets(child, next_active))
+            if len(selected) > _PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS:
+                raise RuntimeError(
+                    "Python Django included route target count exceeds "
+                    f"{_PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS}"
+                )
+        bounded = frozenset(selected)
+        memoized_targets[module] = bounded
+        return bounded
+
+    propagated = 0
+    for module in sorted(modules):
+        for mount in modules[module].include_mounts:
+            child = mounted_module(mount.target_reference)
+            if child is None:
+                continue
+            for target_module, target in sorted(
+                downstream_targets(child, frozenset((module,)))
+            ):
+                constructs.append(
+                    SourceConstruct(
+                        mount.source_file,
+                        "routes_to",
+                        "http_routes",
+                        mount.owner_qualified_name,
+                        target,
+                        target_module,
+                        mount.start_byte,
+                        mount.end_byte,
+                        mount.start_line,
+                        "django-python",
+                    )
+                )
+                propagated += 1
+                if propagated > _PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS:
+                    raise RuntimeError(
+                        "Python Django propagated route target count exceeds "
+                        f"{_PYTHON_FRAMEWORK_MAX_INCLUDE_TARGETS}"
+                    )
+    return SourceConstructInventory(
+        tuple(sorted(set(constructs), key=_source_construct_key)),
+        scanned,
+        parsed,
+        tuple(sorted(rejected)),
+    )
 
 
 _TYPESCRIPT_ORACLE_SCHEMA = "compass.typescript-source-oracle/1"
@@ -1884,7 +3276,18 @@ DEFAULT_STATEMENT_PROVIDERS: Mapping[str, StatementProvider] = {
 }
 
 DEFAULT_CONSTRUCT_PROVIDERS: Mapping[str, ConstructProvider] = {
-    "python": ConstructProvider("python_ast", (".py",), _python_constructs),
+    "python": ConstructProvider(
+        "python_ast",
+        (".py",),
+        _python_constructs,
+        _python_inventory,
+    ),
+    "python-frameworks": ConstructProvider(
+        "python_framework_ast_v1",
+        (".py",),
+        _collector_only_construct_parser,
+        _python_framework_inventory,
+    ),
     "typescript": ConstructProvider(
         _TYPESCRIPT_ORACLE_PROVIDER,
         (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".d.ts"),
@@ -1980,15 +3383,23 @@ def independent_source_inventory(
     for path in sorted(paths):
         resolved = path.resolve()
         try:
-            resolved.relative_to(root)
+            relative = resolved.relative_to(root).as_posix()
         except ValueError:
             rejected.append(path.relative_to(root).as_posix())
+            continue
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        if any(
+            _qualification_glob_matches(relative, pattern) for pattern in exclude_globs
+        ):
             continue
         if resolved.is_file():
             scanned += 1
             extracted = provider.parse(root, resolved)
             if extracted is None:
-                rejected.append(resolved.relative_to(root).as_posix())
+                rejected.append(relative)
             else:
                 parsed += 1
                 constructs.extend(extracted)
@@ -2025,6 +3436,11 @@ def source_construct_inventory_sha256(
                 "startByte": construct.start_byte,
                 "endByte": construct.end_byte,
                 "startLine": construct.start_line,
+                **(
+                    {"frameworkPack": construct.framework_pack}
+                    if construct.framework_pack is not None
+                    else {}
+                ),
             }
             for construct in inventory.constructs
         ],

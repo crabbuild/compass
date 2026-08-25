@@ -113,6 +113,9 @@ pub(super) fn declaration_node(
             Value::String(module_or_package.clone()),
         );
     }
+    if declaration.language == "python" && declaration.range.source_file.ends_with(".pyi") {
+        attributes.insert("source_kind".to_owned(), Value::String("stub".to_owned()));
+    }
     if let Some(definition_range) = definition_range.filter(|range| *range != &declaration.range) {
         attributes.insert(
             "source_anchor".to_owned(),

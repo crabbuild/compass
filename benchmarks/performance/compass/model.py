@@ -218,6 +218,9 @@ class AuditGraphFact:
     source: str
     target: str
     relation: str
+    edge_id: str | None = None
+    extractor: str | None = None
+    rule: str | None = None
 
 
 @dataclass(frozen=True)
@@ -235,6 +238,7 @@ class AuditSourceOracle:
     scanned_files: int
     parsed_files: int
     inventory_sha256: str
+    rejected_files: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

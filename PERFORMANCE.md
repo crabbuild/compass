@@ -1243,6 +1243,16 @@ RSS, and deterministic output digests. Existing sealed realizations and cached
 diff/view projections are expected to be constant- or bounded-read paths;
 explicit `history verify` remains the full integrity scan.
 
+## Python framework source qualification
+
+The version-2 Flask and version-1 SQLAlchemy/Celery universal packs add only
+bounded native syntax/evidence traversal; they do not import or execute Python.
+The checked-in fixture gate records deterministic source inventories and
+contract digests but is explicitly not a latency, RSS, or production-quality
+claim. Cold/warm/edit/worker/RSS measurements and pinned-corpus thresholds
+remain part of the separately reviewed production qualification phase; budgets
+must not be widened from fixture-only results.
+
 ## Document and OCR qualification
 
 Document decoding and OCR are governed by correctness and resource gates, not

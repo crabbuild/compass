@@ -3761,6 +3761,8 @@ fn normalize_edge(
             stage: match optional_string(&raw.attributes, "stage").as_deref() {
                 None | Some("handler") => RouteStage::Handler,
                 Some("middleware") => RouteStage::Middleware,
+                Some("dependency") => RouteStage::Dependency,
+                Some("security") => RouteStage::Security,
                 Some("layout") => RouteStage::Layout,
                 Some("template") => RouteStage::Template,
                 Some("loading") => RouteStage::Loading,

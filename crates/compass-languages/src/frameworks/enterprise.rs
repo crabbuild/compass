@@ -11,7 +11,6 @@ pub(super) fn detect(path: &Path, source: &[u8], language: &str) -> Vec<RawFrame
     let body = text(source);
     let evidence = enterprise_evidence(body, language);
     match language {
-        "python" => python(path, source, body, &evidence),
         "typescript" | "tsx" | "javascript" => typescript(path, source, body, &evidence),
         "java" => java(path, source, body, &evidence),
         "csharp" => csharp(path, source, body, &evidence),
@@ -25,25 +24,6 @@ pub(super) fn detect(path: &Path, source: &[u8], language: &str) -> Vec<RawFrame
 
 fn enterprise_evidence(body: &str, language: &str) -> EvidenceSet {
     match language {
-        "python" => EvidenceSet::new()
-            .direct_if(
-                body.contains("from celery") || body.contains("import celery"),
-                "celery",
-                EvidenceKind::Import,
-                "celery",
-            )
-            .direct_if(
-                body.contains("django.db"),
-                "django-orm",
-                EvidenceKind::Import,
-                "django.db",
-            )
-            .direct_if(
-                body.contains("sqlalchemy"),
-                "sqlalchemy",
-                EvidenceKind::Import,
-                "sqlalchemy",
-            ),
         "typescript" | "tsx" | "javascript" => EvidenceSet::new()
             .direct_if(
                 body.contains("@nestjs/"),
@@ -109,78 +89,6 @@ fn enterprise_evidence(body: &str, language: &str) -> EvidenceSet {
         ),
         _ => EvidenceSet::new(),
     }
-}
-
-fn python(path: &Path, source: &[u8], body: &str, evidence: &EvidenceSet) -> Vec<RawFrameworkFact> {
-    let mut facts = Vec::new();
-    if evidence.activates("celery") {
-        let mut pending_task = None::<(Option<String>, Option<String>, usize, String)>;
-        let task = Regex::new(r#"^\s*@(?:app\.task|shared_task)(?:\((.*)\))?"#).ok();
-        let function = Regex::new(r"^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)").ok();
-        let name = Regex::new(r#"\bname\s*=\s*["']([^"']+)["']"#).ok();
-        let queue = Regex::new(r#"\bqueue\s*=\s*["']([^"']+)["']"#).ok();
-        let mut offset = 0;
-        for line in body.split_inclusive('\n') {
-            if let Some(capture) = task.as_ref().and_then(|pattern| pattern.captures(line)) {
-                let args = capture
-                    .get(1)
-                    .map(|value| value.as_str())
-                    .unwrap_or_default();
-                pending_task = Some((
-                    name.as_ref()
-                        .and_then(|pattern| pattern.captures(args))
-                        .and_then(|capture| capture.get(1))
-                        .map(|value| value.as_str().to_owned()),
-                    queue
-                        .as_ref()
-                        .and_then(|pattern| pattern.captures(args))
-                        .and_then(|capture| capture.get(1))
-                        .map(|value| value.as_str().to_owned()),
-                    offset,
-                    line.to_owned(),
-                ));
-            } else if let Some((configured, queue, at, anchor_line)) = pending_task.take()
-                && let Some(handler) = function
-                    .as_ref()
-                    .and_then(|pattern| pattern.captures(line))
-                    .and_then(|capture| capture.get(1))
-            {
-                let handler = handler.as_str();
-                facts.push(job_fact(
-                    "celery",
-                    configured.as_deref().unwrap_or(handler),
-                    handler,
-                    None,
-                    queue.as_deref(),
-                    path,
-                    source,
-                    at,
-                    &anchor_line,
-                ));
-            }
-            offset += line.len();
-        }
-    }
-    if evidence.activates("django-orm") || evidence.activates("sqlalchemy") {
-        let framework = if evidence.activates("django-orm") {
-            "django-orm"
-        } else {
-            "sqlalchemy"
-        };
-        facts.extend(class_table_mappings(
-            framework,
-            path,
-            source,
-            body,
-            r"^\s*class\s+([A-Za-z_]\w*)\s*\([^)]*(?:Model|Base)[^)]*\)",
-            if framework == "django-orm" {
-                r#"^\s*db_table\s*=\s*["']([^"']+)["']"#
-            } else {
-                r#"^\s*__tablename__\s*=\s*["']([^"']+)["']"#
-            },
-        ));
-    }
-    facts
 }
 
 fn typescript(

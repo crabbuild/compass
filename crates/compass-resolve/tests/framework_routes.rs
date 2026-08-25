@@ -3,14 +3,15 @@ use std::fs;
 use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{
     Extraction, FrameworkLimits, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin,
-    RawNodeRecord, RawRouteFact,
+    RawFrameworkRoleFact, RawNodeRecord, RawRouteFact, RawRouteStageFact, RawRouteStageRole,
 };
 use compass_model::code_graph::{
     EdgeDetails, EdgeKind, NodeDetails, NodeKind, RouteStage, RouteStageDetails,
 };
 use compass_model::provenance::{EvidenceOrigin, ResolutionState, SourceAnchor};
 use compass_resolve::frameworks::{
-    FrameworkResolutionError, RouteStageRole, resolve_and_publish_framework_routes, resolve_routes,
+    FrameworkResolutionError, RouteStageRole, resolve_and_publish_framework_domains,
+    resolve_and_publish_framework_routes, resolve_routes,
 };
 use serde_json::{Map, Value};
 
@@ -74,6 +75,50 @@ fn route(handler: &str) -> RawRouteFact {
 }
 
 #[test]
+fn neutral_framework_roles_publish_existing_node_roles_and_reject_unknown_values()
+-> Result<(), Box<dyn std::error::Error>> {
+    let anchor = route("service").anchor;
+    let role = |role: &str| {
+        RawFrameworkFact::Role(RawFrameworkRoleFact {
+            pack_id: "python-test".to_owned(),
+            framework: "synthetic".to_owned(),
+            role: role.to_owned(),
+            subject_reference: Some("service".to_owned()),
+            context: Some("app".to_owned()),
+            anchor: anchor.clone(),
+            origin: RawFrameworkOrigin::Ast,
+            evidence_class: "exact".to_owned(),
+            detail: Map::new(),
+        })
+    };
+    let mut extraction = Extraction {
+        nodes: vec![node("service", "Service", "app.Service")],
+        framework_facts: vec![role("service"), role("not_a_node_role")],
+        ..Extraction::default()
+    };
+    let resolved =
+        resolve_and_publish_framework_domains(&mut extraction, FrameworkLimits::default())?;
+    assert_eq!(resolved.len(), 2);
+    let service = extraction
+        .nodes
+        .iter()
+        .find(|candidate| candidate.id == "service")
+        .ok_or("missing service node")?;
+    assert_eq!(
+        service.attributes.get("roles"),
+        Some(&Value::Array(vec![Value::String("service".to_owned())]))
+    );
+    assert!(
+        extraction.extensions["framework_domain_diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic["kind"] == "invalid_framework_role" }))
+    );
+    Ok(())
+}
+
+#[test]
 fn exact_routes_publish_ordered_middleware_and_handler_stages() {
     let mut route = route("show_user");
     route.middleware_references = vec!["authenticate".into(), "authorize".into()];
@@ -118,6 +163,130 @@ fn exact_routes_publish_ordered_middleware_and_handler_stages() {
     assert_eq!(route_edges.len(), 3);
     assert_eq!(route_edges[0].string("stage"), "middleware");
     assert_eq!(route_edges[2].string("stage"), "handler");
+}
+
+#[test]
+fn dependency_and_security_stages_round_trip_without_becoming_http_middleware()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut route = route("handler");
+    route.stages = [
+        (RawRouteStageRole::Dependency, "provide_session"),
+        (RawRouteStageRole::Dependency, "provide_session"),
+        (RawRouteStageRole::Security, "require_user"),
+        (RawRouteStageRole::Handler, "handler"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(position, (role, reference))| RawRouteStageFact {
+        role,
+        position: u32::try_from(position).unwrap_or_else(|_| std::process::abort()),
+        reference: reference.to_owned(),
+        anchor: route.anchor.clone(),
+        origin: RawFrameworkOrigin::Ast,
+        detail: Map::new(),
+    })
+    .collect();
+    let mut extraction = Extraction {
+        nodes: vec![
+            node(
+                "dependency",
+                "provide_session",
+                "app.routes.provide_session",
+            ),
+            node("security", "require_user", "app.routes.require_user"),
+            node("handler", "handler", "app.routes.handler"),
+        ],
+        framework_facts: vec![RawFrameworkFact::Route(route)],
+        ..Extraction::default()
+    };
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    assert_eq!(
+        resolved[0]
+            .stages
+            .iter()
+            .map(|stage| stage.role)
+            .collect::<Vec<_>>(),
+        vec![
+            RouteStageRole::Dependency,
+            RouteStageRole::Dependency,
+            RouteStageRole::Security,
+            RouteStageRole::Handler,
+        ]
+    );
+    assert_eq!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("stage") == "dependency")
+            .map(|edge| edge.string("position"))
+            .collect::<Vec<_>>(),
+        vec!["0", "1"],
+        "repeated providers at distinct stage positions retain multiplicity"
+    );
+    let dependency = extraction
+        .nodes
+        .iter()
+        .find(|candidate| candidate.id == "dependency")
+        .ok_or("missing dependency node")?;
+    assert_eq!(
+        dependency.attributes["roles"],
+        Value::Array(vec![Value::String("service".to_owned())])
+    );
+    let security = extraction
+        .nodes
+        .iter()
+        .find(|candidate| candidate.id == "security")
+        .ok_or("missing security node")?;
+    assert_eq!(
+        security.attributes["roles"],
+        Value::Array(vec![Value::String("middleware".to_owned())])
+    );
+    let directory = tempfile::tempdir()?;
+    let source_path = directory.path().join("src/routes.rs");
+    fs::create_dir_all(source_path.parent().ok_or("missing source parent")?)?;
+    fs::write(&source_path, vec![b'x'; 100])?;
+    let build = BuildEvidence::from_extraction(
+        directory.path(),
+        &extraction,
+        "sha256:dependency-security-stages",
+    )?;
+    let graph = normalize_v1(extraction, build)?;
+    let mut dependency_positions = graph
+        .links
+        .iter()
+        .filter_map(|edge| match edge.details.as_ref() {
+            Some(EdgeDetails::Route(details)) if details.stage == RouteStage::Dependency => {
+                details.position
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    dependency_positions.sort_unstable();
+    assert_eq!(dependency_positions, vec![0, 1]);
+    let route = graph
+        .nodes
+        .iter()
+        .find_map(|node| match node.details.as_ref() {
+            Some(NodeDetails::Route(route)) => Some(route),
+            _ => None,
+        })
+        .ok_or("missing route details")?;
+    assert_eq!(route.middleware_count, 0);
+    assert_eq!(
+        route
+            .stages
+            .iter()
+            .map(|stage| stage.stage)
+            .collect::<Vec<_>>(),
+        vec![
+            RouteStage::Dependency,
+            RouteStage::Dependency,
+            RouteStage::Security,
+            RouteStage::Handler
+        ]
+    );
+    Ok(())
 }
 
 #[test]

@@ -34,20 +34,35 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 10);
-    assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
-    assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "php-frameworks");
-    assert_eq!(FrameworkPackRegistry::descriptors()[2].id, "spring-java");
-    assert_eq!(FrameworkPackRegistry::descriptors()[3].id, "spring-kotlin");
-    assert_eq!(FrameworkPackRegistry::descriptors()[4].id, "rails-ruby");
-    assert_eq!(FrameworkPackRegistry::descriptors()[5].id, "vapor-swift");
-    assert_eq!(FrameworkPackRegistry::descriptors()[6].id, "dart-bloc");
+    let ids = FrameworkPackRegistry::descriptors()
+        .iter()
+        .map(|descriptor| descriptor.id)
+        .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
-        FrameworkPackRegistry::descriptors()[7].id,
-        "dart-flutter-navigation"
+        ids,
+        [
+            "aspnet-csharp",
+            "celery-python",
+            "dart-bloc",
+            "dart-flutter-navigation",
+            "dart-riverpod",
+            "django-python",
+            "django-rest-framework-python",
+            "fastapi-python",
+            "flask-python",
+            "php-frameworks",
+            "pydantic-python",
+            "rails-ruby",
+            "react-ui",
+            "sqlalchemy-python",
+            "spring-java",
+            "spring-kotlin",
+            "starlette-python",
+            "vapor-swift",
+        ]
+        .into_iter()
+        .collect()
     );
-    assert_eq!(FrameworkPackRegistry::descriptors()[8].id, "dart-riverpod");
-    assert_eq!(FrameworkPackRegistry::descriptors()[9].id, "react-ui");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -177,6 +192,39 @@ fn universal_framework_pack_registry_enforces_evidence_activation_and_limits() {
     assert_eq!(
         FrameworkPackRegistry::validate_descriptors(&[descriptor, descriptor]),
         Err(FrameworkPackRegistryError::DuplicateId(descriptor.id))
+    );
+}
+
+#[test]
+fn depends_on_accepts_only_declared_dependency_semantics() {
+    let descriptor = valid_universal_framework_pack("dependency-pack");
+    const DEPENDENCY_INJECTION: &[FrameworkCapability] =
+        &[FrameworkCapability::DependencyInjection];
+    const DATA_MODELING: &[FrameworkCapability] = &[FrameworkCapability::DataModeling];
+    const SECURITY: &[FrameworkCapability] = &[FrameworkCapability::Security];
+    for capabilities in [DEPENDENCY_INJECTION, DATA_MODELING, SECURITY] {
+        let dependency_pack = FrameworkPackDescriptor {
+            framework_capabilities: capabilities,
+            emitted_relation_families: &[FrameworkRelation::DependsOn],
+            ..descriptor
+        };
+        assert_eq!(
+            FrameworkPackRegistry::validate_descriptors(&[dependency_pack]),
+            Ok(())
+        );
+    }
+
+    let persistence_only = FrameworkPackDescriptor {
+        framework_capabilities: &[FrameworkCapability::Persistence],
+        emitted_relation_families: &[FrameworkRelation::DependsOn],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[persistence_only]),
+        Err(FrameworkPackRegistryError::RelationCapabilityNotDeclared {
+            pack: descriptor.id,
+            relation: FrameworkRelation::DependsOn,
+        })
     );
 }
 

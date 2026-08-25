@@ -9,6 +9,7 @@ use crate::ResolutionAdmission;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct LanguagePresence {
+    python: bool,
     typescript: bool,
     rust: bool,
     go: bool,
@@ -30,6 +31,7 @@ impl LanguagePresence {
 
     fn observe(&mut self, language: &str) {
         match language {
+            "python" => self.python = true,
             "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => {
                 self.typescript = true;
             }
@@ -168,6 +170,7 @@ impl IndexBuilder<'_> {
                     .map_err(|error| format!("invalid universal evidence: {error}"))
             })?;
         }
+        let _stub_diagnostics = crate::prepare_python_source_stubs(&mut batches);
 
         // Check aggregate input sizes before reserving hash-map capacity. A
         // valid batch is bounded on its own, but an unbounded number of valid
@@ -293,6 +296,16 @@ impl IndexBuilder<'_> {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
+        let python_project_modules = if languages.python {
+            python_project_module_index(
+                &declarations,
+                root,
+                limits.candidates,
+                limits.candidates_per_lookup,
+            )?
+        } else {
+            PythonProjectModuleIndex::default()
+        };
         let (typescript_project_modules, typescript_project_metadata) = if languages.typescript {
             typescript_project_module_index(
                 project_edges,
@@ -488,16 +501,37 @@ impl IndexBuilder<'_> {
             }
             let language = node.string("language");
             let qualified = match language.as_str() {
-                "python" => python_module_name(&node.string("source_file"), root),
+                "python" => python_project_module_keys(
+                    &python_project_modules,
+                    &node.string("source_file"),
+                    root,
+                )
+                .map(<[String]>::to_vec)
+                .or_else(|| {
+                    python_module_name(&node.string("source_file"), root).map(|module| vec![module])
+                })
+                .unwrap_or_default(),
                 "go" => {
                     let package = node.string("package");
-                    (!package.is_empty()).then_some(package)
+                    (!package.is_empty())
+                        .then_some(vec![package])
+                        .unwrap_or_default()
                 }
-                _ => None,
+                _ => Vec::new(),
             };
-            if let Some(qualified) = qualified {
+            for qualified in qualified {
+                if language == "python"
+                    && !python_project_source_is_indexed(
+                        &python_project_modules,
+                        &qualified,
+                        &node.string("source_file"),
+                        root,
+                    )
+                {
+                    continue;
+                }
                 inventory_by_qualified
-                    .entry((language, qualified))
+                    .entry((language.clone(), qualified))
                     .or_default()
                     .push(node.id.clone());
             }
@@ -1055,6 +1089,7 @@ impl IndexBuilder<'_> {
             }),
             project: ProjectContext {
                 root: root.to_path_buf(),
+                python_project_modules,
                 typescript_project_modules,
                 typescript_project_metadata,
                 go_module_path,

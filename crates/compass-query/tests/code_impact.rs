@@ -32,6 +32,143 @@ fn impact_walks_the_approved_reverse_family_and_gates_heuristics()
 }
 
 #[test]
+fn python_framework_dependency_and_schema_edges_reach_the_owning_route()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let dependency = graph
+        .links
+        .iter_mut()
+        .find(|edge| edge.source == "n:list" && edge.target == "n:callee")
+        .ok_or("missing dependency template")?;
+    dependency.kind = EdgeKind::DependsOn;
+    dependency.context = Some("request_model".to_owned());
+    let id = edge_id(
+        &dependency.source,
+        dependency.kind,
+        &dependency.target,
+        dependency.relationship_site.as_ref(),
+        dependency
+            .occurrence_rule
+            .as_ref()
+            .map(compass_model::provenance::OccurrenceRule::as_str),
+    );
+    dependency.id.clone_from(&id);
+    dependency.key = id;
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let impact = engine.impact(ImpactRequest {
+        symbol: "Store.callee".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    })?;
+    assert!(impact.nodes.iter().any(|node| node.id == "n:list"));
+    assert!(impact.nodes.iter().any(|node| node.id == "n:route"));
+    assert!(
+        impact
+            .edges
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::DependsOn)
+    );
+    assert!(
+        impact
+            .edges
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::RoutesTo)
+    );
+    Ok(())
+}
+
+#[test]
+fn django_drf_model_impact_reaches_serializer_viewset_action_and_url()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    for (id, name, qualified_name) in [
+        ("n:list", "publish", "api.ItemViewSet.publish"),
+        ("n:callee", "ItemSerializer", "api.ItemSerializer"),
+        ("n:dependent", "Item", "api.models.Item"),
+    ] {
+        let node = graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == id)
+            .ok_or("missing DRF impact template node")?;
+        node.name = name.to_owned();
+        node.qualified_name = qualified_name.to_owned();
+    }
+    let viewset_serializer = graph
+        .links
+        .iter_mut()
+        .find(|edge| edge.source == "n:list" && edge.target == "n:callee")
+        .ok_or("missing viewset serializer template")?;
+    viewset_serializer.kind = EdgeKind::DependsOn;
+    viewset_serializer.context = Some("serializer_class".to_owned());
+    let id = edge_id(
+        &viewset_serializer.source,
+        viewset_serializer.kind,
+        &viewset_serializer.target,
+        viewset_serializer.relationship_site.as_ref(),
+        None,
+    );
+    viewset_serializer.id.clone_from(&id);
+    viewset_serializer.key = id;
+
+    let serializer_model = graph
+        .links
+        .iter_mut()
+        .find(|edge| edge.source == "n:dependent" && edge.target == "n:caller")
+        .ok_or("missing serializer model template")?;
+    serializer_model.source = "n:callee".to_owned();
+    serializer_model.target = "n:dependent".to_owned();
+    serializer_model.kind = EdgeKind::DependsOn;
+    serializer_model.context = Some("serializer_model".to_owned());
+    let id = edge_id(
+        &serializer_model.source,
+        serializer_model.kind,
+        &serializer_model.target,
+        serializer_model.relationship_site.as_ref(),
+        None,
+    );
+    serializer_model.id.clone_from(&id);
+    serializer_model.key = id;
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let impact = engine.impact(ImpactRequest {
+        symbol: "api.models.Item".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits::default(),
+    })?;
+    for id in ["n:callee", "n:list", "n:route"] {
+        assert!(
+            impact.nodes.iter().any(|node| node.id == id),
+            "missing {id}; impact={impact:#?}"
+        );
+    }
+    assert!(impact.edges.iter().any(|edge| {
+        edge.kind == EdgeKind::DependsOn
+            && edge.source == "n:callee"
+            && edge.target == "n:dependent"
+    }));
+    assert!(impact.edges.iter().any(|edge| {
+        edge.kind == EdgeKind::DependsOn && edge.source == "n:list" && edge.target == "n:callee"
+    }));
+    assert!(
+        impact
+            .edges
+            .iter()
+            .any(|edge| edge.kind == EdgeKind::RoutesTo)
+    );
+    Ok(())
+}
+
+#[test]
 fn impact_reports_bounds_as_typed_truncation() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");

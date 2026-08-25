@@ -80,7 +80,7 @@ fn role_as_domain(role: &compass_languages::RawFrameworkRoleFact) -> RawDomainFa
     detail.insert("pack_id".to_owned(), Value::String(role.pack_id.clone()));
     RawDomainFact {
         framework: role.framework.clone(),
-        kind: "ui_role".to_owned(),
+        kind: "framework_role".to_owned(),
         name: role.subject_reference.clone().unwrap_or_default(),
         declaring_scope: role.context.clone().unwrap_or_default(),
         anchor: role.anchor.clone(),
@@ -230,9 +230,15 @@ pub fn publish_resolved_domains_with_root(
 
     for resolved in resolved {
         let fact = &resolved.fact;
-        if fact.kind == "ui_role" {
+        if matches!(fact.kind.as_str(), "ui_role" | "framework_role") {
             let role = fact.detail.get("role").and_then(Value::as_str);
-            let valid_role = role.is_some_and(is_ui_role);
+            let valid_role = role.is_some_and(|role| {
+                if fact.kind == "ui_role" {
+                    is_ui_role(role)
+                } else {
+                    is_framework_role(role)
+                }
+            });
             if resolved.state == ResolutionState::Exact
                 && valid_role
                 && let [candidate] = resolved.source_candidates.as_slice()
@@ -259,9 +265,9 @@ pub fn publish_resolved_domains_with_root(
             } else {
                 diagnostics.push(json!({
                     "kind": if valid_role {
-                        "unresolved_ui_role"
+                        if fact.kind == "ui_role" { "unresolved_ui_role" } else { "unresolved_framework_role" }
                     } else {
-                        "invalid_ui_role"
+                        if fact.kind == "ui_role" { "invalid_ui_role" } else { "invalid_framework_role" }
                     },
                     "framework": fact.framework,
                     "role": role,
@@ -864,7 +870,7 @@ fn resolve_one(
             target_candidates: Vec::new(),
         });
     }
-    if fact.kind == "ui_role" {
+    if matches!(fact.kind.as_str(), "ui_role" | "framework_role") {
         let reference = fact
             .detail
             .get("source_reference")
@@ -883,7 +889,7 @@ fn resolve_one(
             .into_iter()
             .map(|node| ResolutionCandidate {
                 node_id: node.id.clone(),
-                reason: "exact UI role declaration identity".to_owned(),
+                reason: "exact framework role declaration identity".to_owned(),
                 confidence: compass_model::provenance::EvidenceConfidence::Exact,
                 score: Some(1.0),
                 anchor: node_anchor(node),
@@ -1122,6 +1128,32 @@ fn is_ui_role(role: &str) -> bool {
     matches!(
         role,
         "ui_component"
+            | "hook"
+            | "client_boundary"
+            | "client_component"
+            | "server_component"
+            | "server_function"
+            | "data_loader"
+    )
+}
+
+fn is_framework_role(role: &str) -> bool {
+    matches!(
+        role,
+        "controller"
+            | "route_handler"
+            | "middleware"
+            | "service"
+            | "resolver"
+            | "consumer"
+            | "producer"
+            | "subscriber"
+            | "repository"
+            | "model"
+            | "test"
+            | "fixture"
+            | "generated"
+            | "ui_component"
             | "hook"
             | "client_boundary"
             | "client_component"

@@ -451,6 +451,16 @@ calls as proof that no target exists.
 Use `compass program` for read-only inspection and CompassQL projection.
 Reject unknown schema identifiers rather than guessing compatibility.
 
+A verified managed Python provider has an ID of the form
+`scip-python:<profile-sha256>:<artifact-sha256>`. Its companion SCIP manifest
+uses `compass.scip-manifest/1` and may carry the additive
+`managed_analyzer` object with schema `compass.managed-analyzer-profile/1`.
+The frozen environment is validated and hashed into provider/cache identity,
+but environment paths and platform details are not copied into Program facts.
+Only complete, offline profiles are accepted; unknown profile majors and
+timeout, cancellation, permission, partial, failed, or stale states fail
+explicitly.
+
 ## Query text
 
 `query`, `path`, `explain`, `affected`, and some history commands emit

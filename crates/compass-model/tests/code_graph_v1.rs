@@ -263,6 +263,14 @@ fn route_details_retain_ordered_stage_resolution_and_candidates_on_the_wire()
     assert_eq!(value["data"]["stages"][0]["reference"], "authenticate");
     assert_eq!(value["data"]["stages"][1]["resolution"], "ambiguous");
     assert!(value["data"]["stages"][1].get("target").is_none());
+    assert_eq!(
+        serde_json::from_value::<RouteStage>(json!("dependency"))?,
+        RouteStage::Dependency
+    );
+    assert_eq!(
+        serde_json::from_value::<RouteStage>(json!("security"))?,
+        RouteStage::Security
+    );
     Ok(())
 }
 
@@ -318,6 +326,7 @@ fn strict_records_reject_unknown_values_and_fields() {
         "evidence": []
     });
     assert!(serde_json::from_value::<EdgeRecord>(unknown_edge_kind).is_err());
+    assert!(serde_json::from_value::<RouteStage>(json!("authorization")).is_err());
 
     let unknown_detail_field = json!({
         "id": "node:details",
@@ -334,6 +343,31 @@ fn strict_records_reject_unknown_values_and_fields() {
         "evidence": []
     });
     assert!(serde_json::from_value::<NodeRecord>(unknown_detail_field).is_err());
+}
+
+#[test]
+fn older_closed_route_stage_readers_reject_the_additive_values() {
+    #[allow(dead_code)]
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum LegacyRouteStage {
+        Middleware,
+        Layout,
+        Template,
+        Loading,
+        Default,
+        ErrorBoundary,
+        NotFound,
+        Boundary,
+        Loader,
+        Action,
+        Handler,
+        DataLoader,
+        RouteComponent,
+    }
+
+    assert!(serde_json::from_value::<LegacyRouteStage>(json!("dependency")).is_err());
+    assert!(serde_json::from_value::<LegacyRouteStage>(json!("security")).is_err());
 }
 
 #[test]

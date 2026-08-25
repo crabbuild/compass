@@ -94,6 +94,51 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+The closed route-stage vocabulary used by `compass.graph/1`,
+`compass.query/1`, and `compass.framework-context/1` now includes the additive
+`dependency` and `security` values. The query contract manifest and fingerprint
+changed with that enum list. CLI and MCP output use the same typed model, and
+the bundled viewer validates the same list. Deploy strict readers, manifests,
+and generated viewer assets together. Older strict readers must reject these
+values; consumers must not coerce either one to `middleware`. The existing
+graph and context schema majors are unchanged.
+
+The framework-pack cache identity is now `compass.framework-packs/6`.
+Python HTTP routes no longer use the combined `python-web` runtime adapter;
+they are owned independently by version-2 `django-python`, version-1
+`django-rest-framework-python`, version-2 `fastapi-python`, version-2
+`flask-python`, and version-1 `starlette-python` universal packs. Version-1
+`pydantic-python`, `sqlalchemy-python`, and `celery-python` own exact model,
+persistence, task, queue, canvas, and schedule evidence. The legacy
+`enterprise-domain-facts` source pack no longer runs for Python; its non-Python
+language list and behavior are unchanged. Strict `compass.framework-context/1`
+readers must accept those eight Python IDs and reject the removed combined ID.
+Route
+and graph schema majors remain unchanged, but cached framework facts must be
+rebuilt because pack ownership, evidence provenance, and Flask's default
+operation changed. No graph schema major changes: dependency/security stages
+and Pydantic schema flow reuse the existing typed stage, node-role, and
+`depends_on`, `maps_to`, `produces`, `consumes`, `schedules`, and `triggers`
+contracts.
+
+The Django semantics widening retains the existing graph major and additive
+edge vocabulary. Exact URL-pattern collections, DRF generated routes, model
+relationships/managers, and signal subscriptions can add `routes_to`,
+`depends_on`, and `subscribes` records with source anchors. Dynamic patterns,
+custom router templates, external inherited viewset methods, and ambiguous
+serializer/model targets stay unresolved. Settings, middleware, and admin
+registration calls do not publish `registers`: the current pack contract
+would require the unrelated bean-container capability, so readers must not
+infer those edges from missing output.
+
+Python structural evidence now uses producer version 13. The evidence schema
+is unchanged, but previously empty universal callable/type fields can contain
+source-proven parameter shapes, literal call types, `type_of`, `returns`, and
+call-result bindings. Starred call arguments suppress exact arity; `Any`,
+shadowed names, ambiguous return annotations, and unsupported dynamic forms do
+not acquire a guessed target. Strict consumers should key caches and audit
+baselines by the producer version.
+
 The Grounded Agent Graph feature is additive and opt-in. It does not change
 `compass.graph/1`, structural extraction, default query behavior, or immutable
 history schemas. Its versioned contracts use the
@@ -144,6 +189,18 @@ change unresolved/ambiguous edges compared with older direct extraction. Normal
 cache fingerprints invalidate affected files; users do not need to delete
 artifacts manually. Equal names across Swift/native or JVM-family languages do
 not by themselves create cross-language targets.
+
+Python publishes through version-13 `compass.python` evidence and uses static,
+bounded `pyproject.toml` import-root evidence. The corresponding internal
+project-evidence identity is `compass.framework-project-evidence/4`. A uniquely
+proven `src/` or configured package layout may therefore change qualified names
+and stable graph IDs; zero candidates retain the contained repository-relative
+identity, while multiple distinct candidates retain that identity plus an
+ambiguity diagnostic instead of selecting a root by order. `.py` and `.pyi`
+normalize to one module key. Paired source owns graph declarations, stub-only
+declarations carry `source_kind: "stub"`, and source/stub disagreement is an
+explicit error diagnostic. No Python interpreter, environment discovery,
+package installation, or repository import participates in these rules.
 
 A user-visible incompatible change requires:
 
@@ -445,6 +502,16 @@ Structural `init`, `update`, `extract`, and `watch` builds publish
 legacy `--no-program` flag remains accepted and continues to request the
 structural-only profile. Program inspection commands remain read-only and
 require an existing canonical Program IR artifact.
+
+The optional `compass.scip-manifest/1` companion now accepts an additive
+`managed_analyzer` member with the strict
+`compass.managed-analyzer-profile/1` contract. Existing companions without the
+member retain their prior generic SCIP behavior. Managed Python provider IDs
+include the frozen profile and artifact digests, so Python environment, stub,
+project-configuration, permission, limit, or producer changes invalidate the
+artifact cache deterministically. Unknown profile majors and non-complete or
+stale profiles fail closed. No analyzer runtime, installation, network access,
+or project execution is added to structural builds.
 
 Structural build commands accept the additive
 `--inference-level low|medium|high|max` profile input. `low` is the default and

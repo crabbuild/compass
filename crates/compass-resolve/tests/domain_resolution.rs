@@ -207,6 +207,36 @@ fn absent_orm_targets_remain_diagnostic_without_synthetic_tables() -> Result<(),
     assert!(extraction.framework_facts.iter().any(|fact| {
         matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "orm_mapping")
     }));
+
+    let mut sqlalchemy = Engine::default().extract_source(
+        Path::new("orm/missing_table.py"),
+        br#"from sqlalchemy.orm import DeclarativeBase
+
+class Base(DeclarativeBase): pass
+class Missing(Base):
+    __tablename__ = "missing_table"
+"#,
+    )?;
+    let table_count = sqlalchemy
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "database_table")
+        .count();
+    let resolved =
+        resolve_and_publish_framework_domains(&mut sqlalchemy, FrameworkLimits::default())?;
+    assert!(resolved.iter().any(|fact| {
+        fact.fact.framework == "sqlalchemy"
+            && fact.fact.kind == "orm_mapping"
+            && fact.state == ResolutionState::Unresolved
+    }));
+    assert_eq!(
+        sqlalchemy
+            .nodes
+            .iter()
+            .filter(|node| node.string("symbol_kind") == "database_table")
+            .count(),
+        table_count
+    );
     Ok(())
 }
 

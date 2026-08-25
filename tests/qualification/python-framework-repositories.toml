@@ -1,0 +1,81 @@
+schema = "compass.python-framework-qualification/1"
+
+[[repository]]
+name = "django"
+url = "https://github.com/django/django.git"
+commit = "c9eb16a87e60c305fb3651459639f647cce498db"
+license_files = ["LICENSE"]
+source_globs = ["django/**/*.py", "tests/**/*.py"]
+capabilities = ["http_routes", "persistence", "security"]
+
+[[repository]]
+name = "fastapi"
+url = "https://github.com/fastapi/fastapi.git"
+commit = "0c2b6aafd7a2e3a5bf1055ea0ed0a41da15ba5f4"
+license_files = ["LICENSE"]
+source_globs = ["fastapi/**/*.py", "tests/**/*.py"]
+capabilities = ["http_routes", "dependency_injection", "security"]
+
+[[repository]]
+name = "fastapi-full-stack-template"
+url = "https://github.com/fastapi/full-stack-fastapi-template.git"
+commit = "68adb40d37425f6f8668ec7e5a054500d045e43e"
+license_files = ["LICENSE"]
+source_globs = ["backend/**/*.py"]
+capabilities = ["http_routes", "dependency_injection", "data_modeling", "persistence"]
+
+[[repository]]
+name = "netbox"
+url = "https://github.com/netbox-community/netbox.git"
+commit = "194f3bbde20dd298d0cc2cad0e8d9134d548b431"
+license_files = ["LICENSE.txt"]
+source_globs = ["netbox/**/*.py"]
+capabilities = ["http_routes", "dependency_injection", "security", "persistence"]
+
+[[repository]]
+name = "pydantic"
+url = "https://github.com/pydantic/pydantic.git"
+commit = "55084b74b3abfdfeee61105b9840e968a0739800"
+license_files = ["LICENSE"]
+source_globs = ["pydantic/**/*.py", "tests/**/*.py"]
+capabilities = ["data_modeling"]
+
+[[repository]]
+name = "sqlalchemy"
+url = "https://github.com/sqlalchemy/sqlalchemy.git"
+commit = "0770f6e96ba40b192837d5191dd95e9a5838cef3"
+license_files = ["LICENSE"]
+source_globs = ["lib/**/*.py", "test/**/*.py"]
+capabilities = ["persistence"]
+
+[[repository]]
+name = "starlette"
+url = "https://github.com/encode/starlette.git"
+commit = "04d7869c1ec3016fa11f58382a9ac7bc14b46662"
+license_files = ["LICENSE.md"]
+source_globs = ["starlette/**/*.py", "tests/**/*.py"]
+capabilities = ["http_routes"]
+
+[[repository]]
+name = "django-rest-framework"
+url = "https://github.com/encode/django-rest-framework.git"
+commit = "751a19fe1b237beca9af7d587fce55d3e09d3741"
+license_files = ["LICENSE.md"]
+source_globs = ["rest_framework/**/*.py", "tests/**/*.py"]
+capabilities = ["http_routes", "dependency_injection", "security", "data_modeling"]
+
+[[repository]]
+name = "flask"
+url = "https://github.com/pallets/flask.git"
+commit = "d318b683471101618febed18996405ad26462110"
+license_files = ["LICENSE.txt"]
+source_globs = ["src/flask/**/*.py", "tests/**/*.py"]
+capabilities = ["http_routes"]
+
+[[repository]]
+name = "celery"
+url = "https://github.com/celery/celery.git"
+commit = "8d2bccca0478cad48f31a75eaebc0ce389f65425"
+license_files = ["LICENSE"]
+source_globs = ["celery/**/*.py", "t/**/*.py"]
+capabilities = ["messaging", "scheduling"]

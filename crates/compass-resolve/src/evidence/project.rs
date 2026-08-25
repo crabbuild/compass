@@ -4,6 +4,7 @@ use super::*;
 
 pub(super) struct ProjectContext {
     pub(super) root: std::path::PathBuf,
+    pub(super) python_project_modules: PythonProjectModuleIndex,
     pub(super) typescript_project_modules: TypeScriptProjectModuleIndex,
     pub(super) typescript_project_metadata: TypeScriptProjectMetadataIndex,
     pub(super) go_module_path: Option<String>,
@@ -13,7 +14,9 @@ pub(in crate::evidence) fn python_module_name(source_file: &str, root: &Path) ->
     let path = Path::new(source_file);
     let relative = path.strip_prefix(root).unwrap_or(path);
     let source = relative.to_string_lossy().replace('\\', "/");
-    let source = source.strip_suffix(".py")?;
+    let source = source
+        .strip_suffix(".pyi")
+        .or_else(|| source.strip_suffix(".py"))?;
     let source = source.strip_suffix("/__init__").unwrap_or(source);
     let module = source
         .split('/')
@@ -21,6 +24,126 @@ pub(in crate::evidence) fn python_module_name(source_file: &str, root: &Path) ->
         .collect::<Vec<_>>()
         .join(".");
     (!module.is_empty()).then_some(module)
+}
+
+pub(in crate::evidence) fn python_project_module_index(
+    declarations: &FactTable<DeclarationFact>,
+    root: &Path,
+    entry_limit: usize,
+    candidates_per_lookup: usize,
+) -> Result<PythonProjectModuleIndex, String> {
+    let mut source_to_modules = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut module_to_sources = BTreeMap::<String, BTreeSet<String>>::new();
+    for declaration in declarations
+        .values()
+        .filter(|declaration| declaration.language == "python")
+    {
+        let Some(module) = declaration.module_or_package.as_deref() else {
+            continue;
+        };
+        if module.is_empty()
+            || module.len() > 4_096
+            || module.contains(['\\', '\0'])
+            || module
+                .split('.')
+                .any(|component| component.is_empty() || component == "..")
+        {
+            continue;
+        }
+        let Some(source) = python_project_source_key(&declaration.range.source_file, root) else {
+            continue;
+        };
+        if !source_to_modules.contains_key(&source) && source_to_modules.len() >= entry_limit {
+            return Err(format!(
+                "Python project source module entry count exceeds limit {entry_limit}"
+            ));
+        }
+        if !module_to_sources.contains_key(module) && module_to_sources.len() >= entry_limit {
+            return Err(format!(
+                "Python project module source entry count exceeds limit {entry_limit}"
+            ));
+        }
+        let modules = source_to_modules.entry(source.clone()).or_default();
+        modules.insert(module.to_owned());
+        if modules.len() > candidates_per_lookup {
+            return Err(format!(
+                "Python project module candidates for {source:?} exceed limit {candidates_per_lookup}"
+            ));
+        }
+        let sources = module_to_sources.entry(module.to_owned()).or_default();
+        sources.insert(source);
+        if sources.len() > candidates_per_lookup {
+            return Err(format!(
+                "Python project sources for module {module:?} exceed limit {candidates_per_lookup}"
+            ));
+        }
+    }
+    Ok(PythonProjectModuleIndex {
+        source_to_modules: source_to_modules
+            .into_iter()
+            .map(|(source, modules)| (source, modules.into_iter().collect()))
+            .collect(),
+        module_to_sources: module_to_sources
+            .into_iter()
+            .map(|(module, sources)| (module, sources.into_iter().collect()))
+            .collect(),
+    })
+}
+
+pub(in crate::evidence) fn python_project_module_keys<'a>(
+    project_modules: &'a PythonProjectModuleIndex,
+    source_file: &str,
+    root: &Path,
+) -> Option<&'a [String]> {
+    let source = python_project_source_key(source_file, root)?;
+    project_modules
+        .source_to_modules
+        .get(&source)
+        .map(Vec::as_slice)
+}
+
+pub(in crate::evidence) fn python_project_sources<'a>(
+    project_modules: &'a PythonProjectModuleIndex,
+    module: &str,
+) -> Option<&'a [String]> {
+    project_modules
+        .module_to_sources
+        .get(module)
+        .map(Vec::as_slice)
+}
+
+pub(in crate::evidence) fn python_project_source_is_indexed(
+    project_modules: &PythonProjectModuleIndex,
+    module: &str,
+    source_file: &str,
+    root: &Path,
+) -> bool {
+    let Some(source) = python_project_source_key(source_file, root) else {
+        return false;
+    };
+    python_project_sources(project_modules, module)
+        .is_some_and(|sources| sources.binary_search(&source).is_ok())
+}
+
+fn python_project_source_key(source_file: &str, root: &Path) -> Option<String> {
+    let path = Path::new(source_file);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(root).ok()?
+    } else {
+        path
+    };
+    let mut components = Vec::new();
+    for component in relative.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(value) => components.push(value.to_string_lossy()),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    let source = components.join("/");
+    (!source.is_empty() && source.len() <= 4_096).then_some(source)
 }
 
 pub(in crate::evidence) fn source_directory(source_file: &str, root: &Path) -> Option<String> {
