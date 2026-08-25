@@ -777,6 +777,76 @@ pub(super) const REACT_UI_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDes
     limits: FrameworkLimits::DEFAULT,
 };
 
+pub(super) const DJANGO_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "django-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[LanguageCapability::Imports, LanguageCapability::Calls],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["django"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["django-url-call"],
+    accepted_roles: &[SemanticRole::Import, SemanticRole::Call],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const FASTAPI_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "fastapi-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["fastapi"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["fastapi-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const FLASK_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "flask-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["flask"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["flask-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
 const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     ASPNET_CSHARP_DESCRIPTOR,
     PHP_FRAMEWORKS_DESCRIPTOR,
@@ -787,5 +857,8 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     DART_BLOC_DESCRIPTOR,
     DART_FLUTTER_NAVIGATION_DESCRIPTOR,
     DART_RIVERPOD_DESCRIPTOR,
+    DJANGO_PYTHON_DESCRIPTOR,
+    FASTAPI_PYTHON_DESCRIPTOR,
+    FLASK_PYTHON_DESCRIPTOR,
     REACT_UI_DESCRIPTOR,
 ];

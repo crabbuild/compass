@@ -982,6 +982,9 @@ fn framework_pack_id(framework: &str) -> Option<&'static str> {
         "tanstack" | "tanstack-router" => "tanstack-router",
         "tanstack-start" => "tanstack-start",
         "vite" => "vite-config",
+        "django" => "django-python",
+        "fastapi" => "fastapi-python",
+        "flask" => "flask-python",
         _ => return None,
     };
     Some(mapped)
@@ -996,6 +999,9 @@ fn framework_capabilities(pack_id: &str) -> Vec<String> {
         "tanstack-router" => ["routes", "loaders", "components", "stages"].as_slice(),
         "tanstack-start" => ["routes", "loaders", "actions", "server_functions"].as_slice(),
         "vite-config" => ["aliases", "plugins", "file_sets", "config"].as_slice(),
+        "django-python" => ["routes", "includes", "stages"].as_slice(),
+        "fastapi-python" => ["routes", "dependencies", "mounts", "stages"].as_slice(),
+        "flask-python" => ["routes", "blueprints", "stages"].as_slice(),
         _ => ["framework_evidence"].as_slice(),
     };
     values.iter().map(|value| (*value).to_owned()).collect()
@@ -1745,7 +1751,7 @@ mod tests {
         QueryDiagnosticCode, QueryNode, SearchHit,
     };
 
-    use super::{TaskContextTarget, resolve_target};
+    use super::{TaskContextTarget, framework_capabilities, framework_pack_id, resolve_target};
 
     fn node(id: &str, name: &str, qualified_name: &str) -> QueryNode {
         QueryNode {
@@ -1784,6 +1790,15 @@ mod tests {
             resolve_target("parser-ish", &response),
             TaskContextTarget::NotFound { .. }
         ));
+    }
+
+    #[test]
+    fn python_frameworks_map_to_independent_versioned_packs() {
+        assert_eq!(framework_pack_id("django"), Some("django-python"));
+        assert_eq!(framework_pack_id("fastapi"), Some("fastapi-python"));
+        assert_eq!(framework_pack_id("flask"), Some("flask-python"));
+        assert!(framework_capabilities("fastapi-python").contains(&"mounts".to_owned()));
+        assert_eq!(framework_pack_id("python-web"), None);
     }
 
     #[test]

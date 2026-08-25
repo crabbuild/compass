@@ -34,6 +34,11 @@ function frameworkContext() {
 describe("framework task context contract", () => {
   it("accepts the versioned bounded framework section", () => {
     expect(FrameworkContextSchema.parse(frameworkContext()).packs.at(0)?.id).toBe("react-ui");
+    for (const id of ["django-python", "fastapi-python", "flask-python"]) {
+      const python = frameworkContext();
+      python.packs[0]!.id = id;
+      expect(FrameworkContextSchema.parse(python).packs.at(0)?.id).toBe(id);
+    }
   });
 
   it("fails closed for unknown pack IDs and qualification states", () => {

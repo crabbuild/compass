@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Replace the combined `python-web` route scanner with independently
+  versioned `django-python`, `fastapi-python`, and `flask-python` universal
+  framework packs. Python routes now join exact import, call, decorator, type,
+  and receiver-declaration evidence; Django ignores shadowed or non-
+  `urlpatterns` calls; nested and repeated router/blueprint mounts use bounded
+  receiver identities; and an unqualified Flask `route` declares `GET`
+  instead of `ANY`. Dynamic values, receiver ambiguity, and mount cycles remain
+  fail-closed without a legacy fallback.
+
 - Generalize framework role facts across the existing public node-role
   vocabulary and add exact `dependency` and `security` route stages throughout
   graph normalization, query/task-context serialization, CLI/MCP output, and

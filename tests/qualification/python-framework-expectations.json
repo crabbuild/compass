@@ -12,7 +12,7 @@
       "relation": "routes_to",
       "framework": "django",
       "routePath": "/users/{user_id}",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.django-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
@@ -27,7 +27,7 @@
       "relation": "routes_to",
       "framework": "django",
       "routePath": "/^health/$",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.django-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
@@ -42,7 +42,7 @@
       "relation": "routes_to",
       "framework": "flask",
       "routePath": "/health",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.flask-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
@@ -57,7 +57,7 @@
       "relation": "routes_to",
       "framework": "flask",
       "routePath": "/v2/api/users/<user_id>",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.flask-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
@@ -72,7 +72,7 @@
       "relation": "routes_to",
       "framework": "fastapi",
       "routePath": "/health",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.fastapi-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
@@ -87,7 +87,7 @@
       "relation": "routes_to",
       "framework": "fastapi",
       "routePath": "/api/v1/users",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.fastapi-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
@@ -103,7 +103,7 @@
       "role": "middleware",
       "framework": "fastapi",
       "routePath": "/api/v1/users",
-      "producer": "compass.frameworks.python-web",
+      "producer": "compass.frameworks.fastapi-python",
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false

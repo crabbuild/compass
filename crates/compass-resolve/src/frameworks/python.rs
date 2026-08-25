@@ -1,16 +1,39 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
-use compass_languages::{FrameworkLimitError, FrameworkLimits, RawFrameworkFact, RawRouteFact};
+use compass_languages::{
+    Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkFact, RawRouteFact,
+};
 use serde_json::Value;
 
 use super::routes::FrameworkResolutionError;
 
-pub(super) fn expand_routes(
+pub(super) fn expand(_extraction: &mut Extraction) -> Result<(), FrameworkResolutionError> {
+    Ok(())
+}
+
+pub(super) fn expand_django_routes(
+    _facts: &[RawFrameworkFact],
+    routes: Vec<RawRouteFact>,
+    limits: FrameworkLimits,
+) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
+    expand_django_includes(routes, limits)
+}
+
+pub(super) fn expand_fastapi_routes(
     facts: &[RawFrameworkFact],
     routes: Vec<RawRouteFact>,
     limits: FrameworkLimits,
 ) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
-    let routes = expand_django_includes(routes, limits)?;
+    expand_router_mounts(facts, routes, limits)
+}
+
+pub(super) fn expand_flask_routes(
+    facts: &[RawFrameworkFact],
+    routes: Vec<RawRouteFact>,
+    limits: FrameworkLimits,
+) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
     expand_router_mounts(facts, routes, limits)
 }
 
@@ -70,7 +93,7 @@ fn expand_router_mounts(
     routes: Vec<RawRouteFact>,
     limits: FrameworkLimits,
 ) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
-    let mounts = facts
+    let mut mounts = facts
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Domain(domain) if domain.kind == "router_mount" => Some(domain),
@@ -80,71 +103,116 @@ fn expand_router_mounts(
     if mounts.is_empty() {
         return Ok(routes);
     }
+    mounts.sort_by(|left, right| mount_sort_key(left).cmp(&mount_sort_key(right)));
+    let mut incoming = BTreeMap::<String, Vec<&RawDomainFact>>::new();
+    let mut receiver_ids = BTreeMap::<String, BTreeSet<String>>::new();
+    for mount in &mounts {
+        let Some(target) = mount_string(mount, "target_receiver_qualified_name") else {
+            continue;
+        };
+        let Some(parent) = mount_string(mount, "parent_receiver_qualified_name") else {
+            continue;
+        };
+        incoming.entry(target.to_owned()).or_default().push(mount);
+        if let Some(id) = mount_string(mount, "target_receiver_id") {
+            receiver_ids
+                .entry(target.to_owned())
+                .or_default()
+                .insert(id.to_owned());
+        }
+        if let Some(id) = mount_string(mount, "parent_receiver_id") {
+            receiver_ids
+                .entry(parent.to_owned())
+                .or_default()
+                .insert(id.to_owned());
+        }
+    }
+    for route in &routes {
+        if let (Some(receiver), Some(id)) = (
+            route
+                .detail
+                .get("receiver_qualified_name")
+                .and_then(Value::as_str),
+            route.detail.get("receiver_id").and_then(Value::as_str),
+        ) {
+            receiver_ids
+                .entry(receiver.to_owned())
+                .or_default()
+                .insert(id.to_owned());
+        }
+        if let (Some(receiver), Some(id)) = (
+            route
+                .detail
+                .get("mounted_receiver_qualified_name")
+                .and_then(Value::as_str),
+            route
+                .detail
+                .get("mounted_receiver_id")
+                .and_then(Value::as_str),
+        ) {
+            receiver_ids
+                .entry(receiver.to_owned())
+                .or_default()
+                .insert(id.to_owned());
+        }
+    }
     let mut output = Vec::new();
     for route in routes {
-        if !matches!(route.framework.as_str(), "fastapi" | "flask")
-            || route
-                .detail
-                .get("mount_prefix")
-                .and_then(Value::as_str)
-                .is_some_and(|prefix| !prefix.is_empty())
-        {
-            output.push(route);
-            continue;
-        }
-        let receiver = route
+        let Some(receiver) = route
             .detail
-            .get("receiver")
+            .get("mounted_receiver_qualified_name")
+            .or_else(|| route.detail.get("receiver_qualified_name"))
             .and_then(Value::as_str)
-            .unwrap_or_default();
-        let route_scope = normalize_mount_scope(&route.declaring_scope);
-        let applicable = mounts
-            .iter()
-            .filter(|mount| mount.framework == route.framework)
-            .filter(|mount| {
-                mount.detail.get("target_receiver").and_then(Value::as_str) == Some(receiver)
-            })
-            .filter(|mount| {
-                let target_module = mount
-                    .detail
-                    .get("target_module")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if target_module.is_empty() {
-                    // An unqualified receiver is only safe within the mount
-                    // module itself. Applying it to every same-named router
-                    // in the repository would create a false cross-module
-                    // binding when two modules both use `router`.
-                    mount.declaring_scope == route_scope
-                } else {
-                    route_scope == normalize_mount_scope(target_module)
-                        || route_scope.ends_with(&format!(".{target_module}"))
-                        || mount.declaring_scope == route_scope
-                }
-            })
-            .collect::<Vec<_>>();
-        if applicable.is_empty() {
+        else {
+            output.push(route);
+            continue;
+        };
+        if receiver_ids.get(receiver).is_some_and(|ids| ids.len() > 1) {
+            // A qualified receiver that names multiple declarations cannot
+            // safely participate in a mount edge. Retain the unmounted route
+            // rather than selecting a declaration by merge/source order.
             output.push(route);
             continue;
         }
-        for mount in applicable {
-            let Some(prefix) = mount.detail.get("mount_prefix").and_then(Value::as_str) else {
-                continue;
-            };
+        let mut visiting = BTreeSet::new();
+        let chains = mount_chains(
+            receiver,
+            &route.framework,
+            &incoming,
+            limits,
+            0,
+            &mut visiting,
+        )?;
+        if chains.len() == 1 && chains[0].is_empty() {
+            output.push(route);
+            continue;
+        }
+        for chain in chains {
+            let prefix = chain.iter().fold(String::new(), |prefix, mount| {
+                compose_paths(
+                    &prefix,
+                    mount_string(mount, "mount_prefix").unwrap_or_default(),
+                )
+            });
             let mut expanded = route.clone();
-            expanded.normalized_path = compose_paths(prefix, &route.normalized_path);
-            expanded.raw_path = format!(
-                "{}{}",
-                prefix.trim_end_matches('/'),
-                route.raw_path.trim_start_matches('/')
-            );
+            expanded.normalized_path = compose_paths(&prefix, &route.normalized_path);
+            expanded.raw_path = compose_paths(&prefix, &route.raw_path);
             expanded
                 .detail
-                .insert("mount_prefix".into(), Value::String(prefix.to_owned()));
-            expanded.detail.insert(
-                "mount_anchor".into(),
-                serde_json::to_value(&mount.anchor).unwrap_or(Value::Null),
-            );
+                .insert("mount_prefix".into(), Value::String(prefix));
+            let anchors = chain
+                .iter()
+                .map(|mount| serde_json::to_value(&mount.anchor).unwrap_or(Value::Null))
+                .collect::<Vec<_>>();
+            if let Some(anchor) = anchors.last() {
+                expanded
+                    .detail
+                    .insert("mount_anchor".into(), anchor.clone());
+            }
+            expanded
+                .detail
+                .insert("mount_anchors".into(), Value::Array(anchors));
+            expanded.rule = Some("python-receiver-mount".to_owned());
             output.push(expanded);
         }
     }
@@ -160,12 +228,72 @@ fn expand_router_mounts(
     Ok(output)
 }
 
-fn normalize_mount_scope(value: &str) -> String {
-    value
-        .replace(['/', '\\'], ".")
-        .trim_matches('.')
-        .trim_end_matches(".py")
-        .to_owned()
+fn mount_chains<'a>(
+    receiver: &str,
+    framework: &str,
+    incoming: &BTreeMap<String, Vec<&'a RawDomainFact>>,
+    limits: FrameworkLimits,
+    depth: usize,
+    visiting: &mut BTreeSet<String>,
+) -> Result<Vec<Vec<&'a RawDomainFact>>, FrameworkResolutionError> {
+    if !visiting.insert(receiver.to_owned()) {
+        return Ok(Vec::new());
+    }
+    let applicable = incoming
+        .get(receiver)
+        .into_iter()
+        .flatten()
+        .filter(|mount| mount.framework == framework)
+        .copied()
+        .collect::<Vec<_>>();
+    if applicable.is_empty() {
+        visiting.remove(receiver);
+        return Ok(vec![Vec::new()]);
+    }
+    if depth >= limits.max_include_depth {
+        visiting.remove(receiver);
+        return Err(FrameworkLimitError {
+            limit: "max_include_depth",
+            maximum: limits.max_include_depth,
+            observed: depth.saturating_add(1),
+        }
+        .into());
+    }
+    let mut chains = Vec::new();
+    for mount in applicable {
+        let Some(parent) = mount_string(mount, "parent_receiver_qualified_name") else {
+            continue;
+        };
+        let outer = mount_chains(
+            parent,
+            framework,
+            incoming,
+            limits,
+            depth.saturating_add(1),
+            visiting,
+        )?;
+        for mut chain in outer {
+            chain.push(mount);
+            chains.push(chain);
+        }
+    }
+    visiting.remove(receiver);
+    Ok(chains)
+}
+
+fn mount_string<'a>(mount: &'a RawDomainFact, key: &str) -> Option<&'a str> {
+    mount.detail.get(key).and_then(Value::as_str)
+}
+
+fn mount_sort_key(mount: &RawDomainFact) -> (&str, &str, &str, &str, u64, u64) {
+    (
+        mount_string(mount, "target_receiver_qualified_name").unwrap_or_default(),
+        mount_string(mount, "parent_receiver_qualified_name").unwrap_or_default(),
+        mount_string(mount, "mount_prefix").unwrap_or_default(),
+        mount.anchor.source_file.as_str(),
+        mount.anchor.start_byte,
+        mount.anchor.end_byte,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

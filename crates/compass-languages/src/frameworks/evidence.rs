@@ -6,13 +6,11 @@ pub(super) enum EvidenceKind {
     DecoratorOrAttribute,
     Macro,
     ConfigurationContract,
-    Convention,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum EvidenceStrength {
     Direct,
-    Supporting,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,25 +50,6 @@ impl EvidenceSet {
         self
     }
 
-    #[must_use]
-    pub(super) fn supporting_if(
-        mut self,
-        condition: bool,
-        framework: &'static str,
-        kind: EvidenceKind,
-        identity: impl Into<String>,
-    ) -> Self {
-        if condition {
-            self.entries.push(ActivationEvidence {
-                framework,
-                kind,
-                identity: identity.into(),
-                strength: EvidenceStrength::Supporting,
-            });
-        }
-        self
-    }
-
     pub(super) fn activates(&self, framework: &str) -> bool {
         self.entries.iter().any(|evidence| {
             evidence.framework == framework && evidence.strength == EvidenceStrength::Direct
@@ -90,27 +69,17 @@ mod tests {
     use super::{EvidenceKind, EvidenceSet, EvidenceStrength};
 
     #[test]
-    fn supporting_conventions_cannot_activate_a_framework() {
-        let evidence =
-            EvidenceSet::new().supporting_if(true, "laravel", EvidenceKind::Convention, "routes/");
-
-        assert!(!evidence.activates("laravel"));
-    }
-
-    #[test]
     fn direct_evidence_activates_only_its_framework() {
-        let evidence = EvidenceSet::new()
-            .direct_if(
-                true,
-                "laravel",
-                EvidenceKind::Import,
-                "Illuminate\\Support\\Facades\\Route",
-            )
-            .supporting_if(true, "laravel", EvidenceKind::Convention, "routes/");
+        let evidence = EvidenceSet::new().direct_if(
+            true,
+            "laravel",
+            EvidenceKind::Import,
+            "Illuminate\\Support\\Facades\\Route",
+        );
 
         assert!(evidence.activates("laravel"));
         assert!(!evidence.activates("symfony"));
-        assert_eq!(evidence.evidence("laravel").count(), 2);
+        assert_eq!(evidence.evidence("laravel").count(), 1);
         assert!(evidence.evidence("laravel").any(|item| {
             item.kind == EvidenceKind::Import && item.strength == EvidenceStrength::Direct
         }));
@@ -120,7 +89,7 @@ mod tests {
     fn false_conditions_do_not_record_evidence() {
         let evidence = EvidenceSet::new()
             .direct_if(false, "spring", EvidenceKind::Import, "spring")
-            .supporting_if(
+            .direct_if(
                 false,
                 "spring",
                 EvidenceKind::DecoratorOrAttribute,

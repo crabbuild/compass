@@ -82,7 +82,7 @@ type TemplateDetector =
 /// separate from the language producer version: changing framework activation,
 /// descriptor capabilities, or resource limits must invalidate framework facts
 /// without pretending that the parser/evidence producer changed.
-pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/2";
+pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/3";
 
 /// The concrete implementation stored behind one framework-pack seam.
 ///
@@ -383,7 +383,9 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     ),
     FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
     FrameworkPack::universal(&pack::SPRING_KOTLIN_DESCRIPTOR, spring::detect_kotlin),
-    FrameworkPack::source_versioned("python-web", &["python"], &[], 1, detect_python),
+    FrameworkPack::universal(&pack::DJANGO_PYTHON_DESCRIPTOR, python::detect_django),
+    FrameworkPack::universal(&pack::FASTAPI_PYTHON_DESCRIPTOR, python::detect_fastapi),
+    FrameworkPack::universal(&pack::FLASK_PYTHON_DESCRIPTOR, python::detect_flask),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::universal(&pack::RAILS_RUBY_DESCRIPTOR, ruby::detect_universal),
     FrameworkPack::source_versioned_with_limits(
@@ -951,13 +953,6 @@ pub(crate) fn detect_template_file_route(
     accumulator.publish(extraction);
 }
 
-fn detect_python(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
-    python::detect(context.path, context.source, context.root)
-}
-
 fn detect_go(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
@@ -1133,7 +1128,9 @@ mod tests {
             .collect::<HashSet<_>>();
         for expected in [
             "spring-java",
-            "python-web",
+            "django-python",
+            "fastapi-python",
+            "flask-python",
             "php-frameworks",
             "rails-ruby",
             "spring-kotlin",

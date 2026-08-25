@@ -47,9 +47,19 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         expand: axum::expand_routes,
     },
     RouteExpansionAdapter {
+        pack_id: "django-python",
+        frameworks: &["django"],
+        expand: python::expand_django_routes,
+    },
+    RouteExpansionAdapter {
         pack_id: "express-web",
         frameworks: &["express"],
         expand: node::expand_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "fastapi-python",
+        frameworks: &["fastapi"],
+        expand: python::expand_fastapi_routes,
     },
     RouteExpansionAdapter {
         pack_id: "fastify-web",
@@ -57,14 +67,14 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         expand: node::expand_routes,
     },
     RouteExpansionAdapter {
+        pack_id: "flask-python",
+        frameworks: &["flask"],
+        expand: python::expand_flask_routes,
+    },
+    RouteExpansionAdapter {
         pack_id: "hono-web",
         frameworks: &["hono"],
         expand: node::expand_routes,
-    },
-    RouteExpansionAdapter {
-        pack_id: "python-web",
-        frameworks: &["django", "fastapi", "flask"],
-        expand: python::expand_routes,
     },
 ];
 
@@ -119,6 +129,18 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
     UniversalFrameworkPack {
         id: "react-ui",
         expand: react::expand,
+    },
+    UniversalFrameworkPack {
+        id: "django-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "fastapi-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "flask-python",
+        expand: python::expand,
     },
 ];
 

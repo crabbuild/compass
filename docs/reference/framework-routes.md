@@ -54,9 +54,18 @@ Compass activates a framework pack only when the repository contains direct evid
 
 ### Python web frameworks
 
-- **Django**: `path`, `re_path`, legacy `url`, and `include` in an activated URL module; positional or named `route` and `view` arguments; function views, dotted string handlers, and class-based `.as_view()` handlers
-- **Flask**: `Flask` and `Blueprint` route decorators, constructor and registration-time `url_prefix`, positional or named `rule`, and literal `methods` lists
-- **FastAPI**: `FastAPI` and `APIRouter` decorators for `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `trace`; `api_route` and `route` method lists; literal `path`; constructor and `include_router(prefix=...)` prefixes; `Depends` stages
+- **Django (`django-python` v1)**: exact imported `path`, `re_path`, legacy `url`, and `include` calls that contribute to `urlpatterns`; positional or named `route` and `view` arguments; function views, dotted string handlers, and class-based `.as_view()` handlers. Same-named local helpers and calls outside `urlpatterns` do not activate the pack.
+- **Flask (`flask-python` v1)**: exact `Flask` and `Blueprint` receiver declarations and route decorators, constructor and registration-time `url_prefix`, positional or named `rule`, and literal `methods` lists. A `route` with no declared methods records `GET`; implicit HEAD/OPTIONS behavior is not published as additional routes.
+- **FastAPI (`fastapi-python` v1)**: exact `FastAPI` and `APIRouter` receiver declarations and decorators for `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `trace`; `api_route` and `route` literal method lists; literal `path`; constructor and `include_router(prefix=...)` prefixes; and exact decorator-list `Depends` stages.
+
+FastAPI routers and Flask blueprints compose through a bounded receiver-
+identity multigraph. Repeated mounts retain their source anchors and
+multiplicity, nested prefixes compose outer-to-inner, cycles publish no
+invented route, and an over-depth traversal is an explicit limit error.
+Computed paths/prefixes, rebound receivers, wrong-framework imports, and
+ambiguous receiver identities remain unresolved. These three packs are
+fixture-qualified but remain `Qualifying` until the pinned independent audit
+meets the production thresholds.
 
 ### JavaScript and TypeScript frameworks
 

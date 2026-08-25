@@ -1,63 +1,90 @@
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use regex::Regex;
 use serde_json::{Map, Value};
 use tree_sitter::Node;
 
-use super::evidence::{EvidenceKind, EvidenceSet};
 use super::{
     RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    UniversalDetectionContext,
+};
+use crate::{
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, SemanticEvidenceBatch,
+    SemanticRole,
 };
 
 #[derive(Clone, Debug)]
 struct Receiver {
+    declaration_id: String,
+    qualified_name: String,
+    name: String,
     framework: &'static str,
     prefix: String,
+    start_byte: u64,
 }
 
-pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
-    let text = std::str::from_utf8(source).unwrap_or_default();
-    let aliases = import_aliases(root, source);
-    let receivers = receiver_declarations(root, source, &aliases);
-    let mounts = receiver_mounts(root, source, &receivers);
-    let django_import = aliases.values().any(|target| {
-        target.starts_with("django.urls.") || target.starts_with("django.conf.urls.")
-    });
-    let evidence = EvidenceSet::new()
-        .direct_if(django_import, "django", EvidenceKind::Import, "django.urls")
-        .supporting_if(
-            is_django_url_module(path, text),
-            "django",
-            EvidenceKind::Convention,
-            "urls.py with urlpatterns",
-        )
-        .direct_if(
-            receivers
-                .values()
-                .any(|receiver| receiver.framework == "flask"),
-            "flask",
-            EvidenceKind::Receiver,
-            "flask application receiver",
-        )
-        .direct_if(
-            receivers
-                .values()
-                .any(|receiver| receiver.framework == "fastapi"),
-            "fastapi",
-            EvidenceKind::Receiver,
-            "fastapi application receiver",
-        );
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PythonFramework {
+    Django,
+    FastApi,
+    Flask,
+}
+
+pub(super) fn detect_django(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    detect_universal(context, PythonFramework::Django)
+}
+
+pub(super) fn detect_fastapi(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    detect_universal(context, PythonFramework::FastApi)
+}
+
+pub(super) fn detect_flask(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    detect_universal(context, PythonFramework::Flask)
+}
+
+fn detect_universal(
+    context: &UniversalDetectionContext<'_, '_>,
+    framework: PythonFramework,
+) -> Vec<RawFrameworkFact> {
     let mut facts = Vec::new();
-    facts.extend(receiver_mount_facts(
-        root, source, path, &receivers, &aliases,
-    ));
-    if evidence.activates("django") {
-        collect_django_routes(root, source, path, &aliases, &mut facts);
-    }
-    if evidence.activates("flask") || evidence.activates("fastapi") {
+    if framework == PythonFramework::Django {
+        collect_django_routes(
+            context.root,
+            context.source,
+            context.path,
+            context.evidence,
+            &mut facts,
+        );
+    } else {
+        let receivers = receiver_declarations(context);
+        collect_receiver_mount_facts(
+            context.root,
+            context.source,
+            context.path,
+            context.evidence,
+            &receivers,
+            framework,
+            &mut facts,
+        );
+        let local_mounts = facts
+            .iter()
+            .filter_map(|fact| match fact {
+                RawFrameworkFact::Domain(domain) if domain.kind == "router_mount" => {
+                    Some(domain.clone())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         collect_decorated_routes(
-            root, source, path, &receivers, &mounts, &aliases, &mut facts,
+            context.root,
+            context.source,
+            context.path,
+            context.evidence,
+            &receivers,
+            &local_mounts,
+            framework,
+            &mut facts,
         );
     }
     facts
@@ -67,17 +94,23 @@ fn collect_django_routes(
     node: Node<'_>,
     source: &[u8],
     path: &Path,
-    aliases: &HashMap<String, String>,
+    evidence: &SemanticEvidenceBatch,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
-    if node.kind() == "call" {
-        let function = node
-            .child_by_field_name("function")
-            .map(|function| node_text(function, source))
-            .unwrap_or_default();
-        let terminal = function.rsplit('.').next().unwrap_or(function);
-        if matches!(terminal, "path" | "re_path" | "url")
-            && let Some(arguments) = call_arguments(node, source)
+    if node.kind() == "call"
+        && contributes_to_urlpatterns(node, source)
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(target) = exact_call_target(evidence, function)
+    {
+        let terminal = target.rsplit('.').next().unwrap_or(target.as_str());
+        if matches!(
+            target.as_str(),
+            "django.urls.path"
+                | "django.urls.re_path"
+                | "django.conf.urls.url"
+                | "django.conf.urls.path"
+                | "django.conf.urls.re_path"
+        ) && let Some(arguments) = call_arguments(node, source)
             && let Some(raw_path) = positional_argument(&arguments, 0)
                 .and_then(string_literal)
                 .or_else(|| keyword_string(&arguments, "route"))
@@ -87,22 +120,26 @@ fn collect_django_routes(
             let mut detail = Map::new();
             detail.insert("django_function".into(), Value::String(terminal.to_owned()));
             let handler = handler.trim();
-            let handler_reference = if terminal_call_name(handler) == Some("include") {
+            let handler_node = call_argument_node(node, source, 1, "view");
+            let include_call = handler_node.and_then(|handler_node| {
+                find_exact_call(handler_node, evidence, "django.urls.include")
+                    .or_else(|| find_exact_call(handler_node, evidence, "django.conf.urls.include"))
+            });
+            let handler_reference = if let Some(include_call) = include_call {
+                let include_arguments = call_arguments(include_call, source).unwrap_or_default();
                 let include = call_text_arguments(handler)
                     .first()
                     .map(String::as_str)
                     .and_then(string_literal)
                     .unwrap_or_else(|| {
-                        call_text_arguments(handler)
-                            .first()
-                            .cloned()
+                        positional_argument(&include_arguments, 0)
+                            .map(str::to_owned)
                             .unwrap_or_default()
                     });
                 detail.insert("include".into(), Value::String(include.clone()));
                 format!("@include:{include}")
             } else {
-                let handler = string_literal(handler).unwrap_or_else(|| handler.to_owned());
-                expand_alias(&handler, aliases)
+                string_literal(handler).unwrap_or_else(|| handler.to_owned())
             };
             if !handler_reference.is_empty() {
                 facts.push(RawFrameworkFact::Route(RawRouteFact {
@@ -115,7 +152,7 @@ fn collect_django_routes(
                     handler_reference,
                     middleware_references: Vec::new(),
                     stages: Vec::new(),
-                    origin: RawFrameworkOrigin::Config,
+                    origin: RawFrameworkOrigin::Ast,
                     rule: None,
                     detail,
                 }));
@@ -124,30 +161,32 @@ fn collect_django_routes(
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_django_routes(child, source, path, aliases, facts);
+        collect_django_routes(child, source, path, evidence, facts);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_decorated_routes(
     node: Node<'_>,
     source: &[u8],
     path: &Path,
-    receivers: &HashMap<String, Receiver>,
-    mounts: &HashMap<String, Vec<String>>,
-    aliases: &HashMap<String, String>,
+    evidence: &SemanticEvidenceBatch,
+    receivers: &[Receiver],
+    local_mounts: &[RawDomainFact],
+    framework: PythonFramework,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
-    if node.kind() == "decorated_definition"
-        && let Some(definition) = named_child(node, &["function_definition", "class_definition"])
-        && let Some(name) = definition
-            .child_by_field_name("name")
-            .map(|name| node_text(name, source).to_owned())
-    {
+    if node.kind() == "decorated_definition" {
         let mut cursor = node.walk();
         for decorator in node
             .children(&mut cursor)
             .filter(|child| child.kind() == "decorator")
         {
+            let Some(decorator_occurrence) =
+                exact_occurrence(evidence, SemanticRole::Decorator, decorator)
+            else {
+                continue;
+            };
             let text = node_text(decorator, source).trim().trim_start_matches('@');
             let Some((callee, arguments)) = parse_call(text) else {
                 continue;
@@ -155,9 +194,17 @@ fn collect_decorated_routes(
             let Some((receiver_name, method)) = callee.rsplit_once('.') else {
                 continue;
             };
-            let Some(receiver) = receivers.get(receiver_name) else {
+            let Some(receiver) = receiver_at(
+                receivers,
+                evidence,
+                receiver_name,
+                decorator.start_byte() as u64,
+            ) else {
                 continue;
             };
+            if framework_name(framework) != receiver.framework {
+                continue;
+            }
             let path_keyword = if receiver.framework == "flask" {
                 "rule"
             } else {
@@ -173,22 +220,79 @@ fn collect_decorated_routes(
             if operations.is_empty() {
                 continue;
             }
-            let mount_prefixes = mounts
-                .get(receiver_name)
-                .cloned()
-                .unwrap_or_else(|| vec![String::new()]);
             let middleware_references = if receiver.framework == "fastapi" {
-                fastapi_dependencies(&arguments)
-                    .into_iter()
-                    .map(|reference| expand_alias(&reference, aliases))
-                    .collect()
+                fastapi_dependencies(decorator, source, evidence)
             } else {
                 Vec::new()
             };
-            for mount_prefix in mount_prefixes {
-                let composed_prefix = join_route_paths(&mount_prefix, &receiver.prefix);
+            let Some(handler) = evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.id == decorator_occurrence.owner_declaration_id)
+            else {
+                continue;
+            };
+            let applicable_mounts = local_mounts
+                .iter()
+                .filter(|mount| mount.framework == receiver.framework)
+                .filter(|mount| {
+                    mount
+                        .detail
+                        .get("target_receiver_id")
+                        .and_then(Value::as_str)
+                        == Some(receiver.declaration_id.as_str())
+                })
+                .collect::<Vec<_>>();
+            let route_mounts = if applicable_mounts.is_empty() {
+                vec![None]
+            } else {
+                applicable_mounts.into_iter().map(Some).collect()
+            };
+            for mount in route_mounts {
+                let mount_prefix = mount
+                    .and_then(|mount| mount.detail.get("mount_prefix"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let composed_prefix = join_route_paths(mount_prefix, &receiver.prefix);
                 let normalized_path = join_route_paths(&composed_prefix, &raw_path);
                 for operation in &operations {
+                    let mut detail = Map::from_iter([
+                        ("receiver".into(), Value::String(receiver.name.clone())),
+                        (
+                            "receiver_id".into(),
+                            Value::String(receiver.declaration_id.clone()),
+                        ),
+                        (
+                            "receiver_qualified_name".into(),
+                            Value::String(receiver.qualified_name.clone()),
+                        ),
+                        (
+                            "mount_prefix".into(),
+                            Value::String(mount_prefix.to_owned()),
+                        ),
+                    ]);
+                    if let Some(mount) = mount {
+                        detail.insert(
+                            "mounted_receiver_id".into(),
+                            mount
+                                .detail
+                                .get("parent_receiver_id")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        );
+                        detail.insert(
+                            "mounted_receiver_qualified_name".into(),
+                            mount
+                                .detail
+                                .get("parent_receiver_qualified_name")
+                                .cloned()
+                                .unwrap_or(Value::Null),
+                        );
+                        let mount_anchor =
+                            serde_json::to_value(&mount.anchor).unwrap_or(Value::Null);
+                        detail.insert("mount_anchor".into(), mount_anchor.clone());
+                        detail.insert("mount_anchors".into(), Value::Array(vec![mount_anchor]));
+                    }
                     facts.push(RawFrameworkFact::Route(RawRouteFact {
                         framework: receiver.framework.to_owned(),
                         operation: operation.clone(),
@@ -196,16 +300,12 @@ fn collect_decorated_routes(
                         normalized_path: normalized_path.clone(),
                         declaring_scope: module_scope(path),
                         anchor: anchor(path, decorator),
-                        handler_reference: name.clone(),
+                        handler_reference: handler.name.clone(),
                         middleware_references: middleware_references.clone(),
                         stages: Vec::new(),
                         origin: RawFrameworkOrigin::Ast,
-                        rule: (!mount_prefix.is_empty())
-                            .then(|| "python-mounted-router".to_owned()),
-                        detail: Map::from_iter([
-                            ("receiver".into(), Value::String(receiver_name.to_owned())),
-                            ("mount_prefix".into(), Value::String(mount_prefix.clone())),
-                        ]),
+                        rule: mount.map(|_| "python-receiver-mount".to_owned()),
+                        detail,
                     }));
                 }
             }
@@ -213,42 +313,26 @@ fn collect_decorated_routes(
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_decorated_routes(child, source, path, receivers, mounts, aliases, facts);
+        collect_decorated_routes(
+            child,
+            source,
+            path,
+            evidence,
+            receivers,
+            local_mounts,
+            framework,
+            facts,
+        );
     }
-}
-
-fn receiver_mounts(
-    root: Node<'_>,
-    source: &[u8],
-    receivers: &HashMap<String, Receiver>,
-) -> HashMap<String, Vec<String>> {
-    let mut mounts = HashMap::<String, Vec<String>>::new();
-    collect_receiver_mounts(root, source, receivers, &mut mounts);
-    for values in mounts.values_mut() {
-        values.sort();
-        values.dedup();
-    }
-    mounts
-}
-
-fn receiver_mount_facts(
-    root: Node<'_>,
-    source: &[u8],
-    path: &Path,
-    receivers: &HashMap<String, Receiver>,
-    aliases: &HashMap<String, String>,
-) -> Vec<RawFrameworkFact> {
-    let mut facts = Vec::new();
-    collect_receiver_mount_facts(root, source, path, receivers, aliases, &mut facts);
-    facts
 }
 
 fn collect_receiver_mount_facts(
     node: Node<'_>,
     source: &[u8],
     path: &Path,
-    receivers: &HashMap<String, Receiver>,
-    aliases: &HashMap<String, String>,
+    evidence: &SemanticEvidenceBatch,
+    receivers: &[Receiver],
+    framework: PythonFramework,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
     if node.kind() == "call"
@@ -264,207 +348,278 @@ fn collect_receiver_mount_facts(
         };
         if let Some(prefix_key) = prefix_key
             && let Some(parent) = function_text.rsplit_once('.').map(|(parent, _)| parent)
-            && let Some(parent_receiver) = receivers.get(parent)
+            && exact_occurrence(evidence, SemanticRole::Call, function).is_some()
+            && let Some(parent_receiver) =
+                receiver_at(receivers, evidence, parent, node.start_byte() as u64)
+            && parent_receiver.framework == framework_name(framework)
             && let Some(target) = positional_argument(&arguments, 0)
-            && is_identifier(target.trim())
+            && is_dotted_identifier(target.trim())
             && let Some(prefix) = keyword_string(&arguments, prefix_key)
+            && let Some(target_qualified_name) = exact_receiver_reference(
+                evidence,
+                receivers,
+                target.trim(),
+                node.start_byte() as u64,
+            )
         {
-            let expanded = expand_alias(target.trim(), aliases);
-            let target_module = expanded
+            let target_receiver = target.trim().rsplit('.').next().unwrap_or(target.trim());
+            let target_module = target_qualified_name
                 .rsplit_once('.')
                 .map(|(module, _)| module.to_owned())
                 .unwrap_or_default();
+            let target_receiver_id = receiver_at(
+                receivers,
+                evidence,
+                target_receiver,
+                node.start_byte() as u64,
+            )
+            .map(|receiver| receiver.declaration_id.clone());
+            let mut detail = Map::from_iter([
+                (
+                    "target_receiver".into(),
+                    Value::String(target_receiver.to_owned()),
+                ),
+                ("target_module".into(), Value::String(target_module)),
+                (
+                    "target_receiver_qualified_name".into(),
+                    Value::String(target_qualified_name),
+                ),
+                ("mount_prefix".into(), Value::String(prefix)),
+                (
+                    "parent_receiver".into(),
+                    Value::String(parent_receiver.name.clone()),
+                ),
+                (
+                    "parent_receiver_id".into(),
+                    Value::String(parent_receiver.declaration_id.clone()),
+                ),
+                (
+                    "parent_receiver_qualified_name".into(),
+                    Value::String(parent_receiver.qualified_name.clone()),
+                ),
+            ]);
+            if let Some(target_receiver_id) = target_receiver_id {
+                detail.insert(
+                    "target_receiver_id".into(),
+                    Value::String(target_receiver_id),
+                );
+            }
             facts.push(RawFrameworkFact::Domain(RawDomainFact {
                 framework: parent_receiver.framework.to_owned(),
                 kind: "router_mount".to_owned(),
-                name: target.trim().to_owned(),
+                name: target_receiver.to_owned(),
                 declaring_scope: module_scope(path),
                 anchor: anchor(path, node),
                 origin: RawFrameworkOrigin::Ast,
-                detail: Map::from_iter([
-                    (
-                        "target_receiver".into(),
-                        Value::String(target.trim().to_owned()),
-                    ),
-                    ("target_module".into(), Value::String(target_module)),
-                    ("mount_prefix".into(), Value::String(prefix)),
-                    ("parent_receiver".into(), Value::String(parent.to_owned())),
-                ]),
+                detail,
             }));
         }
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_receiver_mount_facts(child, source, path, receivers, aliases, facts);
+        collect_receiver_mount_facts(child, source, path, evidence, receivers, framework, facts);
     }
 }
 
-fn collect_receiver_mounts(
-    node: Node<'_>,
-    source: &[u8],
-    receivers: &HashMap<String, Receiver>,
-    mounts: &mut HashMap<String, Vec<String>>,
-) {
-    if node.kind() == "call"
-        && let Some(function) = node.child_by_field_name("function")
-        && let Some(arguments) = call_arguments(node, source)
-    {
-        let function = node_text(function, source);
-        let method = function.rsplit('.').next().unwrap_or(function);
-        let prefix_key = match method {
-            "include_router" => Some("prefix"),
-            "register_blueprint" => Some("url_prefix"),
-            _ => None,
-        };
-        if let Some(prefix_key) = prefix_key
-            && let Some(parent) = function.rsplit_once('.').map(|(parent, _)| parent)
-            && receivers.contains_key(parent)
-            && let Some(target) = positional_argument(&arguments, 0)
-            && is_identifier(target.trim())
-            && let Some(prefix) = keyword_string(&arguments, prefix_key)
-        {
-            mounts
-                .entry(target.trim().to_owned())
-                .or_default()
-                .push(prefix);
-        }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_receiver_mounts(child, source, receivers, mounts);
-    }
-}
-
-fn receiver_declarations(
-    root: Node<'_>,
-    source: &[u8],
-    aliases: &HashMap<String, String>,
-) -> HashMap<String, Receiver> {
-    let mut receivers = HashMap::new();
-    collect_receivers(root, source, aliases, &mut receivers);
+fn receiver_declarations(context: &UniversalDetectionContext<'_, '_>) -> Vec<Receiver> {
+    let mut receivers = Vec::new();
+    collect_receivers(
+        context.root,
+        context.source,
+        context.evidence,
+        &mut receivers,
+    );
+    receivers.sort_by(|left, right| {
+        (left.start_byte, &left.declaration_id).cmp(&(right.start_byte, &right.declaration_id))
+    });
     receivers
-}
-
-fn import_aliases(root: Node<'_>, source: &[u8]) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
-    collect_import_aliases(root, source, &mut aliases);
-    aliases
-}
-
-fn collect_import_aliases(node: Node<'_>, source: &[u8], aliases: &mut HashMap<String, String>) {
-    if node.kind() == "import_from_statement" {
-        let module = node
-            .child_by_field_name("module_name")
-            .map(|module| node_text(module, source).trim_matches('.'))
-            .unwrap_or_default();
-        let mut past_import = false;
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "import" {
-                past_import = true;
-                continue;
-            }
-            if !past_import {
-                continue;
-            }
-            let (imported, local) = if child.kind() == "aliased_import" {
-                (
-                    child
-                        .child_by_field_name("name")
-                        .map(|name| node_text(name, source)),
-                    child
-                        .child_by_field_name("alias")
-                        .map(|name| node_text(name, source)),
-                )
-            } else if matches!(child.kind(), "identifier" | "dotted_name") {
-                let name = node_text(child, source);
-                (Some(name), Some(name))
-            } else {
-                (None, None)
-            };
-            if let (Some(imported), Some(local)) = (imported, local)
-                && imported != "*"
-            {
-                let qualified = if module.is_empty() {
-                    imported.to_owned()
-                } else {
-                    format!("{module}.{imported}")
-                };
-                aliases.insert(local.to_owned(), qualified);
-            }
-        }
-    } else if node.kind() == "import_statement" {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "aliased_import"
-                && let (Some(name), Some(alias)) = (
-                    child.child_by_field_name("name"),
-                    child.child_by_field_name("alias"),
-                )
-            {
-                aliases.insert(
-                    node_text(alias, source).to_owned(),
-                    node_text(name, source).to_owned(),
-                );
-            }
-        }
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_import_aliases(child, source, aliases);
-    }
-}
-
-fn expand_alias(reference: &str, aliases: &HashMap<String, String>) -> String {
-    let split = reference.find('.').unwrap_or(reference.len());
-    aliases.get(&reference[..split]).map_or_else(
-        || reference.to_owned(),
-        |expanded| format!("{expanded}{}", &reference[split..]),
-    )
 }
 
 fn collect_receivers(
     node: Node<'_>,
     source: &[u8],
-    aliases: &HashMap<String, String>,
-    receivers: &mut HashMap<String, Receiver>,
+    evidence: &SemanticEvidenceBatch,
+    receivers: &mut Vec<Receiver>,
 ) {
-    if node.kind() == "assignment" {
-        let left = node.child_by_field_name("left");
-        let right = node.child_by_field_name("right");
-        if let (Some(left), Some(right)) = (left, right) {
-            let variable = node_text(left, source).trim();
-            let expression = node_text(right, source).trim();
-            if is_identifier(variable)
-                && let Some((constructor, arguments)) = parse_call(expression)
-            {
-                let resolved = expand_alias(constructor, aliases);
-                let terminal = resolved.rsplit('.').next().unwrap_or(&resolved);
-                let framework = match resolved.as_str() {
-                    "flask.Flask" | "flask.Blueprint" => Some("flask"),
-                    "fastapi.FastAPI" | "fastapi.APIRouter" => Some("fastapi"),
-                    _ => None,
-                };
-                if let Some(framework) = framework {
-                    let prefix_key = if terminal == "Blueprint" {
-                        "url_prefix"
-                    } else {
-                        "prefix"
-                    };
-                    receivers.insert(
-                        variable.to_owned(),
-                        Receiver {
-                            framework,
-                            prefix: keyword_string(&arguments, prefix_key).unwrap_or_default(),
-                        },
-                    );
-                }
-            }
+    if node.kind() == "assignment"
+        && node
+            .parent()
+            .is_some_and(|parent| parent.kind() == "module")
+        && let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        )
+        && left.kind() == "identifier"
+        && right.kind() == "call"
+        && let Some(function) = right.child_by_field_name("function")
+        && let Some(constructor) = exact_call_target(evidence, function)
+        && let Some((framework, prefix_key)) = match constructor.as_str() {
+            "flask.Flask" => Some(("flask", "url_prefix")),
+            "flask.Blueprint" => Some(("flask", "url_prefix")),
+            "fastapi.FastAPI" => Some(("fastapi", "prefix")),
+            "fastapi.APIRouter" => Some(("fastapi", "prefix")),
+            _ => None,
         }
+        && let Some(declaration) = exact_variable_declaration(evidence, left)
+        && receiver_type_is_exact(evidence, declaration, &constructor)
+    {
+        let arguments = call_arguments(right, source).unwrap_or_default();
+        receivers.push(Receiver {
+            declaration_id: declaration.id.clone(),
+            qualified_name: declaration.qualified_name.clone(),
+            name: declaration.name.clone(),
+            framework,
+            prefix: keyword_string(&arguments, prefix_key).unwrap_or_default(),
+            start_byte: declaration.range.start_byte,
+        });
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_receivers(child, source, aliases, receivers);
+        collect_receivers(child, source, evidence, receivers);
+    }
+}
+
+fn exact_variable_declaration<'a>(
+    evidence: &'a SemanticEvidenceBatch,
+    node: Node<'_>,
+) -> Option<&'a DeclarationFact> {
+    let mut matches = evidence.declarations.iter().filter(|declaration| {
+        declaration.kind == "variable"
+            && declaration.range.start_byte == node.start_byte() as u64
+            && declaration.range.end_byte == node.end_byte() as u64
+    });
+    let declaration = matches.next()?;
+    matches.next().is_none().then_some(declaration)
+}
+
+fn receiver_type_is_exact(
+    evidence: &SemanticEvidenceBatch,
+    declaration: &DeclarationFact,
+    expected: &str,
+) -> bool {
+    let targets = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::TypeOf
+                && candidate.source_declaration_id == declaration.id
+        })
+        .filter_map(|candidate| {
+            exact_candidate_binding_target(evidence, candidate.binding_id.as_deref())
+        })
+        .collect::<BTreeSet<_>>();
+    targets.len() == 1 && targets.first().is_some_and(|target| *target == expected)
+}
+
+fn receiver_at<'a>(
+    receivers: &'a [Receiver],
+    evidence: &SemanticEvidenceBatch,
+    name: &str,
+    use_start: u64,
+) -> Option<&'a Receiver> {
+    let declarations = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.name == name && declaration.range.start_byte < use_start)
+        .collect::<Vec<_>>();
+    if declarations.len() != 1 {
+        return None;
+    }
+    receivers
+        .iter()
+        .find(|receiver| receiver.declaration_id == declarations[0].id)
+}
+
+fn exact_receiver_reference(
+    evidence: &SemanticEvidenceBatch,
+    receivers: &[Receiver],
+    reference: &str,
+    use_start: u64,
+) -> Option<String> {
+    if is_identifier(reference)
+        && let Some(receiver) = receiver_at(receivers, evidence, reference, use_start)
+    {
+        return Some(receiver.qualified_name.clone());
+    }
+    let (head, suffix) = reference
+        .split_once('.')
+        .map_or((reference, ""), |(head, suffix)| (head, suffix));
+    let targets = evidence
+        .bindings
+        .iter()
+        .filter(|binding| {
+            matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                && binding.spelling == head
+                && binding.range.end_byte <= use_start
+        })
+        .map(|binding| {
+            if suffix.is_empty() {
+                binding.qualified_target.clone()
+            } else {
+                format!("{}.{}", binding.qualified_target, suffix)
+            }
+        })
+        .collect::<BTreeSet<_>>();
+    (targets.len() == 1)
+        .then(|| targets.first().cloned())
+        .flatten()
+}
+
+fn exact_call_target(evidence: &SemanticEvidenceBatch, function: Node<'_>) -> Option<String> {
+    let occurrence = exact_occurrence(evidence, SemanticRole::Call, function)?;
+    let targets = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls
+                && candidate.occurrence_id.as_deref() == Some(occurrence.id.as_str())
+        })
+        .filter_map(|candidate| {
+            exact_candidate_binding_target(evidence, candidate.binding_id.as_deref())
+        })
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    (targets.len() == 1)
+        .then(|| targets.first().cloned())
+        .flatten()
+}
+
+fn exact_candidate_binding_target<'a>(
+    evidence: &'a SemanticEvidenceBatch,
+    binding_id: Option<&str>,
+) -> Option<&'a str> {
+    let binding_id = binding_id?;
+    let mut matches = evidence
+        .bindings
+        .iter()
+        .filter(|binding| binding.id == binding_id)
+        .filter(|binding| matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias));
+    let binding: &BindingFact = matches.next()?;
+    matches
+        .next()
+        .is_none()
+        .then_some(binding.qualified_target.as_str())
+}
+
+fn exact_occurrence<'a>(
+    evidence: &'a SemanticEvidenceBatch,
+    role: SemanticRole,
+    node: Node<'_>,
+) -> Option<&'a crate::OccurrenceFact> {
+    let mut matches = evidence.occurrences.iter().filter(|occurrence| {
+        occurrence.role == role
+            && occurrence.range.start_byte == node.start_byte() as u64
+            && occurrence.range.end_byte == node.end_byte() as u64
+    });
+    let occurrence = matches.next()?;
+    matches.next().is_none().then_some(occurrence)
+}
+
+fn framework_name(framework: PythonFramework) -> &'static str {
+    match framework {
+        PythonFramework::Django => "django",
+        PythonFramework::FastApi => "fastapi",
+        PythonFramework::Flask => "flask",
     }
 }
 
@@ -484,7 +639,7 @@ fn operations(framework: &str, method: &str, arguments: &[String]) -> Vec<String
     if framework == "flask" && method == "route" {
         let methods = keyword_string_list(arguments, "methods");
         return if methods.is_empty() {
-            vec!["ANY".to_owned()]
+            vec!["GET".to_owned()]
         } else {
             methods
         };
@@ -492,18 +647,96 @@ fn operations(framework: &str, method: &str, arguments: &[String]) -> Vec<String
     Vec::new()
 }
 
-fn fastapi_dependencies(arguments: &[String]) -> Vec<String> {
-    let Some(raw) = keyword_value(arguments, "dependencies") else {
-        return Vec::new();
-    };
-    let Ok(regex) = Regex::new(r"\bDepends\s*\(\s*([A-Za-z_][\w.]*)") else {
-        return Vec::new();
-    };
-    regex
-        .captures_iter(raw)
-        .filter_map(|capture| capture.get(1))
-        .map(|value| value.as_str().to_owned())
-        .collect()
+fn fastapi_dependencies(
+    decorator: Node<'_>,
+    source: &[u8],
+    evidence: &SemanticEvidenceBatch,
+) -> Vec<String> {
+    let mut dependencies = Vec::new();
+    collect_fastapi_dependencies(decorator, source, evidence, &mut dependencies);
+    dependencies
+}
+
+fn collect_fastapi_dependencies(
+    node: Node<'_>,
+    source: &[u8],
+    evidence: &SemanticEvidenceBatch,
+    dependencies: &mut Vec<String>,
+) {
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && exact_call_target(evidence, function).as_deref() == Some("fastapi.Depends")
+        && let Some(arguments) = call_arguments(node, source)
+        && let Some(reference) = positional_argument(&arguments, 0)
+        && is_dotted_identifier(reference.trim())
+    {
+        dependencies.push(reference.trim().to_owned());
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_fastapi_dependencies(child, source, evidence, dependencies);
+    }
+}
+
+fn contributes_to_urlpatterns(node: Node<'_>, source: &[u8]) -> bool {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "assignment" {
+            return parent
+                .child_by_field_name("left")
+                .is_some_and(|left| node_text(left, source).trim() == "urlpatterns");
+        }
+        current = parent.parent();
+    }
+    false
+}
+
+fn call_argument_node<'tree>(
+    call: Node<'tree>,
+    source: &[u8],
+    position: usize,
+    keyword: &str,
+) -> Option<Node<'tree>> {
+    let arguments = call.child_by_field_name("arguments")?;
+    let mut positional_index = 0_usize;
+    let mut cursor = arguments.walk();
+    for argument in arguments
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if argument.kind() == "keyword_argument" {
+            let name = argument.child_by_field_name("name")?;
+            if node_text(name, source) == keyword {
+                return argument.child_by_field_name("value");
+            }
+            continue;
+        }
+        if positional_index == position {
+            return Some(argument);
+        }
+        positional_index = positional_index.saturating_add(1);
+    }
+    None
+}
+
+fn find_exact_call<'tree>(
+    node: Node<'tree>,
+    evidence: &SemanticEvidenceBatch,
+    expected: &str,
+) -> Option<Node<'tree>> {
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && exact_call_target(evidence, function).as_deref() == Some(expected)
+    {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if let Some(found) = find_exact_call(child, evidence, expected) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn call_arguments(node: Node<'_>, source: &[u8]) -> Option<Vec<String>> {
@@ -527,10 +760,6 @@ fn call_text_arguments(value: &str) -> Vec<String> {
     parse_call(value)
         .map(|(_, arguments)| arguments)
         .unwrap_or_default()
-}
-
-fn terminal_call_name(value: &str) -> Option<&str> {
-    parse_call(value).map(|(callee, _)| callee.rsplit('.').next().unwrap_or(callee))
 }
 
 fn split_arguments(value: &str) -> Vec<String> {
@@ -716,11 +945,6 @@ fn join_route_paths(prefix: &str, path: &str) -> String {
     }
 }
 
-fn is_django_url_module(path: &Path, source: &str) -> bool {
-    path.file_name().and_then(|name| name.to_str()) == Some("urls.py")
-        && source.contains("urlpatterns")
-}
-
 fn module_scope(path: &Path) -> String {
     path.with_extension("")
         .components()
@@ -739,12 +963,6 @@ fn anchor(path: &Path, node: Node<'_>) -> RawFrameworkAnchor {
         end_line: u32::try_from(node.end_position().row + 1).unwrap_or(u32::MAX),
         end_column: u32::try_from(node.end_position().column).unwrap_or(u32::MAX),
     }
-}
-
-fn named_child<'tree>(node: Node<'tree>, kinds: &[&str]) -> Option<Node<'tree>> {
-    let mut cursor = node.walk();
-    node.children(&mut cursor)
-        .find(|child| kinds.contains(&child.kind()))
 }
 
 fn node_text<'source>(node: Node<'_>, source: &'source [u8]) -> &'source str {

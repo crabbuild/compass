@@ -107,6 +107,11 @@ pub(super) fn resolve_routes_with_targets(
             route.middleware_references.clone(),
             route.origin.as_str(),
             route.rule.clone(),
+            route
+                .detail
+                .get("mount_anchors")
+                .map(Value::to_string)
+                .unwrap_or_default(),
         );
         unique.entry(key).or_insert(route);
     }

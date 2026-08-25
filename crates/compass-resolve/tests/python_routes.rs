@@ -62,7 +62,7 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
     let flask = extract(Path::new("app.py"), "flask_app.py")?;
     let flask_routes = routes(&flask);
     assert!(flask_routes.iter().any(|route| {
-        route.framework == "flask" && route.operation == "ANY" && route.normalized_path == "/health"
+        route.framework == "flask" && route.operation == "GET" && route.normalized_path == "/health"
     }));
     let methods = flask_routes
         .iter()

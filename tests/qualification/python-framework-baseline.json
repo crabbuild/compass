@@ -9,9 +9,19 @@
   },
   "productionFrameworkPacks": [
     {
-      "id": "python-web",
+      "id": "django-python",
       "semanticsVersion": 1,
-      "frameworks": ["django", "fastapi", "flask"]
+      "frameworks": ["django"]
+    },
+    {
+      "id": "fastapi-python",
+      "semanticsVersion": 1,
+      "frameworks": ["fastapi"]
+    },
+    {
+      "id": "flask-python",
+      "semanticsVersion": 1,
+      "frameworks": ["flask"]
     },
     {
       "id": "enterprise-domain-facts",
@@ -21,7 +31,7 @@
   ],
   "fixtureEvidence": {
     "expectations": 7,
-    "expectedGaps": 6,
+    "expectedGaps": 1,
     "graphQualification": "checked-in-conformance-only",
     "productionQualified": false
   },

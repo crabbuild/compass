@@ -14,7 +14,8 @@ export const FRAMEWORK_CONTEXT_SCHEMA = "compass.framework-context/1" as const;
 const KNOWN_FRAMEWORK_PACK_IDS = [
   "react-ui", "nextjs-routes", "react-router-routes", "remix-routes",
   "tanstack-router", "tanstack-start", "vite-config", "typescript-web",
-  "express-web", "fastify-web", "hono-web", "python-web", "go-web", "axum-web",
+  "express-web", "fastify-web", "hono-web", "django-python", "fastapi-python",
+  "flask-python", "go-web", "axum-web",
   "rust-web", "spring-java", "spring-kotlin", "rails-ruby", "php-frameworks",
   "aspnet-csharp", "vapor-swift", "filesystem-routes", "enterprise-domain-facts",
   "drupal-routing-config", "play-routes-config", "filesystem-template-routes"

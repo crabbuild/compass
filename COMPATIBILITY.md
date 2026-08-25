@@ -94,6 +94,15 @@ and generated viewer assets together. Older strict readers must reject these
 values; consumers must not coerce either one to `middleware`. The existing
 graph and context schema majors are unchanged.
 
+The framework-pack cache identity is now `compass.framework-packs/3`.
+Python HTTP routes no longer use the combined `python-web` runtime adapter;
+they are owned independently by version-1 `django-python`, `fastapi-python`,
+and `flask-python` universal packs. Strict `compass.framework-context/1`
+readers must accept those three IDs and reject the removed combined ID. Route
+and graph schema majors remain unchanged, but cached framework facts must be
+rebuilt because pack ownership, evidence provenance, and Flask's default
+operation changed.
+
 Python structural evidence now uses producer version 13. The evidence schema
 is unchanged, but previously empty universal callable/type fields can contain
 source-proven parameter shapes, literal call types, `type_of`, `returns`, and
@@ -153,7 +162,7 @@ cache fingerprints invalidate affected files; users do not need to delete
 artifacts manually. Equal names across Swift/native or JVM-family languages do
 not by themselves create cross-language targets.
 
-Python publishes through version-12 `compass.python` evidence and uses static,
+Python publishes through version-13 `compass.python` evidence and uses static,
 bounded `pyproject.toml` import-root evidence. The corresponding internal
 project-evidence identity is `compass.framework-project-evidence/4`. A uniquely
 proven `src/` or configured package layout may therefore change qualified names

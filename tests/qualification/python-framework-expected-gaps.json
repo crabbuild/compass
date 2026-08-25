@@ -3,36 +3,6 @@
   "status": "established-unqualified",
   "records": [
     {
-      "id": "flask-default-route-any",
-      "surface": "flask",
-      "current": "ANY",
-      "required": "GET"
-    },
-    {
-      "id": "fastapi-transitive-mount",
-      "surface": "fastapi",
-      "current": "one-pass",
-      "required": "bounded-receiver-id-multigraph"
-    },
-    {
-      "id": "python-router-file-wide-spelling-map",
-      "surface": "framework-runtime",
-      "current": "file-wide-spelling",
-      "required": "lexical-binding-identity-and-source-order"
-    },
-    {
-      "id": "django-shadowed-path",
-      "surface": "django",
-      "current": "name-shaped-source-scan",
-      "required": "exact-import-or-reexport"
-    },
-    {
-      "id": "python-web-combined-pack",
-      "surface": "framework-runtime",
-      "current": "python-web",
-      "required": "django-python-fastapi-python-flask-python"
-    },
-    {
       "id": "python-enterprise-regex",
       "surface": "enterprise-domain-facts",
       "current": "substring-and-line-regex",
