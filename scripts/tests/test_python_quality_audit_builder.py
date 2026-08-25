@@ -282,6 +282,60 @@ class PythonQualityAuditBuilderTests(unittest.TestCase):
             },
         )
 
+    def test_django_signal_connect_requires_exact_import_and_module_handler(self) -> None:
+        source = (
+            "from django.db.models import signals as model_signals\n"
+            "from django.db.models.signals import post_save\n"
+            "def saved(sender, **kwargs): return None\n"
+            "def deleted(sender, **kwargs): return None\n"
+            "post_save.connect(saved)\n"
+            "model_signals.post_delete.connect(receiver=deleted)\n"
+        )
+        constructs = self.inventory({"src/signals.py": source}).constructs
+        subscriptions = [
+            construct
+            for construct in constructs
+            if construct.framework_pack == "django-python"
+            and construct.relation == "subscribes"
+        ]
+        self.assertEqual(
+            [
+                (
+                    "src.signals.deleted",
+                    "django.db.models.signals.post_delete",
+                    b"model_signals.post_delete.connect(receiver=deleted)",
+                ),
+                (
+                    "src.signals.saved",
+                    "django.db.models.signals.post_save",
+                    b"post_save.connect(saved)",
+                ),
+            ],
+            sorted(
+                (
+                    construct.owner_qualified_name,
+                    construct.target_spelling,
+                    source.encode("utf-8")[construct.start_byte : construct.end_byte],
+                )
+                for construct in subscriptions
+            ),
+        )
+
+        shadowed = (
+            "from django.db.models.signals import post_save\n"
+            "from vendor import signals\n"
+            "def handler(sender, **kwargs): return None\n"
+            "post_save = build_signal()\n"
+            "post_save.connect(handler)\n"
+            "signals.post_save.connect(handler)\n"
+            "database.connect(handler)\n"
+            "get_signal().connect(handler)\n"
+        )
+        near_constructs = self.inventory({"src/near.py": shadowed}).constructs
+        self.assertFalse(
+            any(construct.relation == "subscribes" for construct in near_constructs)
+        )
+
     def test_django_include_routes_recursively_use_each_mount_anchor(self) -> None:
         leaf = (
             "from django.urls import path\n"

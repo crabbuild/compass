@@ -2518,6 +2518,9 @@ fn collect_django_signal_nodes(
     models: &BTreeSet<String>,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
+    if node.kind() == "call" {
+        collect_django_signal_connection(node, context, models, facts);
+    }
     if node.kind() == "decorated_definition" {
         let mut cursor = node.walk();
         for decorator in node
@@ -2554,60 +2557,170 @@ fn collect_django_signal_nodes(
             else {
                 continue;
             };
-            append_exact_framework_relation_kind(
+            append_django_signal_subscription(
+                context,
+                models,
                 facts,
-                "django-python",
-                "django",
-                "subscribes",
                 handler,
-                &signal,
-                "signal",
+                signal,
                 anchor(context.path, decorator),
-                context.evidence,
+                call_argument_node(receiver_call, context.source, usize::MAX, "sender"),
             );
-            facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
-                pack_id: "django-python".to_owned(),
-                framework: "django".to_owned(),
-                role: "subscriber".to_owned(),
-                subject_reference: Some(handler.graph_node_id.clone()),
-                context: Some(signal),
-                anchor: anchor(context.path, decorator),
-                origin: RawFrameworkOrigin::Ast,
-                evidence_class: "exact".to_owned(),
-                detail: Map::new(),
-            }));
-            let Some(sender_node) =
-                call_argument_node(receiver_call, context.source, usize::MAX, "sender")
-            else {
-                continue;
-            };
-            let senders = exact_static_references_in_scope(
-                context.evidence,
-                sender_node,
-                context.source,
-                handler.scope_id.as_deref(),
-            );
-            if let [sender] = senders.as_slice()
-                && let Some(sender_declaration) =
-                    unique_declaration_for_reference(context.evidence, sender)
-                && models.contains(sender_declaration.id.as_str())
-            {
-                append_exact_framework_relation(
-                    facts,
-                    "django-python",
-                    "django",
-                    handler,
-                    sender,
-                    "signal_sender",
-                    anchor(context.path, sender_node),
-                    context.evidence,
-                );
-            }
         }
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_django_signal_nodes(child, context, models, facts);
+    }
+}
+
+fn collect_django_signal_connection(
+    call: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    models: &BTreeSet<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let Some(function) = call.child_by_field_name("function") else {
+        return;
+    };
+    if function.kind() != "attribute" {
+        return;
+    }
+    let Some(method) = function.child_by_field_name("attribute") else {
+        return;
+    };
+    if node_text(method, context.source) != "connect" {
+        return;
+    }
+    let Some(receiver) = function.child_by_field_name("object") else {
+        return;
+    };
+    let Some(signal) = exact_django_signal_reference_hint(context, receiver) else {
+        return;
+    };
+    if !signal.starts_with("django.db.models.signals.") {
+        return;
+    }
+    let Some(handler_node) = call_argument_node(call, context.source, 0, "receiver") else {
+        return;
+    };
+    let Some(handler_reference) =
+        exact_static_reference_hint(context.evidence, handler_node, context.source)
+    else {
+        return;
+    };
+    let Some(handler) = unique_declaration_for_reference(context.evidence, &handler_reference)
+    else {
+        return;
+    };
+    if !matches!(handler.kind.as_str(), "function" | "method") {
+        return;
+    }
+    append_django_signal_subscription(
+        context,
+        models,
+        facts,
+        handler,
+        signal,
+        anchor(context.path, call),
+        call_argument_node(call, context.source, usize::MAX, "sender"),
+    );
+}
+
+fn exact_django_signal_reference_hint(
+    context: &UniversalDetectionContext<'_, '_>,
+    node: Node<'_>,
+) -> Option<String> {
+    let reference = node_text(node, context.source).trim();
+    if !is_dotted_identifier(reference) {
+        return None;
+    }
+    let (head, suffix) = reference
+        .split_once('.')
+        .map_or((reference, None), |(head, suffix)| (head, Some(suffix)));
+    let reference_scope = reference_evaluation_scope(context.evidence, node, false);
+    let targets = context
+        .evidence
+        .bindings
+        .iter()
+        .filter(|binding| {
+            matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                && binding.spelling == head
+                && binding.range.end_byte <= node.start_byte() as u64
+                && binding.scope_id.as_deref() == reference_scope
+                && !has_intervening_python_name_binding(
+                    context.root,
+                    head,
+                    binding.range.end_byte,
+                    node.start_byte() as u64,
+                    context.source,
+                )
+        })
+        .map(|binding| {
+            suffix.map_or_else(
+                || binding.qualified_target.clone(),
+                |suffix| format!("{}.{}", binding.qualified_target, suffix),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    let target = targets.first()?;
+    (targets.len() == 1 && target.starts_with("django.db.models.signals.")).then(|| target.clone())
+}
+
+fn append_django_signal_subscription(
+    context: &UniversalDetectionContext<'_, '_>,
+    models: &BTreeSet<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+    handler: &DeclarationFact,
+    signal: String,
+    subscription_anchor: RawFrameworkAnchor,
+    sender_node: Option<Node<'_>>,
+) {
+    append_exact_framework_relation_kind(
+        facts,
+        "django-python",
+        "django",
+        "subscribes",
+        handler,
+        &signal,
+        "signal",
+        subscription_anchor.clone(),
+        context.evidence,
+    );
+    facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+        pack_id: "django-python".to_owned(),
+        framework: "django".to_owned(),
+        role: "subscriber".to_owned(),
+        subject_reference: Some(handler.graph_node_id.clone()),
+        context: Some(signal),
+        anchor: subscription_anchor,
+        origin: RawFrameworkOrigin::Ast,
+        evidence_class: "exact".to_owned(),
+        detail: Map::new(),
+    }));
+    let Some(sender_node) = sender_node else {
+        return;
+    };
+    let senders = exact_static_references_in_scope(
+        context.evidence,
+        sender_node,
+        context.source,
+        handler.scope_id.as_deref(),
+    );
+    if let [sender] = senders.as_slice()
+        && let Some(sender_declaration) = unique_declaration_for_reference(context.evidence, sender)
+        && models.contains(sender_declaration.id.as_str())
+    {
+        append_exact_framework_relation(
+            facts,
+            "django-python",
+            "django",
+            handler,
+            sender,
+            "signal_sender",
+            anchor(context.path, sender_node),
+            context.evidence,
+        );
     }
 }
 

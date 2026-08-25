@@ -726,6 +726,12 @@ def _python_framework_constructs(
             bounded = definition_name_range(node)
             if bounded is not None:
                 declarations.setdefault(node.name, []).append(bounded)
+    module_functions = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and len(declarations.get(node.name, ())) == 1
+    }
 
     relative = path.relative_to(root).as_posix()
     module = _python_module(root, path)
@@ -1254,6 +1260,23 @@ def _python_framework_constructs(
 
         def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
             called = resolved_name(node.func)
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "connect":
+                signal = resolved_name(node.func.value)
+                handler_node = handler_argument(node, 0, "receiver")
+                if (
+                    signal is not None
+                    and signal.startswith("django.db.models.signals.")
+                    and isinstance(handler_node, ast.Name)
+                    and handler_node.id in module_functions
+                ):
+                    add(
+                        "subscribes",
+                        "messaging",
+                        f"{module}.{handler_node.id}",
+                        signal,
+                        byte_range(node),
+                        "django-python",
+                    )
             if (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr == "register"

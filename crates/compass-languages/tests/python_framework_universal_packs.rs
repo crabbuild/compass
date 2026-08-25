@@ -514,6 +514,86 @@ INSTALLED_APPS = [dynamic_app]
 }
 
 #[test]
+fn django_signal_connect_requires_an_exact_imported_signal_and_local_handler()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"from django.db import models
+from django.db.models import signals as model_signals
+from django.db.models.signals import post_save
+
+class Item(models.Model): pass
+
+def saved(sender, **kwargs): return None
+def deleted(sender, **kwargs): return None
+
+post_save.connect(saved, sender=Item)
+model_signals.post_delete.connect(receiver=deleted)
+"#;
+    let extraction = extract("project/signals.py", source)?;
+    let subscriptions = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Relation(relation)
+                if relation.pack_id == "django-python" && relation.relation == "subscribes" =>
+            {
+                Some(relation)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        2,
+        subscriptions.len(),
+        "facts={:#?}",
+        extraction.framework_facts
+    );
+    let mut targets = subscriptions
+        .iter()
+        .filter_map(|relation| relation.target_hint.as_deref())
+        .collect::<Vec<_>>();
+    targets.sort_unstable();
+    assert_eq!(
+        vec![
+            "django.db.models.signals.post_delete",
+            "django.db.models.signals.post_save",
+        ],
+        targets
+    );
+    assert!(subscriptions.iter().all(|relation| {
+        relation.context.as_deref() == Some("signal")
+            && relation.evidence_class == "exact"
+            && relation.anchor.end_byte > relation.anchor.start_byte
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation) if relation.context.as_deref() == Some("signal_sender"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn django_signal_connect_shadowed_dynamic_and_unrelated_receivers_fail_closed()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "project/near_signal.py",
+        br#"from django.db.models.signals import post_save
+from vendor import signals
+
+def handler(sender, **kwargs): return None
+
+post_save = build_signal()
+post_save.connect(handler)
+signals.post_save.connect(handler)
+database.connect(handler)
+get_signal().connect(handler)
+"#,
+    )?;
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation) if relation.relation == "subscribes")
+    }));
+    Ok(())
+}
+
+#[test]
 fn drf_dynamic_lookup_serializer_and_custom_router_templates_fail_closed()
 -> Result<(), Box<dyn Error>> {
     let extraction = extract(
