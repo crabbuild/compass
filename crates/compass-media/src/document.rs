@@ -5,16 +5,20 @@ use std::path::{Component, Path};
 
 use compass_ocr::{OcrPoint, OcrProfileIdentity};
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 use crate::limits::{
     DOCUMENT_MAX_BLOCKS, DOCUMENT_MAX_DEPTH, DOCUMENT_MAX_DIAGNOSTIC_MESSAGE_BYTES,
     DOCUMENT_MAX_DIAGNOSTICS, DOCUMENT_MAX_FIELD_BYTES, DOCUMENT_MAX_LINKS,
-    DOCUMENT_MAX_METADATA_ENTRIES, DOCUMENT_MAX_TEXT_CHARS,
+    DOCUMENT_MAX_METADATA_ENTRIES, DOCUMENT_MAX_PREVIEW_DIMENSION, DOCUMENT_MAX_PREVIEW_REGIONS,
+    DOCUMENT_MAX_PREVIEW_SVG_BYTES, DOCUMENT_MAX_PREVIEW_TOTAL_BYTES, DOCUMENT_MAX_PREVIEWS,
+    DOCUMENT_MAX_TEXT_CHARS,
 };
 
 pub const DOCUMENT_SCHEMA: &str = "compass.document/1";
 pub const DOCUMENT_INSPECT_SCHEMA: &str = "compass.document.inspect/1";
-pub const DOCUMENT_NORMALIZER_VERSION: u32 = 2;
+pub const DOCUMENT_PREVIEW_SCHEMA: &str = "compass.document.preview/1";
+pub const DOCUMENT_NORMALIZER_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -65,6 +69,9 @@ pub enum DocumentLocator {
     Pdf {
         page: u32,
         item: u32,
+    },
+    Page {
+        page: u32,
     },
     Spreadsheet {
         sheet: String,
@@ -145,6 +152,39 @@ pub struct DocumentDiagnostic {
     pub message: String,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentPreviewKind {
+    Page,
+    Slide,
+    Sheet,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentPreviewRegion {
+    pub candidate_id: String,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentPreview {
+    pub schema: String,
+    pub kind: DocumentPreviewKind,
+    pub locator: DocumentLocator,
+    pub label: String,
+    pub width: u32,
+    pub height: u32,
+    /// Sanitized, self-contained SVG. It may contain only data URLs for image
+    /// thumbnails and escaped native text.
+    pub svg: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<DocumentPreviewRegion>,
+    pub digest: String,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VisualCoverage {
@@ -169,6 +209,8 @@ pub struct DocumentArtifact {
     pub visual_coverage: VisualCoverage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ocr_profile: Option<OcrProfileIdentity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previews: Vec<DocumentPreview>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -205,6 +247,7 @@ impl DocumentArtifact {
             complete: true,
             visual_coverage: VisualCoverage::NotRequested,
             ocr_profile: None,
+            previews: Vec::new(),
         }
     }
 
@@ -342,6 +385,25 @@ impl DocumentArtifact {
                 validate_locator(locator, 0)?;
             }
         }
+        if self.previews.len() > DOCUMENT_MAX_PREVIEWS {
+            return Err(DocumentError::InvalidArtifact(
+                "preview count exceeds limit".to_owned(),
+            ));
+        }
+        let mut preview_bytes = 0_usize;
+        for preview in &self.previews {
+            preview.validate()?;
+            preview_bytes = preview_bytes
+                .checked_add(preview.svg.len())
+                .ok_or_else(|| {
+                    DocumentError::InvalidArtifact("preview size overflow".to_owned())
+                })?;
+        }
+        if preview_bytes > DOCUMENT_MAX_PREVIEW_TOTAL_BYTES {
+            return Err(DocumentError::InvalidArtifact(
+                "preview payload exceeds limit".to_owned(),
+            ));
+        }
         if let Some(profile) = &self.ocr_profile {
             profile.validate()?;
         }
@@ -386,6 +448,83 @@ impl DocumentArtifact {
             .map_err(|error| DocumentError::InvalidArtifact(error.to_string()))?;
         artifact.validate()?;
         Ok(artifact)
+    }
+}
+
+impl DocumentPreview {
+    pub fn validate(&self) -> Result<(), DocumentError> {
+        if self.schema != DOCUMENT_PREVIEW_SCHEMA {
+            return Err(DocumentError::InvalidArtifact(format!(
+                "unsupported preview schema {:?}",
+                self.schema
+            )));
+        }
+        validate_field("preview label", &self.label)?;
+        if self.width == 0
+            || self.height == 0
+            || self.width > DOCUMENT_MAX_PREVIEW_DIMENSION
+            || self.height > DOCUMENT_MAX_PREVIEW_DIMENSION
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "preview dimensions exceed limit".to_owned(),
+            ));
+        }
+        let pixels = u64::from(self.width)
+            .checked_mul(u64::from(self.height))
+            .ok_or_else(|| {
+                DocumentError::InvalidArtifact("preview pixel count overflow".to_owned())
+            })?;
+        if pixels
+            > u64::from(DOCUMENT_MAX_PREVIEW_DIMENSION)
+                .saturating_mul(u64::from(DOCUMENT_MAX_PREVIEW_DIMENSION))
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "preview pixel count exceeds limit".to_owned(),
+            ));
+        }
+        if self.svg.is_empty()
+            || self.svg.len() > DOCUMENT_MAX_PREVIEW_SVG_BYTES
+            || self.svg.contains('\0')
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "preview SVG is empty or exceeds limit".to_owned(),
+            ));
+        }
+        validate_preview_svg(&self.svg)?;
+        validate_digest(&self.digest)?;
+        let expected_digest = format!("sha256:{:x}", sha2::Sha256::digest(self.svg.as_bytes()));
+        if self.digest != expected_digest {
+            return Err(DocumentError::InvalidArtifact(
+                "preview digest does not match SVG".to_owned(),
+            ));
+        }
+        validate_preview_locator(self.kind, &self.locator)?;
+        if self.regions.len() > DOCUMENT_MAX_PREVIEW_REGIONS {
+            return Err(DocumentError::InvalidArtifact(
+                "preview region count exceeds limit".to_owned(),
+            ));
+        }
+        let mut region_ids = BTreeSet::new();
+        for region in &self.regions {
+            validate_field("preview candidate ID", &region.candidate_id)?;
+            if !region_ids.insert(&region.candidate_id) {
+                return Err(DocumentError::InvalidArtifact(
+                    "preview candidate IDs must be unique".to_owned(),
+                ));
+            }
+            if region.width == 0
+                || region.height == 0
+                || region.x >= self.width
+                || region.y >= self.height
+                || region.x.saturating_add(region.width) > self.width
+                || region.y.saturating_add(region.height) > self.height
+            {
+                return Err(DocumentError::InvalidArtifact(
+                    "preview region is outside the canvas".to_owned(),
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -469,6 +608,9 @@ fn validate_locator(locator: &DocumentLocator, depth: usize) -> Result<(), Docum
         DocumentLocator::Pdf { page, item } if *page == 0 || *item == 0 => Err(
             DocumentError::InvalidArtifact("PDF coordinates are one-based".to_owned()),
         ),
+        DocumentLocator::Page { page } if *page == 0 => Err(DocumentError::InvalidArtifact(
+            "page coordinates are one-based".to_owned(),
+        )),
         DocumentLocator::Ocr {
             owner,
             candidate_id,
@@ -494,6 +636,69 @@ fn validate_locator(locator: &DocumentLocator, depth: usize) -> Result<(), Docum
         }
         _ => Ok(()),
     }
+}
+
+fn validate_preview_locator(
+    kind: DocumentPreviewKind,
+    locator: &DocumentLocator,
+) -> Result<(), DocumentError> {
+    let valid = match kind {
+        DocumentPreviewKind::Page => matches!(locator, DocumentLocator::Page { .. }),
+        DocumentPreviewKind::Slide => matches!(locator, DocumentLocator::Slide { .. }),
+        DocumentPreviewKind::Sheet => matches!(locator, DocumentLocator::Spreadsheet { .. }),
+    };
+    if !valid {
+        return Err(DocumentError::InvalidArtifact(
+            "preview locator does not match preview kind".to_owned(),
+        ));
+    }
+    validate_locator(locator, 0)
+}
+
+fn validate_digest(value: &str) -> Result<(), DocumentError> {
+    if value.len() != 71
+        || !value.starts_with("sha256:")
+        || !value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(DocumentError::InvalidArtifact(
+            "preview digest must be a sha256 digest".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_preview_svg(svg: &str) -> Result<(), DocumentError> {
+    let trimmed = svg.trim_start();
+    if !trimmed.starts_with("<svg") || !trimmed.contains("</svg>") {
+        return Err(DocumentError::InvalidArtifact(
+            "preview SVG is not a complete SVG document".to_owned(),
+        ));
+    }
+    let lower = svg.to_ascii_lowercase();
+    for forbidden in [
+        "<script",
+        "<foreignobject",
+        "<iframe",
+        "<object",
+        "javascript:",
+        "vbscript:",
+        "onload=",
+        "onclick=",
+        "onerror=",
+        "onmouseover=",
+        "href=\"http",
+        "href='http",
+        "xlink:href=\"http",
+        "xlink:href='http",
+        "url(http",
+    ] {
+        if lower.contains(forbidden) {
+            return Err(DocumentError::InvalidArtifact(format!(
+                "preview SVG contains forbidden content {forbidden:?}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn polygon_doubled_area(points: &[OcrPoint]) -> i128 {

@@ -1459,6 +1459,7 @@ dependencies = [
 name = "compass-media"
 version = "0.3.20"
 dependencies = [
+ "base64 0.22.1",
  "compass-files",
  "compass-ocr",
  "hayro",
