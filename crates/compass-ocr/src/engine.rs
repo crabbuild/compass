@@ -385,10 +385,7 @@ fn sortable_float(value: f32) -> u32 {
     }
 }
 
-#[cfg(any(
-    not(all(target_os = "macos", target_arch = "x86_64")),
-    test
-))]
+#[cfg(any(not(all(target_os = "macos", target_arch = "x86_64")), test))]
 fn quantize_coordinate(value: f32, bound: u32) -> Result<u32, OcrError> {
     if !value.is_finite() || value < 0.0 || value > bound as f32 || bound == 0 {
         return Err(OcrError::InvalidOutput(
