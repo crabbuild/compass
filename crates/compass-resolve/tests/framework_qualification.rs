@@ -3,8 +3,8 @@ use std::path::Path;
 
 use compass_languages::Engine;
 use compass_resolve::frameworks::{
-    FrameworkQualificationCase, FrameworkQualificationError, FrameworkRouteExpectation,
-    qualify_framework_case,
+    FrameworkEvidenceExpectationSet, FrameworkQualificationCase, FrameworkQualificationError,
+    FrameworkRouteExpectation, qualify_framework_case,
 };
 
 fn fixture() -> std::path::PathBuf {
@@ -16,6 +16,33 @@ fn typescript_fixture(name: &str) -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/code-graph/routes/typescript")
         .join(name)
+}
+
+#[test]
+fn python_framework_expectation_ledger_uses_the_strict_shared_contract()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/code-graph/routes/python");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/qualification/python-framework-expectations.json");
+    let set: FrameworkEvidenceExpectationSet = serde_json::from_slice(&fs::read(path)?)?;
+    set.validate(&root)?;
+    assert_eq!(set.corpus_id, "python-framework-fixtures-v1");
+    assert_eq!(set.records.len(), 7);
+    for record in &set.records {
+        let source = fs::read(root.join(&record.source_file))?;
+        let start = usize::try_from(record.start_byte)?;
+        let end = usize::try_from(record.end_byte)?;
+        assert!(end <= source.len(), "{} range exceeds source", record.id);
+        assert!(
+            source[start..end]
+                .iter()
+                .any(|byte| !byte.is_ascii_whitespace()),
+            "{} range contains only whitespace",
+            record.id
+        );
+    }
+    Ok(())
 }
 
 #[test]

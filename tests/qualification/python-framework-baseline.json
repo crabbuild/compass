@@ -1,0 +1,46 @@
+{
+  "schema": "compass.python-framework-baseline/1",
+  "status": "established-unqualified",
+  "plannedAt": "dd3bf47bf9d5d04298c26a3832a70f040ed3dbb8",
+  "pythonProducer": {
+    "id": "compass.python",
+    "version": 11,
+    "qualification": "qualifying"
+  },
+  "productionFrameworkPacks": [
+    {
+      "id": "python-web",
+      "semanticsVersion": 1,
+      "frameworks": ["django", "fastapi", "flask"]
+    },
+    {
+      "id": "enterprise-domain-facts",
+      "semanticsVersion": 1,
+      "pythonBehavior": "substring-and-line-regex"
+    }
+  ],
+  "fixtureEvidence": {
+    "expectations": 7,
+    "expectedGaps": 9,
+    "graphQualification": "checked-in-conformance-only",
+    "productionQualified": false
+  },
+  "lifecycle": {
+    "cold": "not-recorded-phase-0-skeleton",
+    "warm": "not-recorded-phase-0-skeleton",
+    "forced": "not-recorded-phase-0-skeleton",
+    "semanticEdit": "not-recorded-phase-0-skeleton",
+    "factNeutralEdit": "not-recorded-phase-0-skeleton",
+    "deleteRenameRestore": "not-recorded-phase-0-skeleton",
+    "workerEquivalence": "not-recorded-phase-0-skeleton",
+    "peakRss": "not-recorded-phase-0-skeleton"
+  },
+  "qualification": {
+    "acceptedRelationships": 0,
+    "observedPrecision": null,
+    "wilsonLowerBound": null,
+    "sourceRecall": null,
+    "criticalFailures": null,
+    "eligibleForProductionClaim": false
+  }
+}
