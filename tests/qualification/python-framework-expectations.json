@@ -107,6 +107,51 @@
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
+    },
+    {
+      "id": "starlette-mounted-health",
+      "sourceFile": "starlette_app.py",
+      "startByte": 168,
+      "endByte": 173,
+      "sourceIdentity": "starlette_app.child",
+      "targetIdentity": "starlette_app.health",
+      "relation": "routes_to",
+      "framework": "starlette",
+      "routePath": "/api/health",
+      "producer": "compass.frameworks.starlette-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "fastapi-route-security",
+      "sourceFile": "fastapi_models.py",
+      "startByte": 418,
+      "endByte": 426,
+      "sourceIdentity": "fastapi_models.create_item",
+      "targetIdentity": "fastapi_models.authorize",
+      "relation": "routes_to",
+      "role": "security",
+      "framework": "fastapi",
+      "routePath": "/items",
+      "producer": "compass.frameworks.fastapi-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "pydantic-request-model",
+      "sourceFile": "fastapi_models.py",
+      "startByte": 483,
+      "endByte": 487,
+      "sourceIdentity": "fastapi_models.create_item",
+      "targetIdentity": "fastapi_models.Item",
+      "relation": "depends_on",
+      "framework": "pydantic",
+      "producer": "compass.frameworks.pydantic-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
     }
   ]
 }

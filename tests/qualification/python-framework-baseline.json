@@ -15,7 +15,7 @@
     },
     {
       "id": "fastapi-python",
-      "semanticsVersion": 1,
+      "semanticsVersion": 2,
       "frameworks": ["fastapi"]
     },
     {
@@ -24,13 +24,23 @@
       "frameworks": ["flask"]
     },
     {
+      "id": "pydantic-python",
+      "semanticsVersion": 1,
+      "frameworks": ["pydantic"]
+    },
+    {
+      "id": "starlette-python",
+      "semanticsVersion": 1,
+      "frameworks": ["starlette"]
+    },
+    {
       "id": "enterprise-domain-facts",
       "semanticsVersion": 1,
       "pythonBehavior": "substring-and-line-regex"
     }
   ],
   "fixtureEvidence": {
-    "expectations": 7,
+    "expectations": 10,
     "expectedGaps": 1,
     "graphQualification": "checked-in-conformance-only",
     "productionQualified": false

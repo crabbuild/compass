@@ -78,7 +78,10 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
         .find(|route| route.normalized_path == "/api/v1/users")
         .ok_or("missing FastAPI router route")?;
     assert_eq!(create.operation, "POST");
-    assert_eq!(create.middleware_references, vec!["authenticate"]);
+    assert!(create.stages.iter().any(|stage| {
+        stage.role == compass_languages::RawRouteStageRole::Dependency
+            && stage.reference.ends_with("authenticate")
+    }));
     Ok(())
 }
 
@@ -159,7 +162,7 @@ fn python_routes_resolve_handlers_and_dependencies_but_not_near_matches()
             .iter()
             .map(|stage| stage.role)
             .collect::<Vec<_>>(),
-        vec![RouteStageRole::Middleware, RouteStageRole::Handler]
+        vec![RouteStageRole::Dependency, RouteStageRole::Handler]
     );
     assert!(
         fastapi

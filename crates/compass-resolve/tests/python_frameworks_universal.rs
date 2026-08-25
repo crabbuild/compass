@@ -4,7 +4,7 @@ use std::path::Path;
 
 use compass_languages::{Engine, Extraction, FrameworkLimits};
 use compass_model::provenance::ResolutionState;
-use compass_resolve::frameworks::{FrameworkResolutionError, resolve_routes};
+use compass_resolve::frameworks::{FrameworkResolutionError, RouteStageRole, resolve_routes};
 use compass_resolve::resolve;
 
 fn extract(path: &str, source: &[u8]) -> Result<Extraction, Box<dyn Error>> {
@@ -165,5 +165,109 @@ app.include_router(router, prefix="/api")
             .collect::<Vec<_>>(),
         ["/first", "/second"]
     );
+    Ok(())
+}
+
+#[test]
+fn starlette_constructor_and_imperative_routes_compose_repeated_nested_mounts()
+-> Result<(), Box<dyn Error>> {
+    let leaf = br#"from starlette.routing import Route, Router
+def endpoint(request): return None
+leaf = Router(routes=[Route("/leaf", endpoint)])
+"#;
+    let middle = br#"from starlette.applications import Starlette
+from .leaf import leaf
+middle = Starlette()
+middle.mount("/middle", leaf)
+"#;
+    let app = br#"from starlette.applications import Starlette
+from .middle import middle
+app = Starlette()
+app.mount("/v1", middle)
+app.mount("/v2", middle)
+"#;
+    let extraction = resolved_project(&[
+        ("pkg/leaf.py", leaf),
+        ("pkg/middle.py", middle),
+        ("pkg/app.py", app),
+    ])?;
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    assert_eq!(
+        routes
+            .iter()
+            .map(|route| route.route.normalized_path.as_str())
+            .collect::<Vec<_>>(),
+        ["/v1/middle/leaf", "/v2/middle/leaf"]
+    );
+    assert!(
+        routes
+            .iter()
+            .all(|route| route.state == ResolutionState::Exact)
+    );
+    Ok(())
+}
+
+#[test]
+fn fastapi_inherited_stages_and_pydantic_schema_relations_publish_exactly()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"from typing import Annotated
+from fastapi import APIRouter, Depends, FastAPI, Security
+from pydantic import BaseModel
+
+class Item(BaseModel):
+    name: str
+
+def database():
+    yield object()
+
+def authorize(database=Depends(database)): return True
+
+app = FastAPI(dependencies=[Depends(database)])
+router = APIRouter(dependencies=[Security(authorize)])
+
+@router.post("/items", dependencies=[Depends(authorize)], response_model=Item)
+def create_item(item: Item, database: Annotated[object, Depends(database)]) -> Item:
+    return item
+
+app.include_router(router, prefix="/api", dependencies=[Depends(database)])
+"#;
+    let extraction = resolved_project(&[("pkg/api.py", source)])?;
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    assert_eq!(routes.len(), 1);
+    assert_eq!(routes[0].route.normalized_path, "/api/items");
+    let roles = routes[0]
+        .stages
+        .iter()
+        .map(|stage| stage.role)
+        .collect::<Vec<_>>();
+    assert_eq!(roles.last(), Some(&RouteStageRole::Handler));
+    assert!(
+        roles
+            .iter()
+            .filter(|role| **role == RouteStageRole::Dependency)
+            .count()
+            >= 3,
+        "roles={roles:?} stages={:?}",
+        routes[0]
+            .route
+            .stages
+            .iter()
+            .map(|stage| (&stage.role, &stage.reference))
+            .collect::<Vec<_>>()
+    );
+    assert!(roles.contains(&RouteStageRole::Security));
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.string("relation") == "depends_on"
+            && edge.source.contains("create_item")
+            && edge.target.contains("item")
+    }));
+    assert!(extraction.nodes.iter().any(|node| {
+        node.id.contains("item")
+            && node
+                .attributes
+                .get("roles")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|roles| roles.iter().any(|role| role.as_str() == Some("model")))
+    }));
     Ok(())
 }

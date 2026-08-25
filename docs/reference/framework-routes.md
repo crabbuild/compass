@@ -56,16 +56,23 @@ Compass activates a framework pack only when the repository contains direct evid
 
 - **Django (`django-python` v1)**: exact imported `path`, `re_path`, legacy `url`, and `include` calls that contribute to `urlpatterns`; positional or named `route` and `view` arguments; function views, dotted string handlers, and class-based `.as_view()` handlers. Same-named local helpers and calls outside `urlpatterns` do not activate the pack.
 - **Flask (`flask-python` v1)**: exact `Flask` and `Blueprint` receiver declarations and route decorators, constructor and registration-time `url_prefix`, positional or named `rule`, and literal `methods` lists. A `route` with no declared methods records `GET`; implicit HEAD/OPTIONS behavior is not published as additional routes.
-- **FastAPI (`fastapi-python` v1)**: exact `FastAPI` and `APIRouter` receiver declarations and decorators for `get`, `post`, `put`, `patch`, `delete`, `options`, `head`, and `trace`; `api_route` and `route` literal method lists; literal `path`; constructor and `include_router(prefix=...)` prefixes; and exact decorator-list `Depends` stages.
+- **FastAPI (`fastapi-python` v2)**: exact `FastAPI` and `APIRouter` receiver declarations; HTTP and WebSocket decorators; `api_route`, `route`, `add_api_route`, and `add_api_websocket_route`; literal paths and method lists; and constructor plus `include_router` prefixes. Application, router, include, route, parameter-default, and `Annotated` `Depends`/`Security` evidence becomes ordered dependency/security stages. Exact subdependencies use `depends_on`, and `yield` providers retain lifecycle detail without executing Python.
+- **Starlette (`starlette-python` v1)**: exact `Starlette` and `Router` receivers; `route` and `websocket_route` decorators; imperative `add_route` and `add_websocket_route`; `Route` and `WebSocketRoute` constructors; inline and receiver-backed `Mount` composition; literal paths and method lists. Dynamic endpoints, paths, and mounts remain unresolved.
+- **Pydantic (`pydantic-python` v1)**: exact `BaseModel` subclasses and source-proven model inheritance receive the existing `model` role. Existing field, validator, serializer, and computed-field declarations are retained rather than replaced with synthetic schema nodes. FastAPI parameter/return annotations and exact literal `response_model` values publish `depends_on` edges from handlers to request/response models.
 
-FastAPI routers and Flask blueprints compose through a bounded receiver-
+FastAPI routers, Starlette applications/routers, and Flask blueprints compose through a bounded receiver-
 identity multigraph. Repeated mounts retain their source anchors and
 multiplicity, nested prefixes compose outer-to-inner, cycles publish no
 invented route, and an over-depth traversal is an explicit limit error.
 Computed paths/prefixes, rebound receivers, wrong-framework imports, and
-ambiguous receiver identities remain unresolved. These three packs are
+ambiguous receiver identities remain unresolved. These Python packs are
 fixture-qualified but remain `Qualifying` until the pinned independent audit
 meets the production thresholds.
+
+FastAPI/Starlette middleware, lifespan, and background-task registrations are
+not published as route or dependency edges by these pack versions. Their
+registration meaning needs an independently reviewed relation-capability
+contract; same-named or dynamic calls are not approximated in the meantime.
 
 ### JavaScript and TypeScript frameworks
 

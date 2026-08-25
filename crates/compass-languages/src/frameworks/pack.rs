@@ -795,6 +795,37 @@ pub(super) const DJANGO_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPa
 
 pub(super) const FASTAPI_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "fastapi-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::Security,
+    ],
+    dependency_markers: &["fastapi"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["fastapi-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo, FrameworkRelation::DependsOn],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const STARLETTE_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "starlette-python",
     semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["python"],
@@ -806,9 +837,9 @@ pub(super) const FASTAPI_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkP
         LanguageCapability::TypeReferences,
     ],
     framework_capabilities: &[FrameworkCapability::HttpRoutes],
-    dependency_markers: &["fastapi"],
+    dependency_markers: &["starlette"],
     manifest_policy: FrameworkManifestPolicy::Advisory,
-    activation_rules: &["fastapi-receiver-route"],
+    activation_rules: &["starlette-receiver-route"],
     accepted_roles: &[
         SemanticRole::Import,
         SemanticRole::Call,
@@ -816,6 +847,38 @@ pub(super) const FASTAPI_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkP
         SemanticRole::TypeReference,
     ],
     emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const PYDANTIC_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "pydantic-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::DataModeling,
+    ],
+    dependency_markers: &["pydantic"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["pydantic-base-model"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::DependsOn],
     occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
     limits: FrameworkLimits::DEFAULT,
 };
@@ -860,5 +923,7 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     DJANGO_PYTHON_DESCRIPTOR,
     FASTAPI_PYTHON_DESCRIPTOR,
     FLASK_PYTHON_DESCRIPTOR,
+    PYDANTIC_PYTHON_DESCRIPTOR,
+    STARLETTE_PYTHON_DESCRIPTOR,
     REACT_UI_DESCRIPTOR,
 ];

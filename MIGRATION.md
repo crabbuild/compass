@@ -34,13 +34,21 @@ reader should reject a packet containing either new value, then be upgraded;
 cached graph, query, or task-context packets may be rebuilt after deployment.
 
 Python framework readers must replace the combined `python-web` pack ID with
-`django-python`, `fastapi-python`, and `flask-python`. The framework-pack cache
-identity is now `compass.framework-packs/3`, so run a fresh or forced build
-after upgrading. A Flask `@app.route` without a `methods` argument now records
+`django-python`, `fastapi-python`, `flask-python`, `pydantic-python`, and
+`starlette-python`. `fastapi-python` is now semantics version 2 and the
+framework-pack cache identity is `compass.framework-packs/4`, so run a fresh
+or forced build after upgrading. A Flask `@app.route` without a `methods`
+argument now records
 the declared `GET` operation instead of `ANY`. Exact Django URL calls and
 Python receiver mount identities can also remove older name-shaped false
 positives; unresolved ambiguous or dynamic registrations are intentionally not
 restored through a legacy fallback.
+
+FastAPI `Depends` values previously exposed as legacy middleware references
+now use the additive `dependency` route stage; `Security` uses the distinct
+`security` stage. Consumers must retain these values rather than coercing them
+to HTTP middleware. Pydantic schema dependencies reuse `depends_on` and
+existing class/field nodes, so no new public node or edge kind is introduced.
 
 ## Ruby universal evidence rebuild
 

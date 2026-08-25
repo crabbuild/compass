@@ -985,6 +985,8 @@ fn framework_pack_id(framework: &str) -> Option<&'static str> {
         "django" => "django-python",
         "fastapi" => "fastapi-python",
         "flask" => "flask-python",
+        "pydantic" => "pydantic-python",
+        "starlette" => "starlette-python",
         _ => return None,
     };
     Some(mapped)
@@ -1002,6 +1004,8 @@ fn framework_capabilities(pack_id: &str) -> Vec<String> {
         "django-python" => ["routes", "includes", "stages"].as_slice(),
         "fastapi-python" => ["routes", "dependencies", "mounts", "stages"].as_slice(),
         "flask-python" => ["routes", "blueprints", "stages"].as_slice(),
+        "pydantic-python" => ["models", "schemas", "dependencies"].as_slice(),
+        "starlette-python" => ["routes", "mounts", "stages"].as_slice(),
         _ => ["framework_evidence"].as_slice(),
     };
     values.iter().map(|value| (*value).to_owned()).collect()
@@ -1797,7 +1801,11 @@ mod tests {
         assert_eq!(framework_pack_id("django"), Some("django-python"));
         assert_eq!(framework_pack_id("fastapi"), Some("fastapi-python"));
         assert_eq!(framework_pack_id("flask"), Some("flask-python"));
+        assert_eq!(framework_pack_id("pydantic"), Some("pydantic-python"));
+        assert_eq!(framework_pack_id("starlette"), Some("starlette-python"));
         assert!(framework_capabilities("fastapi-python").contains(&"mounts".to_owned()));
+        assert!(framework_capabilities("pydantic-python").contains(&"models".to_owned()));
+        assert!(framework_capabilities("starlette-python").contains(&"routes".to_owned()));
         assert_eq!(framework_pack_id("python-web"), None);
     }
 

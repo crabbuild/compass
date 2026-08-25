@@ -76,6 +76,11 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         frameworks: &["hono"],
         expand: node::expand_routes,
     },
+    RouteExpansionAdapter {
+        pack_id: "starlette-python",
+        frameworks: &["starlette"],
+        expand: python::expand_starlette_routes,
+    },
 ];
 
 type UniversalFrameworkExpansion =
@@ -140,6 +145,14 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
     },
     UniversalFrameworkPack {
         id: "flask-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "pydantic-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "starlette-python",
         expand: python::expand,
     },
 ];

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add independently versioned `starlette-python` and `pydantic-python` packs
+  and advance `fastapi-python` to semantics version 2. Exact Starlette route,
+  WebSocket, imperative, constructor, and bounded mount evidence now composes
+  with FastAPI application/router/include/route/parameter dependency and
+  security stages. Exact Pydantic models retain existing class, field,
+  validator, serializer, and computed-field identities, while FastAPI handler
+  annotations and literal `response_model` values publish fail-closed schema
+  dependencies. Yield providers retain lifecycle detail; dynamic paths,
+  providers, models, and ambiguous receivers remain unresolved.
+
 - Replace the combined `python-web` route scanner with independently
   versioned `django-python`, `fastapi-python`, and `flask-python` universal
   framework packs. Python routes now join exact import, call, decorator, type,

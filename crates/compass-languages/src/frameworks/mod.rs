@@ -82,7 +82,7 @@ type TemplateDetector =
 /// separate from the language producer version: changing framework activation,
 /// descriptor capabilities, or resource limits must invalidate framework facts
 /// without pretending that the parser/evidence producer changed.
-pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/3";
+pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/4";
 
 /// The concrete implementation stored behind one framework-pack seam.
 ///
@@ -386,6 +386,8 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::universal(&pack::DJANGO_PYTHON_DESCRIPTOR, python::detect_django),
     FrameworkPack::universal(&pack::FASTAPI_PYTHON_DESCRIPTOR, python::detect_fastapi),
     FrameworkPack::universal(&pack::FLASK_PYTHON_DESCRIPTOR, python::detect_flask),
+    FrameworkPack::universal(&pack::PYDANTIC_PYTHON_DESCRIPTOR, python::detect_pydantic),
+    FrameworkPack::universal(&pack::STARLETTE_PYTHON_DESCRIPTOR, python::detect_starlette),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::universal(&pack::RAILS_RUBY_DESCRIPTOR, ruby::detect_universal),
     FrameworkPack::source_versioned_with_limits(
@@ -1131,6 +1133,8 @@ mod tests {
             "django-python",
             "fastapi-python",
             "flask-python",
+            "pydantic-python",
+            "starlette-python",
             "php-frameworks",
             "rails-ruby",
             "spring-kotlin",

@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 use compass_languages::{
-    Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkFact, RawRouteFact,
+    Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawFrameworkFact,
+    RawRouteFact, RawRouteStageFact,
 };
 use serde_json::Value;
 
@@ -30,6 +31,14 @@ pub(super) fn expand_fastapi_routes(
 }
 
 pub(super) fn expand_flask_routes(
+    facts: &[RawFrameworkFact],
+    routes: Vec<RawRouteFact>,
+    limits: FrameworkLimits,
+) -> Result<Vec<RawRouteFact>, FrameworkResolutionError> {
+    expand_router_mounts(facts, routes, limits)
+}
+
+pub(super) fn expand_starlette_routes(
     facts: &[RawFrameworkFact],
     routes: Vec<RawRouteFact>,
     limits: FrameworkLimits,
@@ -195,6 +204,25 @@ fn expand_router_mounts(
                 )
             });
             let mut expanded = route.clone();
+            let inherited_stages = chain
+                .iter()
+                .flat_map(|mount| {
+                    mount_stage_facts(mount, "parent_stages")
+                        .into_iter()
+                        .chain(mount_stage_facts(mount, "mount_stages"))
+                })
+                .collect::<Vec<_>>();
+            if !inherited_stages.is_empty() {
+                expanded.stages = inherited_stages
+                    .into_iter()
+                    .chain(expanded.stages)
+                    .enumerate()
+                    .map(|(position, mut stage)| {
+                        stage.position = u32::try_from(position).unwrap_or(u32::MAX);
+                        stage
+                    })
+                    .collect();
+            }
             expanded.normalized_path = compose_paths(&prefix, &route.normalized_path);
             expanded.raw_path = compose_paths(&prefix, &route.raw_path);
             expanded
@@ -283,6 +311,15 @@ fn mount_chains<'a>(
 
 fn mount_string<'a>(mount: &'a RawDomainFact, key: &str) -> Option<&'a str> {
     mount.detail.get(key).and_then(Value::as_str)
+}
+
+fn mount_stage_facts(mount: &RawDomainFact, key: &str) -> Vec<RawRouteStageFact> {
+    mount
+        .detail
+        .get(key)
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
 }
 
 fn mount_sort_key(mount: &RawDomainFact) -> (&str, &str, &str, &str, u64, u64) {
