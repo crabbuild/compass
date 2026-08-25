@@ -59,6 +59,9 @@ function render(): void {
         installOcrModel() {
           vscode.postMessage({ type: "installOcrModel" });
         },
+        cancelOcrModel() {
+          vscode.postMessage({ type: "cancelOcrModel" });
+        },
         verifyOcrModel() {
           vscode.postMessage({ type: "verifyOcrModel" });
         }

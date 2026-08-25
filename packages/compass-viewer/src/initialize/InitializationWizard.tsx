@@ -52,6 +52,7 @@ export type InitializationHost = {
   openGraph(): void;
   showOutput(): void;
   installOcrModel?(): void;
+  cancelOcrModel?(): void;
   verifyOcrModel?(): void;
 };
 
@@ -71,13 +72,21 @@ export type OcrModelStatus =
     message: string;
     installCommand: string;
   }
-  | { kind: "installing"; profile: string }
+  | {
+    kind: "installing";
+    profile: string;
+    /** Installation is intentionally phase-based until the CLI exposes byte-level progress. */
+    phase?: OcrModelInstallPhase | undefined;
+  }
   | {
     kind: "error";
     profile: string;
     message: string;
     canRetry: boolean;
+    retryAction?: "verify" | "install" | undefined;
   };
+
+export type OcrModelInstallPhase = "starting" | "downloading" | "verifying";
 
 export const OcrModelStatusSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("checking"), profile: z.string().min(1).max(128) }).strict(),
@@ -99,12 +108,17 @@ export const OcrModelStatusSchema = z.discriminatedUnion("kind", [
     message: z.string().max(8_192),
     installCommand: z.string().min(1).max(512)
   }).strict(),
-  z.object({ kind: z.literal("installing"), profile: z.string().min(1).max(128) }).strict(),
+  z.object({
+    kind: z.literal("installing"),
+    profile: z.string().min(1).max(128),
+    phase: z.enum(["starting", "downloading", "verifying"]).optional()
+  }).strict(),
   z.object({
     kind: z.literal("error"),
     profile: z.string().min(1).max(128),
     message: z.string().max(8_192),
-    canRetry: z.boolean()
+    canRetry: z.boolean(),
+    retryAction: z.enum(["verify", "install"]).optional()
   }).strict()
 ]);
 
@@ -473,10 +487,11 @@ export function InitializationWizard({
               <div className="init-build-callout">
                 <Gauge aria-hidden="true" />
                 <div>
-                  <strong>Ready to index</strong>
+                  <strong>{ocrModelInstalling ? "Finish OCR setup first" : "Ready to index"}</strong>
                   <p>
-                    You can close other Compass views while this runs. File-level progress
-                    will appear here.
+                    {ocrModelInstalling
+                      ? "Compass will enable the build button as soon as the model is verified."
+                      : "You can close other Compass views while this runs. File-level progress will appear here."}
                   </p>
                 </div>
               </div>
@@ -530,7 +545,11 @@ function OcrModelCard({
 }) {
   const profile = prettyOcrProfile(status.profile);
   return (
-    <section className="init-ocr-card" aria-labelledby="init-ocr-title">
+    <section
+      className="init-ocr-card"
+      aria-labelledby="init-ocr-title"
+      aria-busy={status.kind === "installing"}
+    >
       <div className="init-ocr-card-heading">
         <span className="init-ocr-card-icon" aria-hidden="true">
           {status.kind === "ready" ? <ShieldCheck /> : <ScanText />}
@@ -552,6 +571,13 @@ function OcrModelCard({
             OCR is installed and ready. Native document text stays authoritative; OCR is added
             as confidence-scored evidence.
           </p>
+          <div className="init-ocr-ready-banner" role="status" aria-live="polite">
+            <CheckCircle2 aria-hidden="true" />
+            <span>
+              <strong>Installed and verified</strong>
+              <small>OCR is ready for the next Compass build.</small>
+            </span>
+          </div>
           <div className="init-ocr-facts">
             <span>{profile}</span>
             <span>{formatBytes(status.bytes)}</span>
@@ -577,9 +603,37 @@ function OcrModelCard({
         </>
       )}
       {status.kind === "installing" && (
-        <p role="status" className="init-ocr-progress">
-          <LoaderCircle aria-hidden="true" /> Installing the pinned {profile} profile…
-        </p>
+        <div className="init-ocr-install-progress" role="status" aria-live="polite">
+          <div className="init-ocr-progress-meta">
+            <span>
+              <strong>{ocrInstallPhaseLabel(status.phase)}</strong>
+              <small>{profile}</small>
+            </span>
+            <span className="init-ocr-progress-state">In progress</span>
+          </div>
+          <div
+            className="init-ocr-progress-track"
+            role="progressbar"
+            aria-label={`Installing ${profile}`}
+            aria-valuetext={ocrInstallProgressText(status.phase, profile)}
+          >
+            <span className="init-ocr-progress-bar is-indeterminate" />
+          </div>
+          <p className="init-ocr-progress-detail">
+            <LoaderCircle aria-hidden="true" />
+            {ocrInstallProgressText(status.phase, profile)}. Compass verifies every file before
+            enabling OCR.
+          </p>
+          {host.cancelOcrModel && (
+            <button
+              className="init-button init-button-secondary init-ocr-action"
+              type="button"
+              onClick={host.cancelOcrModel}
+            >
+              Cancel install
+            </button>
+          )}
+        </div>
       )}
       {status.kind === "invalid" && (
         <>
@@ -602,10 +656,14 @@ function OcrModelCard({
             <button
               className="init-button init-button-secondary init-ocr-action"
               type="button"
-              onClick={host.verifyOcrModel ?? host.installOcrModel}
-              disabled={!host.verifyOcrModel && !host.installOcrModel}
+              onClick={status.retryAction === "install"
+                ? host.installOcrModel
+                : host.verifyOcrModel ?? host.installOcrModel}
+              disabled={status.retryAction === "install"
+                ? !host.installOcrModel
+                : !host.verifyOcrModel && !host.installOcrModel}
             >
-              Try again
+              {status.retryAction === "install" ? "Retry install" : "Try again"}
             </button>
           )}
         </>
@@ -623,6 +681,26 @@ function modelStatusLabel(kind: OcrModelStatus["kind"]): string {
     invalid: "Needs repair",
     error: "Action needed"
   }[kind];
+}
+
+function ocrInstallPhaseLabel(phase: OcrModelInstallPhase | undefined): string {
+  return {
+    starting: "Preparing install",
+    downloading: "Downloading model",
+    verifying: "Verifying model"
+  }[phase ?? "downloading"];
+}
+
+function ocrInstallProgressText(
+  phase: OcrModelInstallPhase | undefined,
+  profile: string
+): string {
+  const action = {
+    starting: "Preparing the model install",
+    downloading: "Downloading model files",
+    verifying: "Verifying model files"
+  }[phase ?? "downloading"];
+  return `${action} for ${prettyOcrProfile(profile)}`;
 }
 
 function prettyOcrProfile(value: string): string {
