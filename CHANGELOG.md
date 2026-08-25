@@ -6,7 +6,10 @@
   statically configured setuptools, Poetry, and Hatch layouts. Register `.pyi`
   files, keep paired `.py` declarations authoritative, publish stub-only
   declarations with explicit provenance, and retain source/stub conflicts as
-  diagnostics. Python universal evidence is now producer version 12 and
+  diagnostics. Add conservative Python parameter, call-shape, exact annotation,
+  `type_of`, `returns`, and straight-line call-result evidence; starred,
+  shadowed, `Any`, and conflicting-return forms remain unresolved. Python
+  universal evidence is now producer version 13 and
   project evidence is `compass.framework-project-evidence/4`; affected caches,
   qualified names, and graph IDs rebuild without rewriting history.
 

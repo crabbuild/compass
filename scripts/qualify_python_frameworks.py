@@ -117,7 +117,7 @@ def validate_baseline(document: dict[str, Any], expectations: int, gaps: int) ->
     if document.get("status") != "established-unqualified":
         raise QualificationError("Phase 0 baseline must remain established-unqualified")
     producer = document.get("pythonProducer", {})
-    if producer != {"id": "compass.python", "version": 12, "qualification": "qualifying"}:
+    if producer != {"id": "compass.python", "version": 13, "qualification": "qualifying"}:
         raise QualificationError("Python producer baseline drifted")
     fixture = document.get("fixtureEvidence", {})
     if fixture.get("expectations") != expectations or fixture.get("expectedGaps") != gaps:

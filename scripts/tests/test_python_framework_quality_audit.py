@@ -22,9 +22,9 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
         self.assertEqual(first["schema"], qualification.SCHEMA)
         self.assertEqual(first["status"], "established-unqualified")
         self.assertFalse(first["productionQualified"])
-        self.assertEqual(first["pythonProducer"]["version"], 12)
+        self.assertEqual(first["pythonProducer"]["version"], 13)
         self.assertEqual(first["expectations"], 7)
-        self.assertEqual(len(first["expectedGaps"]), 7)
+        self.assertEqual(len(first["expectedGaps"]), 6)
 
     def test_fixture_ledgers_have_exact_source_ranges(self) -> None:
         expectations = qualification.load_json(qualification.EXPECTATIONS)
@@ -36,7 +36,7 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
 
     def test_baseline_cannot_be_mistaken_for_a_quality_claim(self) -> None:
         baseline = qualification.load_json(qualification.BASELINE)
-        qualification.validate_baseline(baseline, 7, 7)
+        qualification.validate_baseline(baseline, 7, 6)
         self.assertEqual(baseline["qualification"]["acceptedRelationships"], 0)
         self.assertFalse(baseline["qualification"]["eligibleForProductionClaim"])
 

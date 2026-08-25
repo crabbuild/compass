@@ -3,12 +3,6 @@
   "status": "established-unqualified",
   "records": [
     {
-      "id": "python-shadowed-initializer-receiver",
-      "surface": "language",
-      "current": "c3-receiver-evidence",
-      "required": "unresolved-shadowed-constructor"
-    },
-    {
       "id": "flask-default-route-any",
       "surface": "flask",
       "current": "ANY",

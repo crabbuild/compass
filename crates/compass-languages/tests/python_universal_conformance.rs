@@ -13,12 +13,14 @@ use tempfile::tempdir;
 fn evidence(path: &str, source: &[u8]) -> SemanticEvidenceBatch {
     let absolute = Path::new("/repo").join(path);
     let mut engine = Engine::default();
-    let batch = engine
+    let extraction = engine
         .extract_source_combined(&absolute, path, source)
-        .expect("extract Python fixture")
+        .expect("extract Python fixture");
+    let error = extraction.graph.error.clone();
+    let batch = extraction
         .graph
         .semantic_evidence
-        .expect("Python must publish universal evidence");
+        .unwrap_or_else(|| panic!("Python must publish universal evidence: {error:?}"));
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid Python evidence");
     batch
 }
@@ -103,7 +105,7 @@ class Service(Parent):
     let snapshot = selected_snapshot(&batch);
 
     assert_eq!(snapshot["pipeline"]["id"], "compass.python");
-    assert_eq!(snapshot["pipeline"]["version"], 12);
+    assert_eq!(snapshot["pipeline"]["version"], 13);
     assert_eq!(
         snapshot["pipeline"]["schema"],
         "compass.languages.evidence/2"
@@ -292,23 +294,174 @@ fn python_ambiguous_project_roots_retain_repository_identity_and_diagnostic()
 }
 
 #[test]
-fn python_shadowed_initializer_is_characterized_as_an_established_gap() {
+fn python_shadowed_initializer_does_not_fabricate_receiver_dispatch() {
     let batch = evidence(
         "pkg/services.py",
         b"class Service:\n    def run(self):\n        return None\n\ndef execute(Service):\n    value = Service()\n    return value.run()\n",
     );
-    let call = batch
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "run" && candidate.constraints.hierarchy.is_some()
+    }));
+}
+
+#[test]
+fn python_call_shapes_are_exact_only_without_starred_arguments() {
+    let batch = evidence(
+        "pkg/calls.py",
+        b"def target(value, count):\n    return None\n\ndef execute(args):\n    target(\"ready\", 2)\n    target(value=\"ready\", count=2)\n    target(*args)\n",
+    );
+    let calls = batch
         .candidates
         .iter()
-        .find(|candidate| {
-            candidate.target_spelling == "run" && candidate.constraints.hierarchy.is_some()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "target"
         })
-        .expect("established producer currently invents receiver evidence for the shadowed class");
-    assert_eq!(
-        call.constraints.hierarchy,
-        Some(HierarchyConstraint::ReceiverDispatch {
-            receiver_qualified_name: "pkg.services.Service".to_owned(),
-            strategy: ReceiverDispatchStrategy::C3FromReceiver,
-        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3);
+    assert!(calls.iter().any(|candidate| {
+        candidate.constraints.argument_count == Some(2)
+            && candidate.constraints.argument_types
+                == [
+                    Some("builtins.str".to_owned()),
+                    Some("builtins.int".to_owned()),
+                ]
+    }));
+    assert!(calls.iter().any(|candidate| {
+        candidate.constraints.argument_count == Some(2)
+            && candidate.constraints.argument_types == [None, None]
+    }));
+    assert!(calls.iter().any(|candidate| {
+        candidate.constraints.argument_count.is_none()
+            && candidate.constraints.argument_types.is_empty()
+    }));
+}
+
+#[test]
+fn python_parameter_declarations_and_callable_shapes_preserve_method_semantics() {
+    let batch = evidence(
+        "pkg/service.py",
+        b"class Service:\n    def run(self, value: str, count: int):\n        return None\n\n    @staticmethod\n    def build(value: str):\n        return Service()\n\n    @classmethod\n    def from_value(cls, value: str):\n        return cls()\n\n    def fallback(self, value: str = \"ready\"):\n        return value\n\n    def variadic(self, value: str, *extra: str):\n        return value\n\n    def dynamic(self, **values: str):\n        return values\n",
     );
+    let declaration = |name: &str| {
+        batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.kind == "method" && declaration.name == name)
+            .unwrap_or_else(|| panic!("missing method {name}"))
+    };
+    assert_eq!(declaration("run").parameter_count, Some(2));
+    assert_eq!(declaration("build").parameter_count, Some(1));
+    assert_eq!(declaration("from_value").parameter_count, Some(1));
+    assert_eq!(declaration("fallback").parameter_count, None);
+    assert_eq!(declaration("variadic").parameter_count, Some(2));
+    assert!(declaration("variadic").variadic);
+    assert_eq!(declaration("dynamic").parameter_count, None);
+    assert!(declaration("dynamic").variadic);
+    let parameter_names = batch
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "parameter")
+        .map(|declaration| declaration.name.as_str())
+        .collect::<Vec<_>>();
+    for expected in ["self", "value", "count", "cls", "extra", "values"] {
+        assert!(parameter_names.contains(&expected), "missing {expected}");
+    }
+}
+
+#[test]
+fn python_exact_annotations_publish_canonical_parameter_typeof_and_returns_evidence() {
+    let batch = evidence(
+        "pkg/typed.py",
+        b"from typing import Annotated, Any, Optional\nfrom domain.models import Input, Output\n\nclass Container:\n    field: Input\n\ndef handle(value: Annotated[Optional[\"Input\"], \"payload\"], items: list[Input]) -> Output:\n    local: Output = Output()\n    return local\n\ndef dynamic(value: Any) -> Any:\n    return value\n",
+    );
+    let handle = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "handle")
+        .expect("handle declaration");
+    assert_eq!(handle.parameter_count, Some(2));
+    assert_eq!(
+        handle.parameter_types,
+        [
+            "domain.models.Input | builtins.NoneType",
+            "builtins.list[domain.models.Input]",
+        ]
+    );
+    let parameters = batch
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.kind == "parameter"
+                && declaration
+                    .qualified_name
+                    .starts_with(&handle.qualified_name)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(parameters.len(), 2);
+    assert!(parameters.iter().all(|parameter| {
+        batch.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == parameter.id
+                && candidate.relation == CandidateRelation::TypeOf
+                && candidate.constraints.qualified_name.is_some()
+        })
+    }));
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == handle.id
+            && candidate.relation == CandidateRelation::Returns
+            && candidate.constraints.qualified_name.as_deref() == Some("domain.models.Output")
+    }));
+    for (kind, name, target) in [
+        ("field", "field", "domain.models.Input"),
+        ("variable", "local", "domain.models.Output"),
+    ] {
+        let declaration = batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.kind == kind && declaration.name == name)
+            .unwrap_or_else(|| panic!("missing {kind} {name}"));
+        assert!(batch.candidates.iter().any(|candidate| {
+            candidate.source_declaration_id == declaration.id
+                && candidate.relation == CandidateRelation::TypeOf
+                && candidate.constraints.qualified_name.as_deref() == Some(target)
+        }));
+    }
+    let dynamic = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "function" && declaration.name == "dynamic")
+        .expect("dynamic declaration");
+    assert!(dynamic.parameter_types.is_empty());
+    assert!(!batch.candidates.iter().any(|candidate| {
+        candidate.source_declaration_id == dynamic.id
+            && candidate.relation == CandidateRelation::Returns
+    }));
+}
+
+#[test]
+fn python_exact_call_result_annotation_drives_receiver_without_terminal_fallback() {
+    let batch = evidence(
+        "pkg/results.py",
+        b"class Service:\n    def run(self):\n        return None\n\ndef create() -> Service:\n    return Service()\n\ndef execute():\n    value = create()\n    return value.run()\n",
+    );
+    assert!(batch.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "run"
+            && candidate.constraints.hierarchy
+                == Some(HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name: "pkg.results.Service".to_owned(),
+                    strategy: ReceiverDispatchStrategy::C3FromReceiver,
+                })
+    }));
+    assert!(batch.bindings.iter().any(|binding| {
+        binding.kind == BindingKind::CallResult
+            && binding.spelling == "value"
+            && binding.qualified_target == "pkg.results.Service"
+    }));
+
+    let ambiguous = evidence(
+        "pkg/ambiguous_results.py",
+        b"class First:\n    def run(self): ...\n\nclass Second:\n    def run(self): ...\n\ndef create() -> First: ...\ndef create() -> Second: ...\n\ndef execute():\n    value = create()\n    return value.run()\n",
+    );
+    assert!(!ambiguous.candidates.iter().any(|candidate| {
+        candidate.target_spelling == "run" && candidate.constraints.hierarchy.is_some()
+    }));
 }

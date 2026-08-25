@@ -85,6 +85,14 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+Python structural evidence now uses producer version 13. The evidence schema
+is unchanged, but previously empty universal callable/type fields can contain
+source-proven parameter shapes, literal call types, `type_of`, `returns`, and
+call-result bindings. Starred call arguments suppress exact arity; `Any`,
+shadowed names, ambiguous return annotations, and unsupported dynamic forms do
+not acquire a guessed target. Strict consumers should key caches and audit
+baselines by the producer version.
+
 The Grounded Agent Graph feature is additive and opt-in. It does not change
 `compass.graph/1`, structural extraction, default query behavior, or immutable
 history schemas. Its versioned contracts use the
