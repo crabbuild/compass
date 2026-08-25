@@ -135,13 +135,21 @@ def _edge_pack(raw: dict[str, Any]) -> str | None:
     if not isinstance(evidence, list):
         return None
     packs = {
-        EXTRACTOR_PACK[extractor]
+        pack
         for item in evidence
         if isinstance(item, dict)
         and isinstance((extractor := item.get("extractor")), str)
-        and extractor in EXTRACTOR_PACK
+        and (pack := _extractor_pack(extractor)) is not None
     }
     return next(iter(packs)) if len(packs) == 1 else None
+
+
+def _extractor_pack(extractor: str) -> str | None:
+    pack = EXTRACTOR_PACK.get(extractor)
+    if pack is not None:
+        return pack
+    domain = extractor.removesuffix(".domain")
+    return EXTRACTOR_PACK.get(domain) if domain != extractor else None
 
 
 def _graph_edges(
@@ -206,9 +214,58 @@ def _target_matches(construct: SourceConstruct, edge: dict[str, Any]) -> bool:
     qualified = edge["targetNode"]["qualifiedName"].removesuffix("()")
     spelling = construct.target_spelling.removesuffix("()")
     if construct.relation == "imports":
-        return qualified == spelling or qualified.endswith("." + spelling)
-    terminal = spelling.rsplit(".", 1)[-1]
-    return qualified.rsplit(".", 1)[-1] == terminal
+        if qualified == spelling or qualified.endswith("." + spelling):
+            return True
+        qualifier = _absolute_import_qualifier(construct)
+        if qualifier is None:
+            return False
+        spelling_terminal = spelling.rsplit(".", 1)[-1]
+        qualified_module, qualified_terminal = _qualified_terminal(qualified)
+        return (
+            qualified_terminal == spelling_terminal
+            and (
+                qualified_module == qualifier
+                or qualified_module.startswith(qualifier + ".")
+            )
+        )
+    _, terminal = _qualified_terminal(spelling)
+    terminal = terminal.rsplit(".", 1)[-1]
+    _, qualified_terminal = _qualified_terminal(qualified)
+    qualified_terminal = qualified_terminal.rsplit(".", 1)[-1]
+    return qualified_terminal == terminal
+
+
+def _absolute_import_qualifier(construct: SourceConstruct) -> str | None:
+    qualifier = construct.qualifier
+    if qualifier is None:
+        return None
+    if not qualifier.startswith("."):
+        return qualifier
+    level = len(qualifier) - len(qualifier.lstrip("."))
+    suffix = qualifier[level:]
+    relative = Path(construct.source_file).with_suffix("")
+    module_parts = list(relative.parts)
+    if module_parts and module_parts[-1] == "__init__":
+        module_parts.pop()
+        package = module_parts
+    else:
+        package = module_parts[:-1]
+    parents = level - 1
+    if parents > len(package):
+        return None
+    base = package[: len(package) - parents] if parents else package
+    parts = [*base, *(part for part in suffix.split(".") if part)]
+    return ".".join(parts) or None
+
+
+def _qualified_terminal(value: str) -> tuple[str, str]:
+    """Split Compass dotted or declaration-member qualified identities."""
+
+    owner, separator, terminal = value.rpartition("::")
+    if separator:
+        return owner, terminal
+    owner, separator, terminal = value.rpartition(".")
+    return (owner, terminal) if separator else ("", value)
 
 
 def _snippet(root: Path, construct: SourceConstruct) -> str | None:
@@ -303,6 +360,41 @@ def _declared_names(
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 names[node.name] += 1
     return names
+
+
+def _local_declared_names(
+    root: Path,
+    include_globs: tuple[str, ...],
+) -> Counter[tuple[str, str]]:
+    names: Counter[tuple[str, str]] = Counter()
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root).as_posix()
+        if include_globs and not any(
+            _qualification_glob_matches(relative, pattern) for pattern in include_globs
+        ):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=relative)
+        except (OSError, SyntaxError, UnicodeError, ValueError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names[(relative, node.name)] += 1
+    return names
+
+
+def _source_target_is_exact(
+    construct: SourceConstruct,
+    declared_names: Counter[str],
+    local_declared_names: Counter[tuple[str, str]],
+) -> bool:
+    terminal = construct.target_spelling.rsplit(".", 1)[-1]
+    if construct.relation == "calls":
+        return (
+            construct.qualifier is None
+            and local_declared_names[(construct.source_file, terminal)] == 1
+        )
+    return declared_names[terminal] == 1
 
 
 def _parse_corpus(value: str) -> tuple[str, Path, Path]:
@@ -421,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
             file, start, end = edge["anchor"]
             by_anchor[(edge["relation"], file, start, end, edge["frameworkPack"])].append(edge)
         declared_names = _declared_names(root, include_globs)
+        local_declared_names = _local_declared_names(root, include_globs)
         accepted_part: list[dict[str, Any]] = []
         source_part: list[dict[str, Any]] = []
         for producer, inventory in inventories:
@@ -511,9 +604,21 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     continue
 
-                terminal = construct.target_spelling.rsplit(".", 1)[-1]
-                local = declared_names[terminal] == 1
-                judgment = "missing" if not facts and local else "ambiguous"
+                local = _source_target_is_exact(
+                    construct,
+                    declared_names,
+                    local_declared_names,
+                )
+                exact_static_domain = (
+                    construct.framework_pack is not None
+                    and construct.relation
+                    in {"consumes", "maps_to", "produces", "schedules", "subscribes"}
+                )
+                judgment = (
+                    "missing"
+                    if not facts and (local or exact_static_domain)
+                    else "ambiguous"
+                )
                 source_id = "oracle-source-" + hashlib.sha256(
                     f"{name}:{construct.source_file}:{construct.owner_qualified_name}".encode()
                 ).hexdigest()[:16]
