@@ -209,6 +209,49 @@
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
+    },
+    {
+      "id": "flask-factory-nested-items",
+      "sourceFile": "flask_factory.py",
+      "startByte": 239,
+      "endByte": 244,
+      "sourceIdentity": "flask_factory.nested",
+      "targetIdentity": "flask_factory.items",
+      "relation": "routes_to",
+      "framework": "flask",
+      "routePath": "/api/v2/nested/items",
+      "producer": "compass.frameworks.flask-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "sqlalchemy-post-user-relationship",
+      "sourceFile": "sqlalchemy_celery.py",
+      "startByte": 301,
+      "endByte": 345,
+      "sourceIdentity": "sqlalchemy_celery.Post",
+      "targetIdentity": "sqlalchemy_celery.User",
+      "relation": "depends_on",
+      "framework": "sqlalchemy",
+      "producer": "compass.frameworks.sqlalchemy-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "celery-dispatch-refresh-trigger",
+      "sourceFile": "sqlalchemy_celery.py",
+      "startByte": 450,
+      "endByte": 471,
+      "sourceIdentity": "sqlalchemy_celery.dispatch_refresh",
+      "targetIdentity": "sqlalchemy_celery.refresh_users",
+      "relation": "triggers",
+      "framework": "celery",
+      "producer": "compass.frameworks.celery-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
     }
   ]
 }

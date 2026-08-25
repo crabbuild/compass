@@ -161,6 +161,14 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
         expand: python::expand,
     },
     UniversalFrameworkPack {
+        id: "sqlalchemy-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "celery-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
         id: "starlette-python",
         expand: python::expand,
     },

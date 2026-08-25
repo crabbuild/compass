@@ -456,10 +456,18 @@ fn expand_router_mounts(
             expanded
                 .detail
                 .insert("mount_prefix".into(), Value::String(prefix));
-            let anchors = chain
-                .iter()
-                .map(|mount| serde_json::to_value(&mount.anchor).unwrap_or(Value::Null))
-                .collect::<Vec<_>>();
+            let mut anchors = route
+                .detail
+                .get("mount_anchors")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            anchors.extend(
+                chain
+                    .iter()
+                    .map(|mount| serde_json::to_value(&mount.anchor).unwrap_or(Value::Null))
+                    .collect::<Vec<_>>(),
+            );
             if let Some(anchor) = anchors.last() {
                 expanded
                     .detail

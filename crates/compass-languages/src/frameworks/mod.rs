@@ -82,7 +82,7 @@ type TemplateDetector =
 /// separate from the language producer version: changing framework activation,
 /// descriptor capabilities, or resource limits must invalidate framework facts
 /// without pretending that the parser/evidence producer changed.
-pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/5";
+pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/6";
 
 /// The concrete implementation stored behind one framework-pack seam.
 ///
@@ -391,6 +391,11 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::universal(&pack::FASTAPI_PYTHON_DESCRIPTOR, python::detect_fastapi),
     FrameworkPack::universal(&pack::FLASK_PYTHON_DESCRIPTOR, python::detect_flask),
     FrameworkPack::universal(&pack::PYDANTIC_PYTHON_DESCRIPTOR, python::detect_pydantic),
+    FrameworkPack::universal(
+        &pack::SQLALCHEMY_PYTHON_DESCRIPTOR,
+        python::detect_sqlalchemy,
+    ),
+    FrameworkPack::universal(&pack::CELERY_PYTHON_DESCRIPTOR, python::detect_celery),
     FrameworkPack::universal(&pack::STARLETTE_PYTHON_DESCRIPTOR, python::detect_starlette),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::universal(&pack::RAILS_RUBY_DESCRIPTOR, ruby::detect_universal),
@@ -531,7 +536,6 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         semantics_version: 1,
         kind: FrameworkPackKind::Source,
         languages: &[
-            "python",
             "typescript",
             "tsx",
             "javascript",
@@ -1139,6 +1143,8 @@ mod tests {
             "fastapi-python",
             "flask-python",
             "pydantic-python",
+            "sqlalchemy-python",
+            "celery-python",
             "starlette-python",
             "php-frameworks",
             "rails-ruby",
@@ -1205,9 +1211,27 @@ mod tests {
     fn enterprise_domain_pack_matches_large_source_budget() {
         let enterprise = FRAMEWORK_PACKS
             .iter()
-            .find(|pack| pack.id == "enterprise-domain-facts")
-            .expect("enterprise-domain-facts framework pack");
-        assert_eq!(enterprise.limits.max_syntax_nodes, 200_000);
+            .find(|pack| pack.id == "enterprise-domain-facts");
+        assert_eq!(
+            enterprise.map(|pack| pack.limits.max_syntax_nodes),
+            Some(200_000)
+        );
+        assert_eq!(
+            enterprise.map(|pack| pack.languages),
+            Some(
+                &[
+                    "typescript",
+                    "tsx",
+                    "javascript",
+                    "csharp",
+                    "ruby",
+                    "php",
+                    "go",
+                    "rust",
+                ][..]
+            )
+        );
+        assert!(enterprise.is_some_and(|pack| !pack.languages.contains(&"python")));
     }
 
     #[test]

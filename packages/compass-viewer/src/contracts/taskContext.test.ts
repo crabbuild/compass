@@ -40,6 +40,8 @@ describe("framework task context contract", () => {
       "fastapi-python",
       "flask-python",
       "pydantic-python",
+      "sqlalchemy-python",
+      "celery-python",
       "starlette-python",
     ]) {
       const python = frameworkContext();

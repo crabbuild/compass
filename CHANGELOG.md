@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add exact `sqlalchemy-python` and `celery-python` universal packs and remove
+  Python from the regex-based `enterprise-domain-facts` pack without changing
+  its non-Python behavior. SQLAlchemy 2 declarative models, mapped fields,
+  relationships, foreign keys, schemas, and existing-table mappings now retain
+  source identity; Celery tasks, queues, invocations, canvas topology, retries,
+  and beat schedules reuse the existing closed graph vocabulary. Advance
+  `flask-python` to version 2 with application factories, HTTP shortcuts,
+  `add_url_rule`, source-declared `MethodView` methods, nested blueprints,
+  request hooks, and error-handler stages. Dynamic and ambiguous forms remain
+  unresolved without a regex fallback.
+
 - Advance `django-python` to semantics version 2 and add the independent
   version-1 `django-rest-framework-python` pack. Django now follows exact
   local and imported `urlpatterns` collections, includes, namespaces, i18n

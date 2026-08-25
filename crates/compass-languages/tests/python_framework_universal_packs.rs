@@ -2,8 +2,8 @@ use std::error::Error;
 use std::path::Path;
 
 use compass_languages::{
-    Engine, FrameworkCapability, FrameworkPackRegistry, RawDomainFact, RawFrameworkFact,
-    RawRouteFact, RawRouteStageRole, framework_pack_semantics_version,
+    Engine, FrameworkCapability, FrameworkPackRegistry, FrameworkRelation, RawDomainFact,
+    RawFrameworkFact, RawRouteFact, RawRouteStageRole, framework_pack_semantics_version,
 };
 
 fn extract(path: &str, source: &[u8]) -> Result<compass_languages::Extraction, Box<dyn Error>> {
@@ -44,6 +44,8 @@ fn python_web_cutover_has_independent_versioned_universal_owners() -> Result<(),
         "fastapi-python",
         "flask-python",
         "pydantic-python",
+        "sqlalchemy-python",
+        "celery-python",
         "starlette-python",
     ] {
         assert!(ids.contains(&id), "missing universal descriptor {id}");
@@ -54,11 +56,17 @@ fn python_web_cutover_has_independent_versioned_universal_owners() -> Result<(),
         Some(1)
     );
     assert_eq!(framework_pack_semantics_version("fastapi-python"), Some(2));
+    assert_eq!(framework_pack_semantics_version("flask-python"), Some(2));
     assert_eq!(
         framework_pack_semantics_version("starlette-python"),
         Some(1)
     );
     assert_eq!(framework_pack_semantics_version("pydantic-python"), Some(1));
+    assert_eq!(
+        framework_pack_semantics_version("sqlalchemy-python"),
+        Some(1)
+    );
+    assert_eq!(framework_pack_semantics_version("celery-python"), Some(1));
     let fastapi = FrameworkPackRegistry::descriptors()
         .iter()
         .find(|descriptor| descriptor.id == "fastapi-python")
@@ -72,6 +80,41 @@ fn python_web_cutover_has_independent_versioned_universal_owners() -> Result<(),
         fastapi
             .framework_capabilities
             .contains(&FrameworkCapability::Security)
+    );
+    let sqlalchemy = FrameworkPackRegistry::descriptors()
+        .iter()
+        .find(|descriptor| descriptor.id == "sqlalchemy-python")
+        .ok_or("sqlalchemy descriptor")?;
+    assert_eq!(
+        sqlalchemy.framework_capabilities,
+        &[
+            FrameworkCapability::DataModeling,
+            FrameworkCapability::Persistence,
+        ]
+    );
+    assert_eq!(
+        sqlalchemy.emitted_relation_families,
+        &[FrameworkRelation::DependsOn, FrameworkRelation::MapsTo]
+    );
+    let celery = FrameworkPackRegistry::descriptors()
+        .iter()
+        .find(|descriptor| descriptor.id == "celery-python")
+        .ok_or("celery descriptor")?;
+    assert_eq!(
+        celery.framework_capabilities,
+        &[
+            FrameworkCapability::Messaging,
+            FrameworkCapability::Scheduling,
+        ]
+    );
+    assert_eq!(
+        celery.emitted_relation_families,
+        &[
+            FrameworkRelation::Produces,
+            FrameworkRelation::Consumes,
+            FrameworkRelation::Schedules,
+            FrameworkRelation::Triggers,
+        ]
     );
     assert!(!ids.contains(&"python-web"));
     assert_eq!(framework_pack_semantics_version("python-web"), None);
@@ -600,6 +643,127 @@ app.register_blueprint(api, url_prefix="/api")
 }
 
 #[test]
+fn flask_factories_shortcuts_url_rules_method_views_nested_blueprints_and_hooks_are_exact()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "web/factory.py",
+        br#"from flask import Blueprint, Flask
+from flask.views import MethodView
+
+root = Blueprint("root", __name__, url_prefix="/root")
+nested = Blueprint("nested", __name__, url_prefix="/nested")
+
+@nested.before_request
+def authorize(): return None
+
+@nested.errorhandler(404)
+def not_found(error): return None
+
+@nested.get("/items")
+def items(): return None
+
+root.register_blueprint(nested, url_prefix="/v2")
+
+class ItemView(MethodView):
+    def get(self): return None
+
+def health(): return None
+
+def create_app():
+    app = Flask(__name__)
+    app.register_blueprint(root, url_prefix="/api")
+    app.add_url_rule("/health", view_func=health)
+    app.add_url_rule("/item", view_func=ItemView.as_view("item"))
+    return app
+"#,
+    )?;
+    let flask_routes = routes(&extraction)
+        .into_iter()
+        .filter(|route| route.framework == "flask")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        flask_routes.len(),
+        3,
+        "facts={:#?}",
+        extraction.framework_facts
+    );
+    for path in ["/v2/nested/items", "/health", "/item"] {
+        assert!(
+            flask_routes
+                .iter()
+                .any(|route| route.normalized_path == path && route.operation == "GET"),
+            "routes={flask_routes:#?}"
+        );
+    }
+    let nested = flask_routes
+        .iter()
+        .find(|route| route.normalized_path == "/v2/nested/items")
+        .ok_or("nested route")?;
+    assert_eq!(
+        nested.detail.get("implicit_methods"),
+        Some(&serde_json::json!(["HEAD", "OPTIONS"]))
+    );
+    assert!(
+        nested
+            .stages
+            .iter()
+            .any(|stage| stage.role == RawRouteStageRole::Middleware)
+    );
+    assert!(
+        nested
+            .stages
+            .iter()
+            .any(|stage| stage.role == RawRouteStageRole::ErrorBoundary)
+    );
+    assert_eq!(
+        extraction
+            .framework_facts
+            .iter()
+            .filter(|fact| {
+                matches!(fact, RawFrameworkFact::Role(role)
+                    if role.pack_id == "flask-python" && role.role == "hook")
+            })
+            .count(),
+        2
+    );
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Role(role)
+            if role.pack_id == "flask-python"
+                && role.role == "service"
+                && role.context.as_deref() == Some("application_factory"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn flask_dynamic_prefixes_and_method_view_lookalikes_fail_closed() -> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "web/near_match_flask.py",
+        br#"from flask import Blueprint, Flask
+from other import MethodView
+
+prefix = get_prefix()
+app = Flask(__name__)
+blueprint = Blueprint("dynamic", __name__, url_prefix=prefix)
+
+@blueprint.get("/wrong")
+def wrong(): return None
+
+class WrongView(MethodView):
+    def get(self): return None
+
+app.add_url_rule("/wrong-view", view_func=WrongView.as_view("wrong"))
+"#,
+    )?;
+    assert!(
+        routes(&extraction).is_empty(),
+        "facts={:#?}",
+        extraction.framework_facts
+    );
+    Ok(())
+}
+
+#[test]
 fn wrong_framework_dynamic_and_rebound_receivers_fail_closed() -> Result<(), Box<dyn Error>> {
     let wrong = extract(
         "wrong.py",
@@ -845,6 +1009,319 @@ def endpoint(): return None
     );
     assert!(!shadowed.framework_facts.iter().any(|fact| {
         matches!(fact, RawFrameworkFact::Relation(relation) if relation.pack_id == "fastapi-python")
+    }));
+    Ok(())
+}
+
+#[test]
+fn sqlalchemy_models_fields_relationships_and_table_mappings_are_exact()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "models.py",
+        br#"from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+class Base(DeclarativeBase):
+    pass
+
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+
+class Post(Base):
+    __tablename__ = "posts"
+    __table_args__ = {"schema": "content"}
+    id: Mapped[int] = mapped_column(primary_key=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    author: Mapped[User] = relationship(back_populates="posts")
+"#,
+    )?;
+    let model_roles = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Role(role)
+                if role.pack_id == "sqlalchemy-python" && role.role == "model" =>
+            {
+                Some(role)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        model_roles.len(),
+        2,
+        "facts={:#?}",
+        extraction.framework_facts
+    );
+    assert!(model_roles.iter().all(|role| {
+        role.detail
+            .get("fields")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|fields| !fields.is_empty())
+    }));
+    let mappings = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Domain(domain)
+                if domain.framework == "sqlalchemy"
+                    && domain.kind == "orm_mapping"
+                    && domain
+                        .detail
+                        .get("pack_id")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("sqlalchemy-python") =>
+            {
+                Some(domain)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(mappings.len(), 2);
+    assert!(mappings.iter().any(|mapping| {
+        mapping
+            .detail
+            .get("database_schema")
+            .and_then(serde_json::Value::as_str)
+            == Some("content")
+    }));
+    assert!(mappings.iter().all(|mapping| {
+        mapping
+            .detail
+            .get("model_reference")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|reference| {
+                model_roles
+                    .iter()
+                    .any(|role| role.subject_reference.as_deref() == Some(reference))
+            })
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation)
+            if relation.pack_id == "sqlalchemy-python"
+                && relation.relation == "depends_on"
+                && relation.context.as_deref() == Some("relationship:author"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn sqlalchemy_dynamic_shadowed_and_lookalike_forms_fail_closed() -> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "near_match_models.py",
+        br#"from other import DeclarativeBase, mapped_column, relationship
+
+class Base(DeclarativeBase): pass
+class Wrong(Base):
+    __tablename__ = "wrong"
+    id = mapped_column()
+
+from sqlalchemy.orm import DeclarativeBase as RealBase, Mapped, mapped_column as real_column
+
+class ExactBase(RealBase): pass
+class DynamicTable(ExactBase):
+    __tablename__ = table_name()
+    id: Mapped[int] = real_column()
+
+real_column = object()
+class ShadowedColumn(ExactBase):
+    __tablename__ = table_name()
+    id: Mapped[int] = real_column()
+"#,
+    )?;
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain)
+            if domain.framework == "sqlalchemy"
+                && domain.detail.get("pack_id").and_then(serde_json::Value::as_str)
+                    == Some("sqlalchemy-python"))
+    }));
+    let roles = extraction
+        .framework_facts
+        .iter()
+        .filter(|fact| {
+            matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "sqlalchemy-python")
+        })
+        .count();
+    assert_eq!(roles, 2, "facts={:#?}", extraction.framework_facts);
+    Ok(())
+}
+
+#[test]
+fn celery_tasks_invocations_canvas_queues_retry_and_schedules_are_exact()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "tasks.py",
+        br#"from celery import Celery, chain, chord, group, shared_task
+
+app = Celery("tasks")
+
+@app.task(name="orders.cleanup", queue="maintenance", bind=True)
+def cleanup(self, order_id):
+    self.retry(countdown=5)
+
+@shared_task(queue="inventory")
+def refresh_inventory():
+    return None
+
+@app.task(bind=True)
+def rebound_retry(self):
+    self = object()
+    self.retry()
+
+def dispatch():
+    cleanup.delay(1)
+    refresh_inventory.apply_async(queue="priority")
+    chain(cleanup.s(2), refresh_inventory.s())()
+    group(cleanup.s(3), refresh_inventory.s())()
+    chord([cleanup.s(4)], refresh_inventory.s())()
+    app.send_task("external.rebuild", queue="external")
+
+def dynamic_canvas(task):
+    chain(task.s())()
+
+app.conf.beat_schedule = {
+    "refresh-every-minute": {
+        "task": "inventory.refresh",
+        "schedule": 60.0,
+    },
+}
+"#,
+    )?;
+    let celery_domains = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Domain(domain)
+                if domain
+                    .detail
+                    .get("pack_id")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("celery-python") =>
+            {
+                Some(domain)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        celery_domains
+            .iter()
+            .filter(|domain| domain.kind == "job" && domain.detail.get("scheduled_task").is_none())
+            .count(),
+        3,
+        "facts={:#?}",
+        extraction.framework_facts
+    );
+    assert!(celery_domains.iter().any(|domain| {
+        domain.kind == "job"
+            && domain.name == "orders.cleanup"
+            && domain
+                .detail
+                .get("queue")
+                .and_then(serde_json::Value::as_str)
+                == Some("maintenance")
+    }));
+    assert!(celery_domains.iter().any(|domain| {
+        domain.kind == "message"
+            && domain.name == "external.rebuild"
+            && domain
+                .detail
+                .get("relationship")
+                .and_then(serde_json::Value::as_str)
+                == Some("produces")
+    }));
+    assert!(celery_domains.iter().any(|domain| {
+        domain.kind == "job"
+            && domain.name == "refresh-every-minute"
+            && domain
+                .detail
+                .get("scheduled_task")
+                .and_then(serde_json::Value::as_str)
+                == Some("inventory.refresh")
+    }));
+    let trigger_contexts = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Relation(relation)
+                if relation.pack_id == "celery-python" && relation.relation == "triggers" =>
+            {
+                relation.context.as_deref()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for context in [
+        "invocation:delay",
+        "invocation:apply_async",
+        "canvas:chain",
+        "canvas:group",
+        "canvas:chord",
+        "retry",
+    ] {
+        assert!(
+            trigger_contexts.contains(&context),
+            "facts={:#?}",
+            extraction.framework_facts
+        );
+    }
+    assert_eq!(
+        trigger_contexts
+            .iter()
+            .filter(|context| **context == "retry")
+            .count(),
+        1,
+        "a rebound bound-task receiver must not create retry evidence"
+    );
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation)
+            if relation.pack_id == "celery-python"
+                && relation.context.as_deref() == Some("send_task"))
+    }));
+    assert_eq!(
+        extraction
+            .framework_facts
+            .iter()
+            .filter(|fact| {
+                matches!(fact, RawFrameworkFact::Role(role)
+                    if role.pack_id == "celery-python" && role.role == "consumer")
+            })
+            .count(),
+        3
+    );
+    Ok(())
+}
+
+#[test]
+fn celery_lookalike_rebound_and_dynamic_metadata_forms_fail_closed() -> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "near_match_tasks.py",
+        br#"from other import Celery, shared_task
+
+fake = Celery("fake")
+@fake.task(name="wrong")
+def wrong(): pass
+
+from celery import Celery as ExactCelery, shared_task as exact_task
+app = ExactCelery("tasks")
+app = object()
+
+@app.task(name="rebound")
+def rebound(): pass
+
+exact_task = lambda function: function
+@exact_task
+def shadowed(): pass
+"#,
+    )?;
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain)
+            if domain.detail.get("pack_id").and_then(serde_json::Value::as_str)
+                == Some("celery-python"))
+            || matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "celery-python")
+            || matches!(fact, RawFrameworkFact::Relation(relation) if relation.pack_id == "celery-python")
     }));
     Ok(())
 }

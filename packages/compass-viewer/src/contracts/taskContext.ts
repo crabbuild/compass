@@ -15,7 +15,7 @@ const KNOWN_FRAMEWORK_PACK_IDS = [
   "react-ui", "nextjs-routes", "react-router-routes", "remix-routes",
   "tanstack-router", "tanstack-start", "vite-config", "typescript-web",
   "express-web", "fastify-web", "hono-web", "django-python", "django-rest-framework-python", "fastapi-python",
-  "flask-python", "pydantic-python", "starlette-python", "go-web", "axum-web",
+  "flask-python", "pydantic-python", "sqlalchemy-python", "celery-python", "starlette-python", "go-web", "axum-web",
   "rust-web", "spring-java", "spring-kotlin", "rails-ruby", "php-frameworks",
   "aspnet-csharp", "vapor-swift", "filesystem-routes", "enterprise-domain-facts",
   "drupal-routing-config", "play-routes-config", "filesystem-template-routes"

@@ -28,7 +28,7 @@ fn python_framework_expectation_ledger_uses_the_strict_shared_contract()
     let set: FrameworkEvidenceExpectationSet = serde_json::from_slice(&fs::read(path)?)?;
     set.validate(&root)?;
     assert_eq!(set.corpus_id, "python-framework-fixtures-v1");
-    assert_eq!(set.records.len(), 7);
+    assert_eq!(set.records.len(), 17);
     for record in &set.records {
         let source = fs::read(root.join(&record.source_file))?;
         let start = usize::try_from(record.start_byte)?;

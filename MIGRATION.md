@@ -35,15 +35,24 @@ cached graph, query, or task-context packets may be rebuilt after deployment.
 
 Python framework readers must replace the combined `python-web` pack ID with
 `django-python`, `django-rest-framework-python`, `fastapi-python`,
-`flask-python`, `pydantic-python`, and `starlette-python`. `django-python` and
-`fastapi-python` are now semantics version 2, and the framework-pack cache
-identity is `compass.framework-packs/5`, so run a fresh
+`flask-python`, `pydantic-python`, `sqlalchemy-python`, `celery-python`, and
+`starlette-python`. `django-python`, `fastapi-python`, and `flask-python` are
+now semantics version 2, and the framework-pack cache identity is
+`compass.framework-packs/6`, so run a fresh
 or forced build after upgrading. A Flask `@app.route` without a `methods`
 argument now records
 the declared `GET` operation instead of `ANY`. Exact Django URL calls and
 Python receiver mount identities can also remove older name-shaped false
 positives; unresolved ambiguous or dynamic registrations are intentionally not
 restored through a legacy fallback.
+
+Python SQLAlchemy and Celery facts no longer come from
+`enterprise-domain-facts`. Exact SQLAlchemy 2 declarations, mapped fields,
+relationships, and literal table mappings are owned by `sqlalchemy-python`;
+exact Celery task decorators, task invocations, canvas signatures, literal
+queues, retries, and beat schedules are owned by `celery-python`. Dynamic or
+ambiguous forms now remain unresolved instead of retaining regex-derived
+facts. Non-Python `enterprise-domain-facts` behavior is unchanged.
 
 FastAPI `Depends` values previously exposed as legacy middleware references
 now use the additive `dependency` route stage; `Security` uses the distinct

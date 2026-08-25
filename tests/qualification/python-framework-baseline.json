@@ -25,7 +25,7 @@
     },
     {
       "id": "flask-python",
-      "semanticsVersion": 1,
+      "semanticsVersion": 2,
       "frameworks": ["flask"]
     },
     {
@@ -34,19 +34,24 @@
       "frameworks": ["pydantic"]
     },
     {
+      "id": "sqlalchemy-python",
+      "semanticsVersion": 1,
+      "frameworks": ["sqlalchemy"]
+    },
+    {
+      "id": "celery-python",
+      "semanticsVersion": 1,
+      "frameworks": ["celery"]
+    },
+    {
       "id": "starlette-python",
       "semanticsVersion": 1,
       "frameworks": ["starlette"]
-    },
-    {
-      "id": "enterprise-domain-facts",
-      "semanticsVersion": 1,
-      "pythonBehavior": "substring-and-line-regex"
     }
   ],
   "fixtureEvidence": {
-    "expectations": 14,
-    "expectedGaps": 4,
+    "expectations": 17,
+    "expectedGaps": 3,
     "graphQualification": "checked-in-conformance-only",
     "productionQualified": false
   },

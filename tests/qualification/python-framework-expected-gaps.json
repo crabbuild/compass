@@ -3,12 +3,6 @@
   "status": "established-unqualified",
   "records": [
     {
-      "id": "python-enterprise-regex",
-      "surface": "enterprise-domain-facts",
-      "current": "substring-and-line-regex",
-      "required": "sqlalchemy-python-and-celery-python-exact-evidence"
-    },
-    {
       "id": "django-registration-contract",
       "surface": "django-python",
       "current": "signals-only-registration-evidence",

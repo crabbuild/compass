@@ -23,8 +23,8 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
         self.assertEqual(first["status"], "established-unqualified")
         self.assertFalse(first["productionQualified"])
         self.assertEqual(first["pythonProducer"]["version"], 13)
-        self.assertEqual(first["expectations"], 14)
-        self.assertEqual(len(first["expectedGaps"]), 4)
+        self.assertEqual(first["expectations"], 17)
+        self.assertEqual(len(first["expectedGaps"]), 3)
 
     def test_fixture_ledgers_have_exact_source_ranges(self) -> None:
         expectations = qualification.load_json(qualification.EXPECTATIONS)
@@ -35,8 +35,10 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
                 "django": 4,
                 "django-rest-framework": 2,
                 "fastapi": 4,
-                "flask": 2,
+                "celery": 1,
+                "flask": 3,
                 "pydantic": 1,
+                "sqlalchemy": 1,
                 "starlette": 1,
             },
         )
@@ -46,7 +48,7 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
 
     def test_baseline_cannot_be_mistaken_for_a_quality_claim(self) -> None:
         baseline = qualification.load_json(qualification.BASELINE)
-        qualification.validate_baseline(baseline, 14, 4)
+        qualification.validate_baseline(baseline, 17, 3)
         self.assertEqual(baseline["qualification"]["acceptedRelationships"], 0)
         self.assertFalse(baseline["qualification"]["eligibleForProductionClaim"])
 

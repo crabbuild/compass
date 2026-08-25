@@ -94,20 +94,23 @@ and generated viewer assets together. Older strict readers must reject these
 values; consumers must not coerce either one to `middleware`. The existing
 graph and context schema majors are unchanged.
 
-The framework-pack cache identity is now `compass.framework-packs/5`.
+The framework-pack cache identity is now `compass.framework-packs/6`.
 Python HTTP routes no longer use the combined `python-web` runtime adapter;
 they are owned independently by version-2 `django-python`, version-1
-`django-rest-framework-python`, version-2 `fastapi-python`, version-1
+`django-rest-framework-python`, version-2 `fastapi-python`, version-2
 `flask-python`, and version-1 `starlette-python` universal packs. Version-1
-`pydantic-python` owns exact
-model roles and request/response schema dependencies. Strict
-`compass.framework-context/1` readers must accept those six IDs and reject
-the removed combined ID. Route
+`pydantic-python`, `sqlalchemy-python`, and `celery-python` own exact model,
+persistence, task, queue, canvas, and schedule evidence. The legacy
+`enterprise-domain-facts` source pack no longer runs for Python; its non-Python
+language list and behavior are unchanged. Strict `compass.framework-context/1`
+readers must accept those eight Python IDs and reject the removed combined ID.
+Route
 and graph schema majors remain unchanged, but cached framework facts must be
 rebuilt because pack ownership, evidence provenance, and Flask's default
 operation changed. No graph schema major changes: dependency/security stages
 and Pydantic schema flow reuse the existing typed stage, node-role, and
-`depends_on` contracts.
+`depends_on`, `maps_to`, `produces`, `consumes`, `schedules`, and `triggers`
+contracts.
 
 The Django semantics widening retains the existing graph major and additive
 edge vocabulary. Exact URL-pattern collections, DRF generated routes, model

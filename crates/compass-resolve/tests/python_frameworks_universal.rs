@@ -208,6 +208,100 @@ app.mount("/v2", middle)
 }
 
 #[test]
+fn flask_factory_and_nested_blueprint_routes_preserve_exact_stages_and_mount_depth()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"from flask import Blueprint, Flask
+
+root = Blueprint("root", __name__, url_prefix="/root")
+nested = Blueprint("nested", __name__, url_prefix="/nested")
+
+@nested.before_request
+def authorize(): return None
+
+@nested.get("/items")
+def items(): return None
+
+root.register_blueprint(nested, url_prefix="/v2")
+
+def create_app():
+    app = Flask(__name__)
+    app.register_blueprint(root, url_prefix="/api")
+    return app
+"#;
+    let extraction = resolved_project(&[("pkg/app.py", source)])?;
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    let route = routes
+        .iter()
+        .find(|route| route.route.framework == "flask")
+        .ok_or("resolved Flask route")?;
+    assert_eq!(route.route.normalized_path, "/api/v2/nested/items");
+    assert_eq!(route.state, ResolutionState::Exact);
+    assert!(route.stages.iter().any(|stage| {
+        stage.role == RouteStageRole::Middleware && stage.reference.contains("authorize")
+    }));
+    assert_eq!(
+        route
+            .route
+            .detail
+            .get("mount_anchors")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(2)
+    );
+    Ok(())
+}
+
+#[test]
+fn sqlalchemy_and_celery_relations_publish_only_exact_declaration_identities()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"from celery import shared_task
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+class Base(DeclarativeBase): pass
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+class Post(Base):
+    __tablename__ = "posts"
+    author: Mapped[User] = relationship(User)
+
+@shared_task
+def refresh(): return None
+
+def dispatch():
+    refresh.delay()
+"#;
+    let extraction = resolved_project(&[("pkg/domain.py", source)])?;
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.string("relation") == "depends_on"
+            && edge.source.contains("post")
+            && edge.target.contains("user")
+            && edge.string("extractor") == "compass.frameworks.sqlalchemy"
+    }));
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.string("relation") == "triggers"
+            && edge.source.contains("dispatch")
+            && edge.target.contains("refresh")
+            && edge.string("extractor") == "compass.frameworks.celery"
+    }));
+    assert!(extraction.framework_facts.iter().all(|fact| match fact {
+        compass_languages::RawFrameworkFact::Relation(relation)
+            if matches!(
+                relation.pack_id.as_str(),
+                "sqlalchemy-python" | "celery-python"
+            ) =>
+        {
+            relation.ambiguity_policy == "require_exact"
+                && relation.source_reference.is_some()
+                && relation.target_anchor.is_some()
+        }
+        _ => true,
+    }));
+    Ok(())
+}
+
+#[test]
 fn fastapi_inherited_stages_and_pydantic_schema_relations_publish_exactly()
 -> Result<(), Box<dyn Error>> {
     let source = br#"from typing import Annotated

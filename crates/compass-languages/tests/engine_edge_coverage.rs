@@ -34,20 +34,35 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 10);
-    assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "aspnet-csharp");
-    assert_eq!(FrameworkPackRegistry::descriptors()[1].id, "php-frameworks");
-    assert_eq!(FrameworkPackRegistry::descriptors()[2].id, "spring-java");
-    assert_eq!(FrameworkPackRegistry::descriptors()[3].id, "spring-kotlin");
-    assert_eq!(FrameworkPackRegistry::descriptors()[4].id, "rails-ruby");
-    assert_eq!(FrameworkPackRegistry::descriptors()[5].id, "vapor-swift");
-    assert_eq!(FrameworkPackRegistry::descriptors()[6].id, "dart-bloc");
+    let ids = FrameworkPackRegistry::descriptors()
+        .iter()
+        .map(|descriptor| descriptor.id)
+        .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
-        FrameworkPackRegistry::descriptors()[7].id,
-        "dart-flutter-navigation"
+        ids,
+        [
+            "aspnet-csharp",
+            "celery-python",
+            "dart-bloc",
+            "dart-flutter-navigation",
+            "dart-riverpod",
+            "django-python",
+            "django-rest-framework-python",
+            "fastapi-python",
+            "flask-python",
+            "php-frameworks",
+            "pydantic-python",
+            "rails-ruby",
+            "react-ui",
+            "sqlalchemy-python",
+            "spring-java",
+            "spring-kotlin",
+            "starlette-python",
+            "vapor-swift",
+        ]
+        .into_iter()
+        .collect()
     );
-    assert_eq!(FrameworkPackRegistry::descriptors()[8].id, "dart-riverpod");
-    assert_eq!(FrameworkPackRegistry::descriptors()[9].id, "react-ui");
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {

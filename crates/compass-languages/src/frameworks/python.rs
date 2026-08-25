@@ -20,13 +20,22 @@ struct Receiver {
     declaration_id: String,
     qualified_name: String,
     name: String,
+    scope_id: Option<String>,
     framework: &'static str,
     constructor: String,
     prefix: String,
     start_byte: u64,
+    end_byte: u64,
     constructor_start_byte: u64,
     constructor_end_byte: u64,
     stages: Vec<RawRouteStageFact>,
+}
+
+#[derive(Clone, Debug)]
+struct CeleryTask {
+    declaration_id: String,
+    graph_node_id: String,
+    bind: bool,
 }
 
 #[derive(Default)]
@@ -82,7 +91,10 @@ pub(super) fn detect_fastapi(context: &UniversalDetectionContext<'_, '_>) -> Vec
 }
 
 pub(super) fn detect_flask(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
-    detect_universal(context, PythonFramework::Flask)
+    let mut facts = detect_universal(context, PythonFramework::Flask);
+    let receivers = receiver_declarations(context);
+    collect_flask_factory_roles(context.root, context, &receivers, &mut facts);
+    facts
 }
 
 pub(super) fn detect_starlette(
@@ -95,6 +107,1212 @@ pub(super) fn detect_pydantic(
     context: &UniversalDetectionContext<'_, '_>,
 ) -> Vec<RawFrameworkFact> {
     collect_pydantic_facts(context)
+}
+
+pub(super) fn detect_sqlalchemy(
+    context: &UniversalDetectionContext<'_, '_>,
+) -> Vec<RawFrameworkFact> {
+    collect_sqlalchemy_facts(context)
+}
+
+pub(super) fn detect_celery(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    collect_celery_facts(context)
+}
+
+fn collect_sqlalchemy_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    let declarative_bases =
+        python_direct_descendants_of(context.evidence, &["sqlalchemy.orm.DeclarativeBase"]);
+    let mut models = python_descendants_of(context.evidence, &["sqlalchemy.orm.DeclarativeBase"]);
+    for base in &declarative_bases {
+        models.remove(base);
+    }
+
+    let mut facts = Vec::new();
+    for model_id in &models {
+        let Some(model) = context
+            .evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == *model_id)
+        else {
+            continue;
+        };
+        let Some(definition) = declaration_node(context.root, model) else {
+            continue;
+        };
+        let fields = sqlalchemy_model_field_facts(definition, context, model, &models, &mut facts);
+        let schema = direct_class_assignment_value(definition, "__table_args__", context.source)
+            .and_then(|value| dictionary_value_node(value, "schema", context.source))
+            .and_then(|value| string_literal(node_text(value, context.source)))
+            .unwrap_or_default();
+        let table = direct_class_assignment_value(definition, "__tablename__", context.source)
+            .and_then(|value| {
+                string_literal(node_text(value, context.source))
+                    .map(|name| (value, name, schema.clone()))
+            });
+        let mut detail = Map::from_iter([
+            ("declaration_id".into(), Value::String(model.id.clone())),
+            ("fields".into(), Value::Array(fields)),
+        ]);
+        if let Some((_, table_name, schema)) = &table {
+            detail.insert("database_table".into(), Value::String(table_name.clone()));
+            if !schema.is_empty() {
+                detail.insert("database_schema".into(), Value::String(schema.clone()));
+            }
+        }
+        facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+            pack_id: "sqlalchemy-python".to_owned(),
+            framework: "sqlalchemy".to_owned(),
+            role: "model".to_owned(),
+            subject_reference: Some(model.graph_node_id.clone()),
+            context: model.module_or_package.clone(),
+            anchor: evidence_anchor(&model.range),
+            origin: RawFrameworkOrigin::Ast,
+            evidence_class: "exact".to_owned(),
+            detail,
+        }));
+        if let Some((table_node, table_name, schema)) = table {
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "sqlalchemy".to_owned(),
+                kind: "orm_mapping".to_owned(),
+                name: model.name.clone(),
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, table_node),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([
+                    (
+                        "model_reference".into(),
+                        Value::String(model.graph_node_id.clone()),
+                    ),
+                    ("database_table".into(), Value::String(table_name)),
+                    ("database_schema".into(), Value::String(schema)),
+                    ("explicit".into(), Value::Bool(true)),
+                    (
+                        "pack_id".into(),
+                        Value::String("sqlalchemy-python".to_owned()),
+                    ),
+                ]),
+            }));
+        }
+    }
+    facts
+}
+
+fn python_direct_descendants_of(
+    evidence: &SemanticEvidenceBatch,
+    exact_bases: &[&str],
+) -> BTreeSet<String> {
+    evidence
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Extends)
+        .filter(|candidate| {
+            candidate
+                .constraints
+                .qualified_name
+                .as_deref()
+                .is_some_and(|target| exact_bases.contains(&target))
+                || exact_candidate_binding_target(evidence, candidate.binding_id.as_deref())
+                    .is_some_and(|target| exact_bases.contains(&target))
+        })
+        .map(|candidate| candidate.source_declaration_id.clone())
+        .collect()
+}
+
+fn sqlalchemy_model_field_facts(
+    definition: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    model: &DeclarationFact,
+    models: &BTreeSet<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) -> Vec<Value> {
+    let Some(body) = definition.child_by_field_name("body") else {
+        return Vec::new();
+    };
+    let mut fields = Vec::new();
+    let mut cursor = body.walk();
+    for assignment in body
+        .children(&mut cursor)
+        .filter(|child| matches!(child.kind(), "assignment" | "annotated_assignment"))
+    {
+        let (Some(name), Some(value)) = (
+            assignment.child_by_field_name("left"),
+            assignment.child_by_field_name("right"),
+        ) else {
+            continue;
+        };
+        if name.kind() != "identifier" || value.kind() != "call" {
+            continue;
+        }
+        let Some(function) = value.child_by_field_name("function") else {
+            continue;
+        };
+        let Some(constructor) = exact_static_reference_in_scope(
+            context.evidence,
+            function,
+            context.source,
+            model.scope_id.as_deref(),
+        ) else {
+            continue;
+        };
+        if !matches!(
+            constructor.as_str(),
+            "sqlalchemy.orm.mapped_column" | "sqlalchemy.orm.relationship"
+        ) {
+            continue;
+        }
+        let field_name = node_text(name, context.source).to_owned();
+        let mut detail = Map::from_iter([
+            ("name".into(), Value::String(field_name.clone())),
+            ("constructor".into(), Value::String(constructor.clone())),
+            (
+                "anchor".into(),
+                serde_json::to_value(anchor(context.path, assignment)).unwrap_or(Value::Null),
+            ),
+        ]);
+        if let Some(annotation) = assignment.child_by_field_name("type")
+            && node_contains_exact_reference(
+                annotation,
+                context,
+                model.scope_id.as_deref(),
+                "sqlalchemy.orm.Mapped",
+            )
+        {
+            detail.insert(
+                "annotation".into(),
+                Value::String(node_text(annotation, context.source).to_owned()),
+            );
+        }
+        if constructor == "sqlalchemy.orm.mapped_column"
+            && let Some(foreign_key) =
+                find_exact_call(value, context.evidence, "sqlalchemy.ForeignKey")
+            && let Some(target) = call_argument_node(foreign_key, context.source, 0, "column")
+                .and_then(|target| string_literal(node_text(target, context.source)))
+        {
+            detail.insert("foreign_key".into(), Value::String(target));
+        }
+        if constructor == "sqlalchemy.orm.relationship"
+            && let Some(target) = call_argument_node(value, context.source, 0, "argument")
+                .and_then(|target_node| {
+                    exact_python_lexical_reference_evidence(
+                        context.evidence,
+                        target_node,
+                        context.source,
+                    )
+                })
+                .or_else(|| {
+                    assignment
+                        .child_by_field_name("type")
+                        .and_then(|annotation| {
+                            exact_sqlalchemy_annotation_model(annotation, context, models)
+                        })
+                })
+            && let Some(declaration) = unique_declaration_for_reference(context.evidence, &target)
+            && models.contains(declaration.id.as_str())
+        {
+            detail.insert(
+                "target_reference".into(),
+                Value::String(declaration.graph_node_id.clone()),
+            );
+            append_exact_framework_relation(
+                facts,
+                "sqlalchemy-python",
+                "sqlalchemy",
+                model,
+                &declaration.graph_node_id,
+                &format!("relationship:{field_name}"),
+                anchor(context.path, assignment),
+                context.evidence,
+            );
+        }
+        fields.push(Value::Object(detail));
+    }
+    fields
+}
+
+fn exact_sqlalchemy_annotation_model(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    models: &BTreeSet<String>,
+) -> Option<String> {
+    let mut targets = BTreeSet::new();
+    collect_exact_sqlalchemy_annotation_models(node, context, models, &mut targets);
+    (targets.len() == 1)
+        .then(|| targets.first().cloned())
+        .flatten()
+}
+
+fn collect_exact_sqlalchemy_annotation_models(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    models: &BTreeSet<String>,
+    targets: &mut BTreeSet<String>,
+) {
+    if node.kind() == "identifier"
+        && let Some(reference) =
+            exact_python_lexical_reference_evidence(context.evidence, node, context.source)
+        && let Some(declaration) = unique_declaration_for_reference(context.evidence, &reference)
+        && models.contains(declaration.id.as_str())
+    {
+        targets.insert(declaration.graph_node_id.clone());
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_exact_sqlalchemy_annotation_models(child, context, models, targets);
+    }
+}
+
+fn node_contains_exact_reference(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    scope_id: Option<&str>,
+    expected: &str,
+) -> bool {
+    if exact_static_reference_in_scope(context.evidence, node, context.source, scope_id).as_deref()
+        == Some(expected)
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .any(|child| node_contains_exact_reference(child, context, scope_id, expected))
+}
+
+fn collect_celery_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    let receivers = receiver_declarations(context);
+    let mut facts = Vec::new();
+    let mut tasks = Vec::new();
+    collect_celery_task_declarations(context.root, context, &receivers, &mut tasks, &mut facts);
+    collect_celery_invocations(context.root, context, &receivers, &tasks, &mut facts);
+    collect_celery_beat_schedules(context.root, context, &receivers, &mut facts);
+    tasks.sort_by(|left, right| left.declaration_id.cmp(&right.declaration_id));
+    tasks.dedup_by(|left, right| left.declaration_id == right.declaration_id);
+    facts
+}
+
+fn collect_celery_task_declarations(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    tasks: &mut Vec<CeleryTask>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "decorated_definition"
+        && let Some(definition) = named_child_of_kind(node, "function_definition")
+        && let Some(name) = definition.child_by_field_name("name")
+        && let Some(handler) = context.evidence.declarations.iter().find(|declaration| {
+            matches!(declaration.kind.as_str(), "function" | "method")
+                && declaration.range.start_byte == name.start_byte() as u64
+                && declaration.range.end_byte == name.end_byte() as u64
+        })
+    {
+        let mut cursor = node.walk();
+        for decorator in node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "decorator")
+        {
+            let Some((call, bind)) = exact_celery_task_decorator(decorator, context, receivers)
+            else {
+                continue;
+            };
+            let configured_name = call
+                .and_then(|call| keyword_argument_node(call, "name", context.source))
+                .and_then(|value| string_literal(node_text(value, context.source)));
+            let queue = call
+                .and_then(|call| keyword_argument_node(call, "queue", context.source))
+                .and_then(|value| string_literal(node_text(value, context.source)));
+            let task_name = configured_name.unwrap_or_else(|| handler.qualified_name.clone());
+            let mut detail = Map::from_iter([
+                (
+                    "handler_reference".into(),
+                    Value::String(handler.graph_node_id.clone()),
+                ),
+                ("pack_id".into(), Value::String("celery-python".to_owned())),
+                ("bind".into(), Value::Bool(bind)),
+            ]);
+            if let Some(queue) = &queue {
+                detail.insert("queue".into(), Value::String(queue.clone()));
+            }
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "celery".to_owned(),
+                kind: "job".to_owned(),
+                name: task_name.clone(),
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, decorator),
+                origin: RawFrameworkOrigin::Ast,
+                detail,
+            }));
+            facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+                pack_id: "celery-python".to_owned(),
+                framework: "celery".to_owned(),
+                role: "consumer".to_owned(),
+                subject_reference: Some(handler.graph_node_id.clone()),
+                context: Some("task".to_owned()),
+                anchor: anchor(context.path, decorator),
+                origin: RawFrameworkOrigin::Ast,
+                evidence_class: "exact".to_owned(),
+                detail: Map::from_iter([
+                    ("task_name".into(), Value::String(task_name)),
+                    ("bind".into(), Value::Bool(bind)),
+                ]),
+            }));
+            if let Some(queue) = queue {
+                facts.push(celery_queue_fact(
+                    context,
+                    decorator,
+                    &queue,
+                    &handler.graph_node_id,
+                    "consumes",
+                ));
+            }
+            let task = CeleryTask {
+                declaration_id: handler.id.clone(),
+                graph_node_id: handler.graph_node_id.clone(),
+                bind,
+            };
+            if bind {
+                collect_celery_retry_facts(definition, context, &task, facts);
+            }
+            tasks.push(task);
+            break;
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_celery_task_declarations(child, context, receivers, tasks, facts);
+    }
+}
+
+fn exact_celery_task_decorator<'tree>(
+    decorator: Node<'tree>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+) -> Option<(Option<Node<'tree>>, bool)> {
+    let expression = decorator.named_child(0)?;
+    if expression.kind() == "call" {
+        let function = expression.child_by_field_name("function")?;
+        let scope = reference_evaluation_scope(context.evidence, function, false);
+        if exact_static_reference_in_scope(context.evidence, function, context.source, scope)
+            .as_deref()
+            == Some("celery.shared_task")
+        {
+            let bind = call_arguments(expression, context.source)
+                .and_then(|arguments| {
+                    keyword_value(&arguments, "bind").and_then(static_python_bool)
+                })
+                .unwrap_or(false);
+            return Some((Some(expression), bind));
+        }
+        if function.kind() == "attribute"
+            && function
+                .child_by_field_name("attribute")
+                .is_some_and(|attribute| node_text(attribute, context.source) == "task")
+            && let Some(object) = function.child_by_field_name("object")
+            && let Some(receiver) = receiver_at(
+                receivers,
+                context.evidence,
+                node_text(object, context.source),
+                function.start_byte() as u64,
+            )
+            && receiver.framework == "celery"
+        {
+            let bind = call_arguments(expression, context.source)
+                .and_then(|arguments| {
+                    keyword_value(&arguments, "bind").and_then(static_python_bool)
+                })
+                .unwrap_or(false);
+            return Some((Some(expression), bind));
+        }
+        return None;
+    }
+    let scope = reference_evaluation_scope(context.evidence, expression, false);
+    (exact_static_reference_in_scope(context.evidence, expression, context.source, scope)
+        .as_deref()
+        == Some("celery.shared_task"))
+    .then_some((None, false))
+}
+
+fn collect_celery_invocations(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    tasks: &[CeleryTask],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && function.kind() == "attribute"
+        && exact_occurrence(context.evidence, SemanticRole::Call, function).is_some()
+        && let (Some(object), Some(member)) = (
+            function.child_by_field_name("object"),
+            function.child_by_field_name("attribute"),
+        )
+    {
+        let member = node_text(member, context.source);
+        if matches!(member, "delay" | "apply_async" | "s" | "si" | "signature")
+            && let Some(task) = exact_celery_task_reference(object, context, tasks)
+            && let Some(owner) = call_owner_declaration(function, context.evidence)
+        {
+            let relation_context = if matches!(member, "s" | "si" | "signature") {
+                celery_canvas_context(node, context)
+                    .unwrap_or_else(|| format!("signature:{member}"))
+            } else {
+                format!("invocation:{member}")
+            };
+            let mut detail =
+                Map::from_iter([("invocation".into(), Value::String(member.to_owned()))]);
+            let queue = keyword_argument_node(node, "queue", context.source)
+                .and_then(|value| string_literal(node_text(value, context.source)));
+            if let Some(queue) = &queue {
+                detail.insert("queue".into(), Value::String(queue.clone()));
+            }
+            append_celery_trigger_relation(
+                facts,
+                context,
+                owner,
+                task,
+                &relation_context,
+                node,
+                detail,
+            );
+            if let Some(queue) = queue {
+                facts.push(celery_queue_fact(
+                    context,
+                    node,
+                    &queue,
+                    &owner.graph_node_id,
+                    "produces",
+                ));
+            }
+        } else if member == "send_task"
+            && let Some(receiver) = receiver_at(
+                receivers,
+                context.evidence,
+                node_text(object, context.source),
+                function.start_byte() as u64,
+            )
+            && receiver.framework == "celery"
+            && let Some(task_name) = call_argument_node(node, context.source, 0, "name")
+                .and_then(|value| string_literal(node_text(value, context.source)))
+            && let Some(owner) = call_owner_declaration(function, context.evidence)
+        {
+            let queue = keyword_argument_node(node, "queue", context.source)
+                .and_then(|value| string_literal(node_text(value, context.source)));
+            let mut detail = Map::from_iter([
+                ("transport".into(), Value::String("celery".to_owned())),
+                ("subject".into(), Value::String(task_name.clone())),
+                (
+                    "handler_reference".into(),
+                    Value::String(owner.graph_node_id.clone()),
+                ),
+                ("relationship".into(), Value::String("produces".to_owned())),
+                ("pack_id".into(), Value::String("celery-python".to_owned())),
+            ]);
+            if let Some(queue) = &queue {
+                detail.insert("queue".into(), Value::String(queue.clone()));
+            }
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "celery".to_owned(),
+                kind: "message".to_owned(),
+                name: task_name,
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, node),
+                origin: RawFrameworkOrigin::Ast,
+                detail,
+            }));
+            if let Some(queue) = queue {
+                facts.push(celery_queue_fact(
+                    context,
+                    node,
+                    &queue,
+                    &owner.graph_node_id,
+                    "produces",
+                ));
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_celery_invocations(child, context, receivers, tasks, facts);
+    }
+}
+
+fn exact_celery_task_reference<'a>(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    tasks: &'a [CeleryTask],
+) -> Option<&'a CeleryTask> {
+    let reference = exact_python_lexical_reference(context, node)?;
+    let mut matches = tasks
+        .iter()
+        .filter(|task| task.graph_node_id == reference || task.declaration_id == reference);
+    let task = matches.next()?;
+    matches.next().is_none().then_some(task)
+}
+
+fn call_owner_declaration<'a>(
+    function: Node<'_>,
+    evidence: &'a SemanticEvidenceBatch,
+) -> Option<&'a DeclarationFact> {
+    let occurrence = exact_occurrence(evidence, SemanticRole::Call, function)?;
+    let mut matches = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.id == occurrence.owner_declaration_id);
+    let owner = matches.next()?;
+    matches.next().is_none().then_some(owner)
+}
+
+fn celery_canvas_context(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if matches!(parent.kind(), "function_definition" | "class_definition") {
+            break;
+        }
+        if parent.kind() == "call"
+            && let Some(function) = parent.child_by_field_name("function")
+            && let Some(target) = exact_call_target_in_scope(function, context)
+            && matches!(
+                target.as_str(),
+                "celery.chain" | "celery.group" | "celery.chord"
+            )
+        {
+            return Some(format!(
+                "canvas:{}",
+                target.rsplit('.').next().unwrap_or_default()
+            ));
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+fn exact_call_target_in_scope(
+    function: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+) -> Option<String> {
+    exact_python_lexical_reference(context, function)
+}
+
+fn exact_python_lexical_reference(
+    context: &UniversalDetectionContext<'_, '_>,
+    node: Node<'_>,
+) -> Option<String> {
+    exact_python_lexical_reference_evidence(context.evidence, node, context.source)
+}
+
+fn exact_python_lexical_reference_evidence(
+    evidence: &SemanticEvidenceBatch,
+    node: Node<'_>,
+    source: &[u8],
+) -> Option<String> {
+    let reference = node_text(node, source).trim();
+    if !is_identifier(reference) {
+        return None;
+    }
+    let mut scope = reference_evaluation_scope(evidence, node, false);
+    while let Some(scope_id) = scope {
+        let declarations = evidence
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.name == reference
+                    && declaration.range.start_byte < node.start_byte() as u64
+                    && declaration.scope_id.as_deref() == Some(scope_id)
+            })
+            .collect::<Vec<_>>();
+        let bindings = evidence
+            .bindings
+            .iter()
+            .filter(|binding| {
+                matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                    && binding.spelling == reference
+                    && binding.range.end_byte <= node.start_byte() as u64
+                    && binding.scope_id.as_deref() == Some(scope_id)
+            })
+            .collect::<Vec<_>>();
+        if !declarations.is_empty() || !bindings.is_empty() {
+            return match (declarations.as_slice(), bindings.as_slice()) {
+                ([declaration], [])
+                    if matches!(declaration.kind.as_str(), "function" | "method" | "class")
+                        && !has_intervening_python_rebinding(
+                            context_root(node),
+                            declaration,
+                            reference,
+                            node.start_byte() as u64,
+                            source,
+                        ) =>
+                {
+                    Some(declaration.graph_node_id.clone())
+                }
+                ([], [binding])
+                    if !has_intervening_python_name_binding(
+                        context_root(node),
+                        reference,
+                        binding.range.end_byte,
+                        node.start_byte() as u64,
+                        source,
+                    ) =>
+                {
+                    Some(binding.qualified_target.clone())
+                }
+                _ => None,
+            };
+        }
+        scope = evidence
+            .scopes
+            .iter()
+            .find(|candidate| candidate.id == scope_id)
+            .and_then(|candidate| candidate.parent_scope_id.as_deref());
+    }
+    None
+}
+
+fn append_celery_trigger_relation(
+    facts: &mut Vec<RawFrameworkFact>,
+    context: &UniversalDetectionContext<'_, '_>,
+    source: &DeclarationFact,
+    target: &CeleryTask,
+    relation_context: &str,
+    node: Node<'_>,
+    detail: Map<String, Value>,
+) {
+    let target_anchor = context
+        .evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.id == target.declaration_id)
+        .map(|declaration| evidence_anchor(&declaration.range));
+    facts.push(RawFrameworkFact::Relation(RawFrameworkRelationFact {
+        pack_id: "celery-python".to_owned(),
+        framework: "celery".to_owned(),
+        relation: "triggers".to_owned(),
+        source_reference: Some(source.graph_node_id.clone()),
+        target_hint: Some(target.graph_node_id.clone()),
+        context: Some(relation_context.to_owned()),
+        anchor: anchor(context.path, node),
+        target_anchor,
+        origin: RawFrameworkOrigin::Ast,
+        evidence_class: "exact".to_owned(),
+        ambiguity_policy: "require_exact".to_owned(),
+        detail,
+    }));
+}
+
+fn celery_queue_fact(
+    context: &UniversalDetectionContext<'_, '_>,
+    node: Node<'_>,
+    queue: &str,
+    handler_reference: &str,
+    relationship: &str,
+) -> RawFrameworkFact {
+    RawFrameworkFact::Domain(RawDomainFact {
+        framework: "celery".to_owned(),
+        kind: "queue".to_owned(),
+        name: queue.to_owned(),
+        declaring_scope: module_scope(context.path),
+        anchor: anchor(context.path, node),
+        origin: RawFrameworkOrigin::Ast,
+        detail: Map::from_iter([
+            ("transport".into(), Value::String("celery".to_owned())),
+            ("subject".into(), Value::String(queue.to_owned())),
+            (
+                "handler_reference".into(),
+                Value::String(handler_reference.to_owned()),
+            ),
+            (
+                "relationship".into(),
+                Value::String(relationship.to_owned()),
+            ),
+            ("pack_id".into(), Value::String("celery-python".to_owned())),
+        ]),
+    })
+}
+
+fn collect_celery_retry_facts(
+    definition: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    task: &CeleryTask,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if !task.bind {
+        return;
+    }
+    let Some(parameters) = definition.child_by_field_name("parameters") else {
+        return;
+    };
+    let Some((receiver_name, receiver_binding_end)) = first_parameter(parameters, context.source)
+    else {
+        return;
+    };
+    collect_celery_retry_nodes(
+        definition,
+        definition,
+        context,
+        task,
+        &receiver_name,
+        receiver_binding_end,
+        facts,
+    );
+}
+
+fn collect_celery_retry_nodes(
+    root: Node<'_>,
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    task: &CeleryTask,
+    receiver_name: &str,
+    receiver_binding_end: u64,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.id() != root.id() && matches!(node.kind(), "function_definition" | "class_definition") {
+        return;
+    }
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && function.kind() == "attribute"
+        && function
+            .child_by_field_name("object")
+            .is_some_and(|object| node_text(object, context.source) == receiver_name)
+        && function
+            .child_by_field_name("attribute")
+            .is_some_and(|member| node_text(member, context.source) == "retry")
+        && !has_python_name_binding_between(
+            definition_body(root).unwrap_or(root),
+            receiver_name,
+            receiver_binding_end,
+            function.start_byte() as u64,
+            context.source,
+        )
+        && let Some(source) = context
+            .evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == task.declaration_id)
+    {
+        append_celery_trigger_relation(
+            facts,
+            context,
+            source,
+            task,
+            "retry",
+            node,
+            Map::from_iter([("invocation".into(), Value::String("retry".to_owned()))]),
+        );
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_celery_retry_nodes(
+            root,
+            child,
+            context,
+            task,
+            receiver_name,
+            receiver_binding_end,
+            facts,
+        );
+    }
+}
+
+fn first_parameter(parameters: Node<'_>, source: &[u8]) -> Option<(String, u64)> {
+    let mut cursor = parameters.walk();
+    for parameter in parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if parameter.kind() == "identifier" {
+            return Some((
+                node_text(parameter, source).to_owned(),
+                parameter.end_byte() as u64,
+            ));
+        }
+        if let Some(name) = parameter.child_by_field_name("name")
+            && name.kind() == "identifier"
+        {
+            return Some((node_text(name, source).to_owned(), name.end_byte() as u64));
+        }
+    }
+    None
+}
+
+fn definition_body(definition: Node<'_>) -> Option<Node<'_>> {
+    definition.child_by_field_name("body")
+}
+
+fn has_python_name_binding_between(
+    node: Node<'_>,
+    reference: &str,
+    binding_end: u64,
+    use_start: u64,
+    source: &[u8],
+) -> bool {
+    if node.end_byte() as u64 <= binding_end || node.start_byte() as u64 >= use_start {
+        return false;
+    }
+    if matches!(
+        node.kind(),
+        "function_definition" | "class_definition" | "decorated_definition"
+    ) {
+        return false;
+    }
+    if node.start_byte() as u64 > binding_end
+        && node.end_byte() as u64 <= use_start
+        && crate::engine::python_bound_names(node, source, true).contains(reference)
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .any(|child| {
+            has_python_name_binding_between(child, reference, binding_end, use_start, source)
+        })
+}
+
+fn collect_celery_beat_schedules(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "assignment"
+        && let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        )
+        && right.kind() == "dictionary"
+        && let Some(receiver_name) =
+            node_text(left, context.source).strip_suffix(".conf.beat_schedule")
+        && is_identifier(receiver_name)
+        && let Some(receiver) = receiver_at(
+            receivers,
+            context.evidence,
+            receiver_name,
+            left.start_byte() as u64,
+        )
+        && receiver.framework == "celery"
+    {
+        let mut cursor = right.walk();
+        for pair in right
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "pair")
+        {
+            let (Some(key), Some(value)) = (
+                pair.child_by_field_name("key"),
+                pair.child_by_field_name("value"),
+            ) else {
+                continue;
+            };
+            let Some(schedule_name) = string_literal(node_text(key, context.source)) else {
+                continue;
+            };
+            let Some(task_node) = dictionary_value_node(value, "task", context.source) else {
+                continue;
+            };
+            let Some(task_name) = string_literal(node_text(task_node, context.source)) else {
+                continue;
+            };
+            let Some(schedule_node) = dictionary_value_node(value, "schedule", context.source)
+            else {
+                continue;
+            };
+            let Some(schedule) = exact_celery_schedule_value(schedule_node, context) else {
+                continue;
+            };
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "celery".to_owned(),
+                kind: "job".to_owned(),
+                name: schedule_name,
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, pair),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([
+                    ("scheduled_task".into(), Value::String(task_name)),
+                    ("schedule".into(), Value::String(schedule)),
+                    ("pack_id".into(), Value::String("celery-python".to_owned())),
+                ]),
+            }));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_celery_beat_schedules(child, context, receivers, facts);
+    }
+}
+
+fn dictionary_value_node<'tree>(
+    dictionary: Node<'tree>,
+    key: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
+    if dictionary.kind() != "dictionary" {
+        return None;
+    }
+    let mut cursor = dictionary.walk();
+    let mut matches = dictionary.children(&mut cursor).filter_map(|pair| {
+        if pair.kind() != "pair" {
+            return None;
+        }
+        let pair_key = pair.child_by_field_name("key")?;
+        (string_literal(node_text(pair_key, source)).as_deref() == Some(key))
+            .then(|| pair.child_by_field_name("value"))
+            .flatten()
+    });
+    let value = matches.next()?;
+    matches.next().is_none().then_some(value)
+}
+
+fn exact_celery_schedule_value(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+) -> Option<String> {
+    if matches!(node.kind(), "integer" | "float" | "string") {
+        return Some(node_text(node, context.source).to_owned());
+    }
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(target) = exact_call_target_in_scope(function, context)
+        && matches!(
+            target.as_str(),
+            "celery.schedules.crontab" | "celery.schedules.solar"
+        )
+    {
+        return Some(node_text(node, context.source).to_owned());
+    }
+    None
+}
+
+fn collect_flask_receiver_stages(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &mut [Receiver],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "decorated_definition" {
+        let mut cursor = node.walk();
+        for decorator in node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "decorator")
+        {
+            let Some(occurrence) =
+                exact_occurrence(context.evidence, SemanticRole::Decorator, decorator)
+            else {
+                continue;
+            };
+            let Some(handler) = context
+                .evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.id == occurrence.owner_declaration_id)
+            else {
+                continue;
+            };
+            let expression = decorator.named_child(0);
+            let (function, arguments) = if let Some(expression) = expression
+                && expression.kind() == "call"
+            {
+                (
+                    expression.child_by_field_name("function"),
+                    call_arguments(expression, context.source),
+                )
+            } else {
+                (expression, Some(Vec::new()))
+            };
+            let (Some(function), Some(arguments)) = (function, arguments) else {
+                continue;
+            };
+            let Some((receiver_name, hook)) = node_text(function, context.source).rsplit_once('.')
+            else {
+                continue;
+            };
+            let Some(receiver) = receiver_at(
+                receivers,
+                context.evidence,
+                receiver_name,
+                decorator.start_byte() as u64,
+            ) else {
+                continue;
+            };
+            if receiver.framework != "flask" {
+                continue;
+            }
+            let receiver_id = receiver.declaration_id.clone();
+            let role = match hook {
+                "before_request"
+                | "before_app_request"
+                | "after_request"
+                | "after_app_request"
+                | "teardown_request"
+                | "teardown_app_request" => RawRouteStageRole::Middleware,
+                "errorhandler" | "app_errorhandler" => {
+                    if positional_argument(&arguments, 0)
+                        .filter(|value| static_flask_error_code(value))
+                        .is_none()
+                    {
+                        continue;
+                    }
+                    RawRouteStageRole::ErrorBoundary
+                }
+                _ => continue,
+            };
+            append_flask_hook_stage(
+                receivers,
+                &receiver_id,
+                handler,
+                hook,
+                role,
+                anchor(context.path, decorator),
+                facts,
+            );
+        }
+    }
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && exact_occurrence(context.evidence, SemanticRole::Call, function).is_some()
+        && let Some((receiver_name, hook)) = node_text(function, context.source).rsplit_once('.')
+        && let Some(receiver) = receiver_at(
+            receivers,
+            context.evidence,
+            receiver_name,
+            node.start_byte() as u64,
+        )
+        && receiver.framework == "flask"
+    {
+        let receiver_id = receiver.declaration_id.clone();
+        let handler_position = match hook {
+            "before_request" | "after_request" | "teardown_request" => 0,
+            "register_error_handler" => 1,
+            _ => usize::MAX,
+        };
+        if handler_position != usize::MAX
+            && (hook != "register_error_handler"
+                || call_argument_node(node, context.source, 0, "code_or_exception")
+                    .is_some_and(|value| static_flask_error_code(node_text(value, context.source))))
+            && let Some(handler_node) =
+                call_argument_node(node, context.source, handler_position, "f")
+            && let Some(handler) = exact_reference_declaration(context.evidence, handler_node)
+        {
+            let role = if hook == "register_error_handler" {
+                RawRouteStageRole::ErrorBoundary
+            } else {
+                RawRouteStageRole::Middleware
+            };
+            append_flask_hook_stage(
+                receivers,
+                &receiver_id,
+                handler,
+                hook,
+                role,
+                anchor(context.path, node),
+                facts,
+            );
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_flask_receiver_stages(child, context, receivers, facts);
+    }
+}
+
+fn append_flask_hook_stage(
+    receivers: &mut [Receiver],
+    receiver_id: &str,
+    handler: &DeclarationFact,
+    hook: &str,
+    role: RawRouteStageRole,
+    hook_anchor: RawFrameworkAnchor,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let Some(receiver) = receivers
+        .iter_mut()
+        .find(|receiver| receiver.declaration_id == receiver_id)
+    else {
+        return;
+    };
+    receiver.stages.push(RawRouteStageFact {
+        role,
+        position: u32::try_from(receiver.stages.len()).unwrap_or(u32::MAX),
+        reference: handler.graph_node_id.clone(),
+        anchor: hook_anchor.clone(),
+        origin: RawFrameworkOrigin::Ast,
+        detail: Map::from_iter([("hook".into(), Value::String(hook.to_owned()))]),
+    });
+    facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+        pack_id: "flask-python".to_owned(),
+        framework: "flask".to_owned(),
+        role: "hook".to_owned(),
+        subject_reference: Some(handler.graph_node_id.clone()),
+        context: Some(hook.to_owned()),
+        anchor: hook_anchor,
+        origin: RawFrameworkOrigin::Ast,
+        evidence_class: "exact".to_owned(),
+        detail: Map::from_iter([("receiver_id".into(), Value::String(receiver_id.to_owned()))]),
+    }));
+}
+
+fn static_flask_error_code(value: &str) -> bool {
+    let value = value.trim();
+    value.parse::<u16>().is_ok() || string_literal(value).is_some()
+}
+
+fn collect_flask_factory_roles(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "function_definition"
+        && let Some(name) = node.child_by_field_name("name")
+        && let Some(factory) = context.evidence.declarations.iter().find(|declaration| {
+            declaration.kind == "function"
+                && declaration.range.start_byte == name.start_byte() as u64
+                && declaration.range.end_byte == name.end_byte() as u64
+        })
+        && let Some(body) = node.child_by_field_name("body")
+    {
+        let mut cursor = body.walk();
+        let returned = body
+            .children(&mut cursor)
+            .filter(|statement| statement.kind() == "return_statement")
+            .filter_map(|statement| statement.named_child(0).map(|value| (statement, value)))
+            .filter_map(|(statement, value)| {
+                receiver_at(
+                    receivers,
+                    context.evidence,
+                    node_text(value, context.source),
+                    statement.start_byte() as u64,
+                )
+                .filter(|receiver| receiver.framework == "flask")
+                .map(|receiver| (statement, receiver))
+            })
+            .collect::<Vec<_>>();
+        if let [(statement, receiver)] = returned.as_slice() {
+            facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+                pack_id: "flask-python".to_owned(),
+                framework: "flask".to_owned(),
+                role: "service".to_owned(),
+                subject_reference: Some(factory.graph_node_id.clone()),
+                context: Some("application_factory".to_owned()),
+                anchor: anchor(context.path, *statement),
+                origin: RawFrameworkOrigin::Ast,
+                evidence_class: "exact".to_owned(),
+                detail: Map::from_iter([(
+                    "receiver_id".into(),
+                    Value::String(receiver.declaration_id.clone()),
+                )]),
+            }));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if child.kind() != "function_definition" || node.kind() != "function_definition" {
+            collect_flask_factory_roles(child, context, receivers, facts);
+        }
+    }
 }
 
 fn detect_universal(
@@ -117,7 +1335,10 @@ fn detect_universal(
         );
         collect_imported_django_pattern_routes(context.path, &flow, &mut facts);
     } else {
-        let receivers = receiver_declarations(context);
+        let mut receivers = receiver_declarations(context);
+        if framework == PythonFramework::Flask {
+            collect_flask_receiver_stages(context.root, context, &mut receivers, &mut facts);
+        }
         collect_receiver_mount_facts(
             context.root,
             context.source,
@@ -1107,6 +2328,30 @@ fn collect_django_model_facts(
                 ("fields".into(), Value::Array(fields)),
             ]),
         }));
+        if let Some(meta) = direct_nested_class(definition, "Meta", context.source)
+            && let Some(table_node) =
+                direct_class_assignment_value(meta, "db_table", context.source)
+            && let Some(table_name) = string_literal(node_text(table_node, context.source))
+        {
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "django-orm".to_owned(),
+                kind: "orm_mapping".to_owned(),
+                name: model.name.clone(),
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, table_node),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([
+                    (
+                        "model_reference".into(),
+                        Value::String(model.graph_node_id.clone()),
+                    ),
+                    ("database_table".into(), Value::String(table_name)),
+                    ("database_schema".into(), Value::String(String::new())),
+                    ("explicit".into(), Value::Bool(true)),
+                    ("pack_id".into(), Value::String("django-python".to_owned())),
+                ]),
+            }));
+        }
         collect_django_model_relationships(definition, context, model, &models, &managers, facts);
     }
 }
@@ -1550,6 +2795,12 @@ fn collect_decorated_routes(
                             Value::String(mount_prefix.to_owned()),
                         ),
                     ]);
+                    append_flask_implicit_methods(
+                        &mut detail,
+                        receiver.framework,
+                        operation,
+                        &arguments,
+                    );
                     if let Some(mount) = mount {
                         detail.insert(
                             "mounted_receiver_id".into(),
@@ -1637,9 +2888,41 @@ fn collect_imperative_routes(
             ("fastapi", "add_api_websocket_route") | ("starlette", "add_websocket_route") => {
                 vec!["WEBSOCKET".to_owned()]
             }
+            ("flask", "add_url_rule") => operations("flask", method, &arguments),
             _ => Vec::new(),
         };
-        if !operations.is_empty()
+        if receiver.framework == "flask"
+            && method == "add_url_rule"
+            && let Some(raw_path) = positional_argument(&arguments, 0)
+                .and_then(string_literal)
+                .or_else(|| keyword_string(&arguments, "rule"))
+            && let Some(handler_node) = call_argument_node(node, source, 2, "view_func")
+            && let Some((handler, inferred_operations)) =
+                exact_flask_view_declaration(handler_node, source, evidence)
+        {
+            let operations = if keyword_value(&arguments, "methods").is_some() {
+                operations.clone()
+            } else {
+                inferred_operations.unwrap_or_else(|| operations.clone())
+            };
+            if !operations.is_empty() {
+                push_receiver_route_facts(
+                    facts,
+                    path,
+                    source,
+                    evidence,
+                    receiver,
+                    local_mounts,
+                    node,
+                    &raw_path,
+                    &operations,
+                    &handler.graph_node_id,
+                    Some(handler),
+                    Vec::new(),
+                    &arguments,
+                );
+            }
+        } else if !operations.is_empty()
             && let Some(raw_path) = positional_argument(&arguments, 0)
                 .and_then(string_literal)
                 .or_else(|| keyword_string(&arguments, "path"))
@@ -1696,6 +2979,59 @@ fn collect_imperative_routes(
             facts,
         );
     }
+}
+
+fn exact_flask_view_declaration<'a>(
+    node: Node<'_>,
+    source: &[u8],
+    evidence: &'a SemanticEvidenceBatch,
+) -> Option<(&'a DeclarationFact, Option<Vec<String>>)> {
+    if let Some(reference) = exact_python_lexical_reference_evidence(evidence, node, source)
+        && let Some(handler) = unique_declaration_for_reference(evidence, &reference)
+        && matches!(handler.kind.as_str(), "function" | "method")
+    {
+        return Some((handler, None));
+    }
+    if node.kind() != "call" {
+        return None;
+    }
+    let function = node.child_by_field_name("function")?;
+    if function.kind() != "attribute"
+        || function
+            .child_by_field_name("attribute")
+            .is_none_or(|member| node_text(member, source) != "as_view")
+        || exact_occurrence(evidence, SemanticRole::Call, function).is_none()
+    {
+        return None;
+    }
+    let view_node = function.child_by_field_name("object")?;
+    let view_reference = exact_python_lexical_reference_evidence(evidence, view_node, source)?;
+    let view = unique_declaration_for_reference(evidence, &view_reference)?;
+    let method_views = python_descendants_of(evidence, &["flask.views.MethodView"]);
+    if !method_views.contains(view.id.as_str()) {
+        return None;
+    }
+    let view_scope = evidence
+        .scopes
+        .iter()
+        .find(|scope| scope.owner_declaration_id.as_deref() == Some(view.id.as_str()))
+        .map(|scope| scope.id.as_str());
+    let mut operations = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.kind == "method" && declaration.scope_id.as_deref() == view_scope
+        })
+        .filter_map(|declaration| match declaration.name.as_str() {
+            "get" | "post" | "put" | "patch" | "delete" | "options" | "head" => {
+                Some(declaration.name.to_ascii_uppercase())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    operations.sort();
+    operations.dedup();
+    (!operations.is_empty()).then_some((view, Some(operations)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1966,6 +3302,7 @@ fn push_receiver_route_facts(
                     Value::String(mount_prefix.to_owned()),
                 ),
             ]);
+            append_flask_implicit_methods(&mut detail, receiver.framework, operation, arguments);
             if let Some(mount) = mount {
                 detail.insert(
                     "mounted_receiver_id".into(),
@@ -2018,18 +3355,16 @@ fn collect_receiver_mount_facts(
         let function_text = node_text(function, source);
         let method = function_text.rsplit('.').next().unwrap_or(function_text);
         let mount_arguments = match method {
-            "include_router" => positional_argument(&arguments, 0).map(|target| {
-                (
-                    target,
-                    keyword_string(&arguments, "prefix").unwrap_or_default(),
-                )
+            "include_router" => optional_literal_keyword(&arguments, "prefix").and_then(|prefix| {
+                positional_argument(&arguments, 0)
+                    .map(|target| (target, prefix.unwrap_or_default()))
             }),
-            "register_blueprint" => positional_argument(&arguments, 0).map(|target| {
-                (
-                    target,
-                    keyword_string(&arguments, "url_prefix").unwrap_or_default(),
-                )
-            }),
+            "register_blueprint" => {
+                optional_literal_keyword(&arguments, "url_prefix").and_then(|prefix| {
+                    positional_argument(&arguments, 0)
+                        .map(|target| (target, prefix.unwrap_or_default()))
+                })
+            }
             "mount" => positional_argument(&arguments, 1)
                 .or_else(|| keyword_value(&arguments, "app"))
                 .zip(positional_argument(&arguments, 0).and_then(string_literal)),
@@ -2144,49 +3479,100 @@ fn collect_receivers(
     receivers: &mut Vec<Receiver>,
 ) {
     if node.kind() == "assignment"
-        && node
-            .parent()
-            .is_some_and(|parent| parent.kind() == "module")
         && let (Some(left), Some(right)) = (
             node.child_by_field_name("left"),
             node.child_by_field_name("right"),
         )
         && left.kind() == "identifier"
-        && right.kind() == "call"
-        && let Some(function) = right.child_by_field_name("function")
-        && let Some(constructor) = exact_call_target(evidence, function)
-        && let Some((framework, prefix_key)) = match constructor.as_str() {
-            "flask.Flask" => Some(("flask", "url_prefix")),
-            "flask.Blueprint" => Some(("flask", "url_prefix")),
-            "fastapi.FastAPI" => Some(("fastapi", "prefix")),
-            "fastapi.APIRouter" => Some(("fastapi", "prefix")),
-            "starlette.applications.Starlette" => Some(("starlette", "prefix")),
-            "starlette.routing.Router" => Some(("starlette", "prefix")),
-            "rest_framework.routers.DefaultRouter" | "rest_framework.routers.SimpleRouter" => {
-                Some(("django-rest-framework", "prefix"))
-            }
-            _ => None,
-        }
-        && let Some(declaration) = exact_variable_declaration(evidence, left)
-        && receiver_type_is_exact(evidence, declaration, &constructor)
     {
-        let arguments = call_arguments(right, source).unwrap_or_default();
-        receivers.push(Receiver {
-            declaration_id: declaration.id.clone(),
-            qualified_name: declaration.qualified_name.clone(),
-            name: declaration.name.clone(),
-            framework,
-            constructor,
-            prefix: keyword_string(&arguments, prefix_key).unwrap_or_default(),
-            start_byte: declaration.range.start_byte,
-            constructor_start_byte: right.start_byte() as u64,
-            constructor_end_byte: right.end_byte() as u64,
-            stages: if framework == "fastapi" {
-                dependency_stages(right, source, path, evidence)
+        let name = node_text(left, source);
+        let scope_id = reference_evaluation_scope(evidence, left, false).map(str::to_owned);
+        for receiver in receivers.iter_mut().filter(|receiver| {
+            receiver.name == name && receiver.scope_id == scope_id && receiver.end_byte == u64::MAX
+        }) {
+            receiver.end_byte = node.start_byte() as u64;
+        }
+        if right.kind() == "call"
+            && let Some(function) = right.child_by_field_name("function")
+            && let Some(constructor) = exact_call_target(evidence, function)
+                .or_else(|| exact_python_lexical_reference_evidence(evidence, function, source))
+            && let Some((framework, prefix_key)) = match constructor.as_str() {
+                "flask.Flask" => Some(("flask", "url_prefix")),
+                "flask.Blueprint" => Some(("flask", "url_prefix")),
+                "fastapi.FastAPI" => Some(("fastapi", "prefix")),
+                "fastapi.APIRouter" => Some(("fastapi", "prefix")),
+                "starlette.applications.Starlette" => Some(("starlette", "prefix")),
+                "starlette.routing.Router" => Some(("starlette", "prefix")),
+                "celery.Celery" => Some(("celery", "")),
+                "rest_framework.routers.DefaultRouter" | "rest_framework.routers.SimpleRouter" => {
+                    Some(("django-rest-framework", "prefix"))
+                }
+                _ => None,
+            }
+        {
+            let arguments = call_arguments(right, source).unwrap_or_default();
+            let prefix = if prefix_key.is_empty() {
+                Some(String::new())
             } else {
-                Vec::new()
-            },
-        });
+                optional_literal_keyword(&arguments, prefix_key).map(Option::unwrap_or_default)
+            };
+            if let Some(prefix) = prefix {
+                let declaration = exact_variable_declaration(evidence, left);
+                let declaration_id = declaration.map_or_else(
+                    || {
+                        crate::make_id(&[
+                            "python-framework-receiver",
+                            &path.to_string_lossy(),
+                            scope_id.as_deref().unwrap_or_default(),
+                            name,
+                            &left.start_byte().to_string(),
+                        ])
+                    },
+                    |declaration| declaration.id.clone(),
+                );
+                let qualified_name = declaration.map_or_else(
+                    || {
+                        let owner = scope_id
+                            .as_deref()
+                            .and_then(|scope_id| {
+                                evidence
+                                    .scopes
+                                    .iter()
+                                    .find(|scope| scope.id == scope_id)
+                                    .and_then(|scope| scope.owner_declaration_id.as_deref())
+                            })
+                            .and_then(|owner| {
+                                evidence
+                                    .declarations
+                                    .iter()
+                                    .find(|declaration| declaration.id == owner)
+                            })
+                            .map(|declaration| declaration.qualified_name.clone())
+                            .unwrap_or_else(|| module_scope(path));
+                        format!("{owner}.{name}")
+                    },
+                    |declaration| declaration.qualified_name.clone(),
+                );
+                receivers.push(Receiver {
+                    declaration_id,
+                    qualified_name,
+                    name: name.to_owned(),
+                    scope_id,
+                    framework,
+                    constructor,
+                    prefix,
+                    start_byte: left.start_byte() as u64,
+                    end_byte: u64::MAX,
+                    constructor_start_byte: right.start_byte() as u64,
+                    constructor_end_byte: right.end_byte() as u64,
+                    stages: if framework == "fastapi" {
+                        dependency_stages(right, source, path, evidence)
+                    } else {
+                        Vec::new()
+                    },
+                });
+            }
+        }
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
@@ -2207,42 +3593,69 @@ fn exact_variable_declaration<'a>(
     matches.next().is_none().then_some(declaration)
 }
 
-fn receiver_type_is_exact(
-    evidence: &SemanticEvidenceBatch,
-    declaration: &DeclarationFact,
-    expected: &str,
-) -> bool {
-    let targets = evidence
-        .candidates
-        .iter()
-        .filter(|candidate| {
-            candidate.relation == CandidateRelation::TypeOf
-                && candidate.source_declaration_id == declaration.id
-        })
-        .filter_map(|candidate| {
-            exact_candidate_binding_target(evidence, candidate.binding_id.as_deref())
-        })
-        .collect::<BTreeSet<_>>();
-    targets.len() == 1 && targets.first().is_some_and(|target| *target == expected)
-}
-
 fn receiver_at<'a>(
     receivers: &'a [Receiver],
     evidence: &SemanticEvidenceBatch,
     name: &str,
     use_start: u64,
 ) -> Option<&'a Receiver> {
+    let mut scope_id = evidence
+        .scopes
+        .iter()
+        .filter(|scope| scope.range.start_byte <= use_start && scope.range.end_byte >= use_start)
+        .min_by_key(|scope| scope.range.end_byte.saturating_sub(scope.range.start_byte))
+        .map(|scope| scope.id.as_str());
+    let mut scope_chain = Vec::new();
+    while let Some(current) = scope_id {
+        scope_chain.push(current);
+        scope_id = evidence
+            .scopes
+            .iter()
+            .find(|scope| scope.id == current)
+            .and_then(|scope| scope.parent_scope_id.as_deref());
+    }
+    let mut matches = receivers
+        .iter()
+        .filter(|receiver| receiver.name == name)
+        .filter(|receiver| receiver.start_byte < use_start && receiver.end_byte > use_start)
+        .filter_map(|receiver| {
+            scope_chain
+                .iter()
+                .position(|scope| Some(*scope) == receiver.scope_id.as_deref())
+                .map(|distance| (distance, receiver))
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by_key(|(distance, receiver)| (*distance, std::cmp::Reverse(receiver.start_byte)));
+    let (distance, receiver) = *matches.first()?;
+    if matches
+        .get(1)
+        .is_some_and(|(other_distance, _)| *other_distance == distance)
+    {
+        return None;
+    }
+    for shadow_scope in scope_chain.iter().take(distance) {
+        if evidence.declarations.iter().any(|declaration| {
+            declaration.name == name
+                && declaration.range.start_byte < use_start
+                && declaration.scope_id.as_deref() == Some(*shadow_scope)
+        }) {
+            return None;
+        }
+    }
     let declarations = evidence
         .declarations
         .iter()
-        .filter(|declaration| declaration.name == name && declaration.range.start_byte < use_start)
+        .filter(|declaration| {
+            declaration.name == name
+                && declaration.range.start_byte < use_start
+                && declaration.scope_id == receiver.scope_id
+        })
         .collect::<Vec<_>>();
-    if declarations.len() != 1 {
-        return None;
+    match declarations.as_slice() {
+        [] => Some(receiver),
+        [declaration] if declaration.id == receiver.declaration_id => Some(receiver),
+        _ => None,
     }
-    receivers
-        .iter()
-        .find(|receiver| receiver.declaration_id == declarations[0].id)
 }
 
 fn exact_receiver_reference(
@@ -2369,15 +3782,44 @@ fn operations(framework: &str, method: &str, arguments: &[String]) -> Vec<String
                 }
             });
     }
-    if framework == "flask" && method == "route" {
-        let methods = keyword_string_list(arguments, "methods");
-        return if methods.is_empty() {
-            vec!["GET".to_owned()]
-        } else {
-            methods
-        };
+    if framework == "flask" {
+        if matches!(
+            method,
+            "get" | "post" | "put" | "patch" | "delete" | "options"
+        ) {
+            return vec![method.to_ascii_uppercase()];
+        }
+        if matches!(method, "route" | "add_url_rule") {
+            let methods = keyword_string_list(arguments, "methods");
+            return if methods.is_empty() {
+                vec!["GET".to_owned()]
+            } else {
+                methods
+            };
+        }
     }
     Vec::new()
+}
+
+fn append_flask_implicit_methods(
+    detail: &mut Map<String, Value>,
+    framework: &str,
+    operation: &str,
+    arguments: &[String],
+) {
+    if framework != "flask" || operation != "GET" {
+        return;
+    }
+    let mut implicit_methods = vec![Value::String("HEAD".to_owned())];
+    if keyword_value(arguments, "provide_automatic_options").and_then(static_python_bool)
+        != Some(false)
+    {
+        implicit_methods.push(Value::String("OPTIONS".to_owned()));
+    }
+    detail.insert(
+        "implicit_methods".to_owned(),
+        Value::Array(implicit_methods),
+    );
 }
 
 fn dependency_stages(
