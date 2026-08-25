@@ -597,24 +597,41 @@ fn expand_one(
         return Ok(());
     };
     let candidates = include_scope_candidates(&target);
-    let mut children = candidates
-        .iter()
-        .find_map(|candidate| by_scope.get(candidate))
-        .cloned()
-        .unwrap_or_default();
-    if let Some(collection) = route
+    let collection = route
         .detail
         .get("include_collection")
-        .and_then(Value::as_str)
-    {
-        children.retain(|child| {
-            routes[*child]
-                .detail
-                .get("django_collection")
-                .and_then(Value::as_str)
-                == Some(collection)
-        });
-    }
+        .and_then(Value::as_str);
+    let mut candidate_children = candidates
+        .iter()
+        .filter_map(|candidate| by_scope.get(candidate))
+        .map(|children| {
+            children
+                .iter()
+                .copied()
+                .filter(|child| {
+                    collection.is_none_or(|collection| {
+                        routes[*child]
+                            .detail
+                            .get("django_collection")
+                            .and_then(Value::as_str)
+                            == Some(collection)
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .map(|mut children| {
+            children.sort_unstable();
+            children.dedup();
+            children
+        })
+        .filter(|children| !children.is_empty())
+        .collect::<Vec<_>>();
+    candidate_children.sort();
+    candidate_children.dedup();
+    let children = match candidate_children.as_slice() {
+        [children] => children.clone(),
+        _ => Vec::new(),
+    };
     if children.is_empty() {
         output.push(route.clone());
         visiting.remove(&index);

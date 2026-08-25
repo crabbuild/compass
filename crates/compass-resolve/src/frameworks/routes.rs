@@ -470,6 +470,10 @@ fn resolve_one_route(
 ) -> Result<ResolvedRoute, FrameworkResolutionError> {
     let mut stages = Vec::new();
     let normalized_source = source_key(&route.anchor.source_file, root);
+    let included_handler_anchor = route
+        .detail
+        .get("include_anchor")
+        .and_then(|value| serde_json::from_value::<RawFrameworkAnchor>(value.clone()).ok());
     let explicit_stages = route.stages.clone();
     if explicit_stages.is_empty() {
         for (position, reference) in route.middleware_references.iter().enumerate() {
@@ -537,7 +541,7 @@ fn resolve_one_route(
             u32::try_from(route.middleware_references.len()).unwrap_or(u32::MAX),
             RouteStageRole::Handler,
             &route.handler_reference,
-            route.anchor.clone(),
+            included_handler_anchor.unwrap_or_else(|| route.anchor.clone()),
             candidates,
         ));
     } else {
@@ -562,12 +566,18 @@ fn resolve_one_route(
                 route.detail.get("handler_source").and_then(Value::as_str),
                 route.detail.get("handler_module").and_then(Value::as_str),
             )?;
+            let role = route_stage_role(stage.role);
+            let anchor = if role == RouteStageRole::Handler {
+                included_handler_anchor.clone().unwrap_or(stage.anchor)
+            } else {
+                stage.anchor
+            };
             stages.push(resolved_stage(
                 &route,
                 stage.position,
-                route_stage_role(stage.role),
+                role,
                 &stage.reference,
-                stage.anchor,
+                anchor,
                 candidates,
             ));
         }

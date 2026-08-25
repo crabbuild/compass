@@ -202,18 +202,104 @@ urlpatterns = [path("users/<int:user_id>/", detail)]
             String::from_utf8(child_source.to_vec())?,
         ),
     ]);
-    let merged = resolve(&[root, child], &sources);
+    let mut merged = resolve(&[root, child], &sources);
     let resolved = resolve_routes(&merged, FrameworkLimits::default())?;
-    assert!(resolved.iter().any(|route| {
-        route.route.normalized_path == "/api/users/{user_id}"
-            && route.state == ResolutionState::Exact
-            && route.route.detail.contains_key("include_anchor")
-    }));
+    let route = resolved
+        .iter()
+        .find(|route| route.route.normalized_path == "/api/users/{user_id}")
+        .ok_or("missing expanded Django include route")?;
+    assert_eq!(route.state, ResolutionState::Exact);
+    assert!(route.route.detail.contains_key("include_anchor"));
+    let handler = route
+        .stages
+        .iter()
+        .find(|stage| stage.role == RouteStageRole::Handler)
+        .ok_or("missing expanded Django handler stage")?;
+    let include_source = b"path(\"api/\", include(\"project.users.urls\"))";
+    let include_start = root_source
+        .windows(include_source.len())
+        .position(|candidate| candidate == include_source)
+        .ok_or("missing include source range")?;
+    assert_eq!(handler.anchor.source_file, "project/urls.py");
+    assert_eq!(handler.anchor.start_byte, u64::try_from(include_start)?);
+    assert_eq!(
+        handler.anchor.end_byte,
+        u64::try_from(include_start.saturating_add(include_source.len()))?
+    );
     assert!(
         !resolved
             .iter()
             .any(|route| route.route.normalized_path == "/users/{user_id}")
     );
+    resolve_and_publish_framework_routes(&mut merged, FrameworkLimits::default())?;
+    let edge = merged
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "routes_to")
+        .ok_or("missing published Django include edge")?;
+    assert_eq!(edge.string("source_file"), "project/urls.py");
+    assert_eq!(edge.string("extractor"), "compass.frameworks.django");
+    assert_eq!(edge.string("_origin"), "ast");
+    let published_anchor = edge
+        .attributes
+        .get("source_anchor")
+        .and_then(serde_json::Value::as_object)
+        .ok_or("missing published include source anchor")?;
+    assert_eq!(
+        published_anchor
+            .get("startByte")
+            .and_then(serde_json::Value::as_u64),
+        Some(u64::try_from(include_start)?)
+    );
+    assert_eq!(
+        published_anchor
+            .get("endByte")
+            .and_then(serde_json::Value::as_u64),
+        Some(u64::try_from(
+            include_start.saturating_add(include_source.len())
+        )?)
+    );
+    Ok(())
+}
+
+#[test]
+fn django_ambiguous_module_and_urls_include_remains_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root_source = br#"from django.urls import include, path
+urlpatterns = [path("mount/", include("pkg.feature"))]
+"#;
+    let flat_source = br#"from django.urls import path
+def flat(request): return None
+urlpatterns = [path("flat/", flat)]
+"#;
+    let nested_source = br#"from django.urls import path
+def nested(request): return None
+urlpatterns = [path("nested/", nested)]
+"#;
+    let mut engine = Engine::default();
+    let root = engine.extract_source(Path::new("pkg/urls.py"), root_source)?;
+    let flat = engine.extract_source(Path::new("pkg/feature.py"), flat_source)?;
+    let nested = engine.extract_source(Path::new("pkg/feature/urls.py"), nested_source)?;
+    let sources = HashMap::from([
+        (
+            "pkg/urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+        (
+            "pkg/feature.py".to_owned(),
+            String::from_utf8(flat_source.to_vec())?,
+        ),
+        (
+            "pkg/feature/urls.py".to_owned(),
+            String::from_utf8(nested_source.to_vec())?,
+        ),
+    ]);
+    let extraction = resolve(&[root, flat, nested], &sources);
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    assert_eq!(routes.len(), 1, "routes={routes:#?}");
+    assert_eq!(routes[0].route.normalized_path, "/mount");
+    assert_eq!(routes[0].state, ResolutionState::Unresolved);
+    assert_eq!(routes[0].route.handler_reference, "@include:pkg.feature");
     Ok(())
 }
 
