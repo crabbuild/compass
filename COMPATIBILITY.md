@@ -490,6 +490,16 @@ legacy `--no-program` flag remains accepted and continues to request the
 structural-only profile. Program inspection commands remain read-only and
 require an existing canonical Program IR artifact.
 
+The optional `compass.scip-manifest/1` companion now accepts an additive
+`managed_analyzer` member with the strict
+`compass.managed-analyzer-profile/1` contract. Existing companions without the
+member retain their prior generic SCIP behavior. Managed Python provider IDs
+include the frozen profile and artifact digests, so Python environment, stub,
+project-configuration, permission, limit, or producer changes invalidate the
+artifact cache deterministically. Unknown profile majors and non-complete or
+stale profiles fail closed. No analyzer runtime, installation, network access,
+or project execution is added to structural builds.
+
 Structural build commands accept the additive
 `--inference-level low|medium|high|max` profile input. `low` is the default and
 publishes exact relationships only. `medium`, `high`, and `max` remain explicit

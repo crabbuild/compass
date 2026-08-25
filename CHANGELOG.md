@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Add optional, artifact-only `scip-python` call enrichment through the
+  existing `--program-artifact` boundary. A strict frozen profile binds the
+  complete offline producer run to current Python sources, environment,
+  project configuration, typeshed, stubs, editable packages, namespace policy,
+  permissions, and resource limits. Only exact AST/SCIP call and declaration
+  anchors with agreeing provider identity reach `graph.json`; generic, stale,
+  incomplete, timed-out, cancelled, permission-denied, conflicting, or inexact
+  evidence fails closed. Compass does not run, install, or download an analyzer,
+  and native Python output remains unchanged when the artifact is unavailable.
+
 - Add exact `sqlalchemy-python` and `celery-python` universal packs and remove
   Python from the regex-based `enterprise-domain-facts` pack without changing
   its non-Python behavior. SQLAlchemy 2 declarative models, mapped fields,

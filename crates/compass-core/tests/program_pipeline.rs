@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -28,9 +29,32 @@ fn scip_fixture(
     reference_range: Vec<i32>,
     symbol: &str,
 ) -> Result<Vec<u8>, protobuf::Error> {
+    scip_fixture_with_tool(
+        path,
+        language,
+        source,
+        definition_range,
+        reference_range,
+        symbol,
+        "fixture-indexer",
+        "1.0",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scip_fixture_with_tool(
+    path: &str,
+    language: &str,
+    source: &str,
+    definition_range: Vec<i32>,
+    reference_range: Vec<i32>,
+    symbol: &str,
+    tool_name: &str,
+    tool_version: &str,
+) -> Result<Vec<u8>, protobuf::Error> {
     let mut tool = ToolInfo::new();
-    tool.name = "fixture-indexer".to_owned();
-    tool.version = "1.0".to_owned();
+    tool.name = tool_name.to_owned();
+    tool.version = tool_version.to_owned();
     tool.arguments = vec!["/absolute/path/must/not/escape".to_owned()];
     let mut metadata = Metadata::new();
     metadata.tool_info = MessageField::some(tool);
@@ -48,6 +72,71 @@ fn scip_fixture(
     index.metadata = MessageField::some(metadata);
     index.documents = vec![document];
     index.write_to_bytes()
+}
+
+fn write_managed_python_scip(
+    artifact: &Path,
+    source: &str,
+    stubs_digest: char,
+) -> Result<String, Box<dyn Error>> {
+    let source_path = "src/app.py";
+    let bytes = scip_fixture_with_tool(
+        source_path,
+        "python",
+        source,
+        vec![0, 4, 10],
+        vec![1, 11, 17],
+        "python pypi fixture 1.0 target().",
+        "scip-python",
+        "0.6.2",
+    )?;
+    fs::write(artifact, &bytes)?;
+    let source_digest = hex_sha256(source.as_bytes());
+    let source_inventory_digest = compass_program::source_inventory_digest(&BTreeMap::from([(
+        source_path.to_owned(),
+        source_digest.clone(),
+    )]))?;
+    let profile = serde_json::json!({
+        "schema": "compass.managed-analyzer-profile/1",
+        "language": "python",
+        "provider": "scip-python",
+        "provider_version": "0.6.2",
+        "protocol_version": "scip/1",
+        "state": "complete",
+        "source_inventory_digest": source_inventory_digest,
+        "environment": {
+            "implementation": "cpython",
+            "python_version": "3.12.5",
+            "platform": "manylinux_2_28_x86_64",
+            "source_roots": ["src"],
+            "import_roots": ["stubs"],
+            "editable_packages": [],
+            "environment_digest": "c".repeat(64),
+            "project_configuration_digest": "d".repeat(64),
+            "typeshed_digest": "e".repeat(64),
+            "stubs_digest": stubs_digest.to_string().repeat(64),
+            "namespace_policy": "pep420",
+            "use_library_code_for_types": false
+        },
+        "permissions": {
+            "allow_dependency_network": false,
+            "allow_package_install": false,
+            "allow_project_execution": false
+        }
+    });
+    let profile: compass_program::ManagedAnalyzerProfile = serde_json::from_value(profile.clone())?;
+    let profile_digest = compass_program::managed_analyzer_profile_digest(&profile)?;
+    let companion = artifact.with_file_name("index.scip.compass-manifest.json");
+    fs::write(
+        companion,
+        serde_json::to_vec(&serde_json::json!({
+            "schema": "compass.scip-manifest/1",
+            "index_sha256": hex_sha256(&bytes),
+            "documents": {source_path: source_digest},
+            "managed_analyzer": profile,
+        }))?,
+    )?;
+    Ok(profile_digest)
 }
 
 fn scip_document(
@@ -502,6 +591,119 @@ fn fresh_scip_symbols_resolve_java_overloads_in_graph_json() -> Result<(), Box<d
             .map(|source| (source.start_line, source.start_column)),
         Some((4, 15))
     );
+    Ok(())
+}
+
+#[test]
+fn managed_scip_python_enriches_exact_calls_and_native_output_is_unchanged_when_unavailable()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_text = "def target(): pass\ndef run(): target()\n";
+    fs::create_dir(directory.path().join("src"))?;
+    fs::write(directory.path().join("src/app.py"), source_text)?;
+    let artifact = directory.path().join("index.scip");
+    let first_profile = write_managed_python_scip(&artifact, source_text, 'f')?;
+
+    let enabled = build_local_graph(&program_options(directory.path()))?;
+    assert_eq!(enabled.program_artifacts_loaded, 1);
+    assert_eq!(enabled.program_artifact_documents_analyzed, 1);
+    let graph =
+        compass_model::code_graph::GraphDocument::load(&enabled.output_dir.join("graph.json"))?;
+    let call = graph
+        .links
+        .iter()
+        .find(|edge| {
+            edge.kind == compass_model::code_graph::EdgeKind::Calls
+                && edge.evidence.iter().any(|evidence| {
+                    evidence.extractor == "compass.resolve.python.scip-python"
+                        && evidence.rule.as_deref() == Some("scip-python-exact-anchor")
+                })
+        })
+        .ok_or("missing scip-python exact call")?;
+    assert!(call.evidence.iter().any(|evidence| {
+        evidence.origin == compass_model::provenance::EvidenceOrigin::Artifact
+            && evidence.confidence == compass_model::provenance::EvidenceConfidence::Exact
+    }));
+    let first_program = fs::read(enabled.output_dir.join("program.json"))?;
+    assert!(String::from_utf8_lossy(&first_program).contains(&first_profile));
+    assert!(!String::from_utf8_lossy(&first_program).contains("manylinux_2_28_x86_64"));
+
+    let second_profile = write_managed_python_scip(&artifact, source_text, '9')?;
+    let profile_changed = build_local_graph(&program_options(directory.path()))?;
+    assert_eq!(profile_changed.program_artifact_documents_analyzed, 1);
+    let second_program = fs::read(profile_changed.output_dir.join("program.json"))?;
+    assert_ne!(second_program, first_program);
+    assert!(String::from_utf8_lossy(&second_program).contains(&second_profile));
+
+    let mut disabled = program_options(directory.path());
+    disabled.program_analysis = false;
+    disabled.force = true;
+    let disabled_result = build_local_graph(&disabled)?;
+    let native_graph = compass_model::code_graph::GraphDocument::load(
+        &disabled_result.output_dir.join("graph.json"),
+    )?;
+    fs::remove_file(&artifact)?;
+    let mut unavailable = program_options(directory.path());
+    unavailable.force = true;
+    let unavailable_result = build_local_graph(&unavailable)?;
+    assert_eq!(unavailable_result.program_artifacts_loaded, 0);
+    let unavailable_graph = compass_model::code_graph::GraphDocument::load(
+        &unavailable_result.output_dir.join("graph.json"),
+    )?;
+    assert_eq!(unavailable_graph.nodes, native_graph.nodes);
+    assert_eq!(unavailable_graph.links, native_graph.links);
+    Ok(())
+}
+
+#[test]
+fn managed_scip_python_rejects_stale_and_conflicting_companions_without_publication()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source_text = "def target(): pass\ndef run(): target()\n";
+    fs::create_dir(directory.path().join("src"))?;
+    fs::write(directory.path().join("src/app.py"), source_text)?;
+    let artifact = directory.path().join("index.scip");
+    write_managed_python_scip(&artifact, source_text, 'f')?;
+    let options = program_options(directory.path());
+    let first = build_local_graph(&options)?;
+    let pointer = directory.path().join("compass-out/current-snapshot");
+    let active_before = fs::read_to_string(&pointer)?;
+    let graph_before = fs::read(first.output_dir.join("graph.json"))?;
+
+    fs::write(
+        directory.path().join("src/app.py"),
+        "def target(): pass\ndef run(): target(); target()\n",
+    )?;
+    assert!(matches!(
+        build_local_graph(&options),
+        Err(CoreError::ProgramProvider(_))
+    ));
+    assert_eq!(fs::read_to_string(&pointer)?, active_before);
+    assert_eq!(fs::read(first.output_dir.join("graph.json"))?, graph_before);
+
+    fs::write(directory.path().join("src/app.py"), source_text)?;
+    let duplicate = directory.path().join("duplicate.scip");
+    fs::copy(&artifact, &duplicate)?;
+    let duplicate_companion = directory
+        .path()
+        .join("duplicate.scip.compass-manifest.json");
+    let mut duplicate_manifest: serde_json::Value = serde_json::from_slice(&fs::read(
+        directory.path().join("index.scip.compass-manifest.json"),
+    )?)?;
+    duplicate_manifest["managed_analyzer"]["environment"]["stubs_digest"] =
+        serde_json::Value::String("9".repeat(64));
+    fs::write(
+        duplicate_companion,
+        serde_json::to_vec(&duplicate_manifest)?,
+    )?;
+    let mut conflicting = options;
+    conflicting.program_artifacts.push(duplicate);
+    assert!(matches!(
+        build_local_graph(&conflicting),
+        Err(CoreError::InvalidProgramInput(message))
+            if message.contains("conflicting companion manifests")
+    ));
+    assert_eq!(fs::read_to_string(pointer)?, active_before);
     Ok(())
 }
 
