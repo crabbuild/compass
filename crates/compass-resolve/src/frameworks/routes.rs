@@ -772,6 +772,7 @@ fn resolve_reference(
 
 fn canonical_framework_reference(framework: &str, reference: &str) -> String {
     match framework {
+        "django" => canonical_django_reference(reference),
         "laravel" | "drupal" => super::php::canonical_reference(reference),
         "rails" => super::ruby::canonical_reference(reference),
         "spring" | "play" => super::jvm::canonical_reference(reference),
@@ -780,6 +781,29 @@ fn canonical_framework_reference(framework: &str, reference: &str) -> String {
         }
         _ => reference.to_owned(),
     }
+}
+
+fn canonical_django_reference(reference: &str) -> String {
+    let trimmed = reference.trim();
+    let Some(without_closing_parenthesis) = trimmed.strip_suffix(')') else {
+        return reference.to_owned();
+    };
+    let Some((receiver, _arguments)) = without_closing_parenthesis.rsplit_once(".as_view(") else {
+        return reference.to_owned();
+    };
+    if receiver.split('.').all(is_python_identifier) {
+        receiver.to_owned()
+    } else {
+        reference.to_owned()
+    }
+}
+
+fn is_python_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
 }
 
 fn validate_fact_limits(

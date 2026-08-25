@@ -263,6 +263,85 @@ urlpatterns = [path("users/<int:user_id>/", detail)]
 }
 
 #[test]
+fn django_included_class_view_with_arguments_resolves_only_exact_dotted_receiver()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root_source = br#"
+from django.urls import include, path
+urlpatterns = [path("admin/doc/", include("django.contrib.admindocs.urls"))]
+"#;
+    let child_source = br#"
+from django.contrib.admindocs import views
+from django.urls import path
+urlpatterns = [
+    path("", views.BaseAdminDocsView.as_view(template_name="admin_doc/index.html")),
+    path("near/", views.BaseAdminDocsView.as_views(template_name="admin_doc/index.html")),
+    path("dynamic/", factory().as_view(template_name="admin_doc/index.html")),
+]
+"#;
+    let views_source = br#"
+class BaseAdminDocsView:
+    pass
+"#;
+    let mut engine = Engine::default();
+    let root = engine.extract_source(Path::new("project/urls.py"), root_source)?;
+    let child =
+        engine.extract_source(Path::new("django/contrib/admindocs/urls.py"), child_source)?;
+    let views =
+        engine.extract_source(Path::new("django/contrib/admindocs/views.py"), views_source)?;
+    let sources = HashMap::from([
+        (
+            "project/urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+        (
+            "django/contrib/admindocs/urls.py".to_owned(),
+            String::from_utf8(child_source.to_vec())?,
+        ),
+        (
+            "django/contrib/admindocs/views.py".to_owned(),
+            String::from_utf8(views_source.to_vec())?,
+        ),
+    ]);
+    let extraction = resolve(&[root, child, views], &sources);
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    let exact = routes
+        .iter()
+        .find(|route| route.route.normalized_path == "/admin/doc")
+        .ok_or("missing exact class-based route")?;
+    assert_eq!(exact.state, ResolutionState::Exact, "{exact:#?}");
+    assert_eq!(exact.candidates.len(), 1, "{exact:#?}");
+    let include_source = b"path(\"admin/doc/\", include(\"django.contrib.admindocs.urls\"))";
+    let include_start = root_source
+        .windows(include_source.len())
+        .position(|candidate| candidate == include_source)
+        .ok_or("missing include source range")?;
+    let handler = exact
+        .stages
+        .iter()
+        .find(|stage| stage.role == RouteStageRole::Handler)
+        .ok_or("missing exact handler stage")?;
+    assert_eq!(handler.anchor.source_file, "project/urls.py");
+    assert_eq!(handler.anchor.start_byte, u64::try_from(include_start)?);
+    assert_eq!(
+        handler.anchor.end_byte,
+        u64::try_from(include_start.saturating_add(include_source.len()))?
+    );
+    for path in ["/admin/doc/near", "/admin/doc/dynamic"] {
+        let unresolved = routes
+            .iter()
+            .find(|route| route.route.normalized_path == path)
+            .ok_or("missing unresolved near-match route")?;
+        assert_eq!(
+            unresolved.state,
+            ResolutionState::Unresolved,
+            "{unresolved:#?}"
+        );
+        assert!(unresolved.candidates.is_empty(), "{unresolved:#?}");
+    }
+    Ok(())
+}
+
+#[test]
 fn django_ambiguous_module_and_urls_include_remains_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let root_source = br#"from django.urls import include, path

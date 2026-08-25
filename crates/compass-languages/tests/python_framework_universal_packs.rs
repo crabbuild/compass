@@ -162,6 +162,39 @@ not_patterns = [django_path("outside/", handler)]
 }
 
 #[test]
+fn django_class_view_arguments_and_near_matches_remain_explicit_route_references()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "django/admindocs/urls.py",
+        br#"from django.contrib.admindocs import views
+from django.urls import path
+urlpatterns = [
+    path("", views.BaseAdminDocsView.as_view(template_name="admin_doc/index.html")),
+    path("near/", views.BaseAdminDocsView.as_views(template_name="admin_doc/index.html")),
+    path("dynamic/", factory().as_view(template_name="admin_doc/index.html")),
+]
+"#,
+    )?;
+    let routes = routes(&extraction)
+        .into_iter()
+        .filter(|route| route.framework == "django")
+        .collect::<Vec<_>>();
+    assert_eq!(routes.len(), 3, "routes={routes:#?}");
+    assert!(routes.iter().any(|route| {
+        route.handler_reference
+            == "views.BaseAdminDocsView.as_view(template_name=\"admin_doc/index.html\")"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.handler_reference
+            == "views.BaseAdminDocsView.as_views(template_name=\"admin_doc/index.html\")"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.handler_reference == "factory().as_view(template_name=\"admin_doc/index.html\")"
+    }));
+    Ok(())
+}
+
+#[test]
 fn django_static_pattern_collections_i18n_namespaces_and_converters_are_exact()
 -> Result<(), Box<dyn Error>> {
     let extraction = extract(
