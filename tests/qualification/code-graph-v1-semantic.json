@@ -1,5 +1,5 @@
 {
-  "schema": "compass.code-graph-qualification/1",
+  "schema": "compass.code-graph-qualification/2",
   "flows": [
     {
       "id": "flow-django",
@@ -1568,6 +1568,17 @@
       "detailType": "route"
     },
     {
+      "id": "edge-renders",
+      "kind": "renders",
+      "source": "fixtures/code-graph/routes/typescript/react-router.tsx",
+      "qualifiedName": "*",
+      "producer": "compass.resolve.typescript.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "render"
+    },
+    {
       "id": "edge-reads",
       "kind": "reads",
       "source": "fixtures/code-graph/qualification/migrations/001_init.sql",
@@ -1735,7 +1746,7 @@
   ],
   "languages": {
     "source": "corpus",
-    "producerVersion": "compass-languages/0.3.19"
+    "producerVersion": "compass-languages/0.3.20"
   },
   "occurrences": [
     {

@@ -1,0 +1,14 @@
+{
+  "name": "compass-frontend-qualification",
+  "private": true,
+  "dependencies": {
+    "@remix-run/react": "2.15.0",
+    "@tanstack/react-router": "1.120.0",
+    "@vitejs/plugin-react": "4.3.0",
+    "next": "15.0.0",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-router-dom": "7.0.0",
+    "vite": "7.0.0"
+  }
+}

@@ -4246,8 +4246,8 @@ fn build_export_workbench(
                         content: WorkbenchViewContent::History {
                             base_revision,
                             target_revision,
-                            before,
-                            after,
+                            before: Box::new(before),
+                            after: Box::new(after),
                         },
                     },
                 )

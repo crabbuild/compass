@@ -880,7 +880,6 @@ fn string_array_argument(
         })
         .collect()
 }
-
 fn invoke_agent_graph_write(
     context: &AgentGraphContext,
     config: &AgentGraphMcpConfig,
@@ -1349,7 +1348,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "task_context",
-            "Compose a bounded, verified compass.task-context/1 packet after exact target resolution, with optional exact Agent Graph knowledge. Ambiguous fuzzy candidates are never selected.",
+            "Compose a bounded, verified compass.task-context/2 packet after exact target resolution. The typed framework context reports pack versions, routes, render direction, boundaries, configuration dependencies, provenance, ambiguity, and truncation. Ambiguous fuzzy candidates are never selected.",
             json!({"type":"object","additionalProperties":false,"properties":{
                 "intent":{"type":"string","enum":["explain","modify","debug","test"]},
                 "target":{"type":"string","minLength":1,"maxLength":16384},

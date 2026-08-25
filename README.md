@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="apps/web/public/brand/compass-mark.svg" alt="Compass logo" width="128">
+</p>
+
 # Compass
 
 <div align="center">

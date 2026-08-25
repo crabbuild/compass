@@ -10,7 +10,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-SCHEMA = "compass.code-graph-qualification/1"
+# The graph wire contract remains compass.graph/1.  This expectation schema is
+# independently versioned so adding frontend vocabulary cannot make an older
+# oracle silently accept a newer manifest.
+SCHEMA = "compass.code-graph-qualification/2"
 GRAPH_SCHEMA = "compass.graph/1"
 NODE_KINDS = (
     "file", "module", "package", "namespace", "class", "struct", "interface",
@@ -29,12 +32,14 @@ EDGE_KINDS = (
     "decorates", "routes_to", "reads", "writes", "aliases", "registers",
     "handles", "publishes", "subscribes", "produces", "consumes", "schedules",
     "triggers", "tests", "depends_on", "documents", "maps_to",
+    "renders",
 )
 DETAIL_TYPES = {
     "file": {"file"},
     "symbol": set(NODE_KINDS[1:25]) | {"migration"},
     "import_export": {"import", "export"},
     "route": {"route"},
+    "render": {"function", "method", "class", "component", "variable", "property"},
     "component": {"component"},
     "resource": {"resource"},
     "messaging": {"event", "message", "topic", "queue"},
@@ -48,7 +53,11 @@ TRUSTED_ORIGINS = {"ast", "config", "convention", "artifact"}
 ALL_ORIGINS = TRUSTED_ORIGINS | {"heuristic"}
 CONFIDENCES = {"exact", "inferred", "ambiguous"}
 RESOLUTIONS = {"exact", "ambiguous", "unresolved"}
-STAGES = {"handler", "middleware"}
+STAGES = {
+    "handler", "middleware", "layout", "template", "loading", "default",
+    "error_boundary", "not_found", "boundary", "loader", "action",
+    "data_loader", "route_component",
+}
 ENTERPRISE_KINDS = {
     "event", "message", "topic", "queue", "job", "resource", "schema", "query",
     "migration", "config_key", "database", "database_schema", "database_table",
@@ -342,6 +351,14 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
         return (
             (s == "schema" and t == "config_key")
             or (s == "config_key" and t == "config_key")
+            # Framework route hierarchy is an explicit parent-route to
+            # child-route containment relation. Keep this allowance narrow;
+            # do not turn every route into a generic container endpoint.
+            or (s == "route" and t == "route")
+            # Object-valued JavaScript/TypeScript bindings expose their
+            # literal members as properties. This is a declaration-level
+            # containment edge, not an inferred type relationship.
+            or (s == "variable" and t == "property")
             or (s == "file" and t in CONTAINS_FILE_TARGETS)
             or (s in {"module", "package", "namespace"} and t in CONTAINS_SCOPE_TARGETS)
             or (s in TYPE_KINDS | {"component", "schema"} and t in CONTAINS_TYPE_TARGETS)
@@ -414,7 +431,16 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
     if kind == "decorates":
         return s in {"annotation", "macro"} and t in CALLABLE | TYPE_KINDS | VALUE_KINDS | {"component", "route", "resource"}
     if kind == "routes_to":
-        return s == "route" and t in {"file", "function", "method", "class", "component"}
+        return s == "route" and (
+            t in {"file", "function", "method", "class", "component"}
+            or (t == "variable" and "route_handler" in target.get("roles", []))
+        )
+    if kind == "renders":
+        # Top-level JSX/createElement has no callable owner; production uses
+        # the smallest source module/file as the conservative renderer.
+        return s in EXECUTABLE | {"file", "module", "variable"} and t in {
+            "function", "method", "class", "component", "variable", "property",
+        }
     if kind == "maps_to":
         return s in {"class", "struct", "schema", "database_table", "database_view"} and t in {"database_table", "database_view"}
     if kind == "reads":
@@ -614,7 +640,23 @@ def _validate_external_placeholders(
             edge for edge in edges
             if node["id"] in (edge["source"], edge["target"])
         ]
+        route_candidates = []
         if not incident:
+            # An unresolved route must not publish a speculative `routes_to`
+            # edge, but its bounded candidate set is still a real wiring
+            # occurrence. Treat that route-stage record as the incident for
+            # placeholder validation and keep the exact source scope check.
+            for route in nodes:
+                if route.get("kind") != "route":
+                    continue
+                data = (route.get("details") or {}).get("data", {})
+                for stage in data.get("stages", []):
+                    if any(
+                        candidate.get("nodeId") == node["id"]
+                        for candidate in stage.get("candidates", [])
+                    ):
+                        route_candidates.append(stage)
+        if not incident and not route_candidates:
             fail("external_placeholder", node["id"], "orphan placeholder")
         for edge in incident:
             edge_file = (edge.get("relationshipSite") or {}).get("file")
@@ -623,6 +665,18 @@ def _validate_external_placeholders(
                     "external_placeholder_deferred",
                     edge["id"],
                     f"deferred={edge.get('deferred')} scope={edge_file!r}",
+                )
+        for stage in route_candidates:
+            stage_anchor = stage.get("sourceAnchor") or {}
+            # A single unresolved import placeholder can be reused by
+            # multiple route registrations in the same module. Its own
+            # provenance identifies the first unresolved wiring site; each
+            # later route-stage candidate supplies its distinct occurrence.
+            if stage_anchor.get("file") != wiring.get("file"):
+                fail(
+                    "external_placeholder_scope",
+                    node["id"],
+                    f"route-stage scope={stage_anchor!r}",
                 )
 
 

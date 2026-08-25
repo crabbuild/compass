@@ -9,6 +9,7 @@
     "./contracts/architecture": "./src/contracts/architecture.ts",
     "./architecture/projection": "./src/architecture/projection.ts",
     "./contracts/codeQuery": "./src/contracts/codeQuery.ts",
+    "./contracts/taskContext": "./src/contracts/taskContext.ts",
     "./contracts/graph": "./src/contracts/graph.ts",
     "./contracts/history": "./src/contracts/history.ts",
     "./graph/CompassBrandMark": "./src/graph/CompassBrandMark.tsx",

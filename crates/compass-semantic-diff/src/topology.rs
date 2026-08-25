@@ -138,6 +138,9 @@ fn assign_components(reverse: &[Vec<usize>], order: &[usize]) -> Vec<usize> {
 }
 
 fn is_dependency_relation(relation: &str) -> bool {
+    // Rendering is intentionally excluded from dependency-cycle findings:
+    // component trees are semantic UI topology, not executable/import
+    // dependency cycles. Graph deltas still retain renders add/remove facts.
     matches!(
         relation,
         "calls" | "imports" | "imports_from" | "depends_on" | "uses" | "references"

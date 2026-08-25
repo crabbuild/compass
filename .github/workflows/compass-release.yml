@@ -38,9 +38,16 @@ jobs:
         with:
           workspaces: .
           key: release-code-graph-qualification
+      - name: Provision pinned parser sources
+        env:
+          TSLP_PARSER_SOURCE_DIR: ${{ runner.temp }}/compass-parser-sources
+        run: ./scripts/provision_parser_sources.sh "$TSLP_PARSER_SOURCE_DIR"
+      - name: Fetch pinned Rust dependencies
+        run: cargo fetch --locked
       - name: Qualify pinned enterprise repository
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/compass-code-graph-v1
+          TSLP_PARSER_SOURCE_DIR: ${{ runner.temp }}/compass-parser-sources
         shell: bash
         run: >-
           ./scripts/qualify_code_graph_v1.sh

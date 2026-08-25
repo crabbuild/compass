@@ -481,7 +481,12 @@ fn is_noise_dir(path: &Path, output_name: &str) -> bool {
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or_default();
-    if (SKIP_DIRS.contains(&name) && !is_java_package_build_dir(path))
+    // `target` is normally a Rust build directory, but it is also a valid
+    // route segment in Next.js/React Router file conventions (for example
+    // `app/target/page.tsx`). Keep the broad discovery guard everywhere else
+    // while allowing that frontend-specific spelling through.
+    let frontend_route_target = name == "target" && has_frontend_route_ancestor(path);
+    if SKIP_DIRS.contains(&name) && !frontend_route_target && !is_java_package_build_dir(path)
         || Path::new(output_name)
             .file_name()
             .is_some_and(|value| value == name)
@@ -512,6 +517,18 @@ fn is_noise_dir(path: &Path, output_name: &str) -> bool {
         return js_root || has_snap;
     }
     false
+}
+
+fn has_frontend_route_ancestor(path: &Path) -> bool {
+    path.parent()
+        .into_iter()
+        .flat_map(Path::components)
+        .any(|component| {
+            component
+                .as_os_str()
+                .to_str()
+                .is_some_and(|name| matches!(name, "app" | "pages" | "routes"))
+        })
 }
 
 fn is_java_package_build_dir(path: &Path) -> bool {
@@ -670,6 +687,7 @@ fn looks_like_paper(path: &Path) -> bool {
 pub fn classify_file(path: &Path) -> Option<FileType> {
     if is_package_manifest(path)
         || is_play_routes_file(path)
+        || is_drupal_routing_file(path)
         || path
             .file_name()
             .and_then(|value| value.to_str())
@@ -724,6 +742,7 @@ fn graphable_source(path: &Path) -> bool {
     }
     if is_package_manifest(path)
         || is_play_routes_file(path)
+        || is_drupal_routing_file(path)
         || path
             .file_name()
             .and_then(|value| value.to_str())
@@ -744,6 +763,15 @@ fn is_play_routes_file(path: &Path) -> bool {
             .and_then(Path::file_name)
             .and_then(|value| value.to_str())
             .is_some_and(|parent| parent.eq_ignore_ascii_case("conf"))
+}
+
+fn is_drupal_routing_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            name.ends_with(".routing.yml") || name.ends_with(".routing.yaml")
+        })
 }
 
 fn generic_keyword_hit(name: &str) -> bool {
@@ -1114,8 +1142,19 @@ fn collect_memory_files(directory: &Path, files: &mut Vec<PathBuf>, errors: &mut
 
 #[cfg(test)]
 mod tests {
-    use super::{FileType, classify_file};
+    use super::{FileType, classify_file, is_noise_dir};
     use std::path::Path;
+
+    #[test]
+    fn frontend_route_target_directory_is_not_filtered_as_build_output() {
+        assert!(!is_noise_dir(Path::new("repo/app/target"), "compass-out"));
+        assert!(!is_noise_dir(
+            Path::new("repo/src/routes/target"),
+            "compass-out"
+        ));
+        assert!(is_noise_dir(Path::new("repo/target"), "compass-out"));
+        assert!(is_noise_dir(Path::new("repo/build/target"), "compass-out"));
+    }
 
     #[test]
     fn office_documents_are_discovered_as_documents() {

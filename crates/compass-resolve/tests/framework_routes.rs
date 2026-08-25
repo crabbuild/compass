@@ -66,6 +66,7 @@ fn route(handler: &str) -> RawRouteFact {
         },
         handler_reference: handler.to_owned(),
         middleware_references: Vec::new(),
+        stages: Vec::new(),
         origin: RawFrameworkOrigin::Ast,
         rule: None,
         detail: Map::new(),

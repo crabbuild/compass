@@ -60,10 +60,13 @@ pub use evidence_pipeline::{
 };
 pub use facts::{Extraction, RawCall, RawEdgeRecord, RawNodeRecord};
 pub use frameworks::{
-    FrameworkCapability, FrameworkLimitError, FrameworkLimits, FrameworkManifestPolicy,
-    FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind, FrameworkPackRegistry,
-    FrameworkPackRegistryError, FrameworkRelation, RawDomainFact, RawFrameworkAnchor,
-    RawFrameworkAnnotationFact, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    FRAMEWORK_PACK_SEMANTICS_VERSION, FrameworkCapability, FrameworkLimitError, FrameworkLimits,
+    FrameworkManifestPolicy, FrameworkOccurrencePolicy, FrameworkPackDescriptor, FrameworkPackKind,
+    FrameworkPackRegistry, FrameworkPackRegistryError, FrameworkRelation, RawDomainFact,
+    RawFrameworkAnchor, RawFrameworkAnnotationFact, RawFrameworkConfigurationFact,
+    RawFrameworkFact, RawFrameworkFileSetFact, RawFrameworkOrigin, RawFrameworkRelationFact,
+    RawFrameworkRoleFact, RawRouteFact, RawRouteStageFact, RawRouteStageRole,
+    framework_pack_semantics_version, framework_semantics_digest,
 };
 pub use html::{HtmlError, HtmlNormalization, normalize_html};
 pub use ids::{file_stem, make_id, normalize_id};
@@ -71,7 +74,7 @@ pub use json_config::parse_jsonc;
 pub use program::{TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitterSyntaxProvider};
 pub use project_evidence::{
     ComposerAutoloadRoot, FRAMEWORK_PROJECT_EVIDENCE_EXTENSION, ProjectEvidence,
-    ProjectEvidenceDiagnostic, ProjectEvidenceIndex,
+    ProjectEvidenceDiagnostic, ProjectEvidenceIndex, ProjectViteAliasKind, ProjectViteAliasRule,
 };
 pub use registry::{ExtractorKind, LanguageSpec, Registry};
 pub use scip::{ScipExtraction, ingest_scip_json};

@@ -995,6 +995,14 @@ Export writes a self-describing `compass.agent-graph.effective/1` document and
 refuses an unsafe or existing destination. Usage errors exit `2`; typed domain,
 conflict, authorization, verification, storage, and limit errors exit `1`.
 
+For continuous coding-session enrichment, there is no separate long-running
+mutation command. The assistant repeats `status` → `prepare` → `apply` →
+`audit`/`diff` at explicit milestones and pins the receipt revision after each
+successful batch. A changed Base Generation puts the loop behind
+`rebase-plan`/`rebase-commit`; writes must stop until every rebase item is
+resolved. The bundled Compass skill documents this lifecycle while keeping
+ordinary query and watch operations read-only.
+
 ## Output and exit conventions
 
 Human text goes to stdout on success. Diagnostics go to stderr.

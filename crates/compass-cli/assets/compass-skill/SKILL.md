@@ -1,6 +1,6 @@
 ---
 name: compass
-description: "Use for graph-first AI coding sessions and repository analysis: session initialization, architecture maps, dependency or call-graph tracing, symbol and repository search, pull-request risk review, change-impact review, historical diffs, CompassQL, graph refreshes, GROUNDED agent-authored graph enhancements, exact overlay queries or rebases, exports, MCP serving, or project artifacts. Also use when the user invokes /compass or asks about Compass."
+description: "Use for graph-first AI coding sessions and repository analysis: session initialization, architecture maps, dependency or call-graph tracing, symbol and repository search, pull-request risk review, change-impact review, historical diffs, CompassQL, graph refreshes, GROUNDED agent-authored graph enhancements, continuous overlay enrichment during coding sessions, exact overlay queries or rebases, exports, MCP serving, or project artifacts. Also use when the user invokes /compass or asks about Compass."
 compatibility: "Requires the Compass CLI; works with Agent Skills-compatible coding agents."
 metadata:
   version: "1"
@@ -145,6 +145,38 @@ for this or a later coding session.
    rebase-plan` against the prior revision, and resolve every stale, missing, or
    ambiguous item explicitly before `rebase-commit`. Never first-match rebind.
 
+## Continuous enrichment mode
+
+The default session mode is `read_only`. Enter `continuous` mode only after the
+user explicitly asks Compass to keep enriching an overlay during this coding
+session (or names an equivalent durable outcome). In continuous mode:
+
+1. Pin the project root, Base Generation, Overlay ID, active Overlay Revision,
+   composition profile, and write scope in the session context. Re-read
+   `status` after an interruption instead of trusting stale model memory.
+2. Keep a bounded candidate ledger in session context. Each candidate records
+   a stable assertion key, fact type, exact Base node/edge or source-span
+   citations, endpoint identities, and a state: `candidate`, `prepared`,
+   `applied`, `deferred`, or `rebase_required`. Do not put prompts,
+   chain-of-thought, credentials, or user-private data in the overlay.
+3. At useful milestones (orientation, a design decision, before a commit, and
+   session end), discard transient observations, query the exact overlay to
+   deduplicate durable facts, and flush a bounded group through `prepare`, a
+   strict batch, `apply`, `audit`, and `diff`. Never award `GROUNDED` in the
+   draft; advance the pin only from the verified receipt.
+4. If the Base Generation changes, stop writes and enter `rebase_required`.
+   Refresh the graph, run `rebase-plan` from the pinned revision, resolve every
+   exact, missing, changed, or ambiguous item, and commit the complete
+   resolution before collecting new writes. A watch process is a refresh aid,
+   not permission to skip this gate.
+5. At session end, report the exact Base Generation, Overlay ID, final revision,
+   composition profile, applied receipts, deferred candidates, and unresolved
+   conflicts. A later session resumes by pinning that receipt, not by replaying
+   conversational history.
+
+Load the continuous-enrichment reference when this mode is active; it contains
+the state machine, milestone loop, bounded batching, and recovery checklist.
+
 Create, replace, or retract only agent-owned assertions. Challenge a Base fact
 instead of deleting it. Curated masks are stronger, require `--allow-masks` in
 addition to write enablement, and need explicit user intent. `GROUNDED` means
@@ -275,6 +307,7 @@ Load only the reference needed for the current request:
 
 - Complete command inventory and lifecycle: `references/command-reference.md`
 - Agentic session setup, GROUNDED overlay CRUD, revision pinning, and rebases: `references/agent-graph.md`
+- Continuous coding-session enrichment, milestone batching, and rebase gates: `references/continuous-enrichment.md`
 - Query, CompassQL, paths, explanations, impact: `references/query.md`
 - Incremental refresh, clustering, output freshness: `references/update.md`
 - Semantic extraction, providers, caches: `references/semantic-extraction.md`
