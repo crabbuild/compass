@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Make Python module identity source-proven for flat, `src/`, namespace, and
+  statically configured setuptools, Poetry, and Hatch layouts. Register `.pyi`
+  files, keep paired `.py` declarations authoritative, publish stub-only
+  declarations with explicit provenance, and retain source/stub conflicts as
+  diagnostics. Python universal evidence is now producer version 12 and
+  project evidence is `compass.framework-project-evidence/4`; affected caches,
+  qualified names, and graph IDs rebuild without rewriting history.
+
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,

@@ -256,7 +256,7 @@ const REGISTRY_CASES: &[RegistryCase] = &[
     ),
     registry_case!(
         "python",
-        RegistryMatcher::Extensions(&["py"]),
+        RegistryMatcher::Extensions(&["py", "pyi"]),
         spec("python", "python", ExtractorKind::Generic),
         "matrix/sample.py",
         "def matrix():\n    return 1\n"

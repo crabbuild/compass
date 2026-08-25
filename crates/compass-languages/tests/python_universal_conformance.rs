@@ -1,10 +1,14 @@
+use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use compass_languages::{
     BindingKind, CandidateRelation, Engine, EvidenceLimits, HierarchyConstraint,
-    ReceiverDispatchStrategy, Registry, SemanticEvidenceBatch, SemanticRole, validate_evidence,
+    ProjectEvidenceIndex, ReceiverDispatchStrategy, Registry, SemanticEvidenceBatch, SemanticRole,
+    validate_evidence,
 };
 use serde_json::{Value, json};
+use tempfile::tempdir;
 
 fn evidence(path: &str, source: &[u8]) -> SemanticEvidenceBatch {
     let absolute = Path::new("/repo").join(path);
@@ -99,7 +103,7 @@ class Service(Parent):
     let snapshot = selected_snapshot(&batch);
 
     assert_eq!(snapshot["pipeline"]["id"], "compass.python");
-    assert_eq!(snapshot["pipeline"]["version"], 11);
+    assert_eq!(snapshot["pipeline"]["version"], 12);
     assert_eq!(
         snapshot["pipeline"]["schema"],
         "compass.languages.evidence/2"
@@ -196,20 +200,95 @@ fn python_malformed_source_and_fact_order_are_deterministic() {
 }
 
 #[test]
-fn python_src_layout_is_characterized_as_an_established_gap() {
-    let batch = evidence("src/acme/api.py", b"def handler():\n    return None\n");
+fn python_src_layout_uses_unique_static_project_evidence() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempdir()?;
+    let root = directory.path();
+    let source = root.join("src/acme/api.py");
+    fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+    fs::write(
+        root.join("pyproject.toml"),
+        "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n",
+    )?;
+    fs::write(&source, "def handler():\n    return None\n")?;
+    let project = Arc::new(ProjectEvidenceIndex::build(
+        root,
+        std::slice::from_ref(&source),
+    ));
+    let mut engine = Engine::with_project_evidence(project);
+    let batch = engine
+        .extract_source_combined(
+            &source,
+            "src/acme/api.py",
+            b"def handler():\n    return None\n",
+        )?
+        .graph
+        .semantic_evidence
+        .ok_or("missing Python evidence")?;
     let handler = batch
         .declarations
         .iter()
         .find(|declaration| declaration.name == "handler")
-        .expect("handler declaration");
-    assert_eq!(handler.module_or_package.as_deref(), Some("src.acme.api"));
-    assert_eq!(handler.qualified_name, "src.acme.api.handler");
+        .ok_or("missing handler declaration")?;
+    assert_eq!(handler.module_or_package.as_deref(), Some("acme.api"));
+    assert_eq!(handler.qualified_name, "acme.api.handler");
+    Ok(())
 }
 
 #[test]
-fn python_stub_extension_is_characterized_as_an_established_gap() {
-    assert!(Registry::resolve(Path::new("pkg/api.pyi")).is_none());
+fn python_stub_extension_uses_the_python_pipeline_and_module_suffix() {
+    let spec = Registry::resolve(Path::new("pkg/api.pyi")).expect("Python stub registry entry");
+    assert_eq!(spec.name, "python");
+    let batch = evidence("pkg/api.pyi", b"def handler() -> None: ...\n");
+    let handler = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "handler")
+        .expect("stub handler declaration");
+    assert_eq!(handler.module_or_package.as_deref(), Some("pkg.api"));
+    assert_eq!(handler.qualified_name, "pkg.api.handler");
+    let package = evidence("pkg/__init__.pyi", b"from .api import Handler\n");
+    assert!(package.bindings.iter().any(|binding| {
+        binding.kind == BindingKind::Reexport
+            && binding.spelling == "Handler"
+            && binding.qualified_target == "pkg.api.Handler"
+    }));
+}
+
+#[test]
+fn python_ambiguous_project_roots_retain_repository_identity_and_diagnostic()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempdir()?;
+    let root = directory.path();
+    let source = root.join("src/acme/api.py");
+    fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+    fs::write(
+        root.join("pyproject.toml"),
+        "[project]\nname = \"acme\"\n[tool.setuptools.package-dir]\none = \"src\"\ntwo = \"src\"\n",
+    )?;
+    fs::write(&source, "def handler(): ...\n")?;
+    let project = Arc::new(ProjectEvidenceIndex::build(
+        root,
+        std::slice::from_ref(&source),
+    ));
+    let mut engine = Engine::with_project_evidence(project);
+    let batch = engine
+        .extract_source_combined(&source, "src/acme/api.py", b"def handler(): ...\n")?
+        .graph
+        .semantic_evidence
+        .ok_or("missing Python evidence")?;
+    let handler = batch
+        .declarations
+        .iter()
+        .find(|declaration| declaration.name == "handler")
+        .ok_or("missing handler declaration")?;
+    assert_eq!(handler.module_or_package.as_deref(), Some("src.acme.api"));
+    assert!(batch.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "python_module_identity_ambiguous"
+            && diagnostic.message.contains("one.acme.api")
+            && diagnostic.message.contains("two.acme.api")
+    }));
+    Ok(())
 }
 
 #[test]

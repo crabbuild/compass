@@ -149,6 +149,13 @@ type TypeScriptReexportIndex = AHashMap<(String, String, String), Vec<TypeScript
 type TypeScriptProjectModuleIndex = AHashMap<(String, String, String), Vec<String>>;
 type TypeScriptProjectMetadataIndex =
     AHashMap<(String, String, String, String), BTreeMap<String, String>>;
+type PythonProjectModuleMap = BTreeMap<String, Vec<String>>;
+
+#[derive(Default)]
+struct PythonProjectModuleIndex {
+    source_to_modules: PythonProjectModuleMap,
+    module_to_sources: PythonProjectModuleMap,
+}
 
 struct TypeScriptExportWalk<'a> {
     candidate: &'a RelationshipCandidate,

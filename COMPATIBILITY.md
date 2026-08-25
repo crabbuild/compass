@@ -136,6 +136,18 @@ cache fingerprints invalidate affected files; users do not need to delete
 artifacts manually. Equal names across Swift/native or JVM-family languages do
 not by themselves create cross-language targets.
 
+Python publishes through version-12 `compass.python` evidence and uses static,
+bounded `pyproject.toml` import-root evidence. The corresponding internal
+project-evidence identity is `compass.framework-project-evidence/4`. A uniquely
+proven `src/` or configured package layout may therefore change qualified names
+and stable graph IDs; zero candidates retain the contained repository-relative
+identity, while multiple distinct candidates retain that identity plus an
+ambiguity diagnostic instead of selecting a root by order. `.py` and `.pyi`
+normalize to one module key. Paired source owns graph declarations, stub-only
+declarations carry `source_kind: "stub"`, and source/stub disagreement is an
+explicit error diagnostic. No Python interpreter, environment discovery,
+package installation, or repository import participates in these rules.
+
 A user-visible incompatible change requires:
 
 1. native regression coverage;

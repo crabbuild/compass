@@ -1022,7 +1022,7 @@ fn framework_function_start(source: &str, node: &NodeRecord) -> Option<usize> {
 fn finish_resolution(
     mut merged: Extraction,
     mut language_facts: members::LanguageCallFacts,
-    evidence_batches: Vec<SemanticEvidenceBatch>,
+    mut evidence_batches: Vec<SemanticEvidenceBatch>,
     sources: &HashMap<String, String>,
     root: &Path,
     project_edges: Vec<EdgeRecord>,
@@ -1034,6 +1034,26 @@ fn finish_resolution(
     } = mode;
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let stub_diagnostics = prepare_python_source_stubs(&mut evidence_batches);
+    if !stub_diagnostics.is_empty() {
+        let mut diagnostics = merged
+            .extensions
+            .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+            .and_then(|value| serde_json::from_value::<Vec<GraphDiagnostic>>(value).ok())
+            .unwrap_or_default();
+        diagnostics.extend(stub_diagnostics);
+        diagnostics.sort_by(|left, right| {
+            left.code
+                .cmp(&right.code)
+                .then_with(|| left.message.cmp(&right.message))
+        });
+        diagnostics.dedup();
+        if let Ok(value) = serde_json::to_value(diagnostics) {
+            merged
+                .extensions
+                .insert(GRAPH_DIAGNOSTICS_EXTENSION.to_owned(), value);
+        }
+    }
     let mut project_edges = project_edges;
     augment_universal_project_inventory(
         &mut merged,
@@ -1266,6 +1286,125 @@ fn finish_resolution(
     }
     profile_internal("resolver framework relations", &mut profile_started);
     merged
+}
+
+fn prepare_python_source_stubs(batches: &mut Vec<SemanticEvidenceBatch>) -> Vec<GraphDiagnostic> {
+    let mut by_stem = BTreeMap::<String, (Vec<usize>, Vec<usize>)>::new();
+    for (index, batch) in batches.iter().enumerate() {
+        if batch.pipeline.language != "python" {
+            continue;
+        }
+        let Some(source_file) = batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.kind == "file")
+            .or_else(|| batch.declarations.first())
+            .map(|declaration| declaration.range.source_file.replace('\\', "/"))
+        else {
+            continue;
+        };
+        let (stem, stub) = if let Some(stem) = source_file.strip_suffix(".pyi") {
+            (stem, true)
+        } else if let Some(stem) = source_file.strip_suffix(".py") {
+            (stem, false)
+        } else {
+            continue;
+        };
+        let entry = by_stem.entry(stem.to_owned()).or_default();
+        if stub {
+            entry.1.push(index);
+        } else {
+            entry.0.push(index);
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    let mut paired_stub_indices = BTreeSet::new();
+    for (stem, (sources, stubs)) in by_stem {
+        if sources.is_empty() || stubs.is_empty() {
+            continue;
+        }
+        if sources.len() != 1 || stubs.len() != 1 {
+            diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "python_stub_source_conflict".to_owned(),
+                message: format!(
+                    "Python source/stub identity {stem:?} has {} source batches and {} stub batches; no declaration merge was attempted",
+                    sources.len(),
+                    stubs.len()
+                ),
+                anchor: None,
+                related_ids: Vec::new(),
+            });
+            continue;
+        }
+        let source_index = sources[0];
+        let stub_index = stubs[0];
+        let source = &batches[source_index];
+        let stub = &batches[stub_index];
+        let source_modules = source
+            .declarations
+            .iter()
+            .filter_map(|declaration| declaration.module_or_package.clone())
+            .collect::<BTreeSet<_>>();
+        let stub_modules = stub
+            .declarations
+            .iter()
+            .filter_map(|declaration| declaration.module_or_package.clone())
+            .collect::<BTreeSet<_>>();
+        let source_declarations = source
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind != "file")
+            .map(|declaration| (declaration.qualified_name.clone(), declaration.kind.clone()))
+            .collect::<BTreeSet<_>>();
+        let unmatched = stub
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind != "file")
+            .map(|declaration| (declaration.qualified_name.clone(), declaration.kind.clone()))
+            .filter(|declaration| !source_declarations.contains(declaration))
+            .collect::<Vec<_>>();
+        if source_modules != stub_modules || !unmatched.is_empty() {
+            let mismatch = unmatched
+                .iter()
+                .take(8)
+                .map(|(qualified, kind)| format!("{qualified} ({kind})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "python_stub_source_conflict".to_owned(),
+                message: if mismatch.is_empty() {
+                    format!(
+                        "Python source/stub identity {stem:?} has conflicting module identities; the source remains authoritative"
+                    )
+                } else {
+                    format!(
+                        "Python stub {stem}.pyi contains declarations absent or incompatible in its source: {mismatch}; the source remains authoritative"
+                    )
+                },
+                anchor: None,
+                related_ids: Vec::new(),
+            });
+        }
+        paired_stub_indices.insert(stub_index);
+    }
+    if !paired_stub_indices.is_empty() {
+        let mut index = 0_usize;
+        batches.retain(|_| {
+            let retain = !paired_stub_indices.contains(&index);
+            index = index.saturating_add(1);
+            retain
+        });
+    }
+    diagnostics.sort_by(|left, right| {
+        left.code
+            .cmp(&right.code)
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    diagnostics.dedup();
+    diagnostics
 }
 
 fn append_universal_resolution_report(

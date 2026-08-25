@@ -27,7 +27,7 @@ class PythonFrameworkOracleTests(unittest.TestCase):
         self.assertEqual(first["summary"]["partialFiles"], 0)
 
     def test_utf8_ranges_are_exact_source_byte_ranges(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="compass-python-oracle-utf8-") as directory:
+        with tempfile.TemporaryDirectory(prefix="compass-framework-source-audit-utf8-") as directory:
             root = Path(directory)
             source = "class Café(BaseModel):\n    @router.get('/élève')\n    def lire(self):\n        return self\n"
             (root / "models.py").write_text(source, encoding="utf-8")
@@ -39,7 +39,7 @@ class PythonFrameworkOracleTests(unittest.TestCase):
             self.assertIn(b"router.get", raw[anchor["startByte"] : anchor["endByte"]])
 
     def test_malformed_invalid_utf8_and_oversized_files_are_not_success(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="compass-python-oracle-partial-") as directory:
+        with tempfile.TemporaryDirectory(prefix="compass-framework-source-audit-partial-") as directory:
             root = Path(directory)
             (root / "malformed.py").write_text("def broken(:\n", encoding="utf-8")
             (root / "invalid.py").write_bytes(b"value = \xff\n")
@@ -50,7 +50,7 @@ class PythonFrameworkOracleTests(unittest.TestCase):
             self.assertEqual(statuses, {"invalid.py": "partial", "malformed.py": "partial"})
 
     def test_cli_writes_canonical_json(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="compass-python-oracle-cli-") as directory:
+        with tempfile.TemporaryDirectory(prefix="compass-framework-source-audit-cli-") as directory:
             output = Path(directory) / "oracle.json"
             self.assertEqual(
                 oracle.main(

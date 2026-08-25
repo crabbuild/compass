@@ -86,6 +86,15 @@ impl ResolutionDb<'_> {
         {
             return None;
         }
+        if language == "python"
+            && let Some(sources) =
+                python_project_sources(&self.project.python_project_modules, qualified_name)
+            && sources.len() > 1
+        {
+            return Some(ResolutionDecision::Ambiguous {
+                candidate_count: sources.len(),
+            });
+        }
         let candidates = self
             .indexes
             .names

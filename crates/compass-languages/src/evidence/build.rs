@@ -824,6 +824,7 @@ pub(crate) fn extract_tree_evidence(
     source: &[u8],
     root: Node<'_>,
     pipeline: &'static UniversalEvidencePipeline,
+    project_evidence: Option<&crate::ProjectEvidence>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
     if pipeline.producer.language == "csharp" {
         return super::csharp::emit_tree_evidence(path, source_file, source, root);
@@ -861,7 +862,34 @@ pub(crate) fn extract_tree_evidence(
         }
         _ => {}
     }
-    let mut state = DirectEvidenceState::new(path, source_file, source, root, pipeline);
+    let python_module_keys = if pipeline.producer.language == "python" {
+        project_evidence
+            .map(|evidence| evidence.python_module_keys(source_file))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let unique_python_module =
+        (python_module_keys.len() == 1).then(|| python_module_keys[0].clone());
+    let mut state = DirectEvidenceState::new(
+        path,
+        source_file,
+        source,
+        root,
+        pipeline,
+        unique_python_module.as_deref(),
+    );
+    if python_module_keys.len() > 1 {
+        state.builder.diagnose(
+            "python_module_identity_ambiguous",
+            None,
+            Some(range_for_file(source_file, source)),
+            &format!(
+                "source has multiple admissible Python module identities: {}",
+                python_module_keys.join(", ")
+            ),
+        )?;
+    }
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
         let DirectEvidenceState { builder, .. } = state;
@@ -1002,10 +1030,13 @@ impl<'source> DirectEvidenceState<'source> {
         source: &'source [u8],
         root: Node<'_>,
         pipeline: &'static UniversalEvidencePipeline,
+        python_module: Option<&str>,
     ) -> Self {
         let stem = file_stem(path);
         let module_or_package = if pipeline.producer.language == "python" {
-            python_module_identity(path, source_file)
+            python_module
+                .map(str::to_owned)
+                .unwrap_or_else(|| python_module_identity(path, source_file))
         } else if pipeline.producer.language == "go" {
             go_package_identity(path, source_file, source, root)
         } else if pipeline.producer.language == "java" {
@@ -1282,7 +1313,8 @@ impl<'source> DirectEvidenceState<'source> {
 
             let alias = self.text(alias_node);
             let qualified_name = format!("{}.{}", self.module_or_package, alias);
-            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &alias]), assignment);
+            let graph_node_id =
+                self.unique_graph_id(make_id(&[&self.module_or_package, &alias]), assignment);
             let fact_id = self.builder.declare(
                 "function",
                 &graph_node_id,
@@ -1409,7 +1441,8 @@ impl<'source> DirectEvidenceState<'source> {
             }
 
             let qualified_name = format!("{}.{}", self.module_or_package, name);
-            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &name]), assignment);
+            let graph_node_id =
+                self.unique_graph_id(make_id(&[&self.module_or_package, &name]), assignment);
             let fact_id = self.builder.declare(
                 "variable",
                 &graph_node_id,
@@ -1580,7 +1613,7 @@ impl<'source> DirectEvidenceState<'source> {
             };
             let graph_node_id = if owner.kind == "file" {
                 make_id(&[
-                    &self.stem,
+                    &self.module_or_package,
                     qualified_name.rsplit('.').next().unwrap_or(&name),
                 ])
             } else {
@@ -1944,7 +1977,10 @@ impl<'source> DirectEvidenceState<'source> {
             resolve_python_module(
                 &self.module_or_package,
                 &self.text(module),
-                self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"),
+                matches!(
+                    self.path.file_name().and_then(|name| name.to_str()),
+                    Some("__init__.py" | "__init__.pyi")
+                ),
             )
         });
         let named_import = module.is_some();
@@ -2051,7 +2087,10 @@ impl<'source> DirectEvidenceState<'source> {
             return Ok(());
         }
         let is_reexport = owner.kind == "file"
-            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+            && matches!(
+                self.path.file_name().and_then(|name| name.to_str()),
+                Some("__init__.py" | "__init__.pyi")
+            );
         let kind = if is_reexport {
             BindingKind::Reexport
         } else {
@@ -2128,7 +2167,10 @@ impl<'source> DirectEvidenceState<'source> {
         named_import: bool,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
-            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+            && matches!(
+                self.path.file_name().and_then(|name| name.to_str()),
+                Some("__init__.py" | "__init__.pyi")
+            );
         let kind = if is_reexport {
             BindingKind::Reexport
         } else if local == binding_target.rsplit('.').next().unwrap_or_default() {
@@ -9309,17 +9351,22 @@ fn resolve_python_module(current: &str, imported: &str, current_is_package: bool
 fn python_module_identity(path: &Path, source_file: &str) -> String {
     if source_file.contains('/') {
         return source_file
-            .trim_end_matches(".py")
+            .strip_suffix(".pyi")
+            .or_else(|| source_file.strip_suffix(".py"))
+            .unwrap_or(source_file)
             .trim_end_matches("/__init__")
             .replace('/', ".");
     }
-    let stem = source_file.trim_end_matches(".py");
+    let stem = source_file
+        .strip_suffix(".pyi")
+        .or_else(|| source_file.strip_suffix(".py"))
+        .unwrap_or(source_file);
     let parent = path
         .parent()
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if source_file == "__init__.py" {
+    if matches!(source_file, "__init__.py" | "__init__.pyi") {
         return if parent.is_empty() { stem } else { parent }.to_owned();
     }
     if !parent.is_empty()

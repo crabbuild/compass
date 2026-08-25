@@ -12,7 +12,7 @@ use crate::json_config::parse_jsonc;
 
 pub const FRAMEWORK_PROJECT_EVIDENCE_EXTENSION: &str = "_compass_framework_project_evidence";
 
-const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/3";
+const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/4";
 const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DEPENDENCIES_PER_PROJECT: usize = 10_000;
 const MAX_PROJECT_CONFIGURATIONS: usize = 256;
@@ -24,6 +24,10 @@ const MAX_COMPOSER_AUTOLOAD_ROOTS: usize = 4_096;
 const MAX_COMPOSER_ROOTS_PER_PREFIX: usize = 64;
 const MAX_COMPOSER_NAMESPACE_PREFIX_BYTES: usize = 1_024;
 const MAX_COMPOSER_DIRECTORY_BYTES: usize = 4_096;
+const MAX_PYTHON_IMPORT_ROOTS: usize = 1_024;
+const MAX_PYTHON_ROOTS_PER_MANIFEST: usize = 256;
+const MAX_PYTHON_IMPORT_ROOT_BYTES: usize = 4_096;
+const MAX_PYTHON_PACKAGE_PREFIX_BYTES: usize = 1_024;
 const MAX_PROJECT_EVIDENCE_DIAGNOSTICS: usize = 4_096;
 const MAX_PROJECT_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_PROJECT_DIRECTORY_ENTRIES: usize = 4_096;
@@ -98,6 +102,7 @@ pub struct ProjectEvidence {
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: Vec<ComposerAutoloadRoot>,
+    python_import_roots: Vec<PythonImportRoot>,
     input_digests: BTreeMap<String, String>,
     typescript_extends: BTreeSet<String>,
     typescript_project_references: BTreeSet<String>,
@@ -112,6 +117,42 @@ pub struct ComposerAutoloadRoot {
     pub directory: String,
     pub development: bool,
     pub manifest: String,
+}
+
+/// One repository-contained Python import root recovered from static project
+/// configuration. The directory is normalized relative to the repository;
+/// no environment or package-manager discovery contributes to this record.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PythonImportRoot {
+    pub manifest: String,
+    pub directory: String,
+    pub package_prefix: Option<String>,
+    pub kind: PythonImportRootKind,
+}
+
+/// Source-only rule that admitted a Python import root.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum PythonImportRootKind {
+    ProjectRoot,
+    SrcLayout,
+    SetuptoolsPackageDir,
+    SetuptoolsFind,
+    PoetryPackage,
+    HatchWheelPackage,
+}
+
+impl PythonImportRootKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ProjectRoot => "project_root",
+            Self::SrcLayout => "src_layout",
+            Self::SetuptoolsPackageDir => "setuptools_package_dir",
+            Self::SetuptoolsFind => "setuptools_find",
+            Self::PoetryPackage => "poetry_package",
+            Self::HatchWheelPackage => "hatch_wheel_package",
+        }
+    }
 }
 
 /// A deterministic project-manifest diagnostic retained with cache evidence.
@@ -237,6 +278,45 @@ impl ProjectEvidence {
         &self.composer_autoload_roots
     }
 
+    #[must_use]
+    pub fn python_import_roots(&self) -> &[PythonImportRoot] {
+        &self.python_import_roots
+    }
+
+    /// Return every admissible source-only Python module key for a repository-
+    /// relative source path. Explicit or inferred roots take precedence over
+    /// the conventional project root when they contain the source. Distinct
+    /// results are retained so callers can fail closed on ambiguity.
+    #[must_use]
+    pub fn python_module_keys(&self, source_file: &str) -> Vec<String> {
+        let source_file = source_file.replace('\\', "/");
+        if source_file.is_empty()
+            || source_file.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
+            || source_file.starts_with('/')
+            || source_file.contains('\0')
+            || source_file.split('/').any(|component| component == "..")
+        {
+            return Vec::new();
+        }
+        let explicit = self
+            .python_import_roots
+            .iter()
+            .filter(|root| root.kind != PythonImportRootKind::ProjectRoot)
+            .filter_map(|root| python_module_key_for_root(&source_file, root))
+            .collect::<BTreeSet<_>>();
+        let mut keys = if explicit.is_empty() {
+            self.python_import_roots
+                .iter()
+                .filter(|root| root.kind == PythonImportRootKind::ProjectRoot)
+                .filter_map(|root| python_module_key_for_root(&source_file, root))
+                .collect::<BTreeSet<_>>()
+        } else {
+            explicit
+        };
+        keys.retain(|key| !key.is_empty());
+        keys.into_iter().collect()
+    }
+
     /// SHA-256 digests of bounded project inputs that affect framework scope
     /// or compiler/configuration semantics. Lockfiles are inputs only; they
     /// never authorize package-manager execution.
@@ -317,6 +397,35 @@ impl ProjectEvidence {
         self.route_roots
             .get(&normalize_dependency(framework))
             .is_some_and(|roots| roots.contains(&normalize_project_path(root)))
+    }
+}
+
+fn python_module_key_for_root(source_file: &str, root: &PythonImportRoot) -> Option<String> {
+    let relative = if root.directory == "." {
+        source_file
+    } else {
+        source_file.strip_prefix(&format!("{}/", root.directory))?
+    };
+    let stem = relative
+        .strip_suffix(".pyi")
+        .or_else(|| relative.strip_suffix(".py"))?;
+    let stem = stem.strip_suffix("/__init__").unwrap_or(stem);
+    let segments = stem
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments
+        .iter()
+        .any(|segment| !valid_python_identifier(segment))
+    {
+        return None;
+    }
+    let suffix = segments.join(".");
+    match (root.package_prefix.as_deref(), suffix.is_empty()) {
+        (Some(prefix), true) => Some(prefix.to_owned()),
+        (Some(prefix), false) => Some(format!("{prefix}.{suffix}")),
+        (None, false) => Some(suffix),
+        (None, true) => None,
     }
 }
 
@@ -456,6 +565,31 @@ impl ProjectEvidenceIndex {
                     }
                     builder
                         .composer_autoload_roots
+                        .extend(roots.into_iter().take(remaining));
+                    let diagnostic_capacity =
+                        MAX_PROJECT_EVIDENCE_DIAGNOSTICS.saturating_sub(builder.diagnostics.len());
+                    builder
+                        .diagnostics
+                        .extend(diagnostics.into_iter().take(diagnostic_capacity));
+                }
+                if file_name(&project_file).eq_ignore_ascii_case("pyproject.toml") {
+                    let (roots, mut diagnostics) = parse_python_import_roots(
+                        &repository_root,
+                        &project_root,
+                        &project_file,
+                        sources,
+                    );
+                    let remaining =
+                        MAX_PYTHON_IMPORT_ROOTS.saturating_sub(builder.python_import_roots.len());
+                    if roots.len() > remaining {
+                        diagnostics.insert(project_diagnostic(
+                            "python_import_root_total_limit",
+                            &relative_project_file(&repository_root, &project_file),
+                            "Python import roots exceed the project-wide bounded limit",
+                        ));
+                    }
+                    builder
+                        .python_import_roots
                         .extend(roots.into_iter().take(remaining));
                     let diagnostic_capacity =
                         MAX_PROJECT_EVIDENCE_DIAGNOSTICS.saturating_sub(builder.diagnostics.len());
@@ -616,6 +750,7 @@ struct ProjectBuilder {
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
     composer_autoload_roots: BTreeSet<ComposerAutoloadRoot>,
+    python_import_roots: BTreeSet<PythonImportRoot>,
     input_digests: BTreeMap<String, String>,
     typescript_configs: BTreeSet<PathBuf>,
     typescript_extends: BTreeSet<String>,
@@ -693,6 +828,7 @@ fn finish_project(
         .composer_autoload_roots
         .into_iter()
         .collect::<Vec<_>>();
+    let python_import_roots = builder.python_import_roots.into_iter().collect::<Vec<_>>();
     let input_digests = builder.input_digests;
     let typescript_extends = builder.typescript_extends;
     let typescript_project_references = builder.typescript_project_references;
@@ -785,6 +921,18 @@ fn finish_project(
         digest.update(root.manifest.as_bytes());
         digest.update([0]);
     }
+    for root in &python_import_roots {
+        digest.update(root.manifest.as_bytes());
+        digest.update([0]);
+        digest.update(root.directory.as_bytes());
+        digest.update([0]);
+        if let Some(prefix) = &root.package_prefix {
+            digest.update(prefix.as_bytes());
+        }
+        digest.update([0]);
+        digest.update(root.kind.as_str().as_bytes());
+        digest.update([0]);
+    }
     for (path, input_digest) in &input_digests {
         digest.update(path.as_bytes());
         digest.update([0]);
@@ -823,6 +971,7 @@ fn finish_project(
         plugins,
         route_roots,
         composer_autoload_roots,
+        python_import_roots,
         input_digests,
         typescript_extends,
         typescript_project_references,
@@ -1281,6 +1430,468 @@ fn contained_composer_directory(
     } else {
         normalized
     })
+}
+
+fn parse_python_import_roots(
+    repository_root: &Path,
+    project_root: &Path,
+    manifest: &Path,
+    sources: &[PathBuf],
+) -> (
+    BTreeSet<PythonImportRoot>,
+    BTreeSet<ProjectEvidenceDiagnostic>,
+) {
+    let manifest_name = relative_project_file(repository_root, manifest);
+    let mut roots = BTreeSet::new();
+    let mut diagnostics = BTreeSet::new();
+    let project_directory = relative_project_file(repository_root, project_root);
+    roots.insert(PythonImportRoot {
+        manifest: manifest_name.clone(),
+        directory: normalized_root_directory(&project_directory),
+        package_prefix: None,
+        kind: PythonImportRootKind::ProjectRoot,
+    });
+
+    let metadata = match fs::symlink_metadata(manifest) {
+        Ok(metadata)
+            if metadata.file_type().is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.len() <= MAX_MANIFEST_BYTES =>
+        {
+            metadata
+        }
+        Ok(_) => {
+            diagnostics.insert(project_diagnostic(
+                "python_manifest_rejected",
+                &manifest_name,
+                "Python project manifest is not a bounded regular file",
+            ));
+            return (roots, diagnostics);
+        }
+        Err(_) => return (roots, diagnostics),
+    };
+    let _ = metadata;
+    let source = match fs::read_to_string(manifest) {
+        Ok(source) => source,
+        Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "python_manifest_unreadable",
+                &manifest_name,
+                "Python project manifest could not be read as UTF-8",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+    let document = match toml::from_str::<toml::Table>(&source) {
+        Ok(document) => document,
+        Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "python_manifest_invalid",
+                &manifest_name,
+                "Python project manifest is not valid TOML",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+
+    let mut configured = Vec::<(String, Option<String>, PythonImportRootKind)>::new();
+    if let Some(package_dir) = toml_table_at(&document, &["tool", "setuptools", "package-dir"]) {
+        for (prefix, value) in package_dir {
+            let Some(directory) = value.as_str() else {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_invalid",
+                    &manifest_name,
+                    "tool.setuptools.package-dir values must be static strings",
+                ));
+                continue;
+            };
+            let package_prefix = if prefix.is_empty() {
+                None
+            } else if let Some(prefix) = normalize_python_package_prefix(prefix) {
+                Some(prefix)
+            } else {
+                diagnostics.insert(project_diagnostic(
+                    "python_package_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid setuptools package prefix {prefix:?}"),
+                ));
+                continue;
+            };
+            configured.push((
+                directory.to_owned(),
+                package_prefix,
+                PythonImportRootKind::SetuptoolsPackageDir,
+            ));
+        }
+    }
+    if let Some(find) = toml_table_at(&document, &["tool", "setuptools", "packages", "find"])
+        && let Some(where_value) = find.get("where")
+    {
+        collect_static_string_or_array(
+            where_value,
+            "tool.setuptools.packages.find.where",
+            &manifest_name,
+            &mut diagnostics,
+            |directory| {
+                configured.push((
+                    directory.to_owned(),
+                    None,
+                    PythonImportRootKind::SetuptoolsFind,
+                ));
+            },
+        );
+    }
+    if let Some(poetry) = toml_table_at(&document, &["tool", "poetry"])
+        && let Some(packages) = poetry.get("packages")
+    {
+        let Some(packages) = packages.as_array() else {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_invalid",
+                &manifest_name,
+                "tool.poetry.packages must be a static array of tables",
+            ));
+            return finalize_python_import_roots(
+                repository_root,
+                project_root,
+                &manifest_name,
+                sources,
+                roots,
+                configured,
+                diagnostics,
+            );
+        };
+        for package in packages
+            .iter()
+            .take(MAX_PYTHON_ROOTS_PER_MANIFEST.saturating_add(1))
+        {
+            let Some(package) = package.as_table() else {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_invalid",
+                    &manifest_name,
+                    "tool.poetry.packages entries must be static tables",
+                ));
+                continue;
+            };
+            let Some(include) = package.get("include").and_then(toml::Value::as_str) else {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_invalid",
+                    &manifest_name,
+                    "tool.poetry.packages entries require a static include string",
+                ));
+                continue;
+            };
+            if !valid_python_package_path(include) {
+                diagnostics.insert(project_diagnostic(
+                    "python_package_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid Poetry package include {include:?}"),
+                ));
+                continue;
+            }
+            let directory = package
+                .get("from")
+                .and_then(toml::Value::as_str)
+                .unwrap_or(".");
+            configured.push((
+                directory.to_owned(),
+                None,
+                PythonImportRootKind::PoetryPackage,
+            ));
+        }
+        if packages.len() > MAX_PYTHON_ROOTS_PER_MANIFEST {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_limit",
+                &manifest_name,
+                "tool.poetry.packages exceeds the bounded root limit",
+            ));
+        }
+    }
+    if let Some(wheel) = toml_table_at(&document, &["tool", "hatch", "build", "targets", "wheel"])
+        && let Some(packages) = wheel.get("packages")
+    {
+        let mut hatch_packages = Vec::new();
+        collect_static_string_or_array(
+            packages,
+            "tool.hatch.build.targets.wheel.packages",
+            &manifest_name,
+            &mut diagnostics,
+            |package| hatch_packages.push(package.to_owned()),
+        );
+        for package in hatch_packages {
+            if !valid_python_package_path(&package) {
+                diagnostics.insert(project_diagnostic(
+                    "python_package_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid Hatch wheel package {package:?}"),
+                ));
+                continue;
+            }
+            let directory = Path::new(&package)
+                .parent()
+                .map(|parent| parent.to_string_lossy().into_owned())
+                .filter(|parent| !parent.is_empty())
+                .unwrap_or_else(|| ".".to_owned());
+            configured.push((directory, None, PythonImportRootKind::HatchWheelPackage));
+        }
+    }
+
+    finalize_python_import_roots(
+        repository_root,
+        project_root,
+        &manifest_name,
+        sources,
+        roots,
+        configured,
+        diagnostics,
+    )
+}
+
+fn finalize_python_import_roots(
+    repository_root: &Path,
+    project_root: &Path,
+    manifest_name: &str,
+    sources: &[PathBuf],
+    mut roots: BTreeSet<PythonImportRoot>,
+    configured: Vec<(String, Option<String>, PythonImportRootKind)>,
+    mut diagnostics: BTreeSet<ProjectEvidenceDiagnostic>,
+) -> (
+    BTreeSet<PythonImportRoot>,
+    BTreeSet<ProjectEvidenceDiagnostic>,
+) {
+    if configured.len() > MAX_PYTHON_ROOTS_PER_MANIFEST {
+        diagnostics.insert(project_diagnostic(
+            "python_import_root_limit",
+            manifest_name,
+            "Python import-root declarations exceed the bounded manifest limit",
+        ));
+    }
+    let mut semantic_roots = BTreeMap::<(String, Option<String>), PythonImportRootKind>::new();
+    for (directory, package_prefix, kind) in
+        configured.into_iter().take(MAX_PYTHON_ROOTS_PER_MANIFEST)
+    {
+        let Some(directory) = contained_python_directory(repository_root, project_root, &directory)
+        else {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_rejected",
+                manifest_name,
+                &format!("Python import root {directory:?} is invalid or leaves the repository"),
+            ));
+            continue;
+        };
+        let semantic_key = (directory.clone(), package_prefix.clone());
+        if let Some(previous) = semantic_roots.insert(semantic_key, kind) {
+            if previous != kind {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_duplicate",
+                    manifest_name,
+                    &format!(
+                        "Python import root {directory:?} is declared by both {} and {}",
+                        previous.as_str(),
+                        kind.as_str()
+                    ),
+                ));
+            }
+            continue;
+        }
+        roots.insert(PythonImportRoot {
+            manifest: manifest_name.to_owned(),
+            directory,
+            package_prefix,
+            kind,
+        });
+    }
+
+    let mut prefixes_by_directory = BTreeMap::<String, BTreeSet<Option<String>>>::new();
+    for root in roots
+        .iter()
+        .filter(|root| root.kind != PythonImportRootKind::ProjectRoot)
+    {
+        prefixes_by_directory
+            .entry(root.directory.clone())
+            .or_default()
+            .insert(root.package_prefix.clone());
+    }
+    for (directory, prefixes) in prefixes_by_directory {
+        if prefixes.len() > 1 {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_conflict",
+                manifest_name,
+                &format!(
+                    "Python import root {directory:?} has conflicting package-prefix declarations"
+                ),
+            ));
+        }
+    }
+
+    if inferred_src_layout(repository_root, project_root, sources)
+        && let Some(directory) = contained_python_directory(repository_root, project_root, "src")
+    {
+        let semantic = (directory.clone(), None);
+        if !semantic_roots.contains_key(&semantic) {
+            roots.insert(PythonImportRoot {
+                manifest: manifest_name.to_owned(),
+                directory,
+                package_prefix: None,
+                kind: PythonImportRootKind::SrcLayout,
+            });
+        }
+    }
+    (roots, diagnostics)
+}
+
+fn toml_table_at<'a>(root: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Table> {
+    let (first, rest) = path.split_first()?;
+    let mut table = root.get(*first)?.as_table()?;
+    for component in rest {
+        table = table.get(*component)?.as_table()?;
+    }
+    Some(table)
+}
+
+fn collect_static_string_or_array(
+    value: &toml::Value,
+    field: &str,
+    manifest: &str,
+    diagnostics: &mut BTreeSet<ProjectEvidenceDiagnostic>,
+    mut collect: impl FnMut(&str),
+) {
+    if let Some(value) = value.as_str() {
+        collect(value);
+        return;
+    }
+    let Some(values) = value.as_array() else {
+        diagnostics.insert(project_diagnostic(
+            "python_import_root_invalid",
+            manifest,
+            &format!("{field} must be a static string or string array"),
+        ));
+        return;
+    };
+    for value in values
+        .iter()
+        .take(MAX_PYTHON_ROOTS_PER_MANIFEST.saturating_add(1))
+    {
+        if let Some(value) = value.as_str() {
+            collect(value);
+        } else {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_invalid",
+                manifest,
+                &format!("{field} contains a non-string value"),
+            ));
+        }
+    }
+    if values.len() > MAX_PYTHON_ROOTS_PER_MANIFEST {
+        diagnostics.insert(project_diagnostic(
+            "python_import_root_limit",
+            manifest,
+            &format!("{field} exceeds the bounded root limit"),
+        ));
+    }
+}
+
+fn contained_python_directory(
+    repository_root: &Path,
+    project_root: &Path,
+    directory: &str,
+) -> Option<String> {
+    if directory.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
+        || directory.contains('\0')
+        || directory.starts_with(['/', '\\'])
+        || directory.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut candidate = project_root.to_path_buf();
+    for component in Path::new(directory).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => candidate.push(segment),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    if !candidate.starts_with(repository_root) || !candidate.is_dir() {
+        return None;
+    }
+    let canonical_repository = fs::canonicalize(repository_root).ok()?;
+    let canonical_candidate = fs::canonicalize(&candidate).ok()?;
+    if !canonical_candidate.starts_with(canonical_repository) {
+        return None;
+    }
+    let relative = candidate.strip_prefix(repository_root).ok()?;
+    Some(normalized_root_directory(&relative.to_string_lossy()))
+}
+
+fn normalized_root_directory(directory: &str) -> String {
+    let directory = normalize_project_path(directory);
+    if directory.is_empty() {
+        ".".to_owned()
+    } else {
+        directory
+    }
+}
+
+fn normalize_python_package_prefix(prefix: &str) -> Option<String> {
+    let prefix = prefix.trim();
+    if prefix.is_empty() || prefix.len() > MAX_PYTHON_PACKAGE_PREFIX_BYTES {
+        return None;
+    }
+    prefix
+        .split('.')
+        .all(valid_python_identifier)
+        .then(|| prefix.to_owned())
+}
+
+fn valid_python_package_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
+        || value.contains(['\0', '\\'])
+        || value.starts_with('/')
+        || value.as_bytes().get(1) == Some(&b':')
+    {
+        return false;
+    }
+    Path::new(value)
+        .components()
+        .all(|component| match component {
+            std::path::Component::CurDir => true,
+            std::path::Component::Normal(segment) => segment
+                .to_str()
+                .map(|segment| segment.strip_suffix(".py").unwrap_or(segment))
+                .is_some_and(valid_python_identifier),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => false,
+        })
+}
+
+fn valid_python_identifier(segment: &str) -> bool {
+    let mut characters = segment.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
+}
+
+fn inferred_src_layout(repository_root: &Path, project_root: &Path, sources: &[PathBuf]) -> bool {
+    if !project_root.join("src").is_dir() {
+        return false;
+    }
+    let mut python_sources = sources
+        .iter()
+        .map(|source| absolute_path(repository_root, source))
+        .filter(|source| source.starts_with(project_root))
+        .filter(|source| {
+            source
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| matches!(extension, "py" | "pyi"))
+        })
+        .peekable();
+    python_sources.peek().is_some()
+        && python_sources.all(|source| source.starts_with(project_root.join("src")))
 }
 
 fn project_diagnostic(code: &str, manifest: &str, message: &str) -> ProjectEvidenceDiagnostic {
@@ -2580,12 +3191,13 @@ fn absolute_path(root: &Path, path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::error::Error;
     use std::fs;
 
     use tempfile::tempdir;
 
-    use super::{ProjectEvidenceIndex, ProjectViteAliasKind};
+    use super::{ProjectEvidenceIndex, ProjectViteAliasKind, PythonImportRootKind};
 
     #[test]
     fn nearest_project_merges_manifests_and_is_deterministic() -> Result<(), Box<dyn Error>> {
@@ -2672,6 +3284,173 @@ mod tests {
             evidence.fingerprint(),
             second.evidence_for(&source).fingerprint()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_cover_flat_src_and_namespace_layouts_deterministically()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src/acme/api"))?;
+        fs::write(
+            root.join("pyproject.toml"),
+            r#"[project]
+name = "acme"
+[tool.setuptools.packages.find]
+where = ["src"]
+"#,
+        )?;
+        let source = root.join("src/acme/api/routes.py");
+        fs::write(&source, "def route(): ...\n")?;
+
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = first.evidence_for(&source);
+        assert!(evidence.python_import_roots().iter().any(|entry| {
+            entry.directory == "." && entry.kind == PythonImportRootKind::ProjectRoot
+        }));
+        assert!(evidence.python_import_roots().iter().any(|entry| {
+            entry.directory == "src" && entry.kind == PythonImportRootKind::SetuptoolsFind
+        }));
+        assert_eq!(
+            evidence.fingerprint(),
+            second.evidence_for(&source).fingerprint()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_parse_static_setuptools_poetry_and_hatch_rules()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        for path in ["lib", "packages", "src", "vendor"] {
+            fs::create_dir_all(root.join(path))?;
+        }
+        fs::write(
+            root.join("pyproject.toml"),
+            r#"[project]
+name = "acme"
+[tool.setuptools.package-dir]
+acme_legacy = "lib"
+[tool.setuptools.packages.find]
+where = ["packages"]
+[[tool.poetry.packages]]
+include = "acme"
+from = "src"
+[tool.hatch.build.targets.wheel]
+packages = ["vendor/acme_vendor"]
+"#,
+        )?;
+        let source = root.join("src/acme/api.py");
+        fs::create_dir_all(source.parent().ok_or("missing source parent")?)?;
+        fs::write(&source, "")?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let roots = index.evidence_for(&source).python_import_roots();
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "lib"
+                && entry.package_prefix.as_deref() == Some("acme_legacy")
+                && entry.kind == PythonImportRootKind::SetuptoolsPackageDir
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "packages" && entry.kind == PythonImportRootKind::SetuptoolsFind
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "src" && entry.kind == PythonImportRootKind::PoetryPackage
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "vendor" && entry.kind == PythonImportRootKind::HatchWheelPackage
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_reject_escapes_and_retain_duplicate_diagnostics()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src/acme"))?;
+        fs::write(
+            root.join("pyproject.toml"),
+            r#"[project]
+name = "acme"
+[tool.setuptools.package-dir]
+"" = "src"
+escape = "../outside"
+[tool.setuptools.packages.find]
+where = ["src", "/absolute"]
+"#,
+        )?;
+        let source = root.join("src/acme/api.py");
+        fs::write(&source, "")?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        let codes = evidence
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(codes.contains("python_import_root_rejected"));
+        assert!(codes.contains("python_import_root_duplicate"));
+        assert_eq!(
+            evidence
+                .python_import_roots()
+                .iter()
+                .filter(|entry| entry.directory == "src")
+                .count(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_infer_a_sole_src_layout_without_init_files() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src/acme/namespace"))?;
+        fs::write(root.join("pyproject.toml"), "[project]\nname = \"acme\"\n")?;
+        let source = root.join("src/acme/namespace/api.pyi");
+        fs::write(&source, "def route() -> None: ...\n")?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        assert!(
+            index
+                .evidence_for(&source)
+                .python_import_roots()
+                .iter()
+                .any(|entry| {
+                    entry.directory == "src" && entry.kind == PythonImportRootKind::SrcLayout
+                })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_root_change_invalidates_the_project_fingerprint() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        for path in ["src/acme", "packages/acme"] {
+            fs::create_dir_all(root.join(path))?;
+        }
+        let source = root.join("src/acme/api.py");
+        fs::write(&source, "")?;
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n",
+        )?;
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let first_fingerprint = first.fingerprint_for(&source).to_owned();
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"packages\"]\n",
+        )?;
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        assert_ne!(first_fingerprint, second.fingerprint_for(&source));
         Ok(())
     }
 

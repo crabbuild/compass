@@ -48,6 +48,22 @@ candidate exports, and TypeScript scorecards likewise require their `/2`
 schemas and use `producer` for the language evidence identity; regenerate
 those audit inputs rather than trying to load the old field names.
 
+## Python project identity and stubs
+
+Python now publishes version-12 `compass.python` evidence. Static
+`pyproject.toml` import roots can remove repository-layout prefixes such as
+`src.` from qualified names, and top-level Python graph IDs are derived from
+the proven module identity instead of the checkout path. `.pyi` files now use
+the Python pipeline: a matching `.py` file remains the declaration owner,
+stub-only declarations carry `source_kind: "stub"`, and mismatches publish a
+`python_stub_source_conflict` diagnostic without merging guessed facts.
+
+Run a fresh or forced build after upgrading. Project evidence schema
+`compass.framework-project-evidence/4` and Python producer version 12 invalidate
+the affected cache entries automatically. Published historical realizations
+remain immutable; rebuild a historical revision explicitly if it must use the
+new identities.
+
 ## Architecture viewer contract
 
 `compass export callflow-json` now emits

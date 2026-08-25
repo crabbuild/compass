@@ -3,18 +3,6 @@
   "status": "established-unqualified",
   "records": [
     {
-      "id": "python-src-layout-module-prefix",
-      "surface": "language",
-      "current": "src.acme.api",
-      "required": "acme.api"
-    },
-    {
-      "id": "python-pyi-unregistered",
-      "surface": "language",
-      "current": "unsupported",
-      "required": "paired-or-stub-only-source-backed"
-    },
-    {
       "id": "python-shadowed-initializer-receiver",
       "surface": "language",
       "current": "c3-receiver-evidence",

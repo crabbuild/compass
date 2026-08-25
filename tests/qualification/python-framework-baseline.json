@@ -4,7 +4,7 @@
   "plannedAt": "dd3bf47bf9d5d04298c26a3832a70f040ed3dbb8",
   "pythonProducer": {
     "id": "compass.python",
-    "version": 11,
+    "version": 12,
     "qualification": "qualifying"
   },
   "productionFrameworkPacks": [
@@ -21,7 +21,7 @@
   ],
   "fixtureEvidence": {
     "expectations": 7,
-    "expectedGaps": 9,
+    "expectedGaps": 7,
     "graphQualification": "checked-in-conformance-only",
     "productionQualified": false
   },
