@@ -4462,7 +4462,10 @@ fn search_terms(value: &str) -> impl Iterator<Item = String> + '_ {
     value
         .split(|character: char| !character.is_alphanumeric() && character != '_')
         .filter(|term| !term.is_empty())
-        .map(normalize_search_term)
+        .filter_map(|term| {
+            let term = normalize_search_term(term);
+            (!term.is_empty()).then_some(term)
+        })
 }
 
 fn normalize_search_term(value: &str) -> String {
@@ -4707,6 +4710,19 @@ mod tests {
     };
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn search_terms_omit_unicode_marks_removed_by_normalization() {
+        assert_eq!(
+            search_terms("handler \u{0947}\u{0902}").collect::<Vec<_>>(),
+            vec!["handler".to_owned()]
+        );
+        assert!(search_terms("\u{093e}\u{0940}\u{0947}").next().is_none());
+        assert_eq!(
+            search_terms("café").collect::<Vec<_>>(),
+            vec!["cafe".to_owned()]
+        );
+    }
 
     #[test]
     fn canonical_digest_counter_has_no_two_gibibyte_cutoff() -> Result<(), std::io::Error> {
