@@ -126,6 +126,10 @@ pub fn resolve_and_publish(
                 Value::String(fact.framework.clone()),
             ),
             (
+                "extractor".to_owned(),
+                Value::String(format!("compass.frameworks.{}", fact.framework)),
+            ),
+            (
                 "source_file".to_owned(),
                 Value::String(fact.anchor.source_file.clone()),
             ),

@@ -52,6 +52,11 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         expand: python::expand_django_routes,
     },
     RouteExpansionAdapter {
+        pack_id: "django-rest-framework-python",
+        frameworks: &["django-rest-framework"],
+        expand: python::expand_drf_routes,
+    },
+    RouteExpansionAdapter {
         pack_id: "express-web",
         frameworks: &["express"],
         expand: node::expand_routes,
@@ -137,6 +142,10 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
     },
     UniversalFrameworkPack {
         id: "django-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "django-rest-framework-python",
         expand: python::expand,
     },
     UniversalFrameworkPack {

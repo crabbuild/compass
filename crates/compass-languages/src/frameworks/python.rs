@@ -21,11 +21,35 @@ struct Receiver {
     qualified_name: String,
     name: String,
     framework: &'static str,
+    constructor: String,
     prefix: String,
     start_byte: u64,
     constructor_start_byte: u64,
     constructor_end_byte: u64,
     stages: Vec<RawRouteStageFact>,
+}
+
+#[derive(Default)]
+struct DjangoPatternFlow {
+    calls: BTreeSet<usize>,
+    collections_by_call: BTreeMap<usize, String>,
+    local_collections: BTreeSet<String>,
+    i18n_calls: BTreeSet<usize>,
+    imported_collections: Vec<DjangoImportedPatternCollection>,
+}
+
+struct DjangoImportedPatternCollection {
+    target: String,
+    collection: Option<String>,
+    in_i18n: bool,
+    anchor: RawFrameworkAnchor,
+}
+
+struct DjangoInclude {
+    target: String,
+    collection: Option<String>,
+    application_name: Option<String>,
+    namespace: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,7 +61,20 @@ enum PythonFramework {
 }
 
 pub(super) fn detect_django(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
-    detect_universal(context, PythonFramework::Django)
+    let mut facts = detect_universal(context, PythonFramework::Django);
+    collect_django_model_facts(context, &mut facts);
+    collect_django_signal_facts(context, &mut facts);
+    facts
+}
+
+pub(super) fn detect_drf(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    let receivers = receiver_declarations(context);
+    let flow = django_pattern_flow(context.root, context.source, context.path, context.evidence);
+    let mut facts = Vec::new();
+    collect_drf_router_registrations(context, &receivers, &mut facts);
+    collect_drf_router_mounts(context, &receivers, &flow, &mut facts);
+    collect_drf_viewset_and_serializer_facts(context, &mut facts);
+    facts
 }
 
 pub(super) fn detect_fastapi(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
@@ -66,13 +103,19 @@ fn detect_universal(
 ) -> Vec<RawFrameworkFact> {
     let mut facts = Vec::new();
     if framework == PythonFramework::Django {
+        let receivers = receiver_declarations(context);
+        let flow =
+            django_pattern_flow(context.root, context.source, context.path, context.evidence);
         collect_django_routes(
             context.root,
             context.source,
             context.path,
             context.evidence,
+            &receivers,
+            &flow,
             &mut facts,
         );
+        collect_imported_django_pattern_routes(context.path, &flow, &mut facts);
     } else {
         let receivers = receiver_declarations(context);
         collect_receiver_mount_facts(
@@ -136,10 +179,12 @@ fn collect_django_routes(
     source: &[u8],
     path: &Path,
     evidence: &SemanticEvidenceBatch,
+    receivers: &[Receiver],
+    flow: &DjangoPatternFlow,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
     if node.kind() == "call"
-        && contributes_to_urlpatterns(node, source)
+        && flow.calls.contains(&node.id())
         && let Some(function) = node.child_by_field_name("function")
         && let Some(target) = exact_call_target(evidence, function)
     {
@@ -166,23 +211,44 @@ fn collect_django_routes(
                 find_exact_call(handler_node, evidence, "django.urls.include")
                     .or_else(|| find_exact_call(handler_node, evidence, "django.conf.urls.include"))
             });
+            let is_drf_router_include = include_call
+                .and_then(|include_call| {
+                    call_argument_node(include_call, source, 0, "urlconf_module")
+                })
+                .and_then(|router_urls| {
+                    exact_local_drf_router_urls(router_urls, source, evidence, receivers)
+                })
+                .is_some();
             let handler_reference = if let Some(include_call) = include_call {
-                let include_arguments = call_arguments(include_call, source).unwrap_or_default();
-                let include = call_text_arguments(handler)
-                    .first()
-                    .map(String::as_str)
-                    .and_then(string_literal)
-                    .unwrap_or_else(|| {
-                        positional_argument(&include_arguments, 0)
-                            .map(str::to_owned)
-                            .unwrap_or_default()
-                    });
-                detail.insert("include".into(), Value::String(include.clone()));
-                format!("@include:{include}")
+                let Some(include) =
+                    django_include_target(include_call, source, path, evidence, flow)
+                else {
+                    return;
+                };
+                detail.insert("include".into(), Value::String(include.target.clone()));
+                if let Some(collection) = include.collection {
+                    detail.insert("include_collection".into(), Value::String(collection));
+                }
+                if let Some(application_name) = include.application_name {
+                    detail.insert("application_name".into(), Value::String(application_name));
+                }
+                if let Some(namespace) = include.namespace {
+                    detail.insert("namespace".into(), Value::String(namespace));
+                }
+                format!("@include:{}", include.target)
             } else {
                 string_literal(handler).unwrap_or_else(|| handler.to_owned())
             };
-            if !handler_reference.is_empty() {
+            if let Some(collection) = flow.collections_by_call.get(&node.id()) {
+                detail.insert(
+                    "django_collection".into(),
+                    Value::String(collection.clone()),
+                );
+            }
+            if flow.i18n_calls.contains(&node.id()) {
+                detail.insert("i18n".into(), Value::Bool(true));
+            }
+            if !handler_reference.is_empty() && !is_drf_router_include {
                 facts.push(RawFrameworkFact::Route(RawRouteFact {
                     framework: "django".to_owned(),
                     operation: "ANY".to_owned(),
@@ -202,8 +268,1156 @@ fn collect_django_routes(
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_django_routes(child, source, path, evidence, facts);
+        collect_django_routes(child, source, path, evidence, receivers, flow, facts);
     }
+}
+
+fn django_pattern_flow(
+    root: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    evidence: &SemanticEvidenceBatch,
+) -> DjangoPatternFlow {
+    let mut definitions = BTreeMap::<String, Vec<Node<'_>>>::new();
+    let mut roots = Vec::<Node<'_>>::new();
+    let mut root_assignment_count = 0_usize;
+    let mut root_start = None;
+    let mut cursor = root.walk();
+    for statement in root.children(&mut cursor).filter(|child| child.is_named()) {
+        if statement.kind() == "assignment"
+            && let (Some(left), Some(right)) = (
+                statement.child_by_field_name("left"),
+                statement.child_by_field_name("right"),
+            )
+            && left.kind() == "identifier"
+        {
+            let name = node_text(left, source).to_owned();
+            if name == "urlpatterns" {
+                root_assignment_count = root_assignment_count.saturating_add(1);
+                root_start = Some(statement.start_byte());
+                roots.push(right);
+            } else {
+                definitions.entry(name).or_default().push(right);
+            }
+        } else if statement.kind() == "augmented_assignment"
+            && let (Some(left), Some(right)) = (
+                statement.child_by_field_name("left"),
+                statement.child_by_field_name("right"),
+            )
+            && left.kind() == "identifier"
+            && node_text(left, source) == "urlpatterns"
+            && root_start.is_some_and(|start| start < statement.start_byte())
+            && (node_has_unnamed_child(statement, "+") || node_has_unnamed_child(statement, "+="))
+        {
+            roots.push(right);
+        }
+    }
+    if root_assignment_count != 1 {
+        return DjangoPatternFlow::default();
+    }
+    let mut flow = DjangoPatternFlow::default();
+    let mut visiting = BTreeSet::new();
+    for root in roots {
+        if !collect_django_pattern_expression(
+            root,
+            "urlpatterns",
+            false,
+            source,
+            path,
+            evidence,
+            &definitions,
+            &mut visiting,
+            &mut flow,
+        ) {
+            return DjangoPatternFlow::default();
+        }
+    }
+    flow
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_django_pattern_expression<'tree>(
+    node: Node<'tree>,
+    collection: &str,
+    in_i18n: bool,
+    source: &[u8],
+    path: &Path,
+    evidence: &SemanticEvidenceBatch,
+    definitions: &BTreeMap<String, Vec<Node<'tree>>>,
+    visiting: &mut BTreeSet<String>,
+    flow: &mut DjangoPatternFlow,
+) -> bool {
+    match node.kind() {
+        "list" | "tuple" | "set" | "parenthesized_expression" => {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+                let _ = collect_django_pattern_expression(
+                    child,
+                    collection,
+                    in_i18n,
+                    source,
+                    path,
+                    evidence,
+                    definitions,
+                    visiting,
+                    flow,
+                );
+            }
+            true
+        }
+        "binary_operator" if node_has_unnamed_child(node, "+") => {
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return false;
+            };
+            let _ = collect_django_pattern_expression(
+                left,
+                collection,
+                in_i18n,
+                source,
+                path,
+                evidence,
+                definitions,
+                visiting,
+                flow,
+            );
+            let _ = collect_django_pattern_expression(
+                right,
+                collection,
+                in_i18n,
+                source,
+                path,
+                evidence,
+                definitions,
+                visiting,
+                flow,
+            );
+            true
+        }
+        "identifier" => {
+            let name = node_text(node, source);
+            let Some([definition]) = definitions.get(name).map(Vec::as_slice) else {
+                let Some(target) = exact_import_reference_hint(evidence, node, source) else {
+                    return false;
+                };
+                let (target, imported_collection) = imported_django_collection_target(&target);
+                flow.imported_collections
+                    .push(DjangoImportedPatternCollection {
+                        target,
+                        collection: imported_collection,
+                        in_i18n,
+                        anchor: anchor(path, node),
+                    });
+                return true;
+            };
+            if !visiting.insert(name.to_owned()) {
+                return false;
+            }
+            flow.local_collections.insert(name.to_owned());
+            let complete = collect_django_pattern_expression(
+                *definition,
+                name,
+                in_i18n,
+                source,
+                path,
+                evidence,
+                definitions,
+                visiting,
+                flow,
+            );
+            visiting.remove(name);
+            complete
+        }
+        "call" => {
+            let Some(function) = node.child_by_field_name("function") else {
+                return false;
+            };
+            let Some(target) = exact_call_target(evidence, function) else {
+                return false;
+            };
+            if matches!(
+                target.as_str(),
+                "django.urls.path"
+                    | "django.urls.re_path"
+                    | "django.conf.urls.url"
+                    | "django.conf.urls.path"
+                    | "django.conf.urls.re_path"
+            ) {
+                flow.calls.insert(node.id());
+                flow.collections_by_call
+                    .insert(node.id(), collection.to_owned());
+                if in_i18n {
+                    flow.i18n_calls.insert(node.id());
+                }
+                if let Some(local_collection) =
+                    django_local_include_collection(node, source, evidence, definitions)
+                {
+                    if !visiting.insert(local_collection.0.to_owned()) {
+                        return false;
+                    }
+                    flow.local_collections.insert(local_collection.0.to_owned());
+                    let complete = collect_django_pattern_expression(
+                        local_collection.1,
+                        local_collection.0,
+                        in_i18n,
+                        source,
+                        path,
+                        evidence,
+                        definitions,
+                        visiting,
+                        flow,
+                    );
+                    visiting.remove(local_collection.0);
+                    return complete;
+                }
+                return true;
+            }
+            if target != "django.conf.urls.i18n.i18n_patterns" {
+                return false;
+            }
+            let Some(arguments) = node.child_by_field_name("arguments") else {
+                return false;
+            };
+            let mut cursor = arguments.walk();
+            arguments
+                .children(&mut cursor)
+                .filter(|child| child.is_named())
+                .all(|argument| {
+                    if argument.kind() == "keyword_argument" {
+                        return argument.child_by_field_name("name").is_some_and(|name| {
+                            node_text(name, source) == "prefix_default_language"
+                        }) && argument.child_by_field_name("value").is_some_and(|value| {
+                            static_python_bool(node_text(value, source)).is_some()
+                        });
+                    }
+                    collect_django_pattern_expression(
+                        argument,
+                        collection,
+                        true,
+                        source,
+                        path,
+                        evidence,
+                        definitions,
+                        visiting,
+                        flow,
+                    )
+                })
+        }
+        _ => false,
+    }
+}
+
+fn imported_django_collection_target(target: &str) -> (String, Option<String>) {
+    if let Some(module) = target.strip_suffix(".urlpatterns") {
+        return (module.to_owned(), None);
+    }
+    target.rsplit_once('.').map_or_else(
+        || (target.to_owned(), None),
+        |(module, collection)| (module.to_owned(), Some(collection.to_owned())),
+    )
+}
+
+fn collect_imported_django_pattern_routes(
+    path: &Path,
+    flow: &DjangoPatternFlow,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    for imported in &flow.imported_collections {
+        let mut detail = Map::from_iter([
+            ("include".into(), Value::String(imported.target.clone())),
+            (
+                "django_collection".into(),
+                Value::String("urlpatterns".to_owned()),
+            ),
+            ("imported_pattern_collection".into(), Value::Bool(true)),
+        ]);
+        if let Some(collection) = &imported.collection {
+            detail.insert(
+                "include_collection".into(),
+                Value::String(collection.clone()),
+            );
+        }
+        if imported.in_i18n {
+            detail.insert("i18n".into(), Value::Bool(true));
+        }
+        facts.push(RawFrameworkFact::Route(RawRouteFact {
+            framework: "django".to_owned(),
+            operation: "ANY".to_owned(),
+            raw_path: "/".to_owned(),
+            normalized_path: "/".to_owned(),
+            declaring_scope: module_scope(path),
+            anchor: imported.anchor.clone(),
+            handler_reference: format!("@include:{}", imported.target),
+            middleware_references: Vec::new(),
+            stages: Vec::new(),
+            origin: RawFrameworkOrigin::Ast,
+            rule: None,
+            detail,
+        }));
+    }
+}
+
+fn django_local_include_collection<'tree, 'source>(
+    route_call: Node<'tree>,
+    source: &'source [u8],
+    evidence: &SemanticEvidenceBatch,
+    definitions: &BTreeMap<String, Vec<Node<'tree>>>,
+) -> Option<(&'source str, Node<'tree>)> {
+    let handler = call_argument_node(route_call, source, 1, "view")?;
+    let include_call = find_exact_call(handler, evidence, "django.urls.include")
+        .or_else(|| find_exact_call(handler, evidence, "django.conf.urls.include"))?;
+    let argument = call_argument_node(include_call, source, 0, "urlconf_module")?;
+    let collection_node = if argument.kind() == "tuple" {
+        let mut cursor = argument.walk();
+        argument
+            .children(&mut cursor)
+            .find(|child| child.is_named())?
+    } else {
+        argument
+    };
+    if collection_node.kind() != "identifier" {
+        return None;
+    }
+    let name = node_text(collection_node, source);
+    let [definition] = definitions.get(name)?.as_slice() else {
+        return None;
+    };
+    Some((name, *definition))
+}
+
+fn django_include_target(
+    include_call: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    evidence: &SemanticEvidenceBatch,
+    flow: &DjangoPatternFlow,
+) -> Option<DjangoInclude> {
+    let arguments = call_arguments(include_call, source)?;
+    let namespace = optional_literal_keyword(&arguments, "namespace")?;
+    let argument = call_argument_node(include_call, source, 0, "urlconf_module")?;
+    let (target_node, application_name) = if argument.kind() == "tuple" {
+        let mut cursor = argument.walk();
+        let values = argument
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .collect::<Vec<_>>();
+        let target = *values.first()?;
+        let application_name = match values.get(1) {
+            Some(value) => Some(string_literal(node_text(*value, source))?),
+            None => None,
+        };
+        if values.len() > 2 {
+            return None;
+        }
+        (target, application_name)
+    } else {
+        (argument, None)
+    };
+    let text = node_text(target_node, source).trim();
+    if let Some(target) = string_literal(text) {
+        return Some(DjangoInclude {
+            target,
+            collection: None,
+            application_name,
+            namespace,
+        });
+    }
+    if is_identifier(text) && flow.local_collections.contains(text) {
+        return Some(DjangoInclude {
+            target: module_scope(path),
+            collection: Some(text.to_owned()),
+            application_name,
+            namespace,
+        });
+    }
+    exact_static_reference_hint(evidence, target_node, source).map(|target| DjangoInclude {
+        target,
+        collection: None,
+        application_name,
+        namespace,
+    })
+}
+
+fn node_has_unnamed_child(node: Node<'_>, kind: &str) -> bool {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .any(|child| !child.is_named() && child.kind() == kind)
+}
+
+fn collect_drf_router_registrations(
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let viewsets = python_descendants_of(
+        context.evidence,
+        &[
+            "rest_framework.viewsets.ViewSet",
+            "rest_framework.viewsets.GenericViewSet",
+            "rest_framework.viewsets.ModelViewSet",
+            "rest_framework.viewsets.ReadOnlyModelViewSet",
+        ],
+    );
+    collect_drf_router_registration_nodes(context.root, context, receivers, &viewsets, facts);
+}
+
+fn collect_drf_router_registration_nodes(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    viewsets: &BTreeSet<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call"
+        && let Some(function) = node.child_by_field_name("function")
+        && exact_occurrence(context.evidence, SemanticRole::Call, function).is_some()
+        && let Some((receiver_name, "register")) =
+            node_text(function, context.source).rsplit_once('.')
+        && let Some(receiver) = receiver_at(
+            receivers,
+            context.evidence,
+            receiver_name,
+            node.start_byte() as u64,
+        )
+        && receiver.framework == "django-rest-framework"
+        && let Some(arguments) = call_arguments(node, context.source)
+        && let Some(prefix) = positional_argument(&arguments, 0)
+            .and_then(string_literal)
+            .or_else(|| keyword_string(&arguments, "prefix"))
+        && let Some(viewset_node) = call_argument_node(node, context.source, 1, "viewset")
+        && let Some(viewset_reference) =
+            exact_static_reference_hint(context.evidence, viewset_node, context.source)
+        && let Some(viewset) =
+            unique_declaration_for_reference(context.evidence, &viewset_reference)
+        && viewsets.contains(viewset.id.as_str())
+    {
+        let basename = positional_argument(&arguments, 2)
+            .and_then(string_literal)
+            .or_else(|| keyword_string(&arguments, "basename"));
+        let lookup_parameter = drf_viewset_lookup_parameter(context, viewset);
+        if let (Some(basename), Some(lookup_parameter)) = (basename, lookup_parameter) {
+            let methods = drf_viewset_method_templates(context, viewset);
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "django-rest-framework".to_owned(),
+                kind: "drf_router_registration".to_owned(),
+                name: format!("{}:{prefix}", receiver.qualified_name),
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, node),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([
+                    (
+                        "pack_id".into(),
+                        Value::String("django-rest-framework-python".to_owned()),
+                    ),
+                    (
+                        "router_receiver_id".into(),
+                        Value::String(receiver.declaration_id.clone()),
+                    ),
+                    (
+                        "router_receiver_qualified_name".into(),
+                        Value::String(receiver.qualified_name.clone()),
+                    ),
+                    (
+                        "router_template".into(),
+                        Value::String(match receiver.constructor.as_str() {
+                            "rest_framework.routers.DefaultRouter" => {
+                                "drf-default-router-v1".to_owned()
+                            }
+                            _ => "drf-simple-router-v1".to_owned(),
+                        }),
+                    ),
+                    ("prefix".into(), Value::String(prefix)),
+                    (
+                        "viewset_declaration_id".into(),
+                        Value::String(viewset.id.clone()),
+                    ),
+                    (
+                        "viewset_reference".into(),
+                        Value::String(viewset.graph_node_id.clone()),
+                    ),
+                    ("methods".into(), Value::Array(methods)),
+                    ("lookup_parameter".into(), Value::String(lookup_parameter)),
+                    ("basename".into(), Value::String(basename)),
+                ]),
+            }));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_drf_router_registration_nodes(child, context, receivers, viewsets, facts);
+    }
+}
+
+fn collect_drf_router_mounts(
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    flow: &DjangoPatternFlow,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    collect_drf_router_mount_nodes(context.root, context, receivers, flow, facts);
+    collect_direct_drf_router_urlpatterns(context, receivers, facts);
+}
+
+fn collect_drf_router_mount_nodes(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    flow: &DjangoPatternFlow,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call"
+        && flow.calls.contains(&node.id())
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(target) = exact_call_target(context.evidence, function)
+        && matches!(target.as_str(), "django.urls.path" | "django.urls.re_path")
+        && let Some(arguments) = call_arguments(node, context.source)
+        && let Some(prefix) = positional_argument(&arguments, 0)
+            .and_then(string_literal)
+            .or_else(|| keyword_string(&arguments, "route"))
+        && let Some(handler_node) = call_argument_node(node, context.source, 1, "view")
+        && let Some(include_call) =
+            find_exact_call(handler_node, context.evidence, "django.urls.include")
+        && let Some(router_urls) =
+            call_argument_node(include_call, context.source, 0, "urlconf_module")
+        && let Some(receiver) =
+            exact_local_drf_router_urls(router_urls, context.source, context.evidence, receivers)
+    {
+        let include_arguments = call_arguments(include_call, context.source).unwrap_or_default();
+        let namespace = optional_literal_keyword(&include_arguments, "namespace");
+        if let Some(namespace) = namespace {
+            facts.push(RawFrameworkFact::Domain(RawDomainFact {
+                framework: "django-rest-framework".to_owned(),
+                kind: "drf_router_mount".to_owned(),
+                name: receiver.qualified_name.clone(),
+                declaring_scope: module_scope(context.path),
+                anchor: anchor(context.path, node),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([
+                    (
+                        "pack_id".into(),
+                        Value::String("django-rest-framework-python".to_owned()),
+                    ),
+                    (
+                        "router_receiver_id".into(),
+                        Value::String(receiver.declaration_id.clone()),
+                    ),
+                    (
+                        "router_receiver_qualified_name".into(),
+                        Value::String(receiver.qualified_name.clone()),
+                    ),
+                    (
+                        "mount_prefix".into(),
+                        Value::String(normalize_django_path(&prefix, "path")),
+                    ),
+                    (
+                        "namespace".into(),
+                        namespace.map_or(Value::Null, Value::String),
+                    ),
+                ]),
+            }));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_drf_router_mount_nodes(child, context, receivers, flow, facts);
+    }
+}
+
+fn collect_direct_drf_router_urlpatterns(
+    context: &UniversalDetectionContext<'_, '_>,
+    receivers: &[Receiver],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let mut assignments = Vec::new();
+    let mut cursor = context.root.walk();
+    for statement in context
+        .root
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+    {
+        if statement.kind() == "assignment"
+            && let (Some(left), Some(right)) = (
+                statement.child_by_field_name("left"),
+                statement.child_by_field_name("right"),
+            )
+            && left.kind() == "identifier"
+            && node_text(left, context.source) == "urlpatterns"
+        {
+            assignments.push((statement, right));
+        }
+    }
+    let [(assignment, right)] = assignments.as_slice() else {
+        return;
+    };
+    let Some(receiver) =
+        exact_local_drf_router_urls(*right, context.source, context.evidence, receivers)
+    else {
+        return;
+    };
+    append_drf_router_mount(context, receiver, *assignment, String::new(), None, facts);
+}
+
+fn append_drf_router_mount(
+    context: &UniversalDetectionContext<'_, '_>,
+    receiver: &Receiver,
+    source_node: Node<'_>,
+    prefix: String,
+    namespace: Option<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    facts.push(RawFrameworkFact::Domain(RawDomainFact {
+        framework: "django-rest-framework".to_owned(),
+        kind: "drf_router_mount".to_owned(),
+        name: receiver.qualified_name.clone(),
+        declaring_scope: module_scope(context.path),
+        anchor: anchor(context.path, source_node),
+        origin: RawFrameworkOrigin::Ast,
+        detail: Map::from_iter([
+            (
+                "pack_id".into(),
+                Value::String("django-rest-framework-python".to_owned()),
+            ),
+            (
+                "router_receiver_id".into(),
+                Value::String(receiver.declaration_id.clone()),
+            ),
+            (
+                "router_receiver_qualified_name".into(),
+                Value::String(receiver.qualified_name.clone()),
+            ),
+            ("mount_prefix".into(), Value::String(prefix)),
+            (
+                "namespace".into(),
+                namespace.map_or(Value::Null, Value::String),
+            ),
+        ]),
+    }));
+}
+
+fn exact_local_drf_router_urls<'a>(
+    node: Node<'_>,
+    source: &[u8],
+    evidence: &SemanticEvidenceBatch,
+    receivers: &'a [Receiver],
+) -> Option<&'a Receiver> {
+    let node = if node.kind() == "tuple" {
+        let mut cursor = node.walk();
+        let values = node
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .collect::<Vec<_>>();
+        if values.len() != 2 || string_literal(node_text(values[1], source)).is_none() {
+            return None;
+        }
+        values[0]
+    } else {
+        node
+    };
+    let reference = node_text(node, source).trim();
+    let receiver_name = reference.strip_suffix(".urls")?;
+    if !is_identifier(receiver_name) {
+        return None;
+    }
+    receiver_at(receivers, evidence, receiver_name, node.start_byte() as u64)
+        .filter(|receiver| receiver.framework == "django-rest-framework")
+}
+
+fn collect_drf_viewset_and_serializer_facts(
+    context: &UniversalDetectionContext<'_, '_>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let viewsets = python_descendants_of(
+        context.evidence,
+        &[
+            "rest_framework.viewsets.ViewSet",
+            "rest_framework.viewsets.GenericViewSet",
+            "rest_framework.viewsets.ModelViewSet",
+            "rest_framework.viewsets.ReadOnlyModelViewSet",
+        ],
+    );
+    let serializers = python_descendants_of(
+        context.evidence,
+        &[
+            "rest_framework.serializers.Serializer",
+            "rest_framework.serializers.ModelSerializer",
+        ],
+    );
+    let django_models = python_descendants_of(context.evidence, &["django.db.models.Model"]);
+    for viewset_id in &viewsets {
+        let Some(viewset) = context
+            .evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == *viewset_id)
+        else {
+            continue;
+        };
+        facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+            pack_id: "django-rest-framework-python".to_owned(),
+            framework: "django-rest-framework".to_owned(),
+            role: "controller".to_owned(),
+            subject_reference: Some(viewset.graph_node_id.clone()),
+            context: viewset.module_or_package.clone(),
+            anchor: evidence_anchor(&viewset.range),
+            origin: RawFrameworkOrigin::Ast,
+            evidence_class: "exact".to_owned(),
+            detail: Map::from_iter([("declaration_id".into(), Value::String(viewset.id.clone()))]),
+        }));
+        let Some(definition) = declaration_node(context.root, viewset) else {
+            continue;
+        };
+        for (field, role) in [
+            ("serializer_class", None),
+            ("permission_classes", Some("middleware")),
+            ("authentication_classes", Some("middleware")),
+            ("filter_backends", Some("service")),
+            ("throttle_classes", Some("service")),
+        ] {
+            let Some(value) = direct_class_assignment_value(definition, field, context.source)
+            else {
+                continue;
+            };
+            for target in exact_static_references_in_scope(
+                context.evidence,
+                value,
+                context.source,
+                viewset.scope_id.as_deref(),
+            ) {
+                append_exact_framework_relation(
+                    facts,
+                    "django-rest-framework-python",
+                    "django-rest-framework",
+                    viewset,
+                    &target,
+                    field,
+                    anchor(context.path, value),
+                    context.evidence,
+                );
+                if let Some(role) = role {
+                    facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+                        pack_id: "django-rest-framework-python".to_owned(),
+                        framework: "django-rest-framework".to_owned(),
+                        role: role.to_owned(),
+                        subject_reference: Some(target.clone()),
+                        context: Some(field.to_owned()),
+                        anchor: anchor(context.path, value),
+                        origin: RawFrameworkOrigin::Ast,
+                        evidence_class: "exact".to_owned(),
+                        detail: Map::new(),
+                    }));
+                }
+            }
+        }
+    }
+    for serializer_id in &serializers {
+        let Some(serializer) = context
+            .evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == *serializer_id)
+        else {
+            continue;
+        };
+        let Some(definition) = declaration_node(context.root, serializer) else {
+            continue;
+        };
+        let Some(meta) = direct_nested_class(definition, "Meta", context.source) else {
+            continue;
+        };
+        let Some(model_node) = direct_class_assignment_value(meta, "model", context.source) else {
+            continue;
+        };
+        let targets = exact_static_references_in_scope(
+            context.evidence,
+            model_node,
+            context.source,
+            serializer.scope_id.as_deref(),
+        );
+        if let [target] = targets.as_slice()
+            && let Some(model) = unique_declaration_for_reference(context.evidence, target)
+            && django_models.contains(model.id.as_str())
+        {
+            append_exact_framework_relation(
+                facts,
+                "django-rest-framework-python",
+                "django-rest-framework",
+                serializer,
+                target,
+                "serializer_model",
+                anchor(context.path, model_node),
+                context.evidence,
+            );
+        }
+    }
+}
+
+fn collect_django_model_facts(
+    context: &UniversalDetectionContext<'_, '_>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let models = python_descendants_of(context.evidence, &["django.db.models.Model"]);
+    let managers = python_descendants_of(context.evidence, &["django.db.models.Manager"]);
+    for manager_id in &managers {
+        let Some(manager) = context
+            .evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == *manager_id)
+        else {
+            continue;
+        };
+        facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+            pack_id: "django-python".to_owned(),
+            framework: "django".to_owned(),
+            role: "service".to_owned(),
+            subject_reference: Some(manager.graph_node_id.clone()),
+            context: Some("model_manager".to_owned()),
+            anchor: evidence_anchor(&manager.range),
+            origin: RawFrameworkOrigin::Ast,
+            evidence_class: "exact".to_owned(),
+            detail: Map::from_iter([("declaration_id".into(), Value::String(manager.id.clone()))]),
+        }));
+    }
+    for model_id in &models {
+        let Some(model) = context
+            .evidence
+            .declarations
+            .iter()
+            .find(|declaration| declaration.id == *model_id)
+        else {
+            continue;
+        };
+        let Some(definition) = declaration_node(context.root, model) else {
+            continue;
+        };
+        let fields = django_model_field_facts(definition, context, model);
+        facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+            pack_id: "django-python".to_owned(),
+            framework: "django".to_owned(),
+            role: "model".to_owned(),
+            subject_reference: Some(model.graph_node_id.clone()),
+            context: model.module_or_package.clone(),
+            anchor: evidence_anchor(&model.range),
+            origin: RawFrameworkOrigin::Ast,
+            evidence_class: "exact".to_owned(),
+            detail: Map::from_iter([
+                ("declaration_id".into(), Value::String(model.id.clone())),
+                ("fields".into(), Value::Array(fields)),
+            ]),
+        }));
+        collect_django_model_relationships(definition, context, model, &models, &managers, facts);
+    }
+}
+
+fn collect_django_model_relationships(
+    definition: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    model: &DeclarationFact,
+    models: &BTreeSet<String>,
+    managers: &BTreeSet<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let Some(body) = definition.child_by_field_name("body") else {
+        return;
+    };
+    let mut cursor = body.walk();
+    for assignment in body
+        .children(&mut cursor)
+        .filter(|child| matches!(child.kind(), "assignment" | "annotated_assignment"))
+    {
+        let Some(field) = assignment.child_by_field_name("left") else {
+            continue;
+        };
+        let Some(value) = assignment.child_by_field_name("right") else {
+            continue;
+        };
+        if value.kind() != "call" {
+            continue;
+        }
+        let Some(function) = value.child_by_field_name("function") else {
+            continue;
+        };
+        if let Some(manager_reference) = exact_static_reference_in_scope(
+            context.evidence,
+            function,
+            context.source,
+            model.scope_id.as_deref(),
+        ) && let Some(manager) =
+            unique_declaration_for_reference(context.evidence, &manager_reference)
+            && managers.contains(manager.id.as_str())
+        {
+            append_exact_framework_relation(
+                facts,
+                "django-python",
+                "django",
+                model,
+                &manager_reference,
+                &format!("manager:{}", node_text(field, context.source)),
+                anchor(context.path, assignment),
+                context.evidence,
+            );
+            continue;
+        }
+        let Some(target) = exact_static_reference_in_scope(
+            context.evidence,
+            function,
+            context.source,
+            model.scope_id.as_deref(),
+        ) else {
+            continue;
+        };
+        if !matches!(
+            target.as_str(),
+            "django.db.models.ForeignKey"
+                | "django.db.models.ManyToManyField"
+                | "django.db.models.OneToOneField"
+        ) {
+            continue;
+        }
+        let Some(related_node) = call_argument_node(value, context.source, 0, "to") else {
+            continue;
+        };
+        let related = exact_static_references_in_scope(
+            context.evidence,
+            related_node,
+            context.source,
+            model.scope_id.as_deref(),
+        );
+        if let [related] = related.as_slice()
+            && let Some(declaration) = unique_declaration_for_reference(context.evidence, related)
+            && models.contains(declaration.id.as_str())
+        {
+            let relation_anchor = anchor(context.path, field);
+            append_exact_framework_relation(
+                facts,
+                "django-python",
+                "django",
+                model,
+                related,
+                target.rsplit('.').next().unwrap_or("relationship"),
+                relation_anchor,
+                context.evidence,
+            );
+        }
+    }
+}
+
+fn django_model_field_facts(
+    definition: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    model: &DeclarationFact,
+) -> Vec<Value> {
+    let Some(body) = definition.child_by_field_name("body") else {
+        return Vec::new();
+    };
+    let mut fields = Vec::new();
+    let mut cursor = body.walk();
+    for assignment in body
+        .children(&mut cursor)
+        .filter(|child| matches!(child.kind(), "assignment" | "annotated_assignment"))
+    {
+        let (Some(name), Some(value)) = (
+            assignment.child_by_field_name("left"),
+            assignment.child_by_field_name("right"),
+        ) else {
+            continue;
+        };
+        if name.kind() != "identifier" || value.kind() != "call" {
+            continue;
+        }
+        let Some(function) = value.child_by_field_name("function") else {
+            continue;
+        };
+        let Some(constructor) = exact_static_reference_in_scope(
+            context.evidence,
+            function,
+            context.source,
+            model.scope_id.as_deref(),
+        ) else {
+            continue;
+        };
+        let terminal = constructor.rsplit('.').next().unwrap_or_default();
+        if !constructor.starts_with("django.db.models.")
+            || !(terminal.ends_with("Field") || matches!(terminal, "ForeignKey" | "OneToOneField"))
+        {
+            continue;
+        }
+        fields.push(Value::Object(Map::from_iter([
+            (
+                "name".into(),
+                Value::String(node_text(name, context.source).to_owned()),
+            ),
+            ("constructor".into(), Value::String(constructor)),
+            (
+                "anchor".into(),
+                serde_json::to_value(anchor(context.path, assignment)).unwrap_or(Value::Null),
+            ),
+        ])));
+    }
+    fields
+}
+
+fn collect_django_signal_facts(
+    context: &UniversalDetectionContext<'_, '_>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let models = python_descendants_of(context.evidence, &["django.db.models.Model"]);
+    collect_django_signal_nodes(context.root, context, &models, facts);
+}
+
+fn collect_django_signal_nodes(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    models: &BTreeSet<String>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "decorated_definition" {
+        let mut cursor = node.walk();
+        for decorator in node
+            .children(&mut cursor)
+            .filter(|child| child.kind() == "decorator")
+        {
+            let Some(receiver_call) =
+                find_exact_call(decorator, context.evidence, "django.dispatch.receiver")
+            else {
+                continue;
+            };
+            let Some(signal_node) = call_argument_node(receiver_call, context.source, 0, "signal")
+            else {
+                continue;
+            };
+            let Some(signal) =
+                exact_import_reference_hint(context.evidence, signal_node, context.source)
+            else {
+                continue;
+            };
+            if !signal.starts_with("django.db.models.signals.") {
+                continue;
+            }
+            let Some(occurrence) =
+                exact_occurrence(context.evidence, SemanticRole::Decorator, decorator)
+            else {
+                continue;
+            };
+            let Some(handler) = context
+                .evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.id == occurrence.owner_declaration_id)
+            else {
+                continue;
+            };
+            append_exact_framework_relation_kind(
+                facts,
+                "django-python",
+                "django",
+                "subscribes",
+                handler,
+                &signal,
+                "signal",
+                anchor(context.path, decorator),
+                context.evidence,
+            );
+            facts.push(RawFrameworkFact::Role(RawFrameworkRoleFact {
+                pack_id: "django-python".to_owned(),
+                framework: "django".to_owned(),
+                role: "subscriber".to_owned(),
+                subject_reference: Some(handler.graph_node_id.clone()),
+                context: Some(signal),
+                anchor: anchor(context.path, decorator),
+                origin: RawFrameworkOrigin::Ast,
+                evidence_class: "exact".to_owned(),
+                detail: Map::new(),
+            }));
+            let Some(sender_node) =
+                call_argument_node(receiver_call, context.source, usize::MAX, "sender")
+            else {
+                continue;
+            };
+            let senders = exact_static_references_in_scope(
+                context.evidence,
+                sender_node,
+                context.source,
+                handler.scope_id.as_deref(),
+            );
+            if let [sender] = senders.as_slice()
+                && let Some(sender_declaration) =
+                    unique_declaration_for_reference(context.evidence, sender)
+                && models.contains(sender_declaration.id.as_str())
+            {
+                append_exact_framework_relation(
+                    facts,
+                    "django-python",
+                    "django",
+                    handler,
+                    sender,
+                    "signal_sender",
+                    anchor(context.path, sender_node),
+                    context.evidence,
+                );
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_django_signal_nodes(child, context, models, facts);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_exact_framework_relation(
+    facts: &mut Vec<RawFrameworkFact>,
+    pack_id: &str,
+    framework: &str,
+    source: &DeclarationFact,
+    target: &str,
+    context: &str,
+    anchor: RawFrameworkAnchor,
+    evidence: &SemanticEvidenceBatch,
+) {
+    append_exact_framework_relation_kind(
+        facts,
+        pack_id,
+        framework,
+        "depends_on",
+        source,
+        target,
+        context,
+        anchor,
+        evidence,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_exact_framework_relation_kind(
+    facts: &mut Vec<RawFrameworkFact>,
+    pack_id: &str,
+    framework: &str,
+    relation: &str,
+    source: &DeclarationFact,
+    target: &str,
+    context: &str,
+    anchor: RawFrameworkAnchor,
+    evidence: &SemanticEvidenceBatch,
+) {
+    let target_anchor = unique_declaration_for_reference(evidence, target)
+        .map(|declaration| evidence_anchor(&declaration.range));
+    facts.push(RawFrameworkFact::Relation(RawFrameworkRelationFact {
+        pack_id: pack_id.to_owned(),
+        framework: framework.to_owned(),
+        relation: relation.to_owned(),
+        source_reference: Some(source.graph_node_id.clone()),
+        target_hint: Some(target.to_owned()),
+        context: Some(context.to_owned()),
+        anchor,
+        target_anchor,
+        origin: RawFrameworkOrigin::Ast,
+        evidence_class: "exact".to_owned(),
+        ambiguity_policy: "require_exact".to_owned(),
+        detail: Map::new(),
+    }));
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -948,6 +2162,9 @@ fn collect_receivers(
             "fastapi.APIRouter" => Some(("fastapi", "prefix")),
             "starlette.applications.Starlette" => Some(("starlette", "prefix")),
             "starlette.routing.Router" => Some(("starlette", "prefix")),
+            "rest_framework.routers.DefaultRouter" | "rest_framework.routers.SimpleRouter" => {
+                Some(("django-rest-framework", "prefix"))
+            }
             _ => None,
         }
         && let Some(declaration) = exact_variable_declaration(evidence, left)
@@ -959,6 +2176,7 @@ fn collect_receivers(
             qualified_name: declaration.qualified_name.clone(),
             name: declaration.name.clone(),
             framework,
+            constructor,
             prefix: keyword_string(&arguments, prefix_key).unwrap_or_default(),
             start_byte: declaration.range.start_byte,
             constructor_start_byte: right.start_byte() as u64,
@@ -1500,6 +2718,439 @@ fn pydantic_model_declarations(evidence: &SemanticEvidenceBatch) -> BTreeSet<Str
     models
 }
 
+fn python_descendants_of(
+    evidence: &SemanticEvidenceBatch,
+    exact_bases: &[&str],
+) -> BTreeSet<String> {
+    let mut declarations = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Extends)
+        .filter(|candidate| {
+            candidate
+                .constraints
+                .qualified_name
+                .as_deref()
+                .is_some_and(|target| exact_bases.contains(&target))
+                || exact_candidate_binding_target(evidence, candidate.binding_id.as_deref())
+                    .is_some_and(|target| exact_bases.contains(&target))
+        })
+        .map(|candidate| candidate.source_declaration_id.clone())
+        .collect::<BTreeSet<_>>();
+    for _ in 0..evidence.declarations.len() {
+        let mut qualified = BTreeMap::<&str, usize>::new();
+        for declaration in evidence
+            .declarations
+            .iter()
+            .filter(|declaration| declarations.contains(declaration.id.as_str()))
+        {
+            *qualified
+                .entry(declaration.qualified_name.as_str())
+                .or_default() += 1;
+        }
+        let inherited = evidence
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.relation == CandidateRelation::Extends)
+            .filter(|candidate| {
+                candidate
+                    .constraints
+                    .exact_target_declaration_id
+                    .as_ref()
+                    .is_some_and(|target| declarations.contains(target))
+                    || candidate
+                        .constraints
+                        .qualified_name
+                        .as_deref()
+                        .is_some_and(|target| qualified.get(target) == Some(&1))
+            })
+            .map(|candidate| candidate.source_declaration_id.clone())
+            .collect::<Vec<_>>();
+        let previous = declarations.len();
+        declarations.extend(inherited);
+        if declarations.len() == previous {
+            break;
+        }
+    }
+    declarations
+}
+
+fn drf_viewset_method_templates(
+    context: &UniversalDetectionContext<'_, '_>,
+    viewset: &DeclarationFact,
+) -> Vec<Value> {
+    let viewset_scope = context
+        .evidence
+        .scopes
+        .iter()
+        .find(|scope| scope.owner_declaration_id.as_deref() == Some(viewset.id.as_str()))
+        .map(|scope| scope.id.as_str());
+    let mut methods = context
+        .evidence
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.kind == "method" && declaration.scope_id.as_deref() == viewset_scope
+        })
+        .collect::<Vec<_>>();
+    methods.sort_by_key(|method| (method.range.start_byte, method.range.end_byte));
+    let mut templates = Vec::new();
+    for method in methods {
+        if let Some((operation, detail)) = match method.name.as_str() {
+            "list" => Some(("GET", false)),
+            "create" => Some(("POST", false)),
+            "retrieve" => Some(("GET", true)),
+            "update" => Some(("PUT", true)),
+            "partial_update" => Some(("PATCH", true)),
+            "destroy" => Some(("DELETE", true)),
+            _ => None,
+        } {
+            templates.push(drf_method_template(
+                method,
+                operation,
+                detail,
+                None,
+                evidence_anchor(&method.range),
+            ));
+        }
+        templates.extend(drf_action_method_templates(context, method));
+    }
+    templates
+}
+
+fn drf_viewset_lookup_parameter(
+    context: &UniversalDetectionContext<'_, '_>,
+    viewset: &DeclarationFact,
+) -> Option<String> {
+    let definition = declaration_node(context.root, viewset)?;
+    if direct_class_has_assignment(definition, "lookup_value_regex", context.source)
+        || direct_class_has_assignment(definition, "lookup_value_converter", context.source)
+    {
+        return None;
+    }
+    let lookup_field =
+        direct_optional_literal_assignment(definition, "lookup_field", context.source)?
+            .unwrap_or_else(|| "pk".to_owned());
+    let lookup_parameter =
+        direct_optional_literal_assignment(definition, "lookup_url_kwarg", context.source)?
+            .unwrap_or(lookup_field);
+    is_identifier(&lookup_parameter).then_some(lookup_parameter)
+}
+
+fn drf_action_method_templates(
+    context: &UniversalDetectionContext<'_, '_>,
+    method: &DeclarationFact,
+) -> Vec<Value> {
+    let Some(definition) = declaration_node(context.root, method) else {
+        return Vec::new();
+    };
+    let Some(decorated) = definition
+        .parent()
+        .filter(|parent| parent.kind() == "decorated_definition")
+    else {
+        return Vec::new();
+    };
+    let action_occurrences = context
+        .evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Decorates
+                && candidate.source_declaration_id == method.id
+                && (candidate.constraints.qualified_name.as_deref()
+                    == Some("rest_framework.decorators.action")
+                    || exact_candidate_binding_target(
+                        context.evidence,
+                        candidate.binding_id.as_deref(),
+                    ) == Some("rest_framework.decorators.action"))
+        })
+        .filter_map(|candidate| candidate.occurrence_id.as_deref())
+        .collect::<BTreeSet<_>>();
+    if action_occurrences.len() != 1 {
+        return Vec::new();
+    }
+    let Some(occurrence) = context
+        .evidence
+        .occurrences
+        .iter()
+        .find(|occurrence| action_occurrences.contains(occurrence.id.as_str()))
+    else {
+        return Vec::new();
+    };
+    let mut cursor = decorated.walk();
+    let Some(decorator) = decorated
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "decorator")
+        .find(|decorator| {
+            decorator.start_byte() as u64 <= occurrence.range.start_byte
+                && decorator.end_byte() as u64 >= occurrence.range.end_byte
+        })
+    else {
+        return Vec::new();
+    };
+    let text = node_text(decorator, context.source)
+        .trim()
+        .trim_start_matches('@');
+    let Some((_, arguments)) = parse_call(text) else {
+        return Vec::new();
+    };
+    let Some(detail) = keyword_value(&arguments, "detail").and_then(static_python_bool) else {
+        return Vec::new();
+    };
+    let methods = if keyword_value(&arguments, "methods").is_some() {
+        let methods = keyword_string_list(&arguments, "methods");
+        if methods.is_empty() {
+            return Vec::new();
+        }
+        methods
+    } else {
+        vec!["GET".to_owned()]
+    };
+    let url_path = if let Some(value) = keyword_value(&arguments, "url_path") {
+        let Some(value) = string_literal(value) else {
+            return Vec::new();
+        };
+        value
+    } else {
+        method.name.clone()
+    };
+    methods
+        .into_iter()
+        .map(|operation| {
+            drf_method_template(
+                method,
+                &operation,
+                detail,
+                Some(url_path.clone()),
+                anchor(context.path, decorator),
+            )
+        })
+        .collect()
+}
+
+fn drf_method_template(
+    method: &DeclarationFact,
+    operation: &str,
+    detail: bool,
+    url_path: Option<String>,
+    anchor: RawFrameworkAnchor,
+) -> Value {
+    Value::Object(Map::from_iter([
+        ("operation".into(), Value::String(operation.to_owned())),
+        ("detail".into(), Value::Bool(detail)),
+        (
+            "handler".into(),
+            Value::String(method.graph_node_id.clone()),
+        ),
+        (
+            "handler_declaration_id".into(),
+            Value::String(method.id.clone()),
+        ),
+        (
+            "url_path".into(),
+            url_path.map_or(Value::Null, Value::String),
+        ),
+        (
+            "anchor".into(),
+            serde_json::to_value(anchor).unwrap_or(Value::Null),
+        ),
+    ]))
+}
+
+fn static_python_bool(value: &str) -> Option<bool> {
+    match value.trim() {
+        "True" => Some(true),
+        "False" => Some(false),
+        _ => None,
+    }
+}
+
+fn optional_literal_keyword(arguments: &[String], key: &str) -> Option<Option<String>> {
+    match keyword_value(arguments, key) {
+        Some(value) => string_literal(value).map(Some),
+        None => Some(None),
+    }
+}
+
+fn direct_class_assignment_value<'tree>(
+    definition: Node<'tree>,
+    field: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
+    let body = definition.child_by_field_name("body")?;
+    let mut cursor = body.walk();
+    let mut matches = body.children(&mut cursor).filter_map(|child| {
+        if !matches!(child.kind(), "assignment" | "annotated_assignment") {
+            return None;
+        }
+        let left = child.child_by_field_name("left")?;
+        (node_text(left, source) == field)
+            .then(|| child.child_by_field_name("right"))
+            .flatten()
+    });
+    let value = matches.next()?;
+    matches.next().is_none().then_some(value)
+}
+
+fn direct_class_has_assignment(definition: Node<'_>, field: &str, source: &[u8]) -> bool {
+    let Some(body) = definition.child_by_field_name("body") else {
+        return false;
+    };
+    let mut cursor = body.walk();
+    body.children(&mut cursor).any(|child| {
+        matches!(child.kind(), "assignment" | "annotated_assignment")
+            && child
+                .child_by_field_name("left")
+                .is_some_and(|left| node_text(left, source) == field)
+    })
+}
+
+fn direct_optional_literal_assignment(
+    definition: Node<'_>,
+    field: &str,
+    source: &[u8],
+) -> Option<Option<String>> {
+    if !direct_class_has_assignment(definition, field, source) {
+        return Some(None);
+    }
+    direct_class_assignment_value(definition, field, source)
+        .and_then(|value| string_literal(node_text(value, source)))
+        .map(Some)
+}
+
+fn direct_nested_class<'tree>(
+    definition: Node<'tree>,
+    name: &str,
+    source: &[u8],
+) -> Option<Node<'tree>> {
+    let body = definition.child_by_field_name("body")?;
+    let mut cursor = body.walk();
+    let mut matches = body.children(&mut cursor).filter(|child| {
+        child.kind() == "class_definition"
+            && child
+                .child_by_field_name("name")
+                .is_some_and(|node| node_text(node, source) == name)
+    });
+    let class = matches.next()?;
+    matches.next().is_none().then_some(class)
+}
+
+fn exact_static_references_in_scope(
+    evidence: &SemanticEvidenceBatch,
+    node: Node<'_>,
+    source: &[u8],
+    scope_id: Option<&str>,
+) -> Vec<String> {
+    if matches!(node.kind(), "list" | "tuple" | "set") {
+        let mut cursor = node.walk();
+        let mut references = node
+            .children(&mut cursor)
+            .filter(|child| child.is_named())
+            .flat_map(|child| exact_static_references_in_scope(evidence, child, source, scope_id))
+            .collect::<Vec<_>>();
+        references.sort();
+        references.dedup();
+        return references;
+    }
+    exact_static_reference_in_scope(evidence, node, source, scope_id)
+        .into_iter()
+        .collect()
+}
+
+fn exact_static_reference_in_scope(
+    evidence: &SemanticEvidenceBatch,
+    node: Node<'_>,
+    source: &[u8],
+    scope_id: Option<&str>,
+) -> Option<String> {
+    let reference = node_text(node, source).trim();
+    if !is_dotted_identifier(reference) {
+        return None;
+    }
+    if is_identifier(reference) {
+        let declarations = evidence
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.name == reference
+                    && declaration.range.start_byte < node.start_byte() as u64
+                    && declaration.scope_id.as_deref() == scope_id
+            })
+            .collect::<Vec<_>>();
+        let bindings = evidence
+            .bindings
+            .iter()
+            .filter(|binding| {
+                matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                    && binding.spelling == reference
+                    && binding.range.end_byte <= node.start_byte() as u64
+                    && binding.scope_id.as_deref() == scope_id
+            })
+            .collect::<Vec<_>>();
+        return match (declarations.as_slice(), bindings.as_slice()) {
+            ([declaration], [])
+                if matches!(declaration.kind.as_str(), "function" | "method" | "class")
+                    && !has_intervening_python_rebinding(
+                        context_root(node),
+                        declaration,
+                        reference,
+                        node.start_byte() as u64,
+                        source,
+                    ) =>
+            {
+                Some(declaration.graph_node_id.clone())
+            }
+            ([], [binding])
+                if !has_intervening_python_name_binding(
+                    context_root(node),
+                    reference,
+                    binding.range.end_byte,
+                    node.start_byte() as u64,
+                    source,
+                ) =>
+            {
+                Some(binding.qualified_target.clone())
+            }
+            _ => None,
+        };
+    }
+    let (head, suffix) = reference.split_once('.')?;
+    let bindings = evidence
+        .bindings
+        .iter()
+        .filter(|binding| {
+            matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                && binding.spelling == head
+                && binding.range.end_byte <= node.start_byte() as u64
+                && binding.scope_id.as_deref() == scope_id
+                && !has_intervening_python_name_binding(
+                    context_root(node),
+                    head,
+                    binding.range.end_byte,
+                    node.start_byte() as u64,
+                    source,
+                )
+        })
+        .map(|binding| format!("{}.{}", binding.qualified_target, suffix))
+        .collect::<BTreeSet<_>>();
+    (bindings.len() == 1)
+        .then(|| bindings.first().cloned())
+        .flatten()
+}
+
+fn unique_declaration_for_reference<'a>(
+    evidence: &'a SemanticEvidenceBatch,
+    reference: &str,
+) -> Option<&'a DeclarationFact> {
+    let mut matches = evidence.declarations.iter().filter(|declaration| {
+        declaration.id == reference
+            || declaration.graph_node_id == reference
+            || declaration.qualified_name == reference
+    });
+    let declaration = matches.next()?;
+    matches.next().is_none().then_some(declaration)
+}
+
 fn pydantic_member_decorators(
     evidence: &SemanticEvidenceBatch,
     model_scope: Option<&str>,
@@ -1674,6 +3325,33 @@ fn exact_static_reference_hint(
         .flatten()
 }
 
+fn exact_import_reference_hint(
+    evidence: &SemanticEvidenceBatch,
+    node: Node<'_>,
+    source: &[u8],
+) -> Option<String> {
+    let reference = node_text(node, source).trim();
+    if !is_identifier(reference) {
+        return None;
+    }
+    let reference_scope = reference_evaluation_scope(evidence, node, false);
+    let bindings = evidence
+        .bindings
+        .iter()
+        .filter(|binding| {
+            matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                && binding.spelling == reference
+                && binding.range.end_byte <= node.start_byte() as u64
+                && binding.scope_id.as_deref() == reference_scope
+        })
+        .map(|binding| binding.qualified_target.as_str())
+        .collect::<BTreeSet<_>>();
+    let target = *bindings.first()?;
+    (bindings.len() == 1
+        && exact_static_reference_hint(evidence, node, source).as_deref() == Some(target))
+    .then(|| target.to_owned())
+}
+
 fn has_intervening_python_rebinding(
     root: Node<'_>,
     declaration: &DeclarationFact,
@@ -1681,10 +3359,26 @@ fn has_intervening_python_rebinding(
     use_start: u64,
     source: &[u8],
 ) -> bool {
+    has_intervening_python_name_binding(
+        root,
+        reference,
+        declaration.range.end_byte,
+        use_start,
+        source,
+    )
+}
+
+fn has_intervening_python_name_binding(
+    root: Node<'_>,
+    reference: &str,
+    binding_end: u64,
+    use_start: u64,
+    source: &[u8],
+) -> bool {
     let mut cursor = root.walk();
     root.children(&mut cursor)
         .filter(|statement| statement.is_named())
-        .filter(|statement| statement.start_byte() as u64 > declaration.range.end_byte)
+        .filter(|statement| statement.start_byte() as u64 > binding_end)
         .filter(|statement| statement.end_byte() as u64 <= use_start)
         .filter(|statement| {
             !matches!(
@@ -1863,19 +3557,6 @@ fn evidence_anchor(range: &crate::EvidenceRange) -> RawFrameworkAnchor {
     }
 }
 
-fn contributes_to_urlpatterns(node: Node<'_>, source: &[u8]) -> bool {
-    let mut current = node.parent();
-    while let Some(parent) = current {
-        if parent.kind() == "assignment" {
-            return parent
-                .child_by_field_name("left")
-                .is_some_and(|left| node_text(left, source).trim() == "urlpatterns");
-        }
-        current = parent.parent();
-    }
-    false
-}
-
 fn call_argument_node<'tree>(
     call: Node<'tree>,
     source: &[u8],
@@ -1939,12 +3620,6 @@ fn parse_call(value: &str) -> Option<(&str, Vec<String>)> {
     }
     let callee = value[..open].trim();
     is_dotted_identifier(callee).then(|| (callee, split_arguments(&value[open + 1..close])))
-}
-
-fn call_text_arguments(value: &str) -> Vec<String> {
-    parse_call(value)
-        .map(|(_, arguments)| arguments)
-        .unwrap_or_default()
 }
 
 fn split_arguments(value: &str) -> Vec<String> {

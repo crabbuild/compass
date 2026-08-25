@@ -82,7 +82,7 @@ type TemplateDetector =
 /// separate from the language producer version: changing framework activation,
 /// descriptor capabilities, or resource limits must invalidate framework facts
 /// without pretending that the parser/evidence producer changed.
-pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/4";
+pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/5";
 
 /// The concrete implementation stored behind one framework-pack seam.
 ///
@@ -384,6 +384,10 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
     FrameworkPack::universal(&pack::SPRING_KOTLIN_DESCRIPTOR, spring::detect_kotlin),
     FrameworkPack::universal(&pack::DJANGO_PYTHON_DESCRIPTOR, python::detect_django),
+    FrameworkPack::universal(
+        &pack::DJANGO_REST_FRAMEWORK_PYTHON_DESCRIPTOR,
+        python::detect_drf,
+    ),
     FrameworkPack::universal(&pack::FASTAPI_PYTHON_DESCRIPTOR, python::detect_fastapi),
     FrameworkPack::universal(&pack::FLASK_PYTHON_DESCRIPTOR, python::detect_flask),
     FrameworkPack::universal(&pack::PYDANTIC_PYTHON_DESCRIPTOR, python::detect_pydantic),
@@ -1131,6 +1135,7 @@ mod tests {
         for expected in [
             "spring-java",
             "django-python",
+            "django-rest-framework-python",
             "fastapi-python",
             "flask-python",
             "pydantic-python",

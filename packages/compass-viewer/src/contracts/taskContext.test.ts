@@ -36,6 +36,7 @@ describe("framework task context contract", () => {
     expect(FrameworkContextSchema.parse(frameworkContext()).packs.at(0)?.id).toBe("react-ui");
     for (const id of [
       "django-python",
+      "django-rest-framework-python",
       "fastapi-python",
       "flask-python",
       "pydantic-python",

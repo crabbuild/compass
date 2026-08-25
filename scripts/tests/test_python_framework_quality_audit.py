@@ -23,20 +23,30 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
         self.assertEqual(first["status"], "established-unqualified")
         self.assertFalse(first["productionQualified"])
         self.assertEqual(first["pythonProducer"]["version"], 13)
-        self.assertEqual(first["expectations"], 7)
-        self.assertEqual(len(first["expectedGaps"]), 6)
+        self.assertEqual(first["expectations"], 14)
+        self.assertEqual(len(first["expectedGaps"]), 4)
 
     def test_fixture_ledgers_have_exact_source_ranges(self) -> None:
         expectations = qualification.load_json(qualification.EXPECTATIONS)
         frameworks = qualification.validate_expectations(expectations, qualification.FIXTURE_ROOT)
-        self.assertEqual(frameworks, {"django": 2, "fastapi": 3, "flask": 2})
+        self.assertEqual(
+            frameworks,
+            {
+                "django": 4,
+                "django-rest-framework": 2,
+                "fastapi": 4,
+                "flask": 2,
+                "pydantic": 1,
+                "starlette": 1,
+            },
+        )
         for record in expectations["records"]:
             source = (qualification.FIXTURE_ROOT / record["sourceFile"]).read_bytes()
             self.assertTrue(source[record["startByte"] : record["endByte"]].strip())
 
     def test_baseline_cannot_be_mistaken_for_a_quality_claim(self) -> None:
         baseline = qualification.load_json(qualification.BASELINE)
-        qualification.validate_baseline(baseline, 7, 6)
+        qualification.validate_baseline(baseline, 14, 4)
         self.assertEqual(baseline["qualification"]["acceptedRelationships"], 0)
         self.assertFalse(baseline["qualification"]["eligibleForProductionClaim"])
 

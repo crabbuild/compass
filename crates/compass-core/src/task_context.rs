@@ -983,6 +983,7 @@ fn framework_pack_id(framework: &str) -> Option<&'static str> {
         "tanstack-start" => "tanstack-start",
         "vite" => "vite-config",
         "django" => "django-python",
+        "django-rest-framework" | "drf" => "django-rest-framework-python",
         "fastapi" => "fastapi-python",
         "flask" => "flask-python",
         "pydantic" => "pydantic-python",
@@ -1001,7 +1002,26 @@ fn framework_capabilities(pack_id: &str) -> Vec<String> {
         "tanstack-router" => ["routes", "loaders", "components", "stages"].as_slice(),
         "tanstack-start" => ["routes", "loaders", "actions", "server_functions"].as_slice(),
         "vite-config" => ["aliases", "plugins", "file_sets", "config"].as_slice(),
-        "django-python" => ["routes", "includes", "stages"].as_slice(),
+        "django-python" => [
+            "routes",
+            "includes",
+            "models",
+            "fields",
+            "relationships",
+            "signals",
+            "stages",
+        ]
+        .as_slice(),
+        "django-rest-framework-python" => [
+            "routes",
+            "routers",
+            "viewsets",
+            "actions",
+            "serializers",
+            "security",
+            "dependencies",
+        ]
+        .as_slice(),
         "fastapi-python" => ["routes", "dependencies", "mounts", "stages"].as_slice(),
         "flask-python" => ["routes", "blueprints", "stages"].as_slice(),
         "pydantic-python" => ["models", "schemas", "dependencies"].as_slice(),
@@ -1799,6 +1819,10 @@ mod tests {
     #[test]
     fn python_frameworks_map_to_independent_versioned_packs() {
         assert_eq!(framework_pack_id("django"), Some("django-python"));
+        assert_eq!(
+            framework_pack_id("django-rest-framework"),
+            Some("django-rest-framework-python")
+        );
         assert_eq!(framework_pack_id("fastapi"), Some("fastapi-python"));
         assert_eq!(framework_pack_id("flask"), Some("flask-python"));
         assert_eq!(framework_pack_id("pydantic"), Some("pydantic-python"));
@@ -1806,6 +1830,10 @@ mod tests {
         assert!(framework_capabilities("fastapi-python").contains(&"mounts".to_owned()));
         assert!(framework_capabilities("pydantic-python").contains(&"models".to_owned()));
         assert!(framework_capabilities("starlette-python").contains(&"routes".to_owned()));
+        assert!(
+            framework_capabilities("django-rest-framework-python")
+                .contains(&"serializers".to_owned())
+        );
         assert_eq!(framework_pack_id("python-web"), None);
     }
 

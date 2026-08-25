@@ -10,8 +10,13 @@
   "productionFrameworkPacks": [
     {
       "id": "django-python",
-      "semanticsVersion": 1,
+      "semanticsVersion": 2,
       "frameworks": ["django"]
+    },
+    {
+      "id": "django-rest-framework-python",
+      "semanticsVersion": 1,
+      "frameworks": ["django-rest-framework"]
     },
     {
       "id": "fastapi-python",
@@ -40,8 +45,8 @@
     }
   ],
   "fixtureEvidence": {
-    "expectations": 10,
-    "expectedGaps": 1,
+    "expectations": 14,
+    "expectedGaps": 4,
     "graphQualification": "checked-in-conformance-only",
     "productionQualified": false
   },

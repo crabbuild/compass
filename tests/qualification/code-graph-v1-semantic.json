@@ -19,7 +19,7 @@
       "handlerLanguage": "python",
       "resolution": "exact",
       "origins": [
-        "config"
+        "ast"
       ],
       "producer": "compass.frameworks.django",
       "rules": [
@@ -32,7 +32,7 @@
       "id": "flow-flask",
       "framework": "flask",
       "routeFramework": "flask",
-      "operation": "ANY",
+      "operation": "GET",
       "path": "/health",
       "routeSource": "fixtures/code-graph/routes/python/flask_app.py",
       "handler": {
@@ -77,7 +77,7 @@
       ],
       "producer": "compass.frameworks.fastapi",
       "rules": [
-        "python-mounted-router|stage:handler:1"
+        "python-receiver-mount|stage:handler:1"
       ],
       "allowHeuristic": false,
       "candidates": []

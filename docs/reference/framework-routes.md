@@ -54,7 +54,28 @@ Compass activates a framework pack only when the repository contains direct evid
 
 ### Python web frameworks
 
-- **Django (`django-python` v1)**: exact imported `path`, `re_path`, legacy `url`, and `include` calls that contribute to `urlpatterns`; positional or named `route` and `view` arguments; function views, dotted string handlers, and class-based `.as_view()` handlers. Same-named local helpers and calls outside `urlpatterns` do not activate the pack.
+- **Django (`django-python` v2)**: exact imported `path`, `re_path`, legacy
+  `url`, and `include` calls reached through one source-ordered `urlpatterns`
+  assignment plus `+=`; local and imported list/tuple/set collections,
+  concatenation, literal application names/namespaces, exact
+  `i18n_patterns`, converters, function views, dotted string handlers, and
+  class-based `.as_view()` handlers. Exact model subclasses retain anchored
+  field descriptors; unique local foreign-key, many-to-many, one-to-one, and
+  custom-manager targets use `depends_on`. Exact `django.dispatch.receiver`
+  subscriptions use `subscribes`, with a separate exact sender dependency.
+  Dynamic collections, ambiguous assignments/models, same-named helpers, and
+  calls outside the proven flow do not activate those facts.
+- **Django REST Framework (`django-rest-framework-python` v1)**: exact local
+  `SimpleRouter` and `DefaultRouter` receivers, literal registrations and
+  mounts, unique local viewsets, and closed `drf-simple-router-v1` or
+  `drf-default-router-v1` templates. Only source-declared standard viewset
+  methods and exact `@action` methods generate routes; literal lookup fields
+  and URL keyword overrides set the detail parameter. Serializer, permission,
+  authentication, filter, throttle, and serializer-to-model assignments emit
+  exact dependencies. Custom routers, dynamic lookup configuration, dynamic
+  tuple application names, external inherited viewset methods, and ambiguous
+  serializer/model targets remain unresolved; the DefaultRouter API-root
+  convenience route is not synthesized without an exact handler declaration.
 - **Flask (`flask-python` v1)**: exact `Flask` and `Blueprint` receiver declarations and route decorators, constructor and registration-time `url_prefix`, positional or named `rule`, and literal `methods` lists. A `route` with no declared methods records `GET`; implicit HEAD/OPTIONS behavior is not published as additional routes.
 - **FastAPI (`fastapi-python` v2)**: exact `FastAPI` and `APIRouter` receiver declarations; HTTP and WebSocket decorators; `api_route`, `route`, `add_api_route`, and `add_api_websocket_route`; literal paths and method lists; and constructor plus `include_router` prefixes. Application, router, include, route, parameter-default, and `Annotated` `Depends`/`Security` evidence becomes ordered dependency/security stages. Exact subdependencies use `depends_on`, and `yield` providers retain lifecycle detail without executing Python.
 - **Starlette (`starlette-python` v1)**: exact `Starlette` and `Router` receivers; `route` and `websocket_route` decorators; imperative `add_route` and `add_websocket_route`; `Route` and `WebSocketRoute` constructors; inline and receiver-backed `Mount` composition; literal paths and method lists. Dynamic endpoints, paths, and mounts remain unresolved.
@@ -73,6 +94,10 @@ FastAPI/Starlette middleware, lifespan, and background-task registrations are
 not published as route or dependency edges by these pack versions. Their
 registration meaning needs an independently reviewed relation-capability
 contract; same-named or dynamic calls are not approximated in the meantime.
+The same contract boundary applies to Django `MIDDLEWARE`, settings app lists,
+and `admin.site.register`: `registers` currently requires bean-container
+capability, which Django does not truthfully advertise. Those registrations
+remain source-visible but do not become synthetic edges.
 
 ### JavaScript and TypeScript frameworks
 

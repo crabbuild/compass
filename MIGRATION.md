@@ -34,9 +34,10 @@ reader should reject a packet containing either new value, then be upgraded;
 cached graph, query, or task-context packets may be rebuilt after deployment.
 
 Python framework readers must replace the combined `python-web` pack ID with
-`django-python`, `fastapi-python`, `flask-python`, `pydantic-python`, and
-`starlette-python`. `fastapi-python` is now semantics version 2 and the
-framework-pack cache identity is `compass.framework-packs/4`, so run a fresh
+`django-python`, `django-rest-framework-python`, `fastapi-python`,
+`flask-python`, `pydantic-python`, and `starlette-python`. `django-python` and
+`fastapi-python` are now semantics version 2, and the framework-pack cache
+identity is `compass.framework-packs/5`, so run a fresh
 or forced build after upgrading. A Flask `@app.route` without a `methods`
 argument now records
 the declared `GET` operation instead of `ANY`. Exact Django URL calls and
@@ -49,6 +50,13 @@ now use the additive `dependency` route stage; `Security` uses the distinct
 `security` stage. Consumers must retain these values rather than coercing them
 to HTTP middleware. Pydantic schema dependencies reuse `depends_on` and
 existing class/field nodes, so no new public node or edge kind is introduced.
+DRF router routes likewise reuse `routes_to`; serializer, security, model,
+field-relationship, manager, and signal-sender wiring use the existing
+`depends_on` and `subscribes` relationships. Strict framework-context readers
+must accept `django-rest-framework-python`. No settings, middleware, or admin
+registration edge is synthesized: the current descriptor vocabulary cannot
+advertise those registrations without incorrectly claiming bean-container
+semantics.
 
 ## Ruby universal evidence rebuild
 

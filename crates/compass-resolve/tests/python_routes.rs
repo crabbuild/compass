@@ -218,6 +218,74 @@ urlpatterns = [path("users/<int:user_id>/", detail)]
 }
 
 #[test]
+fn django_static_local_and_imported_pattern_collections_compose_exactly()
+-> Result<(), Box<dyn std::error::Error>> {
+    let local_source = br#"from django.conf.urls.i18n import i18n_patterns
+from django.urls import include, path
+
+def health(request): return None
+def item(request, item_id): return None
+def localized(request): return None
+
+api_patterns = [path("items/<int:item_id>/", item)]
+base_patterns = [path("health/", health)]
+urlpatterns = base_patterns + i18n_patterns(path("localized/", localized)) + [
+    path("v1/", include((api_patterns, "api"), namespace="v1")),
+]
+"#;
+    let child_source = br#"from django.urls import path
+def child(request): return None
+child_patterns = [path("child/", child)]
+urlpatterns = child_patterns
+"#;
+    let root_source = br#"from django.urls import include, path
+from .child_urls import urlpatterns as child_patterns
+urlpatterns = child_patterns + [path("nested/", include(child_patterns))]
+"#;
+    let mut engine = Engine::default();
+    let local = engine.extract_source(Path::new("pkg/local_urls.py"), local_source)?;
+    let child = engine.extract_source(Path::new("pkg/child_urls.py"), child_source)?;
+    let root = engine.extract_source(Path::new("pkg/root_urls.py"), root_source)?;
+    let sources = HashMap::from([
+        (
+            "pkg/local_urls.py".to_owned(),
+            String::from_utf8(local_source.to_vec())?,
+        ),
+        (
+            "pkg/child_urls.py".to_owned(),
+            String::from_utf8(child_source.to_vec())?,
+        ),
+        (
+            "pkg/root_urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+    ]);
+    let extraction = resolve(&[local, child, root], &sources);
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    let shapes = routes
+        .iter()
+        .filter(|route| route.route.framework == "django")
+        .map(|route| route.route.normalized_path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shapes,
+        [
+            "/child",
+            "/nested/child",
+            "/health",
+            "/localized",
+            "/v1/items/{item_id}",
+        ]
+    );
+    assert!(
+        routes
+            .iter()
+            .all(|route| route.state == ResolutionState::Exact)
+    );
+    Ok(())
+}
+
+#[test]
 fn django_relative_module_import_resolves_class_based_view_route()
 -> Result<(), Box<dyn std::error::Error>> {
     let urls_source = br#"

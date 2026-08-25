@@ -261,6 +261,14 @@ app.include_router(router, prefix="/api", dependencies=[Depends(database)])
             && edge.source.contains("create_item")
             && edge.target.contains("item")
     }));
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "depends_on")
+            .all(|edge| edge.string("extractor")
+                == format!("compass.frameworks.{}", edge.string("framework")))
+    );
     assert!(extraction.nodes.iter().any(|node| {
         node.id.contains("item")
             && node
@@ -268,6 +276,82 @@ app.include_router(router, prefix="/api", dependencies=[Depends(database)])
                 .get("roles")
                 .and_then(serde_json::Value::as_array)
                 .is_some_and(|roles| roles.iter().any(|role| role.as_str() == Some("model")))
+    }));
+    Ok(())
+}
+
+#[test]
+fn drf_default_router_expands_only_exact_viewset_methods_and_actions() -> Result<(), Box<dyn Error>>
+{
+    let source = br#"from django.db import models
+from django.urls import include, path
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.routers import DefaultRouter
+from rest_framework.serializers import ModelSerializer
+from rest_framework.viewsets import ModelViewSet
+
+class Item(models.Model):
+    name = models.CharField(max_length=100)
+
+class ItemSerializer(ModelSerializer):
+    class Meta:
+        model = Item
+        fields = ["name"]
+
+class ItemViewSet(ModelViewSet):
+    lookup_field = "slug"
+    lookup_url_kwarg = "item_slug"
+    serializer_class = ItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request): return None
+    def retrieve(self, request, pk=None): return None
+
+    @action(detail=True, methods=["post"], url_path="publish")
+    def publish(self, request, pk=None): return None
+
+router = DefaultRouter()
+router.register("items", ItemViewSet, basename="item")
+urlpatterns = [path("api/", include((router.urls, "api"), namespace="v1"))]
+"#;
+    let extraction = resolved_project(&[("api/urls.py", source)])?;
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    let route_shapes = routes
+        .iter()
+        .filter(|route| route.route.framework == "django-rest-framework")
+        .map(|route| {
+            (
+                route.route.operation.as_str(),
+                route.route.normalized_path.as_str(),
+                route.state,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        route_shapes,
+        [
+            ("GET", "/api/items", ResolutionState::Exact),
+            ("GET", "/api/items/{item_slug}", ResolutionState::Exact),
+            (
+                "POST",
+                "/api/items/{item_slug}/publish",
+                ResolutionState::Exact,
+            ),
+        ]
+    );
+    assert!(!routes.iter().any(|route| {
+        route.route.framework == "django" && route.route.handler_reference.contains("router.urls")
+    }));
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.string("relation") == "depends_on"
+            && edge.source.contains("itemviewset")
+            && edge.target.contains("itemserializer")
+    }));
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.string("relation") == "depends_on"
+            && edge.source.contains("itemserializer")
+            && edge.target.contains("item")
     }));
     Ok(())
 }

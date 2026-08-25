@@ -40,6 +40,7 @@ fn python_web_cutover_has_independent_versioned_universal_owners() -> Result<(),
         .collect::<Vec<_>>();
     for id in [
         "django-python",
+        "django-rest-framework-python",
         "fastapi-python",
         "flask-python",
         "pydantic-python",
@@ -47,6 +48,11 @@ fn python_web_cutover_has_independent_versioned_universal_owners() -> Result<(),
     ] {
         assert!(ids.contains(&id), "missing universal descriptor {id}");
     }
+    assert_eq!(framework_pack_semantics_version("django-python"), Some(2));
+    assert_eq!(
+        framework_pack_semantics_version("django-rest-framework-python"),
+        Some(1)
+    );
     assert_eq!(framework_pack_semantics_version("fastapi-python"), Some(2));
     assert_eq!(
         framework_pack_semantics_version("starlette-python"),
@@ -108,6 +114,421 @@ not_patterns = [django_path("outside/", handler)]
         !routes
             .iter()
             .any(|route| { matches!(route.normalized_path.as_str(), "/shadowed" | "/outside") })
+    );
+    Ok(())
+}
+
+#[test]
+fn django_static_pattern_collections_i18n_namespaces_and_converters_are_exact()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "project/urls.py",
+        br#"from django.conf.urls.i18n import i18n_patterns
+from django.urls import include, path, register_converter
+
+class YearConverter: pass
+register_converter(YearConverter, "year")
+
+def health(request): return None
+def item(request, year): return None
+def localized(request): return None
+def extra(request): return None
+
+base_patterns = [path("health/", health)]
+api_patterns = (path("items/<year:year>/", item),)
+localized_patterns = i18n_patterns(path("localized/", localized))
+urlpatterns = base_patterns + localized_patterns + [
+    path("v1/", include((api_patterns, "api"), namespace="v1")),
+]
+urlpatterns += [path("extra/", extra)]
+"#,
+    )?;
+    let django_routes = routes(&extraction)
+        .into_iter()
+        .filter(|route| route.framework == "django")
+        .collect::<Vec<_>>();
+    assert_eq!(django_routes.len(), 5, "routes={django_routes:#?}");
+    assert!(
+        django_routes
+            .iter()
+            .any(|route| route.normalized_path == "/extra")
+    );
+    assert!(
+        django_routes
+            .iter()
+            .any(|route| route.normalized_path == "/items/{year}")
+    );
+    let include = django_routes
+        .iter()
+        .find(|route| route.normalized_path == "/v1")
+        .ok_or("missing local collection include")?;
+    assert_eq!(
+        include
+            .detail
+            .get("include_collection")
+            .and_then(serde_json::Value::as_str),
+        Some("api_patterns")
+    );
+    assert_eq!(
+        include
+            .detail
+            .get("namespace")
+            .and_then(serde_json::Value::as_str),
+        Some("v1")
+    );
+    assert!(django_routes.iter().any(|route| {
+        route.normalized_path == "/localized"
+            && route
+                .detail
+                .get("i18n")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+    }));
+    Ok(())
+}
+
+#[test]
+fn django_orphan_dynamic_and_same_named_i18n_collections_fail_closed() -> Result<(), Box<dyn Error>>
+{
+    let extraction = extract(
+        "project/near_matches.py",
+        br#"from django.urls import path
+
+def i18n_patterns(*patterns): return patterns
+def endpoint(request): return None
+
+orphan = [path("orphan/", endpoint)]
+dynamic = build_patterns()
+urlpatterns = i18n_patterns(path("wrong/", endpoint)) + dynamic
+"#,
+    )?;
+    assert!(routes(&extraction).is_empty());
+    Ok(())
+}
+
+#[test]
+fn drf_router_viewset_action_and_serializer_facts_require_exact_evidence()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "api/urls.py",
+        br#"from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.urls import include, path
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.decorators import action
+from rest_framework.filters import SearchFilter
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.routers import DefaultRouter
+from rest_framework.serializers import ModelSerializer
+from rest_framework.throttling import UserRateThrottle
+from rest_framework.viewsets import ModelViewSet
+
+class ItemManager(models.Manager):
+    pass
+
+class Owner(models.Model):
+    name = models.CharField(max_length=100)
+
+class Item(models.Model):
+    name = models.CharField(max_length=100)
+    owner = models.ForeignKey(Owner, on_delete=models.CASCADE)
+    reviewers = models.ManyToManyField(Owner, related_name="reviewed_items")
+    primary_owner = models.OneToOneField(Owner, on_delete=models.CASCADE, related_name="primary_item")
+    objects = ItemManager()
+
+class ItemSerializer(ModelSerializer):
+    class Meta:
+        model = Item
+        fields = ["name"]
+
+class ItemViewSet(ModelViewSet):
+    lookup_field = "slug"
+    serializer_class = ItemSerializer
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [TokenAuthentication]
+    filter_backends = [SearchFilter]
+    throttle_classes = [UserRateThrottle]
+
+    def list(self, request): return None
+    def retrieve(self, request, pk=None): return None
+
+    @action(detail=True, methods=["post"], url_path="publish")
+    def publish(self, request, pk=None): return None
+
+@receiver(post_save, sender=Item)
+def item_saved(sender, instance, **kwargs): return None
+
+router = DefaultRouter()
+router.register("items", ItemViewSet, basename="item")
+route_patterns = [path("api/", include((router.urls, "api"), namespace="v1"), name="api")]
+urlpatterns = route_patterns
+"#,
+    )?;
+    let drf_domains = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Domain(domain) if domain.framework == "django-rest-framework" => {
+                Some(domain)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        drf_domains
+            .iter()
+            .any(|fact| fact.kind == "drf_router_registration")
+    );
+    assert!(drf_domains.iter().any(|fact| {
+        fact.kind == "drf_router_registration"
+            && fact
+                .detail
+                .get("lookup_parameter")
+                .and_then(serde_json::Value::as_str)
+                == Some("slug")
+    }));
+    assert!(
+        drf_domains
+            .iter()
+            .any(|fact| fact.kind == "drf_router_mount")
+    );
+    assert!(drf_domains.iter().any(|fact| {
+        fact.kind == "drf_router_mount"
+            && fact
+                .detail
+                .get("namespace")
+                .and_then(serde_json::Value::as_str)
+                == Some("v1")
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "django-rest-framework-python" && role.role == "controller")
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "django-python" && role.role == "model")
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "django-python" && role.role == "service" && role.context.as_deref() == Some("model_manager"))
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "django-python" && role.role == "subscriber" && role.context.as_deref() == Some("django.db.models.signals.post_save"))
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation) if relation.pack_id == "django-python" && relation.relation == "subscribes" && relation.target_hint.as_deref() == Some("django.db.models.signals.post_save"))
+    }));
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Role(role) if role.pack_id == "django-python" && role.role == "model" && role.detail.get("fields").and_then(serde_json::Value::as_array).is_some_and(|fields| fields.len() >= 4))
+    }), "facts={:#?}", extraction.framework_facts);
+    let relation_contexts = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Relation(relation)
+                if matches!(
+                    relation.pack_id.as_str(),
+                    "django-python" | "django-rest-framework-python"
+                ) =>
+            {
+                relation.context.as_deref()
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for expected in [
+        "serializer_class",
+        "permission_classes",
+        "authentication_classes",
+        "filter_backends",
+        "throttle_classes",
+        "serializer_model",
+        "ForeignKey",
+        "ManyToManyField",
+        "OneToOneField",
+        "manager:objects",
+        "signal_sender",
+    ] {
+        assert!(
+            relation_contexts.contains(&expected),
+            "missing {expected}; facts={:#?}",
+            extraction.framework_facts
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn drf_custom_router_dynamic_registration_and_wrong_imports_fail_closed()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "api/near_matches.py",
+        br#"from django.urls import include, path
+from other import DefaultRouter, ModelViewSet, action
+
+class ItemViewSet(ModelViewSet):
+    @action(detail=True, methods=get_methods(), url_path=dynamic_path())
+    def publish(self, request): return None
+
+router = DefaultRouter()
+prefix = "items"
+router.register(prefix, ItemViewSet)
+urlpatterns = [path("api/", include(router.urls))]
+"#,
+    )?;
+    assert!(!extraction.framework_facts.iter().any(|fact| match fact {
+        RawFrameworkFact::Domain(domain) => domain.framework == "django-rest-framework",
+        RawFrameworkFact::Role(role) => role.pack_id == "django-rest-framework-python",
+        RawFrameworkFact::Relation(relation) => {
+            relation.pack_id == "django-rest-framework-python"
+        }
+        _ => false,
+    }));
+    Ok(())
+}
+
+#[test]
+fn drf_router_registration_requires_a_literal_basename() -> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "api/dynamic_basename.py",
+        br#"from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+from rest_framework.viewsets import ModelViewSet
+
+class ItemViewSet(ModelViewSet):
+    def list(self, request): return None
+
+router = DefaultRouter()
+router.register("missing", ItemViewSet)
+router.register("dynamic", ItemViewSet, basename=choose_basename())
+urlpatterns = [path("api/", include(router.urls))]
+"#,
+    )?;
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "drf_router_registration")
+    }));
+    Ok(())
+}
+
+#[test]
+fn django_dynamic_registrations_and_ambiguous_signal_sender_fail_closed()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "project/registrations.py",
+        br#"from django.contrib import admin
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+class Item(models.Model): pass
+class ItemAdmin: pass
+
+Item = choose_model()
+
+@receiver(post_save, sender=Item)
+def ambiguous_sender(sender, **kwargs): return None
+
+admin.site.register(Item, ItemAdmin)
+MIDDLEWARE = build_middleware()
+INSTALLED_APPS = [dynamic_app]
+"#,
+    )?;
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation) if matches!(relation.context.as_deref(), Some("signal_sender")) || relation.relation == "registers")
+    }));
+    Ok(())
+}
+
+#[test]
+fn drf_dynamic_lookup_serializer_and_custom_router_templates_fail_closed()
+-> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "api/dynamic.py",
+        br#"from rest_framework.routers import DefaultRouter
+from rest_framework.viewsets import ModelViewSet
+
+class CustomRouter(DefaultRouter): pass
+
+class ItemViewSet(ModelViewSet):
+    lookup_field = choose_lookup()
+    serializer_class = make_serializer()
+    def retrieve(self, request, pk=None): return None
+
+router = DefaultRouter()
+router.register("items", ItemViewSet, basename="item")
+custom = CustomRouter()
+custom.register("custom", ItemViewSet, basename="custom")
+urlpatterns = router.urls
+"#,
+    )?;
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "drf_router_mount")
+    }));
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "drf_router_registration")
+    }));
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Relation(relation) if relation.context.as_deref() == Some("serializer_class"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn drf_router_mount_tuple_requires_a_literal_application_name() -> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "api/tuple_near_match.py",
+        br#"from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+from rest_framework.viewsets import ViewSet
+
+class ItemViewSet(ViewSet):
+    def list(self, request): return None
+
+router = DefaultRouter()
+router.register("items", ItemViewSet, basename="item")
+application_name = choose_name()
+urlpatterns = [path("api/", include((router.urls, application_name), namespace="v1"))]
+"#,
+    )?;
+    assert!(extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "drf_router_registration")
+    }));
+    assert!(!extraction.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "drf_router_mount")
+    }));
+    Ok(())
+}
+
+#[test]
+fn drf_external_inherited_viewset_methods_are_not_synthesized() -> Result<(), Box<dyn Error>> {
+    let extraction = extract(
+        "api/inherited.py",
+        br#"from rest_framework.routers import SimpleRouter
+from rest_framework.viewsets import ModelViewSet
+
+class ItemViewSet(ModelViewSet):
+    pass
+
+router = SimpleRouter()
+router.register("items", ItemViewSet, basename="item")
+urlpatterns = router.urls
+"#,
+    )?;
+    let registration = extraction
+        .framework_facts
+        .iter()
+        .find_map(|fact| match fact {
+            RawFrameworkFact::Domain(domain) if domain.kind == "drf_router_registration" => {
+                Some(domain)
+            }
+            _ => None,
+        })
+        .ok_or("missing exact router registration")?;
+    assert_eq!(
+        registration
+            .detail
+            .get("methods")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(0)
     );
     Ok(())
 }

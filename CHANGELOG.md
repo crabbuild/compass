@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Advance `django-python` to semantics version 2 and add the independent
+  version-1 `django-rest-framework-python` pack. Django now follows exact
+  local and imported `urlpatterns` collections, includes, namespaces, i18n
+  patterns, converters, class-based views, model fields and relationships,
+  custom managers, and signal receivers. DRF adds closed SimpleRouter and
+  DefaultRouter templates for source-declared viewset methods and actions,
+  plus exact serializer, permission, authentication, filter, throttle, and
+  serializer-to-model dependencies. Dynamic collections, custom routers,
+  external inherited methods, ambiguous models, and unproven registration
+  forms remain unresolved.
+
 - Add independently versioned `starlette-python` and `pydantic-python` packs
   and advance `fastapi-python` to semantics version 2. Exact Starlette route,
   WebSocket, imperative, constructor, and bounded mount evidence now composes

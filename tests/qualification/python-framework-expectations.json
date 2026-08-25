@@ -152,6 +152,63 @@
       "origin": "ast",
       "resolution": "exact",
       "expectedAmbiguity": false
+    },
+    {
+      "id": "drf-item-publish-route",
+      "sourceFile": "django_drf.py",
+      "startByte": 1093,
+      "endByte": 1100,
+      "sourceIdentity": "django_drf.router",
+      "targetIdentity": "django_drf.ItemViewSet.publish",
+      "relation": "routes_to",
+      "framework": "django-rest-framework",
+      "routePath": "/api/items/{slug}/publish",
+      "producer": "compass.frameworks.django-rest-framework-python",
+      "origin": "convention",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "drf-serializer-model",
+      "sourceFile": "django_drf.py",
+      "startByte": 789,
+      "endByte": 793,
+      "sourceIdentity": "django_drf.ItemSerializer",
+      "targetIdentity": "django_drf.Item",
+      "relation": "depends_on",
+      "framework": "django-rest-framework",
+      "producer": "compass.frameworks.django-rest-framework-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "django-item-owner",
+      "sourceFile": "django_drf.py",
+      "startByte": 644,
+      "endByte": 654,
+      "sourceIdentity": "django_drf.Item",
+      "targetIdentity": "django_drf.Owner",
+      "relation": "depends_on",
+      "framework": "django",
+      "producer": "compass.frameworks.django-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
+    },
+    {
+      "id": "django-item-signal",
+      "sourceFile": "django_drf.py",
+      "startByte": 1160,
+      "endByte": 1169,
+      "sourceIdentity": "django_drf.item_saved",
+      "targetIdentity": "django.db.models.signals.post_save",
+      "relation": "subscribes",
+      "framework": "django",
+      "producer": "compass.frameworks.django-python",
+      "origin": "ast",
+      "resolution": "exact",
+      "expectedAmbiguity": false
     }
   ]
 }

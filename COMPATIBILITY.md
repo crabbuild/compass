@@ -94,19 +94,30 @@ and generated viewer assets together. Older strict readers must reject these
 values; consumers must not coerce either one to `middleware`. The existing
 graph and context schema majors are unchanged.
 
-The framework-pack cache identity is now `compass.framework-packs/4`.
+The framework-pack cache identity is now `compass.framework-packs/5`.
 Python HTTP routes no longer use the combined `python-web` runtime adapter;
-they are owned independently by version-1 `django-python`, version-2
-`fastapi-python`, version-1 `flask-python`, and the new version-1
-`starlette-python` universal packs. Version-1 `pydantic-python` owns exact
+they are owned independently by version-2 `django-python`, version-1
+`django-rest-framework-python`, version-2 `fastapi-python`, version-1
+`flask-python`, and version-1 `starlette-python` universal packs. Version-1
+`pydantic-python` owns exact
 model roles and request/response schema dependencies. Strict
-`compass.framework-context/1` readers must accept those five IDs and reject
+`compass.framework-context/1` readers must accept those six IDs and reject
 the removed combined ID. Route
 and graph schema majors remain unchanged, but cached framework facts must be
 rebuilt because pack ownership, evidence provenance, and Flask's default
 operation changed. No graph schema major changes: dependency/security stages
 and Pydantic schema flow reuse the existing typed stage, node-role, and
 `depends_on` contracts.
+
+The Django semantics widening retains the existing graph major and additive
+edge vocabulary. Exact URL-pattern collections, DRF generated routes, model
+relationships/managers, and signal subscriptions can add `routes_to`,
+`depends_on`, and `subscribes` records with source anchors. Dynamic patterns,
+custom router templates, external inherited viewset methods, and ambiguous
+serializer/model targets stay unresolved. Settings, middleware, and admin
+registration calls do not publish `registers`: the current pack contract
+would require the unrelated bean-container capability, so readers must not
+infer those edges from missing output.
 
 Python structural evidence now uses producer version 13. The evidence schema
 is unchanged, but previously empty universal callable/type fields can contain
