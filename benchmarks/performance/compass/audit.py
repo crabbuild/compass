@@ -724,11 +724,38 @@ def _occurrence(value: object, context: str) -> AuditOccurrence:
 
 def _graph_fact(value: object, context: str) -> AuditGraphFact:
     item = _expect_object(value, context)
-    _keys(item, required=("source", "target", "relation"), context=context)
+    _keys(
+        item,
+        required=("source", "target", "relation"),
+        optional=("edgeId", "extractor", "rule"),
+        context=context,
+    )
+    pointer = (item.get("edgeId"), item.get("extractor"), item.get("rule"))
+    if any(value is not None for value in pointer) and not all(
+        value is not None for value in pointer
+    ):
+        raise AuditError(
+            f"{context} exact edge pointer requires edgeId, extractor, and rule"
+        )
     return AuditGraphFact(
         source=_text(item["source"], f"{context}.source"),
         target=_text(item["target"], f"{context}.target"),
         relation=_text(item["relation"], f"{context}.relation", identity=True),
+        edge_id=(
+            _text(item["edgeId"], f"{context}.edgeId")
+            if item.get("edgeId") is not None
+            else None
+        ),
+        extractor=(
+            _text(item["extractor"], f"{context}.extractor", identity=True)
+            if item.get("extractor") is not None
+            else None
+        ),
+        rule=(
+            _text(item["rule"], f"{context}.rule", identity=True)
+            if item.get("rule") is not None
+            else None
+        ),
     )
 
 
@@ -1194,6 +1221,45 @@ def _require_fact(
         )
 
 
+def _require_exact_representation(
+    graph: _GraphIndex,
+    fact: AuditGraphFact,
+    record_id: str,
+) -> None:
+    assert fact.edge_id is not None
+    assert fact.extractor is not None
+    assert fact.rule is not None
+    edges = graph.facts.get((fact.source, fact.target, fact.relation), ())
+    matches = [
+        edge
+        for edge in edges
+        if edge.get("id") == fact.edge_id
+        and edge.get("occurrenceRule") == fact.rule
+        and _has_exact_representation_evidence(edge, fact.extractor, fact.rule)
+    ]
+    if len(matches) != 1:
+        raise AuditError(
+            f"record {record_id!r} exact representation edge is absent or stale: "
+            f"{fact.edge_id} ({fact.extractor}, {fact.rule})"
+        )
+
+
+def _has_exact_representation_evidence(
+    edge: dict[str, Any],
+    extractor: str,
+    rule: str,
+) -> bool:
+    evidence = edge.get("evidence")
+    return isinstance(evidence, list) and any(
+        isinstance(item, dict)
+        and item.get("origin") == "ast"
+        and item.get("confidence") == "exact"
+        and item.get("extractor") == extractor
+        and item.get("rule") == rule
+        for item in evidence
+    )
+
+
 def _validate_record_inputs(
     manifest: AuditManifest,
     corpus_root: Path,
@@ -1313,9 +1379,17 @@ def _validate_record_inputs(
             )
 
         graph = indexes[record.corpus]
+        has_exact_representation_pointer = (
+            record.judgment == "represented_elsewhere"
+            and record.representation is not None
+            and record.representation.edge_id is not None
+        )
         requires_source_node = not (
             record.pool == "source_oracle"
-            and record.judgment in {"missing", "ambiguous"}
+            and (
+                record.judgment in {"missing", "ambiguous"}
+                or has_exact_representation_pointer
+            )
         )
         if requires_source_node and record.source.node_id not in graph.nodes:
             raise AuditError(
@@ -1344,12 +1418,19 @@ def _validate_record_inputs(
             _require_fact(graph, fact, record.occurrence, record.record_id)
         elif record.judgment == "represented_elsewhere":
             assert record.representation is not None
-            _require_fact(
-                graph,
-                record.representation,
-                record.occurrence,
-                record.record_id,
-            )
+            if record.representation.edge_id is None:
+                _require_fact(
+                    graph,
+                    record.representation,
+                    record.occurrence,
+                    record.record_id,
+                )
+            else:
+                _require_exact_representation(
+                    graph,
+                    record.representation,
+                    record.record_id,
+                )
         elif record.pool == "source_oracle" and present:
             raise AuditError(
                 f"record {record.record_id!r} is classified {record.judgment!r} "

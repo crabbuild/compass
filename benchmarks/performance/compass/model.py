@@ -218,6 +218,9 @@ class AuditGraphFact:
     source: str
     target: str
     relation: str
+    edge_id: str | None = None
+    extractor: str | None = None
+    rule: str | None = None
 
 
 @dataclass(frozen=True)

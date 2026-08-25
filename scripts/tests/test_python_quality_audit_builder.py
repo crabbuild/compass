@@ -14,7 +14,11 @@ from benchmarks.performance.compass.occurrences import (
     source_construct_inventory_sha256,
 )
 from scripts.build_python_quality_audit import (
+    _django_route_representation_candidates,
+    _django_route_representations,
+    _exact_django_route_representation,
     _extractor_pack,
+    _record,
     _source_target_is_exact,
     _target_matches,
 )
@@ -332,6 +336,14 @@ class PythonQualityAuditBuilderTests(unittest.TestCase):
             ),
             snippets,
         )
+        self.assertEqual(
+            {"src.leaf"},
+            {
+                route.qualifier
+                for route in routes
+                if route.source_file != "src/leaf.py"
+            },
+        )
 
     def test_django_dynamic_includes_fail_closed_and_static_cycles_terminate(self) -> None:
         dynamic = (
@@ -373,6 +385,135 @@ class PythonQualityAuditBuilderTests(unittest.TestCase):
             3,
             sum(route.target_spelling == "concrete" for route in routes),
         )
+
+    def test_django_child_route_representation_requires_one_exact_parent_edge(self) -> None:
+        propagated = SourceConstruct(
+            source_file="src/root.py",
+            relation="routes_to",
+            capability="http_routes",
+            owner_qualified_name="src.root",
+            target_spelling="views.ChildView",
+            qualifier="src.child",
+            start_byte=40,
+            end_byte=80,
+            start_line=3,
+            framework_pack="django-python",
+        )
+        edge = {
+            "id": "sha256:" + "a" * 64,
+            "source": "route-parent",
+            "target": "child-view",
+            "relation": "routes_to",
+            "frameworkPack": "django-python",
+            "confidence": "exact",
+            "occurrenceRule": "framework-route-stage:handler:0",
+            "evidence": [
+                {
+                    "origin": "ast",
+                    "extractor": "compass.frameworks.django",
+                    "confidence": "exact",
+                    "rule": "framework-route-stage:handler:0",
+                }
+            ],
+            "targetNode": {"qualifiedName": "src.child.views.ChildView"},
+        }
+        key = ("routes_to", "src/root.py", 40, 80, "django-python")
+        representations = _django_route_representations(
+            (propagated,),
+            {key: [edge]},
+        )
+        self.assertEqual(
+            ("route-parent", "child-view", edge["id"]),
+            (
+                representations[("src.child", "views.ChildView")][0]["source"],
+                representations[("src.child", "views.ChildView")][0]["target"],
+                representations[("src.child", "views.ChildView")][0]["edgeId"],
+            ),
+        )
+        direct_child = SourceConstruct(
+            source_file="src/child.py",
+            relation="routes_to",
+            capability="http_routes",
+            owner_qualified_name="src.child",
+            target_spelling="views.ChildView",
+            qualifier=None,
+            start_byte=10,
+            end_byte=30,
+            start_line=1,
+            framework_pack="django-python",
+        )
+        self.assertEqual(
+            representations[("src.child", "views.ChildView")],
+            _django_route_representation_candidates(
+                direct_child,
+                False,
+                representations,
+            ),
+        )
+        self.assertEqual(
+            (),
+            _django_route_representation_candidates(
+                direct_child,
+                True,
+                representations,
+            ),
+        )
+        unrelated = SourceConstruct(
+            **{
+                **direct_child.__dict__,
+                "owner_qualified_name": "src.unrelated",
+            }
+        )
+        self.assertEqual(
+            (),
+            _django_route_representation_candidates(
+                unrelated,
+                False,
+                representations,
+            ),
+        )
+        representation = representations[("src.child", "views.ChildView")][0]
+        record = _record(
+            corpus="fixture",
+            producer="python-frameworks",
+            construct=direct_child,
+            relation="routes_to",
+            capability="http_routes",
+            pool="source_oracle",
+            source="oracle-source",
+            target="oracle-target",
+            target_language="python",
+            target_cluster="fixture-cluster",
+            judgment="represented_elsewhere",
+            reason="fixture child route is represented at its parent include",
+            confidence="source_ast",
+            snippet_sha256="b" * 64,
+            representation=representation,
+        )
+        self.assertEqual("represented_elsewhere", record["judgment"])
+        self.assertEqual(representation, record["representation"])
+        self.assertEqual(
+            {
+                "file": "src/child.py",
+                "startByte": 10,
+                "endByte": 30,
+                "snippetSha256": "b" * 64,
+            },
+            record["occurrence"],
+        )
+
+        wrong_rule = {**edge, "occurrenceRule": "python-django-route"}
+        self.assertIsNone(_exact_django_route_representation(wrong_rule))
+        wrong_extractor = {
+            **edge,
+            "evidence": [
+                {
+                    **edge["evidence"][0],
+                    "extractor": "compass.frameworks.lookalike",
+                }
+            ],
+        }
+        self.assertIsNone(_exact_django_route_representation(wrong_extractor))
 
     def test_django_url_pattern_inventory_limit_is_explicit(self) -> None:
         source = (

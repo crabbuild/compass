@@ -189,12 +189,19 @@ def _graph_edges(
                 confidence = values[0]
         edges.append(
             {
+                "id": raw.get("id") if isinstance(raw.get("id"), str) else "",
                 "source": source,
                 "target": target,
                 "relation": relation.casefold(),
                 "anchor": anchor,
                 "frameworkPack": pack,
                 "confidence": confidence,
+                "occurrenceRule": raw.get("occurrenceRule")
+                if isinstance(raw.get("occurrenceRule"), str)
+                else "",
+                "evidence": raw.get("evidence")
+                if isinstance(raw.get("evidence"), list)
+                else [],
                 "sourceNode": source_node,
                 "targetNode": target_node,
             }
@@ -233,6 +240,100 @@ def _target_matches(construct: SourceConstruct, edge: dict[str, Any]) -> bool:
     _, qualified_terminal = _qualified_terminal(qualified)
     qualified_terminal = qualified_terminal.rsplit(".", 1)[-1]
     return qualified_terminal == terminal
+
+
+def _exact_django_route_representation(edge: dict[str, Any]) -> dict[str, str] | None:
+    edge_id = edge.get("id")
+    rule = edge.get("occurrenceRule")
+    if (
+        edge.get("frameworkPack") != "django-python"
+        or edge.get("relation") != "routes_to"
+        or edge.get("confidence") != "exact"
+        or not isinstance(edge_id, str)
+        or not edge_id
+        or not isinstance(rule, str)
+        or not rule.startswith("framework-route-stage:handler:")
+    ):
+        return None
+    exact_evidence = {
+        (item.get("extractor"), item.get("rule"))
+        for item in edge.get("evidence", ())
+        if isinstance(item, dict)
+        and item.get("origin") == "ast"
+        and item.get("confidence") == "exact"
+    }
+    expected = ("compass.frameworks.django", rule)
+    if exact_evidence != {expected}:
+        return None
+    return {
+        "source": edge["source"],
+        "target": edge["target"],
+        "relation": edge["relation"],
+        "edgeId": edge_id,
+        "extractor": expected[0],
+        "rule": rule,
+    }
+
+
+def _django_route_representations(
+    constructs: tuple[SourceConstruct, ...],
+    by_anchor: dict[
+        tuple[str, str, int, int, str | None],
+        list[dict[str, Any]],
+    ],
+) -> dict[tuple[str, str], tuple[dict[str, str], ...]]:
+    candidates: dict[tuple[str, str], dict[str, dict[str, str]]] = defaultdict(dict)
+    for construct in constructs:
+        child_module = construct.qualifier
+        if (
+            construct.framework_pack != "django-python"
+            or construct.relation != "routes_to"
+            or child_module is None
+        ):
+            continue
+        edges = [
+            edge
+            for edge in by_anchor.get(
+                (
+                    construct.relation,
+                    construct.source_file,
+                    construct.start_byte,
+                    construct.end_byte,
+                    construct.framework_pack,
+                ),
+                (),
+            )
+            if _target_matches(construct, edge)
+        ]
+        for edge in edges:
+            representation = _exact_django_route_representation(edge)
+            if representation is None:
+                continue
+            candidates[(child_module, construct.target_spelling)][
+                representation["edgeId"]
+            ] = representation
+    return {
+        key: tuple(by_id[edge_id] for edge_id in sorted(by_id))
+        for key, by_id in candidates.items()
+    }
+
+
+def _django_route_representation_candidates(
+    construct: SourceConstruct,
+    has_exact_fact: bool,
+    representations: dict[tuple[str, str], tuple[dict[str, str], ...]],
+) -> tuple[dict[str, str], ...]:
+    if (
+        has_exact_fact
+        or construct.framework_pack != "django-python"
+        or construct.relation != "routes_to"
+        or construct.qualifier is not None
+    ):
+        return ()
+    return representations.get(
+        (construct.owner_qualified_name, construct.target_spelling),
+        (),
+    )
 
 
 def _absolute_import_qualifier(construct: SourceConstruct) -> str | None:
@@ -303,6 +404,7 @@ def _record(
     reason: str,
     confidence: str,
     snippet_sha256: str,
+    representation: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     value: dict[str, Any] = {
         "id": _record_id(
@@ -338,6 +440,8 @@ def _record(
     }
     if construct.framework_pack is not None:
         value["frameworkPack"] = construct.framework_pack
+    if representation is not None:
+        value["representation"] = representation
     return value
 
 
@@ -512,6 +616,10 @@ def main(argv: list[str] | None = None) -> int:
         for edge in edges:
             file, start, end = edge["anchor"]
             by_anchor[(edge["relation"], file, start, end, edge["frameworkPack"])].append(edge)
+        django_route_representations = _django_route_representations(
+            inventories[1][1].constructs,
+            by_anchor,
+        )
         declared_names = _declared_names(root, include_globs)
         local_declared_names = _local_declared_names(root, include_globs)
         accepted_part: list[dict[str, Any]] = []
@@ -614,11 +722,26 @@ def main(argv: list[str] | None = None) -> int:
                     and construct.relation
                     in {"consumes", "maps_to", "produces", "schedules", "subscribes"}
                 )
-                judgment = (
-                    "missing"
-                    if not facts and (local or exact_static_domain)
-                    else "ambiguous"
+                representation_candidates = _django_route_representation_candidates(
+                    construct,
+                    bool(facts),
+                    django_route_representations,
                 )
+                representation = (
+                    representation_candidates[0]
+                    if len(representation_candidates) == 1
+                    else None
+                )
+                if representation is not None:
+                    judgment = "represented_elsewhere"
+                elif len(representation_candidates) > 1:
+                    judgment = "ambiguous"
+                else:
+                    judgment = (
+                        "missing"
+                        if not facts and (local or exact_static_domain)
+                        else "ambiguous"
+                    )
                 source_id = "oracle-source-" + hashlib.sha256(
                     f"{name}:{construct.source_file}:{construct.owner_qualified_name}".encode()
                 ).hexdigest()[:16]
@@ -640,12 +763,17 @@ def main(argv: list[str] | None = None) -> int:
                         target_cluster=_target_cluster(construct.target_spelling, target_id),
                         judgment=judgment,
                         reason=(
-                            "independent local stdlib AST construct has no exact Compass graph fact"
-                            if judgment == "missing"
-                            else "independent stdlib AST construct has zero or multiple safe target identities"
+                            "exact Django child route is represented by one source-proven parent include graph fact"
+                            if judgment == "represented_elsewhere"
+                            else (
+                                "independent local stdlib AST construct has no exact Compass graph fact"
+                                if judgment == "missing"
+                                else "independent stdlib AST construct has zero or multiple safe target identities"
+                            )
                         ),
                         confidence="source_ast",
                         snippet_sha256=snippet,
+                        representation=representation,
                     )
                 )
         accepted.extend(_sample(accepted_part, args.max_accepted))

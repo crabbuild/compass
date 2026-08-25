@@ -1456,7 +1456,9 @@ def _python_framework_inventory(
         for django_module in django_modules
         if module_counts[django_module.module] == 1
     }
-    direct_targets: dict[str, set[str]] = {module: set() for module in modules}
+    direct_targets: dict[str, set[tuple[str, str]]] = {
+        module: set() for module in modules
+    }
     module_by_source = {
         django_module.source_file: django_module
         for django_module in modules.values()
@@ -1470,7 +1472,9 @@ def _python_framework_inventory(
             and (construct.start_byte, construct.end_byte)
             in django_module.pattern_ranges
         ):
-            direct_targets[django_module.module].add(construct.target_spelling)
+            direct_targets[django_module.module].add(
+                (django_module.module, construct.target_spelling)
+            )
 
     def mounted_module(reference: str) -> str | None:
         if reference in modules:
@@ -1482,9 +1486,12 @@ def _python_framework_inventory(
                     return candidate
         return None
 
-    memoized_targets: dict[str, frozenset[str]] = {}
+    memoized_targets: dict[str, frozenset[tuple[str, str]]] = {}
 
-    def downstream_targets(module: str, active: frozenset[str]) -> frozenset[str]:
+    def downstream_targets(
+        module: str,
+        active: frozenset[str],
+    ) -> frozenset[tuple[str, str]]:
         cached = memoized_targets.get(module)
         if cached is not None:
             return cached
@@ -1511,7 +1518,9 @@ def _python_framework_inventory(
             child = mounted_module(mount.target_reference)
             if child is None:
                 continue
-            for target in sorted(downstream_targets(child, frozenset((module,)))):
+            for target_module, target in sorted(
+                downstream_targets(child, frozenset((module,)))
+            ):
                 constructs.append(
                     SourceConstruct(
                         mount.source_file,
@@ -1519,7 +1528,7 @@ def _python_framework_inventory(
                         "http_routes",
                         mount.owner_qualified_name,
                         target,
-                        None,
+                        target_module,
                         mount.start_byte,
                         mount.end_byte,
                         mount.start_line,

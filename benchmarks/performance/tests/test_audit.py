@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from contextlib import closing
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -201,6 +202,79 @@ class AuditTests(unittest.TestCase):
                     BASE_GRAPH,
                     BASE_CORPUS,
                 )
+
+    def test_represented_elsewhere_exact_edge_pointer_preserves_source_occurrence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            graph = json.loads(BASE_GRAPH.read_text(encoding="utf-8"))
+            represented_edge = next(
+                edge
+                for edge in graph["links"]
+                if edge["source"] == "alpha"
+                and edge["target"] == "beta"
+                and edge["relationshipSite"]["startByte"] == 4
+            )
+            represented_edge.update(
+                {
+                    "id": "sha256:" + "a" * 64,
+                    "occurrenceRule": "framework-route-stage:handler:0",
+                    "evidence": [
+                        {
+                            "origin": "ast",
+                            "extractor": "compass.frameworks.django",
+                            "confidence": "exact",
+                            "rule": "framework-route-stage:handler:0",
+                        }
+                    ],
+                }
+            )
+            graph_path = root / "graph.json"
+            graph_path.write_text(
+                json.dumps(graph, sort_keys=True, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            manifest = copy.deepcopy(self.base)
+            manifest["corpora"][0]["graphSha256"] = hashlib.sha256(
+                graph_path.read_bytes()
+            ).hexdigest()
+            record = next(
+                record
+                for record in manifest["records"]
+                if record["judgment"] == "represented_elsewhere"
+            )
+            record["source"]["nodeId"] = "oracle-child-route"
+            record["target"]["nodeId"] = "oracle-child-handler"
+            record["representation"] = {
+                "source": "alpha",
+                "target": "beta",
+                "relation": "calls",
+                "edgeId": represented_edge["id"],
+                "extractor": "compass.frameworks.django",
+                "rule": "framework-route-stage:handler:0",
+            }
+            manifest_path = self.write_manifest(manifest, root)
+            result = run_audit(manifest_path, graph_path, BASE_CORPUS)
+            self.assertEqual(1, result.judgments["represented_elsewhere"])
+
+            stale = copy.deepcopy(manifest)
+            stale_record = next(
+                item
+                for item in stale["records"]
+                if item["judgment"] == "represented_elsewhere"
+            )
+            stale_record["representation"]["rule"] = "framework-route-stage:handler:1"
+            with self.assertRaisesRegex(AuditError, "representation edge is absent or stale"):
+                run_audit(self.write_manifest(stale, root), graph_path, BASE_CORPUS)
+
+            incomplete = copy.deepcopy(manifest)
+            incomplete_record = next(
+                item
+                for item in incomplete["records"]
+                if item["judgment"] == "represented_elsewhere"
+            )
+            del incomplete_record["representation"]["extractor"]
+            with self.assertRaisesRegex(AuditError, "requires edgeId, extractor, and rule"):
+                load_manifest(self.write_manifest(incomplete, root))
 
     def test_occurrence_ranges_must_be_positive_and_non_empty(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
