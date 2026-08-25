@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs;
 use std::path::Path;
 
+use compass_graph::{BuildEvidence, normalize_v1};
 use compass_languages::{Engine, Extraction, FrameworkLimits};
+use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::ResolutionState;
 use compass_resolve::frameworks::{FrameworkResolutionError, RouteStageRole, resolve_routes};
-use compass_resolve::resolve;
+use compass_resolve::{resolve, resolve_with_root};
 
 fn extract(path: &str, source: &[u8]) -> Result<Extraction, Box<dyn Error>> {
     Ok(Engine::default().extract_source(Path::new(path), source)?)
@@ -446,6 +449,124 @@ urlpatterns = [path("api/", include((router.urls, "api"), namespace="v1"))]
         edge.string("relation") == "depends_on"
             && edge.source.contains("itemserializer")
             && edge.target.contains("item")
+    }));
+    Ok(())
+}
+
+#[test]
+fn django_signal_subscriptions_publish_event_endpoints() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let source = br#"from django.db import models
+from django.db.models.signals import post_save
+
+class Item(models.Model):
+    pass
+
+def saved(sender, **kwargs):
+    return None
+
+post_save.connect(saved, sender=Item)
+"#;
+    let path = root.path().join("signals.py");
+    fs::write(&path, source)?;
+    let signal_module_path = root.path().join("django/db/models/signals.py");
+    fs::create_dir_all(
+        signal_module_path
+            .parent()
+            .ok_or("missing signal module parent")?,
+    )?;
+    fs::write(root.path().join("django/__init__.py"), b"")?;
+    fs::write(root.path().join("django/db/__init__.py"), b"")?;
+    fs::write(root.path().join("django/db/models/__init__.py"), b"")?;
+    let signal_module_source = b"post_save = object()\n";
+    fs::write(&signal_module_path, signal_module_source)?;
+    let mut engine = Engine::default();
+    let extraction = engine.extract_source(Path::new("signals.py"), source)?;
+    let signal_module_extraction = engine.extract_source(
+        Path::new("django/db/models/signals.py"),
+        signal_module_source,
+    )?;
+    let source_map = HashMap::from([
+        ("signals.py".to_owned(), String::from_utf8(source.to_vec())?),
+        (
+            "django/db/models/signals.py".to_owned(),
+            String::from_utf8(signal_module_source.to_vec())?,
+        ),
+    ]);
+    let resolved = resolve_with_root(
+        &[extraction, signal_module_extraction],
+        &source_map,
+        root.path(),
+    );
+    assert!(resolved.nodes.iter().any(|node| {
+        node.string("qualified_name") == "django.db.models.signals.post_save"
+            && node.string("symbol_kind") == "event"
+    }));
+    let subscription_count = resolved
+        .edges
+        .iter()
+        .filter(|edge| edge.string("relation") == "subscribes")
+        .count();
+    assert_eq!(subscription_count, 1, "edges={:#?}", resolved.edges);
+
+    let evidence = BuildEvidence::from_extraction(root.path(), &resolved, "sha256:django-signal")?;
+    let graph = normalize_v1(resolved, evidence)?;
+    let event_ids = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Event)
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(graph.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Subscribes && event_ids.contains(edge.target.as_str())
+    }));
+    Ok(())
+}
+
+#[test]
+fn django_external_signal_subscriptions_publish_event_endpoints() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let source = br#"from django.db.models.signals import post_save
+
+def saved(sender, **kwargs):
+    return None
+
+class Lookalike:
+    def post_save(self):
+        return None
+
+post_save.connect(saved)
+"#;
+    let path = root.path().join("signals.py");
+    fs::write(&path, source)?;
+    let mut engine = Engine::default();
+    let extraction = engine.extract_source(Path::new("signals.py"), source)?;
+    let source_map =
+        HashMap::from([("signals.py".to_owned(), String::from_utf8(source.to_vec())?)]);
+    let resolved = resolve_with_root(&[extraction], &source_map, root.path());
+    assert_eq!(
+        resolved
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "subscribes")
+            .count(),
+        1,
+        "edges={:#?} diagnostics={:#?}",
+        resolved.edges,
+        resolved.extensions
+    );
+
+    let evidence =
+        BuildEvidence::from_extraction(root.path(), &resolved, "sha256:django-signal-external")?;
+    let graph = normalize_v1(resolved, evidence)?;
+    let event_ids = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::Event)
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert!(graph.links.iter().any(|edge| {
+        edge.kind == EdgeKind::Subscribes && event_ids.contains(edge.target.as_str())
     }));
     Ok(())
 }
