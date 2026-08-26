@@ -270,8 +270,14 @@ test("community double-click enters lazy detail, source opens, and Back restores
 
   const runLayout = page.getByRole("button", { name: "Run layout" });
   await expect(runLayout).toBeVisible();
+  const detailGraph = page.getByRole("region", { name: "Interactive Compass code graph" });
+  await expect(detailGraph).toHaveAttribute("data-physics-running", "false");
   const graphCanvas = page.locator(".compass-canvas canvas").first();
+  await page.waitForTimeout(100);
   const pausedFrame = await graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.waitForTimeout(250);
+  await expect(graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()))
+    .resolves.toBe(pausedFrame);
   await runLayout.click();
   await expect(page.getByRole("button", { name: "Stop layout" })).toBeVisible();
   await expect.poll(async () => graphCanvas.evaluate(
