@@ -32,10 +32,17 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   await expect(source).toBeVisible();
   await expect(source.locator(".compass-source-path")).toHaveText("src/lib.rs");
   await expect(source.locator(".compass-source-range")).toHaveText("Lines 5–7");
-  const neighbors = page.locator(".compass-neighbor-link");
-  await expect(neighbors).toHaveCount(2);
-  await expect(neighbors.locator(".compass-neighbor-dot")).toHaveCount(2);
-  await expect(neighbors.first()).toHaveCSS("border-left-width", "0px");
+  const incoming = page.locator('.compass-direction-group[data-direction="incoming"]');
+  const outgoing = page.locator('.compass-direction-group[data-direction="outgoing"]');
+  await expect(incoming).toContainText("Incoming");
+  await expect(incoming).toContainText("run");
+  await expect(incoming).toContainText("calls");
+  await expect(outgoing).toContainText("Outgoing");
+  await expect(outgoing).toContainText("Store");
+  await expect(outgoing).toContainText("uses");
+  const relationships = page.locator(".compass-direction-link");
+  await expect(relationships).toHaveCount(2);
+  await expect(relationships.locator(".compass-neighbor-dot")).toHaveCount(2);
 
   await page.evaluate(() => {
     window.addEventListener("compass:open-source", ((event: CustomEvent) => {
