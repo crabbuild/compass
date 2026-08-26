@@ -23,6 +23,8 @@ use super::target_index::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RouteStageRole {
     Middleware,
+    Dependency,
+    Security,
     Layout,
     Template,
     Loading,
@@ -105,6 +107,11 @@ pub(super) fn resolve_routes_with_targets(
             route.middleware_references.clone(),
             route.origin.as_str(),
             route.rule.clone(),
+            route
+                .detail
+                .get("mount_anchors")
+                .map(Value::to_string)
+                .unwrap_or_default(),
         );
         unique.entry(key).or_insert(route);
     }
@@ -463,6 +470,10 @@ fn resolve_one_route(
 ) -> Result<ResolvedRoute, FrameworkResolutionError> {
     let mut stages = Vec::new();
     let normalized_source = source_key(&route.anchor.source_file, root);
+    let included_handler_anchor = route
+        .detail
+        .get("include_anchor")
+        .and_then(|value| serde_json::from_value::<RawFrameworkAnchor>(value.clone()).ok());
     let explicit_stages = route.stages.clone();
     if explicit_stages.is_empty() {
         for (position, reference) in route.middleware_references.iter().enumerate() {
@@ -530,7 +541,7 @@ fn resolve_one_route(
             u32::try_from(route.middleware_references.len()).unwrap_or(u32::MAX),
             RouteStageRole::Handler,
             &route.handler_reference,
-            route.anchor.clone(),
+            included_handler_anchor.unwrap_or_else(|| route.anchor.clone()),
             candidates,
         ));
     } else {
@@ -555,12 +566,18 @@ fn resolve_one_route(
                 route.detail.get("handler_source").and_then(Value::as_str),
                 route.detail.get("handler_module").and_then(Value::as_str),
             )?;
+            let role = route_stage_role(stage.role);
+            let anchor = if role == RouteStageRole::Handler {
+                included_handler_anchor.clone().unwrap_or(stage.anchor)
+            } else {
+                stage.anchor
+            };
             stages.push(resolved_stage(
                 &route,
                 stage.position,
-                route_stage_role(stage.role),
+                role,
                 &stage.reference,
-                stage.anchor,
+                anchor,
                 candidates,
             ));
         }
@@ -755,6 +772,7 @@ fn resolve_reference(
 
 fn canonical_framework_reference(framework: &str, reference: &str) -> String {
     match framework {
+        "django" => canonical_django_reference(reference),
         "laravel" | "drupal" => super::php::canonical_reference(reference),
         "rails" => super::ruby::canonical_reference(reference),
         "spring" | "play" => super::jvm::canonical_reference(reference),
@@ -763,6 +781,29 @@ fn canonical_framework_reference(framework: &str, reference: &str) -> String {
         }
         _ => reference.to_owned(),
     }
+}
+
+fn canonical_django_reference(reference: &str) -> String {
+    let trimmed = reference.trim();
+    let Some(without_closing_parenthesis) = trimmed.strip_suffix(')') else {
+        return reference.to_owned();
+    };
+    let Some((receiver, _arguments)) = without_closing_parenthesis.rsplit_once(".as_view(") else {
+        return reference.to_owned();
+    };
+    if receiver.split('.').all(is_python_identifier) {
+        receiver.to_owned()
+    } else {
+        reference.to_owned()
+    }
+}
+
+fn is_python_identifier(value: &str) -> bool {
+    let mut characters = value.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
 }
 
 fn validate_fact_limits(
@@ -856,6 +897,8 @@ fn resolved_stage(
 fn route_stage_role(role: RawRouteStageRole) -> RouteStageRole {
     match role {
         RawRouteStageRole::Middleware => RouteStageRole::Middleware,
+        RawRouteStageRole::Dependency => RouteStageRole::Dependency,
+        RawRouteStageRole::Security => RouteStageRole::Security,
         RawRouteStageRole::Layout => RouteStageRole::Layout,
         RawRouteStageRole::Template => RouteStageRole::Template,
         RawRouteStageRole::Loading => RouteStageRole::Loading,
@@ -1105,6 +1148,8 @@ fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRo
     // edge; publishing them as node roles would make the graph unverifiable.
     let Some(role) = (match role {
         RouteStageRole::Middleware => Some("middleware"),
+        RouteStageRole::Dependency => Some("service"),
+        RouteStageRole::Security => Some("middleware"),
         RouteStageRole::Loader | RouteStageRole::DataLoader => Some("data_loader"),
         RouteStageRole::Action | RouteStageRole::Handler | RouteStageRole::RouteComponent => {
             Some("route_handler")
@@ -1134,6 +1179,8 @@ fn mark_stage_role(nodes: &mut [RawNodeRecord], target: &str, role: RouteStageRo
 fn published_route_stage(role: RouteStageRole) -> PublishedRouteStage {
     match role {
         RouteStageRole::Middleware => PublishedRouteStage::Middleware,
+        RouteStageRole::Dependency => PublishedRouteStage::Dependency,
+        RouteStageRole::Security => PublishedRouteStage::Security,
         RouteStageRole::Layout => PublishedRouteStage::Layout,
         RouteStageRole::Template => PublishedRouteStage::Template,
         RouteStageRole::Loading => PublishedRouteStage::Loading,
@@ -1152,6 +1199,8 @@ fn published_route_stage(role: RouteStageRole) -> PublishedRouteStage {
 fn route_stage_name(role: RouteStageRole) -> &'static str {
     match role {
         RouteStageRole::Middleware => "middleware",
+        RouteStageRole::Dependency => "dependency",
+        RouteStageRole::Security => "security",
         RouteStageRole::Layout => "layout",
         RouteStageRole::Template => "template",
         RouteStageRole::Loading => "loading",

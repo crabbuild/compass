@@ -2,6 +2,74 @@
 
 ## Unreleased
 
+- Add optional, artifact-only `scip-python` call enrichment through the
+  existing `--program-artifact` boundary. A strict frozen profile binds the
+  complete offline producer run to current Python sources, environment,
+  project configuration, typeshed, stubs, editable packages, namespace policy,
+  permissions, and resource limits. Only exact AST/SCIP call and declaration
+  anchors with agreeing provider identity reach `graph.json`; generic, stale,
+  incomplete, timed-out, cancelled, permission-denied, conflicting, or inexact
+  evidence fails closed. Compass does not run, install, or download an analyzer,
+  and native Python output remains unchanged when the artifact is unavailable.
+
+- Add exact `sqlalchemy-python` and `celery-python` universal packs and remove
+  Python from the regex-based `enterprise-domain-facts` pack without changing
+  its non-Python behavior. SQLAlchemy 2 declarative models, mapped fields,
+  relationships, foreign keys, schemas, and existing-table mappings now retain
+  source identity; Celery tasks, queues, invocations, canvas topology, retries,
+  and beat schedules reuse the existing closed graph vocabulary. Advance
+  `flask-python` to version 2 with application factories, HTTP shortcuts,
+  `add_url_rule`, source-declared `MethodView` methods, nested blueprints,
+  request hooks, and error-handler stages. Dynamic and ambiguous forms remain
+  unresolved without a regex fallback.
+
+- Advance `django-python` to semantics version 2 and add the independent
+  version-1 `django-rest-framework-python` pack. Django now follows exact
+  local and imported `urlpatterns` collections, includes, namespaces, i18n
+  patterns, converters, class-based views, model fields and relationships,
+  custom managers, and signal receivers. DRF adds closed SimpleRouter and
+  DefaultRouter templates for source-declared viewset methods and actions,
+  plus exact serializer, permission, authentication, filter, throttle, and
+  serializer-to-model dependencies. Dynamic collections, custom routers,
+  external inherited methods, ambiguous models, and unproven registration
+  forms remain unresolved.
+
+- Add independently versioned `starlette-python` and `pydantic-python` packs
+  and advance `fastapi-python` to semantics version 2. Exact Starlette route,
+  WebSocket, imperative, constructor, and bounded mount evidence now composes
+  with FastAPI application/router/include/route/parameter dependency and
+  security stages. Exact Pydantic models retain existing class, field,
+  validator, serializer, and computed-field identities, while FastAPI handler
+  annotations and literal `response_model` values publish fail-closed schema
+  dependencies. Yield providers retain lifecycle detail; dynamic paths,
+  providers, models, and ambiguous receivers remain unresolved.
+
+- Replace the combined `python-web` route scanner with independently
+  versioned `django-python`, `fastapi-python`, and `flask-python` universal
+  framework packs. Python routes now join exact import, call, decorator, type,
+  and receiver-declaration evidence; Django ignores shadowed or non-
+  `urlpatterns` calls; nested and repeated router/blueprint mounts use bounded
+  receiver identities; and an unqualified Flask `route` declares `GET`
+  instead of `ANY`. Dynamic values, receiver ambiguity, and mount cycles remain
+  fail-closed without a legacy fallback.
+
+- Generalize framework role facts across the existing public node-role
+  vocabulary and add exact `dependency` and `security` route stages throughout
+  graph normalization, query/task-context serialization, CLI/MCP output, and
+  strict viewer contracts. Dependency and security providers retain distinct
+  route-edge stages without increasing the HTTP middleware count; unknown
+  stage values still fail closed.
+
+- Make Python module identity source-proven for flat, `src/`, namespace, and
+  statically configured setuptools, Poetry, and Hatch layouts. Register `.pyi`
+  files, keep paired `.py` declarations authoritative, publish stub-only
+  declarations with explicit provenance, and retain source/stub conflicts as
+  diagnostics. Add conservative Python parameter, call-shape, exact annotation,
+  `type_of`, `returns`, and straight-line call-result evidence; starred,
+  shadowed, `Any`, and conflicting-return forms remain unresolved. Python
+  universal evidence is now producer version 13 and
+  project evidence is `compass.framework-project-evidence/4`; affected caches,
+  qualified names, and graph IDs rebuild without rewriting history.
 - Add safe, local-only DOCX page, PPTX slide, and XLSX sheet preview artifacts
   with bounded SVG snapshots, embedded image thumbnails, digest validation,
   and viewer overlays that map OCR boxes directly onto the preview surface.

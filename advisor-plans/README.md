@@ -1,6 +1,6 @@
 # Compass enhancement advisor plans
 
-Generated from deep product/code audits on 2026-07-23 and 2026-08-01.
+Generated from deep product/code audits between 2026-07-23 and 2026-08-25.
 
 Upstream snapshots:
 
@@ -78,6 +78,18 @@ geometry provenance are explicit, model installation is separate from
 extraction, and the recommended engine must beat a pinned baseline on a
 Compass-owned corpus before support or quality claims ship.
 
+Plan 023 is the Python framework graph-intelligence program. It first freezes
+the unqualified Python baseline, adds source-root and stub-aware module
+identity, and qualifies conservative typed bindings. It then replaces the
+legacy combined `python-web` scanner and Python enterprise regexes with
+independently versioned universal packs for Django/DRF,
+FastAPI/Starlette/Pydantic, Flask, SQLAlchemy, and Celery. The program keeps
+normal builds native and Python-runtime-free, preserves unresolved dynamic
+behavior, and requires independent pinned-corpus precision, recall,
+determinism, lifecycle, and performance evidence before promoting any pack
+claim. Python language promotion remains a separate complete-capability
+decision.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -104,6 +116,7 @@ Compass-owned corpus before support or quality claims ship.
 | 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
 | 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | DONE |
 | 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
+| 023 | Make Python framework graphs source-proven and production-qualified | P1 | XXL | —; final gate should consume 005 or equivalent | BLOCKED |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -161,6 +174,15 @@ consume Plan 005's exact-production-evidence model or an equivalent gate.
   Plan 012's credential-free native document gate. Plan 012 and Plan 022 may
   reuse fixture-manifest infrastructure, but neither may make OCR models or
 helper runtimes prerequisites for native document support.
+- Plan 023 is deliberately staged: characterization and independent truth land
+  before project/module identity; project identity lands before typed binding;
+  typed binding and generic framework roles land before framework expansion.
+  Django/FastAPI/Flask replace `python-web` in one atomic production cut, while
+  SQLAlchemy/Celery replace only the Python branch of the enterprise adapter in
+  a later atomic cut. Optional `scip-python` enrichment follows, rather than
+  gates, the native structural qualification. The final public claim should
+  consume Plan 005's exact-production-evidence model or an equivalent release
+  gate.
 
 ## Direction options not promoted to implementation plans
 

@@ -12,7 +12,10 @@ use scip::types::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::{manifest_digest, validate_manifest};
+use crate::manifest::{
+    managed_analyzer_profile_digest, manifest_digest, validate_managed_artifact_context,
+    validate_manifest,
+};
 use crate::scip_stream::{read_metadata, verify_reader, visit_documents};
 use crate::{
     ArtifactInput, ArtifactProvider, ArtifactReader, EvidenceBatch, EvidenceFact, FactKind,
@@ -46,14 +49,17 @@ impl OfficialScipProvider {
         if let Some(manifest) = input.manifest {
             validate_manifest(manifest, input.input_digest)?;
         }
+        validate_managed_artifact_context(input.manifest, input.project_digest)?;
         let metadata = read_metadata(reader, input.limits)?;
         validate_metadata(&metadata)?;
+        validate_managed_metadata(input.manifest, &metadata)?;
         let metadata_protobuf_base64 = base64::engine::general_purpose::STANDARD
             .encode(metadata.write_to_bytes().map_err(protobuf_error)?);
         let mut paths = BTreeSet::new();
         let mut documents = Vec::new();
         visit_documents(reader, input.limits, |document| {
             let path = normalize_source_path(&document.relative_path)?;
+            validate_managed_document(input.manifest, &document, &path)?;
             if !paths.insert(path.clone()) {
                 return Err(ProviderError::InvalidInput(format!(
                     "duplicate normalized SCIP document path {path}"
@@ -66,6 +72,7 @@ impl OfficialScipProvider {
             });
             Ok(())
         })?;
+        validate_managed_document_inventory(input.manifest, &paths)?;
         documents.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
         Ok(DecodedScipArtifact {
             metadata_protobuf_base64,
@@ -81,6 +88,7 @@ impl OfficialScipProvider {
         if let Some(manifest) = input.manifest {
             validate_manifest(manifest, input.input_digest)?;
         }
+        validate_managed_artifact_context(input.manifest, input.project_digest)?;
         let metadata_bytes = base64::engine::general_purpose::STANDARD
             .decode(&decoded.metadata_protobuf_base64)
             .map_err(|error| ProviderError::MalformedArtifact(error.to_string()))?;
@@ -91,6 +99,7 @@ impl OfficialScipProvider {
         }
         let metadata = Metadata::parse_from_bytes(&metadata_bytes).map_err(protobuf_error)?;
         validate_metadata(&metadata)?;
+        validate_managed_metadata(input.manifest, &metadata)?;
         let mut batch = EvidenceBatch {
             descriptor: self.descriptor(&input),
             evidence: Vec::new(),
@@ -121,6 +130,7 @@ impl OfficialScipProvider {
                     "cached SCIP document path mismatch for {path}"
                 )));
             }
+            validate_managed_document(input.manifest, &document, &path)?;
             let freshness = freshness(&input, &path)?;
             if freshness == Freshness::Stale {
                 batch
@@ -150,15 +160,45 @@ impl ArtifactProvider for OfficialScipProvider {
                     .collect::<BTreeMap<_, _>>()
             })
             .unwrap_or_default();
-        let configuration_digest = canonical_json_bytes(&(&manifest, &bound_sources)).map_or_else(
+        let managed = input
+            .manifest
+            .and_then(|manifest| manifest.managed_analyzer.as_ref());
+        let configuration_bytes = managed.map_or_else(
+            || canonical_json_bytes(&(&manifest, &bound_sources)),
+            |_| {
+                canonical_json_bytes(&(
+                    &manifest,
+                    &bound_sources,
+                    input.project_digest,
+                    input.limits,
+                ))
+            },
+        );
+        let configuration_digest = configuration_bytes.map_or_else(
             |_| hex_sha256(b"invalid-scip-configuration"),
             |bytes| hex_sha256(&bytes),
         );
+        let managed_digest =
+            managed.and_then(|profile| managed_analyzer_profile_digest(profile).ok());
         ProviderDescriptor {
-            id: format!("scip:{}", input.input_digest),
+            id: managed_digest.as_ref().map_or_else(
+                || format!("scip:{}", input.input_digest),
+                |profile| format!("scip-python:{profile}:{}", input.input_digest),
+            ),
             kind: ProviderKind::Artifact,
-            version: format!("scip/{SCIP_PROVIDER_VERSION}"),
-            scope: "repository".to_owned(),
+            version: managed.map_or_else(
+                || format!("scip/{SCIP_PROVIDER_VERSION}"),
+                |profile| {
+                    format!(
+                        "scip-python/{SCIP_PROVIDER_VERSION}/{}",
+                        profile.provider_version
+                    )
+                },
+            ),
+            scope: managed.map_or_else(
+                || "repository".to_owned(),
+                |profile| profile.source_inventory_digest.clone(),
+            ),
             input_digest: input.input_digest.to_owned(),
             configuration_digest,
         }
@@ -392,6 +432,68 @@ fn validate_metadata(metadata: &Metadata) -> Result<(), ProviderError> {
             "unknown SCIP text encoding {value}"
         ))),
     }
+}
+
+fn validate_managed_metadata(
+    manifest: Option<&crate::ArtifactManifest>,
+    metadata: &Metadata,
+) -> Result<(), ProviderError> {
+    let Some(profile) = manifest.and_then(|manifest| manifest.managed_analyzer.as_ref()) else {
+        return Ok(());
+    };
+    let Some(tool) = metadata.tool_info.as_ref() else {
+        return Err(ProviderError::InvalidInput(
+            "managed SCIP artifact is missing producer identity".to_owned(),
+        ));
+    };
+    if tool.name != profile.provider || tool.version != profile.provider_version {
+        return Err(ProviderError::InvalidInput(
+            "managed SCIP producer does not match the frozen profile".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_managed_document(
+    manifest: Option<&crate::ArtifactManifest>,
+    document: &Document,
+    path: &str,
+) -> Result<(), ProviderError> {
+    let Some(manifest) = manifest.filter(|manifest| manifest.managed_analyzer.is_some()) else {
+        return Ok(());
+    };
+    if document.language != "python"
+        || !manifest.documents.keys().any(|candidate| {
+            normalize_source_path(candidate)
+                .ok()
+                .is_some_and(|candidate| candidate == path)
+        })
+    {
+        return Err(ProviderError::InvalidInput(format!(
+            "managed scip-python document {path} is not a declared Python source"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_managed_document_inventory(
+    manifest: Option<&crate::ArtifactManifest>,
+    paths: &BTreeSet<String>,
+) -> Result<(), ProviderError> {
+    let Some(manifest) = manifest.filter(|manifest| manifest.managed_analyzer.is_some()) else {
+        return Ok(());
+    };
+    let expected = manifest
+        .documents
+        .keys()
+        .map(|path| normalize_source_path(path))
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    if expected != *paths {
+        return Err(ProviderError::InvalidInput(
+            "managed scip-python document inventory does not match its manifest".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 fn position_encoding(

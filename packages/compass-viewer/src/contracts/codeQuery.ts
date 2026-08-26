@@ -32,6 +32,12 @@ export const CODE_QUERY_OPERATIONS = [
   "search", "callers", "callees", "impact", "explore", "node_trail"
 ] as const;
 
+export const CODE_QUERY_ROUTE_STAGES = [
+  "middleware", "dependency", "security", "layout", "template", "loading",
+  "default", "error_boundary", "not_found", "boundary", "loader", "action",
+  "handler", "data_loader", "route_component"
+] as const;
+
 export const CODE_QUERY_CONTRACT_MANIFEST = {
   schema: CODE_QUERY_SCHEMA,
   enums: {
@@ -39,6 +45,7 @@ export const CODE_QUERY_CONTRACT_MANIFEST = {
     nodeKind: CODE_QUERY_NODE_KINDS,
     nodeRole: CODE_QUERY_NODE_ROLES,
     edgeKind: CODE_QUERY_EDGE_KINDS,
+    routeStage: CODE_QUERY_ROUTE_STAGES,
     evidenceLayer: ["structural_graph", "program_ir"],
     evidenceOrigin: ["ast", "config", "convention", "artifact", "heuristic"],
     confidence: ["exact", "inferred", "ambiguous"],
@@ -162,11 +169,7 @@ const ImportExportNodeDetailsSchema = z.strictObject({
     typeOnly: z.boolean()
   })
 });
-export const CodeRouteStageSchema = z.enum([
-  "middleware", "layout", "template", "loading", "default", "error_boundary",
-  "not_found", "boundary", "loader", "action", "handler", "data_loader",
-  "route_component"
-]);
+export const CodeRouteStageSchema = z.enum(CODE_QUERY_ROUTE_STAGES);
 const RouteStageDetailsSchema = z.strictObject({
   stage: CodeRouteStageSchema,
   position: z.number().int().nonnegative(),

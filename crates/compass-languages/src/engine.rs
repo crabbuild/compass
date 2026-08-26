@@ -156,6 +156,7 @@ impl Engine {
             source,
             tree.root_node(),
             pipeline,
+            self.project_evidence(path),
         );
         evidence.map_err(|error| ExtractError::InvalidProgramEvidence {
             path: path.to_path_buf(),
@@ -390,6 +391,7 @@ impl Engine {
                 source,
                 root,
                 pipeline,
+                self.project_evidence(path),
             ) {
                 Ok(evidence) => {
                     extraction.semantic_evidence = Some(evidence);

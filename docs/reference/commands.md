@@ -68,10 +68,14 @@ Use for normal cold/incremental structural builds. The default publishes the
 structural graph only; pass `--program` when Program IR inspection or graph
 enrichment is needed. `--no-program` remains accepted as an explicit
 structural-only compatibility flag. Supply a verified offline SCIP index with
-repeatable `--program-artifact` (which also enables Program IR). For Java,
-fresh exact symbol evidence can disambiguate AST-proven call sites in
-`graph.json`; stale, unverified, conflicting, and non-call references are not
-projected. `--no-program` conflicts with `--program-artifact`.
+repeatable `--program-artifact` (which also enables Program IR). Fresh exact
+Java symbol evidence can disambiguate AST-proven call sites. Python call
+enrichment additionally requires an offline `scip-python` artifact whose
+`<artifact>.compass-manifest.json` contains a complete frozen
+`compass.managed-analyzer-profile/1` profile. Compass never runs or installs
+`scip-python` during the build. Stale, generic, unverified, inexact, or
+conflicting Python artifact evidence is not projected. `--no-program`
+conflicts with `--program-artifact`.
 Graph storage defaults to `sqlite`; `--store json` opts out of the validated
 local store sidecar without replacing `graph.json`. JSON remains the portable
 authority, while the sidecar keeps large graphs queryable under bounded memory.

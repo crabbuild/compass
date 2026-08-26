@@ -8,7 +8,7 @@ use std::path::Path;
 
 use ahash::AHashSet as HashSet;
 use compass_languages::{
-    Extraction, FrameworkLimits, RawEdgeRecord, RawFrameworkAnchor, RawFrameworkFact,
+    Extraction, FrameworkLimits, RawEdgeRecord, RawFrameworkAnchor, RawFrameworkFact, make_id,
 };
 use compass_model::provenance::{EvidenceConfidence, ResolutionCandidate, ResolutionState};
 use serde_json::{Map, Value, json};
@@ -53,13 +53,15 @@ pub fn resolve_and_publish(
         .collect::<HashSet<_>>();
     let mut diagnostics = Vec::new();
     let mut additions = Vec::new();
-    for fact in extraction.framework_facts.iter().filter_map(|fact| {
-        if let RawFrameworkFact::Relation(fact) = fact {
-            Some(fact)
-        } else {
-            None
-        }
-    }) {
+    let relation_facts = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Relation(fact) => Some(fact.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for fact in &relation_facts {
         let relation = normalize_relation(&fact.relation);
         let Some(relation) = relation else {
             diagnostics.push(json!({
@@ -85,9 +87,17 @@ pub fn resolve_and_publish(
             limits.max_candidates,
             root,
         );
+        let target_candidates =
+            filter_exact_django_signal_candidates(&targets, fact, relation, target_candidates);
         let source_state = candidate_state(&source_candidates, source_truncated);
         let target_state = candidate_state(&target_candidates, target_truncated);
-        if source_state != ResolutionState::Exact || target_state != ResolutionState::Exact {
+        let external_signal_target = (source_state == ResolutionState::Exact
+            && target_state == ResolutionState::Unresolved)
+            .then(|| synthesize_external_django_signal_target(extraction, fact, relation))
+            .flatten();
+        if source_state != ResolutionState::Exact
+            || (target_state != ResolutionState::Exact && external_signal_target.is_none())
+        {
             diagnostics.push(json!({
                 "kind": "unresolved_framework_relation",
                 "framework": fact.framework,
@@ -107,50 +117,62 @@ pub fn resolve_and_publish(
         }
         let (Some(source), Some(target)) = (source_candidates.first(), target_candidates.first())
         else {
+            let Some(source) = source_candidates.first() else {
+                continue;
+            };
+            let Some(target_id) = external_signal_target else {
+                continue;
+            };
+            let published_target_id =
+                promote_exact_django_signal_target(extraction, fact, target_id.as_str())
+                    .unwrap_or(target_id);
+            let source_anchor = source_anchor_value(&fact.anchor);
+            let key = (
+                source.node_id.clone(),
+                published_target_id.clone(),
+                relation.to_owned(),
+                anchor_key(&source_anchor),
+            );
+            if !edges.insert(key) {
+                continue;
+            }
+            let mut attributes = relation_attributes(fact, relation, &source_anchor);
+            if let Some(target_anchor) = fact.target_anchor.as_ref() {
+                attributes.insert(
+                    "target_anchor".to_owned(),
+                    source_anchor_value(target_anchor),
+                );
+            }
+            additions.push(RawEdgeRecord {
+                source: source.node_id.clone(),
+                target: published_target_id,
+                attributes,
+            });
             continue;
         };
+        // Django's signal declarations are emitted by the universal Python
+        // producer as variables (the imported `post_save`/`pre_delete`
+        // bindings point at the signal objects).  A signal is nevertheless
+        // an event endpoint for the closed graph contract: publishing a
+        // `subscribes` edge from a handler to a variable would be rejected as
+        // an invalid `function -> variable` pair.  Promote only the exact
+        // declaration selected by a Django signal relation; never widen the
+        // generic endpoint validator or classify an unreferenced/lookalike
+        // variable as an event.
+        let published_target_id =
+            promote_exact_django_signal_target(extraction, fact, &target.node_id)
+                .unwrap_or_else(|| target.node_id.clone());
         let source_anchor = source_anchor_value(&fact.anchor);
         let key = (
             source.node_id.clone(),
-            target.node_id.clone(),
+            published_target_id.clone(),
             relation.to_owned(),
             anchor_key(&source_anchor),
         );
         if !edges.insert(key) {
             continue;
         }
-        let mut attributes = Map::from_iter([
-            ("relation".to_owned(), Value::String(relation.to_owned())),
-            (
-                "framework".to_owned(),
-                Value::String(fact.framework.clone()),
-            ),
-            (
-                "source_file".to_owned(),
-                Value::String(fact.anchor.source_file.clone()),
-            ),
-            (
-                "source_location".to_owned(),
-                Value::String(format!("L{}", fact.anchor.start_line)),
-            ),
-            ("source_anchor".to_owned(), source_anchor.clone()),
-            (
-                "confidence".to_owned(),
-                Value::String("EXTRACTED".to_owned()),
-            ),
-            (
-                "_origin".to_owned(),
-                Value::String(fact.origin.as_str().to_owned()),
-            ),
-            (
-                "ambiguity_policy".to_owned(),
-                Value::String(fact.ambiguity_policy.clone()),
-            ),
-            (
-                "rule".to_owned(),
-                Value::String(format!("framework-relation:{}", fact.relation)),
-            ),
-        ]);
+        let mut attributes = relation_attributes(fact, relation, &source_anchor);
         if let Some(target_anchor) = fact.target_anchor.as_ref() {
             attributes.insert(
                 "target_anchor".to_owned(),
@@ -159,7 +181,7 @@ pub fn resolve_and_publish(
         }
         additions.push(RawEdgeRecord {
             source: source.node_id.clone(),
-            target: target.node_id.clone(),
+            target: published_target_id,
             attributes,
         });
     }
@@ -171,6 +193,205 @@ pub fn resolve_and_publish(
         );
     }
     Ok(())
+}
+
+fn promote_exact_django_signal_target(
+    extraction: &mut Extraction,
+    fact: &compass_languages::RawFrameworkRelationFact,
+    target_id: &str,
+) -> Option<String> {
+    if fact.pack_id != "django-python"
+        || fact.framework != "django"
+        || fact.relation != "subscribes"
+        || !fact
+            .target_hint
+            .as_deref()
+            .is_some_and(|target| target.starts_with("django.db.models.signals."))
+    {
+        return None;
+    }
+    let node = extraction.nodes.iter().find(|node| node.id == target_id)?;
+    if node.string("symbol_kind") == "variable"
+        && node.string("language") == "python"
+        && node.string("qualified_name") == fact.target_hint.as_deref().unwrap_or_default()
+    {
+        let signal_name = fact.target_hint.as_deref()?;
+        let event_id = make_id(&["django-signal-event", target_id]);
+        if extraction
+            .nodes
+            .iter()
+            .any(|candidate| candidate.id == event_id)
+        {
+            return Some(event_id);
+        }
+        let mut event = node.clone();
+        event.id.clone_from(&event_id);
+        event
+            .attributes
+            .insert("symbol_kind".to_owned(), Value::String("event".to_owned()));
+        event.attributes.insert(
+            "transport".to_owned(),
+            Value::String("django-signal".to_owned()),
+        );
+        event
+            .attributes
+            .insert("subject".to_owned(), Value::String(signal_name.to_owned()));
+        event.attributes.insert(
+            "declaring_scope".to_owned(),
+            Value::String(signal_name.to_owned()),
+        );
+        event.attributes.insert(
+            "source_anchor".to_owned(),
+            source_anchor_value(&fact.anchor),
+        );
+        event.attributes.insert(
+            "extractor".to_owned(),
+            Value::String("compass.frameworks.django".to_owned()),
+        );
+        event
+            .attributes
+            .insert("_origin".to_owned(), Value::String("ast".to_owned()));
+        extraction.nodes.push(event);
+        return Some(event_id);
+    }
+    None
+}
+
+fn synthesize_external_django_signal_target(
+    extraction: &mut Extraction,
+    fact: &compass_languages::RawFrameworkRelationFact,
+    relation: &str,
+) -> Option<String> {
+    if fact.pack_id != "django-python" || fact.framework != "django" || relation != "subscribes" {
+        return None;
+    }
+    let signal_name = fact
+        .target_hint
+        .as_deref()
+        .filter(|target| target.starts_with("django.db.models.signals."))?;
+    let event_id = make_id(&["django-signal-event", "external", "python", signal_name]);
+    if extraction
+        .nodes
+        .iter()
+        .any(|candidate| candidate.id == event_id)
+    {
+        return Some(event_id);
+    }
+    let label = terminal_name(signal_name).to_owned();
+    extraction.nodes.push(compass_languages::RawNodeRecord {
+        id: event_id.clone(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), Value::String(label.clone())),
+            ("name".to_owned(), Value::String(label)),
+            (
+                "qualified_name".to_owned(),
+                Value::String(signal_name.to_owned()),
+            ),
+            ("symbol_kind".to_owned(), Value::String("event".to_owned())),
+            ("file_type".to_owned(), Value::String("code".to_owned())),
+            ("source_file".to_owned(), Value::String(String::new())),
+            ("source_location".to_owned(), Value::String(String::new())),
+            ("language".to_owned(), Value::String("python".to_owned())),
+            (
+                "transport".to_owned(),
+                Value::String("django-signal".to_owned()),
+            ),
+            ("subject".to_owned(), Value::String(signal_name.to_owned())),
+            (
+                "declaring_scope".to_owned(),
+                Value::String(signal_name.to_owned()),
+            ),
+            (
+                "source_anchor".to_owned(),
+                source_anchor_value(&fact.anchor),
+            ),
+            (
+                "extractor".to_owned(),
+                Value::String("compass.frameworks.django".to_owned()),
+            ),
+            (
+                "confidence".to_owned(),
+                Value::String("EXTRACTED".to_owned()),
+            ),
+            ("_origin".to_owned(), Value::String("ast".to_owned())),
+            ("external".to_owned(), Value::Bool(true)),
+            ("placeholder".to_owned(), Value::Bool(true)),
+            ("_canonical_external_symbol".to_owned(), Value::Bool(true)),
+        ]),
+    });
+    Some(event_id)
+}
+
+fn filter_exact_django_signal_candidates(
+    targets: &FrameworkTargetIndex<'_>,
+    fact: &compass_languages::RawFrameworkRelationFact,
+    relation: &str,
+    candidates: Vec<ResolutionCandidate>,
+) -> Vec<ResolutionCandidate> {
+    if fact.pack_id != "django-python"
+        || fact.framework != "django"
+        || relation != "subscribes"
+        || !fact
+            .target_hint
+            .as_deref()
+            .is_some_and(|target| target.starts_with("django.db.models.signals."))
+    {
+        return candidates;
+    }
+    let target = fact.target_hint.as_deref().unwrap_or_default();
+    candidates
+        .into_iter()
+        .filter(|candidate| {
+            targets
+                .targets
+                .iter()
+                .find(|indexed| indexed.node.id == candidate.node_id)
+                .is_some_and(|indexed| indexed.node.string("qualified_name") == target)
+        })
+        .collect()
+}
+
+fn relation_attributes(
+    fact: &compass_languages::RawFrameworkRelationFact,
+    relation: &str,
+    source_anchor: &Value,
+) -> Map<String, Value> {
+    Map::from_iter([
+        ("relation".to_owned(), Value::String(relation.to_owned())),
+        (
+            "framework".to_owned(),
+            Value::String(fact.framework.clone()),
+        ),
+        (
+            "extractor".to_owned(),
+            Value::String(format!("compass.frameworks.{}", fact.framework)),
+        ),
+        (
+            "source_file".to_owned(),
+            Value::String(fact.anchor.source_file.clone()),
+        ),
+        (
+            "source_location".to_owned(),
+            Value::String(format!("L{}", fact.anchor.start_line)),
+        ),
+        ("source_anchor".to_owned(), source_anchor.clone()),
+        (
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        ),
+        (
+            "_origin".to_owned(),
+            Value::String(fact.origin.as_str().to_owned()),
+        ),
+        (
+            "ambiguity_policy".to_owned(),
+            Value::String(fact.ambiguity_policy.clone()),
+        ),
+        (
+            "rule".to_owned(),
+            Value::String(format!("framework-relation:{}", fact.relation)),
+        ),
+    ])
 }
 
 fn edge_anchor_key(edge: &RawEdgeRecord) -> String {

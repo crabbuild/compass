@@ -39,6 +39,7 @@ pub enum FrameworkCapability {
     HttpRoutes,
     Beans,
     DependencyInjection,
+    DataModeling,
     Messaging,
     Scheduling,
     Persistence,
@@ -94,7 +95,11 @@ impl FrameworkRelation {
         let required = match self {
             Self::RoutesTo => Some(FrameworkCapability::HttpRoutes),
             Self::Registers => Some(FrameworkCapability::Beans),
-            Self::DependsOn => Some(FrameworkCapability::DependencyInjection),
+            Self::DependsOn => {
+                return capabilities.contains(&FrameworkCapability::DependencyInjection)
+                    || capabilities.contains(&FrameworkCapability::Security)
+                    || capabilities.contains(&FrameworkCapability::DataModeling);
+            }
             Self::Handles
             | Self::Publishes
             | Self::Subscribes
@@ -772,6 +777,295 @@ pub(super) const REACT_UI_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDes
     limits: FrameworkLimits::DEFAULT,
 };
 
+pub(super) const DJANGO_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "django-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::DataModeling,
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Persistence,
+    ],
+    dependency_markers: &["django"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["django-signal-receiver", "django-url-call"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::RoutesTo,
+        FrameworkRelation::Subscribes,
+        FrameworkRelation::DependsOn,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DJANGO_REST_FRAMEWORK_PYTHON_DESCRIPTOR: FrameworkPackDescriptor =
+    FrameworkPackDescriptor {
+        id: "django-rest-framework-python",
+        semantics_version: 1,
+        kind: FrameworkPackKind::Source,
+        languages: &["python"],
+        required_capabilities: &[
+            LanguageCapability::Declarations,
+            LanguageCapability::Imports,
+            LanguageCapability::Calls,
+            LanguageCapability::Construction,
+            LanguageCapability::Decorators,
+            LanguageCapability::TypeReferences,
+            LanguageCapability::BaseTypes,
+            LanguageCapability::Members,
+            LanguageCapability::Ownership,
+        ],
+        framework_capabilities: &[
+            FrameworkCapability::HttpRoutes,
+            FrameworkCapability::DependencyInjection,
+            FrameworkCapability::DataModeling,
+            FrameworkCapability::Security,
+        ],
+        dependency_markers: &["djangorestframework"],
+        manifest_policy: FrameworkManifestPolicy::Advisory,
+        activation_rules: &["drf-router-viewset-v1"],
+        accepted_roles: &[
+            SemanticRole::Import,
+            SemanticRole::Call,
+            SemanticRole::Construction,
+            SemanticRole::Decorator,
+            SemanticRole::BaseType,
+            SemanticRole::TypeReference,
+            SemanticRole::MemberAccess,
+            SemanticRole::Ownership,
+        ],
+        emitted_relation_families: &[FrameworkRelation::RoutesTo, FrameworkRelation::DependsOn],
+        occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+        limits: FrameworkLimits::DEFAULT,
+    };
+
+pub(super) const FASTAPI_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "fastapi-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::Security,
+    ],
+    dependency_markers: &["fastapi"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["fastapi-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo, FrameworkRelation::DependsOn],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const STARLETTE_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "starlette-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["starlette"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["starlette-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const PYDANTIC_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "pydantic-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::DataModeling,
+    ],
+    dependency_markers: &["pydantic"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["pydantic-base-model"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::DependsOn],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const FLASK_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "flask-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["flask"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "flask-application-factory",
+        "flask-receiver-hook",
+        "flask-receiver-route",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const SQLALCHEMY_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "sqlalchemy-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::DataModeling,
+        FrameworkCapability::Persistence,
+    ],
+    dependency_markers: &["sqlalchemy"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["sqlalchemy-declarative-base", "sqlalchemy-mapped-column"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::DependsOn, FrameworkRelation::MapsTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const CELERY_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "celery-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Scheduling,
+    ],
+    dependency_markers: &["celery"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["celery-task-decorator", "celery-task-invocation"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Decorator,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::Produces,
+        FrameworkRelation::Consumes,
+        FrameworkRelation::Schedules,
+        FrameworkRelation::Triggers,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
 const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     ASPNET_CSHARP_DESCRIPTOR,
     PHP_FRAMEWORKS_DESCRIPTOR,
@@ -782,5 +1076,13 @@ const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
     DART_BLOC_DESCRIPTOR,
     DART_FLUTTER_NAVIGATION_DESCRIPTOR,
     DART_RIVERPOD_DESCRIPTOR,
+    DJANGO_PYTHON_DESCRIPTOR,
+    DJANGO_REST_FRAMEWORK_PYTHON_DESCRIPTOR,
+    FASTAPI_PYTHON_DESCRIPTOR,
+    FLASK_PYTHON_DESCRIPTOR,
+    PYDANTIC_PYTHON_DESCRIPTOR,
+    SQLALCHEMY_PYTHON_DESCRIPTOR,
+    CELERY_PYTHON_DESCRIPTOR,
+    STARLETTE_PYTHON_DESCRIPTOR,
     REACT_UI_DESCRIPTOR,
 ];

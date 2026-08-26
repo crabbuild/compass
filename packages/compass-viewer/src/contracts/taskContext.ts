@@ -14,7 +14,8 @@ export const FRAMEWORK_CONTEXT_SCHEMA = "compass.framework-context/1" as const;
 const KNOWN_FRAMEWORK_PACK_IDS = [
   "react-ui", "nextjs-routes", "react-router-routes", "remix-routes",
   "tanstack-router", "tanstack-start", "vite-config", "typescript-web",
-  "express-web", "fastify-web", "hono-web", "python-web", "go-web", "axum-web",
+  "express-web", "fastify-web", "hono-web", "django-python", "django-rest-framework-python", "fastapi-python",
+  "flask-python", "pydantic-python", "sqlalchemy-python", "celery-python", "starlette-python", "go-web", "axum-web",
   "rust-web", "spring-java", "spring-kotlin", "rails-ruby", "php-frameworks",
   "aspnet-csharp", "vapor-swift", "filesystem-routes", "enterprise-domain-facts",
   "drupal-routing-config", "play-routes-config", "filesystem-template-routes"
@@ -26,7 +27,7 @@ const frameworkText = z.string().min(1).max(16_384).refine(
 );
 
 const routeStageSchema = z.enum([
-  "middleware", "layout", "template", "loading", "default", "error_boundary",
+  "middleware", "dependency", "security", "layout", "template", "loading", "default", "error_boundary",
   "not_found", "boundary", "loader", "action", "handler", "data_loader",
   "route_component"
 ]);

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CODE_QUERY_CONTRACT_MANIFEST,
+  CodeRouteStageSchema,
   CodeQueryResponseSchema,
   decodeCodeQueryResponse
 } from "./codeQuery";
@@ -55,6 +56,12 @@ describe("compass.query/1", () => {
       }]
     };
     expect(CodeQueryResponseSchema.safeParse(unsafe).success).toBe(false);
+    expect(CodeRouteStageSchema.safeParse("authorization").success).toBe(false);
+  });
+
+  it("accepts dependency and security route stages", () => {
+    expect(CodeRouteStageSchema.parse("dependency")).toBe("dependency");
+    expect(CodeRouteStageSchema.parse("security")).toBe("security");
   });
 
   it("retains heuristic wiring and ambiguous candidates", () => {

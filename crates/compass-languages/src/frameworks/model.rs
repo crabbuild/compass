@@ -71,6 +71,8 @@ pub struct RawRouteFact {
 #[serde(rename_all = "snake_case")]
 pub enum RawRouteStageRole {
     Middleware,
+    Dependency,
+    Security,
     Layout,
     Template,
     Loading,

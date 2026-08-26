@@ -82,7 +82,7 @@ type TemplateDetector =
 /// separate from the language producer version: changing framework activation,
 /// descriptor capabilities, or resource limits must invalidate framework facts
 /// without pretending that the parser/evidence producer changed.
-pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/2";
+pub const FRAMEWORK_PACK_SEMANTICS_VERSION: &str = "compass.framework-packs/6";
 
 /// The concrete implementation stored behind one framework-pack seam.
 ///
@@ -383,7 +383,20 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
     ),
     FrameworkPack::universal(&pack::SPRING_JAVA_DESCRIPTOR, spring::detect),
     FrameworkPack::universal(&pack::SPRING_KOTLIN_DESCRIPTOR, spring::detect_kotlin),
-    FrameworkPack::source_versioned("python-web", &["python"], &[], 1, detect_python),
+    FrameworkPack::universal(&pack::DJANGO_PYTHON_DESCRIPTOR, python::detect_django),
+    FrameworkPack::universal(
+        &pack::DJANGO_REST_FRAMEWORK_PYTHON_DESCRIPTOR,
+        python::detect_drf,
+    ),
+    FrameworkPack::universal(&pack::FASTAPI_PYTHON_DESCRIPTOR, python::detect_fastapi),
+    FrameworkPack::universal(&pack::FLASK_PYTHON_DESCRIPTOR, python::detect_flask),
+    FrameworkPack::universal(&pack::PYDANTIC_PYTHON_DESCRIPTOR, python::detect_pydantic),
+    FrameworkPack::universal(
+        &pack::SQLALCHEMY_PYTHON_DESCRIPTOR,
+        python::detect_sqlalchemy,
+    ),
+    FrameworkPack::universal(&pack::CELERY_PYTHON_DESCRIPTOR, python::detect_celery),
+    FrameworkPack::universal(&pack::STARLETTE_PYTHON_DESCRIPTOR, python::detect_starlette),
     FrameworkPack::universal(&pack::PHP_FRAMEWORKS_DESCRIPTOR, php::detect),
     FrameworkPack::universal(&pack::RAILS_RUBY_DESCRIPTOR, ruby::detect_universal),
     FrameworkPack::source_versioned_with_limits(
@@ -523,7 +536,6 @@ const FRAMEWORK_PACKS: &[FrameworkPack] = &[
         semantics_version: 1,
         kind: FrameworkPackKind::Source,
         languages: &[
-            "python",
             "typescript",
             "tsx",
             "javascript",
@@ -951,13 +963,6 @@ pub(crate) fn detect_template_file_route(
     accumulator.publish(extraction);
 }
 
-fn detect_python(
-    context: &DetectionContext<'_, '_>,
-    _extraction: &mut Extraction,
-) -> Vec<RawFrameworkFact> {
-    python::detect(context.path, context.source, context.root)
-}
-
 fn detect_go(
     context: &DetectionContext<'_, '_>,
     _extraction: &mut Extraction,
@@ -1133,7 +1138,14 @@ mod tests {
             .collect::<HashSet<_>>();
         for expected in [
             "spring-java",
-            "python-web",
+            "django-python",
+            "django-rest-framework-python",
+            "fastapi-python",
+            "flask-python",
+            "pydantic-python",
+            "sqlalchemy-python",
+            "celery-python",
+            "starlette-python",
             "php-frameworks",
             "rails-ruby",
             "spring-kotlin",
@@ -1199,9 +1211,27 @@ mod tests {
     fn enterprise_domain_pack_matches_large_source_budget() {
         let enterprise = FRAMEWORK_PACKS
             .iter()
-            .find(|pack| pack.id == "enterprise-domain-facts")
-            .expect("enterprise-domain-facts framework pack");
-        assert_eq!(enterprise.limits.max_syntax_nodes, 200_000);
+            .find(|pack| pack.id == "enterprise-domain-facts");
+        assert_eq!(
+            enterprise.map(|pack| pack.limits.max_syntax_nodes),
+            Some(200_000)
+        );
+        assert_eq!(
+            enterprise.map(|pack| pack.languages),
+            Some(
+                &[
+                    "typescript",
+                    "tsx",
+                    "javascript",
+                    "csharp",
+                    "ruby",
+                    "php",
+                    "go",
+                    "rust",
+                ][..]
+            )
+        );
+        assert!(enterprise.is_some_and(|pack| !pack.languages.contains(&"python")));
     }
 
     #[test]

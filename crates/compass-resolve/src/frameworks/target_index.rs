@@ -547,8 +547,8 @@ pub(super) fn terminal_name(value: &str) -> &str {
 fn module_key(path: &str) -> String {
     let path = path.replace('\\', "/");
     let path = [
-        ".tsx", ".ts", ".jsx", ".js", ".mts", ".mjs", ".vue", ".py", ".rb", ".php", ".java", ".cs",
-        ".go", ".rs", ".swift",
+        ".tsx", ".ts", ".jsx", ".js", ".mts", ".mjs", ".vue", ".pyi", ".py", ".rb", ".php",
+        ".java", ".cs", ".go", ".rs", ".swift",
     ]
     .into_iter()
     .find_map(|extension| path.strip_suffix(extension))

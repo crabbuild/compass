@@ -117,15 +117,23 @@ fn json_context_exposes_exact_react_render_and_next_route_evidence()
         declaring_scope: "src/app/page.tsx".to_owned(),
         resolution: ResolutionState::Exact,
         middleware_count: 0,
-        stages: vec![RouteStageDetails {
-            stage: RouteStage::RouteComponent,
-            position: 0,
-            reference: "Page".to_owned(),
+        stages: [
+            (RouteStage::Dependency, "provide_session"),
+            (RouteStage::Security, "require_user"),
+            (RouteStage::RouteComponent, "Page"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(position, (stage, reference))| RouteStageDetails {
+            stage,
+            position: u32::try_from(position).unwrap_or_else(|_| std::process::abort()),
+            reference: reference.to_owned(),
             resolution: ResolutionState::Exact,
             source_anchor: Some(anchor()),
             target: Some("page".to_owned()),
             candidates: Vec::new(),
-        }],
+        })
+        .collect(),
     }));
     let mut render = edge("renderer", EdgeKind::Renders, "page");
     render.details = Some(EdgeDetails::Render(RenderEdgeDetails {
@@ -165,8 +173,10 @@ fn json_context_exposes_exact_react_render_and_next_route_evidence()
     assert_eq!(framework["schema"], "compass.framework-context/1");
     assert_eq!(framework["renderedBy"].as_array().map(Vec::len), Some(1));
     assert_eq!(framework["routes"].as_array().map(Vec::len), Some(1));
+    assert_eq!(framework["routes"][0]["stages"][0]["stage"], "dependency");
+    assert_eq!(framework["routes"][0]["stages"][1]["stage"], "security");
     assert_eq!(
-        framework["routes"][0]["stages"][0]["stage"],
+        framework["routes"][0]["stages"][2]["stage"],
         "route_component"
     );
     assert_eq!(framework["truncated"], false);
