@@ -146,6 +146,19 @@ function cameraAnimation(duration: number) {
     : { duration, easingFunction: "easeInOutQuad" as const };
 }
 
+function withPhysicsEnabled(options: Options, enabled: boolean): Options {
+  if (!options.physics || typeof options.physics !== "object") {
+    return { ...options, physics: { enabled } };
+  }
+  return {
+    ...options,
+    physics: {
+      ...options.physics,
+      enabled
+    }
+  };
+}
+
 const defaultOptions: Options = {
   autoResize: true,
   interaction: {
@@ -784,13 +797,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       const container = containerRef.current;
       if (!container) return;
       initialViewRef.current = null;
+      const options = renderingProfile === "static"
+        ? staticOptions
+        : comparisonMode ? comparisonOptions : defaultOptions;
       const network = new Network(container, {
         nodes: nodeData,
         edges: edgeData
-      }, renderingProfile === "static"
-        ? staticOptions
-        : comparisonMode ? comparisonOptions : defaultOptions);
-      network.setOptions({ physics: { enabled: physicsRunningRef.current } });
+      }, withPhysicsEnabled(options, physicsRunningRef.current));
       if (!physicsRunningRef.current) network.stopSimulation();
       networkRef.current = network;
       bindGraphNetworkEvents(network, {
@@ -798,7 +811,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         onOpenSource: (nodeId) => eventHandlersRef.current.onOpenSource(nodeId),
         onOpenRelationshipSource: (edgeId) => eventHandlersRef.current.onOpenRelationshipSource(edgeId),
         onInteractionStart: () => {
-          if (physicsRunningRef.current) network.stopSimulation();
+          network.stopSimulation();
           eventHandlersRef.current.onInteractionStart();
         },
         onHover: (change) => eventHandlersRef.current.onHover(change),
@@ -873,8 +886,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       previousLayoutSpacingRef.current = layoutSpacing;
       network.setOptions({
         physics: comparisonMode
-          ? { barnesHut: { springLength: 180 * layoutSpacing } }
-          : { forceAtlas2Based: { springLength: 120 * layoutSpacing } }
+          ? {
+              enabled: physicsRunning,
+              barnesHut: { springLength: 180 * layoutSpacing }
+            }
+          : {
+              enabled: physicsRunning,
+              forceAtlas2Based: { springLength: 120 * layoutSpacing }
+            }
       });
       if (!physicsRunning && previousSpacing !== layoutSpacing) {
         const ratio = layoutSpacing / previousSpacing;

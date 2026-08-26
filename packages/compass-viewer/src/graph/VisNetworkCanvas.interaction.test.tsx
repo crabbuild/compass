@@ -9,6 +9,8 @@ import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 const mock = vi.hoisted(() => ({
   dataSets: [] as Array<Array<Record<string, unknown>>>,
   networks: 0,
+  networkOptions: [] as Array<Record<string, unknown>>,
+  optionUpdates: [] as Array<Record<string, unknown>>,
   fits: [] as Array<Record<string, unknown> | undefined>,
   moves: [] as Array<Record<string, unknown>>,
   connectedNodeRequests: [] as string[],
@@ -42,11 +44,12 @@ vi.mock("vis-network/standalone", () => ({
     }
   },
   Network: class {
-    constructor() {
+    constructor(_container: unknown, _data: unknown, options: Record<string, unknown>) {
       mock.networks += 1;
+      mock.networkOptions.push(options);
     }
 
-    setOptions() {}
+    setOptions(options: Record<string, unknown>) { mock.optionUpdates.push(options); }
     stopSimulation() { mock.simulationStops += 1; }
     startSimulation() { mock.simulationStarts += 1; }
     fit(options?: Record<string, unknown>) { mock.fits.push(options); }
@@ -112,6 +115,8 @@ describe("VisNetworkCanvas hover lifecycle", () => {
   beforeEach(() => {
     mock.dataSets.length = 0;
     mock.networks = 0;
+    mock.networkOptions.length = 0;
+    mock.optionUpdates.length = 0;
     mock.fits.length = 0;
     mock.moves.length = 0;
     mock.connectedNodeRequests.length = 0;
@@ -152,6 +157,51 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     />);
 
     expect(mock.dataSets[1]?.[0]).not.toHaveProperty("title");
+  });
+
+  it("passes the paused physics state into network construction", () => {
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    expect(mock.networkOptions[0]?.physics).toMatchObject({ enabled: false });
+  });
+
+  it("keeps paused physics disabled when solver spacing changes", () => {
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      layoutSpacing={1.25}
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    expect(mock.optionUpdates.some((options) => (
+      (options.physics as { enabled?: boolean } | undefined)?.enabled === false
+    ))).toBe(true);
   });
 
   it("uses semantic node shapes and relationship colors in community detail", () => {
@@ -359,6 +409,36 @@ describe("VisNetworkCanvas hover lifecycle", () => {
 
     expect(mock.simulationStops).toBeGreaterThan(stopsBeforeStabilizing);
     expect(onStabilized).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops an active simulation when a node is hovered", () => {
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    const stopsBeforeHover = mock.simulationStops;
+    const hoverNodeHandlers = mock.eventHandlers.get("hoverNode") ?? [];
+    for (const handler of hoverNodeHandlers) {
+      (handler as unknown as (parameters: Record<string, unknown>) => void)({
+        node: "caller",
+        pointer: { DOM: { x: 10, y: 20 } }
+      });
+    }
+
+    expect(mock.simulationStops).toBeGreaterThan(stopsBeforeHover);
   });
 
   it("scales the reheat so motion stays visible when a large graph is fit", () => {
