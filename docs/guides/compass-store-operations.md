@@ -138,6 +138,13 @@ same-major SQLite store. Unknown majors, pre-release prototypes, a missing or
 invalid `store.ref`, and physical files from another adapter are not migrated
 in place.
 
+Directional store queries additionally require the edge-ID-ordered adjacency
+capability. Sidecars created before that capability remain valid for status,
+validation, backup, and canonical JSON recovery, but must be rebuilt before
+serving bounded callers, callees, impact, trail, or discovery queries. The
+query engine reports the rebuild requirement explicitly and does not fall back
+to a potentially different truncated prefix.
+
 Rebuild a sidecar from the current graph without replacing the JSON artifact:
 
 ```bash

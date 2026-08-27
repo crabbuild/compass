@@ -647,6 +647,14 @@ stream graph and database digests through fixed-size buffers and traverse the
 reachable immutable tree objects with bounded cache and path memory; they do
 not depend on the whole-JSON reader limit.
 
+Directional adjacency indexes advertise an edge-ID-order capability. Bounded
+JSON and store queries select the same canonical edge-ID prefix across the
+requested relationship kinds before applying heuristic filtering. A sidecar
+without that capability remains available for validation, backup, JSON export,
+and recovery, but directional store queries reject it with a rebuild
+instruction; they never reinterpret endpoint-ordered keys as edge-ordered
+results.
+
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve
 `graph.json`, run `scripts/rebuild_compass_store.sh`, or explicitly select

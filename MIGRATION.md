@@ -5,6 +5,26 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Rebuild SQLite adjacency sidecars
+
+Store snapshots now declare edge-ID-ordered directional adjacency so bounded
+JSON and SQLite queries retain the same canonical edge prefix. Existing
+`graph.json` artifacts remain compatible. A SQLite sidecar created before this
+capability can still be validated, backed up, and used to recover canonical
+JSON, but directional store queries reject it with
+`edge_id_ordered_adjacency_unavailable`.
+
+Preserve `graph.json`, then rebuild the disposable sidecar with:
+
+```bash
+compass update --force --store sqlite
+compass store validate compass-out --format json
+```
+
+Use `--engine json` until the rebuild completes. Do not edit or copy SQLite
+tables to add the capability marker; the directional index key order must be
+rebuilt from the validated graph.
+
 ## Frontend graph vocabulary
 
 Recent pre-release builds can add React-oriented `renders` edges and UI/server
