@@ -171,6 +171,118 @@ fn json_config_keys_publish_with_config_provenance_and_stable_paths()
 }
 
 #[test]
+fn markdown_frontmatter_publishes_nested_config_graph_without_changing_graph_v1()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let relative = Path::new("docs/guide.md");
+    let source = br#"---
+title: Graph Guide
+tags: [markdown, compass]
+api_token: do-not-publish
+authors:
+  - name: Ada
+    role: editor
+site:
+  navigation:
+    label: Guide
+---
+# Body
+"#;
+    fs::create_dir_all(root.join("docs"))?;
+    fs::write(root.join(relative), source)?;
+
+    let extraction = Engine::default().extract_source(relative, source)?;
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-config")?;
+    let graph = normalize_v1(extraction, evidence)?;
+    assert_eq!(graph.graph.schema, "compass.graph/1");
+    assert!(graph.nodes.iter().all(|node| {
+        !matches!(
+            node.details,
+            Some(compass_model::code_graph::NodeDetails::Document(_))
+        )
+    }));
+
+    let document = graph
+        .nodes
+        .iter()
+        .find(|node| node.qualified_name == "docs/guide.md")
+        .ok_or("missing Markdown document")?;
+    assert_eq!(document.name, "Graph Guide");
+    let keys = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::ConfigKey)
+        .collect::<Vec<_>>();
+    for expected in [
+        "frontmatter/title",
+        "frontmatter/tags",
+        "frontmatter/api_token",
+        "frontmatter/authors",
+        "frontmatter/authors/0",
+        "frontmatter/authors/0/name",
+        "frontmatter/authors/0/role",
+        "frontmatter/site",
+        "frontmatter/site/navigation",
+        "frontmatter/site/navigation/label",
+    ] {
+        assert!(
+            keys.iter().any(|node| node.qualified_name == expected),
+            "missing {expected}: {keys:#?}"
+        );
+    }
+    assert!(keys.iter().all(|node| {
+        node.source.is_some()
+            && node.evidence[0].origin == EvidenceOrigin::Config
+            && matches!(
+                node.details,
+                Some(compass_model::code_graph::NodeDetails::Config(
+                    ref details
+                )) if details.format == "yaml_frontmatter"
+                    && details.key_path.starts_with('/')
+            )
+    }));
+    let token = keys
+        .iter()
+        .find(|node| node.qualified_name == "frontmatter/api_token")
+        .ok_or("missing token key")?;
+    assert_eq!(token.name, "api_token");
+    assert!(!serde_json::to_string(&graph)?.contains("do-not-publish"));
+    let author = keys
+        .iter()
+        .find(|node| node.qualified_name == "frontmatter/authors/0")
+        .ok_or("missing author item")?;
+    let author_name = keys
+        .iter()
+        .find(|node| node.qualified_name == "frontmatter/authors/0/name")
+        .ok_or("missing author name")?;
+    assert!(graph.links.iter().any(|edge| {
+        edge.source == author.id
+            && edge.target == author_name.id
+            && edge.kind == EdgeKind::Contains
+            && edge.evidence[0].origin == EvidenceOrigin::Config
+    }));
+
+    let stable_ids = keys
+        .iter()
+        .map(|node| (node.qualified_name.clone(), node.id.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let changed = String::from_utf8(source.to_vec())?.replace("Graph Guide", "Compass Graph Guide");
+    fs::write(root.join(relative), &changed)?;
+    let extraction = Engine::default().extract_source(relative, changed.as_bytes())?;
+    let evidence = BuildEvidence::from_extraction(root, &extraction, "sha256:test-config")?;
+    let changed_graph = normalize_v1(extraction, evidence)?;
+    let changed_ids = changed_graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == NodeKind::ConfigKey)
+        .map(|node| (node.qualified_name.clone(), node.id.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(changed_ids, stable_ids);
+    Ok(())
+}
+
+#[test]
 fn package_manifests_publish_dependency_endpoints_instead_of_dangling_edges()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;

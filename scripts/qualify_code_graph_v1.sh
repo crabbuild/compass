@@ -378,6 +378,12 @@ python3 scripts/check_code_graph_v1_coverage.py \
   --compass-revision "$(git rev-parse HEAD)" \
   --comparisons "$QUALIFY_TMP/comparisons.json"
 
+echo "[code-graph-v1] execute independent Markdown graph-quality assertions"
+python3 scripts/markdown_graph_quality_oracle.py \
+  --manifest tests/qualification/markdown-intelligence.json \
+  --fixture-root "$CORPUS" \
+  --graph "$QUALIFY_TMP/restored.graph.json"
+
 quality_json="$("$COMPASS_BIN" diagnose quality --graph "$QUALIFY_TMP/restored.graph.json" --json)"
 python3 - "$quality_json" <<'PY'
 import json

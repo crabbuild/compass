@@ -763,6 +763,38 @@ mod tests {
     }
 
     #[test]
+    fn graph_v1_markdown_cell_labels_are_retrievable_in_both_rankers() -> Result<(), Box<dyn Error>>
+    {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed": true,
+            "multigraph": true,
+            "graph": {},
+            "nodes": [
+                {
+                    "id": "table-row",
+                    "label": "Owner: compass-model",
+                    "kind": "resource",
+                    "qualifiedName": "Ownership::pipe_table#1::pipe_table_row#graph-1::pipe_table_cell#2"
+                },
+                {"id": "unrelated", "label": "unrelated"}
+            ],
+            "links": []
+        }))?;
+        let graph = Graph::from_document(document)?;
+        for profile in [TextRankProfile::FullScanV1, TextRankProfile::Bm25V1] {
+            let scores =
+                score_nodes_with_profile(&graph, &["compass-model".to_owned()], true, profile);
+            let first = scores
+                .scores
+                .ranked
+                .first()
+                .ok_or("missing semantic result")?;
+            assert_eq!(graph.node(first.node).id, "table-row");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn query_tier_and_singleton_arithmetic_are_exact() {
         assert_eq!(
             query_match_tier("alpha", "alpha", "alpha", "id", "alpha", 2.0),

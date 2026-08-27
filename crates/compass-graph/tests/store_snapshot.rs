@@ -8,7 +8,8 @@ use compass_graph::{
 };
 use compass_model::code_graph::{
     BuildMetadata, CommunityMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails,
-    FileRecord, GraphDocument, NodeDetails, NodeKind, NodeRecord,
+    FileRecord, GraphDocument, NodeDetails, NodeKind, NodeRecord, ResourceKind,
+    ResourceNodeDetails,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -355,6 +356,51 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
         ["cafe"]
     );
 
+    Ok(())
+}
+
+#[test]
+fn immutable_snapshot_indexes_semantic_markdown_table_nodes() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    let mut table = node("table");
+    table.kind = NodeKind::Resource;
+    table.name = "Owners — Owner | Status".to_owned();
+    table.qualified_name = "Operations::pipe_table#1".to_owned();
+    table.language = Some("markdown".to_owned());
+    table.details = Some(NodeDetails::Resource(ResourceNodeDetails {
+        resource_kind: ResourceKind::Document,
+        uri: Some("#owners".to_owned()),
+        media_type: Some("text/markdown".to_owned()),
+    }));
+
+    let mut row = node("table-row");
+    row.kind = NodeKind::Resource;
+    row.name = "Owner=platform-team · Status=deploy".to_owned();
+    row.qualified_name = "Operations::pipe_table#1::pipe_table_row#platform-team-1".to_owned();
+    row.language = Some("markdown".to_owned());
+    row.details = Some(NodeDetails::Resource(ResourceNodeDetails {
+        resource_kind: ResourceKind::Document,
+        uri: None,
+        media_type: Some("text/markdown".to_owned()),
+    }));
+    document.nodes.extend([table, row]);
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    for term in ["owner", "platform", "deploy"] {
+        let (nodes, truncated) = reader.nodes_for_terms(&[term.to_owned()], limits(128))?;
+        assert!(!truncated, "{term}");
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.id == "table" || node.id == "table-row"),
+            "term {term} was not indexed in the immutable snapshot"
+        );
+    }
     Ok(())
 }
 

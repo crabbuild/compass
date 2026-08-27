@@ -228,6 +228,14 @@ Treat graph artifacts with the same or higher classification as the source
 corpus. Do not upload them to a public artifact store merely because they
 contain less text than the repository.
 
+Markdown frontmatter is untrusted source. Compass validates it within byte,
+key, item, depth, and graph-node budgets; rejects YAML aliases and tags; and
+requires parser-backed source ranges before publication. Public ConfigKey
+labels include values only for a conservative set of content metadata such as
+title, tags, aliases, authors, dates, layout, and status. Generic values,
+including credential-shaped fields, remain out of graph artifacts. This is a
+disclosure reduction, not permission to store credentials in frontmatter.
+
 HTML and SVG exports must remain self-contained and avoid loading untrusted
 external scripts/fonts/resources.
 

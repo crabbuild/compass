@@ -448,7 +448,7 @@ pub fn agent_orientation(
     let hub_total = god_node_list.len();
     let hubs = god_node_list
         .iter()
-        .filter(|node| !graph.is_pipe_table_structure_node_id(&node.id))
+        .filter(|node| !graph.is_document_table_node_id(&node.id))
         .filter(|node| graph.node_identity_and_anchor_are_safe(&node.id, &node.label))
         .take(HUB_LIMIT)
         .map(|node| build_hub(&graph, node, &node_communities))
@@ -1003,13 +1003,13 @@ fn build_communities(
             (!real.is_empty()).then_some((
                 *community,
                 real.iter()
-                    .all(|member| graph.is_pipe_table_structure_node_id(member)),
+                    .all(|member| graph.is_document_table_node_id(member)),
                 real,
             ))
         })
         .collect::<Vec<_>>();
     let total = eligible.len();
-    eligible.retain(|(_, pipe_table_only, _)| !pipe_table_only);
+    eligible.retain(|(_, document_table_only, _)| !document_table_only);
     eligible.sort_by(|(left_id, _, left_members), (right_id, _, right_members)| {
         right_members
             .len()
@@ -1042,8 +1042,8 @@ fn build_communities(
             // when two candidates have equal connectivity.
             representatives.sort_by(|left, right| {
                 graph
-                    .is_pipe_table_structure_node_id(&left.id)
-                    .cmp(&graph.is_pipe_table_structure_node_id(&right.id))
+                    .is_document_table_node_id(&left.id)
+                    .cmp(&graph.is_document_table_node_id(&right.id))
                     .then_with(|| graph.degree(&right.id).cmp(&graph.degree(&left.id)))
             });
             representatives.truncate(if detailed {
@@ -1184,7 +1184,7 @@ fn build_risks(
         .filter(|node| {
             graph.degree(&node.id) <= 1
                 && !graph.is_file_node_id(&node.id)
-                && !graph.is_pipe_table_structure_node_id(&node.id)
+                && !graph.is_document_table_node_id(&node.id)
                 && !is_concept_node(node)
                 && node.string("file_type") != "rationale"
         })
@@ -1193,15 +1193,15 @@ fn build_risks(
         .values()
         .filter(|members| {
             let mut count = 0_usize;
-            let mut pipe_table_only = true;
+            let mut document_table_only = true;
             for member in *members {
                 if graph.is_file_node_id(member) {
                     continue;
                 }
                 count = count.saturating_add(1);
-                pipe_table_only &= graph.is_pipe_table_structure_node_id(member);
+                document_table_only &= graph.is_document_table_node_id(member);
             }
-            count > 0 && count < min_size && !pipe_table_only
+            count > 0 && count < min_size && !document_table_only
         })
         .count();
     let mut risks = Vec::new();
@@ -2287,7 +2287,7 @@ fn render_orientation_markdown_with_community_limit(
         "## Architecture Map".to_owned(),
         "- Leading communities are ranked by member count, connectivity, label, and stable ID. See the complete bounded directory of architecture-relevant communities later in this report."
             .to_owned(),
-        "- Markdown communities containing only pipe-table parser blocks are excluded from this architecture view and counted in omitted coverage; their source-backed nodes remain available in the graph."
+        "- Markdown communities containing only pipe-table parser blocks are excluded from this architecture view and counted in omitted coverage; these are semantic table navigation records whose source-backed nodes remain available in the graph."
             .to_owned(),
         disclosure(SectionOmission::from_total_shown(
             model.omissions.communities.total,
@@ -2669,7 +2669,7 @@ fn append_community_directory(
         "## Community Directory".to_owned(),
         "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Architecture-relevant communities are ranked by member count, connectivity, label, and stable ID."
             .to_owned(),
-        "- Markdown communities containing only pipe-table parser blocks are excluded and counted in omitted coverage; mixed communities retain their meaningful headings or symbols as entry points."
+        "- Markdown communities containing only pipe-table parser blocks are excluded and counted in omitted coverage; these semantic table navigation records retain source anchors, while mixed communities retain their meaningful headings or symbols as entry points."
             .to_owned(),
         disclosure(model.omissions.communities),
     ]);
@@ -2882,9 +2882,12 @@ impl<'a> ReportGraph<'a> {
             {
                 edge_visits = edge_visits.saturating_add(1);
             }
-            *degrees.entry(edge.source.as_str()).or_default() += 1;
-            if edge.target != edge.source {
-                *degrees.entry(edge.target.as_str()).or_default() += 1;
+            let zero_topology = zero_topology_document_containment(edge, &positions);
+            if !zero_topology {
+                *degrees.entry(edge.source.as_str()).or_default() += 1;
+                if edge.target != edge.source {
+                    *degrees.entry(edge.target.as_str()).or_default() += 1;
+                }
             }
             let relation = relation(edge);
             let confidence = confidence(edge);
@@ -2902,34 +2905,36 @@ impl<'a> ReportGraph<'a> {
                     }
                 }
             }
-            record_node_connectivity(
-                node_connectivity.entry(edge.source.as_str()).or_default(),
-                &relation,
-                &confidence,
-                document.directed.then_some(EndpointDirection::Outgoing),
-            );
-            if edge.target == edge.source {
-                if document.directed {
-                    node_connectivity
-                        .entry(edge.source.as_str())
-                        .or_default()
-                        .incoming += 1;
-                }
-            } else {
+            if !zero_topology {
                 record_node_connectivity(
-                    node_connectivity.entry(edge.target.as_str()).or_default(),
+                    node_connectivity.entry(edge.source.as_str()).or_default(),
                     &relation,
                     &confidence,
-                    document.directed.then_some(EndpointDirection::Incoming),
+                    document.directed.then_some(EndpointDirection::Outgoing),
+                );
+                if edge.target == edge.source {
+                    if document.directed {
+                        node_connectivity
+                            .entry(edge.source.as_str())
+                            .or_default()
+                            .incoming += 1;
+                    }
+                } else {
+                    record_node_connectivity(
+                        node_connectivity.entry(edge.target.as_str()).or_default(),
+                        &relation,
+                        &confidence,
+                        document.directed.then_some(EndpointDirection::Incoming),
+                    );
+                }
+                record_community_connectivity(
+                    &mut community_connectivity,
+                    node_communities.get(edge.source.as_str()).copied(),
+                    node_communities.get(edge.target.as_str()).copied(),
+                    &relation,
+                    document.directed,
                 );
             }
-            record_community_connectivity(
-                &mut community_connectivity,
-                node_communities.get(edge.source.as_str()).copied(),
-                node_communities.get(edge.target.as_str()).copied(),
-                &relation,
-                document.directed,
-            );
         }
         Self {
             nodes: &document.nodes,
@@ -3005,14 +3010,26 @@ impl<'a> ReportGraph<'a> {
             || (label.ends_with("()") && self.degree(id) <= 1)
     }
 
-    fn is_pipe_table_structure_node_id(&self, id: &str) -> bool {
-        self.positions.get(id).is_some_and(|node| {
-            matches!(
-                node.string("document_kind").as_str(),
-                "pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell"
-            )
-        })
+    fn is_document_table_node_id(&self, id: &str) -> bool {
+        self.positions
+            .get(id)
+            .is_some_and(|node| node.is_table_navigation_node())
     }
+}
+
+fn zero_topology_document_containment(
+    edge: &EdgeRecord,
+    positions: &HashMap<&str, &NodeRecord>,
+) -> bool {
+    if edge.relation() != "contains" {
+        return false;
+    }
+    positions
+        .get(edge.source.as_str())
+        .is_some_and(|node| node.is_table_navigation_node())
+        || positions
+            .get(edge.target.as_str())
+            .is_some_and(|node| node.is_table_navigation_node())
 }
 
 #[derive(Clone, Copy)]

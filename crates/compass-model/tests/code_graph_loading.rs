@@ -153,12 +153,70 @@ fn strict_loading_rejects_pre_contract_and_unknown_graphs() -> Result<(), Box<dy
 
     fs::write(
         &graph_path,
-        r#"{"directed":true,"multigraph":true,"graph":{"schema":"compass.graph/2"},"nodes":[],"links":[]}"#,
+        r#"{"directed":true,"multigraph":true,"graph":{"schema":"compass.graph/3"},"nodes":[],"links":[]}"#,
     )?;
     assert!(matches!(
         GraphDocument::load(&graph_path),
-        Err(GraphError::UnsupportedGraphSchema { found: Some(schema) }) if schema == "compass.graph/2"
+        Err(GraphError::UnsupportedGraphSchema { found: Some(schema) }) if schema == "compass.graph/3"
     ));
+    Ok(())
+}
+
+#[test]
+fn strict_loading_accepts_current_graph_v1() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    let build = BuildMetadata {
+        builder_version: "test".to_owned(),
+        schema_fingerprint: "schema".to_owned(),
+        source_tree_digest: "tree".to_owned(),
+        configuration_digest: "config".to_owned(),
+        generation_id: "generation".to_owned(),
+        source_commit: None,
+    };
+    fs::write(
+        &graph_path,
+        serde_json::to_vec(&GraphDocument::empty_v1(build))?,
+    )?;
+    let loaded = GraphDocument::load(&graph_path)?;
+    assert_eq!(loaded.graph.schema, "compass.graph/1");
+    Ok(())
+}
+
+#[test]
+fn graph_v1_rejects_normalization_only_document_details() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    let mut value = serde_json::to_value(document())?;
+    value["nodes"] = serde_json::json!([{
+        "id": "document:normalization-only",
+        "kind": "resource",
+        "name": "Heading",
+        "qualifiedName": "Guide::heading#heading",
+        "details": {
+            "type": "document",
+            "data": {
+                "format": "markdown",
+                "role": "heading",
+                "ordinal": 0,
+                "significance": "content"
+            }
+        },
+        "evidence": []
+    }]);
+    fs::write(&graph_path, serde_json::to_vec(&value)?)?;
+
+    let error = match GraphDocument::load(&graph_path) {
+        Ok(_) => return Err("normalization-only document details were published".into()),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("normalization-only document details in compass.graph/1"),
+        "{error}"
+    );
     Ok(())
 }
 

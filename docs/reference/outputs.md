@@ -267,8 +267,8 @@ json` compares these exact IDs across immutable realizations; realizations
 without the sidecar are counted as observations without graph insights.
 
 Community evidence labels prefer a meaningful symbol or document heading over
-Markdown pipe-table parser blocks, even when a table container has more
-structural edges. A community containing only pipe-table blocks receives a
+Markdown semantic table navigation records, even when a table container has more
+structural edges. A community containing only table navigation records receives a
 source-anchored `Table (path:line)` label. When other communities share a hub
 name, Compass adds a compact source or wiring-site anchor and, only if needed,
 the graph-local community ID. These labels are deterministic navigation aids,
@@ -293,7 +293,7 @@ completeness, overview omissions, and architecture quality are separate
 signals.
 
 The Architecture Map and Community Directory omit communities made entirely
-of Markdown pipe-table parser blocks. Those communities count toward the
+of Markdown table navigation records. Those communities count toward the
 report's omitted-community coverage and their source-backed nodes remain in
 the graph; the report does not present parser partitions as architectural
 subsystems.
