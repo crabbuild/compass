@@ -5,6 +5,7 @@ use crate::facts::stamp_source_range;
 use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::{Node, Parser};
+use tree_sitter_language_pack::{DataNode, DataNodeKind, ProcessConfig};
 use tree_sitter_md::{INLINE_LANGUAGE, LANGUAGE};
 
 const FRONTMATTER_MAX_BYTES: usize = 64 * 1024;
@@ -14,6 +15,8 @@ const MAX_DIAGNOSTICS: usize = 256;
 const MAX_METADATA_KEYS: usize = 256;
 const MAX_METADATA_STRING_BYTES: usize = 16 * 1024;
 const MAX_METADATA_ARRAY_ITEMS: usize = 256;
+const MAX_METADATA_DEPTH: usize = 12;
+const MAX_METADATA_GRAPH_NODES: usize = 512;
 const MAX_LABEL_CHARS: usize = 512;
 const MAX_TABLE_COLUMNS: usize = 128;
 const MAX_TABLE_ROWS: usize = 10_000;
@@ -57,7 +60,7 @@ pub(crate) fn extract_source(
             detail: error.to_string(),
         })?;
 
-    let (metadata, frontmatter_diagnostic) = parse_frontmatter(source);
+    let (frontmatter, frontmatter_diagnostic) = parse_frontmatter(source);
     let stem = crate::file_stem(path);
     let file_id = crate::make_id(&[source_file]);
     let line_starts = newline_offsets(source);
@@ -94,7 +97,15 @@ pub(crate) fn extract_source(
         document_reference_limit_reported: false,
     };
 
-    state.add_root(file_id, metadata);
+    state.add_root(
+        file_id,
+        frontmatter
+            .as_ref()
+            .map(|frontmatter| frontmatter.metadata.clone()),
+    );
+    if let Some(frontmatter) = frontmatter {
+        state.add_frontmatter_nodes(frontmatter.facts);
+    }
     if let Some(diagnostic) = frontmatter_diagnostic {
         state.add_diagnostic(diagnostic);
     }
@@ -235,6 +246,26 @@ struct DocumentTargetHint {
     path: String,
     extension_inferred: bool,
     root_relative: bool,
+}
+
+struct FrontmatterExtraction {
+    metadata: Map<String, Value>,
+    facts: Vec<FrontmatterFact>,
+}
+
+struct FrontmatterFact {
+    key: String,
+    key_path: String,
+    parent_path: Option<String>,
+    value: Value,
+    start_byte: usize,
+    end_byte: usize,
+}
+
+#[derive(Default)]
+struct MetadataBudget {
+    keys: usize,
+    array_items: usize,
 }
 
 #[derive(Clone)]
@@ -504,15 +535,23 @@ impl State<'_, '_> {
     fn add_root(&mut self, id: String, metadata: Option<Map<String, Value>>) {
         self.seen_nodes.insert(id.clone());
         let mut attributes = Map::new();
+        let source_name = self
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let label = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(bounded_label)
+            .unwrap_or_else(|| source_name.to_owned());
+        attributes.insert("label".to_owned(), Value::String(label));
         attributes.insert(
-            "label".to_owned(),
-            Value::String(
-                self.path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default()
-                    .to_owned(),
-            ),
+            "qualified_name".to_owned(),
+            Value::String(self.source_file.clone()),
         );
         attributes.insert("file_type".to_owned(), Value::String("document".to_owned()));
         attributes.insert(
@@ -538,6 +577,98 @@ impl State<'_, '_> {
             attributes,
         });
         self.file_id = id;
+    }
+
+    fn add_frontmatter_nodes(&mut self, facts: Vec<FrontmatterFact>) {
+        let mut ids = HashMap::new();
+        for fact in facts {
+            let id = crate::make_id(&[&self.source_file, "markdown_frontmatter", &fact.key_path]);
+            let parent = fact
+                .parent_path
+                .as_ref()
+                .and_then(|path| ids.get(path))
+                .cloned()
+                .unwrap_or_else(|| self.file_id.clone());
+            let mut attributes = Map::new();
+            attributes.insert(
+                "symbol_kind".to_owned(),
+                Value::String("config_key".to_owned()),
+            );
+            attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+            attributes.insert(
+                "label".to_owned(),
+                Value::String(frontmatter_fact_label(&fact.key, &fact.value)),
+            );
+            attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!("frontmatter{}", fact.key_path)),
+            );
+            attributes.insert("key_path".to_owned(), Value::String(fact.key_path.clone()));
+            attributes.insert(
+                "format".to_owned(),
+                Value::String("yaml_frontmatter".to_owned()),
+            );
+            attributes.insert(
+                "namespace".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
+            attributes.insert(
+                "source_file".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
+            attributes.insert(
+                "source_location".to_owned(),
+                Value::String(format!("L{}", self.line_at(fact.start_byte))),
+            );
+            attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
+            attributes.insert(
+                "rule".to_owned(),
+                Value::String("markdown-frontmatter-key".to_owned()),
+            );
+            stamp_source_range_indexed(
+                &mut attributes,
+                self.source,
+                &self.line_starts,
+                fact.start_byte,
+                fact.end_byte,
+            );
+            self.seen_nodes.insert(id.clone());
+            self.extraction.nodes.push(NodeRecord {
+                id: id.clone(),
+                attributes,
+            });
+            self.add_frontmatter_relation(&parent, &id, fact.start_byte, fact.end_byte);
+            ids.insert(fact.key_path, id);
+        }
+    }
+
+    fn add_frontmatter_relation(&mut self, source: &str, target: &str, start: usize, end: usize) {
+        let mut attributes = Map::new();
+        attributes.insert("relation".to_owned(), Value::String("contains".to_owned()));
+        attributes.insert(
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        );
+        attributes.insert(
+            "source_file".to_owned(),
+            Value::String(self.source_file.clone()),
+        );
+        attributes.insert(
+            "source_location".to_owned(),
+            Value::String(format!("L{}", self.line_at(start))),
+        );
+        attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
+        attributes.insert(
+            "rule".to_owned(),
+            Value::String("markdown-frontmatter-containment".to_owned()),
+        );
+        stamp_source_range_indexed(&mut attributes, self.source, &self.line_starts, start, end);
+        attributes.insert("weight".to_owned(), json!(1.0));
+        self.extraction.edges.push(EdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes,
+        });
     }
 
     fn add_diagnostic(&mut self, diagnostic: String) {
@@ -2387,7 +2518,7 @@ impl State<'_, '_> {
     }
 }
 
-fn parse_frontmatter(source: &[u8]) -> (Option<Map<String, Value>>, Option<String>) {
+fn parse_frontmatter(source: &[u8]) -> (Option<FrontmatterExtraction>, Option<String>) {
     let Some((first_end, first_line)) = next_line(source, 0) else {
         return (None, None);
     };
@@ -2419,10 +2550,18 @@ fn parse_frontmatter(source: &[u8]) -> (Option<Map<String, Value>>, Option<Strin
                     Some("Markdown frontmatter aliases and tags are not supported".to_owned()),
                 );
             }
-            let yaml = String::from_utf8_lossy(yaml);
-            return match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml) {
+            let Ok(yaml) = std::str::from_utf8(yaml) else {
+                return (
+                    None,
+                    Some("Markdown frontmatter must be valid UTF-8".to_owned()),
+                );
+            };
+            return match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml) {
                 Ok(value) => match yaml_metadata(&value) {
-                    Ok(metadata) => (Some(metadata), None),
+                    Ok(metadata) => match frontmatter_facts(yaml, first_end, &metadata) {
+                        Ok(facts) => (Some(FrontmatterExtraction { metadata, facts }), None),
+                        Err(diagnostic) => (None, Some(diagnostic)),
+                    },
                     Err(diagnostic) => (None, Some(diagnostic.to_owned())),
                 },
                 Err(_) => (
@@ -2491,45 +2630,31 @@ fn yaml_metadata(value: &serde_yaml_ng::Value) -> Result<Map<String, Value>, &'s
     let serde_yaml_ng::Value::Mapping(mapping) = value else {
         return Err("Markdown frontmatter must be a mapping");
     };
-    if mapping.len() > MAX_METADATA_KEYS {
-        return Err("Markdown frontmatter has too many keys");
+    let mut budget = MetadataBudget::default();
+    yaml_mapping(mapping, 0, &mut budget)
+}
+
+fn yaml_mapping(
+    mapping: &serde_yaml_ng::Mapping,
+    depth: usize,
+    budget: &mut MetadataBudget,
+) -> Result<Map<String, Value>, &'static str> {
+    if depth > MAX_METADATA_DEPTH {
+        return Err("Markdown frontmatter exceeds the nesting-depth limit");
     }
     let mut entries = Vec::with_capacity(mapping.len());
     for (key, value) in mapping {
         let serde_yaml_ng::Value::String(key) = key else {
             return Err("Markdown frontmatter keys must be strings");
         };
+        budget.keys = budget.keys.saturating_add(1);
+        if budget.keys > MAX_METADATA_KEYS {
+            return Err("Markdown frontmatter has too many keys");
+        }
         if key.len() > MAX_METADATA_STRING_BYTES {
             return Err("Markdown frontmatter key exceeds the byte limit");
         }
-        let json_value = match value {
-            serde_yaml_ng::Value::Null => Value::Null,
-            serde_yaml_ng::Value::Bool(value) => Value::Bool(*value),
-            serde_yaml_ng::Value::Number(value) => {
-                serde_json::to_value(value).map_err(|_| "Markdown frontmatter number is invalid")?
-            }
-            serde_yaml_ng::Value::String(value) => {
-                if value.len() > MAX_METADATA_STRING_BYTES {
-                    return Err("Markdown frontmatter value exceeds the byte limit");
-                }
-                Value::String(value.clone())
-            }
-            serde_yaml_ng::Value::Sequence(values) => {
-                if values.len() > MAX_METADATA_ARRAY_ITEMS {
-                    return Err("Markdown frontmatter array exceeds the item limit");
-                }
-                let mut output = Vec::with_capacity(values.len());
-                for value in values {
-                    let scalar = yaml_scalar(value)
-                        .ok_or("Markdown frontmatter arrays must contain scalars")?;
-                    output.push(scalar);
-                }
-                Value::Array(output)
-            }
-            serde_yaml_ng::Value::Mapping(_) | serde_yaml_ng::Value::Tagged(_) => {
-                return Err("Markdown frontmatter nested values are not supported");
-            }
-        };
+        let json_value = yaml_value(value, depth.saturating_add(1), budget)?;
         entries.push((key.clone(), json_value));
     }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
@@ -2540,16 +2665,216 @@ fn yaml_metadata(value: &serde_yaml_ng::Value) -> Result<Map<String, Value>, &'s
     Ok(output)
 }
 
-fn yaml_scalar(value: &serde_yaml_ng::Value) -> Option<Value> {
-    match value {
-        serde_yaml_ng::Value::Null => Some(Value::Null),
-        serde_yaml_ng::Value::Bool(value) => Some(Value::Bool(*value)),
-        serde_yaml_ng::Value::Number(value) => serde_json::to_value(value).ok(),
-        serde_yaml_ng::Value::String(value) if value.len() <= MAX_METADATA_STRING_BYTES => {
-            Some(Value::String(value.clone()))
-        }
-        _ => None,
+fn yaml_value(
+    value: &serde_yaml_ng::Value,
+    depth: usize,
+    budget: &mut MetadataBudget,
+) -> Result<Value, &'static str> {
+    if depth > MAX_METADATA_DEPTH {
+        return Err("Markdown frontmatter exceeds the nesting-depth limit");
     }
+    match value {
+        serde_yaml_ng::Value::Null => Ok(Value::Null),
+        serde_yaml_ng::Value::Bool(value) => Ok(Value::Bool(*value)),
+        serde_yaml_ng::Value::Number(value) => {
+            serde_json::to_value(value).map_err(|_| "Markdown frontmatter number is invalid")
+        }
+        serde_yaml_ng::Value::String(value) => {
+            if value.len() > MAX_METADATA_STRING_BYTES {
+                return Err("Markdown frontmatter value exceeds the byte limit");
+            }
+            Ok(Value::String(value.clone()))
+        }
+        serde_yaml_ng::Value::Sequence(values) => {
+            budget.array_items = budget.array_items.saturating_add(values.len());
+            if values.len() > MAX_METADATA_ARRAY_ITEMS
+                || budget.array_items > MAX_METADATA_ARRAY_ITEMS
+            {
+                return Err("Markdown frontmatter array exceeds the item limit");
+            }
+            values
+                .iter()
+                .map(|value| yaml_value(value, depth.saturating_add(1), budget))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array)
+        }
+        serde_yaml_ng::Value::Mapping(mapping) => {
+            yaml_mapping(mapping, depth.saturating_add(1), budget).map(Value::Object)
+        }
+        serde_yaml_ng::Value::Tagged(_) => Err("Markdown frontmatter YAML tags are not supported"),
+    }
+}
+
+fn frontmatter_facts(
+    yaml: &str,
+    source_offset: usize,
+    metadata: &Map<String, Value>,
+) -> Result<Vec<FrontmatterFact>, String> {
+    let config = ProcessConfig::new("yaml")
+        .minimal()
+        .with_data_extraction(true);
+    let parsed = tree_sitter_language_pack::process(yaml, &config)
+        .map_err(|error| format!("Markdown frontmatter source anchoring failed: {error}"))?;
+    let root = parsed
+        .data
+        .ok_or_else(|| "Markdown frontmatter source anchoring produced no data".to_owned())?;
+    let root_value = Value::Object(metadata.clone());
+    let mut facts = Vec::new();
+    let mut seen_paths = HashSet::new();
+    collect_frontmatter_facts(
+        &root.children,
+        "",
+        None,
+        &root_value,
+        source_offset,
+        yaml.len(),
+        &mut seen_paths,
+        &mut facts,
+    )?;
+    if !metadata.is_empty() && facts.is_empty() {
+        return Err("Markdown frontmatter keys could not be source-anchored".to_owned());
+    }
+    Ok(facts)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_frontmatter_facts(
+    nodes: &[DataNode],
+    parent_path: &str,
+    parent_fact_path: Option<&str>,
+    root: &Value,
+    source_offset: usize,
+    yaml_len: usize,
+    seen_paths: &mut HashSet<String>,
+    facts: &mut Vec<FrontmatterFact>,
+) -> Result<(), &'static str> {
+    for node in nodes {
+        let Some(segment) = node.key.as_deref() else {
+            continue;
+        };
+        let key_path = frontmatter_key_path(parent_path, segment);
+        let Some(value) = json_pointer_value(root, &key_path) else {
+            return Err("Markdown frontmatter syntax and normalized keys disagree");
+        };
+        if !seen_paths.insert(key_path.clone()) {
+            return Err("Markdown frontmatter contains a duplicate key path");
+        }
+        let scalar_sequence_item = node.kind == DataNodeKind::Sequence
+            && node.children.is_empty()
+            && !matches!(value, Value::Array(_) | Value::Object(_));
+        let emitted_path = if scalar_sequence_item {
+            parent_fact_path.map(str::to_owned)
+        } else {
+            if facts.len() >= MAX_METADATA_GRAPH_NODES {
+                return Err("Markdown frontmatter graph-node limit exceeded");
+            }
+            if node.span.start_byte >= node.span.end_byte || node.span.end_byte > yaml_len {
+                return Err("Markdown frontmatter contains an invalid source range");
+            }
+            facts.push(FrontmatterFact {
+                key: if node.kind == DataNodeKind::Sequence {
+                    segment
+                        .parse::<usize>()
+                        .ok()
+                        .map_or_else(|| segment.to_owned(), |index| format!("item {}", index + 1))
+                } else {
+                    segment.to_owned()
+                },
+                key_path: key_path.clone(),
+                parent_path: parent_fact_path.map(str::to_owned),
+                value: value.clone(),
+                start_byte: source_offset.saturating_add(node.span.start_byte),
+                end_byte: source_offset.saturating_add(node.span.end_byte),
+            });
+            Some(key_path.clone())
+        };
+        collect_frontmatter_facts(
+            &node.children,
+            &key_path,
+            emitted_path.as_deref(),
+            root,
+            source_offset,
+            yaml_len,
+            seen_paths,
+            facts,
+        )?;
+    }
+    Ok(())
+}
+
+fn frontmatter_key_path(parent: &str, segment: &str) -> String {
+    let escaped = segment.replace('~', "~0").replace('/', "~1");
+    if parent.is_empty() {
+        format!("/{escaped}")
+    } else {
+        format!("{parent}/{escaped}")
+    }
+}
+
+fn json_pointer_value<'value>(root: &'value Value, pointer: &str) -> Option<&'value Value> {
+    root.pointer(pointer)
+}
+
+fn frontmatter_fact_label(key: &str, value: &Value) -> String {
+    let semantic_key = key.to_ascii_lowercase().replace(['-', '_'], "");
+    let show_value = matches!(
+        semantic_key.as_str(),
+        "title"
+            | "tag"
+            | "tags"
+            | "alias"
+            | "aliases"
+            | "author"
+            | "authors"
+            | "description"
+            | "summary"
+            | "category"
+            | "categories"
+            | "layout"
+            | "status"
+            | "draft"
+            | "date"
+            | "published"
+            | "updated"
+            | "slug"
+            | "permalink"
+            | "navlabel"
+            | "contenttype"
+            | "audience"
+            | "owner"
+            | "owners"
+    );
+    let Some(summary) = show_value
+        .then(|| frontmatter_value_summary(value))
+        .flatten()
+    else {
+        return bounded_label(key);
+    };
+    bounded_label(&format!("{key}: {summary}"))
+}
+
+fn frontmatter_value_summary(value: &Value) -> Option<String> {
+    let summary = match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => compact_label(value),
+        Value::Array(values) if values.len() <= 16 => {
+            let values = values
+                .iter()
+                .map(|value| match value {
+                    Value::Null => Some("null".to_owned()),
+                    Value::Bool(value) => Some(value.to_string()),
+                    Value::Number(value) => Some(value.to_string()),
+                    Value::String(value) => Some(compact_label(value)),
+                    Value::Array(_) | Value::Object(_) => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            values.join(", ")
+        }
+        Value::Array(_) | Value::Object(_) => return None,
+    };
+    (!summary.is_empty()).then(|| truncate_utf8(&summary, MAX_LABEL_CHARS))
 }
 
 fn next_line(source: &[u8], start: usize) -> Option<(usize, &[u8])> {

@@ -125,6 +125,35 @@ def source_table(root: Path, expected: dict[str, Any]) -> tuple[int, int]:
     fail("source_table", str(expected.get("id")), "declared pipe table not found in source")
 
 
+def source_frontmatter_paths(source: bytes) -> set[str]:
+    lines = source.decode("utf-8").splitlines()
+    if not lines or lines[0].lstrip("\ufeff") != "---":
+        return set()
+    paths: set[str] = set()
+    stack: list[tuple[int, str]] = []
+    for line in lines[1:]:
+        if line == "---":
+            return paths
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if stripped.startswith("-") or ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        key = key.strip().strip("\"'")
+        if not key:
+            continue
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        segment = key.replace("~", "~0").replace("/", "~1")
+        path = (stack[-1][1] if stack else "") + "/" + segment
+        paths.add(path)
+        if not value.strip():
+            stack.append((indent, path))
+    fail("source_frontmatter", "source", "frontmatter has no closing delimiter")
+
+
 def load_sources(root: Path, graph: dict[str, Any]) -> dict[str, bytes]:
     sources: dict[str, bytes] = {}
     for node in graph.get("nodes", []):
@@ -141,7 +170,7 @@ def load_sources(root: Path, graph: dict[str, Any]) -> dict[str, bytes]:
 def assert_markdown_quality(
     graph: dict[str, Any], manifest: dict[str, Any], fixture_root: Path
 ) -> dict[str, Any]:
-    if manifest.get("schema") != "compass.markdown-graph-qualification/2":
+    if manifest.get("schema") != "compass.markdown-graph-qualification/3":
         fail("manifest_schema", "manifest", repr(manifest.get("schema")))
     if graph.get("graph", {}).get("schema") != manifest.get("graphSchema"):
         fail("graph_schema", "graph", repr(graph.get("graph", {}).get("schema")))
@@ -175,6 +204,77 @@ def assert_markdown_quality(
         score += 1
     if any(node.get("name") and terminal_role(node) is None for node in markdown_nodes):
         score += 1
+
+    frontmatter_count = 0
+    for expected in manifest.get("frontmatter", []):
+        identity = str(expected.get("id", "<missing>"))
+        source_name = str(expected.get("source"))
+        source = sources.get(source_name)
+        if source is None:
+            fail("frontmatter_source", identity, f"source {source_name!r} is absent")
+        source_paths = source_frontmatter_paths(source)
+        documents = [
+            node for node in markdown_nodes
+            if source_file(node) == source_name
+            and node.get("kind") == "resource"
+            and node.get("qualifiedName") == source_name
+        ]
+        if len(documents) != 1:
+            fail("frontmatter_document", identity, f"expected one document, found {len(documents)}")
+        if documents[0].get("name") != expected.get("documentName"):
+            fail("frontmatter_title", identity, repr(documents[0].get("name")))
+        config_nodes = {
+            str(node.get("qualifiedName")): node
+            for node in markdown_nodes
+            if source_file(node) == source_name and node.get("kind") == "config_key"
+        }
+        for path in expected.get("paths", []):
+            qualified = str(path.get("qualifiedName"))
+            node = config_nodes.get(qualified)
+            if node is None:
+                fail("frontmatter_path", identity, f"missing {qualified!r}")
+            key_path = path.get("keyPath")
+            if key_path not in source_paths:
+                fail("frontmatter_source_path", identity, f"{key_path!r} is absent from source")
+            details = node.get("details")
+            data = details.get("data") if isinstance(details, dict) else None
+            if (
+                not isinstance(data, dict)
+                or details.get("type") != "config"
+                or data.get("format") != "yaml_frontmatter"
+                or data.get("keyPath") != key_path
+            ):
+                fail("frontmatter_details", qualified, repr(details))
+            if node.get("name") != path.get("name"):
+                fail("frontmatter_label", qualified, repr(node.get("name")))
+            start, end = anchor(node, qualified, sources)
+            first_line = source[start:end].splitlines()[0].decode("utf-8").strip()
+            terminal = str(key_path).rsplit("/", 1)[-1].replace("~1", "/").replace("~0", "~")
+            if not first_line.startswith(terminal + ":"):
+                fail("frontmatter_anchor", qualified, repr(first_line))
+            evidence = node.get("evidence")
+            if (
+                not isinstance(evidence, list)
+                or not evidence
+                or evidence[0].get("origin") != "config"
+            ):
+                fail("frontmatter_provenance", qualified, repr(evidence))
+            parent_qualified = path.get("parent")
+            parent = config_nodes.get(str(parent_qualified)) if parent_qualified else documents[0]
+            if parent is None or not any(
+                edge.get("kind") == "contains"
+                and edge.get("source") == parent.get("id")
+                and edge.get("target") == node.get("id")
+                for edge in links
+            ):
+                fail("frontmatter_containment", qualified, repr(parent_qualified))
+            frontmatter_count += 1
+        encoded_graph = json.dumps(graph, sort_keys=True)
+        for forbidden in expected.get("forbiddenGraphValues", []):
+            if str(forbidden) in encoded_graph:
+                fail("frontmatter_value_disclosure", identity, repr(forbidden))
+    if frontmatter_count:
+        score += 5
 
     table_count = 0
     row_count = 0
@@ -285,6 +385,7 @@ def assert_markdown_quality(
         "rows": row_count,
         "cells": cell_count,
         "exactReferences": references,
+        "frontmatterKeys": frontmatter_count,
     }
 
 

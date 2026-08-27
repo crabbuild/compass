@@ -14,7 +14,7 @@ mode, terminal-name fallback, or runtime dependency on Graphify.
 ## Evidence contract
 
 The serialized evidence schema is `compass.languages.evidence/2`. The
-extraction cache identity is `compass.languages.extraction/3`; changing either
+extraction cache identity is `compass.languages.extraction/4`; changing either
 major version invalidates older artifacts instead of attempting an implicit
 translation.
 

@@ -33,7 +33,7 @@ bounded source bytes
         v
 compass-languages::Engine
         |
-        +--> pinned Markdown block/inline grammars
+        +--> pinned Markdown block/inline + YAML grammars
         +--> pinned HTML grammar and shared renderer
         +--> bounded frontmatter/entity/URL decoders
         |
@@ -54,11 +54,13 @@ source ranges. The standalone compatibility path still accepts a `Path` and
 reads it once.
 
 The Markdown grammars are statically linked through the pinned `tree-sitter-md`
-crate and HTML uses the exact pinned `tree-sitter-html` crate. The vendored
-language pack remains the owner for the general language registry; the direct
-HTML binding is deliberately parser-only because this release's pack build
-does not expose an HTML static loader. Neither path downloads a grammar at
-runtime, invokes Python, calls a model, or follows a URL.
+crate, YAML frontmatter source anchoring uses the pinned statically linked YAML
+grammar in the vendored language pack, and HTML uses the exact pinned
+`tree-sitter-html` crate. The vendored language pack remains the owner for the
+general language registry; the direct HTML binding is deliberately parser-only
+because this release's pack build does not expose an HTML static loader. None
+of these paths downloads a grammar at runtime, invokes Python, calls a model,
+or follows a URL.
 
 ## Markdown projection
 
@@ -66,7 +68,8 @@ Every file has one root node with:
 
 - `document_format: "markdown"` and `document_kind: "document"`;
 - the source file and exact whole-document byte/line range;
-- deterministic `document_metadata` when bounded frontmatter is valid.
+- deterministic nested `document_metadata` when bounded frontmatter is valid;
+- source-anchored `config_key` nodes and containment for frontmatter paths.
 
 The structural projection emits ordered nodes for headings, paragraphs, lists
 and list items, block quotes, thematic breaks, fenced and indented code,
@@ -89,11 +92,21 @@ published as blocks.
 
 Frontmatter is recognized only when the source begins with a whole-line `---`
 (an optional UTF-8 BOM is accepted) and a whole-line closing delimiter appears
-within 64 KiB. It is parsed with the workspace YAML implementation and only
-JSON-compatible scalars and bounded scalar arrays are published. Mappings,
-aliases, tags, oversized values, and arrays containing non-scalars produce a
-bounded diagnostic and do not become graph attributes. Keys are deterministic
-and capped at 256 entries; individual strings and arrays are bounded.
+within 64 KiB. The workspace YAML implementation validates and normalizes
+JSON-compatible scalars, nested mappings, and arrays. A second, statically
+linked YAML syntax pass must source-anchor the same canonical paths before any
+metadata is accepted. Disagreement, duplicate paths, invalid UTF-8, non-string
+keys, aliases, tags, oversized values, or exceeded key/item/depth/node budgets
+produce a bounded diagnostic and publish no partial metadata graph.
+
+The raw root retains the bounded nested `document_metadata` map. Graph-v1
+publication expresses that structure with the existing `ConfigKey` contract:
+canonical JSON Pointer key paths, `yaml_frontmatter` format, Config provenance,
+stable source-file/path identity, exact pair/item ranges, and nested `contains`
+edges. Only an allowlist of semantic content fields receives a value summary in
+the node display name; generic and credential-shaped values are never copied
+into the public graph. This is producer logic inside `compass.graph/1`, not a
+new graph wire field.
 
 Frontmatter is metadata, not visible Markdown body text. Body node ranges still
 point into the original bytes, including CRLF and non-UTF-8 input (labels use a

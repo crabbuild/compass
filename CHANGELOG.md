@@ -5,8 +5,11 @@
 - Harden Markdown intelligence within `compass.graph/1`. Pipe tables retain
   table, header, row, and cell nodes while gaining stable semantic identities,
   header-qualified labels, exact cell-owned references, bounded per-table
-  extraction, and topology-aware containment handling. Published document
-  nodes remain graph-v1 resources; no graph schema migration is required.
+  extraction, and topology-aware containment handling. Nested YAML frontmatter
+  now publishes exact source-backed config-key hierarchies with stable escaped
+  paths, conservative semantic labels, bounded parsing, and fail-closed unsafe
+  syntax handling. Published document nodes remain graph-v1 resources; no graph
+  schema migration is required.
 
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
@@ -18,7 +21,7 @@
   now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized
   evidence envelope moves from `adapter` to `pipeline`, replaces `profile`
   with `qualification`, and replaces the producer string with `emitter`.
-  Universal evidence schema is now `/2` and extraction semantics is `/3`, so
+  Universal evidence schema is now `/2` and extraction semantics is `/4`, so
   pre-refactor caches and evidence artifacts are intentionally rebuilt.
   Qualification manifests, candidate exports, and TypeScript scorecards now
   use version-2 schemas and call their language identity `producer`.

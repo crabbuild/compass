@@ -3,6 +3,8 @@ use std::fs;
 
 use compass_languages::Engine;
 
+const MAX_TEST_FRONTMATTER_DEPTH: usize = 13;
+
 #[test]
 fn markdown_extracts_heading_hierarchy_and_only_local_document_links() -> Result<(), Box<dyn Error>>
 {
@@ -157,6 +159,18 @@ fn markdown_source_path_supports_frontmatter_blocks_and_section_links() -> Resul
 title: Guide
 tags: [rust, graph]
 draft: false
+site:
+  navigation:
+    label: Graph guide
+routes:
+  "docs/url": /guide
+authors:
+  - name: Ada
+    roles: [editor, reviewer]
+reviewers: [{name: Grace, team: Docs}]
+aliases:
+  - Compass guide
+  - Graph handbook
 ---
 # Intro {#start}
 
@@ -185,11 +199,90 @@ let hidden = "[not a link](ignored.md)";
         .first()
         .ok_or("missing Markdown document root")?;
     assert_eq!(root.string("document_format"), "markdown");
-    assert_eq!(root.attributes["document_metadata"]["title"], "Guide");
+    let metadata = root
+        .attributes
+        .get("document_metadata")
+        .unwrap_or_else(|| panic!("extensions={:#?}", extraction.extensions));
+    assert_eq!(metadata["title"], "Guide");
     assert_eq!(
         root.attributes["document_metadata"]["tags"],
         serde_json::json!(["rust", "graph"])
     );
+    assert_eq!(
+        root.attributes["document_metadata"]["site"]["navigation"]["label"],
+        "Graph guide"
+    );
+    assert_eq!(
+        root.attributes["document_metadata"]["authors"][0]["roles"],
+        serde_json::json!(["editor", "reviewer"])
+    );
+    assert_eq!(root.label(), "Guide");
+    assert_eq!(root.string("qualified_name"), "docs/guide.md");
+
+    let config_nodes = extraction
+        .nodes
+        .iter()
+        .filter(|node| node.string("symbol_kind") == "config_key")
+        .collect::<Vec<_>>();
+    for expected in [
+        "frontmatter/title",
+        "frontmatter/tags",
+        "frontmatter/site",
+        "frontmatter/site/navigation",
+        "frontmatter/site/navigation/label",
+        "frontmatter/routes",
+        "frontmatter/routes/docs~1url",
+        "frontmatter/authors",
+        "frontmatter/authors/0",
+        "frontmatter/authors/0/name",
+        "frontmatter/authors/0/roles",
+        "frontmatter/reviewers",
+        "frontmatter/reviewers/0",
+        "frontmatter/reviewers/0/name",
+        "frontmatter/reviewers/0/team",
+        "frontmatter/aliases",
+    ] {
+        assert!(
+            config_nodes
+                .iter()
+                .any(|node| node.string("qualified_name") == expected),
+            "missing {expected}: {config_nodes:#?}"
+        );
+    }
+    assert!(config_nodes.iter().all(|node| {
+        node.string("format") == "yaml_frontmatter"
+            && node.string("file_type") == "code"
+            && node.string("_origin") == "config"
+            && node
+                .attributes
+                .get("start_byte")
+                .and_then(serde_json::Value::as_u64)
+                .zip(
+                    node.attributes
+                        .get("end_byte")
+                        .and_then(serde_json::Value::as_u64),
+                )
+                .is_some_and(|(start, end)| start < end)
+    }));
+    let title = config_nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "frontmatter/title")
+        .ok_or("missing title metadata node")?;
+    assert_eq!(title.label(), "title: Guide");
+    let author = config_nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "frontmatter/authors/0")
+        .ok_or("missing author metadata node")?;
+    let author_name = config_nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "frontmatter/authors/0/name")
+        .ok_or("missing author name metadata node")?;
+    assert!(extraction.edges.iter().any(|edge| {
+        edge.source == author.id
+            && edge.target == author_name.id
+            && edge.string("relation") == "contains"
+            && edge.string("_origin") == "config"
+    }));
 
     let kinds = extraction
         .nodes
@@ -668,6 +761,72 @@ fn markdown_frontmatter_is_bounded_and_diagnosed_without_swallowing_body()
             .contains_key("document_metadata")
     );
     assert!(unsafe_yaml.nodes.iter().any(|node| node.label() == "Body"));
+
+    let duplicate = Engine::default().extract_source(
+        std::path::Path::new("guide.md"),
+        b"---\ntitle: first\ntitle: second\n---\n# Body\n",
+    )?;
+    assert!(
+        !duplicate.nodes[0]
+            .attributes
+            .contains_key("document_metadata")
+    );
+    assert!(
+        duplicate
+            .extensions
+            .get("markdown_diagnostics")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|diagnostics| diagnostics.iter().any(|value| value
+                .as_str()
+                .is_some_and(|message| message.contains("frontmatter"))))
+    );
+    assert!(duplicate.nodes.iter().any(|node| node.label() == "Body"));
+
+    let invalid_utf8 = Engine::default().extract_source(
+        std::path::Path::new("guide.md"),
+        b"---\ntitle: \xff\n---\n# Body\n",
+    )?;
+    assert!(
+        invalid_utf8
+            .extensions
+            .get("markdown_diagnostics")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|diagnostics| diagnostics.iter().any(|value| value
+                .as_str()
+                .is_some_and(|message| message.contains("valid UTF-8"))))
+    );
+    assert!(invalid_utf8.nodes.iter().any(|node| node.label() == "Body"));
+
+    let mut deeply_nested = String::from("---\n");
+    for depth in 0..=MAX_TEST_FRONTMATTER_DEPTH {
+        deeply_nested.push_str(&format!("{}level{depth}:\n", "  ".repeat(depth)));
+    }
+    deeply_nested.push_str(&format!(
+        "{}value: final\n---\n# Body\n",
+        "  ".repeat(MAX_TEST_FRONTMATTER_DEPTH + 1)
+    ));
+    let deeply_nested = Engine::default()
+        .extract_source(std::path::Path::new("guide.md"), deeply_nested.as_bytes())?;
+    assert!(
+        !deeply_nested.nodes[0]
+            .attributes
+            .contains_key("document_metadata")
+    );
+    assert!(
+        deeply_nested
+            .extensions
+            .get("markdown_diagnostics")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|diagnostics| diagnostics.iter().any(|value| value
+                .as_str()
+                .is_some_and(|message| message.contains("nesting-depth"))))
+    );
+    assert!(
+        deeply_nested
+            .nodes
+            .iter()
+            .any(|node| node.label() == "Body")
+    );
     Ok(())
 }
 

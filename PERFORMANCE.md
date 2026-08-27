@@ -32,7 +32,11 @@ The implementation bounds each table independently to 20,000 structural nodes,
 global limits. Exhausting a table budget emits explicit limit evidence and does
 not consume the budget needed to discover later headings. The graph-v1 fixture
 gate runs an independent source oracle for hierarchy, semantic labels, exact
-anchors, reference ownership, and published-schema integrity.
+anchors, reference ownership, and published-schema integrity. The same oracle
+checks frontmatter Config nodes, nested containment, stable canonical paths,
+Config provenance, value-independent identity, and the absence of unapproved
+generic values from graph labels. Frontmatter is capped at 64 KiB and its YAML
+syntax pass is linear in that bounded input.
 
 ## Incremental code-graph qualification
 

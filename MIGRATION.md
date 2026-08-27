@@ -80,7 +80,7 @@ dispatch as a missing deterministic fact.
 ## Universal evidence schema reset
 
 The universal evidence envelope is now `compass.languages.evidence/2` and the
-extraction semantics identity is `compass.languages.extraction/3`. The envelope
+extraction semantics identity is `compass.languages.extraction/4`. The envelope
 field is `pipeline` (with `qualification` and `emitter` metadata), replacing
 the provisional `adapter`/`profile`/`producer` shape. Compass intentionally
 does not translate or reuse pre-refactor universal evidence; run a forced
@@ -88,6 +88,11 @@ update to regenerate one coherent artifact set. Qualification manifests,
 candidate exports, and TypeScript scorecards likewise require their `/2`
 schemas and use `producer` for the language evidence identity; regenerate
 those audit inputs rather than trying to load the old field names.
+
+Version 4 also invalidates pre-enhancement Markdown caches so nested
+frontmatter can be republished as exact graph-v1 config nodes. Normal builds
+re-extract affected files automatically; no graph schema migration or manual
+artifact editing is required.
 
 ## Python project identity and stubs
 

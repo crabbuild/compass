@@ -1,7 +1,23 @@
 {
-  "schema": "compass.markdown-graph-qualification/2",
+  "schema": "compass.markdown-graph-qualification/3",
   "graphSchema": "compass.graph/1",
-  "minimumQualityScore": 12,
+  "minimumQualityScore": 17,
+  "frontmatter": [
+    {
+      "id": "qualification-guide-frontmatter",
+      "source": "fixtures/code-graph/qualification/guide.md",
+      "documentName": "Qualification Guide",
+      "paths": [
+        {"qualifiedName": "frontmatter/title", "keyPath": "/title", "name": "title: Qualification Guide"},
+        {"qualifiedName": "frontmatter/tags", "keyPath": "/tags", "name": "tags: markdown, graph"},
+        {"qualifiedName": "frontmatter/owners", "keyPath": "/owners", "name": "owners"},
+        {"qualifiedName": "frontmatter/owners/quality", "keyPath": "/owners/quality", "name": "quality", "parent": "frontmatter/owners"},
+        {"qualifiedName": "frontmatter/owners/quality/team", "keyPath": "/owners/quality/team", "name": "team", "parent": "frontmatter/owners/quality"},
+        {"qualifiedName": "frontmatter/api_token", "keyPath": "/api_token", "name": "api_token"}
+      ],
+      "forbiddenGraphValues": ["fixture-private-value"]
+    }
+  ],
   "tables": [
     {
       "id": "qualification-guide-table",
