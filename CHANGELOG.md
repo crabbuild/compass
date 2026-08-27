@@ -2,20 +2,6 @@
 
 ## Unreleased
 
-- Harden Markdown intelligence within `compass.graph/1`. Pipe tables retain
-  table, header, row, and cell nodes while gaining stable semantic identities,
-  header-qualified labels, exact cell-owned references, bounded per-table
-  extraction, and topology-aware containment handling. Nested YAML frontmatter
-  now publishes exact source-backed config-key hierarchies with stable escaped
-  paths, conservative semantic labels, bounded parsing, and fail-closed unsafe
-  syntax handling. Published document nodes remain graph-v1 resources; no graph
-  schema migration is required.
-
-- Make community detail graphs easier to scan in both exported HTML and VS
-  Code by grouping node kinds into accessible color-and-shape families,
-  coloring edges by relationship purpose while retaining confidence strokes,
-  and showing a compact legend for the categories present in the subgraph.
-
 - Refactor universal language metadata around `UniversalEvidenceProducer` and
   `UniversalEvidencePipeline`. `UniversalCandidate`/`UniversalComplete` are
   now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized
@@ -71,6 +57,22 @@
   already materialized. Rebuilding does not order or allowlist Compass release
   numbers: it preserves matching user-selected options, replaces engine-owned
   fingerprint fields, and keeps original historical realizations immutable.
+
+## 0.3.22 - 2026-08-27
+
+- Harden Markdown intelligence within `compass.graph/1`. Pipe tables retain
+  table, header, row, and cell nodes while gaining stable semantic identities,
+  header-qualified labels, exact cell-owned references, bounded per-table
+  extraction, and topology-aware containment handling. Nested YAML frontmatter
+  now publishes exact source-backed config-key hierarchies with stable escaped
+  paths, conservative semantic labels, bounded parsing, and fail-closed unsafe
+  syntax handling. Published document nodes remain graph-v1 resources; no graph
+  schema migration is required.
+
+- Improve exported HTML and VS Code graph inspectors with deterministic incoming
+  and outgoing relationship groups, relationship summaries, direction counts,
+  neighbor focus controls, and clearer icon-backed Callers, Callees, and Impact
+  actions while preserving accessible labels and stable ordering.
 
 ## 0.3.21 - 2026-08-25
 
