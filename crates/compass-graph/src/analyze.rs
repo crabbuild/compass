@@ -1726,6 +1726,9 @@ impl<'a> AnalysisGraph<'a> {
                 right: *right,
                 record,
             });
+            if zero_topology_document_containment(record, nodes[*left], nodes[*right]) {
+                continue;
+            }
             let key = if document.directed || left <= right {
                 (*left, *right)
             } else {
@@ -1856,6 +1859,18 @@ fn is_json_key_node(node: &NodeRecord) -> bool {
     attribute(node, "source_file").is_some_and(|source| source.to_lowercase().ends_with(".json"))
         && JSON_NOISE_LABELS.contains(&node.label().trim().to_lowercase().as_str())
 }
+
+fn zero_topology_document_containment(
+    edge: &EdgeRecord,
+    source: &NodeRecord,
+    target: &NodeRecord,
+) -> bool {
+    if edge_string(edge, "relation") != "contains" {
+        return false;
+    }
+    source.is_table_navigation_node() || target.is_table_navigation_node()
+}
+
 fn attribute<'a>(node: &'a NodeRecord, key: &str) -> Option<&'a str> {
     match key {
         "source_file" => node.source_file(),

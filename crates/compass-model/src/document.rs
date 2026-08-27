@@ -20,6 +20,85 @@ pub struct NodeRecord {
 }
 
 impl NodeRecord {
+    /// Return the normalized document role when this compatibility node has
+    /// document semantics. Legacy parser-shaped roles are kept here as a
+    /// read-only adaptation detail so graph consumers do not duplicate syntax
+    /// vocabulary or treat it as product meaning.
+    #[must_use]
+    pub fn document_role(&self) -> Option<&str> {
+        self.attributes
+            .get("document_kind")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                let qualified_name = self
+                    .attributes
+                    .get("qualified_name")
+                    .or_else(|| self.attributes.get("qualifiedName"))
+                    .and_then(Value::as_str)?;
+                if qualified_name.contains("::pipe_table_cell#") {
+                    Some("pipe_table_cell")
+                } else if qualified_name.contains("::pipe_table_header#") {
+                    Some("pipe_table_header")
+                } else if qualified_name.contains("::pipe_table_row#") {
+                    Some("pipe_table_row")
+                } else if qualified_name.contains("::pipe_table#") {
+                    Some("pipe_table")
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Return the derived document significance used by consumer profiles.
+    /// Legacy records may not carry the field, so derive the same conservative
+    /// fallback as the typed graph adapter.
+    #[must_use]
+    pub fn document_significance(&self) -> Option<crate::code_graph::DocumentSignificance> {
+        let role = self.document_role()?;
+        let explicit = self
+            .attributes
+            .get("document_significance")
+            .and_then(Value::as_str);
+        Some(match explicit {
+            Some("container") => crate::code_graph::DocumentSignificance::Container,
+            Some("scaffolding") => crate::code_graph::DocumentSignificance::Scaffolding,
+            Some("content") => crate::code_graph::DocumentSignificance::Content,
+            _ => match role {
+                "list" | "block_quote" | "quote" | "table" => {
+                    crate::code_graph::DocumentSignificance::Container
+                }
+                "link_reference_definition" | "footnote_definition" => {
+                    crate::code_graph::DocumentSignificance::Scaffolding
+                }
+                _ => crate::code_graph::DocumentSignificance::Content,
+            },
+        })
+    }
+
+    /// Whether this node is one of the historical Markdown parser scaffolding
+    /// records. In strict graph/1 projections the role is recovered from the
+    /// extractor-owned qualified-name grammar rather than a new wire field.
+    #[must_use]
+    pub fn is_legacy_table_scaffolding(&self) -> bool {
+        matches!(
+            self.document_role(),
+            Some("pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell")
+        )
+    }
+
+    /// Whether this node is a compact semantic table or body-row record.
+    #[must_use]
+    pub fn is_semantic_table_structure(&self) -> bool {
+        matches!(self.document_role(), Some("table" | "table_row"))
+    }
+
+    /// Whether this node should stay out of architecture/topology summaries
+    /// while remaining available for navigation and detail inspection.
+    #[must_use]
+    pub fn is_table_navigation_node(&self) -> bool {
+        self.is_legacy_table_scaffolding() || self.is_semantic_table_structure()
+    }
+
     #[must_use]
     pub fn string(&self, key: &str) -> String {
         self.attributes
@@ -1807,7 +1886,9 @@ fn insert_optional_value(attributes: &mut Map<String, Value>, key: &str, value: 
 mod tests {
     use std::fs;
 
-    use super::{GraphDocument, affected_cache_path, query_cache_path, traversal_cache_path};
+    use super::{
+        GraphDocument, NodeRecord, affected_cache_path, query_cache_path, traversal_cache_path,
+    };
 
     #[test]
     fn omitted_multigraph_uses_networkx_legacy_default() {
@@ -1822,6 +1903,18 @@ mod tests {
             serde_json::from_str(r#"{"multigraph":false,"nodes":[{"id":"a"}],"links":[]}"#)
                 .unwrap_or_else(|_| std::process::abort());
         assert!(!document.multigraph);
+    }
+
+    #[test]
+    fn graph_v1_markdown_table_roles_are_derived_from_qualified_identity() {
+        let node: NodeRecord = serde_json::from_value(serde_json::json!({
+            "id": "cell",
+            "name": "Owner: compass-model",
+            "qualifiedName": "Ownership::pipe_table#1::pipe_table_row#graph-1::pipe_table_cell#2"
+        }))
+        .unwrap_or_else(|_| std::process::abort());
+        assert_eq!(node.document_role(), Some("pipe_table_cell"));
+        assert!(node.is_table_navigation_node());
     }
 
     #[test]

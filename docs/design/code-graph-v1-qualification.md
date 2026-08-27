@@ -65,8 +65,11 @@ The script:
 4. compares canonical graph bytes from clean, unchanged warm, forced, and
    edit-then-restore updates;
 5. verifies that the checked-in source fixtures were not changed;
-6. executes every semantic assertion over the restored production graph; and
-7. prints one canonical JSON summary to standard output.
+6. executes every semantic assertion over the restored production graph;
+7. derives Markdown table and reference expectations independently from the
+   fixture source, then checks graph-v1 roles, labels, hierarchy, and exact
+   anchors; and
+8. prints canonical machine summaries to standard output.
 
 Oracle self-tests and manifest-only validation can be run independently:
 

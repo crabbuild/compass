@@ -7,12 +7,14 @@ use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord, Registry};
 use compass_model::code_graph::{
     BuildMetadata, CommunityMetadata, ConfigNodeDetails, CoverageRecord, CoverageStatus,
-    DatabaseNodeDetails, DiagnosticSeverity, EdgeDetails, EdgeKind, EdgeRecord, ExtractionStatus,
-    FileNodeDetails, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
-    ImportExportNodeDetails, MessagingNodeDetails, NodeDetails, NodeKind, NodeRecord, NodeRole,
-    QueryNodeDetails, RenderEdgeDetails, RenderKind, ResourceKind, ResourceNodeDetails,
-    RouteEdgeDetails, RouteNodeDetails, RouteStage, RouteStageDetails, SchemaNodeDetails,
-    SymbolNodeDetails,
+    DatabaseNodeDetails, DiagnosticSeverity, DocumentFormat, DocumentNodeDetails,
+    DocumentReferenceResolution, DocumentRole, DocumentSignificance, DocumentTableCellDetails,
+    DocumentTableColumnDetails, DocumentTableDetails, DocumentTableRowDetails, EdgeDetails,
+    EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord, GraphDiagnostic,
+    GraphDocument, GraphMetadata, ImportExportNodeDetails, MessagingNodeDetails, NodeDetails,
+    NodeKind, NodeRecord, NodeRole, QueryNodeDetails, RenderEdgeDetails, RenderKind, ResourceKind,
+    ResourceNodeDetails, RouteEdgeDetails, RouteNodeDetails, RouteStage, RouteStageDetails,
+    SchemaNodeDetails, SymbolNodeDetails, TableAlignment, TableCellState,
 };
 use compass_model::identity::{
     database_entity_id, domain_id, edge_id, file_id, messaging_id, normalize_repository_path,
@@ -35,8 +37,10 @@ use serde_json::{Map, Value};
 use crate::inference::{InferenceLevel, prefilter_extraction_inference};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
-/// Version of the normalization and publication contract behind graph schema v1.
+/// Normalization/publication semantics used by `compass.graph/1`.
 pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/1";
+const MAX_DOCUMENT_REFERENCE_CANDIDATES: usize = 20;
+const MAX_DOCUMENT_REFERENCE_PROBES: usize = 100_000;
 use sha2::{Digest, Sha256};
 
 const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
@@ -47,6 +51,9 @@ const CANONICAL_EXTERNAL_SYMBOL: &str = "_canonical_external_symbol";
 const CANONICAL_RAW_ORDER: &str = "_compass_v1_canonical_raw_order";
 const COALESCED_EDGE_EVIDENCE: &str = "_coalesced_edge_evidence";
 const MAX_EXTERNAL_REFERENCE_DIAGNOSTICS: usize = 100;
+const MAX_DOCUMENT_TEXT_BYTES: usize = 4 * 1024;
+const MAX_DOCUMENT_TABLE_ITEMS: usize = 128;
+const MAX_DOCUMENT_REFERENCES: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PublicationMode {
@@ -1057,6 +1064,293 @@ fn finalize_prepared_edge(
     }
 }
 
+#[derive(Default)]
+struct DocumentReferenceIndex {
+    paths: BTreeMap<String, String>,
+    qualified_names: BTreeMap<String, Vec<String>>,
+    names: BTreeMap<String, Vec<String>>,
+}
+
+fn document_reference_index(
+    nodes: &HashMap<String, NodeRecord>,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> DocumentReferenceIndex {
+    let mut index = DocumentReferenceIndex::default();
+    for path in file_facts.keys() {
+        index.paths.insert(path.clone(), file_id(path));
+    }
+    for node in nodes.values() {
+        if node.kind == NodeKind::File {
+            if let Some(source) = node.source.as_ref() {
+                index.paths.insert(source.file.clone(), node.id.clone());
+            }
+            continue;
+        }
+        if node.kind == NodeKind::Resource {
+            continue;
+        }
+        index
+            .qualified_names
+            .entry(node.qualified_name.clone())
+            .or_default()
+            .push(node.id.clone());
+        index
+            .names
+            .entry(node.name.clone())
+            .or_default()
+            .push(node.id.clone());
+    }
+    for values in index
+        .qualified_names
+        .values_mut()
+        .chain(index.names.values_mut())
+    {
+        values.sort();
+        values.dedup();
+    }
+    index
+}
+
+fn document_reference_path(source_file: &str, spelling: &str) -> Option<String> {
+    let before_fragment = spelling.split_once('#').map_or(spelling, |(path, _)| path);
+    let path = before_fragment
+        .split_once('?')
+        .map_or(before_fragment, |(path, _)| path)
+        .trim();
+    if path.is_empty()
+        || (!path.contains('/')
+            && !path.starts_with('.')
+            && !path.starts_with('/')
+            && Path::new(path).extension().is_none())
+    {
+        return None;
+    }
+    let normalized = if path.starts_with('/') {
+        normalize_repository_path(path.trim_start_matches('/'))
+    } else {
+        let parent = Path::new(source_file)
+            .parent()
+            .unwrap_or_else(|| Path::new(""));
+        normalize_repository_path(&parent.join(path).to_string_lossy())
+    };
+    Some(normalized)
+}
+
+fn document_reference_candidates(
+    spelling: &str,
+    source_file: &str,
+    index: &DocumentReferenceIndex,
+) -> Vec<String> {
+    if let Some(path) = document_reference_path(source_file, spelling) {
+        let mut paths = vec![path.clone()];
+        if Path::new(&path).extension().is_none() {
+            paths.push(format!("{path}.md"));
+        }
+        for path in paths {
+            if let Some(target) = index.paths.get(&path) {
+                return vec![target.clone()];
+            }
+        }
+    }
+    if let Some(targets) = index.qualified_names.get(spelling) {
+        return targets.clone();
+    }
+    index.names.get(spelling).cloned().unwrap_or_default()
+}
+
+fn document_reference_edge(
+    source_raw: &str,
+    target_raw: &str,
+    relation: &str,
+    reference: &compass_model::code_graph::DocumentReferenceEvidence,
+) -> RawEdgeRecord {
+    let mut attributes = Map::new();
+    attributes.insert("relation".to_owned(), Value::String(relation.to_owned()));
+    attributes.insert(
+        "confidence".to_owned(),
+        Value::String("EXTRACTED".to_owned()),
+    );
+    attributes.insert(
+        "source_file".to_owned(),
+        Value::String(reference.site.file.clone()),
+    );
+    attributes.insert("_origin".to_owned(), Value::String("artifact".to_owned()));
+    attributes.insert(
+        "link_kind".to_owned(),
+        Value::String("inline_code".to_owned()),
+    );
+    attributes.insert(
+        "start_byte".to_owned(),
+        Value::from(reference.site.start_byte),
+    );
+    attributes.insert("end_byte".to_owned(), Value::from(reference.site.end_byte));
+    attributes.insert(
+        "line_start".to_owned(),
+        Value::from(reference.site.start_line),
+    );
+    attributes.insert("line_end".to_owned(), Value::from(reference.site.end_line));
+    attributes.insert(
+        "column_start".to_owned(),
+        Value::from(reference.site.start_column),
+    );
+    attributes.insert(
+        "column_end".to_owned(),
+        Value::from(reference.site.end_column),
+    );
+    RawEdgeRecord {
+        source: source_raw.to_owned(),
+        target: target_raw.to_owned(),
+        attributes,
+    }
+}
+
+/// Resolve document reference evidence after all raw nodes have acquired
+/// their strict IDs. This keeps extraction conservative and lets a unique
+/// code/path target be proven from the complete repository inventory.
+fn resolve_document_references(
+    nodes: &mut HashMap<String, NodeRecord>,
+    id_remap: &HashMap<String, String>,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+) -> (Vec<RawEdgeRecord>, Vec<GraphDiagnostic>) {
+    let index = document_reference_index(nodes, file_facts);
+    let mut published_to_raw = BTreeMap::<String, String>::new();
+    for (raw, published) in id_remap {
+        published_to_raw
+            .entry(published.clone())
+            .and_modify(|existing| {
+                if raw < existing {
+                    existing.clone_from(raw);
+                }
+            })
+            .or_insert_with(|| raw.clone());
+    }
+    let mut probes = 0usize;
+    let mut synthetic_edges = Vec::new();
+    let mut diagnostics = Vec::new();
+    let node_ids = nodes.keys().cloned().collect::<BTreeSet<_>>();
+    let node_kinds = nodes
+        .iter()
+        .map(|(id, node)| (id.clone(), node.kind))
+        .collect::<BTreeMap<_, _>>();
+    for node in nodes.values_mut() {
+        let owner_id = node.id.clone();
+        let Some(NodeDetails::Document(details)) = node.details.as_mut() else {
+            continue;
+        };
+        for reference in &mut details.references {
+            if let Some(target) = reference.target.as_ref() {
+                let remapped = id_remap.get(target).cloned().or_else(|| {
+                    // The compatibility graph assembler may have rewritten
+                    // an edge endpoint through a normalized alias without
+                    // being able to rewrite the nested evidence payload. A
+                    // path/qualified-name lookup is the same exact index used
+                    // for inline-code resolution and repairs that transport
+                    // alias without weakening the evidence to a guess.
+                    let candidates = document_reference_candidates(
+                        &reference.spelling,
+                        &reference.site.file,
+                        &index,
+                    )
+                    .into_iter()
+                    .filter(|candidate| node_ids.contains(candidate))
+                    .collect::<Vec<_>>();
+                    (candidates.len() == 1).then(|| candidates[0].clone())
+                });
+                if let Some(remapped) = remapped {
+                    reference.target = Some(remapped);
+                } else if !node_ids.contains(target) {
+                    reference.target = None;
+                    reference.resolution = DocumentReferenceResolution::Unresolved;
+                }
+            }
+            for candidate in &mut reference.candidates {
+                if let Some(published) = id_remap.get(&candidate.node_id) {
+                    candidate.node_id.clone_from(published);
+                }
+            }
+            reference
+                .candidates
+                .retain(|candidate| node_ids.contains(&candidate.node_id));
+            sort_dedup_candidates(&mut reference.candidates);
+            if reference.kind != "inline_code"
+                || reference.resolution != DocumentReferenceResolution::Unresolved
+                || reference.target.is_some()
+                || !reference.candidates.is_empty()
+            {
+                continue;
+            }
+            if probes >= MAX_DOCUMENT_REFERENCE_PROBES {
+                reference.resolution = DocumentReferenceResolution::Limited;
+                diagnostics.push(GraphDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "document_reference_resolution_limited".to_owned(),
+                    message: format!(
+                        "document reference resolution stopped after {MAX_DOCUMENT_REFERENCE_PROBES} probes"
+                    ),
+                    anchor: Some(reference.site.clone()),
+                    related_ids: vec![owner_id.clone()],
+                });
+                continue;
+            }
+            probes = probes.saturating_add(1);
+            let targets =
+                document_reference_candidates(&reference.spelling, &reference.site.file, &index)
+                    .into_iter()
+                    .filter(|target| node_ids.contains(target))
+                    .collect::<Vec<_>>();
+            if targets.len() > MAX_DOCUMENT_REFERENCE_CANDIDATES {
+                reference.resolution = DocumentReferenceResolution::Limited;
+                diagnostics.push(GraphDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    code: "document_reference_candidates_limited".to_owned(),
+                    message: format!(
+                        "document reference {:?} has more than {MAX_DOCUMENT_REFERENCE_CANDIDATES} exact candidates",
+                        reference.spelling
+                    ),
+                    anchor: Some(reference.site.clone()),
+                    related_ids: vec![owner_id.clone()],
+                });
+                continue;
+            }
+            match targets.as_slice() {
+                [target] => {
+                    reference.resolution = DocumentReferenceResolution::Exact;
+                    reference.target = Some(target.clone());
+                    if let (Some(source_raw), Some(target_raw)) = (
+                        published_to_raw.get(&owner_id),
+                        published_to_raw.get(target),
+                    ) {
+                        let relation = if node_kinds.get(target) == Some(&NodeKind::File) {
+                            "documents"
+                        } else {
+                            "references"
+                        };
+                        synthetic_edges.push(document_reference_edge(
+                            source_raw, target_raw, relation, reference,
+                        ));
+                    }
+                }
+                [] => {}
+                targets => {
+                    reference.resolution = DocumentReferenceResolution::Ambiguous;
+                    reference.candidates = targets
+                        .iter()
+                        .map(|target| ResolutionCandidate {
+                            node_id: target.clone(),
+                            reason: "multiple exact document reference candidates".to_owned(),
+                            confidence: EvidenceConfidence::Ambiguous,
+                            score: None,
+                            anchor: None,
+                        })
+                        .collect();
+                    sort_dedup_candidates(&mut reference.candidates);
+                }
+            }
+        }
+    }
+    (synthetic_edges, diagnostics)
+}
+
 fn normalize_v1_with_mode(
     mut extraction: Extraction,
     mut evidence: BuildEvidence,
@@ -1214,6 +1508,7 @@ fn normalize_v1_with_mode(
             id_remap.insert(raw_id, published_id);
         }
     }
+    coalesce_external_placeholder_nodes(&mut nodes, &mut id_remap, mode)?;
     for node in nodes.values_mut() {
         remap_provenance_candidates(&mut node.evidence, &id_remap);
         let Some(NodeDetails::Route(details)) = node.details.as_mut() else {
@@ -1233,6 +1528,10 @@ fn normalize_v1_with_mode(
         }
         recompute_route_resolution(details);
     }
+    let (document_reference_edges, document_reference_diagnostics) =
+        resolve_document_references(&mut nodes, &id_remap, &file_facts);
+    extraction.edges.extend(document_reference_edges);
+    evidence.diagnostics.extend(document_reference_diagnostics);
     profile_v1("v1 node normalization", &mut profile_started);
 
     // Edge publication consults endpoint kinds and unresolved placeholder
@@ -1474,6 +1773,8 @@ fn normalize_v1_with_mode(
             file_id.clone_from(published);
         }
     }
+    ensure_external_placeholder_details(&mut nodes);
+    downgrade_document_details_for_graph_v1(&mut nodes);
     nodes.par_sort_unstable_by(|left, right| left.id.cmp(&right.id));
     links.par_sort_unstable_by(|left, right| {
         left.id
@@ -1528,24 +1829,195 @@ fn normalize_v1_with_mode(
     })
 }
 
+/// Document details are a bounded normalization IR used to resolve references
+/// and derive stable identities. `compass.graph/1` keeps its established wire
+/// shape: document nodes publish as `Resource(document)` and express Markdown
+/// structure through source-backed nodes, meaningful names, qualified names,
+/// containment, and reference edges.
+fn downgrade_document_details_for_graph_v1(nodes: &mut [NodeRecord]) {
+    for node in nodes {
+        let details = match node.details.take() {
+            Some(NodeDetails::Document(details)) => details,
+            other => {
+                node.details = other;
+                continue;
+            }
+        };
+        let media_type = match details.format {
+            DocumentFormat::Markdown => Some("text/markdown".to_owned()),
+            DocumentFormat::Html => Some("text/html".to_owned()),
+            DocumentFormat::Text => Some("text/plain".to_owned()),
+            DocumentFormat::Pdf => Some("application/pdf".to_owned()),
+            DocumentFormat::Docx => Some(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    .to_owned(),
+            ),
+            DocumentFormat::Xlsx => {
+                Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_owned())
+            }
+            DocumentFormat::Pptx => Some(
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    .to_owned(),
+            ),
+            DocumentFormat::Rtf => Some("application/rtf".to_owned()),
+            DocumentFormat::Other => None,
+        };
+        node.details = Some(NodeDetails::Resource(ResourceNodeDetails {
+            resource_kind: ResourceKind::Document,
+            uri: details.uri,
+            media_type,
+        }));
+    }
+}
+
+/// Coalesce equivalent unresolved external symbols emitted by independent
+/// producers. Framework extraction and universal semantic resolution can both
+/// observe the same unresolved import at one exact source site, but their raw
+/// IDs intentionally differ. Publishing both records creates duplicate
+/// placeholders and violates the one-wiring-occurrence identity contract.
+///
+/// The key includes every exact wiring site carried by the node, so symbols
+/// used at different source occurrences (or in different scopes) remain
+/// distinct. The lexicographically smallest existing ID is retained as the
+/// canonical identity; all raw aliases are remapped before references and
+/// edges are published.
+fn coalesce_external_placeholder_nodes(
+    nodes: &mut HashMap<String, NodeRecord>,
+    id_remap: &mut HashMap<String, String>,
+    mode: PublicationMode,
+) -> Result<(), GraphError> {
+    let mut groups = BTreeMap::<ExternalPlaceholderIdentity, Vec<String>>::new();
+    for node in nodes.values() {
+        if let Some(identity) = external_placeholder_identity(node) {
+            groups.entry(identity).or_default().push(node.id.clone());
+        }
+    }
+    for ids in groups.values_mut() {
+        if ids.len() < 2 {
+            continue;
+        }
+        ids.sort();
+        let canonical_id = ids[0].clone();
+        let Some(mut canonical) = nodes.remove(&canonical_id) else {
+            continue;
+        };
+        for duplicate_id in ids.iter().skip(1) {
+            let Some(duplicate) = nodes.remove(duplicate_id) else {
+                continue;
+            };
+            if let Err(error) = merge_normalized_node(&mut canonical, duplicate) {
+                // The identity key is deliberately stricter than the merge
+                // contract. Preserve the normal strict/best-effort behavior
+                // if a producer nevertheless supplied incompatible details.
+                if mode == PublicationMode::Strict {
+                    return Err(error);
+                }
+                continue;
+            }
+            for published in id_remap.values_mut() {
+                if published == duplicate_id {
+                    published.clone_from(&canonical_id);
+                }
+            }
+        }
+        canonical.id = canonical_id.clone();
+        nodes.insert(canonical_id, canonical);
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ExternalPlaceholderIdentity {
+    kind: &'static str,
+    qualified_name: String,
+    language: Option<String>,
+    framework: Option<String>,
+    wiring_sites: Vec<(String, u64, u64)>,
+}
+
+fn external_placeholder_identity(node: &NodeRecord) -> Option<ExternalPlaceholderIdentity> {
+    if node.source.is_some() {
+        return None;
+    }
+    let mut wiring_sites = node
+        .evidence
+        .iter()
+        .filter(|evidence| {
+            evidence.origin == EvidenceOrigin::Heuristic
+                && evidence.confidence == EvidenceConfidence::Inferred
+                && evidence.rule.as_deref() == Some("external-symbol-placeholder")
+        })
+        .filter_map(|evidence| evidence.wiring_site.as_ref())
+        .map(|site| (site.file.clone(), site.start_byte, site.end_byte))
+        .collect::<Vec<_>>();
+    if wiring_sites.is_empty() {
+        return None;
+    }
+    wiring_sites.sort();
+    wiring_sites.dedup();
+    Some(ExternalPlaceholderIdentity {
+        kind: node.kind.as_str(),
+        qualified_name: node.qualified_name.clone(),
+        language: node.language.clone(),
+        framework: node.framework.clone(),
+        wiring_sites,
+    })
+}
+
+/// An unresolved external symbol is still a typed symbol occurrence. Some
+/// producer paths carry no signature fields, so their otherwise-empty symbol
+/// payload can disappear while facts are recomposed. Restore that closed
+/// payload before graph-v1 publication instead of making consumers infer a
+/// node category from a heuristic provenance record.
+fn ensure_external_placeholder_details(nodes: &mut [NodeRecord]) {
+    for node in nodes {
+        if node.details.is_some() || external_placeholder_identity(node).is_none() {
+            continue;
+        }
+        node.details = Some(NodeDetails::Symbol(SymbolNodeDetails {
+            signature: None,
+            modifiers: Vec::new(),
+            overload_discriminator: None,
+            declaring_type: None,
+            signature_digest: None,
+            implementation_digest: None,
+            source_digest: None,
+        }));
+    }
+}
+
 fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, GraphError> {
     let mut node = serde_json::from_value::<NodeRecord>(value)
         .map_err(|error| raw_error(raw_id, &error.to_string()))?;
-    // Trusted records already carry typed semantics. Markdown headings with a
-    // retained fragment URI have a hierarchical identity that survives source
-    // movement; other document resources remain positional occurrences so
-    // repeated blocks cannot quarantine one another.
+    // Trusted records already carry typed semantics. Recompute document IDs
+    // from the same semantic/occurrence rules used for raw normalization so a
+    // legacy producer's global document ID cannot collapse repeated blocks.
     if node.kind == NodeKind::Resource
-        && matches!(
-            node.details,
-            Some(NodeDetails::Resource(ResourceNodeDetails {
-                resource_kind: ResourceKind::Document,
-                ..
-            }))
-        )
         && let Some(site) = node.source.as_ref()
     {
-        node.id = if typed_markdown_heading(&node) {
+        let semantic = match node.details.as_ref() {
+            Some(NodeDetails::Document(details)) => Some(matches!(
+                details.role,
+                DocumentRole::Document
+                    | DocumentRole::Heading
+                    | DocumentRole::Table
+                    | DocumentRole::TableRow
+            )),
+            Some(NodeDetails::Resource(ResourceNodeDetails {
+                resource_kind: ResourceKind::Document,
+                uri,
+                ..
+            })) => Some(
+                uri.as_deref().is_some_and(|value| value.starts_with('#'))
+                    || graph_v1_table_qualified_name(&node.qualified_name)
+                    || (site.start_byte == 0 && node.name == node.qualified_name),
+            ),
+            _ => None,
+        };
+        let Some(semantic) = semantic else {
+            return Ok(node);
+        };
+        node.id = if semantic {
             domain_id(NodeKind::Resource, &site.file, &node.qualified_name)
         } else {
             let positional_name = format!(
@@ -1565,6 +2037,13 @@ fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, Grap
         sort_dedup_serialized(&mut node.evidence);
     }
     Ok(node)
+}
+
+fn graph_v1_table_qualified_name(qualified_name: &str) -> bool {
+    qualified_name.contains("::pipe_table#")
+        || qualified_name.contains("::pipe_table_header#")
+        || qualified_name.contains("::pipe_table_row#")
+        || qualified_name.contains("::pipe_table_cell#")
 }
 
 fn sanitize_document(
@@ -3218,6 +3697,7 @@ fn insert_raw_evidence(attributes: &mut Map<String, Value>, evidence: &Provenanc
 fn insert_raw_node_details(attributes: &mut Map<String, Value>, details: &NodeDetails) {
     match details {
         NodeDetails::File(_) | NodeDetails::Resource(_) => {}
+        NodeDetails::Document(details) => insert_raw_document_details(attributes, details),
         NodeDetails::Symbol(details) => {
             insert_optional_string(attributes, "signature", details.signature.as_ref());
             insert_optional_string(
@@ -3333,6 +3813,93 @@ fn insert_raw_node_details(attributes: &mut Map<String, Value>, details: &NodeDe
                 details.database_schema.as_ref(),
             );
         }
+    }
+}
+
+fn insert_raw_document_details(attributes: &mut Map<String, Value>, details: &DocumentNodeDetails) {
+    attributes.insert(
+        "document_format".to_owned(),
+        serde_json::to_value(details.format).unwrap_or(Value::Null),
+    );
+    attributes.insert(
+        "document_kind".to_owned(),
+        serde_json::to_value(details.role).unwrap_or(Value::Null),
+    );
+    attributes.insert("block_index".to_owned(), Value::from(details.ordinal));
+    if let Some(section) = &details.section {
+        attributes.insert(
+            "document_section".to_owned(),
+            Value::String(section.clone()),
+        );
+    }
+    if let Some(uri) = &details.uri {
+        attributes.insert("uri".to_owned(), Value::String(uri.clone()));
+    }
+    if let Some(content) = &details.content {
+        attributes.insert(
+            "document_content".to_owned(),
+            Value::String(content.clone()),
+        );
+    }
+    attributes.insert(
+        "document_significance".to_owned(),
+        serde_json::to_value(details.significance).unwrap_or(Value::Null),
+    );
+    if let Some(table) = &details.table {
+        attributes.insert(
+            "table_columns".to_owned(),
+            serde_json::to_value(&table.columns).unwrap_or(Value::Null),
+        );
+        attributes.insert(
+            "table_headers".to_owned(),
+            Value::Array(
+                table
+                    .columns
+                    .iter()
+                    .map(|column| Value::String(column.header.clone()))
+                    .collect(),
+            ),
+        );
+        attributes.insert(
+            "table_alignments".to_owned(),
+            Value::Array(
+                table
+                    .columns
+                    .iter()
+                    .map(|column| serde_json::to_value(column.alignment).unwrap_or(Value::Null))
+                    .collect(),
+            ),
+        );
+        attributes.insert(
+            "table_body_row_count".to_owned(),
+            Value::from(table.body_row_count),
+        );
+        attributes.insert(
+            "table_omitted_row_count".to_owned(),
+            Value::from(table.omitted_row_count),
+        );
+        attributes.insert(
+            "table_omitted_column_count".to_owned(),
+            Value::from(table.omitted_column_count),
+        );
+        attributes.insert("table_truncated".to_owned(), Value::Bool(table.truncated));
+    }
+    if let Some(row) = &details.table_row {
+        attributes.insert("table_row_index".to_owned(), Value::from(row.row_index));
+        if let Some(index) = row.identity_cell_index {
+            attributes.insert("table_identity_cell_index".to_owned(), Value::from(index));
+        }
+        attributes.insert(
+            "table_cells".to_owned(),
+            serde_json::to_value(&row.cells).unwrap_or(Value::Null),
+        );
+        attributes.insert("table_truncated".to_owned(), Value::Bool(row.truncated));
+    }
+    if !details.references.is_empty() {
+        attributes.insert(
+            "document_references".to_owned(),
+            serde_json::to_value(&details.references).unwrap_or(Value::Null),
+        );
     }
 }
 
@@ -4343,6 +4910,353 @@ fn map_edge_kind(raw: &str) -> Option<(EdgeKind, Option<&'static str>, bool)> {
     Some(mapped)
 }
 
+fn document_format(attributes: &Map<String, Value>) -> DocumentFormat {
+    let value = optional_any_string(attributes, &["document_format", "language", "lang"]);
+    match value.as_deref().map(str::to_ascii_lowercase).as_deref() {
+        Some("markdown" | "md" | "mdx") => DocumentFormat::Markdown,
+        Some("html" | "htm") => DocumentFormat::Html,
+        Some("text" | "txt" | "plain") => DocumentFormat::Text,
+        Some("pdf") => DocumentFormat::Pdf,
+        Some("docx") => DocumentFormat::Docx,
+        Some("xlsx") => DocumentFormat::Xlsx,
+        Some("pptx") => DocumentFormat::Pptx,
+        Some("rtf") => DocumentFormat::Rtf,
+        _ => DocumentFormat::Other,
+    }
+}
+
+fn document_role(attributes: &Map<String, Value>) -> DocumentRole {
+    match optional_string(attributes, "document_kind").as_deref() {
+        Some("document") => DocumentRole::Document,
+        Some("heading") => DocumentRole::Heading,
+        Some("paragraph") => DocumentRole::Paragraph,
+        Some("list") => DocumentRole::List,
+        Some("list_item") => DocumentRole::ListItem,
+        Some("block_quote" | "quote") => DocumentRole::Quote,
+        Some("fenced_code_block" | "indented_code_block" | "code") => DocumentRole::Code,
+        Some("thematic_break") => DocumentRole::ThematicBreak,
+        Some("table" | "pipe_table") => DocumentRole::Table,
+        Some("table_row" | "pipe_table_row") => DocumentRole::TableRow,
+        Some("link_reference_definition") => DocumentRole::LinkDefinition,
+        Some("footnote_definition") => DocumentRole::FootnoteDefinition,
+        Some("page") => DocumentRole::Page,
+        Some("sheet") => DocumentRole::Sheet,
+        Some("slide") => DocumentRole::Slide,
+        Some("note") => DocumentRole::Note,
+        _ => DocumentRole::Other,
+    }
+}
+
+fn document_significance(
+    role: DocumentRole,
+    attributes: &Map<String, Value>,
+) -> DocumentSignificance {
+    if let Some(value) = optional_string(attributes, "document_significance") {
+        return match value.as_str() {
+            "container" => DocumentSignificance::Container,
+            "scaffolding" => DocumentSignificance::Scaffolding,
+            _ => DocumentSignificance::Content,
+        };
+    }
+    match role {
+        DocumentRole::List | DocumentRole::Quote | DocumentRole::Table => {
+            DocumentSignificance::Container
+        }
+        DocumentRole::LinkDefinition | DocumentRole::FootnoteDefinition => {
+            DocumentSignificance::Scaffolding
+        }
+        _ => DocumentSignificance::Content,
+    }
+}
+
+fn document_alignment(value: Option<&Value>) -> TableAlignment {
+    match value.and_then(Value::as_str) {
+        Some("left") => TableAlignment::Left,
+        Some("center") => TableAlignment::Center,
+        Some("right") => TableAlignment::Right,
+        _ => TableAlignment::Unspecified,
+    }
+}
+
+fn normalize_document_anchor(
+    value: &Value,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+    record: &str,
+) -> Result<SourceAnchor, GraphError> {
+    let mut anchor = structured_source_anchor(value)
+        .map_err(|_| raw_error(record, "invalid nested document source anchor"))?;
+    anchor.file = portable_path(&anchor.file, root)?;
+    if !anchor.is_valid() {
+        return Err(raw_error(
+            record,
+            "nested document source anchor is invalid",
+        ));
+    }
+    let Some(file) = file_facts.get(&anchor.file) else {
+        return Err(raw_error(
+            record,
+            "nested document source anchor references an unknown file",
+        ));
+    };
+    if anchor.end_byte > file.byte_size {
+        return Err(raw_error(
+            record,
+            "nested document source anchor exceeds file bounds",
+        ));
+    }
+    Ok(anchor)
+}
+
+fn document_table_columns(
+    attributes: &Map<String, Value>,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+    record: &str,
+) -> Result<Vec<DocumentTableColumnDetails>, GraphError> {
+    if let Some(Value::Array(values)) = attributes.get("table_columns") {
+        if values.len() > MAX_DOCUMENT_TABLE_ITEMS {
+            return Err(raw_error(
+                record,
+                "table_columns exceeds the bounded item limit",
+            ));
+        }
+        let mut columns = Vec::with_capacity(values.len());
+        for value in values {
+            let Some(object) = value.as_object() else {
+                return Err(raw_error(record, "table_columns entries must be objects"));
+            };
+            let index = object
+                .get("index")
+                .and_then(Value::as_u64)
+                .and_then(|value| u32::try_from(value).ok())
+                .ok_or_else(|| raw_error(record, "table column index is invalid"))?;
+            let header = object
+                .get("header")
+                .and_then(Value::as_str)
+                .ok_or_else(|| raw_error(record, "table column header is invalid"))?
+                .to_owned();
+            let source = object
+                .get("source")
+                .filter(|value| !value.is_null())
+                .map(|value| normalize_document_anchor(value, root, file_facts, record))
+                .transpose()?;
+            columns.push(DocumentTableColumnDetails {
+                index,
+                header,
+                alignment: document_alignment(object.get("alignment")),
+                source,
+            });
+        }
+        return Ok(columns);
+    }
+
+    let headers = attributes
+        .get("table_headers")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if headers.len() > MAX_DOCUMENT_TABLE_ITEMS {
+        return Err(raw_error(
+            record,
+            "table_headers exceeds the bounded item limit",
+        ));
+    }
+    let alignments = attributes
+        .get("table_alignments")
+        .and_then(Value::as_array)
+        .map(|values| values.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if alignments.len() > MAX_DOCUMENT_TABLE_ITEMS {
+        return Err(raw_error(
+            record,
+            "table_alignments exceeds the bounded item limit",
+        ));
+    }
+    let count = headers.len().max(alignments.len());
+    Ok((0..count)
+        .map(|index| DocumentTableColumnDetails {
+            index: index as u32,
+            header: headers.get(index).cloned().unwrap_or_default(),
+            alignment: document_alignment(alignments.get(index).copied()),
+            source: None,
+        })
+        .collect())
+}
+
+fn document_table_cells(
+    attributes: &Map<String, Value>,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+    record: &str,
+) -> Result<Vec<DocumentTableCellDetails>, GraphError> {
+    let Some(Value::Array(values)) = attributes.get("table_cells") else {
+        return Ok(Vec::new());
+    };
+    if values.len() > MAX_DOCUMENT_TABLE_ITEMS {
+        return Err(raw_error(
+            record,
+            "table_cells exceeds the bounded item limit",
+        ));
+    }
+    let mut cells = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(object) = value.as_object() else {
+            return Err(raw_error(record, "table_cells entries must be objects"));
+        };
+        let index = object
+            .get("columnIndex")
+            .or_else(|| object.get("column_index"))
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| raw_error(record, "table cell column index is invalid"))?;
+        let state = match object.get("state").and_then(Value::as_str) {
+            Some("present") => TableCellState::Present,
+            Some("empty") => TableCellState::Empty,
+            Some("missing") => TableCellState::Missing,
+            Some("limited") => TableCellState::Limited,
+            _ => return Err(raw_error(record, "table cell state is invalid")),
+        };
+        let text = object
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let source = object
+            .get("source")
+            .filter(|value| !value.is_null())
+            .map(|value| normalize_document_anchor(value, root, file_facts, record))
+            .transpose()?;
+        cells.push(DocumentTableCellDetails {
+            column_index: index,
+            state,
+            text,
+            source,
+        });
+    }
+    Ok(cells)
+}
+
+fn document_references(
+    attributes: &Map<String, Value>,
+    root: &Path,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+    record: &str,
+) -> Result<Vec<compass_model::code_graph::DocumentReferenceEvidence>, GraphError> {
+    let Some(Value::Array(values)) = attributes.get("document_references") else {
+        return Ok(Vec::new());
+    };
+    if values.len() > MAX_DOCUMENT_REFERENCES {
+        return Err(raw_error(
+            record,
+            "document_references exceeds the bounded item limit",
+        ));
+    }
+    let mut references = Vec::with_capacity(values.len());
+    for value in values {
+        let mut reference = serde_json::from_value::<
+            compass_model::code_graph::DocumentReferenceEvidence,
+        >(value.clone())
+        .map_err(|error| raw_error(record, &format!("invalid document reference: {error}")))?;
+        if reference.spelling.len() > MAX_DOCUMENT_TEXT_BYTES {
+            return Err(raw_error(
+                record,
+                "document reference spelling exceeds the bounded limit",
+            ));
+        }
+        reference.site = normalize_document_anchor(
+            &serde_json::to_value(&reference.site)
+                .map_err(|error| raw_error(record, &error.to_string()))?,
+            root,
+            file_facts,
+            record,
+        )?;
+        for candidate in &mut reference.candidates {
+            if let Some(anchor) = candidate.anchor.take() {
+                candidate.anchor = Some(normalize_document_anchor(
+                    &serde_json::to_value(anchor)
+                        .map_err(|error| raw_error(record, &error.to_string()))?,
+                    root,
+                    file_facts,
+                    record,
+                )?);
+            }
+        }
+        references.push(reference);
+    }
+    Ok(references)
+}
+
+fn document_node_details(
+    attributes: &Map<String, Value>,
+    _source_path: &str,
+    file_facts: &HashMap<String, PublishedFileFacts>,
+    record: &str,
+    root: &Path,
+) -> Result<DocumentNodeDetails, GraphError> {
+    let role = document_role(attributes);
+    let table = if role == DocumentRole::Table
+        || attributes.contains_key("table_columns")
+        || attributes.contains_key("table_headers")
+    {
+        Some(DocumentTableDetails {
+            columns: document_table_columns(attributes, root, file_facts, record)?,
+            body_row_count: optional_u32(attributes, "table_body_row_count").unwrap_or(0),
+            omitted_row_count: optional_u32(attributes, "table_omitted_row_count").unwrap_or(0),
+            omitted_column_count: optional_u32(attributes, "table_omitted_column_count")
+                .unwrap_or(0),
+            truncated: attributes
+                .get("table_truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+    } else {
+        None
+    };
+    let table_row = if role == DocumentRole::TableRow || attributes.contains_key("table_cells") {
+        Some(DocumentTableRowDetails {
+            row_index: optional_u32(attributes, "table_row_index").unwrap_or(0),
+            identity_cell_index: optional_u32(attributes, "table_identity_cell_index"),
+            cells: document_table_cells(attributes, root, file_facts, record)?,
+            truncated: attributes
+                .get("table_truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
+    } else {
+        None
+    };
+    let content = optional_any_string(attributes, &["document_content", "content"]);
+    if content
+        .as_ref()
+        .is_some_and(|value| value.len() > MAX_DOCUMENT_TEXT_BYTES)
+    {
+        return Err(raw_error(
+            record,
+            "document content exceeds the bounded limit",
+        ));
+    }
+    Ok(DocumentNodeDetails {
+        format: document_format(attributes),
+        role,
+        ordinal: optional_u32(attributes, "block_index").unwrap_or(0),
+        section: optional_string(attributes, "document_section"),
+        uri: optional_string(attributes, "uri")
+            .or_else(|| optional_string(attributes, "anchor_slug").map(|slug| format!("#{slug}"))),
+        content,
+        significance: document_significance(role, attributes),
+        table,
+        table_row,
+        references: document_references(attributes, root, file_facts, record)?,
+    })
+}
+
 fn node_details(
     kind: NodeKind,
     resource_kind: Option<ResourceKind>,
@@ -4387,16 +5301,51 @@ fn node_details(
             middleware_count: optional_u32(attributes, "middleware_count").unwrap_or(0),
             stages: route_stage_details(attributes, record, root)?,
         })),
-        NodeKind::Resource => Some(NodeDetails::Resource(ResourceNodeDetails {
-            resource_kind: resource_kind.unwrap_or(ResourceKind::Document),
-            uri: optional_string(attributes, "uri").or_else(|| {
-                raw_markdown_heading(attributes)
-                    .then(|| optional_string(attributes, "anchor_slug"))
-                    .flatten()
-                    .map(|slug| format!("#{slug}"))
-            }),
-            media_type: optional_string(attributes, "media_type"),
-        })),
+        NodeKind::Resource => {
+            // Framework domain resources are emitted through the generic
+            // `resource` node vocabulary but carry a more specific semantic
+            // discriminator in `resource_kind`. Do not let an unrecognised
+            // discriminator fall through to the historical
+            // `Resource(document)` payload. Source-backed document fragments
+            // temporarily use bounded normalization facts below, then publish
+            // through the established graph/1 resource shape.
+            // A file-set is still a resource in the closed graph vocabulary,
+            // so represent it as a concept resource while retaining the
+            // framework-specific discriminator in the flat compatibility
+            // attributes.
+            let resource_kind = resource_kind
+                .or_else(
+                    || match optional_string(attributes, "resource_kind").as_deref() {
+                        Some("paper") => Some(ResourceKind::Paper),
+                        Some("image") => Some(ResourceKind::Image),
+                        Some("concept" | "framework_file_set") => Some(ResourceKind::Concept),
+                        Some("rationale") => Some(ResourceKind::Rationale),
+                        Some("document") => Some(ResourceKind::Document),
+                        _ => None,
+                    },
+                )
+                .unwrap_or(ResourceKind::Document);
+            if resource_kind == ResourceKind::Document && attributes.contains_key("document_kind") {
+                Some(NodeDetails::Document(document_node_details(
+                    attributes,
+                    source_path,
+                    file_facts,
+                    record,
+                    root,
+                )?))
+            } else {
+                Some(NodeDetails::Resource(ResourceNodeDetails {
+                    resource_kind,
+                    uri: optional_string(attributes, "uri").or_else(|| {
+                        raw_markdown_heading(attributes)
+                            .then(|| optional_string(attributes, "anchor_slug"))
+                            .flatten()
+                            .map(|slug| format!("#{slug}"))
+                    }),
+                    media_type: optional_string(attributes, "media_type"),
+                }))
+            }
+        }
         NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue => {
             Some(NodeDetails::Messaging(MessagingNodeDetails {
                 transport: required_string(attributes, "transport", record)?,
@@ -4593,6 +5542,41 @@ fn node_identity(
         NodeKind::Resource
             if matches!(
                 details,
+                Some(NodeDetails::Document(DocumentNodeDetails {
+                    format: DocumentFormat::Markdown,
+                    role: DocumentRole::Heading,
+                    ..
+                }))
+            ) =>
+        {
+            domain_id(kind, source_path, qualified_name)
+        }
+        NodeKind::Resource if matches!(details, Some(NodeDetails::Document(_))) => {
+            let semantic = matches!(
+                details,
+                Some(NodeDetails::Document(DocumentNodeDetails {
+                    role: DocumentRole::Document | DocumentRole::Table | DocumentRole::TableRow,
+                    ..
+                }))
+            ) || raw_markdown_table_structure(attributes);
+            if semantic {
+                // Table, header, row, and cell qualified names are derived
+                // from normalized headers, identity cells, and column indexes,
+                // so their IDs survive line shifts and non-identity edits.
+                domain_id(kind, source_path, qualified_name)
+            } else {
+                // Other blocks are occurrences. Keep the exact source range
+                // to disambiguate repeated prose and parser recovery nodes.
+                let positional_name = identity_site.map_or_else(
+                    || qualified_name.to_owned(),
+                    |site| format!("{qualified_name}@{}:{}", site.start_byte, site.end_byte),
+                );
+                domain_id(kind, source_path, &positional_name)
+            }
+        }
+        NodeKind::Resource
+            if matches!(
+                details,
                 Some(NodeDetails::Resource(ResourceNodeDetails {
                     resource_kind: ResourceKind::Document,
                     ..
@@ -4674,20 +5658,20 @@ fn node_identity_source(
     if !source_path.is_empty() {
         return source_path.to_owned();
     }
-    // External placeholders are occurrences of one unresolved wiring site.
-    // A route candidate and the corresponding unresolved import can arrive
-    // with different transient package/module scopes, but they still denote
-    // the same source expression when their language, qualified name, and
-    // exact anchor agree. Prefer that anchor for identity so normalization
-    // coalesces the compatible records instead of publishing duplicate
-    // placeholders that manufacture ambiguity.
+    // External placeholders are scoped by the deterministic source context
+    // gathered during placeholder splitting. All references in one source
+    // scope should coalesce even when they occur at different wiring sites;
+    // the scope still keeps same-named placeholders in different files or
+    // language families distinct. If no scope was derived, fall back to the
+    // exact wiring site so an unscoped occurrence cannot merge by accident.
     if attributes
         .get("rule")
         .and_then(Value::as_str)
         .is_some_and(|rule| rule == "external-symbol-placeholder")
-        && let Some(site) = identity_site
+        && let Some(scope) = optional_string(attributes, "external_identity_scope")
+        && !scope.trim().is_empty()
     {
-        return format!("{}#{}:{}", site.file, site.start_byte, site.end_byte);
+        return scope;
     }
     optional_string(attributes, "external_identity_scope")
         .filter(|scope| !scope.trim().is_empty())
@@ -4708,16 +5692,12 @@ fn raw_markdown_heading(attributes: &Map<String, Value>) -> bool {
         )
 }
 
-fn typed_markdown_heading(node: &NodeRecord) -> bool {
-    node.language.as_deref() == Some("markdown")
-        && matches!(
-            node.details.as_ref(),
-            Some(NodeDetails::Resource(ResourceNodeDetails {
-                resource_kind: ResourceKind::Document,
-                uri: Some(uri),
-                ..
-            })) if uri.starts_with('#')
-        )
+fn raw_markdown_table_structure(attributes: &Map<String, Value>) -> bool {
+    matches!(
+        optional_string(attributes, "document_kind").as_deref(),
+        Some("pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell")
+    ) && optional_string(attributes, "qualified_name")
+        .is_some_and(|name| name.contains("::pipe_table"))
 }
 
 fn raw_anchor(

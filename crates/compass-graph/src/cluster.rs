@@ -445,8 +445,9 @@ pub fn label_communities_by_hub(
             .iter()
             .filter_map(|member| positions.get(member.as_str()).map(|index| (member, *index)))
             .min_by(|(left_id, left), (right_id, right)| {
-                is_pipe_table_structure(&document.nodes[*left])
-                    .cmp(&is_pipe_table_structure(&document.nodes[*right]))
+                document.nodes[*left]
+                    .is_table_navigation_node()
+                    .cmp(&document.nodes[*right].is_table_navigation_node())
                     .then_with(|| degrees[*right].cmp(&degrees[*left]))
                     .then_with(|| left_id.cmp(right_id))
             });
@@ -454,7 +455,7 @@ pub fn label_communities_by_hub(
         let (base, context, context_required) = hub
             .and_then(|(_, index)| document.nodes.get(index))
             .map(|node| {
-                let table_structure = is_pipe_table_structure(node);
+                let table_structure = node.is_table_navigation_node();
                 (
                     if table_structure {
                         "Table".to_owned()
@@ -520,11 +521,15 @@ pub fn label_communities_by_hub(
     labels.into_iter().collect()
 }
 
-fn is_pipe_table_structure(node: &NodeRecord) -> bool {
-    matches!(
-        node.string("document_kind").as_str(),
-        "pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell"
-    )
+fn zero_topology_document_containment(
+    edge: &EdgeRecord,
+    source: &NodeRecord,
+    target: &NodeRecord,
+) -> bool {
+    if edge.string("relation") != "contains" {
+        return false;
+    }
+    source.is_table_navigation_node() || target.is_table_navigation_node()
 }
 
 fn concise_community_label(node: &NodeRecord) -> Option<String> {
@@ -1097,6 +1102,13 @@ impl WeightedGraph {
             else {
                 continue;
             };
+            if zero_topology_document_containment(
+                edge,
+                &document.nodes[*left],
+                &document.nodes[*right],
+            ) {
+                continue;
+            }
             let weight = edge.number("weight").unwrap_or(1.0);
             let candidate = selected
                 .entry((*left, *right))
@@ -1782,6 +1794,32 @@ mod tests {
     }
 
     #[test]
+    fn semantic_table_containment_is_navigation_only_for_topology() {
+        let mut document = graph(
+            &["heading", "table", "row", "code"],
+            &[("heading", "table"), ("table", "row"), ("row", "code")],
+        );
+        for edge in &mut document.links {
+            edge.attributes
+                .insert("relation".to_owned(), json!("contains"));
+        }
+        document.links[2]
+            .attributes
+            .insert("relation".to_owned(), json!("references"));
+        document.nodes[1]
+            .attributes
+            .insert("qualifiedName".to_owned(), json!("Guide::pipe_table#1"));
+        document.nodes[2].attributes.insert(
+            "qualifiedName".to_owned(),
+            json!("Guide::pipe_table#1::pipe_table_row#graph-1"),
+        );
+        let weighted = WeightedGraph::from_document(&document);
+        assert_eq!(weighted.edge_count(), 1);
+        assert_eq!(weighted.degree_unweighted(1), 0);
+        assert_eq!(weighted.degree_unweighted(2), 1);
+    }
+
+    #[test]
     fn duplicate_hub_labels_add_source_context_only_when_needed() {
         let mut document = graph(&["a", "b", "c", "d", "unique"], &[("a", "b"), ("c", "d")]);
         for (index, file, line) in [
@@ -1815,16 +1853,10 @@ mod tests {
     }
 
     #[test]
-    fn meaningful_document_anchor_outranks_pipe_table_hub() {
+    fn meaningful_document_anchor_outranks_table_navigation_hub() {
         let mut document = graph(
-            &["heading", "table", "header", "row", "cell-a", "cell-b"],
-            &[
-                ("heading", "table"),
-                ("table", "header"),
-                ("table", "row"),
-                ("header", "cell-a"),
-                ("row", "cell-b"),
-            ],
+            &["heading", "table", "row"],
+            &[("heading", "table"), ("table", "row")],
         );
         document.nodes[0]
             .attributes
@@ -1832,13 +1864,7 @@ mod tests {
         document.nodes[0]
             .attributes
             .insert("document_kind".to_owned(), json!("heading"));
-        for (index, kind) in [
-            (1, "pipe_table"),
-            (2, "pipe_table_header"),
-            (3, "pipe_table_row"),
-            (4, "pipe_table_cell"),
-            (5, "pipe_table_cell"),
-        ] {
+        for (index, kind) in [(1, "table"), (2, "table_row")] {
             document.nodes[index]
                 .attributes
                 .insert("label".to_owned(), json!(kind.replace('_', " ")));
@@ -1858,15 +1884,15 @@ mod tests {
     }
 
     #[test]
-    fn pipe_table_only_communities_use_source_anchored_table_labels() {
+    fn table_only_communities_use_source_anchored_table_labels() {
         let mut document = graph(&["left", "right"], &[]);
         for (index, line) in [(0, 12), (1, 44)] {
             document.nodes[index]
                 .attributes
-                .insert("label".to_owned(), json!("pipe table"));
+                .insert("label".to_owned(), json!("table"));
             document.nodes[index]
                 .attributes
-                .insert("document_kind".to_owned(), json!("pipe_table"));
+                .insert("document_kind".to_owned(), json!("table"));
             document.nodes[index]
                 .attributes
                 .insert("source_file".to_owned(), json!("docs/reference/outputs.md"));

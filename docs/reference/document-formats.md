@@ -14,7 +14,7 @@ alone.
 | Lists and task items | List/list-item blocks; `task_checked` when present | `contains` + exact ranges |
 | Block quotes and thematic breaks | Structural block | exact node range |
 | Fenced / indented code | Code block; fenced info string becomes `language` | exact node range |
-| Pipe tables | Table, header, row, and cell blocks | nested `contains` edges |
+| Pipe tables | Table, header, row, and cell blocks with header-qualified labels | nested `contains` edges and exact cell-owned references |
 | Reference definitions | Definition block and definition relationship | definition range |
 | Inline/reference/autolinks | Link relationship with `link_kind` | link-site range |
 | Footnotes | Bounded definition nodes and reference relationships | exact definition/reference ranges |

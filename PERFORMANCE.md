@@ -24,6 +24,16 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Markdown graph-v1 quality qualification
+
+Markdown tables intentionally retain their table, header, row, and cell nodes.
+The implementation bounds each table independently to 20,000 structural nodes,
+16,384 cells, and 512 KiB of retained table text, in addition to the extractor's
+global limits. Exhausting a table budget emits explicit limit evidence and does
+not consume the budget needed to discover later headings. The graph-v1 fixture
+gate runs an independent source oracle for hierarchy, semantic labels, exact
+anchors, reference ownership, and published-schema integrity.
+
 ## Incremental code-graph qualification
 
 Fact-neutral updates may bypass project-wide resolution only after the changed
