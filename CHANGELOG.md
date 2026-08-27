@@ -74,6 +74,10 @@
   neighbor focus controls, and clearer icon-backed Callers, Callees, and Impact
   actions while preserving accessible labels and stable ordering.
 
+- Ensure multiple Markdown tables under one heading receive section-scoped
+  structural identities, preventing graph publication collisions when their
+  headers differ.
+
 ## 0.3.21 - 2026-08-25
 
 - Add source-proven Python graph intelligence with artifact-only SCIP

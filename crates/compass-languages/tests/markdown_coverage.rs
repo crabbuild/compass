@@ -523,6 +523,60 @@ fn markdown_tables_publish_semantic_rows_and_retain_cell_links() -> Result<(), B
 }
 
 #[test]
+fn markdown_tables_with_different_headers_keep_section_scoped_identities()
+-> Result<(), Box<dyn Error>> {
+    let source = br#"# Event Object
+
+| Field | Type | Description |
+| --- | --- | --- |
+| name | string | Event name |
+
+| Value | Name | Description |
+| --- | --- | --- |
+| 1 | ready | Ready event |
+"#;
+    let extraction = Engine::default().extract_source(
+        std::path::Path::new("docs/architecture/external-agent-protocol.md"),
+        source,
+    )?;
+    let tables = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.attributes.get("document_kind") == Some(&serde_json::json!("pipe_table"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tables.len(), 2);
+    assert_eq!(
+        tables
+            .iter()
+            .map(|node| node.string("qualified_name"))
+            .collect::<Vec<_>>(),
+        [
+            "Event Object::pipe_table#1".to_owned(),
+            "Event Object::pipe_table#2".to_owned(),
+        ]
+    );
+    assert_ne!(tables[0].id, tables[1].id);
+    let header_names = extraction
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.attributes.get("document_kind") == Some(&serde_json::json!("pipe_table_header"))
+        })
+        .map(|node| node.string("qualified_name"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        header_names,
+        [
+            "Event Object::pipe_table#1::pipe_table_header#1".to_owned(),
+            "Event Object::pipe_table#2::pipe_table_header#1".to_owned(),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
 fn markdown_table_limits_are_truthful_and_later_blocks_survive() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("limits.md");

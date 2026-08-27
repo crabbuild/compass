@@ -905,8 +905,13 @@ impl State<'_, '_> {
             .map(|cell| truncate_utf8(&normalize_table_text(&cell.text), MAX_TABLE_CELL_BYTES))
             .collect::<Vec<_>>()
             .join("\u{1f}");
-        let table_key = format!("{source_section}\u{1e}{header_signature}");
-        let occurrence = self.table_occurrences.entry(table_key).or_default();
+        // Table ordinals are scoped to the containing section, not to the
+        // header signature. Different tables can share a section and must
+        // still receive distinct qualified names and structural identities.
+        let occurrence = self
+            .table_occurrences
+            .entry(source_section.clone())
+            .or_default();
         *occurrence = occurrence.saturating_add(1);
         let table_ordinal = *occurrence;
         let table_qualified_name = format!("{source_section}::pipe_table#{table_ordinal}");
