@@ -2888,7 +2888,14 @@ fn collect_decorated_routes(
                     handler,
                     u32::try_from(stages.len()).unwrap_or(u32::MAX),
                 ));
-                append_dependency_graph_facts(facts, receiver.framework, handler, &stages, "route");
+                append_dependency_graph_facts(
+                    facts,
+                    receiver.framework,
+                    handler,
+                    &stages,
+                    "route",
+                    evidence,
+                );
                 append_handler_schema_relations(
                     facts, handler, decorator, &arguments, source, evidence, path,
                 );
@@ -3392,7 +3399,14 @@ fn push_receiver_route_facts(
             |handler| handler_stage(handler, u32::try_from(stages.len()).unwrap_or(u32::MAX)),
         ));
         if let Some(handler) = handler {
-            append_dependency_graph_facts(facts, receiver.framework, handler, &stages, "route");
+            append_dependency_graph_facts(
+                facts,
+                receiver.framework,
+                handler,
+                &stages,
+                "route",
+                evidence,
+            );
             append_handler_schema_relations(
                 facts, handler, route_node, arguments, source, evidence, path,
             );
@@ -3871,12 +3885,20 @@ fn operations(framework: &str, method: &str, arguments: &[String]) -> Vec<String
             "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "trace" => {
                 Some(method.to_ascii_uppercase())
             }
+            "websocket" | "websocket_route" => Some("WEBSOCKET".to_owned()),
             "api_route" | "route" => None,
             _ => return Vec::new(),
         };
         return operation
             .map(|operation| vec![operation])
-            .unwrap_or_else(|| keyword_string_list(arguments, "methods"));
+            .unwrap_or_else(|| {
+                let methods = keyword_string_list(arguments, "methods");
+                if methods.is_empty() {
+                    vec!["GET".to_owned()]
+                } else {
+                    methods
+                }
+            });
     }
     if framework == "starlette" {
         let operation = match method {
@@ -3953,6 +3975,22 @@ fn collect_dependency_stages(
     evidence: &SemanticEvidenceBatch,
     stages: &mut Vec<RawRouteStageFact>,
 ) {
+    if let Some(mut stage) = direct_dependency_stage(node, source, path, evidence) {
+        stage.position = u32::try_from(stages.len()).unwrap_or(u32::MAX);
+        stages.push(stage);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_dependency_stages(child, source, path, evidence, stages);
+    }
+}
+
+fn direct_dependency_stage(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    evidence: &SemanticEvidenceBatch,
+) -> Option<RawRouteStageFact> {
     if node.kind() == "call"
         && let Some(function) = node.child_by_field_name("function")
         && let Some(target) = exact_call_target(evidence, function)
@@ -3979,23 +4017,20 @@ fn collect_dependency_stages(
         {
             detail.insert("scopes".into(), Value::String(scopes));
         }
-        stages.push(RawRouteStageFact {
+        return Some(RawRouteStageFact {
             role: if target == "fastapi.Security" {
                 RawRouteStageRole::Security
             } else {
                 RawRouteStageRole::Dependency
             },
-            position: u32::try_from(stages.len()).unwrap_or(u32::MAX),
+            position: 0,
             reference,
             anchor: anchor(path, node),
             origin: RawFrameworkOrigin::Ast,
             detail,
         });
     }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_dependency_stages(child, source, path, evidence, stages);
-    }
+    None
 }
 
 fn ordered_stages(groups: Vec<Vec<RawRouteStageFact>>) -> Vec<RawRouteStageFact> {
@@ -4023,7 +4058,10 @@ fn handler_stage(handler: &DeclarationFact, position: u32) -> RawRouteStageFact 
     RawRouteStageFact {
         role: RawRouteStageRole::Handler,
         position,
-        reference: handler.name.clone(),
+        // Decorator ownership already selected one exact declaration. Keep
+        // that stable graph identity through route resolution instead of
+        // discarding it and performing a second project-wide name lookup.
+        reference: handler.graph_node_id.clone(),
         anchor: evidence_anchor(&handler.range),
         origin: RawFrameworkOrigin::Ast,
         detail: Map::from_iter([("declaration_id".into(), Value::String(handler.id.clone()))]),
@@ -4036,6 +4074,7 @@ fn append_dependency_graph_facts(
     source: &DeclarationFact,
     stages: &[RawRouteStageFact],
     context: &str,
+    evidence: &SemanticEvidenceBatch,
 ) {
     if framework != "fastapi" {
         return;
@@ -4070,7 +4109,8 @@ fn append_dependency_graph_facts(
             target_hint: Some(stage.reference.clone()),
             context: Some(context.to_owned()),
             anchor: stage.anchor.clone(),
-            target_anchor: Some(stage.anchor.clone()),
+            target_anchor: unique_declaration_for_reference(evidence, &stage.reference)
+                .map(|declaration| evidence_anchor(&declaration.range)),
             origin: RawFrameworkOrigin::Ast,
             evidence_class: "exact".to_owned(),
             ambiguity_policy: "require_exact".to_owned(),
@@ -4083,20 +4123,39 @@ fn collect_fastapi_provider_facts(
     context: &UniversalDetectionContext<'_, '_>,
     facts: &mut Vec<RawFrameworkFact>,
 ) {
-    for declaration in context
-        .evidence
-        .declarations
-        .iter()
-        .filter(|declaration| matches!(declaration.kind.as_str(), "function" | "method"))
+    collect_fastapi_dependency_expression_facts(context.root, context, facts);
+}
+
+fn collect_fastapi_dependency_expression_facts(
+    node: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if let Some(stage) =
+        direct_dependency_stage(node, context.source, context.path, context.evidence)
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some(owner) = call_owner_declaration(function, context.evidence)
     {
-        let Some(definition) = declaration_node(context.root, declaration) else {
-            continue;
+        let relation_context = if ancestors_before_definition(node)
+            .iter()
+            .any(|ancestor| ancestor.kind() == "parameters")
+        {
+            "subdependency"
+        } else {
+            "dependency_expression"
         };
-        let Some(parameters) = definition.child_by_field_name("parameters") else {
-            continue;
-        };
-        let stages = dependency_stages(parameters, context.source, context.path, context.evidence);
-        append_dependency_graph_facts(facts, "fastapi", declaration, &stages, "subdependency");
+        append_dependency_graph_facts(
+            facts,
+            "fastapi",
+            owner,
+            std::slice::from_ref(&stage),
+            relation_context,
+            context.evidence,
+        );
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_fastapi_dependency_expression_facts(child, context, facts);
     }
 }
 
@@ -4824,60 +4883,119 @@ fn exact_static_reference_hint(
     let in_signature = ancestors_before_definition(node)
         .iter()
         .any(|ancestor| ancestor.kind() == "parameters");
-    let reference_scope = reference_evaluation_scope(evidence, node, in_signature);
+    let mut reference_scope = reference_evaluation_scope(evidence, node, in_signature);
     if is_identifier(reference) {
+        while let Some(scope_id) = reference_scope {
+            let declarations = evidence
+                .declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.name == reference
+                        && declaration.range.start_byte < node.start_byte() as u64
+                        && declaration.scope_id.as_deref() == Some(scope_id)
+                        && !(in_signature && declaration.kind == "parameter")
+                })
+                .collect::<Vec<_>>();
+            let bindings = evidence
+                .bindings
+                .iter()
+                .filter(|binding| {
+                    matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
+                        && binding.spelling == reference
+                        && binding.range.end_byte <= node.start_byte() as u64
+                        && binding.scope_id.as_deref() == Some(scope_id)
+                })
+                .collect::<Vec<_>>();
+            if !declarations.is_empty() || !bindings.is_empty() {
+                return match (declarations.as_slice(), bindings.as_slice()) {
+                    ([declaration], [])
+                        if (matches!(
+                            declaration.kind.as_str(),
+                            "function" | "method" | "class"
+                        ) || exact_dependency_instance_declaration(evidence, declaration))
+                            && !has_intervening_python_rebinding(
+                                context_root(node),
+                                declaration,
+                                reference,
+                                node.start_byte() as u64,
+                                source,
+                            ) =>
+                    {
+                        Some(declaration.graph_node_id.clone())
+                    }
+                    ([], [binding]) => Some(binding.qualified_target.clone()),
+                    _ => None,
+                };
+            }
+            reference_scope = evidence
+                .scopes
+                .iter()
+                .find(|scope| scope.id == scope_id)
+                .and_then(|scope| scope.parent_scope_id.as_deref());
+        }
+        return None;
+    }
+    let (head, suffix) = reference.split_once('.')?;
+    while let Some(scope_id) = reference_scope {
         let declarations = evidence
             .declarations
             .iter()
             .filter(|declaration| {
-                declaration.name == reference
+                declaration.name == head
                     && declaration.range.start_byte < node.start_byte() as u64
-                    && declaration.scope_id.as_deref() == reference_scope
-                    && !(in_signature && declaration.kind == "parameter")
+                    && declaration.scope_id.as_deref() == Some(scope_id)
             })
-            .collect::<Vec<_>>();
+            .count();
         let bindings = evidence
             .bindings
             .iter()
             .filter(|binding| {
                 matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
-                    && binding.spelling == reference
+                    && binding.spelling == head
                     && binding.range.end_byte <= node.start_byte() as u64
-                    && binding.scope_id.as_deref() == reference_scope
+                    && binding.scope_id.as_deref() == Some(scope_id)
             })
-            .collect::<Vec<_>>();
-        return match (declarations.as_slice(), bindings.as_slice()) {
-            ([declaration], [])
-                if matches!(declaration.kind.as_str(), "function" | "method" | "class")
-                    && !has_intervening_python_rebinding(
-                        context_root(node),
-                        declaration,
-                        reference,
-                        node.start_byte() as u64,
-                        source,
-                    ) =>
-            {
-                Some(declaration.graph_node_id.clone())
-            }
-            ([], [binding]) => Some(binding.qualified_target.clone()),
-            _ => None,
-        };
+            .map(|binding| format!("{}.{}", binding.qualified_target, suffix))
+            .collect::<BTreeSet<_>>();
+        if declarations > 0 || !bindings.is_empty() {
+            return (declarations == 0 && bindings.len() == 1)
+                .then(|| bindings.first().cloned())
+                .flatten();
+        }
+        reference_scope = evidence
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .and_then(|scope| scope.parent_scope_id.as_deref());
     }
-    let (head, suffix) = reference.split_once('.')?;
-    let bindings = evidence
-        .bindings
+    None
+}
+
+fn exact_dependency_instance_declaration(
+    evidence: &SemanticEvidenceBatch,
+    declaration: &DeclarationFact,
+) -> bool {
+    if declaration.kind != "variable" {
+        return false;
+    }
+    let types = evidence
+        .candidates
         .iter()
-        .filter(|binding| {
-            matches!(binding.kind, BindingKind::Import | BindingKind::ImportAlias)
-                && binding.spelling == head
-                && binding.range.end_byte <= node.start_byte() as u64
-                && binding.scope_id.as_deref() == reference_scope
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::TypeOf
+                && candidate.source_declaration_id == declaration.id
         })
-        .map(|binding| format!("{}.{}", binding.qualified_target, suffix))
+        .map(|candidate| {
+            (
+                candidate.constraints.exact_target_declaration_id.as_deref(),
+                candidate.constraints.qualified_name.as_deref(),
+            )
+        })
         .collect::<BTreeSet<_>>();
-    (bindings.len() == 1)
-        .then(|| bindings.first().cloned())
-        .flatten()
+    types.len() == 1
+        && types
+            .first()
+            .is_some_and(|(declaration, qualified)| declaration.is_some() || qualified.is_some())
 }
 
 fn exact_import_reference_hint(

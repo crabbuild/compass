@@ -74,6 +74,124 @@ app.include_router(middle, prefix="/v2")
 }
 
 #[test]
+fn nested_fastapi_routes_and_dependencies_use_exact_lexical_identities()
+-> Result<(), Box<dyn Error>> {
+    let dependencies = br#"def dependency_c():
+    return "c"
+"#;
+    let routes = br#"from fastapi import Depends, FastAPI
+import pkg.dependencies as module
+
+class Checker:
+    def __call__(self):
+        return True
+
+checker = Checker()
+
+def first_app():
+    app = FastAPI()
+
+    @app.websocket("/first")
+    async def endpoint(value=Depends(checker)):
+        return value
+
+    return app
+
+def second_app():
+    app = FastAPI()
+
+    @app.api_route("/second")
+    def endpoint(value=Depends(module.dependency_c)):
+        return value
+
+    return app
+"#;
+    let extraction = resolved_project(&[
+        ("pkg/dependencies.py", dependencies),
+        ("pkg/routes.py", routes),
+    ])?;
+    let resolved = resolve_routes(&extraction, FrameworkLimits::default())?;
+    assert_eq!(resolved.len(), 2, "routes={resolved:#?}");
+    assert!(
+        resolved
+            .iter()
+            .all(|route| route.state == ResolutionState::Exact)
+    );
+    let handler_targets = resolved
+        .iter()
+        .filter_map(|route| {
+            route
+                .stages
+                .iter()
+                .find(|stage| stage.role == RouteStageRole::Handler)
+                .and_then(|stage| stage.target.as_deref())
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(handler_targets.len(), 2);
+
+    let checker = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.routes.checker")
+        .ok_or("missing checker instance")?;
+    let dependency_c = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.dependencies.dependency_c")
+        .ok_or("missing qualified dependency")?;
+    assert_eq!(checker.string("symbol_kind"), "variable");
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .any(|edge| { edge.string("relation") == "depends_on" && edge.target == checker.id })
+    );
+    assert!(
+        extraction.edges.iter().any(|edge| {
+            edge.string("relation") == "depends_on" && edge.target == dependency_c.id
+        })
+    );
+    Ok(())
+}
+
+#[test]
+fn module_scoped_fastapi_dependencies_preserve_exact_file_identity() -> Result<(), Box<dyn Error>> {
+    let source = br#"from typing import Annotated
+from fastapi import Depends
+
+def module_dependency():
+    return True
+
+DependencyAlias = Annotated[str, Depends(module_dependency)]
+"#;
+    let extraction = resolved_project(&[("pkg/dependencies.py", source)])?;
+    let file = extraction
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("symbol_kind") == "file"
+                && node.string("source_file") == "pkg/dependencies.py"
+        })
+        .ok_or("missing file node")?;
+    let dependency = extraction
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "pkg.dependencies.module_dependency")
+        .ok_or("missing module dependency")?;
+    assert!(
+        extraction.edges.iter().any(|edge| {
+            edge.string("relation") == "depends_on"
+                && edge.source == file.id
+                && edge.target == dependency.id
+        }),
+        "edges={:#?} diagnostics={:#?}",
+        extraction.edges,
+        extraction.extensions
+    );
+    Ok(())
+}
+
+#[test]
 fn receiver_mount_cycles_emit_no_fabricated_route_and_depth_overflow_is_explicit()
 -> Result<(), Box<dyn Error>> {
     let a = br#"from fastapi import APIRouter

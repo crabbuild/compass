@@ -378,6 +378,19 @@ python3 scripts/check_code_graph_v1_coverage.py \
   --compass-revision "$(git rev-parse HEAD)" \
   --comparisons "$QUALIFY_TMP/comparisons.json"
 
+echo "[code-graph-v1] clustered production update for topology qualification"
+CLUSTERED_OUTPUT="$QUALIFY_TMP/clustered-output"
+"$COMPASS_BIN" update "$CORPUS" \
+  --out "$CLUSTERED_OUTPUT" --no-viz --no-gitignore \
+  --inference-level max \
+  >"$QUALIFY_TMP/clustered.log"
+clustered_graph="$(active_graph "$CLUSTERED_OUTPUT")"
+
+echo "[code-graph-v1] enforce evidence-backed topology regression policy"
+python3 scripts/check_code_graph_topology.py \
+  --graph "$clustered_graph" \
+  --policy tests/qualification/code-graph-v1-topology.json
+
 echo "[code-graph-v1] execute independent Markdown graph-quality assertions"
 python3 scripts/markdown_graph_quality_oracle.py \
   --manifest tests/qualification/markdown-intelligence.json \
