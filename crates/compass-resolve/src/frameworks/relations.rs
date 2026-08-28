@@ -73,7 +73,7 @@ pub fn resolve_and_publish(
             }));
             continue;
         };
-        let (source_candidates, source_truncated) = resolve_hint(
+        let (source_candidates, source_truncated) = resolve_source_hint(
             fact.source_reference.as_deref(),
             &fact.anchor,
             &targets,
@@ -459,6 +459,28 @@ fn normalize_relation(value: &str) -> Option<&'static str> {
     }
 }
 
+fn resolve_source_hint(
+    hint: Option<&str>,
+    anchor: &RawFrameworkAnchor,
+    targets: &FrameworkTargetIndex<'_>,
+    limit: usize,
+    root: Option<&Path>,
+) -> (Vec<ResolutionCandidate>, bool) {
+    if let Some(reference) = hint.map(str::trim).filter(|hint| !hint.is_empty()) {
+        let (nodes, truncated) = targets.exact_node(reference, limit);
+        if !nodes.is_empty() || truncated {
+            return (
+                nodes
+                    .into_iter()
+                    .map(|node| candidate(node.id.clone(), node, "exact relation source id"))
+                    .collect(),
+                truncated,
+            );
+        }
+    }
+    resolve_hint(hint, anchor, targets, limit, root)
+}
+
 fn resolve_hint(
     hint: Option<&str>,
     anchor: &RawFrameworkAnchor,
@@ -469,6 +491,7 @@ fn resolve_hint(
     let families = [
         TargetFamily::Route,
         TargetFamily::Callable,
+        TargetFamily::Dependency,
         TargetFamily::Type,
         TargetFamily::DatabaseTable,
     ];

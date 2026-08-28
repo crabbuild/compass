@@ -133,6 +133,19 @@ fn route_validation_accepts_role_promoted_javascript_alias_targets() {
 }
 
 #[test]
+fn route_validation_accepts_role_promoted_dependency_instance_targets() {
+    for role in [NodeRole::Service, NodeRole::Middleware] {
+        let mut graph = document();
+        graph.nodes[1].kind = NodeKind::Variable;
+        graph.nodes[1].roles = vec![role];
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "role-promoted {role:?} variable was rejected"
+        );
+    }
+}
+
+#[test]
 fn structured_validation_classifies_document_node_and_edge_failures() -> Result<(), Box<dyn Error>>
 {
     let mut graph = document();
@@ -572,6 +585,25 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
             "{kind:?} accepted {source_kind:?} -> {target_kind:?}"
         );
     }
+}
+
+#[test]
+fn dependency_edges_accept_source_backed_callable_instance_variables() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Function;
+    graph.nodes[1].kind = NodeKind::Variable;
+    graph.links[0].kind = EdgeKind::DependsOn;
+    let id = edge_id(
+        "route",
+        EdgeKind::DependsOn,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+
+    assert!(validate_code_graph(&graph).is_ok());
 }
 
 #[test]

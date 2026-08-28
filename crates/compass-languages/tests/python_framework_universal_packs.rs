@@ -756,6 +756,57 @@ app.register_blueprint(api, url_prefix="/api")
 }
 
 #[test]
+fn fastapi_websocket_and_api_route_decorators_preserve_exact_handlers() -> Result<(), Box<dyn Error>>
+{
+    let extraction = extract(
+        "api/routes.py",
+        br#"from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.websocket("/events")
+async def events():
+    return None
+
+@app.api_route("/default")
+def default_route():
+    return None
+
+@app.api_route("/explicit", methods=["POST", "PATCH"])
+def explicit_route():
+    return None
+"#,
+    )?;
+    let routes = routes(&extraction);
+    assert!(routes.iter().any(|route| {
+        route.operation == "WEBSOCKET"
+            && route.normalized_path == "/events"
+            && route.handler_reference == "events"
+    }));
+    assert!(routes.iter().any(|route| {
+        route.operation == "GET"
+            && route.normalized_path == "/default"
+            && route.handler_reference == "default_route"
+    }));
+    let explicit = routes
+        .iter()
+        .filter(|route| route.normalized_path == "/explicit")
+        .map(|route| route.operation.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        explicit,
+        std::collections::BTreeSet::from(["PATCH", "POST"])
+    );
+    assert!(routes.iter().all(|route| {
+        route
+            .stages
+            .last()
+            .is_some_and(|stage| stage.detail.contains_key("declaration_id"))
+    }));
+    Ok(())
+}
+
+#[test]
 fn flask_factories_shortcuts_url_rules_method_views_nested_blueprints_and_hooks_are_exact()
 -> Result<(), Box<dyn Error>> {
     let extraction = extract(

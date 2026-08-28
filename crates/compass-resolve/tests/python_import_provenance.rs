@@ -1394,6 +1394,30 @@ fn low_python_local_initializer_calls_the_exact_class_method() -> Result<(), Box
 }
 
 #[test]
+fn multiline_awaited_call_under_tuple_assignment_keeps_the_exact_target()
+-> Result<(), Box<dyn Error>> {
+    let files = [(
+        "dependencies.py",
+        "async def solve_dependencies():\n    if True:\n        (\n            body_values,\n            body_errors,\n        ) = await request_body_to_args(  # body_params checked above\n            body_fields=[],\n            received_body=None,\n            embed_body_fields=False,\n        )\n        return body_values, body_errors\n\nasync def request_body_to_args(body_fields, received_body, embed_body_fields):\n    return {}, []\n",
+    )];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "dependencies.solve_dependencies")
+        .ok_or("missing solve_dependencies")?;
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "dependencies.request_body_to_args")
+        .ok_or("missing request_body_to_args")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id && edge.target == target.id && edge.string("relation") == "calls"
+    }));
+    Ok(())
+}
+
+#[test]
 fn low_python_local_initializer_dispatch_fails_closed_for_non_dominating_or_rebound_values()
 -> Result<(), Box<dyn Error>> {
     for source in [

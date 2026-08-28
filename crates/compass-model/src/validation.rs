@@ -996,16 +996,20 @@ fn endpoint_kinds_are_valid(
                         | NodeKind::Class
                         | NodeKind::Component
                 )
-                // JavaScript/TypeScript frameworks commonly expose a route
-                // handler through an alias (`export const GET = handler`,
-                // `const Page = withData(...)`). Preserve the structural
-                // `variable` kind while accepting it only after the route
-                // resolver has explicitly promoted the node to the typed
-                // route-handler role; arbitrary variables must remain
-                // invalid route targets.
+                // Frameworks commonly expose a route handler, dependency, or
+                // security component through a source-backed variable. Keep
+                // the structural `variable` kind while accepting it only
+                // after the route resolver has explicitly promoted the node
+                // to the corresponding typed role; arbitrary variables must
+                // remain invalid route targets.
                 || (source.kind == NodeKind::Route
                     && target.kind == NodeKind::Variable
-                    && target.roles.contains(&NodeRole::RouteHandler))
+                    && target.roles.iter().any(|role| {
+                        matches!(
+                            role,
+                            NodeRole::RouteHandler | NodeRole::Service | NodeRole::Middleware
+                        )
+                    }))
         }
         EdgeKind::MapsTo => {
             matches!(
@@ -1541,6 +1545,10 @@ const fn is_dependency_endpoint(kind: NodeKind) -> bool {
             NodeKind::File
                 | NodeKind::Import
                 | NodeKind::Export
+                // A dependency-injection marker can name a source-backed
+                // callable instance directly. The variable remains the
+                // truthful graph identity of that configured instance.
+                | NodeKind::Variable
                 | NodeKind::TypeAlias
                 | NodeKind::Resource
                 | NodeKind::Schema
