@@ -1233,6 +1233,84 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
 }
 
 #[test]
+fn truncated_callers_use_the_same_edge_id_prefix_for_store_and_json()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let mut target = graph
+        .nodes
+        .first()
+        .cloned()
+        .ok_or("fixture graph has no template node")?;
+    target.id = "n:bounded-target".to_owned();
+    target.kind = NodeKind::Function;
+    target.name = "bounded_target".to_owned();
+    target.qualified_name = "Bounded.target".to_owned();
+    graph.nodes.push(target);
+
+    let edge_template = graph
+        .links
+        .first()
+        .cloned()
+        .ok_or("fixture graph has no template edge")?;
+    for ordinal in 0..32 {
+        let mut caller = graph
+            .nodes
+            .first()
+            .cloned()
+            .ok_or("fixture graph has no template node")?;
+        caller.id = format!("n:bounded-caller:{ordinal:02}");
+        caller.kind = NodeKind::Function;
+        caller.name = format!("bounded_caller_{ordinal:02}");
+        caller.qualified_name = format!("Bounded.caller_{ordinal:02}");
+
+        let mut edge = edge_template.clone();
+        edge.source = caller.id.clone();
+        edge.target = "n:bounded-target".to_owned();
+        edge.kind = EdgeKind::Calls;
+        edge.occurrence_rule = None;
+        edge.details = None;
+        edge.deferred = false;
+        edge.id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            None,
+        );
+        edge.key.clone_from(&edge.id);
+        graph.nodes.push(caller);
+        graph.links.push(edge);
+    }
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let cache = directory.path().join("cache");
+    let store = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let request = CallRequest {
+        symbol: "Bounded.target".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits {
+            max_edges: 1,
+            max_nodes: 2,
+            ..CodeQueryLimits::default()
+        },
+    };
+    let store_response = store.callers(request.clone())?;
+    let json_response = json.callers(request)?;
+    assert!(store_response.truncated);
+    assert!(json_response.truncated);
+    assert_eq!(
+        serde_json::to_value(store_response)?,
+        serde_json::to_value(json_response)?,
+    );
+    Ok(())
+}
+
+#[test]
 fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Make bounded JSON and SQLite adjacency queries retain the same canonical
+  edge-ID prefix before heuristic filtering. New store snapshots advertise the
+  edge-ordered adjacency capability; older sidecars remain valid recovery
+  inputs but directional store queries fail with an explicit rebuild
+  instruction instead of returning a backend-dependent truncated subset.
+
 - Refactor universal language metadata around `UniversalEvidenceProducer` and
   `UniversalEvidencePipeline`. `UniversalCandidate`/`UniversalComplete` are
   now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized

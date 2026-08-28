@@ -14,8 +14,8 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex};
 
 use compass_model::code_graph::{
-    CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
-    NodeDetails, NodeKind, NodeRecord,
+    CODE_GRAPH_SCHEMA_V1, EdgeKind, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument,
+    GraphMetadata, NodeDetails, NodeKind, NodeRecord,
 };
 use compass_model::validate_code_graph;
 use compass_store::{
@@ -38,6 +38,7 @@ pub const IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1: &str = "__compass_cap_identifi
 pub const OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_operation_role_terms_v1__";
 pub const DECLARATION_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_declaration_terms_v1__";
 pub const RELATIONSHIP_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_relationship_terms_v1__";
+const EDGE_ID_ORDERED_ADJACENCY_CAPABILITY_V1: &str = "compass.edge-id-ordered-adjacency/1";
 pub const GRAPH_SNAPSHOT_OBJECT_PARTITION: &str = "graph-snapshot/objects";
 pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
 pub const GRAPH_SNAPSHOT_ACTIVE_KEY: &str = "active";
@@ -60,6 +61,39 @@ const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
 const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
 const TREE_OBJECT_CACHE_MAX_BYTES: usize = 7 * 1024 * 1024;
 const TREE_OBJECT_CACHE_MAX_OBJECTS: usize = 1_024;
+const ALL_EDGE_KINDS: &[EdgeKind] = &[
+    EdgeKind::Contains,
+    EdgeKind::Embeds,
+    EdgeKind::Calls,
+    EdgeKind::Imports,
+    EdgeKind::Exports,
+    EdgeKind::Extends,
+    EdgeKind::Implements,
+    EdgeKind::MixesIn,
+    EdgeKind::References,
+    EdgeKind::TypeOf,
+    EdgeKind::Returns,
+    EdgeKind::Instantiates,
+    EdgeKind::Overrides,
+    EdgeKind::Decorates,
+    EdgeKind::RoutesTo,
+    EdgeKind::Reads,
+    EdgeKind::Writes,
+    EdgeKind::Aliases,
+    EdgeKind::Registers,
+    EdgeKind::Handles,
+    EdgeKind::Publishes,
+    EdgeKind::Subscribes,
+    EdgeKind::Produces,
+    EdgeKind::Consumes,
+    EdgeKind::Schedules,
+    EdgeKind::Triggers,
+    EdgeKind::Tests,
+    EdgeKind::DependsOn,
+    EdgeKind::Documents,
+    EdgeKind::MapsTo,
+    EdgeKind::Renders,
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -801,6 +835,7 @@ impl GraphSnapshotBuilder {
         let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
             SnapshotError::Unsupported("node-value delta requires an active snapshot".to_owned())
         })?;
+        reader.require_edge_id_ordered_adjacency()?;
         let previous_snapshot_id = snapshot_identity(previous)?;
         if reader.selector().snapshot_id != previous_snapshot_id
             || reader.manifest().node_count != previous.nodes.len() as u64
@@ -876,6 +911,7 @@ impl GraphSnapshotBuilder {
         let reader = GraphSnapshotReader::open_active(store)?.ok_or_else(|| {
             SnapshotError::Unsupported("graph delta requires an active snapshot".to_owned())
         })?;
+        reader.require_edge_id_ordered_adjacency()?;
         let previous_snapshot_id = snapshot_identity(previous)?;
         if reader.selector().snapshot_id != previous_snapshot_id
             || reader.manifest().node_count != previous.nodes.len() as u64
@@ -1844,7 +1880,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 b"diagnostic" => graph
                     .diagnostics
                     .push(decode_json::<GraphDiagnostic>(&entry.value)?),
-                b"diagnostic-code" | b"scope-capability" => {}
+                b"adjacency-capability" | b"diagnostic-code" | b"scope-capability" => {}
                 _ => {
                     return Err(SnapshotError::Corrupt(
                         "metadata index contains an unknown supplement".to_owned(),
@@ -2662,27 +2698,12 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         &self,
         node_id: &str,
         incoming: bool,
-        kinds: &[compass_model::code_graph::EdgeKind],
+        kinds: &[EdgeKind],
         limits: SnapshotReadLimits,
     ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
-        let index = if incoming {
-            IndexKind::Incoming
-        } else {
-            IndexKind::Outgoing
-        };
-        let mut edge_ids = BTreeSet::new();
-        let mut truncated = false;
-        for kind in kinds {
-            let prefix =
-                encode_graph_index_key(index, &[node_id.as_bytes(), kind.as_str().as_bytes()])?;
-            let (entries, bucket_truncated) =
-                self.scan_entries_bounded(index, Some(&prefix), limits)?;
-            truncated |= bucket_truncated;
-            for entry in entries {
-                let edge_id = index_entry_id(&entry, "directional adjacency")?;
-                edge_ids.insert(edge_id);
-            }
-        }
+        let (entries, truncated) =
+            self.directional_entries_by_kinds(node_id, incoming, kinds, limits)?;
+        let edge_ids = entries.into_keys().collect::<BTreeSet<_>>();
         let edges = self
             .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
         Ok((edges, truncated))
@@ -2696,21 +2717,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         incoming: bool,
         limits: SnapshotReadLimits,
     ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
-        let index = if incoming {
-            IndexKind::Incoming
-        } else {
-            IndexKind::Outgoing
-        };
-        let prefix = encode_graph_index_key(index, &[node_id.as_bytes()])?;
-        let (entries, truncated) = self.scan_entries_bounded(index, Some(&prefix), limits)?;
-        let mut edge_ids = BTreeSet::new();
-        for entry in entries {
-            let edge_id = index_entry_id(&entry, "directional adjacency")?;
-            edge_ids.insert(edge_id);
-        }
-        let edges = self
-            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
-        Ok((edges, truncated))
+        self.adjacency_by_kinds(node_id, incoming, ALL_EDGE_KINDS, limits)
     }
 
     /// Read outgoing occurrences whose target is already in a bounded selected
@@ -2722,30 +2729,15 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         selected_node_ids: &BTreeSet<String>,
         limits: SnapshotReadLimits,
     ) -> Result<(Vec<String>, bool, usize), SnapshotError> {
-        let prefix = encode_graph_index_key(IndexKind::Outgoing, &[source_id.as_bytes()])?;
         let (entries, truncated) =
-            self.scan_entries_bounded(IndexKind::Outgoing, Some(&prefix), limits)?;
+            self.directional_entries_by_kinds(source_id, false, ALL_EDGE_KINDS, limits)?;
         let entries_examined = entries.len();
-        let mut edge_ids = Vec::new();
-        for entry in entries {
-            let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
-            let target_id = segments
-                .get(3)
-                .and_then(|segment| std::str::from_utf8(segment).ok())
-                .ok_or_else(|| {
-                    SnapshotError::Corrupt("outgoing index key has an invalid target ID".to_owned())
-                })?;
-            if !selected_node_ids.contains(target_id) {
-                continue;
-            }
-            let edge_id = segments
-                .get(4)
-                .and_then(|segment| std::str::from_utf8(segment).ok())
-                .ok_or_else(|| {
-                    SnapshotError::Corrupt("outgoing index key has an invalid edge ID".to_owned())
-                })?;
-            edge_ids.push(edge_id.to_owned());
-        }
+        let edge_ids = entries
+            .into_iter()
+            .filter_map(|(edge_id, target_id)| {
+                selected_node_ids.contains(&target_id).then_some(edge_id)
+            })
+            .collect();
         Ok((edge_ids, truncated, entries_examined))
     }
 
@@ -2754,20 +2746,72 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         node_id: &str,
         limits: SnapshotReadLimits,
     ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
-        let incoming_prefix = encode_graph_index_key(IndexKind::Incoming, &[node_id.as_bytes()])?;
-        let outgoing_prefix = encode_graph_index_key(IndexKind::Outgoing, &[node_id.as_bytes()])?;
+        let limits = limits.validate()?;
         let (incoming, incoming_truncated) =
-            self.scan_entries_bounded(IndexKind::Incoming, Some(&incoming_prefix), limits)?;
+            self.directional_entries_by_kinds(node_id, true, ALL_EDGE_KINDS, limits)?;
         let (outgoing, outgoing_truncated) =
-            self.scan_entries_bounded(IndexKind::Outgoing, Some(&outgoing_prefix), limits)?;
-        let mut edge_ids = BTreeSet::new();
-        for entry in incoming.into_iter().chain(outgoing) {
-            let edge_id = index_entry_id(&entry, "incident adjacency")?;
+            self.directional_entries_by_kinds(node_id, false, ALL_EDGE_KINDS, limits)?;
+        let mut edge_ids = incoming.into_keys().collect::<BTreeSet<_>>();
+        let mut truncated = incoming_truncated || outgoing_truncated;
+        for edge_id in outgoing.into_keys() {
             edge_ids.insert(edge_id);
+            if edge_ids.len() > limits.max_items {
+                edge_ids.pop_last();
+                truncated = true;
+            }
         }
         let edges = self
             .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
-        Ok((edges, incoming_truncated || outgoing_truncated))
+        Ok((edges, truncated))
+    }
+
+    fn directional_entries_by_kinds(
+        &self,
+        node_id: &str,
+        incoming: bool,
+        kinds: &[EdgeKind],
+        limits: SnapshotReadLimits,
+    ) -> Result<(BTreeMap<String, String>, bool), SnapshotError> {
+        let limits = limits.validate()?;
+        self.require_edge_id_ordered_adjacency()?;
+        let index = if incoming {
+            IndexKind::Incoming
+        } else {
+            IndexKind::Outgoing
+        };
+        let mut entries_by_id = BTreeMap::new();
+        let mut truncated = false;
+        for kind in kinds {
+            let prefix =
+                encode_graph_index_key(index, &[node_id.as_bytes(), kind.as_str().as_bytes()])?;
+            let (entries, bucket_truncated) =
+                self.scan_entries_bounded(index, Some(&prefix), limits)?;
+            truncated |= bucket_truncated;
+            for entry in entries {
+                let (edge_id, opposite_id) = directional_index_entry(&entry, index)?;
+                entries_by_id.insert(edge_id, opposite_id);
+                if entries_by_id.len() > limits.max_items {
+                    entries_by_id.pop_last();
+                    truncated = true;
+                }
+            }
+        }
+        Ok((entries_by_id, truncated))
+    }
+
+    fn require_edge_id_ordered_adjacency(&self) -> Result<(), SnapshotError> {
+        let key = encode_graph_index_key(IndexKind::Metadata, &[b"adjacency-capability"])?;
+        let capability = self
+            .lookup(IndexKind::Metadata, &key)?
+            .map(|value| decode_json::<String>(&value))
+            .transpose()?;
+        if capability.as_deref() != Some(EDGE_ID_ORDERED_ADJACENCY_CAPABILITY_V1) {
+            return Err(SnapshotError::CapabilityUnavailable(
+                "edge_id_ordered_adjacency_unavailable; rebuild the graph store with this Compass version"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     pub fn export_graph(&self) -> Result<GraphDocument, SnapshotError> {
@@ -2815,29 +2859,22 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         node_id: &str,
         limits: SnapshotReadLimits,
     ) -> Result<Vec<EdgeRecord>, SnapshotError> {
-        let prefix = encode_graph_index_key(index, &[node_id.as_bytes()])?;
-        let entries = self.scan_entries(index, Some(&prefix), limits)?;
-        let edge_ids = entries
-            .iter()
-            .map(|entry| index_entry_id(entry, "adjacency"))
-            .collect::<Result<Vec<_>, _>>()?;
-        let requested = edge_ids.iter().cloned().collect::<BTreeSet<_>>();
-        let edges = self.get_edges_by_ids_bounded_work(
-            &requested,
-            point_lookup_batch_limits(requested.len()),
-        )?;
-        let by_id = edges
-            .into_iter()
-            .map(|edge| (edge.id.clone(), edge))
-            .collect::<BTreeMap<_, _>>();
-        let mut ordered = Vec::with_capacity(edge_ids.len());
-        for edge_id in edge_ids {
-            let edge = by_id.get(&edge_id).cloned().ok_or_else(|| {
-                SnapshotError::Corrupt(format!("{index:?} index references missing edge {edge_id}"))
-            })?;
-            ordered.push(edge);
+        let incoming = match index {
+            IndexKind::Incoming => true,
+            IndexKind::Outgoing => false,
+            _ => {
+                return Err(SnapshotError::Corrupt(format!(
+                    "{index:?} is not a directional adjacency index"
+                )));
+            }
+        };
+        let (edges, truncated) = self.directional_adjacency(node_id, incoming, limits)?;
+        if truncated {
+            return Err(SnapshotError::Limit(format!(
+                "{index:?} adjacency exceeds the snapshot item limit"
+            )));
         }
-        Ok(ordered)
+        Ok(edges)
     }
 
     fn root(&self, index: IndexKind) -> Result<&SnapshotRoot, SnapshotError> {
@@ -3031,13 +3068,34 @@ fn validate_tree_integrity<S: Store + ?Sized>(
     }
 }
 
-fn index_entry_id(entry: &TreeEntry, label: &str) -> Result<String, SnapshotError> {
+fn directional_index_entry(
+    entry: &TreeEntry,
+    index: IndexKind,
+) -> Result<(String, String), SnapshotError> {
     let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
-    let id = segments
-        .last()
+    if segments.len() != 5 || segments.first().map(Vec::as_slice) != Some(index.as_str().as_bytes())
+    {
+        return Err(SnapshotError::Corrupt(format!(
+            "{} index key has an invalid edge-ordered layout",
+            index.as_str()
+        )));
+    }
+    let edge_id = segments
+        .get(3)
         .and_then(|segment| std::str::from_utf8(segment).ok())
-        .ok_or_else(|| SnapshotError::Corrupt(format!("{label} ID is invalid")))?;
-    Ok(id.to_owned())
+        .ok_or_else(|| {
+            SnapshotError::Corrupt(format!("{} index edge ID is invalid", index.as_str()))
+        })?;
+    let opposite_id = segments
+        .get(4)
+        .and_then(|segment| std::str::from_utf8(segment).ok())
+        .ok_or_else(|| {
+            SnapshotError::Corrupt(format!(
+                "{} index opposite endpoint is invalid",
+                index.as_str()
+            ))
+        })?;
+    Ok((edge_id.to_owned(), opposite_id.to_owned()))
 }
 
 /// Encode an index key using the portable, length-prefixed store encoding.
@@ -3302,6 +3360,11 @@ fn build_index(
                 &mut entries,
                 encode_graph_index_key(IndexKind::Metadata, &[b"scope-capability"])?,
                 &DISCOVERY_SCOPE_INDEX_CAPABILITY_V1,
+            )?;
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(IndexKind::Metadata, &[b"adjacency-capability"])?,
+                &EDGE_ID_ORDERED_ADJACENCY_CAPABILITY_V1,
             )?;
         }
         IndexKind::Nodes => {
@@ -3577,8 +3640,8 @@ fn build_index(
                         &[
                             edge.source.as_bytes(),
                             kind,
-                            edge.target.as_bytes(),
                             edge.id.as_bytes(),
+                            edge.target.as_bytes(),
                         ],
                     )?,
                     &(),
@@ -3595,8 +3658,8 @@ fn build_index(
                         &[
                             edge.target.as_bytes(),
                             kind,
-                            edge.source.as_bytes(),
                             edge.id.as_bytes(),
+                            edge.source.as_bytes(),
                         ],
                     )?,
                     &(),
@@ -5309,6 +5372,56 @@ mod tests {
             reader.resolve_scope_values("node-id", "missing", SnapshotReadLimits::default()),
             Err(SnapshotError::CapabilityUnavailable(message))
                 if message.contains("scope_index_unavailable")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn snapshot_without_edge_ordered_adjacency_requires_rebuild_for_directional_reads()
+    -> Result<(), SnapshotError> {
+        let graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "legacy-adjacency-test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let store = compass_store::MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let mut content = builder.prepare_content(&store, &graph)?;
+        let mut metadata_entries = build_index(&graph, IndexKind::Metadata, None)?;
+        metadata_entries.remove(&encode_graph_index_key(
+            IndexKind::Metadata,
+            &[b"adjacency-capability"],
+        )?);
+        let metadata_entry_count = metadata_entries.len() as u64;
+        let mut writer = ObjectWriter::new(&store)?;
+        let metadata_digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
+        let _ = writer.finish()?;
+        let metadata_root = content
+            .roots
+            .iter_mut()
+            .find(|root| root.index == IndexKind::Metadata)
+            .ok_or_else(|| SnapshotError::Corrupt("metadata root is missing".to_owned()))?;
+        metadata_root.digest = metadata_digest;
+        metadata_root.entry_count = metadata_entry_count;
+        let (graph_digest, graph_bytes) = digest_canonical_graph(&graph, false)?;
+        let prepared = builder.finish_content(&store, content, graph_digest, graph_bytes)?;
+        builder.activate(&store, &prepared)?;
+
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
+        assert_eq!(reader.export_graph()?, graph);
+        assert!(matches!(
+            reader.adjacency_by_kinds(
+                "missing",
+                false,
+                &[EdgeKind::Calls],
+                SnapshotReadLimits::default(),
+            ),
+            Err(SnapshotError::CapabilityUnavailable(message))
+                if message.contains("edge_id_ordered_adjacency_unavailable")
         ));
         Ok(())
     }
