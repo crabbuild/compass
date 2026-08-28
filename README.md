@@ -2,7 +2,7 @@
   <img src="apps/web/public/brand/compass-mark.svg" alt="Compass logo" width="128">
 </p>
 
-# Compass
+<h1 align="center">Compass</h1>
 
 <div align="center">
   <p><strong>Understand the shape of a codebase before you change it.</strong></p>
