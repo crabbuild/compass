@@ -19,7 +19,7 @@ name = "compass"
 path = "src/bin/compass.rs"
 
 [dependencies]
-compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.22" }
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.23" }
 ctrlc.workspace = true
 flate2.workspace = true
 glob.workspace = true
@@ -36,32 +36,32 @@ time.workspace = true
 tokio.workspace = true
 toml.workspace = true
 ureq.workspace = true
-compass-core = { path = "../compass-core", version = "0.3.22" }
-compass-analysis = { path = "../compass-analysis", version = "0.3.22" }
-compass-ir = { path = "../compass-ir", version = "0.3.22" }
-compass-program = { path = "../compass-program", version = "0.3.22" }
-compass-cypher = { path = "../compass-cypher", version = "0.3.22" }
-compass-cargo = { path = "../compass-cargo", version = "0.3.22" }
-compass-files = { path = "../compass-files", version = "0.3.22" }
-compass-graph = { path = "../compass-graph", version = "0.3.22" }
-compass-graphdb = { path = "../compass-graphdb", version = "0.3.22" }
-compass-global = { path = "../compass-global", version = "0.3.22" }
-compass-history = { path = "../compass-history", version = "0.3.22" }
-compass-google-workspace = { path = "../compass-google-workspace", version = "0.3.22" }
-compass-ingest = { path = "../compass-ingest", version = "0.3.22" }
-compass-model = { path = "../compass-model", version = "0.3.22" }
-compass-media = { path = "../compass-media", version = "0.3.22" }
-compass-ocr = { path = "../compass-ocr", version = "0.3.22" }
-compass-mcp = { path = "../compass-mcp", version = "0.3.22" }
-compass-output = { path = "../compass-output", version = "0.3.22" }
-compass-postgres = { path = "../compass-postgres", version = "0.3.22" }
-compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.22" }
-compass-prs = { path = "../compass-prs", version = "0.3.22" }
-compass-query = { path = "../compass-query", version = "0.3.22" }
-compass-store = { path = "../compass-store", version = "0.3.22" }
-compass-reflect = { path = "../compass-reflect", version = "0.3.22" }
-compass-semantic = { path = "../compass-semantic", version = "0.3.22" }
-compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.22" }
+compass-core = { path = "../compass-core", version = "0.3.23" }
+compass-analysis = { path = "../compass-analysis", version = "0.3.23" }
+compass-ir = { path = "../compass-ir", version = "0.3.23" }
+compass-program = { path = "../compass-program", version = "0.3.23" }
+compass-cypher = { path = "../compass-cypher", version = "0.3.23" }
+compass-cargo = { path = "../compass-cargo", version = "0.3.23" }
+compass-files = { path = "../compass-files", version = "0.3.23" }
+compass-graph = { path = "../compass-graph", version = "0.3.23" }
+compass-graphdb = { path = "../compass-graphdb", version = "0.3.23" }
+compass-global = { path = "../compass-global", version = "0.3.23" }
+compass-history = { path = "../compass-history", version = "0.3.23" }
+compass-google-workspace = { path = "../compass-google-workspace", version = "0.3.23" }
+compass-ingest = { path = "../compass-ingest", version = "0.3.23" }
+compass-model = { path = "../compass-model", version = "0.3.23" }
+compass-media = { path = "../compass-media", version = "0.3.23" }
+compass-ocr = { path = "../compass-ocr", version = "0.3.23" }
+compass-mcp = { path = "../compass-mcp", version = "0.3.23" }
+compass-output = { path = "../compass-output", version = "0.3.23" }
+compass-postgres = { path = "../compass-postgres", version = "0.3.23" }
+compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.23" }
+compass-prs = { path = "../compass-prs", version = "0.3.23" }
+compass-query = { path = "../compass-query", version = "0.3.23" }
+compass-store = { path = "../compass-store", version = "0.3.23" }
+compass-reflect = { path = "../compass-reflect", version = "0.3.23" }
+compass-semantic = { path = "../compass-semantic", version = "0.3.23" }
+compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.23" }
 url.workspace = true
 
 [lints]

@@ -13,8 +13,8 @@ categories.workspace = true
 
 [dependencies]
 base64.workspace = true
-compass-files = { path = "../compass-files", version = "0.3.22" }
-compass-ocr = { path = "../compass-ocr", version = "0.3.22" }
+compass-files = { path = "../compass-files", version = "0.3.23" }
+compass-ocr = { path = "../compass-ocr", version = "0.3.23" }
 hayro.workspace = true
 image.workspace = true
 oxidize-pdf.workspace = true
