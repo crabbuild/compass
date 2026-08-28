@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.23 - 2026-08-28
+
 - Make bounded JSON and SQLite adjacency queries retain the same canonical
   edge-ID prefix before heuristic filtering. New store snapshots advertise the
   edge-ordered adjacency capability; older sidecars remain valid recovery
