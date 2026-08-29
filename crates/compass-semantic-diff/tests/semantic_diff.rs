@@ -69,6 +69,15 @@ impl SnapshotReader for Fixtures {
             .cloned()
             .unwrap_or_default())
     }
+
+    fn dependency_participates_in_cycle(
+        &self,
+        _side: SnapshotSide,
+        _source: &str,
+        _target: &str,
+    ) -> Result<Option<bool>, SemanticDiffError> {
+        Ok(Some(true))
+    }
 }
 
 fn bundle(fixtures: &Fixtures, side: SnapshotSide) -> &AnalysisBundle {
@@ -302,6 +311,12 @@ fn graph_only_additions_and_removals_are_classified_before_digest_changes()
             ),
         ]),
     };
+    let community_node = |id: &str, label: &str, source_file: &str, community: u64| {
+        let mut node = node(id, label, source_file);
+        node.attributes
+            .insert("community".to_owned(), serde_json::json!({"id": community}));
+        node
+    };
     let fixtures = Fixtures {
         old,
         new,
@@ -311,15 +326,20 @@ fn graph_only_additions_and_removals_are_classified_before_digest_changes()
         )]),
         new_nodes: BTreeMap::from([
             (
+                "src_package_api".to_owned(),
+                community_node("src_package_api", "api", "src/package/api.py", 7),
+            ),
+            (
                 added_id.clone(),
                 node(&added_id, "new_handler", "src/api.ts"),
             ),
             (
                 internal_exported_id.clone(),
-                node(
+                community_node(
                     &internal_exported_id,
                     "Exported",
                     "src/package/_internal.py",
+                    9,
                 ),
             ),
             (
@@ -388,6 +408,15 @@ fn graph_only_additions_and_removals_are_classified_before_digest_changes()
             .find(|finding| finding.subject == internal_hidden_id)
             .is_some_and(|finding| !finding.public_surface)
     );
+    let dependency = report
+        .findings
+        .iter()
+        .find(|finding| finding.finding_type == FindingType::DependencyChange)
+        .and_then(|finding| finding.dependency_topology.as_ref())
+        .ok_or("missing dependency topology")?;
+    assert_eq!(dependency.source_community, Some(7));
+    assert_eq!(dependency.target_community, Some(9));
+    assert_eq!(dependency.participates_in_cycle, Some(true));
     Ok(())
 }
 

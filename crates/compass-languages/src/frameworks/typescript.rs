@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use regex::Regex;
@@ -15,17 +15,12 @@ const HTTP_METHODS: &[&str] = &[
     "get", "post", "put", "patch", "delete", "options", "head", "all",
 ];
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ImportAlias {
     local: String,
     imported: String,
     module: String,
-    start_byte: u64,
-    end_byte: u64,
-    start_line: u64,
-    start_column: u64,
-    end_line: u64,
-    end_column: u64,
+    anchor: RawFrameworkAnchor,
 }
 
 pub(super) fn detect_express(
@@ -39,13 +34,13 @@ pub(super) fn detect_express(
     }
     let body = std::str::from_utf8(source).unwrap_or_default();
     let mut imports = Vec::new();
-    collect_import_aliases(root, source, &mut imports);
+    collect_import_aliases(path, root, source, &mut imports);
     attach_import_aliases(path, source, root, extraction, &imports);
     let imports_module = |expected: &str| {
-        imports.iter().any(|import| {
-            import.module == expected
-                || (expected.ends_with('/') && import.module.starts_with(expected))
-                || (expected == "react-router" && import.module.starts_with("react-router-"))
+        imports.iter().any(|alias| {
+            alias.module == expected
+                || (expected.ends_with('/') && alias.module.starts_with(expected))
+                || (expected == "react-router" && alias.module.starts_with("react-router-"))
         })
     };
     let mut facts = Vec::new();
@@ -62,6 +57,7 @@ pub(super) fn detect_express(
         "express application/router",
     );
     if evidence.activates("express") {
+        collect_express_mount_facts(root, source, path, &receivers, &imports, &mut facts);
         collect_express_routes(root, source, path, &receivers, &mounts, &mut facts);
     }
     facts
@@ -150,12 +146,12 @@ fn detect_node_router(
         return Vec::new();
     }
     let mut imports = Vec::new();
-    collect_import_aliases(root, source, &mut imports);
+    collect_import_aliases(path, root, source, &mut imports);
     attach_import_aliases(path, source, root, extraction, &imports);
     let module = kind.module();
     let imported = imports
         .iter()
-        .any(|import| import.module == module || import.module.starts_with(&format!("{module}/")));
+        .any(|alias| alias.module == module || alias.module.starts_with(&format!("{module}/")));
     let direct = imported || source_has_module_require(root, source, module);
     if !direct {
         return Vec::new();
@@ -166,6 +162,7 @@ fn detect_node_router(
     }
     let mounts = node_router_mounts(root, source, &receivers, kind);
     let mut facts = Vec::new();
+    collect_node_router_mount_facts(root, source, path, &receivers, &imports, kind, &mut facts);
     collect_node_router_routes(root, source, path, &receivers, &mounts, kind, &mut facts);
     facts
 }
@@ -178,12 +175,12 @@ fn node_router_receivers(
 ) -> HashSet<String> {
     let constructors = imports
         .iter()
-        .filter(|import| {
-            (import.module == kind.module()
-                || import.module.starts_with(&format!("{}/", kind.module())))
-                && kind.constructor_import(&import.imported)
+        .filter(|alias| {
+            (alias.module == kind.module()
+                || alias.module.starts_with(&format!("{}/", kind.module())))
+                && kind.constructor_import(&alias.imported)
         })
-        .map(|import| import.local.clone())
+        .map(|alias| alias.local.clone())
         .collect::<HashSet<_>>();
     let body = std::str::from_utf8(source).unwrap_or_default();
     let mut receivers = HashSet::new();
@@ -213,6 +210,16 @@ fn collect_node_router_receivers(
     kind: NodeRouterKind,
     receivers: &mut HashSet<String>,
 ) {
+    if matches!(kind, NodeRouterKind::Fastify)
+        && matches!(node.kind(), "required_parameter" | "optional_parameter")
+        && node_text(node, source).contains("FastifyInstance")
+        && let Some(name) = node
+            .child_by_field_name("pattern")
+            .or_else(|| node.child_by_field_name("name"))
+        && is_identifier(node_text(name, source))
+    {
+        receivers.insert(node_text(name, source).to_owned());
+    }
     if node.kind() == "variable_declarator"
         && let (Some(name), Some(value)) = (
             node.child_by_field_name("name"),
@@ -339,6 +346,59 @@ fn collect_node_router_mounts(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn collect_node_router_mount_facts(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    receivers: &HashSet<String>,
+    imports: &[ImportAlias],
+    kind: NodeRouterKind,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call_expression"
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some((parent, method)) = node_text(function, source).trim().rsplit_once('.')
+        && receivers.contains(parent)
+        && ((matches!(kind, NodeRouterKind::Hono) && method == "route")
+            || (matches!(kind, NodeRouterKind::Fastify) && method == "register"))
+        && let Some(arguments) = node.child_by_field_name("arguments")
+    {
+        let arguments = split_arguments(node_text(arguments, source));
+        let (target, prefix) = if method == "route" {
+            (
+                arguments.get(1).map(String::as_str),
+                arguments.first().and_then(|value| string_literal(value)),
+            )
+        } else {
+            (
+                arguments.first().map(String::as_str),
+                arguments.get(1).and_then(|value| {
+                    object_property_text(value, "prefix").and_then(|value| string_literal(&value))
+                }),
+            )
+        };
+        if let (Some(target), Some(prefix)) = (target.map(str::trim), prefix)
+            && is_identifier(target)
+            && (receivers.contains(target) || imports.iter().any(|alias| alias.local == target))
+        {
+            facts.push(router_mount_fact(
+                kind.framework(),
+                path,
+                node,
+                parent,
+                target,
+                &prefix,
+                imports,
+            ));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_node_router_mount_facts(child, source, path, receivers, imports, kind, facts);
+    }
+}
+
 fn collect_node_router_routes(
     node: Node<'_>,
     source: &[u8],
@@ -405,6 +465,9 @@ fn collect_node_router_routes(
                 let (handler, middleware, mut detail) = router_stages(&raw_stages, kind, node);
                 if let Some(handler) = handler {
                     detail.insert("receiver".into(), Value::String(receiver.to_owned()));
+                    if let Some(prefix) = mounts.get(receiver).filter(|prefix| !prefix.is_empty()) {
+                        detail.insert("mount_prefix".into(), Value::String(prefix.clone()));
+                    }
                     for operation in methods {
                         facts.push(RawFrameworkFact::Route(RawRouteFact {
                             framework: kind.framework().to_owned(),
@@ -463,24 +526,19 @@ fn collect_node_router_routes(
                 return;
             };
             let (handler, opaque) = handler_from_value(&handler_value, node);
-            let mut detail = Map::from_iter([(
-                "receiver".into(),
-                Value::String(
-                    function
-                        .rsplit_once('.')
-                        .map(|(receiver, _)| receiver)
-                        .unwrap_or_default()
-                        .to_owned(),
-                ),
-            )]);
-            if opaque {
-                detail.insert("opaque_handler".into(), Value::Bool(true));
-            }
-            let middleware = object_hook_references(object);
             let receiver = function
                 .rsplit_once('.')
                 .map(|(receiver, _)| receiver)
                 .unwrap_or_default();
+            let mut detail =
+                Map::from_iter([("receiver".into(), Value::String(receiver.to_owned()))]);
+            if let Some(prefix) = mounts.get(receiver).filter(|prefix| !prefix.is_empty()) {
+                detail.insert("mount_prefix".into(), Value::String(prefix.clone()));
+            }
+            if opaque {
+                detail.insert("opaque_handler".into(), Value::Bool(true));
+            }
+            let middleware = object_hook_references(object);
             for operation in methods {
                 facts.push(RawFrameworkFact::Route(RawRouteFact {
                     framework: "fastify".to_owned(),
@@ -659,17 +717,23 @@ pub(super) fn detect_non_express(
         return Vec::new();
     }
     let mut imports = Vec::new();
-    collect_import_aliases(root, source, &mut imports);
+    collect_import_aliases(path, root, source, &mut imports);
     attach_import_aliases(path, source, root, extraction, &imports);
     let imports_module = |expected: &str| {
-        imports.iter().any(|import| {
-            import.module == expected
-                || (expected.ends_with('/') && import.module.starts_with(expected))
-                || (expected == "react-router" && import.module.starts_with("react-router-"))
+        imports.iter().any(|alias| {
+            alias.module == expected
+                || (expected.ends_with('/') && alias.module.starts_with(expected))
+                || (expected == "react-router" && alias.module.starts_with("react-router-"))
         })
     };
     let mut facts = Vec::new();
     let evidence = EvidenceSet::new()
+        .direct_if(
+            imports_module("@angular/router"),
+            "angular-router",
+            EvidenceKind::Import,
+            "@angular/router",
+        )
         .direct_if(
             imports_module("@nestjs/"),
             "nestjs",
@@ -691,6 +755,9 @@ pub(super) fn detect_non_express(
     if evidence.activates("nestjs") {
         collect_nest_routes(root, source, path, &mut facts);
     }
+    if evidence.activates("angular-router") {
+        collect_angular_router_routes(root, source, path, &mut facts);
+    }
     if evidence.activates("react-router") {
         collect_react_router_routes(root, source, path, &mut facts, "");
     }
@@ -709,7 +776,22 @@ fn attach_import_aliases(
 ) {
     attach_default_export_identities(path, source, root, extraction);
     let mut aliases = aliases.to_vec();
-    aliases.sort();
+    aliases.sort_by(|left, right| {
+        (
+            left.local.as_str(),
+            left.imported.as_str(),
+            left.module.as_str(),
+            left.anchor.start_byte,
+            left.anchor.end_byte,
+        )
+            .cmp(&(
+                right.local.as_str(),
+                right.imported.as_str(),
+                right.module.as_str(),
+                right.anchor.start_byte,
+                right.anchor.end_byte,
+            ))
+    });
     aliases.dedup();
     let source_file = path.to_string_lossy().into_owned();
     for alias in aliases {
@@ -717,12 +799,7 @@ fn attach_import_aliases(
             local,
             imported,
             module,
-            start_byte,
-            end_byte,
-            start_line,
-            start_column,
-            end_line,
-            end_column,
+            anchor,
         } = alias;
         if extraction.nodes.iter().any(|node| {
             node.attributes.get("local_name").and_then(Value::as_str) == Some(local.as_str())
@@ -747,14 +824,14 @@ fn attach_import_aliases(
                 ("source_file".into(), Value::String(source_file.clone())),
                 (
                     "source_location".into(),
-                    Value::String(format!("L{start_line}")),
+                    Value::String(format!("L{}", anchor.start_line)),
                 ),
-                ("start_byte".into(), Value::from(start_byte)),
-                ("end_byte".into(), Value::from(end_byte)),
-                ("line_start".into(), Value::from(start_line)),
-                ("line_end".into(), Value::from(end_line)),
-                ("column_start".into(), Value::from(start_column)),
-                ("column_end".into(), Value::from(end_column)),
+                ("line_start".into(), Value::from(anchor.start_line)),
+                ("line_end".into(), Value::from(anchor.end_line)),
+                ("column_start".into(), Value::from(anchor.start_column)),
+                ("column_end".into(), Value::from(anchor.end_column)),
+                ("start_byte".into(), Value::from(anchor.start_byte)),
+                ("end_byte".into(), Value::from(anchor.end_byte)),
                 ("file_type".into(), Value::String("code".into())),
                 ("language".into(), Value::String("typescript".into())),
                 ("_origin".into(), Value::String("ast".into())),
@@ -823,12 +900,16 @@ fn collect_default_export_identities(
     }
 }
 
-fn collect_import_aliases(node: Node<'_>, source: &[u8], aliases: &mut Vec<ImportAlias>) {
+fn collect_import_aliases(
+    path: &Path,
+    node: Node<'_>,
+    source: &[u8],
+    aliases: &mut Vec<ImportAlias>,
+) {
     if node.kind() == "import_statement" {
         let text = node_text(node, source);
         if let Some(module) = import_module(text) {
-            let start = node.start_position();
-            let end = node.end_position();
+            let anchor = anchor(path, node);
             aliases.extend(
                 parse_import_bindings(text)
                     .into_iter()
@@ -836,12 +917,7 @@ fn collect_import_aliases(node: Node<'_>, source: &[u8], aliases: &mut Vec<Impor
                         local,
                         imported,
                         module: module.clone(),
-                        start_byte: u64::try_from(node.start_byte()).unwrap_or(u64::MAX),
-                        end_byte: u64::try_from(node.end_byte()).unwrap_or(u64::MAX),
-                        start_line: u64::try_from(start.row + 1).unwrap_or(u64::MAX),
-                        start_column: u64::try_from(start.column).unwrap_or(u64::MAX),
-                        end_line: u64::try_from(end.row + 1).unwrap_or(u64::MAX),
-                        end_column: u64::try_from(end.column).unwrap_or(u64::MAX),
+                        anchor: anchor.clone(),
                     }),
             );
         }
@@ -849,7 +925,7 @@ fn collect_import_aliases(node: Node<'_>, source: &[u8], aliases: &mut Vec<Impor
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_import_aliases(child, source, aliases);
+        collect_import_aliases(path, child, source, aliases);
     }
 }
 
@@ -1054,6 +1130,9 @@ fn collect_express_routes(
                 };
                 if !handler.is_empty() {
                     detail.insert("receiver".into(), Value::String(receiver.to_owned()));
+                    if let Some(prefix) = mounts.get(receiver).filter(|prefix| !prefix.is_empty()) {
+                        detail.insert("mount_prefix".into(), Value::String(prefix.clone()));
+                    }
                     facts.push(RawFrameworkFact::Route(RawRouteFact {
                         framework: "express".to_owned(),
                         operation: if method == "all" {
@@ -1146,6 +1225,70 @@ fn collect_express_mounts(
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_express_mounts(child, source, receivers, mounts);
     }
+}
+
+fn collect_express_mount_facts(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    receivers: &HashSet<String>,
+    imports: &[ImportAlias],
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call_expression"
+        && let Some(function) = node.child_by_field_name("function")
+        && let Some((parent, "use")) = node_text(function, source).trim().rsplit_once('.')
+        && receivers.contains(parent)
+        && let Some(arguments) = node.child_by_field_name("arguments")
+    {
+        let arguments = split_arguments(node_text(arguments, source));
+        if let (Some(prefix), Some(target)) = (
+            arguments
+                .first()
+                .and_then(|argument| string_literal(argument)),
+            arguments.get(1).map(|argument| argument.trim()),
+        ) && is_identifier(target)
+            && (receivers.contains(target) || imports.iter().any(|alias| alias.local == target))
+        {
+            facts.push(router_mount_fact(
+                "express", path, node, parent, target, &prefix, imports,
+            ));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_express_mount_facts(child, source, path, receivers, imports, facts);
+    }
+}
+
+fn router_mount_fact(
+    framework: &str,
+    path: &Path,
+    node: Node<'_>,
+    parent: &str,
+    target: &str,
+    prefix: &str,
+    imports: &[ImportAlias],
+) -> RawFrameworkFact {
+    let target_module = imports
+        .iter()
+        .find(|alias| alias.local == target)
+        .map(|alias| alias.module.clone())
+        .unwrap_or_default();
+    RawFrameworkFact::Domain(RawDomainFact {
+        framework: framework.to_owned(),
+        kind: "router_mount".to_owned(),
+        name: target.to_owned(),
+        declaring_scope: module_scope(path),
+        anchor: anchor(path, node),
+        origin: RawFrameworkOrigin::Ast,
+        detail: Map::from_iter([
+            ("parent_receiver".into(), Value::String(parent.to_owned())),
+            ("target_receiver".into(), Value::String(target.to_owned())),
+            ("target_module".into(), Value::String(target_module)),
+            ("mount_prefix".into(), Value::String(prefix.to_owned())),
+        ]),
+    })
 }
 
 fn collect_nest_routes(
@@ -1400,6 +1543,84 @@ fn collect_vue_router_routes(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
         collect_vue_router_routes(child, source, path, facts);
+    }
+}
+
+fn collect_angular_router_routes(
+    root: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    let mut arrays = BTreeMap::new();
+    collect_named_route_arrays(root, source, &mut arrays);
+    let mut collected = HashSet::new();
+    for array in arrays.values().filter(|array| {
+        array
+            .parent()
+            .is_some_and(|declaration| node_text(declaration, source).contains(": Routes"))
+    }) {
+        if collected.insert(array.id()) {
+            collect_route_config_with_parent(*array, source, path, "angular-router", facts, "");
+        }
+    }
+    collect_angular_config_calls(root, source, path, &arrays, &mut collected, facts);
+}
+
+fn collect_named_route_arrays<'tree>(
+    node: Node<'tree>,
+    source: &[u8],
+    arrays: &mut BTreeMap<String, Node<'tree>>,
+) {
+    if node.kind() == "variable_declarator"
+        && let (Some(name), Some(value)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        )
+        && name.kind() == "identifier"
+        && value.kind() == "array"
+    {
+        arrays.insert(node_text(name, source).to_owned(), value);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_named_route_arrays(child, source, arrays);
+    }
+}
+
+fn collect_angular_config_calls(
+    node: Node<'_>,
+    source: &[u8],
+    path: &Path,
+    arrays: &BTreeMap<String, Node<'_>>,
+    collected: &mut HashSet<usize>,
+    facts: &mut Vec<RawFrameworkFact>,
+) {
+    if node.kind() == "call_expression"
+        && let Some(function) = node.child_by_field_name("function")
+        && matches!(
+            node_text(function, source).trim().rsplit('.').next(),
+            Some("provideRouter" | "forRoot" | "forChild" | "resetConfig")
+        )
+        && let Some(arguments) = node.child_by_field_name("arguments")
+    {
+        let mut cursor = arguments.walk();
+        if let Some(argument) = arguments.named_children(&mut cursor).next() {
+            let array = if argument.kind() == "array" {
+                Some(argument)
+            } else if argument.kind() == "identifier" {
+                arrays.get(node_text(argument, source)).copied()
+            } else {
+                None
+            };
+            if let Some(array) = array.filter(|array| collected.insert(array.id())) {
+                collect_route_config_with_parent(array, source, path, "angular-router", facts, "");
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_angular_config_calls(child, source, path, arrays, collected, facts);
     }
 }
 
@@ -1723,7 +1944,13 @@ fn direct_object_identifier_property(node: Node<'_>, source: &[u8], name: &str) 
 }
 
 fn direct_object_handler_property(node: Node<'_>, source: &[u8]) -> Option<(String, bool)> {
-    for name in ["component", "element", "Component"] {
+    for name in [
+        "component",
+        "element",
+        "Component",
+        "loadComponent",
+        "loadChildren",
+    ] {
         let Some(value) = direct_object_property(node, source, name) else {
             continue;
         };

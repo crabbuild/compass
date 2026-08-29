@@ -9,8 +9,8 @@ alone.
 
 | Construct | Current behavior | Provenance |
 | --- | --- | --- |
-| ATX / Setext headings | Heading node, hierarchy, slug, optional explicit ID | exact node range |
-| Paragraphs and inline text | Paragraph block | exact node range |
+| ATX / Setext headings | Heading node, hierarchy, source-order duplicate slug, optional explicit ID | exact node range |
+| Paragraphs and inline text | Section-qualified paragraph block | exact node range |
 | Lists and task items | List/list-item blocks; `task_checked` when present | `contains` + exact ranges |
 | Block quotes and thematic breaks | Structural block | exact node range |
 | Fenced / indented code | Code block; fenced info string becomes `language` | exact node range |
@@ -33,7 +33,9 @@ Tree-sitter block and inline grammars. Supported source extensions are
 Document and block nodes retain the common graph fields `id`, `label`,
 `file_type`, `document_kind`, `source_file`, `_origin`, `start_byte`,
 `end_byte`, `start_line`, `end_line`, `column_start`, and `column_end` where
-applicable. Markdown-specific root extensions include:
+applicable. Structural blocks also carry a deterministic `qualified_name` and,
+when nested under a heading, `document_section`. Markdown-specific root
+extensions include:
 
 - `markdown_block_count`;
 - `markdown_link_count`;
@@ -55,10 +57,15 @@ attributes and must not parse stable IDs as path components.
 
 ### Link boundary
 
-External links are recorded as evidence but never fetched. Same-file fragments
-resolve only to a unique heading slug or explicit ID. Ambiguous and missing
-fragments are explicit unresolved evidence. Unsupported local suffixes and
-missing document targets do not create invented nodes.
+External links are recorded as evidence but never fetched. Same-file and
+cross-file fragments are percent-decoded within a fixed bound and resolve only
+to a unique heading slug or explicit ID.
+Project resolution supports exact paths, `.md`/`.markdown`/`.mdx`/`.qmd`/`.skill`
+extension inference, repository-root paths, directory `README`/`index`
+documents, and unique wikilink stems. It can also connect documentation to the
+file-inventory node for any extracted source language. Ambiguous or missing
+targets and fragments remain unresolved; Compass does not select the first
+candidate, fall back to a document root, or invent a node.
 
 ## HTML
 

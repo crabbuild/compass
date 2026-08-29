@@ -10,30 +10,36 @@ compass query "who calls PaymentGateway.charge?"
 compass query "path from CheckoutController.create to PaymentGateway.charge"
 compass query "payment retries" --traverse
 compass query "payment retries" --dfs
-compass query "payment retries" --budget 1500
-compass query "payment retries" --budget 8000
-compass query "payment retries" --budget 8000 --page 2
-compass query "payment retries" --context CheckoutService
+compass query "payment retries" --text-budget 1500
+compass query "payment retries" --cursor '<TOKEN>'
+compass query "payment retries" --context call
+compass query "authentication flow" --direction both --scope package:auth
+compass query "what uses charge?" --direction incoming --context call --format json
 ```
 
-Clear search, callers, callees, impact, and path questions against a current
-typed graph use the bounded typed query framework automatically. Generic or
-contradictory questions retain broad relevance traversal. Use `--traverse` to
-select traversal explicitly; `--dfs`, `--context`, `--budget`, and `--page` do
-so as well. Historical `--at` queries always use traversal.
+Plain questions against a current typed graph use bounded structured discovery.
+`--direction`, `--scope`, `--context`, `--dfs`, and discovery bounds compose in
+that contract. Historical discovery resolves `--at REV` once and reads the
+selected immutable realization's trusted `compass.graph/1` artifact.
 
-The default traversal favors broad relevant context. Use `--dfs` when tracing a
-specific chain. A token budget bounds rendered output; it does not change graph
-contents. Keep the 2,000-token default for a focused question. Raise it for a
-broad question only when enough context remains for source verification and the
-final answer; 4,000–16,000 tokens is a useful starting range, not a required
-limit. Read the final `Pagination:` line:
-when `next` is a page number, repeat the exact query, graph selector, contexts,
-mode, and budget with `--page N`. Continue until `next=none` before making an
-exhaustive claim. If enough evidence arrives earlier, stop and say that
-additional pages remain rather than treating the first page as complete. Prefer
-`--at REV` when paging through a historical investigation so every page is tied
-to one immutable graph.
+`--text-budget` bounds only the rendered page; it does not change the semantic
+response. Keep the 2,000-token default for a focused question. Read the final
+`Pagination:` line and repeat the unchanged question, graph selector, and
+semantic discovery options with `--cursor <TOKEN>`. The presentation-only text
+budget may change between pages. Continue until `next=none` before an
+exhaustive claim. The cursor binds the request, graph, semantic-result digest,
+and next stable entry, so changed inputs fail clearly. If enough evidence
+arrives earlier, disclose that additional pages remain.
+
+`--context VALUE` filters relationships by their stored evidence context, such
+as `call`, `import`, or `route`, before traversal. It does not select a node,
+file, package, community, or subsystem. Use repeatable `--scope KIND:VALUE` for
+an explicit OR scope. Supported kinds are `community`, `source`, `package`, and
+`node`; every scope must resolve canonically, and Compass never guesses a kind.
+Use `--direction auto|incoming|outgoing|both` to override or expose direction
+selection. Inspect direction, ambiguity, completeness, domain truncation, and
+pagination before relying on the response. `--traverse`, `--budget`, and
+`--page` select legacy traversal and cannot be mixed with discovery controls.
 
 Before retrying a weak result, derive a small vocabulary set from the request:
 exact symbol spellings, file or crate names, domain nouns, and likely community
@@ -90,10 +96,9 @@ compass tree
 If a label is ambiguous, retry with the exact node ID, symbol spelling, or source
 file returned by `query`.
 
-Use `--context VALUE` to anchor a common term inside a subsystem. Prefer a
-shorter query plus an exact context over a long prose prompt containing several
-unrelated questions. Split multi-part investigations so the evidence for each
-claim stays attributable.
+Prefer a shorter query with one concrete identity over a long prose prompt
+containing several unrelated questions. Split multi-part investigations so the
+evidence for each claim stays attributable.
 
 ## Exact CompassQL
 

@@ -18,6 +18,7 @@ boundaries and failure-safe consumption.
 | Cross-repository graph lookup | `compass global` |
 | External graph database | `compass export` and configured target |
 | Compare revisions | `compass diff --format json` |
+| Review a pull request | `compass review --format json` or the reusable Action |
 
 Human text is optimized for clarity and can evolve. Machine consumers should
 prefer explicitly versioned JSON or documented graph schemas.

@@ -7,7 +7,7 @@ use compass_core::{BuildOptions, build_graph_with_layers, build_local_graph};
 use compass_files::{AST_CACHE_VERSION, Cache, CacheOptions};
 use compass_languages::{Extraction, Registry};
 use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument, NodeKind};
-use compass_model::provenance::EvidenceOrigin;
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin};
 use compass_model::validate_code_graph;
 use sha2::{Digest, Sha256};
 
@@ -306,7 +306,7 @@ fn typescript_type_star_reexport_keeps_barrel_file_exact() -> Result<(), Box<dyn
         .find(|file| file.path == "src/index.ts")
         .ok_or("missing TypeScript barrel input")?;
     assert_eq!(barrel.extraction_status, ExtractionStatus::Extracted);
-    let barrel_exports = graph
+    let exports = graph
         .links
         .iter()
         .filter(|edge| {
@@ -316,7 +316,73 @@ fn typescript_type_star_reexport_keeps_barrel_file_exact() -> Result<(), Box<dyn
                 })
         })
         .collect::<Vec<_>>();
-    assert_eq!(barrel_exports.len(), 2, "{barrel_exports:#?}");
+    assert_eq!(exports.len(), 2, "unexpected export evidence: {exports:#?}");
+    let barrel_owner = graph
+        .nodes
+        .iter()
+        .find(|node| {
+            node.id == exports[0].source
+                && node.kind == NodeKind::Module
+                && node.source_file() == Some("src/index.ts")
+        })
+        .ok_or("missing TypeScript barrel module owner")?;
+    let target_by_line = BTreeSet::from([
+        (
+            1,
+            graph
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.kind == NodeKind::Module && node.source_file() == Some("src/value.ts")
+                })
+                .ok_or("missing value module node")?
+                .id
+                .as_str(),
+        ),
+        (
+            2,
+            graph
+                .nodes
+                .iter()
+                .find(|node| {
+                    node.kind == NodeKind::Module && node.source_file() == Some("src/types.ts")
+                })
+                .ok_or("missing types module node")?
+                .id
+                .as_str(),
+        ),
+    ]);
+    let actual_by_line = exports
+        .iter()
+        .map(|edge| {
+            let site = edge
+                .relationship_site
+                .as_ref()
+                .ok_or("missing export site")?;
+            assert_eq!(edge.source, barrel_owner.id);
+            assert_eq!(edge.context.as_deref(), Some("export"));
+            assert_eq!(edge.weight, Some(1.0));
+            assert!(!edge.deferred);
+            assert_eq!(
+                edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+                Some("universal-reexport-project-module-binding")
+            );
+            let [evidence] = edge.evidence.as_slice() else {
+                return Err("export edge must retain exactly one provenance record");
+            };
+            assert_eq!(evidence.origin, EvidenceOrigin::Ast);
+            assert_eq!(evidence.confidence, EvidenceConfidence::Exact);
+            assert_eq!(evidence.extractor, "compass.resolve.typescript.universal");
+            assert_eq!(
+                evidence.rule.as_deref(),
+                Some("universal-reexport-project-module-binding")
+            );
+            assert_eq!(evidence.anchors.as_slice(), std::slice::from_ref(site));
+            assert_eq!(evidence.wiring_site, None);
+            Ok((site.start_line, edge.target.as_str()))
+        })
+        .collect::<Result<BTreeSet<_>, &str>>()?;
+    assert_eq!(actual_by_line, target_by_line);
     Ok(())
 }
 

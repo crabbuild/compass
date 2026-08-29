@@ -58,6 +58,7 @@ compass-out/
 ├── graph.json
 ├── graph.html        # unless --no-viz or the render limit omits it
 ├── GRAPH_REPORT.md
+├── orientation.json  # versioned agent context bound to this exact graph.json
 ├── manifest.json
 └── cache/
 ```
@@ -67,6 +68,52 @@ only need the executable and output-directory rename. The JSON schema and
 cache payloads remain Compass contracts: do not copy `graphify-out/cache/` or
 `graphify-out/manifest.json` into `compass-out/`. Compass rebuilds them from
 source while retaining its own internal snapshot and store protocols.
+
+## Update natural-query automation
+
+Plain `compass query "<question>"` now returns structured discovery text by
+default on a typed graph. Replace discovery text paging based on `--budget` and
+numeric `--page` with `--text-budget` and the opaque `next=<cursor>` token.
+Keep the question, discovery options, and graph unchanged while following a
+cursor. Use explicit `--traverse` when an existing workflow intentionally needs
+the former relevance traversal; its `--budget`/`--page` behavior remains.
+CompassQL and explicit `ask`, `search`, `callers`, `callees`, and other typed
+commands are unchanged.
+
+Natural discovery now defaults to a focused 64-node, 128-edge neighborhood.
+Automation that depended on the former 500-node, 1,000-edge default should pass
+`--max-nodes 500 --max-edges 1000` explicitly. Those values remain supported
+hard ceilings; the discovery JSON schema and deterministic result ordering are
+unchanged.
+
+MCP clients must read structured results from the `result` field of the
+`compass.mcp.tool-result/1` envelope and inspect `transportTruncation`
+separately from the domain result's own `truncated` field.
+
+Run `compass update .` once after upgrading to publish `orientation.json` with
+the exact `graph.json` digest. Agent-facing orientation/report exports fail
+explicitly for older, missing, detached, or stale sidecars instead of pairing
+evidence by filename alone.
+
+## Select inference breadth explicitly when upgrading
+
+Structural `init`, `update`, `extract`, and `watch` builds now default to
+`--inference-level low`, which publishes exact relationships only. This is a
+hard cutover from the former `max` default. If an automation or downstream
+consumer requires deferred-receiver and all other retained inferred
+relationships, add the former behavior explicitly:
+
+```bash
+compass update . --inference-level max
+compass extract . --code-only --inference-level max
+```
+
+`medium` adds source-backed inferred relationships and `high` additionally
+adds explicitly qualified external relationships. Existing schema-1 build
+state that omitted the inference field is still interpreted as historical
+`max`. Because new low profiles record the level explicitly, the first command
+run without an override rebuilds and republishes the graph coherently instead
+of reusing the wider graph.
 
 ## Opt into Program IR generation
 

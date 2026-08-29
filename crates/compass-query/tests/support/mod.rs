@@ -2,8 +2,8 @@ use std::fs;
 use std::path::Path;
 
 use compass_model::code_graph::{
-    BuildMetadata, DiagnosticSeverity, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord,
-    GraphDiagnostic, GraphDocument, NodeKind, NodeRecord,
+    BuildMetadata, CommunityMetadata, DiagnosticSeverity, EdgeKind, EdgeRecord, ExtractionStatus,
+    FileRecord, GraphDiagnostic, GraphDocument, NodeKind, NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -175,6 +175,14 @@ pub fn write_graph(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
             "src/payments/gateway.rs",
         ),
     ];
+    if let Some(node) = graph.nodes.iter_mut().find(|node| node.id == "n:list") {
+        node.community = Some(CommunityMetadata {
+            id: 7,
+            label: Some("services".to_owned()),
+            score: None,
+            color: None,
+        });
+    }
     let alias_id = edge_id(
         "n:alias",
         EdgeKind::Aliases,

@@ -60,6 +60,12 @@ Compass parses untrusted project content and graph files. Its default structural
   stable tag/version binding, bounded unique targets, selected archive name and
   size, SHA-256 digest, archive path, and staged executable version before
   replacing the running binary.
+- `compass review` parses exact untrusted Git objects without checking out or
+  executing their code. Its reusable Action must run in a dedicated job that
+  has not executed contributor-controlled scripts; the write token belongs
+  only in the pinned comment-delivery step. Fork reviews publish read-only
+  evidence and suppress comments. Never use `pull_request_target` to execute a
+  contributor head.
 
 Include the selected options and endpoint type in reports about these features. Never include live credentials.
 

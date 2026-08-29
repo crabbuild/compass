@@ -95,8 +95,25 @@ pub(crate) struct BuildProfile {
     pub code_only: bool,
     pub program_analysis: bool,
     pub graph_storage: String,
+    #[serde(
+        default = "legacy_default_inference_level",
+        skip_serializing_if = "inference_level_is_legacy_max"
+    )]
+    pub inference_level: String,
     #[serde(default = "default_max_source_bytes")]
     pub max_source_bytes: u64,
+}
+
+// Build-state schema 1 omitted the historical max profile. Keep interpreting
+// an absent field as max even though new builds default to low. New low
+// profiles serialize the field explicitly, so the first build after the
+// cutover cannot reuse a max graph as though it were low.
+fn legacy_default_inference_level() -> String {
+    compass_graph::InferenceLevel::Max.as_str().to_owned()
+}
+
+fn inference_level_is_legacy_max(level: &str) -> bool {
+    level == compass_graph::InferenceLevel::Max.as_str()
 }
 
 const fn default_max_source_bytes() -> u64 {
@@ -268,6 +285,29 @@ mod tests {
     }
 
     #[test]
+    fn legacy_build_profiles_default_to_max_inference() -> Result<(), Box<dyn Error>> {
+        let profile = BuildProfile {
+            purpose: "update".to_owned(),
+            no_cluster: false,
+            no_viz: true,
+            resolution: 1.0,
+            exclude_hubs: None,
+            code_only: true,
+            program_analysis: false,
+            graph_storage: "json".to_owned(),
+            inference_level: legacy_default_inference_level(),
+            max_source_bytes: default_max_source_bytes(),
+        };
+        let document = serde_json::to_value(&profile)?;
+        assert!(document.get("inference_level").is_none());
+
+        let restored: BuildProfile = serde_json::from_value(document)?;
+        assert_eq!(restored.inference_level, "max");
+        assert_eq!(restored, profile);
+        Ok(())
+    }
+
+    #[test]
     fn verified_state_rejects_schema_profile_artifact_and_interruption_changes()
     -> Result<(), Box<dyn Error>> {
         let directory = tempfile::tempdir()?;
@@ -289,6 +329,7 @@ mod tests {
             code_only: false,
             program_analysis: true,
             graph_storage: "json".to_owned(),
+            inference_level: legacy_default_inference_level(),
             max_source_bytes: default_max_source_bytes(),
         };
         let state = BuildState::capture(

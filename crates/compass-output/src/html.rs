@@ -36,6 +36,131 @@ pub struct HtmlRender {
     pub edges: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct GraphViewBundle {
+    pub overview: GraphViewModel,
+    pub community_details: BTreeMap<usize, GraphViewModel>,
+    pub truncated: bool,
+}
+
+pub fn graph_view_model_bundle_document(
+    document: &GraphDocument,
+    communities: &Communities,
+    output_path: impl AsRef<Path>,
+    options: &HtmlOptions<'_>,
+) -> Result<GraphViewBundle, OutputError> {
+    let title = sanitize_label(&output_path.as_ref().to_string_lossy());
+    let limit = options.node_limit.unwrap_or_else(viz_node_limit);
+    if limit < 1 {
+        return Err(OutputError::HtmlTooLarge {
+            nodes: document.nodes.len(),
+            limit,
+        });
+    }
+    let bounded_node_limit = usize::try_from(limit).map_err(|_| OutputError::HtmlTooLarge {
+        nodes: document.nodes.len(),
+        limit,
+    })?;
+    if (document.nodes.len() as isize) <= limit {
+        return Ok(GraphViewBundle {
+            overview: crate::viewer_model::graph_view_model(
+                document,
+                communities,
+                title,
+                options,
+                false,
+            ),
+            community_details: BTreeMap::new(),
+            truncated: false,
+        });
+    }
+    let (meta, meta_communities, member_counts) = aggregate(document, communities, options);
+    if meta.nodes.len() <= 1 {
+        let selected = document
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .take(bounded_node_limit)
+            .collect::<HashSet<_>>();
+        let bounded = GraphDocument {
+            directed: document.directed,
+            multigraph: document.multigraph,
+            graph: document.graph.clone(),
+            nodes: document
+                .nodes
+                .iter()
+                .filter(|node| selected.contains(node.id.as_str()))
+                .cloned()
+                .collect(),
+            links: document
+                .links
+                .iter()
+                .filter(|edge| {
+                    selected.contains(edge.source.as_str())
+                        && selected.contains(edge.target.as_str())
+                })
+                .take(EMBEDDED_DETAIL_EDGE_BUDGET)
+                .cloned()
+                .collect(),
+            extras: document.extras.clone(),
+        };
+        let bounded_communities = communities
+            .iter()
+            .filter_map(|(community, members)| {
+                let members = members
+                    .iter()
+                    .filter(|member| selected.contains(member.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (!members.is_empty()).then_some((*community, members))
+            })
+            .collect();
+        return Ok(GraphViewBundle {
+            overview: crate::viewer_model::graph_view_model(
+                &bounded,
+                &bounded_communities,
+                title,
+                options,
+                false,
+            ),
+            community_details: BTreeMap::new(),
+            truncated: true,
+        });
+    }
+    let mut overview = crate::viewer_model::graph_view_model(
+        &meta,
+        &meta_communities,
+        title.clone(),
+        &HtmlOptions {
+            community_labels: options.community_labels,
+            member_counts: Some(&member_counts),
+            node_limit: None,
+            learning_overlay: options.learning_overlay,
+        },
+        true,
+    );
+    let community_details = community_view_models(
+        document,
+        communities,
+        &title,
+        options,
+        EMBEDDED_DETAIL_NODE_BUDGET,
+        EMBEDDED_DETAIL_EDGE_BUDGET,
+    )?;
+    for node in &mut overview.nodes {
+        if node.member_count.is_some() {
+            node.detail_available = Some(community_details.contains_key(&node.community));
+        }
+    }
+    Ok(GraphViewBundle {
+        overview,
+        community_details,
+        truncated: false,
+    })
+}
+
 pub fn html_document(
     document: &GraphDocument,
     communities: &Communities,

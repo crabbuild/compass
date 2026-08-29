@@ -109,6 +109,16 @@ fn universal_resolution_is_language_isolated_and_input_order_deterministic() {
                 .iter()
                 .any(|node| node.id == edge.target && node.string("language") == "python"))
     }));
+    assert!(
+        first
+            .edges
+            .iter()
+            .filter(|edge| edge.string("extractor").contains(".universal"))
+            .all(|edge| {
+                !edge.attributes.contains_key("evidence_candidate_id")
+                    && !edge.attributes.contains_key("evidence_occurrence_id")
+            })
+    );
 }
 
 #[test]

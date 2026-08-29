@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
-use compass_graph::{BuildEvidence, normalize_v1};
+use compass_graph::{BuildEvidence, InferenceLevel, apply_inference_level, normalize_v1};
 use compass_languages::{CandidateRelation, Engine, EvidenceLimits, validate_evidence};
 use compass_model::code_graph::NodeKind;
 use compass_resolve::evidence::{
@@ -233,6 +233,265 @@ fn markdown_documents_edges_resolve_to_universal_file_inventory() -> Result<(), 
             .any(|edge| edge.kind.as_str() == "documents"),
         "published={:#?}",
         published.document
+    );
+    Ok(())
+}
+
+#[test]
+fn markdown_project_links_resolve_exact_files_fragments_indexes_and_unique_wiki_stems()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let docs = directory.path().join("docs");
+    let topic = docs.join("topic");
+    std::fs::create_dir_all(&topic)?;
+    let guide_path = docs.join("guide.md");
+    let reference_path = docs.join("reference.md");
+    let index_path = topic.join("README.md");
+    let ambiguous_markdown_path = docs.join("dual.md");
+    let ambiguous_mdx_path = docs.join("dual.mdx");
+    let skill_path = docs.join("agent.skill");
+    let code_paths = [
+        (directory.path().join("src/module.py"), "python"),
+        (directory.path().join("src/lib.rs"), "rust"),
+        (directory.path().join("src/main.go"), "go"),
+        (directory.path().join("src/Main.java"), "java"),
+        (directory.path().join("src/index.ts"), "typescript"),
+    ];
+    std::fs::create_dir_all(code_paths[0].0.parent().ok_or("missing code parent")?)?;
+    std::fs::write(
+        &guide_path,
+        concat!(
+            "# Guide\n",
+            "[exact](reference.md#target-section)\n",
+            "[extensionless](reference#target-section)\n",
+            "[root](/docs/reference.md#target-section)\n",
+            "[encoded](reference.md#target%2Dsection)\n",
+            "[[Reference#target-section]]\n",
+            "[directory](topic/#overview)\n",
+            "[skill](agent#rules)\n",
+            "[python](../src/module.py) [rust](../src/lib.rs) [go](../src/main.go)\n",
+            "[java](../src/Main.java) [typescript](../src/index.ts)\n",
+            "[missing fragment](reference.md#absent)\n",
+            "[ambiguous extension](dual#section)\n",
+        ),
+    )?;
+    std::fs::write(
+        &reference_path,
+        "# Reference\n\n## Target section\n\nImportant behavior.\n",
+    )?;
+    std::fs::write(&index_path, "# Overview\n\nDirectory documentation.\n")?;
+    std::fs::write(&ambiguous_markdown_path, "# Section\n")?;
+    std::fs::write(&ambiguous_mdx_path, "# Section\n")?;
+    std::fs::write(&skill_path, "# Agent\n\n## Rules\n\nUse exact evidence.\n")?;
+    for (path, source) in code_paths.iter().zip([
+        "def documented():\n    pass\n",
+        "pub fn documented() {}\n",
+        "package main\nfunc documented() {}\n",
+        "class Main { void documented() {} }\n",
+        "export function documented() {}\n",
+    ]) {
+        std::fs::write(&path.0, source)?;
+    }
+
+    let mut engine = Engine::default();
+    let mut extractions = vec![
+        engine.extract(&guide_path)?,
+        engine.extract(&reference_path)?,
+        engine.extract(&index_path)?,
+        engine.extract(&ambiguous_markdown_path)?,
+        engine.extract(&ambiguous_mdx_path)?,
+        engine.extract(&skill_path)?,
+    ];
+    for (path, _) in &code_paths {
+        extractions.push(engine.extract(path)?);
+    }
+    let merged = resolve_with_root(&extractions, &HashMap::new(), directory.path());
+    let target_heading = merged
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("docs/reference.md")
+                && node.string("anchor_slug") == "target-section"
+        })
+        .ok_or("missing cross-document target heading")?;
+    let overview_heading = merged
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("docs/topic/README.md")
+                && node.string("anchor_slug") == "overview"
+        })
+        .ok_or("missing directory index heading")?;
+    let skill_heading = merged
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file").ends_with("docs/agent.skill")
+                && node.string("anchor_slug") == "rules"
+        })
+        .ok_or("missing skill heading")?;
+    let resolved = merged
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("source_file").ends_with("docs/guide.md")
+                && edge.string("relation") == "references"
+                && edge.string("_document_target_resolution").is_empty()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        resolved.len(),
+        7,
+        "resolved={resolved:#?}; guide_edges={:#?}",
+        merged
+            .edges
+            .iter()
+            .filter(|edge| edge.string("source_file").ends_with("docs/guide.md"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        resolved
+            .iter()
+            .filter(|edge| edge.target == target_heading.id)
+            .count(),
+        5
+    );
+    assert_eq!(
+        resolved
+            .iter()
+            .filter(|edge| edge.target == overview_heading.id)
+            .count(),
+        1
+    );
+    assert_eq!(
+        resolved
+            .iter()
+            .filter(|edge| edge.target == skill_heading.id)
+            .count(),
+        1
+    );
+    assert!(resolved.iter().all(|edge| {
+        edge.string("rule") == "document-link-exact-target"
+            && edge.string("resolution_rule") == "document-link-target-resolution"
+            && !edge
+                .attributes
+                .contains_key(compass_model::provenance::ENDPOINT_REWRITE_RULES_ATTRIBUTE)
+    }));
+    let unresolved = merged
+        .edges
+        .iter()
+        .filter(|edge| {
+            edge.string("source_file").ends_with("docs/guide.md")
+                && !edge.string("_document_target_resolution").is_empty()
+        })
+        .map(|edge| edge.string("_document_target_resolution"))
+        .collect::<Vec<_>>();
+    assert_eq!(unresolved, ["missing_fragment", "ambiguous_target"]);
+    let code_file_ids = merged
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.string("source_file").contains("src/") && node.string("symbol_kind") == "file"
+        })
+        .map(|node| node.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        code_file_ids.len(),
+        5,
+        "missing language file inventory node"
+    );
+    assert_eq!(
+        merged
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.string("source_file").ends_with("docs/guide.md")
+                    && edge.string("relation") == "documents"
+                    && code_file_ids.contains(edge.target.as_str())
+            })
+            .count(),
+        5
+    );
+    let graph = compass_graph::build(&[merged], true, true, Some(directory.path()))?;
+    let mut published = compass_graph::normalize_document_v1_with_inventory_best_effort(
+        &graph,
+        directory.path(),
+        "test",
+        None,
+        {
+            let mut inventory = [
+                (&guide_path, "markdown"),
+                (&reference_path, "markdown"),
+                (&index_path, "markdown"),
+                (&ambiguous_markdown_path, "markdown"),
+                (&ambiguous_mdx_path, "markdown"),
+                (&skill_path, "markdown"),
+            ]
+            .into_iter()
+            .map(|(path, language)| compass_graph::InventoryEvidence {
+                path: path.clone(),
+                language: Some(language.to_owned()),
+                producer: format!("compass.languages.{language}"),
+                status: compass_model::code_graph::ExtractionStatus::Extracted,
+                reason: None,
+            })
+            .collect::<Vec<_>>();
+            inventory.extend(code_paths.iter().map(|(path, language)| {
+                compass_graph::InventoryEvidence {
+                    path: path.clone(),
+                    language: Some((*language).to_owned()),
+                    producer: format!("compass.languages.{language}"),
+                    status: compass_model::code_graph::ExtractionStatus::Extracted,
+                    reason: None,
+                }
+            }));
+            inventory
+        },
+    )?;
+    let published_links = published
+        .document
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.kind.as_str() == "references"
+                && edge
+                    .relationship_site
+                    .as_ref()
+                    .is_some_and(|site| site.file == "docs/guide.md")
+        })
+        .count();
+    assert_eq!(published_links, 7, "published={:#?}", published.document);
+    assert_eq!(
+        published
+            .document
+            .links
+            .iter()
+            .filter(|edge| {
+                edge.kind.as_str() == "documents"
+                    && edge
+                        .relationship_site
+                        .as_ref()
+                        .is_some_and(|site| site.file == "docs/guide.md")
+            })
+            .count(),
+        5
+    );
+    apply_inference_level(&mut published.document, InferenceLevel::Low);
+    assert_eq!(
+        published
+            .document
+            .links
+            .iter()
+            .filter(|edge| {
+                matches!(edge.kind.as_str(), "references" | "documents")
+                    && edge
+                        .relationship_site
+                        .as_ref()
+                        .is_some_and(|site| site.file == "docs/guide.md")
+            })
+            .count(),
+        12,
+        "exact document relationships must survive the default low inference level"
     );
     Ok(())
 }

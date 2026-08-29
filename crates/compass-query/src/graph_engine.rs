@@ -4,11 +4,12 @@
 //! indexes directly. Generic store adapters can still use the materializing
 //! engine for compatibility and differential validation.
 
-use std::fs::{self, File};
-use std::io::{BufReader, Read};
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use compass_graph::{GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector};
+use compass_graph::{
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotReader, SnapshotSelector, canonical_graph_json,
+};
 use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
 use compass_store::{STORE_REF_FILE_NAME, SqliteStore, Store, StoreRef, local_sqlite_store_path};
 use sha2::{Digest, Sha256};
@@ -36,17 +37,91 @@ pub struct JsonGraphEngine {
     graph_identity: String,
 }
 
-impl JsonGraphEngine {
-    pub fn open(path: &Path) -> Result<Self, QueryError> {
-        let graph = GraphDocument::load(path).map_err(|error| {
+/// Validated in-memory graph source with a canonical content identity.
+pub struct DirectGraphEngine {
+    graph: GraphDocument,
+    graph_identity: String,
+}
+
+impl DirectGraphEngine {
+    pub fn from_document(graph: GraphDocument) -> Result<Self, QueryError> {
+        validate_graph_schema(&graph)?;
+        compass_model::validate_code_graph(&graph).map_err(|error| {
             QueryError::new(
                 QueryErrorKind::CorruptArtifact,
-                "graph_load_failed",
+                "direct_graph_validation_failed",
                 error.to_string(),
             )
         })?;
+        let bytes = canonical_graph_json(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_identity_failed",
+                error.to_string(),
+            )
+        })?;
+        let graph_identity = format!("{:x}", Sha256::digest(&bytes));
+        Ok(Self {
+            graph,
+            graph_identity,
+        })
+    }
+
+    /// Use an identity already verified by an immutable source such as a
+    /// history realization, avoiding another graph-sized canonical buffer.
+    pub fn from_verified_document(
+        graph: GraphDocument,
+        graph_identity: String,
+    ) -> Result<Self, QueryError> {
         validate_graph_schema(&graph)?;
-        let graph_identity = hash_graph_artifact(path)?;
+        compass_model::validate_code_graph(&graph).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_validation_failed",
+                error.to_string(),
+            )
+        })?;
+        if graph_identity.len() != 64
+            || !graph_identity.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "direct_graph_identity_invalid",
+                "verified graph identity must be a 64-character hexadecimal digest",
+            ));
+        }
+        Ok(Self {
+            graph,
+            graph_identity: graph_identity.to_ascii_lowercase(),
+        })
+    }
+}
+
+impl GraphEngine for DirectGraphEngine {
+    fn kind(&self) -> QueryEngineKind {
+        QueryEngineKind::Memory
+    }
+
+    fn graph(&self) -> &GraphDocument {
+        &self.graph
+    }
+
+    fn graph_identity(&self) -> &str {
+        &self.graph_identity
+    }
+}
+
+impl JsonGraphEngine {
+    pub fn open(path: &Path) -> Result<Self, QueryError> {
+        let (graph, graph_identity) =
+            GraphDocument::load_with_artifact_digest(path).map_err(|error| {
+                QueryError::new(
+                    QueryErrorKind::CorruptArtifact,
+                    "graph_load_failed",
+                    error.to_string(),
+                )
+            })?;
+        validate_graph_schema(&graph)?;
         Ok(Self {
             graph,
             graph_identity,
@@ -78,6 +153,9 @@ pub(crate) struct LocalStoreSnapshot {
     pub(crate) store: SqliteStore,
     pub(crate) selector: SnapshotSelector,
     pub(crate) store_path: PathBuf,
+    pub(crate) graph_identity: String,
+    pub(crate) build_generation_identity: String,
+    pub(crate) partial_graph_message: Option<String>,
 }
 
 impl LocalStoreSnapshot {
@@ -113,6 +191,35 @@ impl StoreGraphEngine {
                 "store has no active immutable graph snapshot",
             ));
         };
+        let manifest = reader.manifest();
+        let graph_bytes = reader.export_json_bytes().map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_export_failed",
+                error.to_string(),
+            )
+        })?;
+        Self::from_parts(
+            manifest.graph_schema.clone(),
+            manifest.node_count,
+            manifest.edge_count,
+            graph_bytes,
+            manifest.graph_digest.clone(),
+        )
+    }
+
+    /// Open one exact immutable selector without consulting the active ref.
+    pub fn from_store_selector<S: Store + ?Sized>(
+        store: &S,
+        selector: SnapshotSelector,
+    ) -> Result<Self, QueryError> {
+        let reader = GraphSnapshotReader::open_selector(store, selector).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?;
         let manifest = reader.manifest();
         let graph_bytes = reader.export_json_bytes().map_err(|error| {
             QueryError::new(
@@ -227,27 +334,49 @@ pub(crate) fn open_local_store_snapshot(
             error.to_string(),
         )
     })?;
-    let actual = store
-        .graph_snapshot_reference_for(&reference.snapshot_id, &reference.manifest_digest)
-        .map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "store_ref_store_read_failed",
-                error.to_string(),
-            )
-        })?;
-    if actual != reference || reader.manifest().graph_digest != reference.graph_digest {
+    if reader.manifest().graph_digest != reference.graph_digest {
         return Err(QueryError::new(
             QueryErrorKind::CorruptArtifact,
             "store_ref_mismatch",
             "store.ref does not describe the selected immutable graph snapshot",
         ));
     }
+    let graph_identity = reader.manifest().graph_digest.clone();
+    let build_generation_identity = reader
+        .metadata_summary()
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?
+        .graph
+        .build
+        .generation_id;
+    let partial_graph_message = reader
+        .graph_diagnostic_by_code("publication_omission_summary")
+        .map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "store_graph_snapshot_failed",
+                error.to_string(),
+            )
+        })?
+        .map(|diagnostic| {
+            format!(
+                "Published graph coverage is incomplete: {}",
+                diagnostic.message
+            )
+        });
     drop(reader);
     Ok(LocalStoreSnapshot {
         store,
         selector,
         store_path,
+        graph_identity,
+        build_generation_identity,
+        partial_graph_message,
     })
 }
 
@@ -263,33 +392,6 @@ impl GraphEngine for StoreGraphEngine {
     fn graph_identity(&self) -> &str {
         &self.graph_identity
     }
-}
-
-fn hash_graph_artifact(path: &Path) -> Result<String, QueryError> {
-    let file = File::open(path).map_err(|error| {
-        QueryError::new(
-            QueryErrorKind::CorruptArtifact,
-            "graph_hash_failed",
-            error.to_string(),
-        )
-    })?;
-    let mut reader = BufReader::new(file);
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        let read = reader.read(&mut buffer).map_err(|error| {
-            QueryError::new(
-                QueryErrorKind::CorruptArtifact,
-                "graph_hash_failed",
-                error.to_string(),
-            )
-        })?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(format!("{:x}", digest.finalize()))
 }
 
 /// Open the selected materialized graph engine. The bounded local-store path
@@ -321,7 +423,7 @@ fn validate_graph_schema(graph: &GraphDocument) -> Result<(), QueryError> {
     Ok(())
 }
 
-fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> {
+pub(crate) fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> {
     let reference_path = graph_path
         .parent()
         .unwrap_or_else(|| Path::new("."))
@@ -351,7 +453,7 @@ fn read_store_ref(graph_path: &Path) -> Result<StoreRef, QueryError> {
             error.to_string(),
         )
     })?;
-    reference.validate().map_err(|error| {
+    reference.validate_local_sqlite_graph().map_err(|error| {
         QueryError::new(
             QueryErrorKind::CorruptArtifact,
             "store_ref_invalid",

@@ -1,10 +1,9 @@
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
-import {
-  graphRenderingProfile,
-  type GraphLayoutStyle
-} from "./renderingProfile";
+import type { GraphLayoutStyle } from "./renderingProfile";
+import type { GraphEdgeDirection } from "./neighborhood";
 
 export type GraphChangeType = NonNullable<GraphNode["change"]>;
+export type GraphLayoutSpacing = 0.75 | 1 | 1.25 | 1.5;
 
 export type GraphState = {
   focusedNodeId: string | null;
@@ -12,6 +11,12 @@ export type GraphState = {
   layoutStyle: GraphLayoutStyle;
   initialLayoutPending: boolean;
   forceLabels: boolean;
+  showEdgeLabels: boolean;
+  isolateSelection: boolean;
+  neighborhoodDepth: number;
+  edgeDirection: GraphEdgeDirection;
+  layoutSpacing: GraphLayoutSpacing;
+  showMinimap: boolean;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
   query: string;
@@ -25,6 +30,12 @@ export type GraphAction =
   | { type: "setPhysics"; running: boolean }
   | { type: "setLayout"; layout: GraphLayoutStyle; runPhysics: boolean }
   | { type: "setLabels"; visible: boolean }
+  | { type: "setEdgeLabels"; visible: boolean }
+  | { type: "setIsolation"; isolated: boolean }
+  | { type: "setNeighborhoodDepth"; depth: number }
+  | { type: "setEdgeDirection"; direction: GraphEdgeDirection }
+  | { type: "setLayoutSpacing"; spacing: GraphLayoutSpacing }
+  | { type: "setMinimap"; visible: boolean }
   | { type: "toggleCommunity"; communityId: number }
   | { type: "setHiddenCommunities"; communityIds: number[] }
   | { type: "toggleChange"; change: GraphChangeType }
@@ -32,17 +43,33 @@ export type GraphAction =
 
 export const initialGraphState: GraphState = {
   focusedNodeId: null,
-  physicsRunning: true,
+  physicsRunning: false,
   layoutStyle: "automatic",
-  initialLayoutPending: true,
+  initialLayoutPending: false,
   forceLabels: false,
+  showEdgeLabels: false,
+  isolateSelection: false,
+  neighborhoodDepth: 1,
+  edgeDirection: "both",
+  layoutSpacing: 1,
+  showMinimap: true,
   hiddenCommunities: new Set<number>(),
   hiddenChanges: new Set<GraphChangeType>(),
   query: ""
 };
 
-export function initialGraphStateForModel(model: GraphViewModel): GraphState {
-  if (graphRenderingProfile(model) === "interactive") return initialGraphState;
+export function initialGraphStateForModel(
+  _model: GraphViewModel,
+  preferredLayout: GraphLayoutStyle = "automatic"
+): GraphState {
+  if (preferredLayout !== "automatic") {
+    return {
+      ...initialGraphState,
+      layoutStyle: preferredLayout,
+      physicsRunning: false,
+      initialLayoutPending: false
+    };
+  }
   return {
     ...initialGraphState,
     physicsRunning: false,
@@ -59,7 +86,7 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
         physicsRunning: false
       };
     case "clearFocus":
-      return { ...state, focusedNodeId: null };
+      return { ...state, focusedNodeId: null, isolateSelection: false };
     case "stabilized":
       return state.physicsRunning || state.initialLayoutPending
         ? { ...state, physicsRunning: false, initialLayoutPending: false }
@@ -81,6 +108,21 @@ export function graphReducer(state: GraphState, action: GraphAction): GraphState
       };
     case "setLabels":
       return { ...state, forceLabels: action.visible };
+    case "setEdgeLabels":
+      return { ...state, showEdgeLabels: action.visible };
+    case "setIsolation":
+      return { ...state, isolateSelection: action.isolated };
+    case "setNeighborhoodDepth":
+      return {
+        ...state,
+        neighborhoodDepth: Math.max(1, Math.min(4, Math.trunc(action.depth)))
+      };
+    case "setEdgeDirection":
+      return { ...state, edgeDirection: action.direction };
+    case "setLayoutSpacing":
+      return { ...state, layoutSpacing: action.spacing };
+    case "setMinimap":
+      return { ...state, showMinimap: action.visible };
     case "search":
       return { ...state, query: action.query };
     case "toggleCommunity": {

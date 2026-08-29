@@ -356,6 +356,43 @@ class SecondController {
 }
 
 #[test]
+fn php_case_folded_class_and_method_collision_remains_unresolved() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("models.php");
+    let source = br#"<?php
+class Post {}
+class Like {
+    public function post() {}
+    public function modelClass() { Post::factory(); return Post::class; }
+}
+"#;
+
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let post = extraction
+        .nodes
+        .iter()
+        .find(|node| node.label() == "Post")
+        .ok_or("missing Post class")?;
+    let method = extraction
+        .nodes
+        .iter()
+        .find(|node| node.label() == ".post()")
+        .ok_or("missing Like::post method")?;
+
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .any(|edge| { edge.target == post.id && edge.string("relation") == "calls" })
+    );
+    assert!(!extraction.edges.iter().any(|edge| {
+        edge.string("relation") == "references_constant"
+            && (edge.target == post.id || edge.target == method.id)
+    }));
+    Ok(())
+}
+
+#[test]
 fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;

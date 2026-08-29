@@ -69,6 +69,38 @@ const FOCUSED_SKILLS: &[&str] = &[
 ];
 
 #[test]
+fn agent_assets_reject_subsystem_context_examples() -> Result<(), Box<dyn Error>> {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let subsystem_example = regex::Regex::new(
+        r"--context(?:=|\s+)[A-Z][A-Za-z0-9_:.-]*(?:Service|Controller|Module|Package)\b",
+    )?;
+    for root in [
+        manifest.join("assets/compass-integrations"),
+        manifest.join("assets/compass-skill"),
+    ] {
+        for (path, bytes) in directory_tree(&root)? {
+            let text = String::from_utf8(bytes).map_err(|error| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("agent asset {} is not UTF-8: {error}", path.display()),
+                )
+            })?;
+            assert!(
+                !subsystem_example.is_match(&text),
+                "{} uses a subsystem identity as --context: {text}",
+                path.display()
+            );
+            assert!(
+                !text.contains("anchor a common term inside a subsystem"),
+                "{} contains the retired subsystem-context guidance",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Error>> {
     let fixture = InstallFixture::new()?;
     let output = fixture.run(&["install", "--platform", "codex", "--project"])?;
@@ -102,8 +134,14 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
             .is_file()
     );
     let query = fs::read_to_string(skill.with_file_name("references").join("query.md"))?;
-    assert!(query.contains("4,000–16,000 tokens"));
+    assert!(query.contains("2,000-token default"));
     assert!(query.contains("additional pages remain"));
+    assert!(query.contains("repeat the unchanged question"));
+    assert!(query.contains("filters relationships by their stored evidence context"));
+    assert!(query.contains("Use repeatable `--scope KIND:VALUE`"));
+    assert!(query.contains("every scope must resolve canonically"));
+    assert!(!query.contains("--context CheckoutService"));
+    assert!(!query.contains("anchor a common term inside a subsystem"));
     let references = skill.with_file_name("references");
     assert_eq!(
         fs::read_dir(&references)?
@@ -137,6 +175,7 @@ fn every_project_platform_installs_native_content() -> Result<(), Box<dyn Error>
         assert_success(&format!("{platform} project install"), &output);
         assert_native_tree(&fixture.project)?;
         assert_native_tree(&fixture.home)?;
+        assert_daily_workflow(&fixture.project, platform)?;
 
         let output = fixture.run(&["uninstall", "--platform", platform, "--project"])?;
         assert_success(&format!("{platform} project uninstall"), &output);
@@ -160,6 +199,7 @@ fn every_global_platform_installs_native_content() -> Result<(), Box<dyn Error>>
         assert_success(&format!("{platform} global install"), &output);
         assert_native_tree(&fixture.project)?;
         assert_native_tree(&fixture.home)?;
+        assert_daily_workflow(&fixture.home, platform)?;
     }
     Ok(())
 }
@@ -477,19 +517,32 @@ fn user_destination_and_claude_config_overrides_round_trip() -> Result<(), Box<d
 #[test]
 fn kilo_uninstall_removes_only_the_exact_plugin_entry() -> Result<(), Box<dyn Error>> {
     let fixture = InstallFixture::new()?;
+    fs::create_dir_all(fixture.project.join(".kilo"))?;
+    let config = fixture.project.join(".kilo/kilo.json");
+    fs::write(
+        &config,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "plugin": [
+                "./plugins/compass.js",
+                "file:./.kilo/plugins/compass.js",
+                "file:///unrelated/.kilo/plugins/compass.js.backup"
+            ]
+        }))?,
+    )?;
     assert_success(
         "kilo install",
         &fixture.run(&["install", "--platform", "kilo", "--project"])?,
     );
-    let config = fixture.project.join(".kilo/kilo.json");
-    let mut document: serde_json::Value = serde_json::from_slice(&fs::read(&config)?)?;
-    document["plugin"]
-        .as_array_mut()
-        .ok_or("plugin array")?
-        .push(serde_json::json!(
-            "file:///unrelated/.kilo/plugins/compass.js.backup"
-        ));
-    fs::write(&config, serde_json::to_vec_pretty(&document)?)?;
+    let document: serde_json::Value = serde_json::from_slice(&fs::read(&config)?)?;
+    assert_eq!(
+        document["plugin"],
+        serde_json::json!(["file:///unrelated/.kilo/plugins/compass.js.backup"])
+    );
+    let kilo_plugin_path = fixture.project.join(".kilo/plugins/compass.js");
+    let kilo_plugin = fs::read_to_string(&kilo_plugin_path)?;
+    assert!(kilo_plugin.contains("export default { id: \"compass\", server }"));
+    assert!(!kilo_plugin.contains("export const CompassPlugin"));
+    assert_plugin_loads(&kilo_plugin_path, &fixture.project, "kilo")?;
 
     assert_success(
         "kilo uninstall",
@@ -499,6 +552,81 @@ fn kilo_uninstall_removes_only_the_exact_plugin_entry() -> Result<(), Box<dyn Er
     assert_eq!(
         after["plugin"],
         serde_json::json!(["file:///unrelated/.kilo/plugins/compass.js.backup"])
+    );
+    Ok(())
+}
+
+#[test]
+fn opencode_uses_an_auto_discovered_named_export_plugin() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    fs::create_dir_all(fixture.project.join(".opencode"))?;
+    let config_path = fixture.project.join(".opencode/opencode.json");
+    fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "plugin": [
+                "./plugins/compass.js",
+                ".opencode/plugins/compass.js",
+                "npm:unrelated-plugin"
+            ]
+        }))?,
+    )?;
+    assert_success(
+        "opencode install",
+        &fixture.run(&["install", "--platform", "opencode", "--project"])?,
+    );
+    let config: serde_json::Value = serde_json::from_slice(&fs::read(&config_path)?)?;
+    assert_eq!(
+        config["plugin"],
+        serde_json::json!(["npm:unrelated-plugin"])
+    );
+    let plugin_path = fixture.project.join(".opencode/plugins/compass.js");
+    let plugin = fs::read_to_string(&plugin_path)?;
+    assert!(plugin.contains("export const CompassPlugin"));
+    assert!(!plugin.contains("export default { id: \"compass\", server }"));
+    assert_plugin_loads(&plugin_path, &fixture.project, "opencode")?;
+    assert_success(
+        "opencode uninstall",
+        &fixture.run(&["uninstall", "--platform", "opencode", "--project"])?,
+    );
+    let after: serde_json::Value = serde_json::from_slice(&fs::read(config_path)?)?;
+    assert_eq!(after["plugin"], serde_json::json!(["npm:unrelated-plugin"]));
+    Ok(())
+}
+
+fn assert_plugin_loads(
+    plugin: &Path,
+    project: &Path,
+    platform: &str,
+) -> Result<(), Box<dyn Error>> {
+    fs::create_dir_all(project.join("compass-out"))?;
+    fs::write(project.join("compass-out/graph.json"), "{}")?;
+    let script = r#"
+import { readFile } from 'node:fs/promises';
+const source = await readFile(process.env.COMPASS_PLUGIN_MODULE, 'utf8');
+const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const loaded = await import(moduleUrl);
+const factory = process.env.COMPASS_PLUGIN_PLATFORM === 'kilo'
+  ? loaded.default?.server
+  : loaded.CompassPlugin;
+if (typeof factory !== 'function') throw new Error('plugin factory missing');
+const hooks = await factory({ directory: process.env.COMPASS_PLUGIN_PROJECT });
+const before = hooks?.['tool.execute.before'];
+if (typeof before !== 'function') throw new Error('before hook missing');
+const output = { args: { command: 'true' } };
+await before({ tool: 'bash' }, output);
+if (!output.args.command.includes('[compass]')) throw new Error('hook did not execute');
+"#;
+    let output = Command::new("node")
+        .args(["--input-type=module", "--eval", script])
+        .env("COMPASS_PLUGIN_MODULE", plugin)
+        .env("COMPASS_PLUGIN_PROJECT", project)
+        .env("COMPASS_PLUGIN_PLATFORM", platform)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{platform} plugin runtime load failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
     Ok(())
 }
@@ -916,6 +1044,51 @@ fn assert_native(value: &str) {
         !lowercase.contains("python -m"),
         "installed content contains a Python module command: {normalized}"
     );
+}
+
+fn assert_daily_workflow(root: &Path, platform: &str) -> Result<(), Box<dyn Error>> {
+    let required = [
+        "compass init",
+        "compass install",
+        "compass watch",
+        "second terminal",
+        "focused task",
+        "broad repository orientation",
+        "Agent",
+        "Orientation",
+        "direction",
+        "ambiguity",
+        "graph completeness",
+        "domain truncation",
+        "exact node ID",
+        "cited source",
+        "compass update .",
+    ];
+    let executable = env!("CARGO_BIN_EXE_compass");
+    let candidates = directory_tree(root)?
+        .into_iter()
+        .filter_map(|(path, bytes)| String::from_utf8(bytes).ok().map(|text| (path, text)))
+        .collect::<Vec<_>>();
+    let combined = candidates
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for required in required {
+        assert!(
+            combined.contains(required),
+            "{platform} workflow under {} is missing {required:?}",
+            root.display()
+        );
+    }
+    for (path, text) in candidates {
+        assert!(
+            !text.contains(executable),
+            "{platform} installed text artifact {} contains the build-machine Compass executable path",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 fn tree_contains_compass_skill(root: &Path) -> Result<bool, Box<dyn Error>> {

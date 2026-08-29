@@ -194,3 +194,46 @@ def prepare_checkout(
     identity_path.parent.mkdir(parents=True, exist_ok=True)
     _write_json_atomic(identity_path, asdict(identity))
     return identity
+
+
+def validate_reused_checkout(
+    spec: RepositorySpec,
+    commit: str,
+    checkout: Path,
+) -> CheckoutIdentity:
+    """Validate an existing pinned checkout without mutating or contacting it."""
+    if _OBJECT_ID.fullmatch(commit) is None:
+        raise ValueError(f"invalid commit for {spec.name}: {commit}")
+    if not checkout.is_dir():
+        raise RuntimeError(f"reused checkout is missing: {checkout}")
+    origin = _git(["remote", "get-url", "origin"], cwd=checkout)
+    if origin != spec.url:
+        raise RuntimeError(
+            f"reused checkout origin mismatch for {spec.name}: {origin!r} != {spec.url!r}"
+        )
+    actual = _git(["rev-parse", "HEAD"], cwd=checkout)
+    if actual != commit:
+        raise RuntimeError(
+            f"reused checkout commit mismatch for {spec.name}: {actual} != {commit}"
+        )
+    if _git(["rev-parse", "--abbrev-ref", "HEAD"], cwd=checkout) != "HEAD":
+        raise RuntimeError(f"reused checkout must be detached: {checkout}")
+    status = _git(
+        ["status", "--porcelain=v1", "--untracked-files=all"], cwd=checkout
+    )
+    if status:
+        raise RuntimeError(f"reused checkout is dirty: {checkout}")
+    tree = _git(["rev-parse", "HEAD^{tree}"], cwd=checkout)
+    expected_tree = _git(["rev-parse", f"{commit}^{{tree}}"], cwd=checkout)
+    if tree != expected_tree:
+        raise RuntimeError(
+            f"reused checkout tree mismatch for {spec.name}: {tree} != {expected_tree}"
+        )
+    return CheckoutIdentity(
+        name=spec.name,
+        url=spec.url,
+        branch="detached",
+        commit=commit,
+        tree=tree,
+        path=str(checkout.resolve()),
+    )

@@ -2,8 +2,11 @@
 
 mod affected;
 mod benchmark;
+mod bm25;
 mod code_query;
 mod cql;
+mod discovery;
+mod discovery_text;
 mod graph_engine;
 mod index;
 mod intent;
@@ -24,8 +27,20 @@ pub use cql::{
     CacheStats, ExplainPlan, OperatorProfile, PlanCache, PlanCacheConfig, QueryError,
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
-pub use graph_engine::{GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine};
-pub use index::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
+pub use discovery_text::{
+    DISCOVERY_TEXT_PAGE_VERSION, DiscoveryTextPage, DiscoveryTextPageError,
+    DiscoveryTextPageOptions, discovery_request_digest, discovery_response_digest,
+    discovery_result_envelope, render_discovery_text_page,
+};
+pub use graph_engine::{
+    DirectGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine, open_graph_engine,
+};
+pub use index::{
+    CachedQueryEngine, DEFAULT_QUERY_ENGINE_CACHE_CAPACITY, EngineSelection,
+    MAX_QUERY_ENGINE_CACHE_CAPACITY, QueryEngineCache, QueryEngineKind, has_published_store, open,
+    open_with_document, open_with_engine, open_with_store, open_with_store_selector,
+    open_with_verified_document,
+};
 pub use intent::{
     NaturalQueryIntent, NaturalQueryPlan, NaturalQueryRequest, QUERY_PLANNER_PROFILE_V1,
     plan_natural_query,
@@ -39,16 +54,19 @@ pub use relevance::{
     QUERY_QUALIFICATION_SCHEMA_V1, QualificationReport, QueryClass, QueryObservation,
     RelevanceError, RelevanceMetrics, qualification_report, score,
 };
-pub use score::{QueryScores, ScoredNode, find_node, pick_scored_endpoint, score_nodes};
+pub use score::{
+    ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_FULL_SCAN_V1,
+    TextRankProfile, find_node, pick_scored_endpoint, score_nodes, score_nodes_with_profile,
+};
 pub use telemetry::{
     ProfiledCodeQueryResponse, QUERY_EXECUTION_PROFILE_V1, QueryExecutionProfile,
     QueryStageTimings, WorkCounts,
 };
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{
-    DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TextPaginationError, TraversalMode,
-    query_graph_text, query_graph_text_page, render_explanation, render_explanation_page,
-    render_shortest_path,
+    DEFAULT_TEXT_TOKEN_BUDGET, ProfiledTextPageOptions, TextPageOptions, TextPaginationError,
+    TraversalMode, query_graph_text, query_graph_text_page, query_graph_text_page_with_profile,
+    render_explanation, render_explanation_page, render_shortest_path,
 };
 
 #[cfg(test)]
@@ -74,6 +92,18 @@ mod tests {
         assert_eq!(
             query_terms("Wie funktioniert die Authentifizierung?"),
             vec!["authentifizierung"]
+        );
+        assert_eq!(
+            query_terms("how does a model save data"),
+            vec!["model", "save", "data"]
+        );
+        assert_eq!(
+            query_terms("how are plugins added and tasks scheduled"),
+            vec!["plugin", "add", "task", "schedule"]
+        );
+        assert_eq!(
+            query_terms("why detect all agents"),
+            vec!["why", "detect", "all", "agent"]
         );
     }
 

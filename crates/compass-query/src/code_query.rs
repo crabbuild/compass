@@ -1,32 +1,37 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 
-use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
+use compass_graph::{
+    GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_TERM_POSTING_CHUNK_ITEMS,
+    GraphSnapshotReader, SnapshotReadLimits, TermPostingWork,
+};
 use compass_ir::ProgramBundle;
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord,
+    BuildMetadata, EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeKind, NodeRecord,
 };
 use compass_model::provenance::EvidenceConfidence;
 use compass_model::query_contract::{
-    CallRequest, CodeQueryOperation, CodeQueryResponse, ExploreRequest, ImpactRequest,
-    NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryFile, QueryNode,
-    QueryPath, SearchHit, SearchRequest, normalize_query_symbol, query_edge_from_record,
-    query_node_from_record, query_path_from_records,
+    CallRequest, CodeQueryOperation, CodeQueryResponse, DiscoveryScopeKind, ExploreRequest,
+    ImpactRequest, NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryFile,
+    QueryNode, QueryPath, SearchHit, SearchRequest, discovery_scope_postings,
+    normalize_query_symbol, query_edge_from_record, query_node_from_record,
+    query_path_from_records,
 };
 use compass_model::validate_build_metadata_identity;
-use rusqlite::{Connection, params};
+use compass_store::SqliteStore;
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::cql::{QueryError, QueryErrorKind};
 use crate::graph_engine::LocalStoreSnapshot;
 use crate::index::QueryEngineKind;
 use crate::join_program_evidence;
-use crate::ranking::rank_search_candidates;
+use crate::ranking::{rank_search_candidates, resolution_rank_is_strictly_better};
 use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
 use crate::source::{VerifiedSource, verified_source};
 use crate::telemetry::QueryInstrumentation;
-use crate::text::strip_diacritics;
+use crate::text::{canonical_query_token, query_recall_terms, strip_diacritics};
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
@@ -70,7 +75,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
 ];
 
 #[derive(Clone, Copy, Debug)]
-enum StructuralOperandRole {
+pub(crate) enum StructuralOperandRole {
     CallersTarget,
     CalleesSource,
     ImpactTarget,
@@ -90,11 +95,112 @@ impl StructuralOperandRole {
     }
 }
 
-struct CandidateAssembly {
-    pool: SearchCandidatePool,
+pub(crate) struct CandidateAssembly {
+    pub(crate) pool: SearchCandidatePool,
+    pub(crate) truncated: bool,
+    pub(crate) candidate_nodes_read: u64,
+    pub(crate) postings_decoded: u64,
+    pub(crate) relation_edges_examined: u64,
+}
+
+pub(crate) struct TermCandidateRead {
+    pub(crate) nodes: Vec<NodeRecord>,
+    pub(crate) matched_concepts: BTreeMap<String, BTreeSet<String>>,
+    pub(crate) truncated: bool,
+    pub(crate) node_ids_decoded: u64,
+    pub(crate) chunks_decoded: u64,
+}
+
+pub(crate) struct RelationshipCandidateRead {
+    pub(crate) source_ids: Vec<String>,
+    pub(crate) truncated: bool,
+    pub(crate) node_ids_decoded: u64,
+    pub(crate) chunks_decoded: u64,
+}
+
+pub(crate) struct RelationshipTargetRead {
+    pub(crate) target_ids: Vec<String>,
+    pub(crate) truncated: bool,
+    pub(crate) ids_decoded: u64,
+}
+
+pub(crate) struct SelectedOutgoingRead {
+    pub(crate) records: Vec<EdgeRecord>,
+    pub(crate) edge_ids: Vec<String>,
+    pub(crate) truncated: bool,
+    pub(crate) examined: usize,
+}
+
+pub(crate) struct CandidateAssemblyPolicy<'a> {
+    pub(crate) max_candidates: usize,
+    pub(crate) source_lookup_limit: usize,
+    pub(crate) max_candidate_reads: usize,
+    pub(crate) max_candidate_probes: usize,
+    pub(crate) bounded_posting_work: bool,
+    pub(crate) admit: &'a dyn Fn(&NodeRecord) -> bool,
+    pub(crate) check: &'a mut dyn FnMut() -> Result<(), QueryError>,
+}
+
+struct CandidateReadBudget {
+    remaining: usize,
+    read: u64,
+    probes_remaining: usize,
+    probes: u64,
     truncated: bool,
-    postings_decoded: u64,
-    relation_edges_examined: u64,
+}
+
+impl CandidateReadBudget {
+    const fn new(read_limit: usize, probe_limit: usize) -> Self {
+        Self {
+            remaining: read_limit,
+            read: 0,
+            probes_remaining: probe_limit,
+            probes: 0,
+            truncated: false,
+        }
+    }
+
+    fn begin_probe(&mut self) -> bool {
+        if self.probes_remaining == 0 {
+            self.truncated = true;
+            return false;
+        }
+        self.probes_remaining = self.probes_remaining.saturating_sub(1);
+        self.probes = self.probes.saturating_add(1);
+        true
+    }
+
+    fn lookup_limit(&self, desired: usize) -> usize {
+        desired.min(self.remaining.saturating_sub(1))
+    }
+
+    fn record(&mut self, returned: usize, source_truncated: bool) {
+        let examined = returned.saturating_add(usize::from(source_truncated));
+        self.remaining = self.remaining.saturating_sub(examined);
+        self.read = self
+            .read
+            .saturating_add(u64::try_from(examined).unwrap_or(u64::MAX));
+        self.truncated |= source_truncated || self.remaining == 0;
+    }
+
+    fn record_additional_probes(&mut self, probes: u64) {
+        let requested = usize::try_from(probes).unwrap_or(usize::MAX);
+        let admitted = requested.min(self.probes_remaining);
+        self.probes_remaining = self.probes_remaining.saturating_sub(admitted);
+        self.probes = self
+            .probes
+            .saturating_add(u64::try_from(admitted).unwrap_or(u64::MAX));
+        self.truncated |= admitted < requested;
+    }
+
+    fn record_exact_work(&mut self, examined: usize, source_truncated: bool) {
+        let admitted = examined.min(self.remaining);
+        self.remaining = self.remaining.saturating_sub(admitted);
+        self.read = self
+            .read
+            .saturating_add(u64::try_from(admitted).unwrap_or(u64::MAX));
+        self.truncated |= source_truncated || admitted < examined || self.remaining == 0;
+    }
 }
 
 struct TraversalBudget {
@@ -176,6 +282,8 @@ pub struct CodeQueryEngine {
     pub(crate) index_path: PathBuf,
     pub(crate) partial_graph_message: Option<String>,
     pub(crate) engine_kind: QueryEngineKind,
+    pub(crate) graph_identity: String,
+    pub(crate) build_generation_identity: String,
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
     pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
 }
@@ -204,9 +312,10 @@ impl CodeQueryEngine {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct PreparedSearchQuery {
-    terms: Vec<String>,
-    fts_query: String,
+pub(crate) struct PreparedSearchQuery {
+    pub(crate) terms: Vec<String>,
+    pub(crate) ranking_terms: Vec<String>,
+    pub(crate) fts_query: String,
 }
 
 #[derive(Debug)]
@@ -247,7 +356,7 @@ impl SearchQueryCache {
     }
 }
 
-type FuzzyLookupValue = (Vec<NodeRecord>, bool);
+pub(crate) type FuzzyLookupValue = (Vec<NodeRecord>, bool);
 
 #[derive(Debug)]
 pub(crate) struct FuzzyLookupCache {
@@ -298,10 +407,23 @@ pub(crate) enum CodeGraphBackend {
     Store(Box<LocalStoreSnapshot>),
 }
 
+/// Request-scoped graph view. Store discovery pins one immutable reader so
+/// selector verification and database setup happen once for the whole query.
+pub(crate) enum PinnedDiscoveryBackend<'a> {
+    Materialized {
+        graph: &'a GraphDocument,
+        adjacency: &'a CodeAdjacencyIndex,
+        lookup: &'a CodeLookupIndex,
+    },
+    Store(Box<GraphSnapshotReader<'a, SqliteStore>>),
+}
+
 pub(crate) struct CodeLookupIndex {
     node_by_id: HashMap<String, usize>,
     nodes_by_normalized_name: HashMap<String, Vec<usize>>,
+    operation_nodes_by_term: HashMap<String, Vec<usize>>,
     file_by_path: HashMap<String, usize>,
+    scope_values: HashMap<(u8, String), Vec<String>>,
 }
 
 impl CodeLookupIndex {
@@ -309,7 +431,9 @@ impl CodeLookupIndex {
         let mut lookup = Self {
             node_by_id: HashMap::with_capacity(graph.nodes.len()),
             nodes_by_normalized_name: HashMap::new(),
+            operation_nodes_by_term: HashMap::new(),
             file_by_path: HashMap::with_capacity(graph.graph.files.len()),
+            scope_values: HashMap::new(),
         };
         for (index, node) in graph.nodes.iter().enumerate() {
             lookup.node_by_id.insert(node.id.clone(), index);
@@ -320,10 +444,41 @@ impl CodeLookupIndex {
                     .or_default()
                     .push(index);
             }
+            if is_operation_role_declaration(node) {
+                let mut terms = compass_model::search::identifier_search_terms(&node.name);
+                terms.extend(compass_model::search::identifier_search_terms(
+                    &node.qualified_name,
+                ));
+                for term in terms {
+                    lookup
+                        .operation_nodes_by_term
+                        .entry(term)
+                        .or_default()
+                        .push(index);
+                }
+            }
+            for (posting_kind, value, canonical) in discovery_scope_postings(node) {
+                let Some(kind) = scope_kind_from_posting(&posting_kind) else {
+                    continue;
+                };
+                lookup
+                    .scope_values
+                    .entry((scope_kind_rank(kind), value))
+                    .or_default()
+                    .push(canonical);
+            }
         }
         for nodes in lookup.nodes_by_normalized_name.values_mut() {
             nodes.sort_by(|left, right| graph.nodes[*left].id.cmp(&graph.nodes[*right].id));
             nodes.dedup();
+        }
+        for nodes in lookup.operation_nodes_by_term.values_mut() {
+            nodes.sort_by(|left, right| graph.nodes[*left].id.cmp(&graph.nodes[*right].id));
+            nodes.dedup();
+        }
+        for values in lookup.scope_values.values_mut() {
+            values.sort();
+            values.dedup();
         }
         for (index, file) in graph.graph.files.iter().enumerate() {
             lookup.file_by_path.insert(file.path.clone(), index);
@@ -341,8 +496,48 @@ impl CodeLookupIndex {
             .map_or(&[], Vec::as_slice)
     }
 
+    fn operation_nodes_for_terms(&self, terms: &[String], limit: usize) -> (Vec<usize>, bool) {
+        let mut nodes = BTreeSet::new();
+        let mut truncated = false;
+        for term in terms {
+            for index in self.operation_nodes_by_term.get(term).into_iter().flatten() {
+                nodes.insert(*index);
+                if nodes.len() > limit {
+                    nodes.pop_last();
+                    truncated = true;
+                }
+            }
+        }
+        (nodes.into_iter().collect(), truncated)
+    }
+
     fn file_by_path(&self, path: &str) -> Option<usize> {
         self.file_by_path.get(path).copied()
+    }
+
+    fn scope_values(&self, kind: DiscoveryScopeKind, value: &str) -> &[String] {
+        self.scope_values
+            .get(&(scope_kind_rank(kind), value.to_owned()))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+pub(crate) const fn scope_kind_rank(kind: DiscoveryScopeKind) -> u8 {
+    match kind {
+        DiscoveryScopeKind::Community => 0,
+        DiscoveryScopeKind::Source => 1,
+        DiscoveryScopeKind::Package => 2,
+        DiscoveryScopeKind::Node => 3,
+    }
+}
+
+fn scope_kind_from_posting(posting: &str) -> Option<DiscoveryScopeKind> {
+    match posting {
+        "community-id" | "community-label" => Some(DiscoveryScopeKind::Community),
+        "source" => Some(DiscoveryScopeKind::Source),
+        "package" => Some(DiscoveryScopeKind::Package),
+        "node-id" | "node-qname" => Some(DiscoveryScopeKind::Node),
+        _ => None,
     }
 }
 
@@ -491,7 +686,24 @@ impl CodeAdjacencyIndex {
 }
 
 impl CodeGraphBackend {
-    fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
+    pub(crate) fn pin_discovery(&self) -> Result<PinnedDiscoveryBackend<'_>, QueryError> {
+        match self {
+            Self::Materialized {
+                graph,
+                adjacency,
+                lookup,
+            } => Ok(PinnedDiscoveryBackend::Materialized {
+                graph,
+                adjacency,
+                lookup,
+            }),
+            Self::Store(snapshot) => {
+                Ok(PinnedDiscoveryBackend::Store(Box::new(snapshot.reader()?)))
+            }
+        }
+    }
+
+    pub(crate) fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
         match self {
             Self::Materialized { graph, lookup, .. } => Ok(lookup
                 .node_by_id(id)
@@ -509,16 +721,17 @@ impl CodeGraphBackend {
         }
     }
 
-    fn nodes_by_normalized_name(
+    pub(crate) fn nodes_by_normalized_name(
         &self,
         name: &str,
         limit: usize,
     ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        let name = normalize_symbol(name);
         match self {
             Self::Materialized { graph, lookup, .. } => {
                 let retained = limit.saturating_add(1);
                 let mut nodes = lookup
-                    .nodes_by_normalized_name(name)
+                    .nodes_by_normalized_name(&name)
                     .iter()
                     .take(retained)
                     .map(|index| graph.nodes[*index].clone())
@@ -532,7 +745,7 @@ impl CodeGraphBackend {
             Self::Store(snapshot) => {
                 let (mut nodes, truncated) = snapshot
                     .reader()?
-                    .nodes_by_normalized_name(name, snapshot_limits(limit.saturating_add(1))?)
+                    .nodes_by_normalized_name(&name, snapshot_limits(limit.saturating_add(1))?)
                     .map_err(snapshot_error)?;
                 let truncated = truncated || nodes.len() > limit;
                 if nodes.len() > limit {
@@ -543,7 +756,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn matching_bounded(
+    pub(crate) fn matching_bounded(
         &self,
         node: &str,
         inbound: bool,
@@ -555,21 +768,19 @@ impl CodeGraphBackend {
             Self::Materialized {
                 graph, adjacency, ..
             } => {
-                let (indices, truncated, _) = adjacency.matching_bounded(
-                    graph,
-                    node,
-                    inbound,
-                    kinds,
-                    include_heuristic,
-                    limit,
-                );
-                Ok((
-                    indices
-                        .into_iter()
-                        .map(|index| graph.links[index].clone())
-                        .collect(),
-                    truncated,
-                ))
+                // Both backends bound the same canonical raw edge prefix and
+                // apply the heuristic filter afterward. Otherwise a dense
+                // heuristic prefix changes both results and truncation.
+                let (indices, truncated, _) =
+                    adjacency.matching_bounded(graph, node, inbound, kinds, true, limit);
+                let mut edges = indices
+                    .into_iter()
+                    .map(|index| graph.links[index].clone())
+                    .collect::<Vec<_>>();
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated))
             }
             Self::Store(snapshot) => {
                 let (mut edges, truncated) = snapshot
@@ -594,7 +805,7 @@ impl CodeGraphBackend {
         }
     }
 
-    fn incident_bounded(
+    pub(crate) fn incident_bounded(
         &self,
         node: &str,
         include_heuristic: bool,
@@ -650,19 +861,534 @@ impl CodeGraphBackend {
         &self,
         terms: &[String],
         limit: usize,
-    ) -> Result<Option<(Vec<NodeRecord>, bool)>, QueryError> {
+        bounded_posting_work: bool,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
         let Self::Store(snapshot) = self else {
             return Ok(None);
         };
-        let (mut nodes, truncated) = snapshot
-            .reader()?
-            .nodes_for_terms(terms, snapshot_limits(limit.saturating_add(1))?)
-            .map_err(snapshot_error)?;
+        let reader = snapshot.reader()?;
+        let (mut nodes, truncated, node_ids_decoded, chunks_decoded) = if bounded_posting_work {
+            let (nodes, truncated, work) = reader
+                .nodes_for_terms_bounded_work(terms, snapshot_limits(limit)?)
+                .map_err(snapshot_error)?;
+            (nodes, truncated, work.node_ids_decoded, work.chunks_decoded)
+        } else {
+            let recall_ceiling =
+                usize::try_from(compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ)
+                    .unwrap_or(usize::MAX);
+            let (nodes, truncated) = reader
+                .nodes_for_terms(terms, snapshot_limits(recall_ceiling)?)
+                .map_err(snapshot_error)?;
+            let decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
+            (nodes, truncated, decoded, 0)
+        };
         let truncated = truncated || nodes.len() > limit;
         if nodes.len() > limit {
             nodes.truncate(limit);
         }
-        Ok(Some((nodes, truncated)))
+        let concepts = terms.iter().cloned().collect::<BTreeSet<_>>();
+        let matched_concepts = nodes
+            .iter()
+            .map(|node| (node.id.clone(), concepts.clone()))
+            .collect();
+        Ok(Some(TermCandidateRead {
+            nodes,
+            matched_concepts,
+            truncated,
+            node_ids_decoded,
+            chunks_decoded,
+        }))
+    }
+}
+
+impl PinnedDiscoveryBackend<'_> {
+    pub(crate) fn node_by_id(&self, id: &str) -> Result<Option<NodeRecord>, QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => Ok(lookup
+                .node_by_id(id)
+                .map(|index| graph.nodes[index].clone())),
+            Self::Store(reader) => reader.get_node(id).map_err(snapshot_error),
+        }
+    }
+
+    pub(crate) fn nodes_by_normalized_name(
+        &self,
+        name: &str,
+        limit: usize,
+    ) -> Result<(Vec<NodeRecord>, bool), QueryError> {
+        let name = normalize_symbol(name);
+        match self {
+            Self::Materialized { graph, lookup, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut nodes = lookup
+                    .nodes_by_normalized_name(&name)
+                    .iter()
+                    .take(retained)
+                    .map(|index| graph.nodes[*index].clone())
+                    .collect::<Vec<_>>();
+                let truncated = nodes.len() > limit;
+                nodes.truncate(limit);
+                Ok((nodes, truncated))
+            }
+            Self::Store(reader) => {
+                let (mut nodes, truncated) = reader
+                    .nodes_by_normalized_name(&name, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                let truncated = truncated || nodes.len() > limit;
+                nodes.truncate(limit);
+                Ok((nodes, truncated))
+            }
+        }
+    }
+
+    pub(crate) fn resolve_scope_values(
+        &self,
+        kind: DiscoveryScopeKind,
+        value: &str,
+        limit: usize,
+    ) -> Result<(Vec<String>, bool), QueryError> {
+        match self {
+            Self::Materialized { lookup, .. } => {
+                let retained = limit.saturating_add(1);
+                let mut values = lookup
+                    .scope_values(kind, value)
+                    .iter()
+                    .take(retained)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let truncated = values.len() > limit;
+                values.truncate(limit);
+                Ok((values, truncated))
+            }
+            Self::Store(reader) => {
+                let mut values = BTreeSet::new();
+                let mut truncated = false;
+                for posting_kind in snapshot_scope_kinds(kind) {
+                    let (found, found_truncated) = reader
+                        .resolve_scope_values(
+                            posting_kind,
+                            value,
+                            snapshot_limits(limit.saturating_add(1))?,
+                        )
+                        .map_err(scope_snapshot_error)?;
+                    truncated |= found_truncated;
+                    for value in found {
+                        values.insert(value);
+                        if values.len() > limit {
+                            truncated = true;
+                            values.pop_last();
+                        }
+                    }
+                }
+                Ok((values.into_iter().collect(), truncated))
+            }
+        }
+    }
+
+    pub(crate) fn matching_bounded(
+        &self,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool), QueryError> {
+        let (edges, truncated, _) =
+            self.matching_bounded_counted(node, inbound, kinds, include_heuristic, limit)?;
+        Ok((edges, truncated))
+    }
+
+    pub(crate) fn matching_bounded_counted(
+        &self,
+        node: &str,
+        inbound: bool,
+        kinds: &[EdgeKind],
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool, usize), QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let (indices, truncated, _) =
+                    adjacency.matching_bounded(graph, node, inbound, kinds, true, limit);
+                let mut edges = indices
+                    .into_iter()
+                    .map(|index| graph.links[index].clone())
+                    .collect::<Vec<_>>();
+                let examined = edges.len().saturating_add(usize::from(truncated));
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated, examined))
+            }
+            Self::Store(reader) => {
+                let (mut edges, truncated) = reader
+                    .directional_adjacency(node, inbound, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                edges.sort_by(|left, right| left.id.cmp(&right.id));
+                let truncated = truncated || edges.len() > limit;
+                edges.truncate(limit);
+                let examined = edges.len().saturating_add(usize::from(truncated));
+                edges.retain(|edge| kinds.contains(&edge.kind));
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated, examined))
+            }
+        }
+    }
+
+    pub(crate) fn incident_bounded(
+        &self,
+        node: &str,
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<(Vec<EdgeRecord>, bool), QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let retained = limit.saturating_add(1);
+                let mut edges = adjacency
+                    .incident(node, true)
+                    .iter()
+                    .take(retained)
+                    .map(|index| graph.links[*index].clone())
+                    .collect::<Vec<_>>();
+                let truncated = edges.len() > limit;
+                edges.truncate(limit);
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated))
+            }
+            Self::Store(reader) => {
+                let (mut edges, truncated) = reader
+                    .incident(node, snapshot_limits(limit.saturating_add(1))?)
+                    .map_err(snapshot_error)?;
+                edges.sort_by(|left, right| left.id.cmp(&right.id));
+                let truncated = truncated || edges.len() > limit;
+                edges.truncate(limit);
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok((edges, truncated))
+            }
+        }
+    }
+
+    pub(crate) fn outgoing_within_nodes_bounded_work(
+        &self,
+        source: &str,
+        selected_node_ids: &BTreeSet<String>,
+        include_heuristic: bool,
+        limit: usize,
+    ) -> Result<SelectedOutgoingRead, QueryError> {
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => {
+                let (indices, truncated, examined) =
+                    adjacency.matching_bounded(graph, source, false, ALL_EDGE_KINDS, true, limit);
+                let mut edges = indices
+                    .into_iter()
+                    .map(|index| graph.links[index].clone())
+                    .filter(|edge| selected_node_ids.contains(&edge.target))
+                    .collect::<Vec<_>>();
+                if !include_heuristic {
+                    edges.retain(|edge| !is_heuristic(edge));
+                }
+                Ok(SelectedOutgoingRead {
+                    records: edges,
+                    edge_ids: Vec::new(),
+                    truncated,
+                    examined: examined.min(limit),
+                })
+            }
+            Self::Store(reader) => {
+                let (edge_ids, truncated, examined) = reader
+                    .outgoing_edge_ids_within_nodes_bounded_work(
+                        source,
+                        selected_node_ids,
+                        snapshot_limits(limit)?,
+                    )
+                    .map_err(snapshot_error)?;
+                Ok(SelectedOutgoingRead {
+                    records: Vec::new(),
+                    edge_ids,
+                    truncated,
+                    examined,
+                })
+            }
+        }
+    }
+
+    pub(crate) fn edges_by_ids(
+        &self,
+        ids: &BTreeSet<String>,
+    ) -> Result<Vec<EdgeRecord>, QueryError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self {
+            Self::Materialized {
+                graph, adjacency, ..
+            } => ids
+                .iter()
+                .map(|id| {
+                    adjacency
+                        .by_id(id)
+                        .map(|index| graph.links[index].clone())
+                        .ok_or_else(|| {
+                            QueryError::new(
+                                QueryErrorKind::GraphInvariant,
+                                "discovery_edge_missing",
+                                format!("outgoing index references missing edge {id}"),
+                            )
+                        })
+                })
+                .collect(),
+            Self::Store(reader) => reader
+                .get_edges_by_ids_bounded_work(ids, snapshot_limits(ids.len())?)
+                .map_err(snapshot_error),
+        }
+    }
+
+    pub(crate) fn supports_identifier_subwords(&self) -> Result<bool, QueryError> {
+        match self {
+            Self::Materialized { .. } => Ok(true),
+            Self::Store(reader) => reader
+                .supports_identifier_subwords()
+                .map_err(snapshot_error),
+        }
+    }
+
+    pub(crate) fn supports_relationship_terms(&self) -> Result<bool, QueryError> {
+        match self {
+            Self::Materialized { .. } => Ok(true),
+            Self::Store(reader) => reader.supports_relationship_terms().map_err(snapshot_error),
+        }
+    }
+
+    pub(crate) fn operation_role_candidates(
+        &self,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        match self {
+            Self::Materialized { graph, lookup, .. } => {
+                let (indices, truncated) = lookup.operation_nodes_for_terms(terms, limit);
+                let nodes = indices
+                    .into_iter()
+                    .map(|index| graph.nodes[index].clone())
+                    .collect::<Vec<_>>();
+                Ok(Some(TermCandidateRead {
+                    node_ids_decoded: u64::try_from(nodes.len()).unwrap_or(u64::MAX),
+                    nodes,
+                    matched_concepts: BTreeMap::new(),
+                    truncated,
+                    chunks_decoded: 0,
+                }))
+            }
+            Self::Store(reader) => {
+                if !reader
+                    .supports_operation_role_terms()
+                    .map_err(snapshot_error)?
+                {
+                    return Ok(None);
+                }
+                let minimum = GRAPH_TERM_POSTING_CHUNK_ITEMS.saturating_mul(terms.len().max(1));
+                let (mut nodes, truncated, work) = reader
+                    .operation_role_nodes_for_terms_bounded_work(
+                        terms,
+                        snapshot_limits(limit.max(minimum))?,
+                    )
+                    .map_err(snapshot_error)?;
+                let truncated = truncated || nodes.len() > limit;
+                nodes.truncate(limit);
+                Ok(Some(TermCandidateRead {
+                    nodes,
+                    matched_concepts: BTreeMap::new(),
+                    truncated,
+                    node_ids_decoded: work.node_ids_decoded,
+                    chunks_decoded: work.chunks_decoded,
+                }))
+            }
+        }
+    }
+
+    pub(crate) fn declaration_candidates(
+        &self,
+        terms: &[String],
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        if !reader
+            .supports_declaration_terms()
+            .map_err(snapshot_error)?
+        {
+            return Ok(None);
+        }
+        let minimum = GRAPH_TERM_POSTING_CHUNK_ITEMS.saturating_mul(terms.len().max(1));
+        let (mut nodes, truncated, work) = reader
+            .declaration_nodes_for_terms_bounded_work(terms, snapshot_limits(limit.max(minimum))?)
+            .map_err(snapshot_error)?;
+        let truncated = truncated || nodes.len() > limit;
+        nodes.truncate(limit);
+        Ok(Some(TermCandidateRead {
+            nodes,
+            matched_concepts: BTreeMap::new(),
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
+    fn store_term_candidates(
+        &self,
+        concepts: &[String],
+        limit: usize,
+    ) -> Result<Option<TermCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        let read_limits = snapshot_limits(limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS))?;
+        let exact_read_limits = snapshot_limits(
+            limit
+                .checked_div(concepts.len().max(1))
+                .unwrap_or(limit)
+                .max(GRAPH_TERM_POSTING_CHUNK_ITEMS),
+        )?;
+        let (mut nodes, mut truncated, mut work) = if let [concept] = concepts {
+            reader
+                .nodes_for_exact_term_bounded_work(concept, exact_read_limits)
+                .map_err(snapshot_error)?
+        } else {
+            let mut intersection = None::<BTreeSet<String>>;
+            let mut exact_truncated = false;
+            let mut exact_work = TermPostingWork::default();
+            for concept in concepts {
+                let (term_ids, term_truncated, term_work) = reader
+                    .node_ids_for_exact_term_bounded_work(concept, exact_read_limits)
+                    .map_err(snapshot_error)?;
+                exact_truncated |= term_truncated;
+                exact_work.chunks_decoded = exact_work
+                    .chunks_decoded
+                    .saturating_add(term_work.chunks_decoded);
+                exact_work.node_ids_decoded = exact_work
+                    .node_ids_decoded
+                    .saturating_add(term_work.node_ids_decoded);
+                let term_ids = term_ids.into_iter().collect::<BTreeSet<_>>();
+                match &mut intersection {
+                    Some(previous) => previous.retain(|id| term_ids.contains(id)),
+                    None => intersection = Some(term_ids),
+                }
+                if intersection.as_ref().is_some_and(BTreeSet::is_empty) {
+                    break;
+                }
+            }
+            let ids = intersection.unwrap_or_default();
+            let nodes = if ids.is_empty() {
+                Vec::new()
+            } else {
+                reader
+                    .get_nodes_by_ids_bounded_work(&ids, snapshot_limits(ids.len())?)
+                    .map_err(snapshot_error)?
+            };
+            (nodes, exact_truncated, exact_work)
+        };
+        if nodes.is_empty() && !truncated {
+            (nodes, truncated, work) = reader
+                .nodes_for_terms_bounded_work(concepts, read_limits)
+                .map_err(snapshot_error)?;
+        }
+        let truncated = truncated || nodes.len() > limit;
+        nodes.truncate(limit);
+        let matched = concepts.iter().cloned().collect::<BTreeSet<_>>();
+        let matched_concepts = nodes
+            .iter()
+            .map(|node| (node.id.clone(), matched.clone()))
+            .collect();
+        Ok(Some(TermCandidateRead {
+            nodes,
+            matched_concepts,
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
+    fn store_relationship_sources(
+        &self,
+        concept: &str,
+        limit: usize,
+    ) -> Result<Option<RelationshipCandidateRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        let read_limits = snapshot_limits(limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS))?;
+        let (mut source_ids, truncated, work) = reader
+            .source_ids_for_exact_relationship_term_bounded_work(concept, read_limits)
+            .map_err(snapshot_error)?;
+        let truncated = truncated || source_ids.len() > limit;
+        source_ids.truncate(limit);
+        Ok(Some(RelationshipCandidateRead {
+            source_ids,
+            truncated,
+            node_ids_decoded: work.node_ids_decoded,
+            chunks_decoded: work.chunks_decoded,
+        }))
+    }
+
+    fn store_relationship_source_matches_term(
+        &self,
+        source_id: &str,
+        concept: &str,
+    ) -> Result<Option<bool>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        reader
+            .relationship_source_matches_term(source_id, concept)
+            .map(Some)
+            .map_err(snapshot_error)
+    }
+
+    fn store_relationship_targets(
+        &self,
+        source_id: &str,
+        concepts: &BTreeSet<String>,
+        limit: usize,
+    ) -> Result<Option<RelationshipTargetRead>, QueryError> {
+        let Self::Store(reader) = self else {
+            return Ok(None);
+        };
+        let (mut target_ids, truncated, work) = reader
+            .relationship_target_ids_for_source_terms_bounded_work(
+                source_id,
+                concepts,
+                snapshot_limits(limit)?,
+            )
+            .map_err(snapshot_error)?;
+        let truncated = truncated || target_ids.len() > limit;
+        target_ids.truncate(limit);
+        Ok(Some(RelationshipTargetRead {
+            target_ids,
+            truncated,
+            ids_decoded: work.node_ids_decoded,
+        }))
+    }
+}
+
+fn snapshot_scope_kinds(kind: DiscoveryScopeKind) -> &'static [&'static str] {
+    match kind {
+        DiscoveryScopeKind::Community => &["community-id", "community-label"],
+        DiscoveryScopeKind::Source => &["source"],
+        DiscoveryScopeKind::Package => &["package"],
+        DiscoveryScopeKind::Node => &["node-id", "node-qname"],
     }
 }
 
@@ -688,6 +1414,21 @@ fn snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
         "store_graph_snapshot_failed",
         error.to_string(),
     )
+}
+
+fn scope_snapshot_error(error: compass_graph::SnapshotError) -> QueryError {
+    if matches!(
+        error,
+        compass_graph::SnapshotError::CapabilityUnavailable(_)
+    ) {
+        QueryError::new(
+            QueryErrorKind::UnsupportedSchema,
+            "scope_index_unavailable",
+            error.to_string(),
+        )
+    } else {
+        snapshot_error(error)
+    }
 }
 
 fn index_directional_edge(
@@ -743,18 +1484,34 @@ impl CodeQueryEngine {
             return response;
         }
         let candidate_limit = usize::try_from(request.limits.max_candidates).unwrap_or(usize::MAX);
+        let admit = |_: &NodeRecord| true;
+        let mut check = || Ok(());
         let assembly = self.assemble_search_candidates(
             &request.query,
             &terms,
             &query,
-            candidate_limit,
+            CandidateAssemblyPolicy {
+                max_candidates: candidate_limit,
+                source_lookup_limit: candidate_limit,
+                max_candidate_reads: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ,
+                )
+                .unwrap_or(usize::MAX),
+                max_candidate_probes: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
+                )
+                .unwrap_or(usize::MAX),
+                bounded_posting_work: false,
+                admit: &admit,
+                check: &mut check,
+            },
             None,
             false,
         )?;
         instrumentation.work.candidates_read = instrumentation
             .work
             .candidates_read
-            .saturating_add(assembly.pool.candidates_read());
+            .saturating_add(assembly.candidate_nodes_read);
         instrumentation.work.postings_decoded = instrumentation
             .work
             .postings_decoded
@@ -823,15 +1580,16 @@ impl CodeQueryEngine {
         response
     }
 
-    fn assemble_search_candidates(
+    pub(crate) fn assemble_search_candidates(
         &self,
         raw_query: &str,
         terms: &[String],
         fts_query: &str,
-        candidate_limit: usize,
+        policy: CandidateAssemblyPolicy<'_>,
         role: Option<StructuralOperandRole>,
         include_heuristic: bool,
     ) -> Result<CandidateAssembly, QueryError> {
+        let candidate_limit = policy.max_candidates;
         let budget = RecallBudget {
             max_total_candidates: candidate_limit,
             max_per_source: candidate_limit,
@@ -839,57 +1597,127 @@ impl CodeQueryEngine {
         };
         let mut pool = SearchCandidatePool::new(budget);
         let mut truncated = false;
+        let mut candidate_work =
+            CandidateReadBudget::new(policy.max_candidate_reads, policy.max_candidate_probes);
         let mut postings_decoded = 0_u64;
         let mut relation_edges_examined = 0_u64;
 
-        if let Some(node) = self.backend.node_by_id(raw_query)? {
-            let _ = pool.add(CandidateSource::ExactId, node);
+        (policy.check)()?;
+        if candidate_work.remaining > 0
+            && candidate_work.begin_probe()
+            && let Some(node) = self.backend.node_by_id(raw_query)?
+        {
+            candidate_work.record(1, false);
+            if (policy.admit)(&node) {
+                let _ = pool.add(CandidateSource::ExactId, node);
+            }
+        } else if candidate_work.remaining == 0 {
+            candidate_work.truncated = true;
         }
 
+        (policy.check)()?;
         let normalized_name_query = normalize_symbol(raw_query);
-        let (exact_name_nodes, exact_name_truncated) = self
-            .backend
-            .nodes_by_normalized_name(&normalized_name_query, candidate_limit)?;
-        pool.add_many(CandidateSource::ExactName, exact_name_nodes);
-        truncated |= exact_name_truncated;
+        let exact_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
+        if exact_limit > 0 && candidate_work.begin_probe() {
+            let (exact_name_nodes, exact_name_truncated) = self
+                .backend
+                .nodes_by_normalized_name(&normalized_name_query, exact_limit)?;
+            candidate_work.record(exact_name_nodes.len(), exact_name_truncated);
+            add_admitted_candidates(
+                &mut pool,
+                CandidateSource::ExactName,
+                exact_name_nodes,
+                policy.admit,
+            );
+        } else if policy.source_lookup_limit > 0 {
+            candidate_work.truncated = true;
+        }
 
         for term in terms {
+            (policy.check)()?;
             if term.chars().count() < 3 {
                 continue;
             }
-            let (alias_nodes, alias_truncated) = self
-                .backend
-                .nodes_by_normalized_name(term, candidate_limit)?;
-            pool.add_many(CandidateSource::Alias, alias_nodes);
-            truncated |= alias_truncated;
+            let alias_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
+            if alias_limit == 0 || !candidate_work.begin_probe() {
+                candidate_work.truncated = true;
+                break;
+            }
+            let (alias_nodes, alias_truncated) =
+                self.backend.nodes_by_normalized_name(term, alias_limit)?;
+            candidate_work.record(alias_nodes.len(), alias_truncated);
+            add_admitted_candidates(&mut pool, CandidateSource::Alias, alias_nodes, policy.admit);
         }
 
-        let (term_nodes, term_truncated) =
-            if let Some(candidates) = self.backend.store_term_candidates(terms, candidate_limit)? {
+        (policy.check)()?;
+        let term_limit = candidate_work.lookup_limit(policy.source_lookup_limit);
+        if term_limit > 0 && candidate_work.begin_probe() {
+            let term_read = if let Some(candidates) = self.backend.store_term_candidates(
+                terms,
+                term_limit,
+                policy.bounded_posting_work,
+            )? {
                 candidates
             } else {
-                self.materialized_term_candidates(fts_query, candidate_limit)?
+                let (nodes, truncated) =
+                    self.materialized_term_candidates(fts_query, term_limit)?;
+                let decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
+                TermCandidateRead {
+                    matched_concepts: nodes
+                        .iter()
+                        .map(|node| {
+                            (
+                                node.id.clone(),
+                                terms.iter().cloned().collect::<BTreeSet<_>>(),
+                            )
+                        })
+                        .collect(),
+                    nodes,
+                    truncated,
+                    node_ids_decoded: decoded,
+                    chunks_decoded: 0,
+                }
             };
-        postings_decoded =
-            postings_decoded.saturating_add(u64::try_from(term_nodes.len()).unwrap_or(u64::MAX));
-        if term_truncated {
-            postings_decoded = postings_decoded.saturating_add(1);
+            postings_decoded = postings_decoded.saturating_add(term_read.node_ids_decoded);
+            candidate_work.record_additional_probes(term_read.chunks_decoded);
+            candidate_work.record_exact_work(
+                usize::try_from(term_read.node_ids_decoded).unwrap_or(usize::MAX),
+                term_read.truncated,
+            );
+            add_admitted_candidates(
+                &mut pool,
+                CandidateSource::TermIndex,
+                term_read.nodes,
+                policy.admit,
+            );
+        } else if !fts_query.is_empty() && policy.source_lookup_limit > 0 {
+            candidate_work.truncated = true;
         }
-        pool.add_many(CandidateSource::TermIndex, term_nodes);
-        truncated |= term_truncated;
 
         if pool.len() < candidate_limit.min(MIN_RECALL_CANDIDATES_BEFORE_FUZZY) {
             for variant in recall_fuzzy_term_variants(terms) {
+                (policy.check)()?;
                 if variant.len() < 3 {
                     continue;
                 }
                 if pool.len() >= candidate_limit {
                     break;
                 }
+                let fuzzy_limit = candidate_work
+                    .lookup_limit(policy.source_lookup_limit.min(budget.max_fuzzy_candidates));
+                if fuzzy_limit == 0 || !candidate_work.begin_probe() {
+                    candidate_work.truncated = true;
+                    break;
+                }
                 let (fuzzy_nodes, fuzzy_truncated) =
-                    self.cached_fuzzy_nodes(&variant, budget.max_fuzzy_candidates)?;
-                pool.add_many(CandidateSource::Fuzzy, fuzzy_nodes);
-                truncated |= fuzzy_truncated;
+                    self.cached_fuzzy_nodes(&variant, fuzzy_limit)?;
+                candidate_work.record(fuzzy_nodes.len(), fuzzy_truncated);
+                add_admitted_candidates(
+                    &mut pool,
+                    CandidateSource::Fuzzy,
+                    fuzzy_nodes,
+                    policy.admit,
+                );
                 if pool.truncated_by_fuzzy_capacity() {
                     break;
                 }
@@ -899,6 +1727,7 @@ impl CodeQueryEngine {
         if let Some(role) = role {
             let (inbound, kinds) = role.relation_probe();
             for node_id in pool.candidate_ids() {
+                (policy.check)()?;
                 let (edges, probe_truncated) = self.backend.matching_bounded(
                     &node_id,
                     inbound,
@@ -916,16 +1745,21 @@ impl CodeQueryEngine {
                 }
             }
         }
-        truncated |= pool.is_truncated();
+        truncated |= candidate_work.truncated || pool.is_truncated();
         Ok(CandidateAssembly {
             pool,
             truncated,
+            candidate_nodes_read: candidate_work.read,
             postings_decoded,
             relation_edges_examined,
         })
     }
 
-    fn cached_fuzzy_nodes(&self, name: &str, limit: usize) -> Result<FuzzyLookupValue, QueryError> {
+    pub(crate) fn cached_fuzzy_nodes(
+        &self,
+        name: &str,
+        limit: usize,
+    ) -> Result<FuzzyLookupValue, QueryError> {
         {
             let mut cache = match self.fuzzy_lookup_cache.lock() {
                 Ok(cache) => cache,
@@ -944,7 +1778,10 @@ impl CodeQueryEngine {
         Ok(value)
     }
 
-    fn prepare_search_query(&self, query: &str) -> Result<PreparedSearchQuery, QueryError> {
+    pub(crate) fn prepare_search_query(
+        &self,
+        query: &str,
+    ) -> Result<PreparedSearchQuery, QueryError> {
         validate_search_query_size(query)?;
         {
             let mut cache = match self.search_query_cache.lock() {
@@ -959,6 +1796,7 @@ impl CodeQueryEngine {
         let terms = search_query_terms(query)?;
         let prepared = PreparedSearchQuery {
             fts_query: fts_query_from_terms(&terms),
+            ranking_terms: terms.clone(),
             terms,
         };
         let mut cache = match self.search_query_cache.lock() {
@@ -969,7 +1807,63 @@ impl CodeQueryEngine {
         Ok(prepared)
     }
 
-    fn materialized_term_candidates(
+    pub(crate) fn prepare_discovery_query(
+        &self,
+        query: &str,
+    ) -> Result<PreparedSearchQuery, QueryError> {
+        validate_search_query_size(query)?;
+        let cache_key = format!("discovery\0{query}");
+        {
+            let mut cache = match self.search_query_cache.lock() {
+                Ok(cache) => cache,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(prepared) = cache.get(&cache_key) {
+                return Ok(prepared);
+            }
+        }
+
+        let recall_terms = query_recall_terms(query)
+            .into_iter()
+            .filter(|term| {
+                !matches!(
+                    term.to_ascii_uppercase().as_str(),
+                    "AND" | "OR" | "NOT" | "NEAR"
+                )
+            })
+            .take(compass_model::query_contract::MAX_INDEXED_QUERY_TERMS.saturating_add(1))
+            .collect::<Vec<_>>();
+        validate_search_term_count(&recall_terms)?;
+        let ranking_terms = recall_terms
+            .iter()
+            .cloned()
+            .map(canonical_query_token)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut terms = recall_terms.clone();
+        for term in &ranking_terms {
+            if terms.len() >= compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
+                break;
+            }
+            if !terms.contains(term) {
+                terms.push(term.clone());
+            }
+        }
+        let prepared = PreparedSearchQuery {
+            fts_query: fts_query_from_terms(&recall_terms),
+            ranking_terms,
+            terms,
+        };
+        let mut cache = match self.search_query_cache.lock() {
+            Ok(cache) => cache,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.insert(cache_key, prepared.clone());
+        Ok(prepared)
+    }
+
+    pub(crate) fn materialized_term_candidates(
         &self,
         query: &str,
         candidate_limit: usize,
@@ -994,7 +1888,10 @@ impl CodeQueryEngine {
                      LIMIT ?2",
             )
             .map_err(sql_error)?;
-        let sql_limit = i64::try_from(candidate_limit.saturating_add(1)).unwrap_or(i64::MAX);
+        let read_envelope = (candidate_limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            / GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+        let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
         let mut rows = statement
             .query(params![query, sql_limit])
             .map_err(sql_error)?;
@@ -1010,11 +1907,285 @@ impl CodeQueryEngine {
             })?;
             nodes.push(node);
         }
-        let truncated = nodes.len() > candidate_limit;
-        if truncated {
-            nodes.truncate(candidate_limit);
-        }
+        let truncated = if nodes.len() == read_envelope {
+            let last = nodes.last().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "term_posting_invariant",
+                    "nonzero term posting envelope returned no rows",
+                )
+            })?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1
+                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                        WHERE node_fts MATCH ?1 AND n.id > ?2
+                     )",
+                    params![query, last.id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+        } else {
+            false
+        };
+        nodes.truncate(candidate_limit);
         Ok((nodes, truncated))
+    }
+
+    pub(crate) fn discovery_term_candidates(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        concepts: &[String],
+        candidate_limit: usize,
+    ) -> Result<TermCandidateRead, QueryError> {
+        if let Some(read) = backend.store_term_candidates(concepts, candidate_limit)? {
+            return Ok(read);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let read_envelope = (candidate_limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            / GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+        let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
+        let mut nodes = Vec::new();
+        let mut selected_query = String::new();
+        let exact_query = concepts
+            .iter()
+            .map(|concept| format!("\"{}\"", concept.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let prefix_query = fts_query_from_terms(concepts);
+        for query in [exact_query, prefix_query] {
+            let mut statement = connection
+                .prepare(
+                    "SELECT n.id
+                       FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                      WHERE node_fts MATCH ?1
+                      ORDER BY n.id
+                      LIMIT ?2",
+                )
+                .map_err(sql_error)?;
+            let mut rows = statement
+                .query(params![query, sql_limit])
+                .map_err(sql_error)?;
+            while let Some(row) = rows.next().map_err(sql_error)? {
+                let id: String = row.get(0).map_err(sql_error)?;
+                let node = backend.node_by_id(&id)?.ok_or_else(|| {
+                    QueryError::new(
+                        QueryErrorKind::GraphInvariant,
+                        "query_graph_invariant",
+                        format!("index references absent graph node {id}"),
+                    )
+                })?;
+                nodes.push(node);
+            }
+            if !nodes.is_empty() {
+                selected_query = query;
+                break;
+            }
+        }
+        let truncated = if nodes.len() == read_envelope {
+            let last = nodes.last().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "term_posting_invariant",
+                    "nonzero discovery term envelope returned no rows",
+                )
+            })?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1
+                         FROM node_fts JOIN nodes n ON n.id = node_fts.node_id
+                        WHERE node_fts MATCH ?1 AND n.id > ?2
+                     )",
+                    params![selected_query, last.id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+        } else {
+            false
+        };
+        let node_ids_decoded = u64::try_from(nodes.len()).unwrap_or(u64::MAX);
+        nodes.truncate(candidate_limit);
+        let matched = concepts.iter().cloned().collect::<BTreeSet<_>>();
+        let matched_concepts = nodes
+            .iter()
+            .map(|node| (node.id.clone(), matched.clone()))
+            .collect();
+        Ok(TermCandidateRead {
+            node_ids_decoded,
+            nodes,
+            matched_concepts,
+            truncated,
+            chunks_decoded: 0,
+        })
+    }
+
+    pub(crate) fn discovery_relationship_sources(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        concept: &str,
+        candidate_limit: usize,
+    ) -> Result<RelationshipCandidateRead, QueryError> {
+        if let Some(read) = backend.store_relationship_sources(concept, candidate_limit)? {
+            return Ok(read);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let read_envelope = (candidate_limit.max(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            / GRAPH_TERM_POSTING_CHUNK_ITEMS)
+            .saturating_mul(GRAPH_TERM_POSTING_CHUNK_ITEMS);
+        let sql_limit = i64::try_from(read_envelope).unwrap_or(i64::MAX);
+        let mut statement = connection
+            .prepare(
+                "SELECT source_id
+                   FROM relationship_terms
+                  WHERE term = ?1
+                  ORDER BY source_id
+                  LIMIT ?2",
+            )
+            .map_err(sql_error)?;
+        let mut rows = statement
+            .query(params![concept, sql_limit])
+            .map_err(sql_error)?;
+        let mut source_ids = Vec::new();
+        while let Some(row) = rows.next().map_err(sql_error)? {
+            source_ids.push(row.get(0).map_err(sql_error)?);
+        }
+        let truncated = if source_ids.len() == read_envelope {
+            let last = source_ids.last().ok_or_else(|| {
+                QueryError::new(
+                    QueryErrorKind::Internal,
+                    "relationship_posting_invariant",
+                    "nonzero relationship posting envelope returned no rows",
+                )
+            })?;
+            connection
+                .query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM relationship_terms
+                        WHERE term = ?1 AND source_id > ?2
+                     )",
+                    params![concept, last],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sql_error)?
+        } else {
+            false
+        };
+        let node_ids_decoded = u64::try_from(source_ids.len()).unwrap_or(u64::MAX);
+        source_ids.truncate(candidate_limit);
+        Ok(RelationshipCandidateRead {
+            node_ids_decoded,
+            source_ids,
+            truncated,
+            chunks_decoded: 0,
+        })
+    }
+
+    pub(crate) fn discovery_relationship_source_matches_term(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        source_id: &str,
+        concept: &str,
+    ) -> Result<bool, QueryError> {
+        if let Some(matches) = backend.store_relationship_source_matches_term(source_id, concept)? {
+            return Ok(matches);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        connection
+            .query_row(
+                "SELECT 1
+                   FROM relationship_terms
+                  WHERE term = ?1 AND source_id = ?2",
+                params![concept, source_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|found| found.is_some())
+            .map_err(sql_error)
+    }
+
+    pub(crate) fn discovery_relationship_targets(
+        &self,
+        backend: &PinnedDiscoveryBackend<'_>,
+        source_id: &str,
+        concepts: &BTreeSet<String>,
+        limit: usize,
+    ) -> Result<RelationshipTargetRead, QueryError> {
+        if concepts.is_empty() || limit == 0 {
+            return Ok(RelationshipTargetRead {
+                target_ids: Vec::new(),
+                truncated: false,
+                ids_decoded: 0,
+            });
+        }
+        if let Some(read) = backend.store_relationship_targets(source_id, concepts, limit)? {
+            return Ok(read);
+        }
+        let connection = self.connection.as_ref().ok_or_else(|| {
+            QueryError::new(
+                QueryErrorKind::Internal,
+                "query_index_missing",
+                "materialized query engine has no search index",
+            )
+        })?;
+        let per_term_limit = limit.div_ceil(concepts.len());
+        let mut target_ids = BTreeSet::new();
+        let mut ids_decoded = 0_u64;
+        let mut truncated = false;
+        for concept in concepts {
+            let decoded = usize::try_from(ids_decoded).unwrap_or(usize::MAX);
+            let remaining = limit.saturating_sub(decoded);
+            if remaining == 0 {
+                truncated = true;
+                break;
+            }
+            let row_limit = remaining.min(per_term_limit);
+            let sql_limit = i64::try_from(row_limit).unwrap_or(i64::MAX);
+            let mut statement = connection
+                .prepare(
+                    "SELECT target_id
+                       FROM relationship_term_targets
+                      WHERE source_id = ?1 AND term = ?2
+                      ORDER BY target_id
+                      LIMIT ?3",
+                )
+                .map_err(sql_error)?;
+            let mut rows = statement
+                .query(params![source_id, concept, sql_limit])
+                .map_err(sql_error)?;
+            let mut term_rows = 0_usize;
+            while let Some(row) = rows.next().map_err(sql_error)? {
+                term_rows = term_rows.saturating_add(1);
+                target_ids.insert(row.get(0).map_err(sql_error)?);
+            }
+            ids_decoded = ids_decoded.saturating_add(u64::try_from(term_rows).unwrap_or(u64::MAX));
+            truncated |= term_rows == row_limit;
+        }
+        Ok(RelationshipTargetRead {
+            target_ids: target_ids.into_iter().collect(),
+            truncated,
+            ids_decoded,
+        })
     }
 
     pub fn callers(&self, request: CallRequest) -> Result<CodeQueryResponse, QueryError> {
@@ -1396,6 +2567,18 @@ impl CodeQueryEngine {
         self.engine_kind
     }
 
+    /// Immutable identity supplied by the selected graph engine.
+    #[must_use]
+    pub fn graph_identity(&self) -> &str {
+        &self.graph_identity
+    }
+
+    /// Build generation recorded by the selected graph snapshot.
+    #[must_use]
+    pub fn build_generation_identity(&self) -> &str {
+        &self.build_generation_identity
+    }
+
     fn resolve_symbol(
         &self,
         query: &str,
@@ -1454,18 +2637,34 @@ impl CodeQueryEngine {
             });
             return Ok(None);
         }
+        let admit = |_: &NodeRecord| true;
+        let mut check = || Ok(());
         let assembly = self.assemble_search_candidates(
             query,
             &prepared.terms,
             &prepared.fts_query,
-            candidate_limit,
+            CandidateAssemblyPolicy {
+                max_candidates: candidate_limit,
+                source_lookup_limit: candidate_limit,
+                max_candidate_reads: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_NODES_READ,
+                )
+                .unwrap_or(usize::MAX),
+                max_candidate_probes: usize::try_from(
+                    compass_model::query_contract::MAX_INDEXED_CANDIDATE_PROBES,
+                )
+                .unwrap_or(usize::MAX),
+                bounded_posting_work: false,
+                admit: &admit,
+                check: &mut check,
+            },
             role,
             include_heuristic,
         )?;
         instrumentation.work.candidates_read = instrumentation
             .work
             .candidates_read
-            .saturating_add(assembly.pool.candidates_read());
+            .saturating_add(assembly.candidate_nodes_read);
         instrumentation.work.postings_decoded = instrumentation
             .work
             .postings_decoded
@@ -1497,21 +2696,22 @@ impl CodeQueryEngine {
             });
             return Ok(None);
         }
-        let relation_seeded = candidates
-            .iter()
-            .filter(|candidate| candidate.sources.contains(&CandidateSource::RelationSeed))
-            .collect::<Vec<_>>();
-        if let [candidate] = relation_seeded.as_slice() {
+        let candidate_count = candidates.len();
+        let ranked =
+            rank_search_candidates(query, &prepared.ranking_terms, candidates, candidate_limit);
+        if let [candidate] = ranked.as_slice() {
             return Ok(Some(candidate.node.id.clone()));
         }
-        if let [candidate] = candidates.as_slice() {
+        if let [candidate, runner_up, ..] = ranked.as_slice()
+            && resolution_rank_is_strictly_better(candidate, runner_up)
+        {
             return Ok(Some(candidate.node.id.clone()));
         }
         response.diagnostics.push(QueryDiagnostic {
             code: QueryDiagnosticCode::AmbiguousMatch,
             message: format!(
                 "Symbol {query:?} recalled {} candidates; provide a qualified name or exact ID",
-                candidates.len()
+                candidate_count
             ),
             node_id: None,
             path: None,
@@ -1809,8 +3009,37 @@ fn path_record(nodes: &[String], edges: &[String], selected: &[EdgeRecord]) -> Q
     query_path_from_records(nodes, edges, selected)
 }
 
-fn normalize_symbol(value: &str) -> String {
+pub(crate) fn normalize_symbol(value: &str) -> String {
     normalize_query_symbol(value)
+}
+
+fn is_operation_role_declaration(node: &NodeRecord) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Class
+            | NodeKind::Struct
+            | NodeKind::Interface
+            | NodeKind::Trait
+            | NodeKind::Protocol
+            | NodeKind::Enum
+            | NodeKind::TypeAlias
+    ) && node.source_file().is_some_and(|file| !file.is_empty())
+        && compass_model::search::identifier_search_terms(&node.name)
+            .iter()
+            .any(|term| compass_model::search::OPERATION_ROLE_TOKENS.contains(&term.as_str()))
+}
+
+fn add_admitted_candidates(
+    pool: &mut SearchCandidatePool,
+    source: CandidateSource,
+    nodes: Vec<NodeRecord>,
+    admit: &dyn Fn(&NodeRecord) -> bool,
+) {
+    for node in nodes {
+        if admit(&node) {
+            let _ = pool.add(source, node);
+        }
+    }
 }
 
 fn is_heuristic(edge: &EdgeRecord) -> bool {
@@ -1871,17 +3100,20 @@ fn fts_query_from_terms(terms: &[String]) -> String {
 }
 
 fn validate_search_query_size(value: &str) -> Result<(), QueryError> {
-    if value.len() > 4_096 {
+    if value.len() > compass_model::query_contract::MAX_INDEXED_QUERY_BYTES {
         return Err(QueryError::new(
             QueryErrorKind::InvalidParameter,
             "search_query_too_large",
-            "search query exceeds 4096 bytes",
+            format!(
+                "search query exceeds {} bytes",
+                compass_model::query_contract::MAX_INDEXED_QUERY_BYTES
+            ),
         ));
     }
     Ok(())
 }
 
-fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
+pub(crate) fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
     validate_search_query_size(value)?;
     let terms = value
         .split(|character: char| !(character.is_alphanumeric() || character == '_'))
@@ -1893,19 +3125,27 @@ fn search_query_terms(value: &str) -> Result<Vec<String>, QueryError> {
                 )
         })
         .map(str::to_lowercase)
-        .take(33)
+        .take(compass_model::query_contract::MAX_INDEXED_QUERY_TERMS.saturating_add(1))
         .collect::<Vec<_>>();
-    if terms.len() > 32 {
-        return Err(QueryError::new(
-            QueryErrorKind::InvalidParameter,
-            "too_many_search_terms",
-            "search query exceeds 32 terms",
-        ));
-    }
+    validate_search_term_count(&terms)?;
     Ok(terms)
 }
 
-fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
+fn validate_search_term_count(terms: &[String]) -> Result<(), QueryError> {
+    if terms.len() > compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
+        return Err(QueryError::new(
+            QueryErrorKind::InvalidParameter,
+            "too_many_search_terms",
+            format!(
+                "search query exceeds {} terms",
+                compass_model::query_contract::MAX_INDEXED_QUERY_TERMS
+            ),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn recall_fuzzy_term_variants(terms: &[String]) -> Vec<String> {
     let mut seen = terms.iter().cloned().collect::<BTreeSet<_>>();
     let mut variants = Vec::new();
     let eligible_terms = terms
@@ -2070,7 +3310,24 @@ mod adjacency_tests {
     use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
     use compass_model::validate_code_graph;
 
-    use super::{CodeAdjacencyIndex, EdgeKind};
+    use compass_model::query_contract::DiscoveryScopeKind;
+
+    use super::{CodeAdjacencyIndex, EdgeKind, scope_kind_from_posting};
+
+    #[test]
+    fn discovery_scope_posting_mapping_is_closed() {
+        for (posting, expected) in [
+            ("community-id", DiscoveryScopeKind::Community),
+            ("community-label", DiscoveryScopeKind::Community),
+            ("source", DiscoveryScopeKind::Source),
+            ("package", DiscoveryScopeKind::Package),
+            ("node-id", DiscoveryScopeKind::Node),
+            ("node-qname", DiscoveryScopeKind::Node),
+        ] {
+            assert_eq!(scope_kind_from_posting(posting), Some(expected));
+        }
+        assert_eq!(scope_kind_from_posting("future-extension"), None);
+    }
 
     fn edge(id: &str, source: &str, kind: EdgeKind, target: &str) -> EdgeRecord {
         EdgeRecord {
@@ -2369,6 +3626,7 @@ mod fuzzy_term_variant_tests {
     fn prepared(term: &str) -> PreparedSearchQuery {
         PreparedSearchQuery {
             terms: vec![term.to_owned()],
+            ranking_terms: vec![term.to_owned()],
             fts_query: format!("\"{term}\"*"),
         }
     }

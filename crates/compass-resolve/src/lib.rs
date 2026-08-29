@@ -5,10 +5,50 @@ pub mod frameworks;
 mod members;
 mod program;
 
+pub use evidence::universal_resolution_report;
 pub use members::resolve_language_calls;
 pub use program::{
     ProgramProjectionSites, apply_program_projection, collect_program_projection_sites,
 };
+
+/// Maximum inference that cross-file resolution may materialize.
+///
+/// This mirrors the graph publication levels at the resolver ownership
+/// boundary so discarded relationships do not first allocate full graph
+/// records. Existing resolver entry points retain their historical `Max`
+/// behavior; build orchestration opts into an explicit level.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ResolutionAdmission {
+    /// Resolve relationships backed by exact structural evidence only.
+    Low,
+    /// Also admit inferred relationships between source-backed declarations.
+    Medium,
+    /// Also admit explicitly qualified external relationships.
+    High,
+    /// Admit deferred receivers and every other bounded inference.
+    #[default]
+    Max,
+}
+
+impl ResolutionAdmission {
+    const fn admits_source_backed_inference(self) -> bool {
+        self as u8 >= Self::Medium as u8
+    }
+
+    const fn admits_qualified_external(self) -> bool {
+        self as u8 >= Self::High as u8
+    }
+
+    const fn admits_deferred_receiver(self) -> bool {
+        matches!(self, Self::Max)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ResolutionMode {
+    evidence_prevalidated: bool,
+    admission: ResolutionAdmission,
+}
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -20,6 +60,7 @@ use compass_languages::{
     RawNodeRecord as NodeRecord, SemanticEvidenceBatch, SemanticRole, file_stem,
     is_language_builtin_global, make_id, parse_jsonc,
 };
+use compass_model::code_graph::{DiagnosticSeverity, GraphDiagnostic};
 use compass_model::provenance::{
     EndpointRewriteEvidence, EndpointRewriteRule, append_endpoint_rewrite_evidence,
     preserve_occurrence_rule,
@@ -30,6 +71,7 @@ use sha1::{Digest, Sha1};
 
 const DECLARATION_SUFFIXES: &[&str] = &["h", "hpp", "hh", "hxx"];
 const IMPLEMENTATION_SUFFIXES: &[&str] = &["m", "mm", "cpp", "cc", "cxx", "c"];
+const GRAPH_DIAGNOSTICS_EXTENSION: &str = "_compass_v1_graph_diagnostics";
 
 /// Collapse a clean sibling header/implementation declaration pair before
 /// portable file-prefix remapping would split their shared symbol IDs.
@@ -306,7 +348,10 @@ pub fn resolve_with_root(
         sources,
         root,
         project_edges,
-        false,
+        ResolutionMode {
+            evidence_prevalidated: false,
+            admission: ResolutionAdmission::Max,
+        },
     )
 }
 
@@ -319,7 +364,13 @@ pub fn resolve_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    resolve_owned_with_root_impl(&mut extractions, sources, root, false)
+    resolve_owned_with_root_impl(
+        &mut extractions,
+        sources,
+        root,
+        false,
+        ResolutionAdmission::Max,
+    )
 }
 
 /// Resolve owned facts whose universal evidence was validated at its trust boundary.
@@ -334,7 +385,25 @@ pub fn resolve_prevalidated_owned_with_root(
     sources: &HashMap<String, String>,
     root: &Path,
 ) -> Extraction {
-    resolve_owned_with_root_impl(&mut extractions, sources, root, true)
+    resolve_owned_with_root_impl(
+        &mut extractions,
+        sources,
+        root,
+        true,
+        ResolutionAdmission::Max,
+    )
+}
+
+/// Resolve prevalidated owned facts while suppressing relationships that the
+/// selected graph profile cannot publish.
+#[must_use]
+pub fn resolve_prevalidated_owned_with_root_at_inference(
+    mut extractions: Vec<Extraction>,
+    sources: &HashMap<String, String>,
+    root: &Path,
+    admission: ResolutionAdmission,
+) -> Extraction {
+    resolve_owned_with_root_impl(&mut extractions, sources, root, true, admission)
 }
 
 fn resolve_owned_with_root_impl(
@@ -342,6 +411,7 @@ fn resolve_owned_with_root_impl(
     sources: &HashMap<String, String>,
     root: &Path,
     evidence_prevalidated: bool,
+    admission: ResolutionAdmission,
 ) -> Extraction {
     let mut profile_started = Instant::now();
     let language_facts = members::collect_language_call_facts_owned(extractions);
@@ -412,7 +482,10 @@ fn resolve_owned_with_root_impl(
         sources,
         root,
         project_edges,
-        evidence_prevalidated,
+        ResolutionMode {
+            evidence_prevalidated,
+            admission,
+        },
     )
 }
 
@@ -757,10 +830,16 @@ fn restore_framework_callable_names(
     root: &Path,
 ) {
     let mut framework_sources = BTreeSet::new();
+    let mut framework_handlers = BTreeMap::<String, BTreeSet<String>>::new();
     for fact in &extraction.framework_facts {
         match fact {
             compass_languages::RawFrameworkFact::Route(route) => {
                 framework_sources.insert(route.anchor.source_file.clone());
+                let handlers = framework_handlers
+                    .entry(source_key(&route.anchor.source_file, root))
+                    .or_default();
+                handlers.insert(route.handler_reference.clone());
+                handlers.extend(route.middleware_references.iter().cloned());
                 if let Some(handler_source) = route
                     .detail
                     .get("handler_source")
@@ -816,9 +895,24 @@ fn restore_framework_callable_names(
         else {
             continue;
         };
-        // Universal binding/reference evidence is the source-backed bridge
-        // for framework handlers that live in another TS/JS file.
-        framework_sources.insert(target_source.to_owned());
+        let Some(handler_references) = framework_handlers.get(&source_key(edge_source, root))
+        else {
+            continue;
+        };
+        let Some(target) = nodes_by_id.get(edge.target.as_str()) else {
+            continue;
+        };
+        if handler_references
+            .iter()
+            .any(|reference| frameworks::edge_targets_declared_callable(edge, target, reference))
+        {
+            // Universal binding/reference evidence is the source-backed bridge
+            // for framework handlers that live in another TS/JS file. Only a
+            // declared handler or middleware may extend the compatibility
+            // surface; ordinary references from a framework file must keep
+            // their universal qualified names.
+            framework_sources.insert(target_source.to_owned());
+        }
     }
     if framework_sources.is_empty() {
         return;
@@ -908,8 +1002,12 @@ fn finish_resolution(
     sources: &HashMap<String, String>,
     root: &Path,
     project_edges: Vec<EdgeRecord>,
-    evidence_prevalidated: bool,
+    mode: ResolutionMode,
 ) -> Extraction {
+    let ResolutionMode {
+        evidence_prevalidated,
+        admission,
+    } = mode;
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut project_edges = project_edges;
@@ -1022,34 +1120,16 @@ fn finish_resolution(
         let project_edges = project_resolution
             .as_ref()
             .map_or(&[][..], |project| project.edges.as_slice());
-        let index = if evidence_prevalidated {
-            evidence::UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned(
-                evidence_batches,
-                &merged.nodes,
-                project_edges,
-                &canonical_root,
-                evidence::UniversalResolutionLimits::default(),
-            )
-        } else {
-            evidence::UniversalResolutionIndex::new_with_project_inventory_owned(
-                evidence_batches,
-                &merged.nodes,
-                project_edges,
-                &canonical_root,
-                evidence::UniversalResolutionLimits::default(),
-            )
-        };
-        match index {
-            Ok(index) => index.materialize(&mut merged.nodes, &mut merged.edges),
-            Err(error) => {
-                if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
-                    eprintln!("[compass internal] universal resolution failed: {error}");
-                }
-                merged
-                    .error
-                    .get_or_insert_with(|| format!("universal resolution failed: {error}"));
-            }
-        }
+        let report = evidence::materialize_bounded_owned(
+            evidence_batches,
+            project_edges,
+            &canonical_root,
+            evidence::UniversalResolutionLimits::default(),
+            admission,
+            evidence_prevalidated,
+            (&mut merged.nodes, &mut merged.edges),
+        );
+        append_universal_resolution_report(&mut merged, &report);
     }
     profile_internal("resolver universal evidence", &mut profile_started);
     restore_framework_callable_names(&mut merged, sources, &canonical_root);
@@ -1064,6 +1144,8 @@ fn finish_resolution(
         &mut language_facts.calls,
     );
     profile_internal("resolver collision disambiguation", &mut profile_started);
+    resolve_document_link_targets(&mut merged, &canonical_root);
+    profile_internal("resolver document links", &mut profile_started);
     if has_javascript {
         resolve_javascript_workspace_symbols(&mut merged);
     }
@@ -1088,8 +1170,8 @@ fn finish_resolution(
     // candidate selection together, then apply the historical generic-first
     // append order and duplicate suppression at the single mutation point.
     let (mut generic_edges, (language_nodes, mut language_edges)) = rayon::join(
-        || resolve_cross_file_call_additions(&merged, &language_facts.calls),
-        || members::resolve_language_call_facts_additions(&language_facts, &merged),
+        || resolve_cross_file_call_additions(&merged, &language_facts.calls, admission),
+        || members::resolve_language_call_facts_additions(&language_facts, &merged, admission),
     );
     let generic_keys = generic_edges
         .iter()
@@ -1150,6 +1232,65 @@ fn finish_resolution(
     }
     profile_internal("resolver framework domains", &mut profile_started);
     merged
+}
+
+fn append_universal_resolution_report(
+    extraction: &mut Extraction,
+    report: &evidence::UniversalResolutionReport,
+) {
+    if let Ok(value) = serde_json::to_value(report) {
+        extraction.extensions.insert(
+            evidence::UNIVERSAL_RESOLUTION_REPORT_EXTENSION.to_owned(),
+            value,
+        );
+    }
+    let mut diagnostics = extraction
+        .extensions
+        .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+        .and_then(|value| serde_json::from_value::<Vec<GraphDiagnostic>>(value).ok())
+        .unwrap_or_default();
+    if report.compacted_declarations > 0 {
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Info,
+            code: "low_inference_declaration_compaction".to_owned(),
+            message: format!(
+                "low inference omitted {} unreferenced parameter/property declarations before project resolution",
+                report.compacted_declarations
+            ),
+            anchor: None,
+            related_ids: Vec::new(),
+        });
+    }
+    if report.degraded {
+        let reason = report
+            .reason
+            .as_deref()
+            .unwrap_or("bounded universal resolution could not complete")
+            .chars()
+            .take(1_024)
+            .collect::<String>();
+        diagnostics.push(GraphDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            code: "universal_resolution_partial".to_owned(),
+            message: format!(
+                "published bounded partial universal resolution across {} partitions; {} relationship candidates were omitted and {} partitions failed: {reason}",
+                report.partitions, report.omitted_candidates, report.failed_partitions
+            ),
+            anchor: None,
+            related_ids: Vec::new(),
+        });
+    }
+    diagnostics.sort_by(|left, right| {
+        left.code
+            .cmp(&right.code)
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    diagnostics.dedup();
+    if let Ok(value) = serde_json::to_value(diagnostics) {
+        extraction
+            .extensions
+            .insert(GRAPH_DIAGNOSTICS_EXTENSION.to_owned(), value);
+    }
 }
 
 fn profile_internal(label: &str, started: &mut Instant) {
@@ -3892,7 +4033,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         facts.insert(source_file.clone(), (namespace, uses));
     }
 
-    let mut internal_types = HashMap::new();
+    let mut internal_types = BTreeMap::<String, BTreeSet<(String, String)>>::new();
     for node in &extraction.nodes {
         let source_file = string_attribute(node, "source_file");
         let Some((namespace, _)) = facts.get(&source_file) else {
@@ -3903,6 +4044,7 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
             || label.ends_with(')')
             || label.contains('.')
             || is_file_node(node, &source_file)
+            || !is_type_like_definition(node)
         {
             continue;
         }
@@ -3913,7 +4055,8 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         };
         internal_types
             .entry(fqn.to_ascii_lowercase())
-            .or_insert_with(|| node.id.clone());
+            .or_default()
+            .insert((node.id.clone(), source_file));
     }
 
     let mut created = HashSet::new();
@@ -3926,7 +4069,8 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         ) {
             continue;
         }
-        let Some((namespace, uses)) = facts.get(&edge.string("source_file")) else {
+        let source_file = edge.string("source_file");
+        let Some((namespace, uses)) = facts.get(&source_file) else {
             continue;
         };
         let Some(label) = stub_labels.get(&edge.target) else {
@@ -3941,8 +4085,21 @@ fn resolve_php_type_references(extraction: &mut Extraction, sources: &HashMap<St
         let Some(fqn) = fqn else {
             continue;
         };
-        let target = if let Some(target) = internal_types.get(&fqn.to_ascii_lowercase()) {
-            target.clone()
+        let target = if let Some(candidates) = internal_types.get(&fqn.to_ascii_lowercase()) {
+            let mut same_file = candidates
+                .iter()
+                .filter(|(_, candidate_source)| candidate_source == &source_file);
+            let first_same_file = same_file.next();
+            if let Some((target, _)) = first_same_file {
+                if same_file.next().is_some() {
+                    continue;
+                }
+                target.clone()
+            } else if let Some((target, _)) = candidates.first().filter(|_| candidates.len() == 1) {
+                target.clone()
+            } else {
+                continue;
+            }
         } else if explicit {
             make_id(&[&fqn])
         } else {
@@ -4079,6 +4236,9 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
         })
         .collect::<HashMap<_, _>>();
     for edge in &mut extraction.edges {
+        if edge.attributes.contains_key("_document_target_path") {
+            continue;
+        }
         if node_ids.contains(edge.target.as_str()) {
             continue;
         }
@@ -4094,6 +4254,276 @@ fn canonicalize_file_targets(extraction: &mut Extraction, root: &Path) {
             edge.target.clone_from(target);
             stamp_endpoint_rewrite(edge, rule, 1.0);
         }
+    }
+}
+
+const DOCUMENT_TARGET_EXTENSIONS: [&str; 5] = ["md", "markdown", "mdx", "qmd", "skill"];
+
+/// Resolve Markdown links only after the complete project inventory is known.
+///
+/// The per-file extractor preserves the source spelling and an exact wiring
+/// site. This stage can therefore resolve cross-file fragments, extensionless
+/// links, repository-root links, directory index documents, and unique wiki
+/// stems without filesystem-order guesses or cross-language policy.
+fn resolve_document_link_targets(extraction: &mut Extraction, root: &Path) {
+    let profile = std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some();
+    let mut considered = 0_usize;
+    let mut rewritten = 0_usize;
+    let mut roots_by_source = BTreeMap::<String, Vec<String>>::new();
+    let mut wiki_stems = BTreeMap::<String, Vec<(String, String)>>::new();
+    let mut headings = BTreeMap::<(String, String), Vec<String>>::new();
+
+    for node in &extraction.nodes {
+        let source = string_attribute(node, "source_file");
+        if source.is_empty() {
+            continue;
+        }
+        let source = source_key(&source, root);
+        let document_root =
+            node.string("file_type") == "document" && node.string("document_kind") == "document";
+        if document_root || is_file_node(node, &source) {
+            roots_by_source
+                .entry(source.clone())
+                .or_default()
+                .push(node.id.clone());
+            if document_root
+                && let Some(stem) = Path::new(&source)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+            {
+                wiki_stems
+                    .entry(stem.to_ascii_lowercase())
+                    .or_default()
+                    .push((source.clone(), node.id.clone()));
+            }
+        }
+        if node.string("file_type") == "document" && node.string("document_kind") == "heading" {
+            let mut aliases = BTreeSet::new();
+            for attribute in ["anchor_slug", "explicit_id"] {
+                let value = node.string(attribute);
+                if !value.is_empty() {
+                    aliases.insert(value.to_ascii_lowercase());
+                }
+            }
+            for alias in aliases {
+                headings
+                    .entry((source.clone(), alias))
+                    .or_default()
+                    .push(node.id.clone());
+            }
+        }
+    }
+    for candidates in roots_by_source.values_mut() {
+        candidates.sort();
+        candidates.dedup();
+    }
+    for candidates in wiki_stems.values_mut() {
+        candidates.sort();
+        candidates.dedup();
+    }
+    for candidates in headings.values_mut() {
+        candidates.sort();
+        candidates.dedup();
+    }
+
+    for edge in &mut extraction.edges {
+        let Some(target_path) = edge
+            .attributes
+            .get("_document_target_path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.is_empty())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        considered = considered.saturating_add(1);
+        let extension_inferred = edge
+            .attributes
+            .get("_document_target_extension_inferred")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let wiki_link =
+            edge.attributes.get("link_kind").and_then(Value::as_str) == Some("wikilink");
+
+        let mut source_candidates = BTreeSet::new();
+        let normalized = document_target_key(&target_path, root);
+        if !normalized.is_empty() {
+            source_candidates.insert(normalized.clone());
+        }
+        if extension_inferred {
+            let path = Path::new(&normalized);
+            for extension in DOCUMENT_TARGET_EXTENSIONS {
+                source_candidates.insert(
+                    path.with_extension(extension)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+                source_candidates.insert(
+                    path.join("README")
+                        .with_extension(extension)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+                source_candidates.insert(
+                    path.join("index")
+                        .with_extension(extension)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+
+        let mut candidates = source_candidates
+            .iter()
+            .filter_map(|source| {
+                roots_by_source
+                    .get(source)
+                    .filter(|targets| targets.len() == 1)
+                    .and_then(|targets| targets.first())
+                    .map(|target| (source.clone(), target.clone()))
+            })
+            .collect::<Vec<_>>();
+        if candidates.is_empty() && wiki_link {
+            let stem = Path::new(&normalized)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if let Some(targets) = wiki_stems.get(&stem).filter(|targets| targets.len() == 1) {
+                candidates.extend(targets.iter().cloned());
+            }
+        }
+        candidates.sort();
+        candidates.dedup();
+
+        let Some((target_source, document_target)) =
+            (candidates.len() == 1).then(|| candidates.pop()).flatten()
+        else {
+            let status = if candidates.is_empty() {
+                "missing_target"
+            } else {
+                "ambiguous_target"
+            };
+            mark_unresolved_document_link(edge, &target_path, status);
+            continue;
+        };
+        let fragment = edge
+            .attributes
+            .get("fragment")
+            .and_then(Value::as_str)
+            .filter(|fragment| !fragment.is_empty())
+            .map(str::to_owned);
+        let target = if let Some(fragment) = fragment.as_deref() {
+            let key = decode_markdown_fragment(fragment).to_ascii_lowercase();
+            let Some(targets) = headings.get(&(target_source, key)) else {
+                mark_unresolved_document_link(edge, &target_path, "missing_fragment");
+                continue;
+            };
+            if targets.len() != 1 {
+                mark_unresolved_document_link(edge, &target_path, "ambiguous_fragment");
+                continue;
+            }
+            targets[0].clone()
+        } else {
+            document_target
+        };
+        if target != edge.target {
+            edge.attributes.insert(
+                "_document_original_target".to_owned(),
+                Value::String(edge.target.clone()),
+            );
+            edge.target = target;
+            rewritten = rewritten.saturating_add(1);
+        }
+        edge.attributes.insert(
+            "rule".to_owned(),
+            Value::String("document-link-exact-target".to_owned()),
+        );
+        edge.attributes.insert(
+            "resolution_rule".to_owned(),
+            Value::String("document-link-target-resolution".to_owned()),
+        );
+    }
+    if profile {
+        eprintln!(
+            "[compass internal] document links considered={considered} rewritten={rewritten}"
+        );
+    }
+}
+
+fn document_target_key(source: &str, root: &Path) -> String {
+    let key = source_key(source, root);
+    if !Path::new(&key).is_absolute() {
+        return key;
+    }
+    let path = Path::new(source);
+    let Some((parent, file_name)) = path.parent().zip(path.file_name()) else {
+        return key;
+    };
+    let Ok(parent) = std::fs::canonicalize(parent) else {
+        return key;
+    };
+    let Ok(parent) = parent.strip_prefix(root) else {
+        return key;
+    };
+    parent.join(file_name).to_string_lossy().replace('\\', "/")
+}
+
+fn mark_unresolved_document_link(edge: &mut EdgeRecord, target_path: &str, status: &str) {
+    let fragment = edge
+        .attributes
+        .get("fragment")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let source_file = edge
+        .attributes
+        .get("source_file")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let start_byte = edge
+        .attributes
+        .get("start_byte")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+        .to_string();
+    edge.target = make_id(&[
+        "unresolved_document_link",
+        source_file,
+        &start_byte,
+        target_path,
+        fragment,
+    ]);
+    edge.attributes.insert(
+        "_document_target_resolution".to_owned(),
+        Value::String(status.to_owned()),
+    );
+}
+
+fn decode_markdown_fragment(fragment: &str) -> String {
+    let bytes = fragment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len().min(512));
+    let mut index = 0;
+    while index < bytes.len() && decoded.len() < 512 {
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (bytes.get(index + 1), bytes.get(index + 2))
+            && let (Some(high), Some(low)) = (hex_digit(*high), hex_digit(*low))
+        {
+            decoded.push(high.saturating_mul(16).saturating_add(low));
+            index = index.saturating_add(3);
+            continue;
+        }
+        decoded.push(bytes[index]);
+        index = index.saturating_add(1);
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+const fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -4317,15 +4747,15 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
 }
 
 fn is_type_like_definition(node: &NodeRecord) -> bool {
-    if string_attribute(node, "type") == "namespace"
-        || string_attribute(node, "file_type") != "code"
-    {
+    let legacy_kind = string_attribute(node, "type");
+    if legacy_kind == "namespace" || string_attribute(node, "file_type") != "code" {
         return false;
     }
     let kind = string_attribute(node, "symbol_kind");
-    if !kind.is_empty() {
+    let effective_kind = if kind.is_empty() { &legacy_kind } else { &kind };
+    if !effective_kind.is_empty() {
         return matches!(
-            kind.as_str(),
+            effective_kind.as_str(),
             "class"
                 | "component"
                 | "enum"
@@ -4583,13 +5013,15 @@ fn resolve_cross_file_calls_with_root(
 }
 
 fn resolve_cross_file_calls_with_root_calls(extraction: &mut Extraction, raw_calls: &[RawCall]) {
-    let additions = resolve_cross_file_call_additions(extraction, raw_calls);
+    let additions =
+        resolve_cross_file_call_additions(extraction, raw_calls, ResolutionAdmission::Max);
     extraction.edges.extend(additions);
 }
 
 fn resolve_cross_file_call_additions(
     extraction: &Extraction,
     raw_calls: &[RawCall],
+    admission: ResolutionAdmission,
 ) -> Vec<EdgeRecord> {
     let eligible_calls = raw_calls.iter().filter(|raw| {
         !raw.callee.is_empty()
@@ -4763,7 +5195,8 @@ fn resolve_cross_file_call_additions(
         }
         let indirect = raw.extensions.get("indirect").and_then(Value::as_bool) == Some(true);
         if indirect {
-            if target != raw.caller_nid
+            if admission.admits_source_backed_inference()
+                && target != raw.caller_nid
                 && callable.contains(&target)
                 && call_like.insert((
                     raw.caller_nid.clone(),
@@ -4788,6 +5221,9 @@ fn resolve_cross_file_call_additions(
             continue;
         }
         if target == raw.caller_nid || (!import_evidence && is_javascript(&raw.source_file)) {
+            continue;
+        }
+        if !import_evidence && !admission.admits_source_backed_inference() {
             continue;
         }
         if existing.insert((
@@ -5233,6 +5669,35 @@ mod tests {
     use compass_graph::{build_from_extraction, normalize_document_v1};
     use serde_json::json;
 
+    #[test]
+    fn degraded_universal_resolution_is_machine_visible() {
+        let mut extraction = Extraction::default();
+        let report = evidence::UniversalResolutionReport {
+            partitioned: true,
+            degraded: true,
+            partitions: 3,
+            failed_partitions: 1,
+            omitted_candidates: 17,
+            reason: Some("bounded test failure".to_owned()),
+            ..evidence::UniversalResolutionReport::default()
+        };
+
+        append_universal_resolution_report(&mut extraction, &report);
+
+        assert_eq!(universal_resolution_report(&extraction), Some(report));
+        let diagnostics = extraction
+            .extensions
+            .get(GRAPH_DIAGNOSTICS_EXTENSION)
+            .cloned()
+            .and_then(|value| serde_json::from_value::<Vec<GraphDiagnostic>>(value).ok())
+            .unwrap_or_default();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == DiagnosticSeverity::Error
+                && diagnostic.code == "universal_resolution_partial"
+                && diagnostic.message.contains("17 relationship candidates")
+        }));
+    }
+
     fn node(id: &str, label: &str, source_file: &str, kind: &str) -> NodeRecord {
         let mut attributes = Map::new();
         attributes.insert("label".to_owned(), Value::String(label.to_owned()));
@@ -5260,6 +5725,103 @@ mod tests {
             target: target.to_owned(),
             attributes,
         }
+    }
+
+    fn typescript_callable(
+        id: &str,
+        label: &str,
+        qualified_name: &str,
+        legacy_qualified_name: &str,
+        source_file: &str,
+    ) -> NodeRecord {
+        let mut callable = node(id, label, source_file, "method");
+        callable.attributes.extend([
+            (
+                "qualified_name".to_owned(),
+                Value::String(qualified_name.to_owned()),
+            ),
+            (
+                "legacy_qualified_name".to_owned(),
+                Value::String(legacy_qualified_name.to_owned()),
+            ),
+            ("symbol_kind".to_owned(), Value::String("method".to_owned())),
+            (
+                "language".to_owned(),
+                Value::String("typescript".to_owned()),
+            ),
+        ]);
+        callable
+    }
+
+    #[test]
+    fn framework_identity_propagation_is_limited_to_declared_handlers() {
+        let mut extraction = Extraction {
+            nodes: vec![
+                typescript_callable(
+                    "handler",
+                    ".handle()",
+                    "service.Service.handle",
+                    "Service::handle()@10",
+                    "service.ts",
+                ),
+                typescript_callable(
+                    "client-send",
+                    ".send()",
+                    "client-proxy.ClientProxy.send",
+                    "ClientProxy::send()@20",
+                    "client-proxy.ts",
+                ),
+            ],
+            edges: vec![
+                {
+                    let mut edge = edge("controller", "handler", "references", "controller.ts");
+                    edge.attributes.insert(
+                        compass_model::provenance::OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
+                        Value::String(
+                            "universal-reference-project-module-binding:binding:HandlerAlias:0:0"
+                                .to_owned(),
+                        ),
+                    );
+                    edge
+                },
+                edge("controller", "client-send", "references", "controller.ts"),
+            ],
+            framework_facts: vec![compass_languages::RawFrameworkFact::Route(
+                compass_languages::RawRouteFact {
+                    framework: "nest".to_owned(),
+                    operation: "GET".to_owned(),
+                    raw_path: "/items".to_owned(),
+                    normalized_path: "/items".to_owned(),
+                    declaring_scope: "ItemsController".to_owned(),
+                    anchor: compass_languages::RawFrameworkAnchor {
+                        source_file: "controller.ts".to_owned(),
+                        start_byte: 0,
+                        end_byte: 1,
+                        start_line: 1,
+                        start_column: 0,
+                        end_line: 1,
+                        end_column: 1,
+                    },
+                    handler_reference: "HandlerAlias".to_owned(),
+                    middleware_references: Vec::new(),
+                    origin: compass_languages::RawFrameworkOrigin::Ast,
+                    rule: None,
+                    detail: Map::new(),
+                },
+            )],
+            ..Extraction::default()
+        };
+
+        restore_framework_callable_names(&mut extraction, &HashMap::new(), Path::new("."));
+
+        assert_eq!(
+            extraction.nodes[0].string("qualified_name"),
+            "Service::handle()@10"
+        );
+        assert_eq!(
+            extraction.nodes[1].string("qualified_name"),
+            "client-proxy.ClientProxy.send"
+        );
     }
 
     #[test]
@@ -6135,5 +6697,57 @@ mod tests {
                 ("API".to_owned(), "Vendor\\Package\\Contract".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn php_type_resolution_is_order_independent_and_rejects_ambiguous_definitions() {
+        let sources = HashMap::from([
+            (
+                "tests/Local.php".to_owned(),
+                "<?php\nnamespace Fixtures;\nclass Post {}\n".to_owned(),
+            ),
+            (
+                "tests/Remote.php".to_owned(),
+                "<?php\nnamespace Fixtures;\nclass Post {}\n".to_owned(),
+            ),
+            (
+                "tests/Ambiguous.php".to_owned(),
+                "<?php\nnamespace Fixtures;\n".to_owned(),
+            ),
+        ]);
+        let make_extraction = || Extraction {
+            nodes: vec![
+                node("local-post", "Post", "tests/Local.php", "class"),
+                node("remote-post", "Post", "tests/Remote.php", "class"),
+                node("method-post", "Post", "tests/Local.php", "method"),
+                node("post-stub", "Post", "", "stub"),
+            ],
+            edges: vec![edge(
+                "local-consumer",
+                "post-stub",
+                "references",
+                "tests/Local.php",
+            )],
+            ..Extraction::default()
+        };
+
+        let mut forward = make_extraction();
+        resolve_php_type_references(&mut forward, &sources);
+        assert_eq!(forward.edges[0].target, "local-post");
+
+        let mut reversed = make_extraction();
+        reversed.nodes.reverse();
+        resolve_php_type_references(&mut reversed, &sources);
+        assert_eq!(reversed.edges[0].target, "local-post");
+
+        let mut ambiguous = make_extraction();
+        ambiguous.edges[0] = edge(
+            "ambiguous-consumer",
+            "post-stub",
+            "references",
+            "tests/Ambiguous.php",
+        );
+        resolve_php_type_references(&mut ambiguous, &sources);
+        assert_eq!(ambiguous.edges[0].target, "post-stub");
     }
 }

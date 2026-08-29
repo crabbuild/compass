@@ -36,9 +36,11 @@ Start with [Getting started](getting-started.md), then choose the task closest
 to yours:
 
 - [Explore an unfamiliar codebase](guides/exploring-a-codebase.md)
+- [Compose task-oriented context](guides/task-context.md)
 - [Integrate Compass with other tools](guides/integrating-compass.md)
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
+- [Review pull requests in GitHub](guides/github-pr-review.md)
 - [Operate watch, serve, hooks, and providers](guides/operations.md)
 - [Solve a concrete problem](cookbook/README.md)
 - [Look up commands and contracts](reference/commands.md)
@@ -61,9 +63,11 @@ to yours:
 | --- | --- |
 | [Getting started](getting-started.md) | A working local graph and your first useful answers |
 | [Exploring a codebase](guides/exploring-a-codebase.md) | A repeatable architecture-reading workflow |
+| [Task context](guides/task-context.md) | A bounded, verified evidence packet for explain, modify, debug, or test work |
 | [Integrating Compass](guides/integrating-compass.md) | Stable, machine-readable data in another tool |
 | [Assistant setup](guides/assistant-setup.md) | A native Compass skill installed at the right scope |
 | [Versioned history](guides/versioned-history.md) | Immutable graphs and diffs for exact Git commits |
+| [GitHub PR review](guides/github-pr-review.md) | Evidence-qualified reports, safe comments, and deterministic gates |
 | [Operations](guides/operations.md) | Safe operation of long-running and optional surfaces |
 
 ### Copy a recipe
@@ -84,6 +88,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
+| [PR Intelligence](reference/pr-intelligence.md) | Canonical report, fingerprints, completeness, risk rubric, and gates |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
 | [CompassQL support](COMPASSQL_SUPPORT.md) | Checked syntax and feature matrix |
@@ -101,6 +106,8 @@ They are not evidence that an uncompleted design has shipped.
 | [Native agent package distribution](implementation/agent-distribution.md) | Canonical inventory, generated Codex/Claude/OpenCode packages, portability, and lifecycle ownership |
 | [Evidence resolution framework technical design](implementation/evidence-resolution-framework-technical-design.md) | Target ownership, components, interfaces, and invariants for rearchitecting the resolver |
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
+| [Query recall and accuracy design](implementation/query-recall-accuracy/query-performance-accuracy-recall-phased-technical-design.md) | Phased query-quality architecture, evidence, and rollout boundaries |
+| [Query implementation plans](plans/README.md) | Ordered, independently executable query-quality work plans |
 
 ## How these documents are written
 

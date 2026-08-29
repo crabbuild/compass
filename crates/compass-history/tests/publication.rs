@@ -10,6 +10,12 @@ use compass_history::{
 };
 use compass_ir::{ProgramBundle, ProviderDescriptor, ProviderKind, hex_sha256};
 use compass_model::GraphDocument;
+use compass_model::code_graph::{
+    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord,
+    GraphDocument as CodeGraphDocument, NodeKind, NodeRecord,
+};
+use compass_model::identity::{edge_id, file_id};
+use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
 use prolly::{Config, KeyBuilder, Prolly};
 use prolly_store_sqlite::SqliteStore;
 use serde_json::json;
@@ -145,6 +151,148 @@ fn publication_is_atomic_reopenable_and_content_idempotent()
     assert_eq!(reopened.get(&first.id)?.version, first.version);
     assert_eq!(reopened.artifacts(&first.id)?, expected_artifacts);
     assert_eq!(reopened.list(None)?.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn realization_reader_returns_only_the_exact_trusted_typed_graph()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new()?;
+    let repository = Repository::discover(&fixture.path)?;
+    let history = HistoryStore::create(&repository)?;
+
+    let legacy = history.publish(request('a', false)?)?;
+    let legacy_error = match history.reader(&legacy.id)?.graph_document() {
+        Ok(_) => return Err("compatibility-only realization accepted a typed graph read".into()),
+        Err(error) => error,
+    };
+    assert!(matches!(
+        legacy_error,
+        compass_history::HistoryError::TrustedGraphUnavailable { realization }
+            if realization == legacy.id.to_string()
+    ));
+
+    let digest = format!("sha256:{}", "0".repeat(64));
+    let mut document = CodeGraphDocument::empty_v1(BuildMetadata {
+        builder_version: "test".to_owned(),
+        schema_fingerprint: digest.clone(),
+        source_tree_digest: digest.clone(),
+        configuration_digest: digest.clone(),
+        generation_id: digest,
+        source_commit: None,
+    });
+    let anchor = SourceAnchor {
+        file: "src/lib.rs".to_owned(),
+        start_byte: 0,
+        end_byte: 4,
+        start_line: 1,
+        start_column: 0,
+        end_line: 1,
+        end_column: 4,
+    };
+    let evidence = Provenance {
+        origin: EvidenceOrigin::Ast,
+        extractor: "history-test".to_owned(),
+        confidence: EvidenceConfidence::Exact,
+        rule: None,
+        anchors: vec![anchor.clone()],
+        wiring_site: None,
+        score: None,
+        candidates: Vec::new(),
+    };
+    document.graph.files.push(FileRecord {
+        id: file_id("src/lib.rs"),
+        path: "src/lib.rs".to_owned(),
+        language: Some("rust".to_owned()),
+        content_digest: format!("sha256:{}", "1".repeat(64)),
+        byte_size: 4,
+        generated: false,
+        extraction_status: ExtractionStatus::Extracted,
+        extractor_versions: vec!["history-test".to_owned()],
+        coverage: Vec::new(),
+        diagnostics: Vec::new(),
+    });
+    document.nodes = ["a", "b", "c"]
+        .into_iter()
+        .map(|id| NodeRecord {
+            id: format!("n:{id}"),
+            kind: NodeKind::Function,
+            roles: Vec::new(),
+            name: id.to_owned(),
+            qualified_name: format!("fixture::{id}"),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: Some(anchor.clone()),
+            details: None,
+            evidence: vec![evidence.clone()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        })
+        .collect();
+    document.links = ["n:a", "n:b", "n:c"]
+        .into_iter()
+        .flat_map(|source| {
+            ["n:a", "n:b", "n:c"]
+                .into_iter()
+                .filter(move |target| *target != source)
+                .map(move |target| (source, target))
+        })
+        .map(|(source, target)| {
+            let id = edge_id(source, EdgeKind::Calls, target, Some(&anchor), None);
+            EdgeRecord {
+                id: id.clone(),
+                key: id,
+                source: source.to_owned(),
+                target: target.to_owned(),
+                kind: EdgeKind::Calls,
+                occurrence_rule: None,
+                relationship_site: Some(anchor.clone()),
+                details: None,
+                evidence: vec![evidence.clone()],
+                weight: None,
+                context: None,
+                deferred: false,
+                diagnostics: Vec::new(),
+            }
+        })
+        .collect();
+    document.links.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut topology_order = document.links.clone();
+    topology_order.sort_by(|left, right| {
+        (
+            left.source.as_str(),
+            left.kind.as_str(),
+            left.target.as_str(),
+            left.key.as_str(),
+        )
+            .cmp(&(
+                right.source.as_str(),
+                right.kind.as_str(),
+                right.target.as_str(),
+                right.key.as_str(),
+            ))
+    });
+    assert_ne!(document.links, topology_order);
+    let typed_artifacts = GraphArtifacts::from_trusted(document.clone(), None, None, None)?;
+    let expected_graph_bytes = typed_artifacts.graph_json_bytes()?;
+    let expected_registry = typed_artifacts.artifact_registry()?;
+    let mut typed_request = request('b', false)?;
+    typed_request.artifacts = typed_artifacts;
+    let typed = history.publish(typed_request)?;
+    let reconstructed = history.artifacts(&typed.id)?;
+    assert_eq!(
+        reconstructed.artifacts.graph_json_bytes()?,
+        expected_graph_bytes
+    );
+    assert_eq!(
+        reconstructed.artifacts.artifact_registry()?,
+        expected_registry
+    );
+    let reader = history.reader(&typed.id)?;
+    assert_eq!(reader.version().id, typed.id);
+    assert_eq!(reader.graph_document()?, document);
+    assert_eq!(reader.version().id, typed.id);
     Ok(())
 }
 

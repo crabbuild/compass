@@ -41,12 +41,21 @@ python3 benchmarks/performance/harness.py run \
 ```
 
 Use `--repository NAME` repeatedly to select repositories and `--workload`
-to select `build`, `query`, or `compassql`. Query selections still perform the
-build prerequisite. Raw graphs and process logs remain under the owned
+to select `build`, `query`, or `compassql`. Query-only runs materialize one
+SQLite query artifact per repository instead of repeating the build matrix.
+Fresh query samples use one direct CLI process; warm samples share one MCP
+server, with one unmeasured iteration in each mode. Raw graphs and process logs remain under the owned
 workspace; `run.json` and `summary.md` are written under the output directory.
-Every process is fresh, expensive build workloads have three samples, query
-workloads have one untimed warmup and ten measured samples, and reports retain
-excluded observations.
+Expensive build workloads have three samples, query workloads have ten measured
+samples, and reports retain excluded observations.
+
+Use `--reuse-corpora-root PATH` only with detached, clean checkouts whose
+origin, commit, and tree exactly match the suite. Use
+`--reuse-query-artifacts PATH` to validate and query an existing artifact tree
+without pruning it. Pre-digest Compass revisions may be measured only with the
+explicit `--allow-legacy-query-digest` baseline mode; those results retain
+strict quality failures, are labeled as legacy, and cannot be promoted as a
+current passing baseline.
 
 Promotion is allowed only for a complete, clean, passing eight-repository run:
 
@@ -64,20 +73,58 @@ Only this command resolves and installs Graphify:
 
 ```bash
 python3 benchmarks/performance/harness.py compare \
+  --inference-level low \
   --output target/performance/runs/comparison
 ```
 
 Both tools use the same corpus commits. Build comparisons use the same
-structural profile: Compass `--code-only --no-cluster --no-viz --store json`
-and Graphify's native `--code-only` profile. Every cold, warm, incremental, and
-natural-language query row must independently reach
+publishable structural profile: Compass `--code-only --no-viz --store json`
+and Graphify's native `--code-only` profile, both with community clustering.
+`--inference-level` selects Compass's `low`, `medium`, `high`, or `max`
+profile and is recorded in tool metadata; it defaults to `low`. Every cold,
+warm, incremental, and fresh natural-language query row must independently reach
 `graphify p50 / compass p50 >= 5.00`; averages cannot hide a failed row.
 Compass build peak RSS must not exceed Graphify, and Graphify's shared graph
-facts must remain present and compatible in Compass. CompassQL is excluded from
+facts must remain present and compatible in Compass. Only fresh natural-query
+rows participate in the cross-tool ratio; persistent warm queries are a
+Compass baseline comparison. CompassQL is excluded from
 the cross-tool ratio because Graphify has no equivalent workload.
 
 The comparison environment is isolated under `target/performance/` and is not a
 Compass runtime or development dependency.
+
+### Focused Delta accuracy oracles
+
+`delta-rs-low-oracles.toml` is a smaller, non-promotable qualification suite
+for inference and query iteration. It pins one Delta repository revision and
+contains 20 manually source-reviewed positive seed labels plus five manually
+source-reviewed negative controls. Each label records its independent judgment
+source and reason. Negative controls deliberately share generic terms such as
+`vacuum`, `snapshot`, or `merge` with real symbols; returning a graph node for
+one of those isolated terms is scored as a false positive for both tools.
+For Graphify, seed accuracy is evaluated only against the source-anchored
+`NODE` records corresponding to its declared `Start` list; finding the labeled
+symbol later in a broad traversal does not count as selecting the right seed.
+Top-1, MRR@10, recall@10, completeness, and exact source-anchor counts are
+reported with the same labels used for Compass.
+
+The same suite is also used across inference levels. A result is not
+quality-eligible merely because it is faster: each level must pass the source-
+anchored positive, ambiguity, and no-answer judgments, and its run metadata
+must bind the exact graph/store artifact used for every sample.
+
+Run the focused low-inference comparison with:
+
+```bash
+python3 benchmarks/performance/harness.py compare \
+  --suite benchmarks/performance/delta-rs-low-oracles.toml \
+  --inference-level low \
+  --output target/performance/runs/delta-rs-low
+```
+
+The loader accepts one to eight repositories so focused suites use the same
+bounded runner and correctness implementation. Only the complete checked-in
+eight-repository suite remains eligible for baseline promotion.
 
 ## Analyze external comparison runs
 
@@ -252,10 +299,30 @@ provider, scanned/parsed counts, and inventory SHA-256 into its
 inventory from the pinned corpus; copying only selected records cannot conceal
 an unsupported, skipped, or stale source population.
 
+Audit results report precision, recall, F1, source-oracle ambiguity, and
+scanned/parsed/unsupported file coverage. Language and relation strata carry
+their own precision, recall, F1, and ambiguity measures. Incomplete source
+coverage remains visible in conformance output but fails the production
+qualification gate; unsupported files cannot disappear behind a smaller
+denominator.
+
 The checked-in `audits/universal-core.json` is only a small conformance fixture.
 Production qualification still requires the fixed sample, precision, Wilson
 lower-bound, capability, corpus, relation, diversity, and recall thresholds
 enforced by `compass/audit.py`.
+
+Audit occurrence multiplicity and relationship serialization separately:
+
+```bash
+python3 benchmarks/performance/harness.py multiplicity \
+  --graph /path/to/pinned/compass/graph.json
+```
+
+The bounded streaming report groups exact `(source, relation, target)` pairs,
+counts repeated source occurrences, rejects duplicate edge IDs or duplicate
+pair/site records, and reports serialized relationship bytes by relation.
+Repeated pairs are therefore not treated as removable duplication unless their
+source occurrence is also identical.
 
 ## Output and interruption policy
 

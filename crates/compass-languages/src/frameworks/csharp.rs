@@ -1,15 +1,18 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use regex::Regex;
-use serde_json::Map;
+use serde_json::{Map, Value};
 use tree_sitter::Node;
 
 use super::evidence::{EvidenceKind, EvidenceSet};
-use super::text::{join_route_path, line_anchor, normalize_route_path, text};
+use super::text::{anchor, join_route_path, line_anchor, normalize_route_path, text};
 use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
 
-pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
-    let body = text(source);
+pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
+    let mut masked = source.to_vec();
+    mask_comments(root, &mut masked);
+    let body = text(&masked);
     let evidence = EvidenceSet::new()
         .direct_if(
             body.contains("Microsoft.AspNetCore.Mvc"),
@@ -22,6 +25,12 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
             "aspnet",
             EvidenceKind::DecoratorOrAttribute,
             "ApiController",
+        )
+        .direct_if(
+            body.contains("WebApplication.CreateBuilder") && body.contains(".Map"),
+            "aspnet",
+            EvidenceKind::Receiver,
+            "ASP.NET Core WebApplication minimal route receiver",
         );
     if !evidence.activates("aspnet") {
         return Vec::new();
@@ -47,7 +56,7 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
     let mut pending_route = None::<String>;
     let mut pending_action_route = None::<String>;
     let mut pending_http = Vec::<(String, String, usize, String)>::new();
-    let mut facts = Vec::new();
+    let mut facts = collect_minimal_api_routes(path, source, body);
     let mut offset = 0_usize;
     for line in body.split_inclusive('\n') {
         if let Some(capture) = route_attribute.captures(line)
@@ -130,6 +139,99 @@ pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFram
             }
         }
         offset = offset.saturating_add(line.len());
+    }
+    facts
+}
+
+fn mask_comments(node: Node<'_>, source: &mut [u8]) {
+    if node.kind() == "comment" {
+        for byte in source
+            .get_mut(node.start_byte()..node.end_byte())
+            .into_iter()
+            .flatten()
+            .filter(|byte| **byte != b'\n' && **byte != b'\r')
+        {
+            *byte = b' ';
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        mask_comments(child, source);
+    }
+}
+
+fn collect_minimal_api_routes(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
+    if !body.contains("WebApplication.CreateBuilder") {
+        return Vec::new();
+    }
+    let Ok(group_pattern) = Regex::new(
+        r#"(?m)\b(?:var|RouteGroupBuilder)\s+([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\.MapGroup\(\s*"([^"]*)"\s*\)"#,
+    ) else {
+        return Vec::new();
+    };
+    let mut prefixes = HashMap::<String, String>::new();
+    for capture in group_pattern.captures_iter(body) {
+        let (Some(child), Some(parent), Some(prefix)) =
+            (capture.get(1), capture.get(2), capture.get(3))
+        else {
+            continue;
+        };
+        let parent_prefix = prefixes
+            .get(parent.as_str())
+            .map(String::as_str)
+            .unwrap_or_default();
+        prefixes.insert(
+            child.as_str().to_owned(),
+            join_route_path(parent_prefix, prefix.as_str()),
+        );
+    }
+
+    let Ok(route_pattern) = Regex::new(
+        r#"(?s)\b([A-Za-z_]\w*)\.Map(Get|Post|Put|Patch|Delete|Options|Head)\s*\(\s*"([^"]*)"\s*,\s*([^,;\r\n]+)"#,
+    ) else {
+        return Vec::new();
+    };
+    let Ok(reference_pattern) = Regex::new(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$") else {
+        return Vec::new();
+    };
+    let mut facts = Vec::new();
+    for capture in route_pattern.captures_iter(body) {
+        let (Some(whole), Some(receiver), Some(operation), Some(raw_path), Some(handler)) = (
+            capture.get(0),
+            capture.get(1),
+            capture.get(2),
+            capture.get(3),
+            capture.get(4),
+        ) else {
+            continue;
+        };
+        let handler = handler.as_str().trim().trim_end_matches(')').trim();
+        let (handler_reference, detail) = if reference_pattern.is_match(handler) {
+            (handler.to_owned(), Map::new())
+        } else {
+            (
+                format!("opaque_minimal_handler_at_{}", whole.start()),
+                Map::from_iter([("opaque_handler".into(), Value::Bool(true))]),
+            )
+        };
+        let receiver_prefix = prefixes
+            .get(receiver.as_str())
+            .map(String::as_str)
+            .unwrap_or_default();
+        facts.push(RawFrameworkFact::Route(RawRouteFact {
+            framework: "aspnet".to_owned(),
+            operation: operation.as_str().to_ascii_uppercase(),
+            raw_path: raw_path.as_str().to_owned(),
+            normalized_path: join_route_path(receiver_prefix, raw_path.as_str()),
+            declaring_scope: receiver.as_str().to_owned(),
+            anchor: anchor(path, source, whole.start(), whole.end()),
+            handler_reference,
+            middleware_references: Vec::new(),
+            origin: RawFrameworkOrigin::Ast,
+            rule: None,
+            detail,
+        }));
     }
     facts
 }

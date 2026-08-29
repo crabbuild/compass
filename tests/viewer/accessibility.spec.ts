@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 
 for (const pageName of [
   "graph",
+  "workbench",
   "loading",
   "architecture",
   "calls",
@@ -31,6 +32,39 @@ test("graph remains usable at 320 CSS pixels and reduced motion", async ({ page 
   const columns = await page.locator(".compass-workspace")
     .evaluate((element) => getComputedStyle(element).gridTemplateColumns);
   expect(columns.split(" ")).toHaveLength(1);
+});
+
+test("workbench graph panels stay exclusive, bounded, and recover from empty filters", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/workbench.html");
+
+  const filters = page.getByRole("button", { name: "Graph filters" });
+  const settings = page.getByRole("button", { name: "Graph settings" });
+  await expect(settings.locator(".lucide-settings")).toHaveCount(1);
+  await expect(filters.locator(".lucide-sliders-horizontal")).toHaveCount(1);
+  expect(await settings.evaluate((element) => {
+    const filter = document.querySelector('[aria-label="Graph filters"]');
+    return filter !== null
+      && Boolean(element.compareDocumentPosition(filter) & Node.DOCUMENT_POSITION_FOLLOWING);
+  })).toBe(true);
+  await settings.click();
+  await expect(settings).toHaveAttribute("aria-expanded", "true");
+  await filters.click();
+  await expect(settings).toHaveAttribute("aria-expanded", "false");
+  await expect(filters).toHaveAttribute("aria-expanded", "true");
+
+  const panel = page.getByRole("region", { name: "Graph filter options" });
+  const bounds = await panel.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+
+  await page.getByRole("combobox", { name: "Relationship" }).selectOption("documents");
+  await page.getByRole("combobox", { name: "Node kind" }).selectOption("function");
+  await expect(page.getByText("No nodes match these filters")).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.getByText("No nodes match these filters")).toBeHidden();
+  await expect(filters).toContainText("4 / 4");
 });
 
 test("graph inspector can be resized, collapsed, and expanded accessibly", async ({ page }) => {

@@ -38,7 +38,12 @@ compass install
 compass watch
 ```
 
-Run `compass watch` in a second terminal. Once installed, an assistant runs `compass query "<question>"` before broad source searches. It reads `compass-out/GRAPH_REPORT.md` for repository-wide architecture context and opens only the source needed to verify its answer.
+Run `compass watch` in a second terminal. For a focused task, an installed
+assistant starts with `compass query "<question>"`. On a first session or broad
+repository orientation, it reads only the bounded **Agent Orientation** at the
+start of `compass-out/GRAPH_REPORT.md`, then runs a focused query. It checks
+direction, ambiguity, completeness, truncation, and pagination before opening
+only the cited source needed to verify its answer.
 
 Inside a Git repository, `compass install` detects supported assistants and always includes the portable Agent Skills integration. Confirm that the intended host appears under `Selected`. If it does not, select one or more platforms explicitly:
 
@@ -60,16 +65,31 @@ Human graph exploration is optional. Run `compass export html`, or choose **Open
 
 ```bash
 compass export html
+
+# Put several perspectives in one self-contained page.
+compass export html \
+  --code-graph \
+  --architecture-graph \
+  --call-graph checkout \
+  --impact-graph checkout
 ```
 
 Refresh the browser after a build, or reopen the graph in VS Code.
 
-Use the graph from the right sidebar:
+The exported page and VS Code graph use the same workbench shell. Switch among
+requested code, call, impact, affected, architecture, history, and artifact
+lenses without losing the snapshot context. Use the graph from the right
+sidebar:
 
 1. Search for a symbol or file.
 2. Select a node to inspect its source, signature, community, evidence, and relationships.
 3. Open the source card, or double-click a located node, to jump to the exact code.
 4. Filter communities or change the layout when you need a different level of detail.
+
+The graph toolbar includes an exploration panel for isolating a selected
+1–4-hop neighborhood, following incoming, outgoing, or both edge directions,
+adjusting layout spacing, and showing a navigable minimap. Press `?` in the
+graph to see camera and exploration keyboard shortcuts.
 
 Right-click inside a function in VS Code to open callers, callees, impact, related symbols, or a path.
 
@@ -241,6 +261,7 @@ Compass writes:
 compass-out/
 ├── graph.json        machine-readable graph
 ├── GRAPH_REPORT.md   architecture and community summary
+├── orientation.json  versioned Agent Orientation from the same graph generation
 ├── graph.html        interactive visualization when size permits
 ├── manifest.json     incremental build state
 ├── snapshots/        coherent retained build snapshots
@@ -252,16 +273,21 @@ compass-out/
 
 ```bash
 compass query "where is authentication enforced?"
-compass query "where is authentication enforced?" --budget 8000 --page 2
+compass query "where is authentication enforced?" --text-budget 8000
+compass query "where is authentication enforced?" --cursor '<TOKEN>'
 compass explain TokenVerifier
 compass path ApiHandler TokenVerifier
 compass affected TokenVerifier --depth 3
 ```
 
 These commands read the saved graph and do not call a model.
-Natural `query` and `explain` output is deterministically paged. Callers may set
-an approximate per-page token budget with `--budget N` (2,000 by default) and
-follow the reported `next` page with `--page N`.
+Plain natural `query` uses bounded structured discovery. Its text projection
+pages whole deterministic entries with `--text-budget N` (2,000 by default).
+Follow `next=<cursor>` with the unchanged semantic question and options until
+`next=none`; the presentation-only text budget may change between pages. The
+cursor fails if semantic inputs, the selected graph, or the semantic result
+changed. `--traverse`, `--budget`, and `--page` retain the
+legacy traversal contract; CompassQL is unchanged.
 
 ## Compass-specific workflows
 
@@ -356,21 +382,20 @@ and trust the hook under `/hooks`; in Gemini CLI, run `/skills reload`.
 The umbrella skill teaches the complete Compass workflow. Six additive focused
 skills let compatible clients activate a smaller task boundary without
 changing explicit `/compass` requests or broad multi-operation fallback.
-Installation does not build a graph; on the first architecture, dependency,
-history, or impact question, the assistant can run the local deterministic
-build and continue.
+The umbrella skill teaches assistants to keep `compass watch` in a second terminal (or
+use `compass update .` as a reported fallback), run a focused query first, and
+open only cited source. For first-session or broad orientation it reads only
+the bounded Agent Orientation at the start of `GRAPH_REPORT.md`, then queries.
+It inspects direction, ambiguity, graph completeness, domain truncation, and
+pagination; ambiguous seeds are retried by exact node ID. Installation does
+not build a graph.
 
 ```text
-coding question
-        |
-        v
-run a focused Compass query
-        |
-        v
-read GRAPH_REPORT.md for repository-wide context
-        |
-        v
-inspect the smallest useful source set
+focused task ───────────────> focused query
+first/broad orientation ────> bounded Agent Orientation ──> focused query
+                                      |
+                                      v
+                 inspect completion and the smallest cited source set
 ```
 
 See [Assistant setup](docs/guides/assistant-setup.md) for supported platforms,

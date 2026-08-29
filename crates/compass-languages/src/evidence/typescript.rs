@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use tree_sitter::Node;
 
-use super::build::{EvidenceBuilder, range_for_byte_span, range_for_node};
+use super::build::{EvidenceBuilder, range_for_byte_span, range_for_file, range_for_node};
 use super::model::{
     BindingKind, CandidateRelation, EvidenceRange, HierarchyConstraint, ResolutionConstraint,
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
@@ -330,7 +330,7 @@ pub(crate) fn extract_candidate_tree_evidence(
         EvidenceLimits::default(),
         Some(&dialect_name),
     );
-    let file_range = range_for_node(source_file, root);
+    let file_range = range_for_file(source_file, source);
     let file_graph_id = stable_graph_id(source_file, "module", &module_name, 0);
     let file_kind = if root.end_byte() == root.start_byte() {
         "file"
@@ -4257,49 +4257,47 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         ) {
             collect_import_bindings(self.source, clause, reexport, type_only, &mut bindings);
         }
-        let wildcard_reexport = reexport
+        let owner = self.owner_for_scope(scope_id);
+        let module_occurrence = self.builder.occur_with_context(
+            if reexport {
+                SemanticRole::Reexport
+            } else {
+                SemanticRole::Import
+            },
+            &owner,
+            &module,
+            None,
+            Some(scope_id),
+            Some(if type_only {
+                "type_only_module"
+            } else {
+                "module"
+            }),
+            range_for_node(self.source_file, module_node),
+        )?;
+        self.builder.relate(
+            if reexport {
+                CandidateRelation::Reexports
+            } else {
+                CandidateRelation::Imports
+            },
+            &owner,
+            Some(&module_occurrence),
+            None,
+            &module,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                module_or_package: Some(module.clone()),
+                allowed_target_kinds: vec!["module".to_owned()],
+                allow_external: true,
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        if reexport
             && bindings.is_empty()
             && (statement_text.trim_start().starts_with("export *")
-                || statement_text.trim_start().starts_with("export type *"));
-        let owner = self.owner_for_scope(scope_id);
-        if !wildcard_reexport {
-            let module_occurrence = self.builder.occur_with_context(
-                if reexport {
-                    SemanticRole::Reexport
-                } else {
-                    SemanticRole::Import
-                },
-                &owner,
-                &module,
-                None,
-                Some(scope_id),
-                Some(if type_only {
-                    "type_only_module"
-                } else {
-                    "module"
-                }),
-                range_for_node(self.source_file, module_node),
-            )?;
-            self.builder.relate(
-                if reexport {
-                    CandidateRelation::Reexports
-                } else {
-                    CandidateRelation::Imports
-                },
-                &owner,
-                Some(&module_occurrence),
-                None,
-                &module,
-                ResolutionConstraint {
-                    exact_language: Some(self.language.to_owned()),
-                    module_or_package: Some(module.clone()),
-                    allowed_target_kinds: vec!["module".to_owned()],
-                    allow_external: true,
-                    ..ResolutionConstraint::default()
-                },
-            )?;
-        }
-        if wildcard_reexport {
+                || statement_text.trim_start().starts_with("export type *"))
+        {
             // An export-star statement is represented as a wildcard
             // reexport binding. The resolver expands this bounded edge only
             // for a requested named export, preserving barrel cycles and
@@ -4349,21 +4347,30 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 }),
                 range_for_node(self.source_file, anchor),
             )?;
-            self.builder.relate(
-                CandidateRelation::Reexports,
-                &owner,
-                Some(&occurrence_id),
-                Some(&binding_id),
-                export_name,
-                ResolutionConstraint {
-                    exact_language: Some(self.language.to_owned()),
-                    module_or_package: Some(module),
-                    qualified_name: Some(target),
-                    allowed_target_kinds: vec!["module".to_owned()],
-                    allow_external: true,
-                    ..ResolutionConstraint::default()
-                },
-            )?;
+            // A plain wildcard binding is bounded lookup scope for resolving
+            // named exports through the barrel. The module-literal candidate
+            // above already publishes the direct barrel-to-module edge, so a
+            // second relationship candidate here would manufacture duplicate
+            // parallel evidence with the same semantic endpoints. A namespace
+            // alias is different: its explicit exported name is source-level
+            // relationship evidence and keeps its own candidate.
+            if alias.is_some() {
+                self.builder.relate(
+                    CandidateRelation::Reexports,
+                    &owner,
+                    Some(&occurrence_id),
+                    Some(&binding_id),
+                    export_name,
+                    ResolutionConstraint {
+                        exact_language: Some(self.language.to_owned()),
+                        module_or_package: Some(module),
+                        qualified_name: Some(target),
+                        allowed_target_kinds: vec!["module".to_owned()],
+                        allow_external: true,
+                        ..ResolutionConstraint::default()
+                    },
+                )?;
+            }
             return Ok(());
         }
         if bindings.is_empty() {

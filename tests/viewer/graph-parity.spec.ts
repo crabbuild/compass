@@ -77,6 +77,15 @@ test("graph layout styles can be selected without enabling physics", async ({ pa
   const layout = page.getByRole("combobox", { name: "Graph layout" });
   const graph = page.getByRole("region", { name: "Interactive Compass code graph" });
 
+  await expect(page.getByRole("option", { name: "Depth layers" })).toHaveCount(0);
+  await expect(graph).toHaveAttribute("data-physics-running", "false");
+  await expect(page.getByRole("status")).toContainText("Layout static");
+  const canvas = page.locator(".compass-canvas canvas").first();
+  await page.waitForTimeout(100);
+  const staticFrame = await canvas.evaluate((element) => element.toDataURL());
+  await page.waitForTimeout(250);
+  await expect(canvas.evaluate((element) => element.toDataURL())).resolves.toBe(staticFrame);
+
   await layout.selectOption("circle");
   await expect(graph).toHaveAttribute("data-layout-style", "circle");
   await expect(page.getByRole("status")).toContainText("Circle layout");
@@ -96,10 +105,71 @@ test("graph layout styles can be selected without enabling physics", async ({ pa
 
   await layout.selectOption("automatic");
   await expect(graph).toHaveAttribute("data-layout-style", "automatic");
-  await expect(page.locator(".compass-tool-button").filter({ hasText: /layout/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeEnabled();
 });
 
-test("single-click inspects and double-click opens the selected node's exact range", async ({
+test("graph toolbar exposes camera, neighborhood, and label controls", async ({ page }) => {
+  await page.goto("/graph.html");
+
+  await expect(page.getByRole("group", { name: "Zoom controls" })).toBeVisible();
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  await page.getByRole("button", { name: "Reset zoom to 100%" }).click();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+
+  const fitSelection = page.getByRole("button", {
+    name: "Fit selected neighborhood"
+  });
+  await expect(fitSelection).toBeDisabled();
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
+  await page.getByRole("option", { name: /Store/i }).click();
+  await expect(fitSelection).toBeEnabled();
+  await fitSelection.click();
+
+  await page.getByRole("button", { name: "Show relationship labels" }).click();
+  await expect(page.getByRole("button", {
+    name: "Hide relationship labels"
+  })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("graph exploration controls isolate directed neighborhoods and expose shortcuts", async ({ page }) => {
+  await page.goto("/graph.html");
+  const graph = page.getByRole("region", { name: "Interactive Compass code graph" });
+
+  await expect(page.getByRole("complementary", { name: "Graph overview" })).toBeVisible();
+  await page.getByRole("button", { name: "Graph settings" }).click();
+  const exploration = page.getByRole("region", { name: "Graph exploration controls" });
+  await expect(exploration).toBeVisible();
+  await expect(page.getByLabel("Graph keyboard shortcuts")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Isolate selection" })).toBeDisabled();
+
+  await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
+  await page.getByRole("option", { name: /Store/i }).click();
+  await page.getByRole("button", { name: "Graph settings" }).click();
+  await page.getByRole("button", { name: "2 hops" }).click();
+  await page.getByRole("button", { name: "Outgoing edges" }).click();
+  await page.getByRole("button", { name: "Isolate selection" }).click();
+  await expect(graph).toHaveAttribute("data-isolated", "true");
+  await expect(page.getByRole("status")).toContainText("2 hops");
+
+  await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("1.25");
+  await expect(graph).toHaveAttribute("data-layout-spacing", "1.25");
+  await page.getByRole("button", { name: "Graph settings" }).click();
+  await page.keyboard.press("]");
+  await page.getByRole("button", { name: "Graph settings" }).click();
+  await expect(page.getByRole("button", { name: "3 hops" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.keyboard.press("d");
+  await expect(page.getByRole("button", { name: "Incoming edges" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.keyboard.press("m");
+  await expect(page.getByRole("complementary", { name: "Graph overview" })).toHaveCount(0);
+});
+
+test("selected nodes remain inspectable and open their exact source range", async ({
   page
 }) => {
   await page.goto("/graph.html");
@@ -110,13 +180,9 @@ test("single-click inspects and double-click opens the selected node's exact ran
   });
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("run");
   await page.getByRole("option", { name: /^run/i }).click();
-  await page.waitForTimeout(300);
-  const canvas = page.locator("canvas");
-  await canvas.click();
-  expect(await page.evaluate(
-    () => (window as typeof window & { openedSource?: unknown }).openedSource
-  )).toBeUndefined();
-  await canvas.dblclick();
+  const source = page.getByRole("button", { name: "Open source src/lib.rs at lines 1–3" });
+  await expect(source).toBeVisible();
+  await source.click();
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource
   )).toEqual({ file: "src/lib.rs", startLine: 1, endLine: 3 });
@@ -153,7 +219,7 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
   expect(await page.evaluate(() => (
     window as typeof window & { initialNetwork?: Element | null }
   ).initialNetwork === document.querySelector(".vis-network"))).toBe(true);
-  await expect(page.getByRole("button", { name: "Resume layout" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeVisible();
   await page.evaluate(() => {
     document.documentElement.style.setProperty("--vscode-editor-background", "#08111f");
     document.documentElement.style.setProperty("--vscode-sideBar-background", "#101b2d");
@@ -177,6 +243,23 @@ test("community double-click enters lazy detail, source opens, and Back restores
     () => (window as typeof window & { openedCommunity?: number }).openedCommunity
   )).toBe(0);
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
+
+  const runLayout = page.getByRole("button", { name: "Run layout" });
+  await expect(runLayout).toBeVisible();
+  const graphCanvas = page.locator(".compass-canvas canvas").first();
+  const pausedFrame = await graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await runLayout.click();
+  await expect(page.getByRole("button", { name: "Stop layout" })).toBeVisible();
+  await expect.poll(async () => graphCanvas.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.toDataURL()
+  )).not.toBe(pausedFrame);
+  await page.getByRole("button", { name: "Stop layout" }).click();
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeVisible();
+  await page.waitForTimeout(100);
+  const stoppedFrame = await graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.waitForTimeout(250);
+  await expect(graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()))
+    .resolves.toBe(stoppedFrame);
 
   await search.fill("run");
   await page.getByRole("option", { name: /^run/i }).click();

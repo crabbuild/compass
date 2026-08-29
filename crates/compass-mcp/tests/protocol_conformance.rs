@@ -79,6 +79,9 @@ async fn stdio_conformance_discovers_lists_invokes_reads_and_closes() -> Result<
             "list_prs",
             "get_pr_impact",
             "triage_prs",
+            "review_pull_request",
+            "pr_readiness",
+            "task_context",
         ]
     );
     let resources = client.list_resources(None).await?;
@@ -90,6 +93,7 @@ async fn stdio_conformance_discovers_lists_invokes_reads_and_closes() -> Result<
     assert_eq!(
         resource_uris,
         [
+            "compass://orientation",
             "compass://report",
             "compass://stats",
             "compass://god-nodes",
@@ -109,16 +113,15 @@ async fn stdio_conformance_discovers_lists_invokes_reads_and_closes() -> Result<
         .map(|content| content.text.as_str());
     assert!(text.is_some_and(|text| text.contains("Nodes: 1")));
 
-    let report = client
-        .read_resource(ReadResourceRequestParams::new("compass://report"))
+    let stats = client
+        .read_resource(ReadResourceRequestParams::new("compass://stats"))
         .await?;
-    assert_eq!(report.contents.len(), 1);
-    assert!(
-        client
-            .read_resource(ReadResourceRequestParams::new("compass://missing"))
-            .await
-            .is_err()
-    );
+    assert_eq!(stats.contents.len(), 1);
+    let missing = client
+        .read_resource(ReadResourceRequestParams::new("compass://missing"))
+        .await
+        .expect_err("missing resource unexpectedly succeeded");
+    assert!(format!("{missing:?}").contains("compass://missing"));
 
     client.cancel().await?;
     server_task.await?.map_err(std::io::Error::other)?;

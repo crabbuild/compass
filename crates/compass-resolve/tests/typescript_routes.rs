@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -182,6 +182,222 @@ unknown.get("/not-a-route", listUsers);
             && route.normalized_path == "/v2/batch"
     }));
     assert!(!routes(&extraction).any(|route| route.normalized_path == "/not-a-route"));
+    Ok(())
+}
+
+#[test]
+fn angular_router_extracts_typed_named_configs_and_nested_lazy_routes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let extraction = Engine::default().extract_source(
+        Path::new("src/app.routes.ts"),
+        br#"import { provideRouter, Routes } from "@angular/router";
+import { AdminPage } from "./admin.page";
+const routes: Routes = [
+  {
+    path: "admin",
+    component: AdminPage,
+    children: [
+      { path: "users/:id", loadComponent: () => import("./user.page").then(m => m.UserPage) },
+    ],
+  },
+];
+export const providers = [provideRouter(routes)];
+"#,
+    )?;
+    let admin = routes(&extraction)
+        .find(|route| route.framework == "angular-router" && route.normalized_path == "/admin")
+        .ok_or("missing Angular parent route")?;
+    assert_eq!(admin.handler_reference, "AdminPage");
+
+    let lazy = routes(&extraction)
+        .find(|route| {
+            route.framework == "angular-router" && route.normalized_path == "/admin/users/{id}"
+        })
+        .ok_or("missing Angular lazy child route")?;
+    assert!(
+        lazy.handler_reference
+            .starts_with("opaque_route_handler_at_")
+    );
+    assert_eq!(
+        lazy.detail.get("opaque_handler"),
+        Some(&serde_json::Value::Bool(true))
+    );
+    assert_eq!(
+        routes(&extraction)
+            .filter(|route| route.framework == "angular-router")
+            .count(),
+        2,
+        "typed config and provideRouter must not duplicate the same routes"
+    );
+
+    let near_match = Engine::default().extract_source(
+        Path::new("src/not-router.ts"),
+        br#"const routes = [{ path: "admin", component: AdminPage }];"#,
+    )?;
+    assert!(!routes(&near_match).any(|route| route.framework == "angular-router"));
+    Ok(())
+}
+
+#[test]
+fn node_router_mounts_compose_across_modules_and_fail_closed_on_ambiguity()
+-> Result<(), Box<dyn std::error::Error>> {
+    for (framework, parent, child, expected_path) in [
+        (
+            "express",
+            br#"import express from "express";
+import api from "./api";
+const app = express();
+app.use("/api", api);
+"#
+            .as_slice(),
+            br#"import express from "express";
+const router = express.Router();
+function listUsers() {}
+router.get("/users", listUsers);
+export default router;
+"#
+            .as_slice(),
+            "/api/users",
+        ),
+        (
+            "hono",
+            br#"import { Hono } from "hono";
+import api from "./api";
+const app = new Hono();
+app.route("/v1", api);
+"#
+            .as_slice(),
+            br#"import { Hono } from "hono";
+const router = new Hono();
+function listUsers() {}
+router.get("/users", listUsers);
+export default router;
+"#
+            .as_slice(),
+            "/v1/users",
+        ),
+        (
+            "fastify",
+            br#"import fastify from "fastify";
+import api from "./api";
+const app = fastify();
+app.register(api, { prefix: "/internal" });
+"#
+            .as_slice(),
+            br#"import type { FastifyInstance } from "fastify";
+function listUsers() {}
+export default async function api(router: FastifyInstance) {
+  router.get("/users", listUsers);
+}
+"#
+            .as_slice(),
+            "/internal/users",
+        ),
+    ] {
+        let mut engine = Engine::default();
+        let parent_path = "src/server.ts";
+        let child_path = "src/api.ts";
+        let files = [
+            engine.extract_source(Path::new(parent_path), parent)?,
+            engine.extract_source(Path::new(child_path), child)?,
+        ];
+        let sources = HashMap::from([
+            (parent_path.to_owned(), String::from_utf8(parent.to_vec())?),
+            (child_path.to_owned(), String::from_utf8(child.to_vec())?),
+        ]);
+        let mut extraction = resolve(&files, &sources);
+        if framework == "express" {
+            let original_nodes = extraction.nodes.clone();
+            let original_edges = extraction.edges.clone();
+            let error = resolve_and_publish_framework_routes(
+                &mut extraction,
+                FrameworkLimits {
+                    max_include_depth: 0,
+                    ..FrameworkLimits::default()
+                },
+            )
+            .err()
+            .ok_or("expected an explicit cross-module mount depth error")?;
+            assert!(error.to_string().contains("max_include_depth"));
+            assert_eq!(extraction.nodes, original_nodes);
+            assert_eq!(extraction.edges, original_edges);
+        }
+        let resolved =
+            resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+        assert!(
+            resolved.iter().any(|route| {
+                route.route.framework == framework && route.route.normalized_path == expected_path
+            }),
+            "missing {framework} cross-module route {expected_path}"
+        );
+
+        let forward_shapes = resolved
+            .iter()
+            .map(|route| {
+                (
+                    route.route.framework.clone(),
+                    route.route.operation.clone(),
+                    route.route.normalized_path.clone(),
+                    route.route.handler_reference.clone(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        let reverse_files = [
+            engine.extract_source(Path::new(child_path), child)?,
+            engine.extract_source(Path::new(parent_path), parent)?,
+        ];
+        let mut reverse_extraction = resolve(&reverse_files, &sources);
+        let reverse = resolve_and_publish_framework_routes(
+            &mut reverse_extraction,
+            FrameworkLimits::default(),
+        )?;
+        let reverse_shapes = reverse
+            .iter()
+            .map(|route| {
+                (
+                    route.route.framework.clone(),
+                    route.route.operation.clone(),
+                    route.route.normalized_path.clone(),
+                    route.route.handler_reference.clone(),
+                )
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(forward_shapes, reverse_shapes, "{framework} input order");
+    }
+
+    let mut engine = Engine::default();
+    let parent_path = "src/server.ts";
+    let child_path = "src/api.ts";
+    let parent = br#"import express from "express";
+import api from "./api";
+const app = express();
+app.use("/api", api);
+"#;
+    let child = br#"import express from "express";
+const users = express.Router();
+const admin = express.Router();
+function listUsers() {}
+users.get("/users", listUsers);
+admin.get("/admin", listUsers);
+export default users;
+"#;
+    let files = [
+        engine.extract_source(Path::new(parent_path), parent)?,
+        engine.extract_source(Path::new(child_path), child)?,
+    ];
+    let sources = HashMap::from([
+        (parent_path.to_owned(), String::from_utf8(parent.to_vec())?),
+        (child_path.to_owned(), String::from_utf8(child.to_vec())?),
+    ]);
+    let mut extraction = resolve(&files, &sources);
+    let resolved =
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+    assert!(
+        resolved
+            .iter()
+            .all(|route| !route.route.normalized_path.starts_with("/api/")),
+        "an ambiguous imported router must not receive an invented mount"
+    );
     Ok(())
 }
 

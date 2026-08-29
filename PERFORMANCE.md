@@ -24,6 +24,19 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+Real-repository natural-query qualification materializes one SQLite-backed
+query artifact per repository. Fresh latency/RSS is one direct `compass query`
+process per observation; warm latency is measured inside one persistent MCP
+session after an unmeasured iteration. The harness requires exact artifact
+identity across compared runs, checks all seven discovery work counters, and
+requires the complete eight-corpus run to include at least one query on a graph
+of 50,000 or more nodes that inspects no
+more than 25% of the graph's nodes during candidate recall. Current results
+must carry the Rust-owned semantic digest. An explicitly enabled legacy
+baseline may retain a labeled full-payload harness digest for timing reference,
+but its quality failures remain visible and it cannot be promoted or used as a
+current candidate.
+
 ## Query-relevance qualification
 
 The native query-relevance gate keeps three intentionally separate evidence
@@ -86,6 +99,47 @@ limits the total multi-source recall pool and is never expanded to
 `maxNodes`. The default ranks at most 20 recalled candidates. The existing
 100,000-node in-process ceiling now covers direct search and natural-query
 planning as well as callers, impact, and node trails.
+
+### Shadow text-ranker qualification
+
+The generic text-traversal ranker has an opt-in
+`text-ranker/bm25-v1` qualification profile. It is not selected by the CLI or
+MCP defaults. Run its controlled 100,000-node comparison with:
+
+```bash
+CARGO_TARGET_DIR=/Volumes/Workspace/crabbuild-target/compass-<checkout> \
+  scripts/qualify_text_ranker_bm25.sh
+```
+
+The script builds a release-mode qualification executable and runs each
+profile in a separate process so OS-reported peak RSS is comparable. Each run
+checks the exact top node ID, records the first query, then records 31 warm
+samples. The synthetic question has one rare matching symbol; it is useful for
+measuring indexed lookup overhead but does not represent common-term posting
+scans or a real-repository relevance distribution.
+
+One macOS Apple Silicon development run on 2026-08-08 produced:
+
+| Profile | First query | Warm p50 | Warm p95 | Maximum RSS | Top ID |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `text-ranker/full-scan-v1` | 158.868 ms | 155.983 ms | 157.671 ms | 281,444,352 B | expected |
+| `text-ranker/bm25-v1` | 366.502 ms | 0.005 ms | 0.010 ms | 322,453,504 B | expected |
+
+The BM25 first query includes lazy construction of 202,008 terms for 100,000
+documents. On this run it was about 131% slower on first use and maximum RSS
+was about 14.6% higher, while warm rare-term lookup was substantially faster.
+The very small warm measurements are timer-sensitive and should not be
+generalized into a universal speedup.
+
+The compact reviewed language goldens currently give both profiles 1.0 for
+Success@1, MRR, Recall@5/20, and nDCG on four answerable Python/Rust/TypeScript/
+Unicode questions, plus 1.0 no-answer precision on one negative question. That
+small equal-score result demonstrates no regression on those cases; it does
+not demonstrate the required 10% relative Recall@5 improvement. Because the
+cold-query and memory observations also exceed the 10% review threshold, this
+evidence does not support making BM25 the default. It remains a shadow profile
+pending real-repository judgments and a decision about amortization or a more
+compact/persistent index.
 
 ## Compass Store release qualification
 
@@ -265,6 +319,244 @@ current Django code-only graph kept deterministic result digests and met the
 These cross-tool observations are diagnostic evidence rather than a promoted
 Compass baseline. The remaining build gap is primarily the richer graph size
 and durable publication contract, not an unresolved duplicate atomic flush.
+
+### Delta-rs low-inference diagnostic
+
+A 2026-08-10 follow-up compared the new `low` inference profile with Graphify
+0.9.37 on pinned delta-rs, including symmetric clustered and no-cluster build
+profiles, cold/warm/incremental timing and RSS, graph integrity and provenance,
+source-verified natural-query recall, exact identifiers, and adversarial
+no-answer behavior. Compass won clustered cold and warm build time and
+published a fully source-backed graph, but still lost query latency, strict
+question pass rate, adversarial no-answer specificity, and cold/incremental
+memory. The complete methodology, results, limitations, and prioritized gates
+are in [Low-inference evaluation against Graphify](docs/implementation/low-inference-graphify-evaluation.md).
+
+A 2026-08-11 resolver-admission follow-up preserved the ordered low graph while
+moving rejected inference before graph-record allocation and compacting exact
+duplicate Rust test candidates. Correcting streaming AST cache publication to
+encode one entry at a time then produced three fresh exact-equivalent samples
+with a 2.37 s wall-time median and 673.8 MiB peak-RSS median. These are
+diagnostic development samples, not a promoted baseline: Compass still used
+about 4.50x the documented Graphify cold RSS, so the memory gate remains
+failed. The linked evaluation records the intermediate samples and explicit
+CPU/memory tradeoffs.
+
+Replacing the resolver's duplicate owned-ID hash keys with sorted fact tables
+then produced a final three-sample median of 2.44 s and 610.7 MiB peak RSS,
+again with exact ordered graph equivalence. Relative to the preceding cache-
+only median, RSS decreased 9.4% while total time increased about 3.0%; the
+universal-resolution stage itself rose from roughly 0.29 s to 0.40 s because
+borrowed ID lookup is now binary search. Compass still used about 4.08x the
+documented Graphify cold RSS.
+
+Compacting relationship candidates into a resolver-private interned table as
+the validated per-file batches are drained produced a subsequent three-sample
+median of 2.63 s and 598.9 MiB. Ordered nodes and relationships remained byte-
+equivalent in every sample. The 1.9% RSS reduction came with a 7.8% wall-time
+increase and still used about 4.00x Graphify's documented cold RSS. This result
+is retained as an honest intermediate bound: eliminating the remaining gap
+requires compact or streamed evidence before corpus-wide per-file candidate
+and occurrence objects coexist, not additional late filtering.
+
+Moving the 88,447 validated occurrences into a resolver-private slot-backed
+string table produced a further three-sample median of 2.65 s and 592.1 MiB.
+The canonical 34,117,849-byte graph remained byte-identical to the preceding
+artifact. Relative to the candidate-compaction median, RSS decreased 1.14%
+and wall time increased 0.8%; Compass still used about 3.96x Graphify's
+documented cold RSS. The compact table drops language, owner, and scope only
+after evidence validation because no resolution stage reads those fields; the
+public evidence and cache schema are unchanged. This small result reinforces
+that resolver-local compaction is useful but cannot remove the earlier
+producer/cache high-water mark or the later index/graph overlap.
+
+Disabling mimalloc's process-wide reserved arena for one-shot builds then
+produced three exact-equivalent clustered samples at `4.26`, `4.10`, and
+`4.06` seconds, with peak RSS of `500,957,184`, `494,026,752`, and
+`498,925,568` bytes. The median is 4.10 seconds and 475.8 MiB: 19.6% less RSS
+than the preceding occurrence-table median, but 54.7% more wall time. Compass
+still used about 3.18x the documented Graphify cold RSS, although it remained
+1.79x faster than the retained 7.337-second Graphify cold median. All three
+Compass graphs were the same canonical 34,117,849 bytes with SHA-256
+`77c49b1f6bf4b6280898d005c1ffc53107feeef3e073dd1883025788e047722d`.
+This improves the operating-system high-water mark without changing graph
+semantics, but does not replace the required compact or streamed evidence
+producer work.
+
+Releasing the universal resolver's secondary name, member, hierarchy, and
+language lookup indexes after every resolution decision is fixed, together
+with consuming rather than cloning the typed/compatibility graph projection,
+then produced fresh samples of `3.87`, `3.94`, and `3.96` seconds. Maximum RSS
+was `465,977,344`, `466,878,464`, and `469,958,656` bytes, for medians of 3.94
+seconds and 445.3 MiB. That is 3.9% faster and 6.4% less RSS than the preceding
+no-arena median. Every graph remained exactly 34,117,849 bytes with SHA-256
+`77c49b1f6bf4b6280898d005c1ffc53107feeef3e073dd1883025788e047722d`.
+Compass therefore remains about 2.98x the retained 149.47 MiB Graphify cold
+RSS; this closes an avoidable lifetime overlap but does not close the producer
+evidence or graph-record representation gap.
+
+Replaying the final admission binary established a new clean-head reference:
+one clustered delta-rs low build completed in 4.12 seconds with 461,357,056
+bytes (440.0 MiB) maximum RSS. Its 9,982 nodes, 25,206 relationships, 532
+communities, and 1,212 structural test roles produced a 34,116,625-byte graph
+with SHA-256
+`971d588275cbad097ed1f7b5f54e32b86a80fadd8875760e3848b9948069f573`.
+The earlier `77c49...` artifacts above remain evidence for their recorded
+revisions but are not the semantic reference for changes after final resolver
+stage admission.
+
+Dropping resolver-only candidate and occurrence lookup IDs once each edge's
+typed relation, occurrence rule, exact anchor, endpoints, and provenance were
+materialized then produced three fresh samples at 4.30, 4.36, and 4.06
+seconds, with maximum RSS of 455,966,720, 455,131,136, and 462,143,488 bytes.
+The medians are 4.30 seconds and 434.8 MiB. All three graphs were byte-identical
+to the clean-head reference above, including the test-role count. Relative to
+the single clean-head replay this is a diagnostic 1.2% RSS reduction, not a
+controlled baseline replacement; Compass still used about 2.91x Graphify's
+retained 149.47 MiB cold RSS. The result removes dead transient identity
+strings without weakening multiplicity or provenance, but confirms that the
+remaining gap requires a compact edge representation rather than additional
+attribute pruning.
+
+Reusing the build's existing bounded Rayon pool for AST extraction, rather
+than creating and destroying a second pool before resolution, then produced
+fresh SQLite samples at 4.49, 4.56, and 4.70 seconds. Maximum RSS was
+430,489,600, 431,833,088, and 431,194,112 bytes, for medians of 4.56 seconds
+and 411.2 MiB. Every graph remained exactly 34,116,625 bytes with SHA-256
+`971d588275cbad097ed1f7b5f54e32b86a80fadd8875760e3848b9948069f573`.
+The worker policy still bounds mid-sized extraction at eight deterministic
+chunks and honors `--max-workers`; the chunks now execute on the long-lived
+pipeline pool so their allocator pages can be reused by resolution. Relative
+to the preceding median this reduced RSS by 5.4% while increasing wall time by
+6.0%. Compass still used about 2.75x Graphify's retained 149.47 MiB cold RSS,
+so compact or streamed producer evidence remains the required next step.
+
+A bounded streaming multiplicity audit of that same canonical graph found
+25,206 unique edge IDs, 23,209 semantic `(source, relation, target)` pairs, and
+1,076 pairs with parallel occurrences. Those repeated pairs represent 3,073
+edges at distinct source sites; collapsing each pair to one edge would discard
+1,997 real occurrences. The audit found zero duplicate edge IDs, zero duplicate
+pair/site records, and zero missing relationship sites. Calls account for 533
+parallel pairs, tests for 295, references for 173, and the remaining 75 span
+instantiation, reads, exports, returns, and type relationships.
+
+The relationship array serialized to 22,808,206 bytes, 66.9% of the complete
+34,116,625-byte graph, with a mean of 904.9 bytes per relationship. This proves
+both sides of the serialization gap: relationship representation is the main
+artifact cost, but semantic-pair deduplication is not a valid remedy. Further
+compaction must preserve every distinct site, direction, occurrence rule, and
+provenance record.
+
+A focused all-level delta-rs replay then exercised `medium`, `high`, and `max`
+with the same clustered default-SQLite profile and forced each build a second
+time. Every profile reproduced its exact graph SHA-256:
+
+| Level | Nodes | Relationships | Communities | JSON bytes | First build | Peak RSS | SHA-256 prefix |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| low | 9,982 | 25,206 | 532 | 34,116,625 | 4.30 s median | 434.8 MiB median | `971d5882` |
+| medium | 9,982 | 25,219 | 528 | 34,137,117 | 4.43 s | 433.0 MiB | `27492c72` |
+| high | 21,368 | 56,640 | 749 | 85,047,812 | 5.91 s | 722.8 MiB | `8a70927b` |
+| max | 34,384 | 93,247 | 1,078 | 143,936,676 | 9.02 s | 1,120.9 MiB | `dc87abf2` |
+
+The low row retains the three-sample result above; the other performance rows
+are single samples plus an unmeasured exact forced rebuild, not promoted
+baselines. This proves deterministic nested publication on the pinned corpus
+but not complete-suite qualification. It also exposes a separate high/max
+memory problem: admitting external and deferred inference more than doubles
+the clustered graph and drives max past 1 GiB, so low-only improvements cannot
+stand in for all-level performance.
+
+A subsequent query-hydration replay used the same pinned delta-rs SQLite
+artifact and seven fresh release-binary processes per independently labeled
+negative identifier. Moving the already-established absent composite-
+identifier admission rule ahead of generic posting hydration reduced median
+latency from `0.04`--`0.52` seconds to `0.01`--`0.05` seconds. The slowest row
+fell from `0.52` to `0.02` seconds while decoded candidate work fell from
+3,471 nodes to zero; every row performed only exact-ID and exact-name probes.
+All five negative oracles remained no-answer, and the exact composite
+`AddColumnBuilder` still resolved through `exact_name`. This is a focused
+warm-filesystem diagnostic rather than a promoted cross-platform baseline.
+
+A later operation-admission replay added a compact immutable term index over
+source-backed operation-role declarations. One fresh process per 20 positive
+and five negative source-reviewed labels, with `--max-nodes 3 --max-edges 1`
+to isolate seed admission from neighborhood expansion, produced 19/20 Top-1,
+20/20 Top-3, and 5/5 no-answer results. Median latency was 0.066 seconds, the
+observed p95 was 0.542 seconds, and the maximum was 0.892 seconds. Median
+candidate work was 25 decoded nodes; operation rows commonly decoded 5--44.
+The remaining broad representation rows decoded as many as 6,407 nodes and
+account for the tail. The sole Top-1 disagreement ranked the Python
+`CommitProperties` declaration ahead of the independently labeled Rust
+`CommitProperties`; the labeled declaration remained second. This focused
+result does not claim default 500-node neighborhood latency, which remains a
+separate traversal/hydration target.
+
+Running the checked-in correctness validator once per label with the default
+discovery limits produced 21/25 strict passes: 16/20 positives plus all five
+negative controls. Positive Top-1 was 19/20, MRR@10 was 0.975, and recall@10
+was 100%. The four failed positive rows were the same `CommitProperties`
+cross-language Top-1 disagreement plus unexpected ambiguity on that row and
+three otherwise correct Top-1 rows. Only strict passes are timing-eligible in
+the comparison harness, so these quality results do not manufacture a latency
+claim from failed rows.
+
+A subsequent checked-in Delta qualification on 2026-08-11 used the focused
+64-node/128-edge defaults, ID-first multi-term intersection, and full-rank
+ambiguity comparison. Source review independently confirmed that the unscoped
+`CommitProperties` question legitimately names both the Rust-core and
+Python-facing public declarations, so the oracle now requires that ambiguity
+instead of forcing a language preference. All 20 positive labels and all five
+negative controls passed, and every one of 250 fresh-process plus 250
+persistent-MCP measured samples was correctness-eligible. Across the 25 rows,
+fresh-process p50 ranged from 0.0481 to 0.5500 seconds and p95 from 0.0483 to
+0.5647 seconds; every row stayed below the 0.59-second p95 target. Positive
+persistent-MCP p50 ranged from 0.1613 to 0.4806 seconds, while the five
+constant-work negative controls ranged from 0.00147 to 0.00169 seconds. Fresh
+peak RSS ranged from 19.64 to 84.31 MiB. The shared MCP server peaked at 147.48
+MiB for the complete session, which is process high-water rather than per-query
+memory. The harness performs one unmeasured warmup per row, so “fresh” means a
+new CLI process over warmed filesystem state, not a cold-page-cache claim. The
+complete run passed its correctness gate; raw evidence is retained outside the
+repository under the qualification workspace and is not a promoted
+cross-platform baseline.
+
+A subsequent declaration-admission replay at Compass revision `2e9d1455`
+projected the existing exact term postings onto source-backed type
+declarations. The store can finish from this compact channel only when it read
+the complete declaration set and the unchanged ranker proves every requested
+seed outranks omitted non-types. The canonical graph artifacts did not change:
+low retained SHA-256 `971d5882...` and max retained `dc87abf2...`. The SQLite
+store grew from 35,995,648 to 36,405,248 bytes for low (1.14%) and from
+113,033,216 to 113,278,976 bytes for max (0.22%).
+
+Across all 25 reviewed questions, decoded candidate IDs fell from 21,543 to
+897 in low (95.84%) and from 25,978 to 913 in max (96.49%). The four formerly
+broad declaration rows changed as follows:
+
+| Question | Low candidate IDs | Max candidate IDs |
+| --- | ---: | ---: |
+| Delta table state | 6,407 -> 245 | 6,985 -> 251 |
+| commit properties | 5,958 -> 64 | 6,357 -> 65 |
+| table snapshot | 4,691 -> 143 | 6,917 -> 149 |
+| log-store abstraction | 4,132 -> 90 | 5,364 -> 93 |
+
+Every low and max matrix again passed all 25 labels in both 250-sample fresh
+CLI and 250-sample persistent-MCP modes. Low retained all ranked seed lists.
+Max changed one rank-3 seed for the state question from `DeltaTableFactory` to
+the more specific `DeltaTable`; Top-1 and the independently labeled result were
+unchanged, and low/max now agree for that row instead of allowing max-only
+inferred relationship evidence to promote the factory.
+
+The max run improved aggregate fresh p95 from 1.067 to 0.518 seconds and peak
+RSS from 126.72 to 91.75 MiB; persistent p95 improved from 1.259 to 0.367
+seconds and the server high-water fell from 237.52 to 176.23 MiB. Two complete
+low runs exposed runner noise in different modes: fresh p50 was stable at
+0.252--0.264 seconds, but aggregate p95 ranged from 0.290 to 0.609 seconds;
+persistent p50 was 0.193--0.198 seconds while p95 ranged from 0.244 to 0.542
+seconds. The slow samples switched from persistent to fresh between repeats,
+so this result does not promote the better timing or claim a cross-platform
+latency bound. Candidate work, correctness, graph identity, and store size were
+deterministic across those runs.
 
 ## Incremental and language-hardening observations
 

@@ -151,7 +151,7 @@ PY
     repository_output="$QUALIFY_TMP/repository-output/$repository_name"
     echo "[code-graph-v1] qualify pinned repository $repository_name@$repository_commit"
     "$COMPASS_BIN" update "$repository" \
-      --out "$repository_output" --no-cluster --no-viz \
+      --out "$repository_output" --no-cluster --no-viz --inference-level max \
       >"$QUALIFY_TMP/$repository_name.log"
     repository_graph="$(active_graph "$repository_output")"
     "$COMPASS_BIN" benchmark "$repository_graph" \
@@ -272,8 +272,12 @@ fixture_digest_before="$(fixture_digest)"
 run_update() {
   local mode="$1"
   shift
+  # This gate qualifies the complete language/relation support superset.
+  # Product-contract tests separately prove that an omitted CLI option is
+  # byte-identical to explicit low inference.
   "$COMPASS_BIN" update "$CORPUS" \
-    --out "$OUTPUT_PARENT" --no-cluster --no-viz --no-gitignore "$@" \
+    --out "$OUTPUT_PARENT" --no-cluster --no-viz --no-gitignore \
+    --inference-level max "$@" \
     >"$QUALIFY_TMP/$mode.log"
   active_graph "$OUTPUT_PARENT"
 }
@@ -308,6 +312,7 @@ mkdir -p "$CHECKOUT_CORPUS"
 cp -R "$CORPUS/." "$CHECKOUT_CORPUS/"
 "$COMPASS_BIN" update "$CHECKOUT_CORPUS" \
   --out "$CHECKOUT_OUTPUT" --no-cluster --no-viz --no-gitignore \
+  --inference-level max \
   >"$QUALIFY_TMP/alternate-checkout.log"
 checkout_graph="$(active_graph "$CHECKOUT_OUTPUT")"
 cp "$checkout_graph" "$QUALIFY_TMP/checkout.graph.json"

@@ -4837,7 +4837,7 @@ export class OrdersConsumer {
         let private_zod_type = evidence
             .declarations
             .iter()
-            .find(|declaration| declaration.name == "_ZodType")
+            .find(|declaration| declaration.name == "_ZodType" && declaration.kind == "interface")
             .ok_or("missing _ZodType interface")?;
         let zod_any_value = evidence
             .declarations

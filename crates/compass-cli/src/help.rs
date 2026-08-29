@@ -95,6 +95,7 @@ const GROUPS: &[Group] = &[
             "impact",
             "explore",
             "node",
+            "context",
             "call-graph",
             "query",
             "program",
@@ -106,7 +107,7 @@ const GROUPS: &[Group] = &[
     },
     Group {
         title: "History",
-        commands: &["history", "diff"],
+        commands: &["history", "diff", "review"],
     },
     Group {
         title: "Visualize and export",
@@ -145,6 +146,12 @@ const GROUPS: &[Group] = &[
 
 const PAGES: &[Page] = &[
     page!(
+        "context",
+        "Compose bounded, verified evidence for a coding task",
+        ["compass context <explain|modify|debug|test> <TARGET> [OPTIONS]"],
+        "Arguments:\n  <INTENT>                 Task intent: explain, modify, debug, or test\n  <TARGET>                 Exact symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>           Graph JSON [default: compass-out/graph.json]\n  --program <PATH>         Optional Program IR bundle\n  --root <PATH>            Repository root for digest-verified source [default: current directory]\n  --memory <PATH>          Reflection memory directory [default: GRAPH_DIR/memory]\n  --engine <default|json|store> Query backend [default: default]\n  --format <text|json>     Output format [default: text]\n  --max-depth <N>          Maximum impact depth\n  --max-nodes <N>          Maximum nodes per evidence query\n  --max-edges <N>          Maximum edges per evidence query\n  --max-paths <N>          Maximum paths per evidence query\n  --max-candidates <N>     Maximum target candidates\n  --max-source-bytes <N>   Maximum verified source bytes\n  --max-knowledge-items <N> Maximum linked memory records\n  --max-response-bytes <N> Maximum composed response bytes\n\nExamples:\n  compass context explain crate::Parser::parse\n  compass context modify symbol-id --format json\n\nNotes:\n  Fuzzy candidates are suggestions only. Compass composes structural evidence only after one exact identity resolves; ambiguity is never resolved by first match."
+    ),
+    page!(
         "ask",
         "Route a natural-language question to a typed code-graph query",
         ["compass ask <QUESTION> [OPTIONS]"],
@@ -166,13 +173,13 @@ const PAGES: &[Page] = &[
         "init",
         "Configure project scope and build the first knowledge graph",
         ["compass init [PATH] [OPTIONS]"],
-        "Arguments:\n  [PATH]                       Project root [default: .]\n\nOptions:\n  --include <PATH_OR_GLOB>     Include a file, folder, or glob; repeatable\n  --exclude <GLOB>             Exclude a project-relative glob; repeatable\n  --program                    Also build and publish the optional Program IR\n  --store <json|sqlite>        Graph storage [default: json]\n  --yes                        Accept the preview without prompting\n  --force                      Replace existing .compass/config.toml\n  --timing                     Print stage timings\n\nExamples:\n  compass init\n  compass init . --include src --exclude '**/generated/**' --yes --timing\n  compass init . --yes --store sqlite\n\nNotes:\n  Init writes .compass/config.toml and performs a forced structural build. Program IR is omitted unless --program is selected. SQLite is an explicit sidecar opt-in; graph.json is always published."
+        "Arguments:\n  [PATH]                       Project root [default: .]\n\nOptions:\n  --include <PATH_OR_GLOB>     Include a file, folder, or glob; repeatable\n  --exclude <GLOB>             Exclude a project-relative glob; repeatable\n  --program                    Also build and publish the optional Program IR\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --yes                        Accept the preview without prompting\n  --force                      Replace existing .compass/config.toml\n  --timing                     Print stage timings\n\nExamples:\n  compass init\n  compass init . --include src --exclude '**/generated/**' --yes --timing\n  compass init . --yes --store sqlite\n  compass init . --yes --inference-level medium\n\nNotes:\n  Init writes .compass/config.toml and performs a forced structural build. Program IR is omitted unless --program is selected. SQLite is an explicit sidecar opt-in; graph.json is always published."
     ),
     page!(
         "update",
         "Incrementally refresh the local knowledge graph",
         ["compass update [PATH] [OPTIONS]"],
-        "Arguments:\n  [PATH]                       Project directory to scan [default: saved root or .]\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --store <json|sqlite>        Graph storage [default: json]\n  --out <DIR>                  Write artifacts below this directory\n  --force                      Rebuild even when inputs appear unchanged\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules while scanning\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community-detection resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree hubs from clustering\n  --timing                     Print stage timings\n\nExamples:\n  compass update\n  compass update ./services/api --program --force --timing\n  compass update ./services/api --no-cluster\n  compass update --program-artifact index.scip\n  compass update --store sqlite\n\nTips:\n  Structural graph builds omit Program IR by default; use `--program` when program inspection or enrichment is needed. Use `compass watch --program` for the same opt-in in watch mode."
+        "Arguments:\n  [PATH]                       Project directory to scan [default: saved root or .]\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Write artifacts below this directory\n  --force                      Rebuild even when inputs appear unchanged\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules while scanning\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community-detection resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree hubs from clustering\n  --timing                     Print stage timings\n\nExamples:\n  compass update\n  compass update ./services/api --program --force --timing\n  compass update ./services/api --no-cluster\n  compass update ./services/api --inference-level medium\n  compass update --program-artifact index.scip\n  compass update --store sqlite\n\nTips:\n  Structural graph builds omit Program IR by default; use `--program` when program inspection or enrichment is needed. Low is the evidence-first default and keeps exact relationships; medium adds source-backed inference; high adds explicitly qualified external relationships; max retains all inferred relationships."
     ),
     page!(
         "store",
@@ -192,13 +199,13 @@ const PAGES: &[Page] = &[
             "compass extract [PATH] [OPTIONS]",
             "compass extract --postgres <DSN> [OPTIONS]"
         ],
-        "Arguments:\n  [PATH]                       Project directory to scan\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --code-only                  Extract structural code without semantic sources\n  --cargo                      Include Cargo metadata\n  --google-workspace           Include Google Workspace shortcuts\n  --postgres <DSN>             Extract PostgreSQL schema objects\n  --backend <NAME>             Semantic provider name\n  --model <MODEL>              Override the provider's default model\n  --mode <deep>                Use deep semantic extraction\n  --token-budget <N>           Maximum semantic token budget\n  --max-concurrency <N>        Maximum concurrent provider requests\n  --max-workers <N>            Maximum local extraction workers\n  --api-timeout <SECONDS>      Provider request timeout\n  --allow-partial              Publish results when semantic chunks fail\n  --dedup-llm                  Use the model to review likely duplicates\n  --timing                     Print stage timings\n  --global                     Merge the completed graph into the global graph\n  --as <TAG>                   Repository tag used with --global\n  --store <json|sqlite>        Graph storage [default: json]\n  --out <DIR>                  Output directory\n  --force                      Rebuild unchanged inputs\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree clustering hubs\n\nExamples:\n  compass extract ./project --code-only\n  compass extract ./project --program --code-only\n  compass extract ./project --no-program --code-only\n  compass extract ./project --program-artifact index.scip --code-only\n  compass extract ./project --code-only --store sqlite\n  compass extract --postgres \"postgresql://localhost/app\" --code-only\n\nNotes:\n  Semantic extraction may require credentials for the selected provider."
+        "Arguments:\n  [PATH]                       Project directory to scan\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --code-only                  Extract structural code without semantic sources\n  --cargo                      Include Cargo metadata\n  --google-workspace           Include Google Workspace shortcuts\n  --postgres <DSN>             Extract PostgreSQL schema objects\n  --backend <NAME>             Semantic provider name\n  --model <MODEL>              Override the provider's default model\n  --mode <deep>                Use deep semantic extraction\n  --token-budget <N>           Maximum semantic token budget\n  --max-concurrency <N>        Maximum concurrent provider requests\n  --max-workers <N>            Maximum local extraction workers\n  --api-timeout <SECONDS>      Provider request timeout\n  --allow-partial              Publish results when semantic chunks fail\n  --dedup-llm                  Use the model to review likely duplicates\n  --timing                     Print stage timings\n  --global                     Merge the completed graph into the global graph\n  --as <TAG>                   Repository tag used with --global\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Output directory\n  --force                      Rebuild unchanged inputs\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree clustering hubs\n\nExamples:\n  compass extract ./project --code-only\n  compass extract ./project --program --code-only\n  compass extract ./project --no-program --code-only\n  compass extract ./project --program-artifact index.scip --code-only\n  compass extract ./project --code-only --inference-level max\n  compass extract ./project --code-only --store sqlite\n  compass extract --postgres \"postgresql://localhost/app\" --code-only\n\nNotes:\n  Low is the evidence-first default and publishes exact relationships only. Medium adds source-backed inference; high adds explicitly qualified external relationships; max retains all inferred relationships, including deferred receivers. Semantic extraction may require credentials for the selected provider."
     ),
     page!(
         "watch",
         "Rebuild the graph automatically when project files change",
         ["compass watch [PATH] [OPTIONS]"],
-        "Arguments:\n  [PATH]                       Project directory to watch [default: .]\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --debounce <SECONDS>         Adaptive quiet window [default: 0.15]\n  --store <json|sqlite>        Graph storage [default: json]\n  --out <DIR>                  Output directory\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --poll                       Force content-aware polling\n\nExamples:\n  compass watch\n  compass watch ./services/api --program --poll\n  compass watch ./services/api --program-artifact index.scip --poll\n  compass watch ./services/api --store sqlite\n\nNotes:\n  Watch synchronizes once at startup, then uses native filesystem events with adaptive coalescing. Continuous edits cannot delay a build beyond five debounce windows. If native watching is unavailable, Compass falls back to polling automatically."
+        "Arguments:\n  [PATH]                       Project directory to watch [default: .]\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --debounce <SECONDS>         Adaptive quiet window [default: 0.15]\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Output directory\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --poll                       Force content-aware polling\n\nExamples:\n  compass watch\n  compass watch ./services/api --program --poll\n  compass watch ./services/api --program-artifact index.scip --poll\n  compass watch ./services/api --inference-level high\n  compass watch ./services/api --store sqlite\n\nNotes:\n  Watch synchronizes once at startup, then uses native filesystem events with adaptive coalescing. Continuous edits cannot delay a build beyond five debounce windows. If native watching is unavailable, Compass falls back to polling automatically."
     ),
     page!(
         "cluster-only",
@@ -280,9 +287,12 @@ const PAGES: &[Page] = &[
             "compass query --cql <QUERY> [OPTIONS]",
             "compass query --cql --file <PATH> [OPTIONS]",
             "compass query --cql --stdin",
-            "compass query --cql --repl"
+            "compass query --cql --repl",
+            "compass query <QUESTION> --format json --result-envelope",
+            "compass query <QUESTION> --text-budget <N>",
+            "compass query <QUESTION> --cursor <TOKEN>"
         ],
-        "Arguments:\n  <QUESTION>                      Natural-language graph question\n  <QUERY>                         Inline CompassQL query\n\nOptions:\n  --traverse                      Force legacy relevance traversal instead of intent routing\n  --dfs                           Use depth-first traversal and disable intent routing\n  --context <VALUE>               Add query context and disable intent routing\n  --budget <N>                    Approximate tokens per traversal page [default: 2000]\n  --page <N>                      Traversal result page, starting at 1 [default: 1]\n  --graph <PATH>                  Read a graph JSON file\n  --at <REV>                      Query an immutable Git revision; conflicts with --graph\n  --cql                           Use CompassQL mode\n  --file <PATH>                   Read CompassQL from a file\n  --stdin                         Read CompassQL from standard input\n  --repl                          Start the interactive CompassQL shell\n  --param <NAME=VALUE>            Bind a parameter; repeatable\n  --params-file <PATH>            Read parameters from JSON\n  --format <table|json|jsonl>     CompassQL result format [default: table]\n  --output <PATH>                 Write CompassQL results to a file\n  --timeout-ms <N>                CompassQL execution timeout [default: 5000]\n  --max-rows <N>                  CompassQL row limit [default: 10000]\n  --max-path-depth <N>            CompassQL path-depth limit [default: 32]\n  --max-expanded-relationships <N> CompassQL relationship expansion limit [default: 5000000]\n  --max-memory-bytes <N>          CompassQL memory limit [default: 268435456]\n\nExamples:\n  compass query \"who calls PaymentService.charge?\"\n  compass query \"path from CheckoutController.create to PaymentGateway.charge\"\n  compass query \"authentication flow\"\n  compass query \"authentication flow\" --budget 8000 --page 2\n  compass query \"who calls PaymentService.charge?\" --traverse\n  compass query --cql \"MATCH (n) RETURN n LIMIT 10\" --format json\n  compass query --cql --file report.cql --params-file params.json\n\nTips:\n  High-confidence search, callers, callees, impact, and path questions use the bounded typed query framework. Generic, contradictory, historical, or explicitly traversed questions retain paginated relevance traversal.\n  Pagination metadata reports the next traversal page; repeat the same query with that `--page`."
+        "Arguments:\n  <QUESTION>                      Natural-language graph question\n  <QUERY>                         Inline CompassQL query\n\nOptions:\nNatural discovery:\n  --direction <VALUE>             Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>            Repeatable OR scope: community, source, package, or node\n  --context <VALUE>               Repeatable strict relationship-context filter\n  --dfs                           Use depth-first expansion [default: breadth-first]\n  --include-heuristic             Include heuristic evidence [default: excluded]\n  --format <text|json>            Discovery output [default: text]\n  --text-budget <N>               Approximate tokens in one text page [default: 2000]\n  --cursor <TOKEN>                Continue the same immutable semantic result (text only)\n  --max-depth <N>                 Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                 Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>            Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                 Returned node count [default/hard maximum: 500]\n  --max-edges <N>                 Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N> Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>        Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal:\n  --traverse                      Force legacy relevance traversal\n  --budget <N>                    Approximate tokens per page [default: 2000]\n  --page <N>                      Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                  Read a graph JSON file\n  --at <REV>                      Query an exact immutable realization; conflicts with --graph\n\nCompassQL:\n  --cql                           Use CompassQL mode\n  --file <PATH>                   Read CompassQL from a file\n  --stdin                         Read CompassQL from standard input\n  --repl                          Start the interactive CompassQL shell\n  --param <NAME=VALUE>            Bind a parameter; repeatable\n  --params-file <PATH>            Read parameters from JSON\n  --format <table|json|jsonl>     CompassQL result format [default: table]\n  --output <PATH>                 Write CompassQL results to a file\n  --timeout-ms <N>                CompassQL execution timeout\n  --max-rows <N>                  CompassQL row limit [default: 10000]\n  --max-path-depth <N>            CompassQL path-depth limit [default: 32]\n  --max-expanded-relationships <N> CompassQL relationship expansion limit\n  --max-memory-bytes <N>          CompassQL memory limit [default: 268435456]\n\nExamples:\n  compass query \"who calls PaymentService.charge?\"\n  compass query \"authentication flow\" --direction both --scope package:auth\n  compass query \"what uses charge?\" --direction incoming --context call --format json\n  compass query \"authentication flow\" --text-budget 8000\n  compass query \"authentication flow\" --cursor '<TOKEN>'\n  compass query \"authentication flow\" --budget 8000 --page 2\n  compass query --cql \"MATCH (n) RETURN n LIMIT 10\" --format json\n  compass query --cql --file report.cql --params-file params.json\n\nTips:\n  Direction, scope, context, and DFS compose through the bounded typed discovery contract. Scope is repeatable OR and never guesses a kind. Discovery limits must be positive; values above a hard maximum are rejected rather than clamped. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls.\n  Historical discovery requires an immutable realization retaining trusted compass.graph/1 data."
     ),
     page!(
         "program",
@@ -529,6 +539,15 @@ const PAGES: &[Page] = &[
         "Inspect and prioritize GitHub pull requests",
         ["compass prs [NUMBER] [OPTIONS]"],
         "Arguments:\n  [NUMBER]                 Pull request number for a detailed view\n\nOptions:\n  --triage                 Rank the review queue with a configured model\n  --worktrees              Show worktree, branch, and PR mapping\n  --conflicts              Show graph-community overlap\n  --wrong-base             Show pull requests targeting the wrong base\n  -b, --base <BRANCH>      Filter by base branch\n  -R, --repo <OWNER/REPO>  Select a GitHub repository\n  --graph <PATH>           Graph JSON used for conflict analysis\n\nExamples:\n  compass prs\n  compass prs 42\n  compass prs --conflicts --base main"
+    ),
+    page!(
+        "review",
+        "Analyze one exact pull-request candidate with typed risk and deterministic gates",
+        [
+            "compass review --base <REV> --head <REV> [OPTIONS]",
+            "compass review --pr <NUMBER> --repo <OWNER/REPO> [OPTIONS]"
+        ],
+        "Input modes:\n  --base <REV>               Exact local target revision (requires --head)\n  --head <REV>               Exact local pull-request head (requires --base)\n  --pr <NUMBER>              GitHub pull request number (requires --repo)\n  --repo <OWNER/REPO>        Repository identity; selects GitHub with --pr\n\nOptions:\n  --host <HOST>              GitHub Enterprise hostname [default: github.com]\n  --pull-request-number <N>  Bind PR identity in local --base/--head mode\n  --fingerprint <SHA256>     Require one extraction fingerprint at both revisions\n  --format <FORMAT>          text, json, markdown, or sarif [default: text]\n  --readiness                Emit compass.pr-readiness/1 (JSON or Markdown; default: Markdown)\n  --output <PATH>            Atomically write the selected projection\n  --max-findings <N>         Markdown-only report projection bound\n  --max-output-bytes <N>     Markdown-only report byte bound (reports exact omissions)\n\nExamples:\n  compass review --base origin/main --head HEAD\n  compass review --base main --head feature --format json --output review.json\n  compass review --base main --head feature --readiness --format json\n  compass review --pr 42 --repo crabbuild/compass --format markdown\n\nNotes:\n  Local mode never fetches Git objects. GitHub mode freezes full object IDs and requires those objects locally. Readiness is an additive envelope referencing the unchanged canonical report digest. Documentation drift is advisory; unknown test evidence is never reported as untested."
     ),
     page!(
         "hook",
@@ -938,7 +957,21 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
         let _ = output.pop();
     }
     let details = add_help_option(page.details);
-    let details = if matches!(page.path, "init" | "update" | "extract" | "watch") {
+    let details = if page.path == "query" {
+        details
+            .replace(
+                "Query an exact immutable realization; conflicts with --graph",
+                "Resolve REV once to an immutable typed realization; conflicts with --graph",
+            )
+            .replace(
+                "default/hard maximum: 500",
+                "default: 64; hard maximum: 500",
+            )
+            .replace(
+                "default/hard maximum: 1000",
+                "default: 128; hard maximum: 1000",
+            )
+    } else if matches!(page.path, "init" | "update" | "extract" | "watch") {
         details
             .replace("Graph storage [default: json]", "Graph storage [default: sqlite]")
             .replace(
@@ -1149,7 +1182,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 47);
+        assert_eq!(roots.len(), 49);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");
@@ -1211,6 +1244,39 @@ mod tests {
                 output.lines().all(|line| line.chars().count() <= WIDTH),
                 "{}",
                 page.path
+            );
+        }
+    }
+
+    #[test]
+    fn build_help_describes_low_inference_as_the_default() {
+        for command in ["init", "update", "extract", "watch"] {
+            let command_page = page(command);
+            assert!(command_page.is_some(), "missing {command} help page");
+            let Some(command_page) = command_page else {
+                return;
+            };
+            let output = render_page(command_page, HelpStyle::Plain);
+            assert!(
+                output.contains("[default: low]"),
+                "{command} help does not declare the low default: {output}"
+            );
+        }
+
+        let extract_page = page("extract");
+        assert!(extract_page.is_some(), "missing extract help page");
+        let Some(extract_page) = extract_page else {
+            return;
+        };
+        let extract = render_page(extract_page, HelpStyle::Plain);
+        for description in [
+            "publishes exact relationships only",
+            "source-backed inference",
+            "all inferred relationships",
+        ] {
+            assert!(
+                extract.contains(description),
+                "extract help is missing inference description {description:?}: {extract}"
             );
         }
     }

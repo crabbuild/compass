@@ -8,7 +8,7 @@ pub(super) fn materialized_edge(
     target: String,
     relation: &str,
     candidate: &RelationshipCandidate,
-    occurrence: Option<&OccurrenceFact>,
+    occurrence: Option<OccurrenceRef<'_>>,
     binding: Option<&BindingFact>,
     target_kind: Option<&str>,
     target_source_file: Option<&str>,
@@ -22,17 +22,17 @@ pub(super) fn materialized_edge(
         ("calls", ResolutionRule::DeferredReceiver) => "deferred_receiver_call",
         ("calls", _) => "call",
         ("indirect_call", _) => occurrence
-            .and_then(|occurrence| occurrence.context.as_deref())
+            .and_then(OccurrenceRef::context)
             .unwrap_or("reference"),
         ("references", _) if candidate.relation == CandidateRelation::Decorates => "decorator",
         ("decorates", _) => "decorator",
         ("references", _)
             if occurrence.is_some_and(|occurrence| {
-                occurrence.role == compass_languages::SemanticRole::CallableReference
+                occurrence.role() == compass_languages::SemanticRole::CallableReference
             }) =>
         {
             occurrence
-                .and_then(|occurrence| occurrence.context.as_deref())
+                .and_then(OccurrenceRef::context)
                 .unwrap_or("reference")
         }
         ("imports_from", _)
@@ -41,7 +41,7 @@ pub(super) fn materialized_edge(
             "submodule_import"
         }
         ("imports_from", _) => occurrence
-            .and_then(|occurrence| occurrence.context.as_deref())
+            .and_then(OccurrenceRef::context)
             .unwrap_or("import"),
         ("re_exports", _) => "export",
         ("inherits", _) => "base_type",
@@ -118,17 +118,13 @@ pub(super) fn materialized_edge(
             OCCURRENCE_RULE_ATTRIBUTE.to_owned(),
             Value::String(occurrence_rule),
         ),
-        (
-            "evidence_candidate_id".to_owned(),
-            Value::String(candidate.id.clone()),
-        ),
     ]);
-    if let Some(occurrence_id) = candidate.occurrence_id.as_ref() {
-        attributes.insert(
-            "evidence_occurrence_id".to_owned(),
-            Value::String(occurrence_id.clone()),
-        );
-    }
+    // Candidate and occurrence IDs are resolver-internal lookup identities.
+    // At this point their relation, occurrence rule, exact anchor, endpoints,
+    // and provenance have already been projected into the public edge. Do not
+    // duplicate those long IDs in every transient JSON attribute map. The
+    // separate universal project-edge builder retains candidate IDs until its
+    // own deduplication pass because that path still consumes them.
     if matches!(
         candidate.relation,
         CandidateRelation::Imports | CandidateRelation::Reexports

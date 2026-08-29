@@ -1,13 +1,26 @@
 mod support;
 
+use std::collections::BTreeSet;
 use std::fs;
+use std::sync::{Arc, Barrier};
+use std::thread;
 
-use compass_graph::GraphSnapshotBuilder;
-use compass_model::code_graph::{CODE_GRAPH_SCHEMA_V1, GraphDocument};
-use compass_model::query_contract::{
-    CallRequest, CodeQueryLimits, ExploreRequest, ImpactRequest, NodeTrailRequest, SearchRequest,
+use compass_graph::{GraphSnapshotBuilder, GraphSnapshotReader};
+use compass_model::code_graph::{
+    CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument, NodeKind, NodeRecord,
 };
-use compass_query::{EngineSelection, QueryEngineKind, open, open_with_engine, open_with_store};
+use compass_model::identity::{edge_id, file_id};
+use compass_model::provenance::OccurrenceRule;
+use compass_model::query_contract::{
+    CallRequest, CodeQueryLimits, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
+    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ExploreRequest,
+    ImpactRequest, MAX_DISCOVERY_CANDIDATE_NODES_READ, MAX_DISCOVERY_CANDIDATE_PROBES,
+    NodeTrailRequest, SearchRequest,
+};
+use compass_query::{
+    EngineSelection, QueryEngineCache, QueryEngineKind, open, open_with_document, open_with_engine,
+    open_with_store, open_with_store_selector,
+};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use compass_store_redb::RedbStore;
 
@@ -26,6 +39,611 @@ fn publish_phase2_snapshot(
     )?;
     store.checkpoint()?;
     Ok(store)
+}
+
+fn discovery_request(question: &str) -> DiscoveryQueryRequest {
+    DiscoveryQueryRequest {
+        question: question.to_owned(),
+        direction: DiscoveryDirection::Both,
+        relation_contexts: Vec::new(),
+        scope: Vec::new(),
+        traversal: DiscoveryTraversal::Bfs,
+        include_heuristic: false,
+        limits: DiscoveryLimits::default(),
+    }
+}
+
+fn assert_discovery_semantically_equal(
+    actual: &DiscoveryQueryResponse,
+    expected: &DiscoveryQueryResponse,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut actual_value = serde_json::to_value(actual)?;
+    let mut expected_value = serde_json::to_value(expected)?;
+    actual_value
+        .as_object_mut()
+        .ok_or("discovery response must serialize as an object")?
+        .remove("stats");
+    expected_value
+        .as_object_mut()
+        .ok_or("discovery response must serialize as an object")?
+        .remove("stats");
+    assert_eq!(actual_value, expected_value);
+    for response in [actual, expected] {
+        assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+        assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+    }
+    Ok(())
+}
+
+#[test]
+fn discovery_is_identical_for_json_store_direct_document_and_immutable_selectors()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let first_graph = GraphDocument::load(&graph_path)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let first_selector = GraphSnapshotReader::open_active(&store)?
+        .ok_or("first snapshot missing")?
+        .selector()
+        .clone();
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let json_reopened = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    assert_eq!(json.index_path(), json_reopened.index_path());
+    let active = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("active-cache"),
+    )?;
+    let local_direct = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("local-direct-cache"),
+        EngineSelection::Store,
+    )?;
+    let selected = open_with_store_selector(
+        &store,
+        first_selector.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("selector-cache"),
+    )?;
+    let direct = open_with_document(
+        first_graph.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("shared-direct-cache"),
+    )?;
+    let direct_reopened = open_with_document(
+        first_graph.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("shared-direct-cache"),
+    )?;
+    assert_eq!(direct.engine_kind(), QueryEngineKind::Memory);
+    assert_eq!(direct.index_path(), direct_reopened.index_path());
+    let request = discovery_request("UserService.list");
+    let expected = json.discover(request.clone())?;
+    for actual in [
+        active.discover(request.clone())?,
+        local_direct.discover(request.clone())?,
+        selected.discover(request.clone())?,
+        direct.discover(request.clone())?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &expected)?;
+    }
+    assert_eq!(json.discover(request.clone())?.stats, expected.stats);
+    assert_eq!(
+        active.discover(request.clone())?.stats,
+        active.discover(request.clone())?.stats
+    );
+    assert_eq!(
+        local_direct.discover(request.clone())?.stats,
+        local_direct.discover(request.clone())?.stats
+    );
+
+    let mut scoped = discovery_request("UserService.list");
+    scoped.scope = vec![DiscoveryScope {
+        kind: DiscoveryScopeKind::Node,
+        value: "UserService.list".to_owned(),
+    }];
+    let scoped_expected = json.discover(scoped.clone())?;
+    for actual in [
+        active.discover(scoped.clone())?,
+        local_direct.discover(scoped.clone())?,
+        selected.discover(scoped.clone())?,
+        direct.discover(scoped)?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &scoped_expected)?;
+    }
+
+    for scope in [
+        DiscoveryScope {
+            kind: DiscoveryScopeKind::Source,
+            value: "src".to_owned(),
+        },
+        DiscoveryScope {
+            kind: DiscoveryScopeKind::Community,
+            value: "services".to_owned(),
+        },
+    ] {
+        let mut scoped = discovery_request("UserService.list");
+        scoped.scope = vec![scope];
+        let expected = json.discover(scoped.clone())?;
+        for actual in [
+            json_reopened.discover(scoped.clone())?,
+            active.discover(scoped.clone())?,
+            local_direct.discover(scoped.clone())?,
+            selected.discover(scoped.clone())?,
+            direct.discover(scoped)?,
+        ] {
+            assert_discovery_semantically_equal(&actual, &expected)?;
+        }
+    }
+
+    let ambiguous = discovery_request("list");
+    let ambiguous_expected = json.discover(ambiguous.clone())?;
+    for actual in [
+        active.discover(ambiguous.clone())?,
+        selected.discover(ambiguous.clone())?,
+        direct.discover(ambiguous)?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &ambiguous_expected)?;
+    }
+    assert_discovery_semantically_equal(&direct_reopened.discover(request.clone())?, &expected)?;
+    assert_discovery_semantically_equal(&direct.discover(request.clone())?, &expected)?;
+
+    for subword_query in ["user record", "cache key"] {
+        let request = discovery_request(subword_query);
+        let expected = json.discover(request.clone())?;
+        assert!(!expected.seeds.is_empty(), "{subword_query}");
+        for actual in [
+            active.discover(request.clone())?,
+            local_direct.discover(request.clone())?,
+            selected.discover(request.clone())?,
+            direct.discover(request.clone())?,
+        ] {
+            assert_discovery_semantically_equal(&actual, &expected)?;
+        }
+    }
+
+    let boolean_only = discovery_request("AND OR NOT NEAR");
+    let empty_expected = json.discover(boolean_only.clone())?;
+    for actual in [
+        local_direct.discover(boolean_only.clone())?,
+        selected.discover(boolean_only.clone())?,
+        direct.discover(boolean_only)?,
+    ] {
+        assert_discovery_semantically_equal(&actual, &empty_expected)?;
+    }
+
+    let mut second_graph = first_graph;
+    let mut added = second_graph.nodes[0].clone();
+    added.id = "n:new-realization".to_owned();
+    added.name = "new_realization".to_owned();
+    added.qualified_name = "History.new_realization".to_owned();
+    second_graph.nodes.push(added);
+    second_graph
+        .nodes
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    let replacement = open_with_document(
+        second_graph.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("shared-direct-cache"),
+    )?;
+    assert_ne!(direct.index_path(), replacement.index_path());
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &second_graph)?;
+    let second_selector = GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let historical = open_with_store_selector(
+        &store,
+        first_selector.clone(),
+        &graph_path,
+        None,
+        &directory.path().join("historical-cache"),
+    )?;
+    assert_discovery_semantically_equal(&historical.discover(request.clone())?, &expected)?;
+    let current = open_with_store_selector(
+        &store,
+        second_selector,
+        &graph_path,
+        None,
+        &directory.path().join("current-cache"),
+    )?;
+    let current_response = current.discover(discovery_request("new_realization"))?;
+    assert!(
+        current_response
+            .nodes
+            .iter()
+            .any(|node| node.id == "n:new-realization")
+    );
+    assert_ne!(historical.index_path(), current.index_path());
+
+    let mut corrupt = first_selector.clone();
+    corrupt.schema = "corrupt-selector".to_owned();
+    let error = open_with_store_selector(
+        &store,
+        corrupt,
+        &graph_path,
+        None,
+        &directory.path().join("corrupt-selector-cache"),
+    )
+    .err()
+    .ok_or("corrupt selector unexpectedly opened")?;
+    assert_eq!(error.code(), "store_graph_snapshot_failed");
+
+    let mut mismatched = first_selector;
+    mismatched.snapshot_id = "0".repeat(64);
+    let error = open_with_store_selector(
+        &store,
+        mismatched,
+        &graph_path,
+        None,
+        &directory.path().join("mismatch-cache"),
+    )
+    .err()
+    .ok_or("mismatched selector unexpectedly opened")?;
+    assert_eq!(error.code(), "store_graph_snapshot_failed");
+    Ok(())
+}
+
+#[test]
+fn composite_identifier_no_match_skips_store_posting_hydration()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+    let request = discovery_request("NebulaUserServiceWidget");
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request)?;
+
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    for response in [actual, expected] {
+        assert!(response.seeds.is_empty());
+        assert_eq!(response.stats.candidate_nodes, 0);
+        assert_eq!(response.stats.candidate_probes, 2);
+        assert!(!response.truncated);
+    }
+    Ok(())
+}
+
+#[test]
+fn discovery_common_prefix_maximum_terms_is_bounded_and_backend_equal()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "n:list")
+        .cloned()
+        .ok_or("fixture node missing")?;
+    let mut terms = Vec::new();
+    for index in 0..compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
+        let term = format!("pre{index:02}");
+        let mut node = template.clone();
+        node.id = format!("n:{term}");
+        node.name = term.clone();
+        node.qualified_name = format!("Prefix.{term}");
+        graph.nodes.push(node);
+        terms.push(term);
+    }
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+    let request = discovery_request(&terms.join(" "));
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request.clone())?;
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    for response in [&actual, &expected] {
+        assert!(response.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+        assert!(response.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+        assert!(response.stats.candidates_admitted <= u64::from(request.limits.max_candidates));
+        if response.truncated {
+            assert!(response.seeds.iter().all(|seed| seed.ambiguous));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn exact_relationship_recall_is_backend_equal_for_dense_daily_workflows()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let node_template = graph
+        .nodes
+        .iter()
+        .find(|node| node.kind.is_callable() && node.source.is_some())
+        .cloned()
+        .ok_or("fixture callable node missing")?;
+    let edge_template = graph.links.first().cloned().ok_or("fixture edge missing")?;
+    let make_node = |id: &str, name: &str, file: &str| -> NodeRecord {
+        let mut node = node_template.clone();
+        node.id = id.to_owned();
+        node.name = name.to_owned();
+        node.qualified_name = format!("Workflow.{name}");
+        if let Some(source) = &mut node.source {
+            source.file = file.to_owned();
+        }
+        node
+    };
+    let make_edge = |_id: &str, source: &str, target: &str| {
+        let mut edge = edge_template.clone();
+        edge.source = source.to_owned();
+        edge.target = target.to_owned();
+        edge.kind = EdgeKind::Calls;
+        let relationship_id = edge_id(
+            source,
+            EdgeKind::Calls,
+            target,
+            edge.relationship_site.as_ref(),
+            edge.occurrence_rule.as_ref().map(|rule| rule.as_str()),
+        );
+        edge.id = relationship_id.clone();
+        edge.key = relationship_id;
+        edge
+    };
+
+    graph.nodes.extend([
+        make_node("z:condense", "CondenseSession", "src/session/strategy.rs"),
+        make_node("n:checkpoint", "CheckpointID", "src/session/id.rs"),
+        make_node("n:create", "CreateSession", "src/session/create.rs"),
+        make_node("n:checkpoint2", "CheckpointStore", "src/session/id.rs"),
+        make_node("n:create2", "CreateData", "src/session/create.rs"),
+        make_node("n:both", "CheckpointCreate", "src/session/create.rs"),
+        make_node("n:create3", "CreateCommit", "src/session/create.rs"),
+        make_node("a:production-three", "run", "src/workflow/three.rs"),
+        make_node("0:test-five", "run", "tests/workflow_test.rs"),
+        make_node("z:save", "SaveStep", "src/history/strategy.rs"),
+        make_node(
+            "n:repository",
+            "RepositoryHandle",
+            "src/history/repository.rs",
+        ),
+        make_node("n:state", "StateHandle", "src/history/state.rs"),
+        make_node("n:recorded", "RecordedMarker", "src/history/record.rs"),
+    ]);
+    graph.links.extend([
+        make_edge("e:condense:checkpoint", "z:condense", "n:checkpoint"),
+        make_edge("e:condense:create", "z:condense", "n:create"),
+        make_edge("e:condense:checkpoint2", "z:condense", "n:checkpoint2"),
+        make_edge("e:condense:create2", "z:condense", "n:create2"),
+        make_edge("e:p3:both", "a:production-three", "n:both"),
+        make_edge("e:p3:checkpoint", "a:production-three", "n:checkpoint"),
+        make_edge("e:p3:create", "a:production-three", "n:create"),
+        make_edge("e:t5:both", "0:test-five", "n:both"),
+        make_edge("e:t5:checkpoint", "0:test-five", "n:checkpoint"),
+        make_edge("e:t5:create", "0:test-five", "n:create"),
+        make_edge("e:t5:create2", "0:test-five", "n:create2"),
+        make_edge("e:t5:create3", "0:test-five", "n:create3"),
+        make_edge("e:save:repository", "z:save", "n:repository"),
+        make_edge("e:save:state", "z:save", "n:state"),
+        make_edge("e:save:recorded", "z:save", "n:recorded"),
+    ]);
+    let mut parallel_create = make_edge("parallel", "z:condense", "n:create");
+    parallel_create.occurrence_rule = OccurrenceRule::new("parallel");
+    let parallel_id = edge_id(
+        &parallel_create.source,
+        EdgeKind::Calls,
+        &parallel_create.target,
+        parallel_create.relationship_site.as_ref(),
+        parallel_create
+            .occurrence_rule
+            .as_ref()
+            .map(|rule| rule.as_str()),
+    );
+    parallel_create.id = parallel_id.clone();
+    parallel_create.key = parallel_id;
+    graph.links.push(parallel_create);
+    graph.nodes.extend([
+        make_node("n:equal:a", "run", "src/equal/a.rs"),
+        make_node("n:equal:b", "run", "src/equal/b.rs"),
+    ]);
+    for index in 0..1_000 {
+        let target_id = format!("n:alpha-beta:{index:04}");
+        graph.nodes.push(make_node(
+            &target_id,
+            "AlphaBeta",
+            "src/targets/alpha_beta.rs",
+        ));
+        graph.links.push(make_edge(
+            &format!("e:equal:a:{index:04}"),
+            "n:equal:a",
+            &target_id,
+        ));
+        graph.links.push(make_edge(
+            &format!("e:equal:b:{index:04}"),
+            "n:equal:b",
+            &target_id,
+        ));
+    }
+    for index in 0..200 {
+        let caller_id = format!("a:create-noise:{index:04}");
+        graph.nodes.push(make_node(
+            &caller_id,
+            &format!("createFixture{index:04}"),
+            "tests/generated/create.rs",
+        ));
+        graph.links.push(make_edge(
+            &format!("e:create-noise:{index:04}"),
+            &caller_id,
+            "n:create",
+        ));
+    }
+    for index in 0..1_100 {
+        let caller_id = format!("m:checkpoint-noise:{index:04}");
+        graph.nodes.push(make_node(
+            &caller_id,
+            &format!("checkpointFixture{index:04}"),
+            "tests/generated/checkpoint.rs",
+        ));
+        graph.links.push(make_edge(
+            &format!("e:checkpoint-noise:{index:04}"),
+            &caller_id,
+            "n:checkpoint",
+        ));
+    }
+    let existing_paths = graph
+        .graph
+        .files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect::<BTreeSet<_>>();
+    let missing_paths = graph
+        .nodes
+        .iter()
+        .filter_map(|node| node.source_file().map(str::to_owned))
+        .filter(|path| !existing_paths.contains(path))
+        .collect::<BTreeSet<_>>();
+    let file_template = graph
+        .graph
+        .files
+        .first()
+        .cloned()
+        .ok_or("fixture file missing")?;
+    for path in missing_paths {
+        let mut file = file_template.clone();
+        file.id = file_id(&path);
+        file.path = path;
+        graph.graph.files.push(file);
+    }
+    graph
+        .graph
+        .files
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    graph.links.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+
+    for (question, target) in [
+        ("how is a checkpoint created", "n:both"),
+        ("how is repository state recorded", "z:save"),
+    ] {
+        let request = discovery_request(question);
+        let expected = json.discover(request.clone())?;
+        let actual = stored.discover(request)?;
+        assert_discovery_semantically_equal(&actual, &expected)?;
+        for response in [&actual, &expected] {
+            assert_eq!(response.seeds[0].node_id, target, "{question}");
+            assert!(!response.seeds[0].ambiguous, "{question}");
+            if question == "how is a checkpoint created" {
+                assert_eq!(
+                    response
+                        .seeds
+                        .iter()
+                        .map(|seed| seed.node_id.as_str())
+                        .collect::<Vec<_>>(),
+                    ["n:both", "z:condense", "a:production-three"]
+                );
+            }
+            assert!(
+                response.diagnostics.iter().all(|diagnostic| !diagnostic
+                    .message
+                    .contains("lacks exact relationship-term postings")),
+                "{question}"
+            );
+        }
+    }
+    let equal_request = discovery_request("alpha beta");
+    let equal_json = json.discover(equal_request.clone())?;
+    let equal_store = stored.discover(equal_request.clone())?;
+    assert_discovery_semantically_equal(&equal_store, &equal_json)?;
+    for response in [&equal_json, &equal_store] {
+        assert!(response.seeds[0].ambiguous);
+        assert_eq!(response.seeds[0].node_id, "n:alpha-beta:0000");
+        assert_eq!(
+            response.seeds[0].alternatives[0].node_id,
+            "n:alpha-beta:0001"
+        );
+    }
+
+    let reversed_directory = directory.path().join("reversed");
+    fs::create_dir(&reversed_directory)?;
+    let reversed_graph_path = reversed_directory.join("graph.json");
+    graph.nodes.reverse();
+    graph.links.reverse();
+    fs::write(&reversed_graph_path, serde_json::to_vec(&graph)?)?;
+    let reversed_store = publish_phase2_snapshot(&reversed_directory, &reversed_graph_path)?;
+    let reversed_json = open_with_engine(
+        &reversed_graph_path,
+        None,
+        &reversed_directory.join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let reversed_stored = open_with_store(
+        &reversed_store,
+        &reversed_graph_path,
+        None,
+        &reversed_directory.join("store-cache"),
+    )?;
+    for question in [
+        "how is a checkpoint created",
+        "how is repository state recorded",
+        "alpha beta",
+    ] {
+        let request = discovery_request(question);
+        let original = json.discover(request.clone())?;
+        let reversed_json_response = reversed_json.discover(request.clone())?;
+        let reversed_store_response = reversed_stored.discover(request)?;
+        assert_discovery_semantically_equal(&reversed_json_response, &original)?;
+        assert_discovery_semantically_equal(&reversed_store_response, &original)?;
+    }
+    Ok(())
 }
 
 #[test]
@@ -71,6 +689,320 @@ fn default_query_open_prefers_published_store_and_matches_json()
     drop(store_engine);
     let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
     assert_eq!(reopened.engine_kind(), QueryEngineKind::Store);
+    Ok(())
+}
+
+#[test]
+fn operation_role_fast_path_is_backend_neutral_and_bounded()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph.nodes.first().ok_or("fixture graph has no nodes")?;
+    let mut table = template.clone();
+    table.id = "n:delta-table".to_owned();
+    table.kind = NodeKind::Struct;
+    table.name = "DeltaTable".to_owned();
+    table.qualified_name = "crate::DeltaTable".to_owned();
+    let mut builder = template.clone();
+    builder.id = "n:delta-table-builder".to_owned();
+    builder.kind = NodeKind::Struct;
+    builder.name = "DeltaTableBuilder".to_owned();
+    builder.qualified_name = "crate::DeltaTableBuilder".to_owned();
+    graph.nodes.extend([table, builder]);
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    let store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_store(
+        &store,
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+    )?;
+    let request = discovery_request("how is a delta table opened");
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request)?;
+
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    assert_eq!(actual.seeds[0].node_id, "n:delta-table-builder");
+    assert!(actual.stats.candidate_nodes <= MAX_DISCOVERY_CANDIDATE_NODES_READ);
+    assert!(actual.stats.candidate_probes <= MAX_DISCOVERY_CANDIDATE_PROBES);
+    Ok(())
+}
+
+#[test]
+fn store_representation_discovery_uses_complete_declarations_before_generic_postings()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .first()
+        .ok_or("fixture graph has no nodes")?
+        .clone();
+    for (id, name) in [
+        ("n:delta-table-state", "DeltaTableState"),
+        ("n:delta-table", "DeltaTable"),
+        ("n:table-state", "TableState"),
+    ] {
+        let mut declaration = template.clone();
+        declaration.id = id.to_owned();
+        declaration.kind = NodeKind::Struct;
+        declaration.name = name.to_owned();
+        declaration.qualified_name = format!("crate::{name}");
+        graph.nodes.push(declaration);
+    }
+    for index in 0..300 {
+        let mut noise = template.clone();
+        noise.id = format!("n:noise-{index:03}");
+        noise.kind = NodeKind::Function;
+        noise.name = format!("delta_table_state_noise_{index:03}");
+        noise.qualified_name = format!("crate::noise::{}", noise.name);
+        graph.nodes.push(noise);
+    }
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    let _store = publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("store-cache"),
+        EngineSelection::Store,
+    )?;
+    let mut request = discovery_request("where is delta table state represented");
+    request.limits.max_nodes = 3;
+    request.limits.max_edges = 1;
+    let expected = json.discover(request.clone())?;
+    let actual = stored.discover(request)?;
+
+    assert_discovery_semantically_equal(&actual, &expected)?;
+    assert_eq!(actual.seeds[0].node_id, "n:delta-table-state");
+    assert!(
+        actual.stats.candidate_nodes <= 16,
+        "declaration fast path decoded {} candidate IDs",
+        actual.stats.candidate_nodes
+    );
+    Ok(())
+}
+
+#[test]
+fn store_query_engine_cache_reuses_exact_identity_invalidates_and_evicts()
+-> Result<(), Box<dyn std::error::Error>> {
+    let first_directory = tempfile::tempdir()?;
+    let first_graph = first_directory.path().join("graph.json");
+    support::write_graph(&first_graph)?;
+    publish_phase2_snapshot(first_directory.path(), &first_graph)?;
+    let cache = QueryEngineCache::new(1)?;
+
+    let original = cache.open_published_store(&first_graph)?;
+    let repeated = cache.open_published_store(&first_graph)?;
+    assert!(Arc::ptr_eq(&original, &repeated));
+
+    let mut changed = GraphDocument::load(&first_graph)?;
+    let mut added = changed.nodes[0].clone();
+    added.id = "n:cache-generation".to_owned();
+    added.name = "cache_generation".to_owned();
+    added.qualified_name = "Cache.cache_generation".to_owned();
+    changed.nodes.push(added);
+    changed.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&first_graph, serde_json::to_vec_pretty(&changed)?)?;
+    publish_phase2_snapshot(first_directory.path(), &first_graph)?;
+
+    let changed_engine = cache.open_published_store(&first_graph)?;
+    assert!(!Arc::ptr_eq(&original, &changed_engine));
+    assert!(
+        changed_engine
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .discover(discovery_request("cache_generation"))?
+            .nodes
+            .iter()
+            .any(|node| node.id == "n:cache-generation")
+    );
+
+    let second_directory = tempfile::tempdir()?;
+    let second_graph = second_directory.path().join("graph.json");
+    support::write_graph(&second_graph)?;
+    publish_phase2_snapshot(second_directory.path(), &second_graph)?;
+    cache.open_published_store(&second_graph)?;
+    assert_eq!(cache.len(), 1);
+    let reopened = cache.open_published_store(&first_graph)?;
+    assert!(!Arc::ptr_eq(&changed_engine, &reopened));
+    assert_eq!(cache.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_reuses_and_invalidates_verified_documents()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = QueryEngineCache::new(2)?;
+    let cache_root = directory.path().join("cache");
+
+    let original = cache.open_verified_document(&document, &identity, &graph_path, &cache_root)?;
+    let repeated = cache.open_verified_document(&document, &identity, &graph_path, &cache_root)?;
+    assert!(Arc::ptr_eq(&original, &repeated));
+
+    let mut changed = document;
+    let mut added = changed.nodes[0].clone();
+    added.id = "n:verified-generation".to_owned();
+    added.name = "verified_generation".to_owned();
+    added.qualified_name = "Cache.verified_generation".to_owned();
+    changed.nodes.push(added);
+    changed.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec_pretty(&changed)?)?;
+    let (changed, changed_identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let replacement =
+        cache.open_verified_document(&changed, &changed_identity, &graph_path, &cache_root)?;
+    assert!(!Arc::ptr_eq(&original, &replacement));
+    assert!(
+        replacement
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .discover(discovery_request("verified_generation"))?
+            .nodes
+            .iter()
+            .any(|node| node.id == "n:verified-generation")
+    );
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_constructs_one_engine_for_concurrent_exact_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = Arc::new(QueryEngineCache::new(2)?);
+    let barrier = Arc::new(Barrier::new(8));
+    let mut threads = Vec::new();
+    for _ in 0..8 {
+        let cache = Arc::clone(&cache);
+        let barrier = Arc::clone(&barrier);
+        let document = document.clone();
+        let identity = identity.clone();
+        let graph_path = graph_path.clone();
+        let cache_root = directory.path().join("cache");
+        threads.push(thread::spawn(move || {
+            barrier.wait();
+            cache.open_verified_document(&document, &identity, &graph_path, &cache_root)
+        }));
+    }
+    let mut engines = Vec::new();
+    for handle in threads {
+        engines.push(handle.join().map_err(|_| "cache thread panicked")??);
+    }
+    let first = engines
+        .first()
+        .ok_or("concurrent cache returned no engines")?;
+    assert!(engines.iter().all(|engine| Arc::ptr_eq(first, engine)));
+    assert_eq!(cache.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_keeps_lru_coherent_during_hits_and_evictions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root = tempfile::tempdir()?;
+    let cache = Arc::new(QueryEngineCache::new(2)?);
+    let mut inputs = Vec::new();
+    for name in ["first", "second", "third"] {
+        let directory = root.path().join(name);
+        fs::create_dir_all(&directory)?;
+        let graph_path = directory.join("graph.json");
+        support::write_graph(&graph_path)?;
+        let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+        inputs.push((document, identity, graph_path, directory.join("cache")));
+    }
+
+    let barrier = Arc::new(Barrier::new(4));
+    let mut threads = Vec::new();
+    for worker in 0..4 {
+        let cache = Arc::clone(&cache);
+        let barrier = Arc::clone(&barrier);
+        let inputs = inputs.clone();
+        threads.push(thread::spawn(move || {
+            barrier.wait();
+            for round in 0..12 {
+                let (document, identity, graph_path, cache_root) = &inputs[(worker + round) % 3];
+                cache.open_verified_document(document, identity, graph_path, cache_root)?;
+            }
+            Ok::<(), compass_query::QueryError>(())
+        }));
+    }
+    for handle in threads {
+        handle.join().map_err(|_| "cache thread panicked")??;
+    }
+    assert_eq!(cache.len(), 2);
+    let (document, identity, graph_path, cache_root) = &inputs[2];
+    let first = cache.open_verified_document(document, identity, graph_path, cache_root)?;
+    let repeated = cache.open_verified_document(document, identity, graph_path, cache_root)?;
+    assert!(Arc::ptr_eq(&first, &repeated));
+    assert_eq!(cache.len(), 2);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn query_engine_cache_canonicalizes_verified_document_aliases()
+-> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    let alias_path = directory.path().join("graph-alias.json");
+    support::write_graph(&graph_path)?;
+    symlink(&graph_path, &alias_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = QueryEngineCache::new(2)?;
+    let cache_root = directory.path().join("cache");
+
+    let direct = cache.open_verified_document(&document, &identity, &graph_path, &cache_root)?;
+    let alias = cache.open_verified_document(&document, &identity, &alias_path, &cache_root)?;
+    assert!(Arc::ptr_eq(&direct, &alias));
+    assert_eq!(cache.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn query_engine_cache_rejects_a_missing_verified_document_path()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let (document, identity) = GraphDocument::load_with_artifact_digest(&graph_path)?;
+    let cache = QueryEngineCache::new(2)?;
+    let error = cache
+        .open_verified_document(
+            &document,
+            &identity,
+            &directory.path().join("missing.json"),
+            &directory.path().join("cache"),
+        )
+        .err()
+        .ok_or("missing graph path unexpectedly opened")?;
+    assert_eq!(error.code(), "canonicalize_verified_graph_failed");
     Ok(())
 }
 
@@ -343,6 +1275,31 @@ fn active_phase2_snapshot_rejects_a_stale_store_reference() -> Result<(), Box<dy
 }
 
 #[test]
+fn active_phase2_snapshot_rejects_another_store_namespace() -> Result<(), Box<dyn std::error::Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+    let reference_path = directory.path().join(STORE_REF_FILE_NAME);
+    let mut reference: StoreRef = serde_json::from_slice(&fs::read(&reference_path)?)?;
+    reference.namespace = "another.graph".to_owned();
+    fs::write(reference_path, serde_json::to_vec(&reference)?)?;
+
+    let error = match open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("cache"),
+        EngineSelection::Store,
+    ) {
+        Ok(_) => return Err("foreign store namespace was accepted".into()),
+        Err(error) => error,
+    };
+    assert_eq!(error.code(), "store_ref_invalid");
+    Ok(())
+}
+
+#[test]
 fn opened_store_reader_remains_pinned_when_the_active_selector_changes()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -425,6 +1382,34 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
         Err(error) => error,
     };
     assert_eq!(error.code(), "store_open_failed");
+    Ok(())
+}
+
+#[test]
+fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let cache = directory.path().join("cache");
+    let engine = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let index_path = engine.index_path().to_path_buf();
+    drop(engine);
+
+    let connection = rusqlite::Connection::open(&index_path)?;
+    connection.execute(
+        "UPDATE metadata SET value='compass-code-index/3' WHERE key='format'",
+        [],
+    )?;
+    drop(connection);
+
+    let reopened = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    assert_eq!(reopened.index_path(), index_path);
+    let connection = rusqlite::Connection::open(index_path)?;
+    let format: String =
+        connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
+            row.get(0)
+        })?;
+    assert_eq!(format, "compass-code-index/7");
     Ok(())
 }
 

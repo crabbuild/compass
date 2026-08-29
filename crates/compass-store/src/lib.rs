@@ -41,16 +41,12 @@ pub const MAX_SCAN_ITEMS: usize = 1_000;
 pub const MAX_SCAN_BYTES: usize = 1024 * 1024;
 pub const MAX_IMMUTABLE_BATCH_ITEMS: usize = 1_024;
 pub const MAX_IMMUTABLE_BATCH_BYTES: usize = 16 * 1024 * 1024;
-/// Maximum canonical graph payload accepted by the bounded store snapshot.
+/// Maximum payload accepted by the legacy monolithic snapshot compatibility API.
 ///
-/// The portable in-memory JSON readers intentionally keep their independent
-/// 1 GiB cap.  The local store is the bounded large-graph path and therefore
-/// accepts up to 2 GiB.  Reads reach records through indexed scans
-/// (`GraphSnapshotReader`) or stream stored chunks
-/// (`SqliteStore::read_snapshot_chunks`) rather than materializing the whole
-/// document; `SqliteStore::read_snapshot` is the explicit opt-in that does
-/// allocate the full payload.  The limit is still finite so malformed or
-/// hostile snapshots cannot request unbounded allocation.
+/// The current graph-index snapshot stores independently bounded immutable tree
+/// objects and has no aggregate payload limit. This cap remains on the legacy
+/// `publish_snapshot`/`read_snapshot` path because that API materializes the
+/// canonical payload in one allocation.
 pub const MAX_GRAPH_BYTES: usize = 2 * 1024 * 1024 * 1024;
 
 /// Effective opt-in graph byte bound used by snapshot publication and reads.
@@ -753,6 +749,21 @@ impl StoreRef {
                     "store reference {name} is not a SHA-256 hex digest"
                 )));
             }
+        }
+        Ok(())
+    }
+
+    /// Validate that this reference selects Compass's local immutable SQLite
+    /// graph namespace rather than another store adapter or namespace.
+    pub fn validate_local_sqlite_graph(&self) -> Result<(), StoreError> {
+        self.validate()?;
+        if self.adapter != "sqlite"
+            || self.store_id != "sqlite-local-v1"
+            || self.namespace.as_bytes() != GRAPH_NAMESPACE
+        {
+            return Err(StoreError::InvalidFormat(
+                "store reference does not select the local SQLite graph namespace".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -2698,10 +2709,29 @@ mod tests {
 
     use super::{
         GRAPH_SCHEMA_V1, ImmutableWrite, Key, KeyRange, MemoryStore, NamespaceId, PartitionKey,
-        STORE_DIRECTORY_NAME, STORE_FILE_NAME, ScanLimits, SqliteStore, Store, StoreError,
-        VersionToken, WriteCondition, decode_key_segments, encode_key_segments,
-        local_sqlite_store_path,
+        STORE_DIRECTORY_NAME, STORE_FILE_NAME, STORE_REF_SCHEMA_V1, STORE_SCHEMA_V1, ScanLimits,
+        SqliteStore, Store, StoreError, StoreRef, VersionToken, WriteCondition,
+        decode_key_segments, encode_key_segments, local_sqlite_store_path,
     };
+
+    #[test]
+    fn local_sqlite_graph_reference_rejects_other_adapters_and_namespaces() {
+        let mut reference = StoreRef {
+            schema: STORE_REF_SCHEMA_V1.to_owned(),
+            store_schema: STORE_SCHEMA_V1.to_owned(),
+            adapter: "sqlite".to_owned(),
+            store_id: "sqlite-local-v1".to_owned(),
+            namespace: String::from_utf8_lossy(super::GRAPH_NAMESPACE).into_owned(),
+            snapshot_id: "0".repeat(64),
+            manifest_digest: "1".repeat(64),
+            graph_digest: "2".repeat(64),
+        };
+
+        assert!(reference.validate_local_sqlite_graph().is_ok());
+        reference.namespace = "another.graph".to_owned();
+        assert!(reference.validate().is_ok());
+        assert!(reference.validate_local_sqlite_graph().is_err());
+    }
 
     #[test]
     fn visible_output_paths_resolve_the_shared_sqlite_store() -> Result<(), Box<dyn Error>> {

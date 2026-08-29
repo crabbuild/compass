@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fs::{self, FileTimes};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
 use compass_files::{
@@ -11,7 +13,7 @@ use compass_files::{
     write_json_atomic, write_text_atomic,
 };
 use compass_files::{FileType, IgnorePolicy};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -21,6 +23,24 @@ struct PortableAstFixture {
     edges: Vec<serde_json::Value>,
     #[serde(default)]
     framework_facts: Vec<serde_json::Value>,
+}
+
+struct TrackedPortableAst<'a> {
+    active: &'a AtomicUsize,
+    maximum: &'a AtomicUsize,
+}
+
+impl Serialize for TrackedPortableAst<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.maximum.fetch_max(active, Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(1));
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        serializer.serialize_u8(1)
+    }
 }
 
 #[test]
@@ -133,6 +153,30 @@ fn watcher_filter_reuses_ignore_and_output_boundaries() -> Result<(), Box<dyn Er
     assert!(!filter.allows(&root.join("compass-out/graph.json")));
     assert!(!filter.allows(&root.join("compass-out/graph.json")));
     assert!(!filter.allows(&root.join("README.unknown")));
+    Ok(())
+}
+
+#[test]
+fn java_build_package_is_source_but_build_output_stays_ignored() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let package = root.join("src/main/java/build/crab/prolly");
+    fs::create_dir_all(&package)?;
+    fs::write(
+        package.join("Transaction.java"),
+        "package build.crab.prolly;\n",
+    )?;
+    let generated = root.join("build/generated");
+    fs::create_dir_all(&generated)?;
+    fs::write(generated.join("Generated.java"), "class Generated {}\n")?;
+
+    let detection = compass_files::detect(root, &DetectOptions::default())?;
+    assert_eq!(detection.files["code"].len(), 1);
+    assert!(detection.files["code"][0].ends_with("Transaction.java"));
+
+    let filter = WatchPathFilter::new(root, &DetectOptions::default())?;
+    assert!(filter.allows(&package.join("Transaction.java")));
+    assert!(!filter.allows(&generated.join("Generated.java")));
     Ok(())
 }
 
@@ -564,6 +608,31 @@ fn streaming_portable_ast_batch_round_trips() -> Result<(), Box<dyn Error>> {
         cache.load(&source, &CacheKind::Ast, None, false)?,
         Some(expected)
     );
+    Ok(())
+}
+
+#[test]
+fn streaming_portable_ast_batch_encodes_one_entry_at_a_time() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let paths = (0..256)
+        .map(|index| {
+            let path = directory.path().join(format!("streamed-{index}.rs"));
+            fs::write(&path, "fn streamed() {}\n")?;
+            Ok::<_, std::io::Error>(path)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let active = AtomicUsize::new(0);
+    let maximum = AtomicUsize::new(0);
+    let value = TrackedPortableAst {
+        active: &active,
+        maximum: &maximum,
+    };
+    let entries = paths.iter().map(|path| (path, &value)).collect::<Vec<_>>();
+    let mut cache = Cache::open(directory.path(), CacheOptions::output_directory(None))?;
+
+    cache.write_portable_ast_batch_ref(&entries)?;
+
+    assert_eq!(maximum.load(Ordering::SeqCst), 1);
     Ok(())
 }
 

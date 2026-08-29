@@ -44,6 +44,10 @@ from benchmarks.performance.compass.model import (
     QualificationRun,
     RepositorySpec,
 )
+from benchmarks.performance.compass.multiplicity import (
+    DEFAULT_MAX_RELATIONSHIPS,
+    audit_multiplicity,
+)
 from benchmarks.performance.compass.report import (
     compare_baseline,
     compare_tools,
@@ -53,6 +57,7 @@ from benchmarks.performance.compass.report import (
     write_run,
 )
 from benchmarks.performance.compass.workloads import (
+    prepare_query_artifact,
     run_build_matrix,
     run_compassql_matrix,
     run_query_matrix,
@@ -61,6 +66,7 @@ from benchmarks.performance.compass.workspace import (
     QualificationWorkspace,
     prepare_checkout,
     resolve_remote_head,
+    validate_reused_checkout,
 )
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
@@ -266,12 +272,13 @@ def prepare(args: argparse.Namespace) -> int:
     identities = []
     with workspace.acquire():
         for repository in repositories:
-            _, commit = resolve_remote_head(repository.url)
+            commit = repository.commit
             identities.append(
                 prepare_checkout(
                     repository,
                     commit,
                     workspace.root / "corpora" / repository.name,
+                    pinned=True,
                 )
             )
     payload = {
@@ -402,50 +409,72 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
     corpora = []
     shared_gates: list[GateReport] = []
     with workspace.acquire():
-        compass = CompassAdapter.prepare(args.source_root)
+        compass = CompassAdapter.prepare(
+            args.source_root,
+            inference_level=args.inference_level,
+            cluster=comparison,
+        )
         graphify = (
             GraphifyAdapter.prepare(workspace, commit=graphify_commit)
             if comparison
             else None
         )
         for repository in repositories:
-            pinned_commit = repository_commits.get(repository.name)
-            if pinned_commit is None:
-                _, commit = resolve_remote_head(repository.url)
-            else:
-                commit = pinned_commit
-            identity = prepare_checkout(
-                repository,
-                commit,
-                workspace.root / "corpora" / repository.name,
-                pinned=pinned_commit is not None,
+            pinned_commit = repository_commits.get(repository.name, repository.commit)
+            commit = pinned_commit
+            identity = (
+                validate_reused_checkout(
+                    repository,
+                    commit,
+                    args.reuse_corpora_root / repository.name,
+                )
+                if args.reuse_corpora_root is not None
+                else prepare_checkout(
+                    repository,
+                    commit,
+                    workspace.root / "corpora" / repository.name,
+                    pinned=True,
+                )
             )
             corpora.append(identity)
             checkout = Path(identity.path)
-            compass_builds = run_build_matrix(
-                compass,
-                checkout,
-                artifact_root,
-                repository,
-                repeats=args.build_repeats,
-                timeout_seconds=args.build_timeout,
-            )
-            results.extend(compass_builds)
-            compass_graph = compass.graph_path(
-                artifact_root / "compass" / repository.name
-            )
+            compass_graph = None
+            if args.workload in {"all", "build", "compassql"}:
+                compass_builds = run_build_matrix(
+                    compass,
+                    checkout,
+                    artifact_root,
+                    repository,
+                    repeats=args.build_repeats,
+                    timeout_seconds=args.build_timeout,
+                )
+                results.extend(compass_builds)
+                compass_graph = compass.graph_path(
+                    artifact_root / "compass" / repository.name
+                )
             if args.workload in {"all", "query"}:
+                compass_query_graph = prepare_query_artifact(
+                    compass,
+                    checkout,
+                    artifact_root,
+                    repository,
+                    reuse_root=args.reuse_query_artifacts,
+                    timeout_seconds=args.build_timeout,
+                )
                 results.extend(
                     run_query_matrix(
                         compass,
-                        compass_graph,
+                        compass_query_graph,
                         artifact_root,
                         repository,
                         batches=args.query_batches,
                         timeout_seconds=args.query_timeout,
+                        allow_legacy_digest=args.allow_legacy_query_digest,
                     )
                 )
             if args.workload in {"all", "compassql"}:
+                if compass_graph is None:
+                    raise RuntimeError("CompassQL qualification has no build artifact")
                 results.extend(
                     run_compassql_matrix(
                         compass,
@@ -457,19 +486,27 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
                     )
                 )
             if graphify is not None:
-                results.extend(
-                    run_build_matrix(
+                if args.workload in {"all", "build", "compassql"}:
+                    results.extend(run_build_matrix(
                         graphify,
                         checkout,
                         artifact_root,
                         repository,
                         repeats=args.build_repeats,
                         timeout_seconds=args.build_timeout,
+                    ))
+                    graphify_graph = graphify.graph_path(
+                        artifact_root / "graphify" / repository.name
                     )
-                )
-                graphify_graph = graphify.graph_path(
-                    artifact_root / "graphify" / repository.name
-                )
+                else:
+                    graphify_graph = prepare_query_artifact(
+                        graphify,
+                        checkout,
+                        artifact_root,
+                        repository,
+                        reuse_root=args.reuse_query_artifacts,
+                        timeout_seconds=args.build_timeout,
+                    )
                 if args.workload in {"all", "query"}:
                     results.extend(
                         run_query_matrix(
@@ -481,9 +518,10 @@ def qualify(args: argparse.Namespace, *, comparison: bool) -> int:
                             timeout_seconds=args.query_timeout,
                         )
                     )
+                comparison_compass_graph = compass_graph or compass_query_graph
                 shared_gates.append(
                     _shared_graph_gate(
-                        compass_graph,
+                        comparison_compass_graph,
                         graphify_graph,
                         repository.name,
                         checkout,
@@ -595,6 +633,15 @@ def typescript_scorecard(args: argparse.Namespace) -> int:
     return 0 if result["passed"] else 1
 
 
+def multiplicity(args: argparse.Namespace) -> int:
+    result = audit_multiplicity(
+        args.graph,
+        max_relationships=args.max_relationships,
+    )
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    return 0 if result["passed"] else 1
+
+
 def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None:
     parser.add_argument("--suite", type=Path, default=DEFAULT_SUITE)
     parser.add_argument("--workspace", type=Path, default=DEFAULT_WORKSPACE)
@@ -611,7 +658,20 @@ def _common(parser: argparse.ArgumentParser, *, execution: bool = False) -> None
         parser.add_argument("--build-timeout", type=float, default=1800)
         parser.add_argument("--graph-comparison-timeout", type=float, default=600)
         parser.add_argument("--query-timeout", type=float, default=120)
+        parser.add_argument(
+            "--inference-level",
+            choices=("low", "medium", "high", "max"),
+            default="low",
+            help="select the Compass inference profile (default: low)",
+        )
         parser.add_argument("--baseline", type=Path)
+        parser.add_argument("--reuse-corpora-root", type=Path)
+        parser.add_argument("--reuse-query-artifacts", type=Path)
+        parser.add_argument(
+            "--allow-legacy-query-digest",
+            action="store_true",
+            help="label pre-digest Compass CLI/MCP payloads with a legacy harness digest",
+        )
         parser.add_argument(
             "--repository-commit",
             action="append",
@@ -656,6 +716,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scorecard_parser.add_argument("--scorecard", type=Path, required=True)
     scorecard_parser.add_argument("--output", type=Path)
+    multiplicity_parser = subparsers.add_parser(
+        "multiplicity",
+        help="audit parallel relationship occurrences and serialized size",
+    )
+    multiplicity_parser.add_argument("--graph", type=Path, required=True)
+    multiplicity_parser.add_argument(
+        "--max-relationships",
+        type=int,
+        default=DEFAULT_MAX_RELATIONSHIPS,
+    )
     return parser
 
 
@@ -685,6 +755,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return audit_candidates(args)
         if args.command == "typescript-scorecard":
             return typescript_scorecard(args)
+        if args.command == "multiplicity":
+            return multiplicity(args)
     except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2

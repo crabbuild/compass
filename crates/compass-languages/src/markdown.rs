@@ -63,6 +63,7 @@ pub(crate) fn extract_source(
         seen_nodes: HashSet::new(),
         heading_stack: Vec::new(),
         heading_occurrences: HashMap::new(),
+        heading_slug_occurrences: HashMap::new(),
         heading_targets: HashMap::new(),
         reference_definitions: HashMap::new(),
         footnote_definitions: HashMap::new(),
@@ -167,6 +168,7 @@ struct State<'source, 'path> {
     seen_nodes: HashSet<String>,
     heading_stack: Vec<HeadingFrame>,
     heading_occurrences: HashMap<String, usize>,
+    heading_slug_occurrences: HashMap<String, usize>,
     heading_targets: HashMap<String, Vec<String>>,
     reference_definitions: HashMap<String, String>,
     footnote_definitions: HashMap<String, Vec<String>>,
@@ -201,6 +203,12 @@ struct LinkSite {
     end_byte: usize,
     line: usize,
     line_start: usize,
+}
+
+struct DocumentTargetHint {
+    path: String,
+    extension_inferred: bool,
+    root_relative: bool,
 }
 
 impl State<'_, '_> {
@@ -328,13 +336,14 @@ impl State<'_, '_> {
                 .to_owned(),
             ),
         );
-        let anchor_slug = slugify(explicit_id.as_deref().unwrap_or(title));
+        let anchor_slug = self.heading_anchor_slug(title, explicit_id.as_deref());
         extra.insert("anchor_slug".to_owned(), Value::String(anchor_slug.clone()));
         // A fragment URI is the typed marker that this document resource is a
         // semantic heading rather than an arbitrary repeated block. The v1
         // identity layer can therefore use its hierarchical qualified name
         // and remain stable when prose is inserted before the heading.
-        extra.insert("uri".to_owned(), Value::String(format!("#{anchor_slug}")));
+        let semantic_slug = slugify(explicit_id.as_deref().unwrap_or(title));
+        extra.insert("uri".to_owned(), Value::String(format!("#{semantic_slug}")));
         if let Some(explicit_id) = explicit_id.as_deref() {
             extra.insert(
                 "explicit_id".to_owned(),
@@ -349,7 +358,7 @@ impl State<'_, '_> {
             parent.as_deref(),
             extra,
         );
-        self.register_heading_target(title, explicit_id.as_deref(), &id);
+        self.register_heading_target(&anchor_slug, explicit_id.as_deref(), &id);
         self.collect_inline_descendants(node, &id);
         self.heading_stack.push(HeadingFrame {
             level,
@@ -410,6 +419,24 @@ impl State<'_, '_> {
             extra.insert("table_role".to_owned(), Value::String("row".to_owned()));
         } else if kind == "pipe_table_cell" {
             extra.insert("table_role".to_owned(), Value::String("cell".to_owned()));
+        }
+        if let Some(section) = self.heading_stack.last() {
+            extra.insert(
+                "document_section".to_owned(),
+                Value::String(section.qualified_name.clone()),
+            );
+            extra.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!(
+                    "{}::{kind}#{}",
+                    section.qualified_name, self.next_block_index
+                )),
+            );
+        } else {
+            extra.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!("{}::{kind}#{}", self.stem, self.next_block_index)),
+            );
         }
         let id = self.add_block_node(
             id,
@@ -931,8 +958,26 @@ impl State<'_, '_> {
         owner
     }
 
-    fn register_heading_target(&mut self, title: &str, explicit_id: Option<&str>, id: &str) {
-        let mut keys = vec![slugify(title)];
+    fn heading_anchor_slug(&mut self, title: &str, explicit_id: Option<&str>) -> String {
+        let base = slugify(explicit_id.unwrap_or(title));
+        if explicit_id.is_some() || base.is_empty() {
+            return base;
+        }
+        let occurrence = self
+            .heading_slug_occurrences
+            .entry(base.clone())
+            .or_default();
+        let slug = if *occurrence == 0 {
+            base
+        } else {
+            format!("{base}-{occurrence}")
+        };
+        *occurrence = occurrence.saturating_add(1);
+        slug
+    }
+
+    fn register_heading_target(&mut self, anchor_slug: &str, explicit_id: Option<&str>, id: &str) {
+        let mut keys = vec![anchor_slug.to_ascii_lowercase()];
         if let Some(explicit_id) = explicit_id {
             keys.push(explicit_id.to_ascii_lowercase());
             keys.push(slugify(explicit_id));
@@ -1007,13 +1052,13 @@ impl State<'_, '_> {
                 .split_once('?')
                 .map_or(path_part, |(path, _)| path)
                 .trim();
-            let target_path = if path_part.is_empty() {
+            let root_relative = path_part.starts_with('/');
+            let unresolved_path = if path_part.is_empty() {
                 lexical_normalize(self.path)
+            } else if root_relative {
+                lexical_normalize(Path::new(path_part.trim_start_matches('/')))
             } else {
-                let mut target = PathBuf::from(path_part);
-                if target.extension().is_none() {
-                    target.set_extension("md");
-                }
+                let target = PathBuf::from(path_part);
                 if target.is_absolute() {
                     target
                 } else {
@@ -1026,14 +1071,20 @@ impl State<'_, '_> {
                     )
                 }
             };
+            let extension_inferred = unresolved_path.extension().is_none();
+            let mut target_path = unresolved_path.clone();
+            if extension_inferred {
+                target_path.set_extension("md");
+            }
             let same_file = lexical_normalize(self.path) == target_path;
             if same_file {
                 if let Some(fragment) = fragment.filter(|fragment| !fragment.is_empty()) {
-                    let key = fragment.to_ascii_lowercase();
+                    let fragment_key = decode_fragment(fragment);
+                    let key = fragment_key.to_ascii_lowercase();
                     let candidates = self
                         .heading_targets
                         .get(&key)
-                        .or_else(|| self.heading_targets.get(&slugify(fragment)));
+                        .or_else(|| self.heading_targets.get(&slugify(&fragment_key)));
                     match candidates {
                         Some(candidates) if candidates.len() == 1 => {
                             if let Some(target_id) = candidates.first() {
@@ -1050,9 +1101,6 @@ impl State<'_, '_> {
                 }
                 continue;
             }
-            if is_documentable_source(&target_path) && !target_path.is_file() {
-                continue;
-            }
             if !is_supported_local_link(&target_path) {
                 continue;
             }
@@ -1062,7 +1110,16 @@ impl State<'_, '_> {
             } else {
                 "references"
             };
-            self.add_link_edge(&pending, target_id, Some((relation, fragment)));
+            self.add_link_edge_with_hint(
+                &pending,
+                target_id,
+                Some((relation, fragment)),
+                DocumentTargetHint {
+                    path: unresolved_path.to_string_lossy().replace('\\', "/"),
+                    extension_inferred,
+                    root_relative,
+                },
+            );
         }
     }
 
@@ -1081,6 +1138,28 @@ impl State<'_, '_> {
             pending.kind,
             fragment,
         );
+    }
+
+    fn add_link_edge_with_hint(
+        &mut self,
+        pending: &PendingLink,
+        target: String,
+        relation: Option<(&str, Option<&str>)>,
+        hint: DocumentTargetHint,
+    ) {
+        self.add_link_edge(pending, target, relation);
+        if let Some(edge) = self.extraction.edges.last_mut() {
+            edge.attributes
+                .insert("_document_target_path".to_owned(), Value::String(hint.path));
+            edge.attributes.insert(
+                "_document_target_extension_inferred".to_owned(),
+                Value::Bool(hint.extension_inferred),
+            );
+            edge.attributes.insert(
+                "_document_target_root_relative".to_owned(),
+                Value::Bool(hint.root_relative),
+            );
+        }
     }
 
     fn add_unresolved(&mut self, pending: &PendingLink, reason: &str, target: &str) {
@@ -1649,6 +1728,34 @@ fn slugify(text: &str) -> String {
         }
     }
     slug
+}
+
+fn decode_fragment(fragment: &str) -> String {
+    let bytes = fragment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len().min(512));
+    let mut index = 0;
+    while index < bytes.len() && decoded.len() < 512 {
+        if bytes[index] == b'%'
+            && let (Some(high), Some(low)) = (bytes.get(index + 1), bytes.get(index + 2))
+            && let (Some(high), Some(low)) = (hex_digit(*high), hex_digit(*low))
+        {
+            decoded.push(high.saturating_mul(16).saturating_add(low));
+            index = index.saturating_add(3);
+            continue;
+        }
+        decoded.push(bytes[index]);
+        index = index.saturating_add(1);
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+const fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn normalize_reference_label(label: &str) -> String {

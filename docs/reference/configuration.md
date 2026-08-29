@@ -95,6 +95,21 @@ Initialize a reviewable repository scope with:
 compass init . --include src --exclude '**/generated/**' --yes
 ```
 
+### Inference policy
+
+Select graph breadth per build with:
+
+```bash
+compass update . --inference-level medium
+```
+
+Supported values are `low`, `medium`, `high`, and `max`; the default is `low`.
+The option is available on `init`, `update`, `extract`, and `watch`. Use
+explicit `max` when the former complete-inference breadth is required. It is a
+build-profile input, so changing it causes a coherent republish even when
+source files are unchanged. Extraction caches keep the complete normalized
+evidence and can be reused across levels.
+
 Compass writes:
 
 ```toml
@@ -283,15 +298,27 @@ Natural-language discovery:
 ```text
 --dfs
 --context VALUE
---budget N
---page N
+--direction auto|incoming|outgoing|both
+--scope KIND:VALUE
+--text-budget N
+--cursor TOKEN
 --graph PATH | --at REV
+--max-nodes N
+--max-edges N
 ```
 
-`--budget` controls approximate tokens per page (default 2,000). `--page` is
-one-based. Repeat all other query inputs unchanged when following the
-`previous` or `next` page reported in output. `compass explain` accepts the
-same two output controls for connection and ambiguity pages.
+`--context VALUE` filters stored relationship evidence contexts such as `call`,
+`import`, or `route`; it does not scope retrieval to a node, file, package,
+community, or subsystem. Use repeatable `--scope KIND:VALUE` for an explicit OR
+scope over `community`, `source`, `package`, or `node`.
+
+`--text-budget` controls approximate rendered tokens per discovery page
+(default 2,000). Follow the opaque `next` cursor with the same semantic query;
+the presentation-only text budget may change. `--traverse`, `--budget`, and
+`--page` explicitly select the bounded legacy compatibility renderer.
+The default semantic neighborhood contains at most 64 nodes and 128 edges.
+`--max-nodes` and `--max-edges` may raise those bounds to the hard ceilings of
+500 nodes and 1,000 edges when a wider response is intentional.
 
 CompassQL:
 

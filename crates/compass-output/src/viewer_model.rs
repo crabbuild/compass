@@ -64,6 +64,10 @@ pub struct GraphViewNode {
     pub learning_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub learning_stale: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root: Option<bool>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -159,6 +163,8 @@ pub fn graph_view_model(
                 }),
                 learning_status: non_empty(object, "learning_status"),
                 learning_stale: object.get("learning_stale").and_then(Value::as_bool),
+                depth: None,
+                root: None,
             })
         })
         .collect::<Vec<_>>();

@@ -4,7 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use compass_graph::GraphSnapshotBuilder;
-use compass_model::query_contract::{CodeQueryLimits, CodeQueryOperation, QueryDiagnosticCode};
+use compass_model::query_contract::{
+    CodeQueryLimits, CodeQueryOperation, MAX_INDEXED_CANDIDATE_NODES_READ, QueryDiagnosticCode,
+};
 use compass_query::{
     EngineSelection, NaturalQueryIntent, NaturalQueryRequest, ProfiledCodeQueryResponse,
     QUERY_EXECUTION_PROFILE_V1, QUERY_PLANNER_PROFILE_V1, QUERY_RANKER_PROFILE_V2,
@@ -157,7 +159,10 @@ fn structural_intents_use_bounded_fuzzy_recall_and_relation_evidence()
         )?;
         let response = engine.query_natural(request("who calls UserService.lits?"))?;
         assert_eq!(response.operation, CodeQueryOperation::Callers);
-        assert!(response.nodes.iter().any(|node| node.id == "n:list"));
+        assert!(
+            response.nodes.iter().any(|node| node.id == "n:list"),
+            "{response:#?}"
+        );
         assert!(!response.nodes.iter().any(|node| node.id == "n:ilts"));
         assert!(response.edges.iter().any(|edge| edge.target == "n:list"));
     }
@@ -177,13 +182,20 @@ fn profiled_natural_queries_report_real_stage_work_without_changing_the_response
         EngineSelection::Json,
     )?;
     let profiled = engine.query_natural_profiled(request("who calls UserService.list?"))?;
+    let repeated = engine.query_natural_profiled(request("who calls UserService.list?"))?;
     let ordinary = engine.query_natural(request("who calls UserService.list?"))?;
 
     assert_eq!(profiled.response, ordinary);
+    assert_eq!(profiled.response, repeated.response);
     assert_eq!(profiled.profile.schema, QUERY_EXECUTION_PROFILE_V1);
     assert_eq!(profiled.profile.planner_profile, QUERY_PLANNER_PROFILE_V1);
     assert_eq!(profiled.profile.ranker_profile, QUERY_RANKER_PROFILE_V2);
     assert!(profiled.profile.work.candidates_read > 0);
+    assert_eq!(
+        profiled.profile.work.candidates_read,
+        repeated.profile.work.candidates_read
+    );
+    assert!(profiled.profile.work.candidates_read <= MAX_INDEXED_CANDIDATE_NODES_READ);
     assert!(profiled.profile.work.nodes_expanded > 0);
     assert!(profiled.profile.work.edges_expanded > 0);
     assert_eq!(

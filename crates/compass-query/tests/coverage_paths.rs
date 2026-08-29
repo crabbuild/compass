@@ -239,7 +239,7 @@ fn benchmark_and_text_helpers_cover_unicode_ascii_and_error_modes() -> Result<()
 
     assert_eq!(search_tokens("Crème brûlée"), vec!["creme", "brulee"]);
     assert!(query_terms("知识图谱如何工作").len() >= 2);
-    assert_eq!(query_terms("how what why"), vec!["how", "what", "why"]);
+    assert_eq!(query_terms("how what why"), vec!["why"]);
     assert_eq!(
         normalize_context_filters(&[
             " Args ".to_owned(),

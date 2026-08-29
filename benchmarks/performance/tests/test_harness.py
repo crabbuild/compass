@@ -41,6 +41,10 @@ class HarnessTests(unittest.TestCase):
                 ]
             ).command,
         )
+        self.assertEqual(
+            "multiplicity",
+            parser.parse_args(["multiplicity", "--graph", "graph.json"]).command,
+        )
 
     def test_comparison_is_explicit(self) -> None:
         parser = build_parser()
@@ -62,6 +66,14 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual([f"django={'a' * 40}"], args.repository_commit)
         self.assertEqual("b" * 40, args.graphify_commit)
+
+    def test_inference_level_is_explicit_and_defaults_to_low(self) -> None:
+        parser = build_parser()
+        self.assertEqual("low", parser.parse_args(["run"]).inference_level)
+        self.assertEqual(
+            "low",
+            parser.parse_args(["compare", "--inference-level", "low"]).inference_level,
+        )
 
     def test_repository_commit_overrides_fail_closed(self) -> None:
         selected = (

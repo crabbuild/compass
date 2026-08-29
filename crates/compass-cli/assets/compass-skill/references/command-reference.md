@@ -18,6 +18,8 @@ whether a Compass capability is covered by the installed skill. Run
 - `compass explore`: return related source grouped by file plus connecting
   paths in one bounded response.
 - `compass node`: show an attributable evidence trail between two symbols.
+- `compass context`: compose a bounded, digest-verified evidence packet for an
+  explain, modify, debug, or test task after exact target resolution.
 - `compass call-graph`: trace bounded callers, callees, or both from a source
   position or structural symbol, with optional Program IR enrichment.
 - `compass query`: budgeted, deterministic pages of natural-language graph
@@ -77,11 +79,20 @@ long-lived. Every command in this group writes local state.
   registry.
 - `compass prs`: inspect pull requests, worktrees, likely conflicts, base
   branches, and graph impact.
+- `compass review`: analyze one exact target/head candidate and emit a typed PR
+  Intelligence report as reviewer text, canonical JSON, bounded Markdown, or
+  SARIF; add `--readiness` for the independent digest-linked readiness
+  envelope. Local mode resolves `--base` and `--head` without fetching; GitHub
+  mode freezes the revisions identified by `--pr` and `--repo` and requires
+  those objects in the local repository.
 - `compass merge-driver`: three-way merge entry point for a configured Git merge
   driver, not an ordinary file merge command.
 
 Keep repository origins and graph revisions visible when composing results.
 Never treat PR impact as proof of a textual conflict.
+Advisory risk from `review` is reviewer evidence, not an exit-status policy.
+Only the Action's explicit `fail-on: deterministic` setting may turn a proven
+deterministic gate failure into a failing check.
 
 ## Knowledge and semantic operations
 

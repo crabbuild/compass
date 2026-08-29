@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::error::Error;
 
 use compass_graph::{
@@ -6,15 +7,18 @@ use compass_graph::{
     garbage_collect_graph_snapshots, graph_snapshot_needs_gc,
 };
 use compass_model::code_graph::{
-    BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
-    GraphDocument, NodeDetails, NodeKind, NodeRecord,
+    BuildMetadata, CommunityMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails,
+    FileRecord, GraphDocument, NodeDetails, NodeKind, NodeRecord,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
     EvidenceConfidence, EvidenceOrigin, OccurrenceRule, Provenance, SourceAnchor,
 };
 use compass_store::SqliteStore;
-use compass_store::{Key, MemoryStore, NamespaceId, PartitionKey, Store, WriteCondition};
+use compass_store::{
+    Key, KeyRange, MAX_GRAPH_BYTES, MAX_VALUE_BYTES, MemoryStore, NamespaceId, PartitionKey,
+    ScanLimits, Store, WriteCondition,
+};
 use sha2::Digest;
 use tempfile::tempdir;
 
@@ -159,9 +163,12 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
         unknown.validate(),
         Err(SnapshotError::Unsupported(_))
     ));
-    let mut oversized = first.manifest.clone();
-    oversized.edge_count = (compass_graph::GRAPH_SNAPSHOT_MAX_ITEMS as u64) + 1;
-    assert!(matches!(oversized.validate(), Err(SnapshotError::Limit(_))));
+    let mut mismatched = first.manifest.clone();
+    mismatched.edge_count = mismatched.edge_count.saturating_add(1);
+    assert!(matches!(
+        mismatched.validate(),
+        Err(SnapshotError::Corrupt(_))
+    ));
     assert_eq!(second.new_objects, 0);
     assert!(second.reused_objects > 0);
     assert_eq!(first.write_transactions, 2);
@@ -177,15 +184,40 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
     assert_eq!(reader.outgoing("a", limits(4))?.len(), 2);
     assert_eq!(reader.incoming("b", limits(4))?.len(), 2);
     assert!(reader.outgoing("b", limits(4))?.is_empty());
+    let node_ids = ["a".to_owned(), "b".to_owned()]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        reader
+            .get_nodes_by_ids_bounded_work(&node_ids, limits(4))?
+            .into_iter()
+            .map(|node| node.id)
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+    let edge_ids = graph()
+        .links
+        .into_iter()
+        .map(|edge| edge.id)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        reader
+            .get_edges_by_ids_bounded_work(&edge_ids, limits(4))?
+            .into_iter()
+            .map(|edge| edge.id)
+            .collect::<Vec<_>>(),
+        edge_ids.into_iter().collect::<Vec<_>>()
+    );
     let (named, named_truncated) = reader.nodes_by_normalized_name("A", limits(4))?;
     assert!(!named_truncated);
     assert_eq!(
         named.into_iter().map(|node| node.id).collect::<Vec<_>>(),
         ["a"]
     );
-    let (term_nodes, term_truncated) = reader.nodes_for_terms(&["crat".to_owned()], limits(4))?;
+    let (term_nodes, term_truncated) =
+        reader.nodes_for_terms(&["rust".to_owned()], limits(12_800))?;
     assert!(!term_truncated);
-    assert_eq!(term_nodes.len(), 2);
+    assert_eq!(term_nodes.len(), 3);
     assert_eq!(
         reader.file_by_path("src/lib.rs")?.map(|file| file.path),
         Some("src/lib.rs".to_owned())
@@ -221,6 +253,61 @@ fn snapshot_is_deterministic_and_reuses_immutable_objects() -> Result<(), Box<dy
 }
 
 #[test]
+fn segmented_snapshot_accepts_a_logical_graph_larger_than_two_gibibytes()
+-> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let content = builder.prepare_content(&store, &graph())?;
+    let logical_graph_bytes = (MAX_GRAPH_BYTES as u64).saturating_add(1);
+
+    let prepared = builder.finish_content(&store, content, "a".repeat(64), logical_graph_bytes)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    assert_eq!(reader.manifest().graph_bytes, logical_graph_bytes);
+    assert_eq!(
+        reader.get_node("a")?.map(|node| node.id),
+        Some("a".to_owned())
+    );
+    let object_page = store.scan(
+        &NamespaceId::graph(),
+        &PartitionKey::new("graph-snapshot/objects")?,
+        &KeyRange::default(),
+        ScanLimits::default(),
+        None,
+    )?;
+    assert!(object_page.next.is_none());
+    assert!(!object_page.entries.is_empty());
+    assert!(
+        object_page
+            .entries
+            .iter()
+            .all(|entry| entry.value.len() <= MAX_VALUE_BYTES)
+    );
+    Ok(())
+}
+
+#[test]
+fn segmented_manifest_counts_are_not_limited_by_materialized_read_budgets()
+-> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let mut manifest = GraphSnapshotBuilder::new()
+        .prepare(&store, &graph())?
+        .manifest;
+    let logical_node_count = (compass_graph::GRAPH_SNAPSHOT_MAX_ITEMS as u64).saturating_add(1);
+    manifest.node_count = logical_node_count;
+    manifest
+        .roots
+        .iter_mut()
+        .find(|root| root.index == IndexKind::Nodes)
+        .ok_or("node root missing")?
+        .entry_count = logical_node_count;
+
+    manifest.validate()?;
+    Ok(())
+}
+
+#[test]
 fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn Error>> {
     let store = MemoryStore::default();
     let builder = GraphSnapshotBuilder::new();
@@ -229,12 +316,17 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
     cafe.name = "café".to_owned();
     cafe.qualified_name = "crate::café".to_owned();
     document.nodes.push(cafe);
+    let mut identifier = node("identifier");
+    identifier.name = "HTTPCheckpoint_session_state".to_owned();
+    identifier.qualified_name = "crate::HTTPCheckpoint_session_state".to_owned();
+    document.nodes.push(identifier);
 
     let prepared = builder.prepare(&store, &document)?;
     builder.activate(&store, &prepared)?;
     let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert!(reader.supports_identifier_subwords()?);
 
-    let (nodes, truncated) = reader.nodes_for_terms(&["cafe".to_owned()], limits(8))?;
+    let (nodes, truncated) = reader.nodes_for_terms(&["cafe".to_owned()], limits(128))?;
     assert!(!truncated);
     assert_eq!(nodes.len(), 1);
     assert_eq!(
@@ -242,8 +334,18 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
         ["cafe"]
     );
 
+    for term in ["http", "checkpoint", "session", "state"] {
+        let (nodes, truncated) = reader.nodes_for_terms(&[term.to_owned()], limits(128))?;
+        assert!(!truncated, "{term}");
+        assert_eq!(
+            nodes.into_iter().map(|node| node.id).collect::<Vec<_>>(),
+            ["identifier"],
+            "{term}"
+        );
+    }
+
     let (nodes_with_punctuation, truncated) =
-        reader.nodes_for_terms(&["café".to_owned()], limits(8))?;
+        reader.nodes_for_terms(&["café".to_owned()], limits(128))?;
     assert!(!truncated);
     assert_eq!(
         nodes_with_punctuation
@@ -253,6 +355,282 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
         ["cafe"]
     );
 
+    Ok(())
+}
+
+#[test]
+fn identifier_subword_capability_is_found_in_a_multilevel_terms_tree() -> Result<(), Box<dyn Error>>
+{
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    document.nodes.clear();
+    document.links.clear();
+    document.nodes.push(node("caller"));
+    for index in 0..4_200 {
+        let target_id = format!("term-{index:04}");
+        let mut term_node = node(&target_id);
+        term_node.name = format!("UniqueCapabilityTerm{index:04}");
+        term_node.qualified_name = format!("fixture::UniqueCapabilityTerm{index:04}");
+        document.nodes.push(term_node);
+        let call_id = edge_id("caller", EdgeKind::Calls, &target_id, None, None);
+        document.links.push(EdgeRecord {
+            id: call_id.clone(),
+            key: call_id,
+            source: "caller".to_owned(),
+            target: target_id,
+            kind: EdgeKind::Calls,
+            occurrence_rule: None,
+            relationship_site: None,
+            details: None,
+            evidence: vec![evidence()],
+            weight: None,
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+    }
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    let terms = reader
+        .manifest()
+        .roots
+        .iter()
+        .find(|root| root.index == IndexKind::Terms)
+        .ok_or("terms root missing")?;
+    assert!(terms.entry_count > 4_096);
+    assert!(reader.supports_identifier_subwords()?);
+    assert!(reader.supports_relationship_terms()?);
+    assert!(reader.relationship_source_matches_term("caller", "uniquecapabilityterm4199")?);
+    let (source_ids, truncated, work) = reader
+        .source_ids_for_exact_relationship_term_bounded_work(
+            "uniquecapabilityterm4199",
+            limits(128),
+        )?;
+    assert!(!truncated);
+    assert_eq!(source_ids, ["caller"]);
+    assert_eq!(work.node_ids_decoded, 1);
+    let (target_ids, target_truncated, target_work) = reader
+        .relationship_target_ids_for_source_terms_bounded_work(
+            "caller",
+            &["uniquecapabilityterm4199".to_owned()]
+                .into_iter()
+                .collect(),
+            limits(128),
+        )?;
+    assert!(!target_truncated);
+    assert_eq!(target_ids, ["term-4199"]);
+    assert_eq!(target_work.node_ids_decoded, 1);
+    let common_terms = ["capability".to_owned(), "unique".to_owned()]
+        .into_iter()
+        .collect();
+    let (bounded_targets, bounded_truncated, bounded_work) = reader
+        .relationship_target_ids_for_source_terms_bounded_work(
+            "caller",
+            &common_terms,
+            limits(17),
+        )?;
+    assert!(bounded_truncated);
+    assert_eq!(bounded_targets.len(), 9);
+    assert_eq!(
+        bounded_targets.first().map(String::as_str),
+        Some("term-0000")
+    );
+    assert_eq!(
+        bounded_targets.last().map(String::as_str),
+        Some("term-0008")
+    );
+    assert_eq!(bounded_work.node_ids_decoded, 17);
+    Ok(())
+}
+
+#[test]
+fn multi_term_prefix_lookup_includes_longer_symbol_terms() -> Result<(), Box<dyn Error>> {
+    let mut document = graph();
+    let mut list = node("n:list");
+    list.name = "list".to_owned();
+    list.qualified_name = "UserService.list".to_owned();
+    let mut listing = node("n:listing");
+    listing.name = "listing".to_owned();
+    listing.qualified_name = "UserService.listing".to_owned();
+    document.nodes.extend([list, listing]);
+    let call_id = edge_id("a", EdgeKind::Calls, "n:list", None, None);
+    document.links.push(EdgeRecord {
+        id: call_id.clone(),
+        key: call_id,
+        source: "a".to_owned(),
+        target: "n:list".to_owned(),
+        kind: EdgeKind::Calls,
+        occurrence_rule: None,
+        relationship_site: None,
+        details: None,
+        evidence: vec![evidence()],
+        weight: None,
+        context: None,
+        deferred: false,
+        diagnostics: Vec::new(),
+    });
+    document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let store = MemoryStore::default();
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &document)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    let (nodes, truncated) = reader.nodes_for_terms(
+        &["userservice".to_owned(), "list".to_owned()],
+        SnapshotReadLimits::default(),
+    )?;
+
+    assert!(!truncated);
+    assert_eq!(
+        nodes
+            .into_iter()
+            .map(|node| node.id)
+            .filter(|id| id.starts_with("n:list"))
+            .collect::<Vec<_>>(),
+        ["n:list", "n:listing"]
+    );
+    for term in ["user", "service"] {
+        let (exact_ids, id_truncated, id_work) =
+            reader.node_ids_for_exact_term_bounded_work(term, SnapshotReadLimits::default())?;
+        let (exact_nodes, exact_truncated, _) =
+            reader.nodes_for_exact_term_bounded_work(term, SnapshotReadLimits::default())?;
+        assert!(!id_truncated);
+        assert!(!exact_truncated);
+        assert_eq!(
+            exact_ids
+                .iter()
+                .filter(|id| id.starts_with("n:list"))
+                .collect::<Vec<_>>(),
+            ["n:list", "n:listing"]
+        );
+        assert!(id_work.node_ids_decoded >= u64::try_from(exact_ids.len()).unwrap_or(u64::MAX));
+        assert_eq!(
+            exact_nodes
+                .into_iter()
+                .map(|node| node.id)
+                .filter(|id| id.starts_with("n:list"))
+                .collect::<Vec<_>>(),
+            ["n:list", "n:listing"]
+        );
+    }
+    let (callers, caller_truncated, _) = reader
+        .source_ids_for_exact_relationship_term_bounded_work(
+            "list",
+            SnapshotReadLimits::default(),
+        )?;
+    assert!(!caller_truncated);
+    assert_eq!(callers, ["a"]);
+    let (targets, target_truncated, target_work) = reader
+        .relationship_target_ids_for_source_terms_bounded_work(
+            "a",
+            &["list".to_owned()].into_iter().collect(),
+            SnapshotReadLimits::default(),
+        )?;
+    assert!(!target_truncated);
+    assert_eq!(targets, ["n:list"]);
+    assert_eq!(target_work.node_ids_decoded, 1);
+    for namespace_only in ["user", "service"] {
+        assert!(!reader.relationship_source_matches_term("a", namespace_only)?);
+    }
+    Ok(())
+}
+
+#[test]
+fn relationship_target_batch_dedupes_shared_targets_under_one_low_bound()
+-> Result<(), Box<dyn Error>> {
+    let mut document = graph();
+    let mut shared = node("t:shared");
+    shared.name = "CheckpointCreate".to_owned();
+    let mut create = node("t:create");
+    create.name = "CreateSession".to_owned();
+    document.nodes.extend([shared, create]);
+    for (rule, target) in [
+        (None, "t:shared"),
+        (Some("parallel"), "t:shared"),
+        (None, "t:create"),
+    ] {
+        let id = edge_id("a", EdgeKind::Calls, target, None, rule);
+        document.links.push(EdgeRecord {
+            id: id.clone(),
+            key: id,
+            source: "a".to_owned(),
+            target: target.to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: rule.and_then(OccurrenceRule::new),
+            relationship_site: None,
+            details: None,
+            evidence: vec![evidence()],
+            weight: None,
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+    }
+    document.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    document.links.sort_by(|left, right| left.id.cmp(&right.id));
+    let store = MemoryStore::default();
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &document)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    let terms = ["checkpoint".to_owned(), "create".to_owned()]
+        .into_iter()
+        .collect();
+
+    let (targets, truncated, work) = reader.relationship_target_ids_for_source_terms_bounded_work(
+        "a",
+        &terms,
+        SnapshotReadLimits::default(),
+    )?;
+    assert!(!truncated);
+    assert_eq!(targets, ["t:create", "t:shared"]);
+    assert_eq!(work.node_ids_decoded, 3);
+
+    let (bounded, bounded_truncated, bounded_work) =
+        reader.relationship_target_ids_for_source_terms_bounded_work("a", &terms, limits(2))?;
+    assert!(bounded_truncated);
+    assert_eq!(bounded, ["t:create", "t:shared"]);
+    assert_eq!(bounded_work.node_ids_decoded, 2);
+    Ok(())
+}
+
+#[test]
+fn term_posting_work_is_bounded_before_multi_term_intersection() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    document.nodes.clear();
+    document.links.clear();
+    for index in 0..128 {
+        let mut candidate = node(&format!("n:{index:03}"));
+        candidate.name = if index == 0 { "alpha" } else { "beta" }.to_owned();
+        document.nodes.push(candidate);
+    }
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert_eq!(reader.nodes(limits(300))?.len(), 128);
+
+    let (alpha, alpha_truncated, alpha_work) =
+        reader.nodes_for_terms_bounded_work(&["crat".to_owned()], limits(128))?;
+    assert_eq!(alpha.len(), 128);
+    assert!(!alpha_truncated);
+    assert_eq!(alpha_work.node_ids_decoded, 128);
+
+    let (nodes, truncated, work) = reader
+        .nodes_for_terms_bounded_work(&["crat".to_owned(), "alpha".to_owned()], limits(256))?;
+    assert_eq!(nodes.len(), 1);
+    assert!(!truncated);
+    assert_eq!(work.chunks_decoded, 2);
+    assert_eq!(work.node_ids_decoded, 129);
+
+    let (nodes, truncated, work) =
+        reader.nodes_for_terms_bounded_work(&["crat".to_owned()], limits(127))?;
+    assert!(nodes.is_empty());
+    assert!(truncated);
+    assert_eq!(work.node_ids_decoded, 0);
     Ok(())
 }
 
@@ -431,12 +809,104 @@ fn graph_delta_rebuilds_relationship_indexes_without_rewriting_nodes() -> Result
 }
 
 #[test]
+fn graph_delta_rebuilds_discovery_scope_postings() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut previous = graph();
+    for path in ["src/old_a.rs", "src/new.rs"] {
+        let mut file = previous.graph.files[0].clone();
+        file.id = file_id(path);
+        file.path = path.to_owned();
+        previous.graph.files.push(file);
+    }
+    previous
+        .graph
+        .files
+        .sort_by(|left, right| left.id.cmp(&right.id));
+    let previous_node = previous
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "a")
+        .ok_or("node a missing")?;
+    previous_node.source = Some(SourceAnchor {
+        file: "src/old_a.rs".to_owned(),
+        ..anchor()
+    });
+    previous_node.community = Some(CommunityMetadata {
+        id: 7,
+        label: Some("old-community".to_owned()),
+        score: None,
+        color: None,
+    });
+    let first = builder.prepare(&store, &previous)?;
+    builder.activate(&store, &first)?;
+
+    let mut current = previous.clone();
+    let current_node = current
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "a")
+        .ok_or("node a missing")?;
+    current_node.qualified_name = "new_package::a".to_owned();
+    current_node.source = Some(SourceAnchor {
+        file: "src/new.rs".to_owned(),
+        ..anchor()
+    });
+    current_node.community = Some(CommunityMetadata {
+        id: 8,
+        label: Some("new-community".to_owned()),
+        score: None,
+        color: None,
+    });
+
+    let content = builder.prepare_graph_delta(&store, &previous, &current)?;
+    let graph_bytes = canonical_graph_json(&current)?;
+    let graph_digest = format!("{:x}", sha2::Sha256::digest(&graph_bytes));
+    let delta = builder.finish_content(&store, content, graph_digest, graph_bytes.len() as u64)?;
+    builder.activate(&store, &delta)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    for (kind, value) in [
+        ("node-qname", "crate::a"),
+        ("source", "src/old_a.rs"),
+        ("community-label", "old-community"),
+    ] {
+        assert!(
+            reader
+                .resolve_scope_values(kind, value, limits(16))?
+                .0
+                .is_empty()
+        );
+    }
+    assert_eq!(
+        reader
+            .resolve_scope_values("node-qname", "new_package::a", limits(16))?
+            .0,
+        ["a"]
+    );
+    assert_eq!(
+        reader
+            .resolve_scope_values("source", "src/new.rs", limits(16))?
+            .0,
+        ["src/new.rs"]
+    );
+    assert_eq!(
+        reader
+            .resolve_scope_values("community-label", "new-community", limits(16))?
+            .0,
+        ["8"]
+    );
+    Ok(())
+}
+
+#[test]
 fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
     let store = MemoryStore::default();
     let builder = GraphSnapshotBuilder::new();
     let prepared = builder.prepare(&store, &graph())?;
     let selector = builder.activate(&store, &prepared)?;
     let reader = GraphSnapshotReader::open_selector(&store, selector)?;
+    reader.validate_integrity()?;
     let root = reader
         .manifest()
         .roots
@@ -453,6 +923,11 @@ fn missing_or_tampered_objects_fail_closed() -> Result<(), Box<dyn Error>> {
         b"corrupt",
         WriteCondition::Any,
     )?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert!(matches!(
+        reader.validate_integrity(),
+        Err(SnapshotError::Corrupt(_))
+    ));
     assert!(matches!(
         reader.get_node("a"),
         Err(SnapshotError::Corrupt(_))

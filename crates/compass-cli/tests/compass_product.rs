@@ -170,3 +170,124 @@ fn installation_managed_commands_have_compass_native_help() -> Result<(), Box<dy
     }
     Ok(())
 }
+
+#[test]
+fn inference_level_defaults_to_low_and_controls_published_graph_breadth()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let source = directory.path().join("source");
+    std::fs::create_dir(&source)?;
+    std::fs::write(
+        source.join("sample.rs"),
+        r#"use external_crate::ExternalType;
+
+fn run(value: ExternalType) {
+    value.execute();
+    external_crate::Service::call();
+}
+"#,
+    )?;
+
+    let mut counts = Vec::new();
+    let mut level_graphs = Vec::new();
+    for level in ["low", "medium", "high", "max"] {
+        let destination = directory.path().join(format!("{level}-artifacts"));
+        let run = |force: bool| -> Result<Vec<u8>, Box<dyn Error>> {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_compass"));
+            command.args([
+                "update",
+                ".",
+                "--code-only",
+                "--no-viz",
+                "--no-cluster",
+                "--store",
+                "json",
+                "--inference-level",
+                level,
+                "--out",
+            ]);
+            command.arg(&destination);
+            if force {
+                command.arg("--force");
+            }
+            let output = command
+                .current_dir(&source)
+                .env_remove("COMPASS_OUT")
+                .output()?;
+            assert!(
+                output.status.success(),
+                "compass update --inference-level {level} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let graph_path =
+                BuildGuard::resolve_artifact(&destination.join("compass-out"), "graph.json")?;
+            Ok(std::fs::read(graph_path)?)
+        };
+        let graph_bytes = run(false)?;
+        let rebuilt_graph_bytes = run(true)?;
+        assert!(
+            graph_bytes == rebuilt_graph_bytes,
+            "{level} inference graph changed across a forced rebuild"
+        );
+
+        let graph: Value = serde_json::from_slice(&graph_bytes)?;
+        let nodes = graph["nodes"].as_array().ok_or("nodes")?.len();
+        let links = graph["links"].as_array().ok_or("links")?;
+        let inferred = links
+            .iter()
+            .filter(|link| {
+                link["evidence"].as_array().is_some_and(|evidence| {
+                    evidence.iter().any(|item| item["confidence"] == "inferred")
+                })
+            })
+            .count();
+        counts.push((nodes, links.len(), inferred));
+        level_graphs.push(graph_bytes);
+    }
+
+    let default_destination = directory.path().join("default-artifacts");
+    let default = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args([
+            "update",
+            ".",
+            "--code-only",
+            "--no-viz",
+            "--no-cluster",
+            "--store",
+            "json",
+            "--out",
+        ])
+        .arg(&default_destination)
+        .current_dir(&source)
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(
+        default.status.success(),
+        "compass update with the default inference level failed: {}",
+        String::from_utf8_lossy(&default.stderr)
+    );
+    let default_graph_path =
+        BuildGuard::resolve_artifact(&default_destination.join("compass-out"), "graph.json")?;
+    let default_graph = std::fs::read(default_graph_path)?;
+    let low_graph = level_graphs.first().ok_or("missing low inference graph")?;
+    assert_eq!(default_graph.as_slice(), low_graph.as_slice());
+
+    let low = counts[0];
+    let max = counts[3];
+    assert_eq!(low.2, 0);
+    assert!(max.2 > 0);
+    assert!(low.0 < max.0);
+    assert!(low.1 < max.1);
+    assert!(counts.windows(2).all(|levels| {
+        levels[0].0 <= levels[1].0 && levels[0].1 <= levels[1].1 && levels[0].2 <= levels[1].2
+    }));
+
+    let invalid = Command::new(env!("CARGO_BIN_EXE_compass"))
+        .args(["update", ".", "--inference-level", "automatic"])
+        .current_dir(&source)
+        .env_remove("COMPASS_OUT")
+        .output()?;
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("low, medium, high, or max"));
+    Ok(())
+}

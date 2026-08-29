@@ -309,7 +309,10 @@ is collapsed. Its five core concepts are contract changes, behavior changes,
 dependency changes, affected consumers, and verification evidence. JSON uses
 schema `compass.semantic_diff.report/1`; deterministic `sd1-...` finding IDs
 make `--explain` and automation stable when the underlying semantic evidence
-does not change. HTML embeds that complete JSON report and provides local
+does not change. Dependency findings may include strict `dependency_topology`
+with community IDs and bounded directed-cycle participation; absent evidence
+stays absent rather than being inferred from prose. HTML embeds that complete
+JSON report and provides local
 search, change-type filtering, routine-churn control, expandable evidence, and
 analysis-completeness indicators without requiring a server. It also shows the
 exact source patch and the meaningful code-graph delta in the same report. The

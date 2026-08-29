@@ -93,6 +93,240 @@
   snapshots. Production validation and reference generation now verify chunks
   without retaining the canonical payload in one allocation, while the public
   full-read API and store formats remain compatible.
+## 0.3.12 - 2026-08-13
+
+- Remove the 2 GiB aggregate canonical-payload limit from current SQLite
+  graph-index snapshots. Large graphs are now admitted by their validated
+  manifest and stored as independently bounded, content-addressed tree objects
+  with bounded write batches; point and range query work remains explicitly
+  bounded. Store status, validation, backup, and restore now stream file
+  digests and validate every reachable tree object without materializing the
+  canonical graph. The legacy monolithic snapshot compatibility API and
+  whole-JSON readers retain their existing allocation limits.
+
+- Prevent oversized universal-evidence collections from collapsing code graphs
+  to file scaffolding. Default-low builds compact unused leaf declaration
+  details, project retained declarations before resolution, and resolve safe
+  exact relationships in deterministic bounded partitions. Any remaining
+  omissions are published through `universal_resolution_partial`, counted as
+  omitted edges, and make the build exit nonzero while retaining the useful
+  partial graph. Pipeline workers now use an explicit portable stack bound so
+  deeply nested generated sources fail neither the resolver nor the process.
+
+- Improve Markdown as first-class agent context. Repeated automatic heading
+  slugs now follow deterministic source-order suffixes, every structural block
+  has a section-qualified identity, and project resolution connects exact,
+  extensionless, repository-root, directory-index, and unique-wikilink targets
+  to document headings or source-file inventory. Missing fragments and
+  ambiguous targets remain unresolved, while exact document relationships now
+  survive the default low inference level. Advance extraction semantics to v12
+  so affected cached facts rebuild.
+
+- Improve natural code discovery on independently reviewed Python and
+  TypeScript libraries. Ranking now recognizes common operation vocabulary,
+  compound protocol owners, container roles, and decoder-chain intent without
+  weakening bounded recall or negative-query handling. TypeScript framework
+  compatibility propagation is limited to declared handlers and middleware so
+  ordinary referenced callables retain stable module-qualified identities.
+  Add pinned HTTPX and NestJS low-inference relevance oracles for repeatable
+  cross-tool qualification.
+
+## 0.3.11 - 2026-08-13
+
+- Expand route extraction across popular framework families: add Angular Router
+  typed and provider-backed route configs, Echo and Fiber receiver-aware Go
+  routes, ASP.NET Core Minimal APIs and nested route groups, and deterministic
+  cross-module Express, Fastify, and Hono router mounts. Ambiguous imported
+  routers remain local rather than receiving an invented prefix. Advance
+  extraction semantics to v11 so affected cached facts rebuild.
+
+- Complete Axum route composition across local router variables, `nest` and
+  `merge` chains, cross-module router factories, state-wrapped handlers, and
+  ordered `layer` or `route_layer` middleware with import-aware targets.
+  Ambiguous or cyclic Rust router targets now remain uncomposed instead of
+  inventing an endpoint. The Routes and handlers HTML lens now uses a
+  hierarchical layout and minimally qualified labels for same-named handlers.
+
+- Reduce `GRAPH_REPORT.md` token use from opaque graph identities. Markdown now
+  uses unique source anchors instead of redundant duplicate-label node IDs,
+  compacts unavoidable long IDs to a bounded prefix/suffix plus deterministic
+  fingerprint, emits portable short commands only once, and leaves oversized
+  exact argv in `orientation.json`. Machine-readable IDs and argv are unchanged.
+
+- Improve default-low code-graph fidelity and natural task discovery from a
+  five-language real-repository qualification. Python now preserves exact
+  named-import provenance, singleton/local-initializer dispatch, multiline
+  receiver parameters, and callable aliases without low-mode placeholder
+  leakage. Rust reexports retain exact namespace precedence; Go closure return
+  types remain references instead of becoming enclosing-function contracts;
+  Java `build` package paths remain source; and TypeScript callable properties
+  are valid exact call targets. Natural queries now rank source-backed
+  functions and methods by complete predicate/subject evidence while retaining
+  genuine ambiguity. Tighten performance-harness timing parsing and diagnostics
+  for these qualification runs.
+
+- Stop Markdown pipe-table containers from overwhelming community names and
+  `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
+  symbols over higher-degree table parser nodes; table-only communities use
+  deterministic source-anchored `Table (path:line)` labels and are counted as
+  omitted from the architecture-focused report directory while remaining
+  queryable in the graph. Advance graph publication semantics to v4 so existing
+  build state is regenerated with the corrected analysis.
+
+- Make `GRAPH_REPORT.md` a more complete, label-first architecture entry map.
+  The compact Agent Orientation still highlights the leading communities, while
+  the bounded Community Directory now retains up to 4,096 ranked non-empty
+  communities, including thin communities. The top 32 receive full boundary
+  evidence and up to twelve high-connectivity entry points; every remaining
+  retained community receives a compact ranked index row with its best anchored
+  entry point. Numeric community scopes remain only where they are useful for
+  copyable `compass query --scope community:<id>` follow-up.
+  Raise the full report to 256,000 characters, the compact orientation to
+  16,000 characters, and the shared orientation/MCP resource envelope to 4 MiB.
+
+- Add bounded `compass.task-context/1` packets through `compass context` and
+  MCP `task_context`, with exact target resolution, digest-verified source,
+  provenance, linked reflection memory, deterministic omissions, work
+  accounting, and result digests. Add an independent
+  `compass.pr-readiness/1` envelope through `compass review --readiness` and
+  MCP `pr_readiness`, preserving the canonical PR report digest while
+  summarizing signature/body changes, impact, static test evidence, advisory
+  documentation drift, and bounded local ownership.
+
+- Add the versioned `compass.viewer.workbench/1` export contract and a shared
+  navigation shell for offline HTML and VS Code. `compass export html` now
+  accepts repeatable code, call, impact, affected, architecture, history, and
+  artifact lenses in one self-contained page; strict parsing rejects unknown
+  or format-incompatible options. Add relationship, evidence, node-kind, and
+  language filters, explicit coverage state, deterministic depth layouts, and
+  convenient graph-camera controls for bounded zoom, 100% reset, whole-graph
+  and selected-neighborhood fitting, plus independent node and relationship
+  labels. Add bounded 1–4-hop selection isolation with incoming/outgoing edge
+  filtering, layout spacing, a navigable minimap, and discoverable keyboard
+  shortcuts. Resuming a settled nested community graph now reheats its layout
+  so pause/resume produces visible physics movement. Consolidate workbench
+  filters into the top graph-control rail, allow neighborhood settings to be
+  prepared before selection, keep filters scoped to the visible overview or
+  community detail, fit newly isolated neighborhoods, and scale layout reheating
+  so motion remains visible on fitted repository graphs. Keep filter and graph
+  settings panels mutually exclusive and viewport-bounded, provide recoverable
+  empty-filter states, and discard selections that no longer exist in the
+  filtered graph. Add the `workbench-json` machine export while preserving
+  plain `compass.viewer.graph/1` JSON compatibility.
+
+- Make PHP extraction and type resolution fail closed for colliding exact or
+  case-folded symbols instead of selecting a hash-iteration winner. Qualified
+  duplicate types now prefer one unique same-file declaration and otherwise
+  remain unresolved. Advance extraction semantics to v9 so affected cached
+  facts rebuild automatically.
+
+- Add canonical `compass.pr_intelligence.report/1` review analysis over exact
+  immutable target, PR-head, and synthetic-merge realizations, with stable
+  `cmpprv1` findings, explicit completeness, a versioned advisory integer
+  rubric, and independently versioned deterministic gates. Expose the same
+  report through `compass review`, JSON/text/Markdown/SARIF projections, and
+  MCP `review_pull_request`. Add a checksum-pinned reusable GitHub Action with
+  read-only analysis, evidence artifact and job summary, fork-safe bounded
+  sticky-comment delivery, and `fail-on: none|deterministic`; advisory risk
+  never blocks merging.
+
+- Qualify PR dependency risk with typed topology evidence. Ordinary dependency
+  changes no longer count as cross-boundary impact without differing community
+  identities, and changed edges receive a cycle factor only when a bounded,
+  directed strongly connected component proves cycle participation. Semantic
+  diff derived caches advance to engine version 2.
+
+- Keep `GRAPH_REPORT.md` community evidence labels concise while making them
+  deterministic and unique within a graph. Repeated hub names now gain compact
+  source or wiring-site context, with the graph-local community ID used only
+  as a final tie-breaker; unique names remain unchanged.
+
+- Add deterministic `--inference-level low|medium|high|max` controls to
+  structural graph builds. Lower levels retain exact or source-backed evidence
+  and can admit explicitly qualified external relationships without the full
+  deferred-receiver expansion. Hard-cut the build default to evidence-first
+  `low`; users can opt into the former complete behavior with
+  `--inference-level max`. Filtered builds prune unreferenced inferred
+  placeholders and bind the selected level into build-profile/cache identity.
+  Historical schema-1 build profiles that omitted the field remain readable
+  as `max`, while new low profiles record the level explicitly and trigger a
+  coherent rebuild.
+
+- Make the performance harness select and record an inference level, and use
+  symmetric community clustering for explicit Compass/Graphify comparisons.
+  Add a pinned delta-rs diagnostic covering build latency and memory, graph
+  integrity and provenance, natural and exact query recall, query latency, and
+  adversarial no-answer behavior.
+
+- Admit provably disallowed inferred calls after resolver, semantic, entity,
+  and endpoint resolution but before node-link materialization, preserving
+  duplicate evidence, unresolved and constructible targets, omission
+  diagnostics, and the authoritative v1 policy pass. Reuse clustered community
+  artifacts for fact-neutral edits, locally
+  recluster bounded affected communities for small topology changes, and fall
+  back to full Louvain for removals or oversized regions. Reduce immutable-store
+  query startup reads, reject unsupported one-term fallback seeds for
+  multi-concept discovery, and add a pinned Delta suite with independently
+  labeled positive and negative accuracy oracles. Apply the established absent
+  composite-identifier no-answer rule before generic term and relationship
+  posting hydration, preserving exact ID/name ranking and ambiguity while
+  making proven no-answer queries constant-work.
+
+- Improve agent discovery accuracy and latency with deterministic identifier-
+  subword postings, exact trusted-call relationship-term postings, bounded
+  proof-complete caller recall, distinct supporting-callee evidence, fair
+  candidate allocation, persistence-predicate precision within trusted
+  relation candidates, a compact source-backed operation-role term index,
+  subject-complete action ranking, capacity-aware traversal, selected-subgraph
+  edge-ref filtering, bounded batched node and edge hydration, and one pinned
+  immutable store reader with a bounded decoded-object cache per request.
+  Intersect multi-concept exact-term IDs before hydrating surviving records,
+  and make the normal discovery neighborhood a focused 64 nodes and 128 edges
+  while retaining 500/1,000 as explicit hard ceilings. Compare the full
+  specificity rank before labeling natural-query alternatives as ambiguous,
+  while preserving equal-rank and exact-name ambiguity. Admit explicit `path
+  from <symbol> to <symbol>` questions when both endpoints are exact symbol
+  references, without weakening generic multi-concept no-answer admission.
+  Legacy store snapshots remain readable and report incomplete identifier or
+  relationship coverage until they are rebuilt; operation queries use the
+  existing bounded fallback until the compact role index is available. The
+  immutable relationship capability is v2, and the disposable SQLite query
+  accelerator now uses internal format v7 and rebuilds automatically.
+
+- Configure one-shot graph builds to use mimalloc without its process-wide
+  reserved arena while preserving explicit operator allocator settings. This
+  lets freed extraction and resolver pages return to the operating system
+  between build stages instead of accumulating in a 1 GiB arena.
+
+- Thread inference admission into universal, generic, and language-member
+  resolution so low builds do not materialize deferred receivers, heuristic
+  calls, or inferred external placeholders. Preserve exact test roles without
+  retaining discarded inferred test edges. After enforcing the original
+  evidence limits, compact uniquely paired duplicate `tests` candidates while
+  independently resolving their relation-sensitive rules. Published low nodes
+  and relationships remain equivalent to the prior authoritative post-filter;
+  graph-level coverage and diagnostics now describe admitted records instead
+  of inference that was constructed only to be discarded.
+
+- Make streaming portable-AST cache publication encode and atomically write
+  one entry at a time for every batch size. Large cold builds no longer retain
+  concurrent MessagePack buffers and compression workspaces under an API whose
+  documented purpose is bounded residency; the parallel encode-then-publish
+  API remains available where callers explicitly accept batch memory.
+
+- Store universal resolver declarations, scopes, bindings, and occurrences in
+  deterministic sorted fact tables instead of hash maps that duplicate every
+  fact's owned ID as a second key. Move relationship candidates into a private
+  interned table while validated per-file batches are drained, retaining
+  bounded per-candidate inflation during index construction and projection.
+  Compact validated occurrences into a private slot-backed string table and
+  retain only the role, spelling, qualifier, context, and exact range consumed
+  by resolution.
+  Release secondary resolver indexes after every build decision is fixed, and
+  consume the legacy clustering/report projection instead of retaining it
+  beside a complete typed graph. Borrowed lookup and explicit duplicate-ID
+  rejection preserve graph semantics while reducing the transient resolver
+  working set without changing the public evidence, cache, or graph schema.
 
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
@@ -141,6 +375,57 @@
   preserved through cached and rebuilt graphs. Preserve the pipeline's exact
   repository-relative identity for universal framework facts so shallow source
   paths are published instead of being mistaken for temporary-directory paths.
+
+## 0.3.10 - 2026-08-12
+
+- Add bounded `compass.task-context/1` packets through `compass context` and
+  MCP `task_context`, plus an independent `compass.pr-readiness/1` envelope
+  through `compass review --readiness` and MCP `pr_readiness`. Results include
+  exact target resolution, digest-verified source, provenance, deterministic
+  omissions, work accounting, and stable readiness evidence.
+
+- Improve `GRAPH_REPORT.md` as a label-first architecture entry map with a
+  bounded ranked Community Directory, anchored boundary evidence, compact
+  labels, deterministic community navigation, and larger report/resource
+  envelopes. Nested community layout resume now reheats settled graphs so
+  pause/resume produces visible movement.
+
+## 0.3.9 - 2026-08-12
+
+- Add the versioned `compass.viewer.workbench/1` export contract and a shared
+  navigation shell for offline HTML and VS Code. `compass export html` now
+  supports repeatable code, call, impact, affected, architecture, history, and
+  artifact lenses, relationship/evidence/node-kind/language filters,
+  deterministic depth layouts, bounded camera controls, 1–4-hop selection
+  isolation, minimap navigation, keyboard shortcuts, and the `workbench-json`
+  machine export while preserving `compass.viewer.graph/1` compatibility.
+
+## 0.3.8 - 2026-08-11
+
+- Make evidence-first structural inference the default, with explicit
+  `--inference-level low|medium|high|max` controls. Low builds preserve
+  exact/source-backed relationships, bind the level into cache/build identity,
+  and remain deterministic.
+
+- Improve natural and agent discovery with indexed identifier/subword and
+  relationship-term recall, bounded caller/operation-role discovery,
+  capacity-aware traversal, focused default neighborhoods, and constant-work
+  proven no-answer behavior while preserving ambiguity, direction, provenance,
+  and bounded contracts.
+
+- Reduce resolver/query memory and latency with compact deterministic
+  fact/occurrence tables, bounded AST-cache publication, shared readers/object
+  caching, targeted index release, and pinned discovery/delta/performance
+  qualification.
+
+- Add typed pull-request risk review over immutable target, PR-head, and
+  synthetic-merge realizations, with deterministic cmpprv1 findings,
+  completeness/advisory risk projections, CLI/MCP surfaces, a fork-safe
+  read-only GitHub Action, and cycle-aware dependency topology.
+
+- Harden PHP symbol resolution and graph publication determinism, preserve
+  wildcard/import source anchors and directed multigraph evidence, and improve
+  community labels/report references.
 
 ## 0.3.7 - 2026-08-08
 

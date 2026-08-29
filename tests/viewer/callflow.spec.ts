@@ -41,8 +41,9 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   await page.goto("/calls.html");
   await expect(page.getByText("depth 1")).toBeVisible();
   await expect(page.getByText("Calls from run")).toBeVisible();
-  await expect(page.getByText("2 nodes", { exact: true })).toBeVisible();
-  await expect(page.getByText("1 edge", { exact: true })).toBeVisible();
+  const callGraphSummary = page.locator(".call-graph-summary");
+  await expect(callGraphSummary.getByText("2 nodes", { exact: true })).toBeVisible();
+  await expect(callGraphSummary.getByText("1 edge", { exact: true })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("Partial call graph");
   await expect(page.getByRole("alert")).toContainText(
     "Compass reached the configured graph limit. Counts and paths may be incomplete."

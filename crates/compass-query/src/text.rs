@@ -1,12 +1,11 @@
 use std::collections::HashSet;
 
-use unicode_normalization::UnicodeNormalization;
-use unicode_normalization::char::is_combining_mark;
+pub use compass_model::strip_diacritics;
+use compass_model::{canonical_code_token, identifier_tokens};
 
 const QUERY_STOPWORDS: &[&str] = &[
     "how",
     "what",
-    "why",
     "when",
     "where",
     "which",
@@ -57,7 +56,6 @@ const QUERY_STOPWORDS: &[&str] = &[
     "they",
     "about",
     "any",
-    "all",
     "some",
     "work",
     "works",
@@ -164,15 +162,8 @@ const QUERY_STOPWORDS: &[&str] = &[
 ];
 
 #[must_use]
-pub fn strip_diacritics(text: &str) -> String {
-    text.nfkd()
-        .filter(|character| !is_combining_mark(*character))
-        .collect()
-}
-
-#[must_use]
 pub fn search_tokens(text: &str) -> Vec<String> {
-    unicode_words(&split_identifier_words(&strip_diacritics(text)).to_lowercase())
+    identifier_tokens(text)
         .into_iter()
         .map(canonical_search_token)
         .collect()
@@ -180,6 +171,13 @@ pub fn search_tokens(text: &str) -> Vec<String> {
 
 #[must_use]
 pub fn query_terms(question: &str) -> Vec<String> {
+    query_recall_terms(question)
+        .into_iter()
+        .map(canonical_query_token)
+        .collect()
+}
+
+pub(crate) fn query_recall_terms(question: &str) -> Vec<String> {
     let mut terms = Vec::new();
     for raw in question.split_whitespace() {
         if raw.chars().any(is_chinese) {
@@ -208,10 +206,6 @@ pub fn query_terms(question: &str) -> Vec<String> {
             }
         }
     }
-    let terms = terms
-        .into_iter()
-        .map(canonical_query_token)
-        .collect::<Vec<_>>();
     let content = terms
         .iter()
         .filter(|term| !QUERY_STOPWORDS.contains(&term.as_str()))
@@ -243,10 +237,17 @@ pub fn normalize_context_filters(filters: &[String]) -> Vec<String> {
             "return" | "returns" | "returned" => "return_type",
             "generic" | "generics" | "template" | "templates" => "generic_arg",
             "annotation" | "annotations" | "decorator" | "decorators" => "attribute",
-            "calls" | "called" | "invoke" | "invocation" => "call",
+            "calls" | "called" | "invoke" | "invokes" | "invoked" | "invocation" => "call",
             "fields" | "property" | "properties" | "member" | "members" => "field",
             "imports" | "imported" | "module" | "modules" => "import",
             "exports" | "exported" => "export",
+            "routes" | "routed" | "routing" => "route",
+            "register" | "registered" | "registers" => "registration",
+            "reads" | "reading" => "read",
+            "writes" | "writing" => "write",
+            "tests" | "tested" | "testing" => "test",
+            "types" | "typing" => "type",
+            "dependencies" | "depends" => "dependency",
             _ => &key,
         }
         .to_owned();
@@ -308,42 +309,6 @@ pub fn infer_context_filters(question: &str) -> Vec<String> {
         .collect()
 }
 
-fn unicode_words(text: &str) -> Vec<String> {
-    let mut words = Vec::new();
-    let mut current = String::new();
-    for character in text.chars() {
-        if character.is_alphanumeric() || character == '_' {
-            current.push(character);
-        } else if !current.is_empty() {
-            words.push(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        words.push(current);
-    }
-    words
-}
-
-fn split_identifier_words(text: &str) -> String {
-    let characters = text.chars().collect::<Vec<_>>();
-    let mut words = String::with_capacity(text.len());
-    for (index, &character) in characters.iter().enumerate() {
-        let previous = index.checked_sub(1).and_then(|at| characters.get(at));
-        let next = characters.get(index + 1);
-        let boundary = character.is_uppercase()
-            && previous.is_some_and(|value| {
-                value.is_lowercase()
-                    || value.is_numeric()
-                    || (value.is_uppercase() && next.is_some_and(|next| next.is_lowercase()))
-            });
-        if boundary {
-            words.push(' ');
-        }
-        words.push(character);
-    }
-    words
-}
-
 fn canonical_search_token(token: String) -> String {
     match token.as_str() {
         "resolution" | "resolved" | "resolver" | "resolving" => "resolve".to_owned(),
@@ -356,96 +321,7 @@ pub(crate) fn canonical_query_token(token: String) -> String {
         return token;
     }
 
-    match token.as_str() {
-        // Keep a small explicit table for common irregular or spelling-changing
-        // forms. The generic suffix rules below intentionally stay conservative
-        // so a natural-language query cannot rewrite an arbitrary identifier.
-        "resolution" | "resolved" | "resolver" | "resolving" => "resolve".to_owned(),
-        "solved" | "solving" => "solve".to_owned(),
-        "compiled" | "compiling" => "compile".to_owned(),
-        "registered" | "registering" => "register".to_owned(),
-        "routing" => "route".to_owned(),
-        "aliases" => "alias".to_owned(),
-        "using" => "use".to_owned(),
-        "searched" | "searching" => "search".to_owned(),
-        "represented" | "representing" => "represent".to_owned(),
-        "created" | "creating" => "create".to_owned(),
-        "mapped" | "mapping" => "map".to_owned(),
-        "tracked" | "tracking" => "track".to_owned(),
-        "enabled" | "enabling" => "enable".to_owned(),
-        "sent" | "sending" => "send".to_owned(),
-        "opened" | "opening" => "open".to_owned(),
-        "loaded" | "loading" => "load".to_owned(),
-        "formatted" | "formatting" => "format".to_owned(),
-        "parsed" | "parsing" => "parse".to_owned(),
-        "dispatched" | "dispatching" => "dispatch".to_owned(),
-        "implemented" | "implementing" => "implement".to_owned(),
-        "handled" | "handling" => "handle".to_owned(),
-        _ => canonical_query_suffix(token),
-    }
-}
-
-fn canonical_query_suffix(token: String) -> String {
-    if let Some(stem) = token.strip_suffix("ies")
-        && stem.len() >= 2
-    {
-        return format!("{stem}y");
-    }
-
-    if token.ends_with("sses")
-        || token.ends_with("xes")
-        || token.ends_with("zes")
-        || token.ends_with("ches")
-        || token.ends_with("shes")
-        || token.ends_with("uses")
-    {
-        return token[..token.len().saturating_sub(2)].to_owned();
-    }
-
-    if let Some(stem) = token.strip_suffix('s')
-        && !stem.ends_with(['s', 'u', 'i'])
-        && !stem.ends_with('a')
-        && stem.len() >= 3
-    {
-        return stem.to_owned();
-    }
-
-    if let Some(stem) = token.strip_suffix("ing")
-        && stem.len() >= 3
-    {
-        return add_silent_e_or_remove_double(stem);
-    }
-
-    if let Some(stem) = token.strip_suffix("ied")
-        && stem.len() >= 2
-    {
-        return format!("{stem}y");
-    }
-
-    if let Some(stem) = token.strip_suffix("ed")
-        && stem.len() >= 3
-    {
-        return add_silent_e_or_remove_double(stem);
-    }
-
-    token
-}
-
-fn add_silent_e_or_remove_double(stem: &str) -> String {
-    let mut characters = stem.chars().collect::<Vec<_>>();
-    if characters.len() >= 2 && characters[characters.len() - 1] == characters[characters.len() - 2]
-    {
-        characters.pop();
-    }
-    let mut value = characters.into_iter().collect::<String>();
-    if value.ends_with("at")
-        || value.ends_with("abl")
-        || value.ends_with("il")
-        || value.ends_with('v')
-    {
-        value.push('e');
-    }
-    value
+    canonical_code_token(token)
 }
 
 fn is_chinese(character: char) -> bool {

@@ -18,7 +18,7 @@ const MINIMUM_REFERENCES: usize = 10;
 const MINIMUM_REFERENCE_WORDS: usize = 120;
 const MINIMUM_BUNDLE_WORDS: usize = 5_000;
 const CANONICAL_SKILL_SHA256: &str =
-    "c6c097e081043c3f57cacb113423ff5783b0391f9881cb3262501277663a5d91";
+    "9b53334776eaf3957da267926e8a37ac94a35ba52512403f36f7ddd4145f72db";
 const FOCUSED_SKILLS: &[&str] = &[
     "compass-architecture",
     "compass-change-impact",

@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::OnceLock;
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::{EdgeIndex, EdgeRecord, NodeIndex, NodeRecord};
+use crate::{EdgeIndex, EdgeRecord, LexicalIndex, NodeIndex, NodeRecord};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SchemaFingerprint([u8; 32]);
@@ -40,6 +41,7 @@ pub struct QueryIndex {
     outgoing_by_type: Vec<BTreeMap<String, Vec<EdgeIndex>>>,
     incoming_by_type: Vec<BTreeMap<String, Vec<EdgeIndex>>>,
     schema_fingerprint: SchemaFingerprint,
+    lexical_index: OnceLock<LexicalIndex>,
 }
 
 impl QueryIndex {
@@ -52,6 +54,7 @@ impl QueryIndex {
             outgoing_by_type: Vec::new(),
             incoming_by_type: Vec::new(),
             schema_fingerprint: SchemaFingerprint::empty(),
+            lexical_index: OnceLock::new(),
         }
     }
 
@@ -111,6 +114,7 @@ impl QueryIndex {
             outgoing_by_type,
             incoming_by_type,
             schema_fingerprint,
+            lexical_index: OnceLock::new(),
         }
     }
 
@@ -157,6 +161,11 @@ impl QueryIndex {
     #[must_use]
     pub const fn schema_fingerprint(&self) -> SchemaFingerprint {
         self.schema_fingerprint
+    }
+
+    pub(crate) fn lexical_index(&self, nodes: &[NodeRecord]) -> &LexicalIndex {
+        self.lexical_index
+            .get_or_init(|| LexicalIndex::build(nodes))
     }
 }
 

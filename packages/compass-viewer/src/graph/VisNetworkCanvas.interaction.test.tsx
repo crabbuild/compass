@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphViewModel } from "../contracts/graph";
-import { VisNetworkCanvas } from "./VisNetworkCanvas";
+import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 
 const mock = vi.hoisted(() => ({
   dataSets: [] as Array<Array<Record<string, unknown>>>,
-  networks: 0
+  networks: 0,
+  fits: [] as Array<Record<string, unknown> | undefined>,
+  moves: [] as Array<Record<string, unknown>>,
+  connectedNodeRequests: [] as string[],
+  updates: [] as Array<Array<Record<string, unknown>>>,
+  movedNodes: [] as Array<{ id: string; x: number; y: number }>,
+  simulationStarts: 0,
+  simulationStops: 0,
+  eventHandlers: new Map<string, Array<() => void>>(),
+  positionScale: 10
 }));
 
 vi.mock("vis-network/standalone", () => ({
@@ -20,6 +30,7 @@ vi.mock("vis-network/standalone", () => ({
     }
 
     update(items: Array<Record<string, unknown>>) {
+      mock.updates.push(items);
       for (const item of items) {
         const id = String(item.id);
         this.items.set(id, { ...this.items.get(id), ...item });
@@ -36,18 +47,45 @@ vi.mock("vis-network/standalone", () => ({
     }
 
     setOptions() {}
-    stopSimulation() {}
-    startSimulation() {}
-    fit() {}
+    stopSimulation() { mock.simulationStops += 1; }
+    startSimulation() { mock.simulationStarts += 1; }
+    fit(options?: Record<string, unknown>) { mock.fits.push(options); }
     destroy() {}
-    on() {}
-    once() {}
-    getConnectedNodes() { return []; }
+    on(event: string, callback: () => void) {
+      const handlers = mock.eventHandlers.get(event) ?? [];
+      handlers.push(callback);
+      mock.eventHandlers.set(event, handlers);
+    }
+    once(event: string, callback: () => void) {
+      const wrapped = () => {
+        callback();
+        const handlers = mock.eventHandlers.get(event) ?? [];
+        mock.eventHandlers.set(event, handlers.filter((handler) => handler !== wrapped));
+      };
+      const handlers = mock.eventHandlers.get(event) ?? [];
+      handlers.push(wrapped);
+      mock.eventHandlers.set(event, handlers);
+    }
+    getConnectedNodes(id: string) {
+      mock.connectedNodeRequests.push(id);
+      return id === "caller" ? ["callee"] : [];
+    }
     getViewPosition() { return { x: 0, y: 0 }; }
     getScale() { return 1; }
+    getPositions(ids: string[] = ["caller", "callee"]) {
+      return Object.fromEntries(ids.map((id, index) => [id, {
+        x: index * mock.positionScale,
+        y: 0
+      }]));
+    }
+    moveNode(id: string, x: number, y: number) {
+      mock.movedNodes.push({ id, x, y });
+    }
+    redraw() {}
     unselectAll() {}
     selectNodes() {}
     focus() {}
+    moveTo(options: Record<string, unknown>) { mock.moves.push(options); }
   }
 }));
 
@@ -74,6 +112,15 @@ describe("VisNetworkCanvas hover lifecycle", () => {
   beforeEach(() => {
     mock.dataSets.length = 0;
     mock.networks = 0;
+    mock.fits.length = 0;
+    mock.moves.length = 0;
+    mock.connectedNodeRequests.length = 0;
+    mock.updates.length = 0;
+    mock.movedNodes.length = 0;
+    mock.simulationStarts = 0;
+    mock.simulationStops = 0;
+    mock.eventHandlers.clear();
+    mock.positionScale = 10;
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: vi.fn(),
@@ -175,6 +222,129 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     expect(mock.networks).toBe(1);
   });
 
+  it("reheats a settled nested layout when physics resumes", () => {
+    const callbacks = {
+      onFocus: vi.fn(),
+      onOpenSource: vi.fn(),
+      onOpenRelationshipSource: vi.fn(),
+      onHover: vi.fn(),
+      onHoverEdge: vi.fn(),
+      onClear: vi.fn(),
+      onStabilized: vi.fn()
+    };
+    const { rerender } = render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...callbacks}
+    />);
+
+    mock.movedNodes.length = 0;
+    const startsBeforeResume = mock.simulationStarts;
+    rerender(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={true}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...callbacks}
+    />);
+
+    expect(mock.movedNodes.map(({ id }) => id)).toEqual(["callee", "caller"]);
+    expect(mock.movedNodes[0]?.x).toBeGreaterThanOrEqual(18);
+    expect(mock.simulationStarts).toBeGreaterThan(startsBeforeResume);
+  });
+
+  it("reports stabilization after every explicit relayout", () => {
+    const onStabilized = vi.fn();
+    const view = render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={onStabilized}
+    />);
+
+    for (const handler of [...mock.eventHandlers.get("stabilizationIterationsDone") ?? []]) {
+      handler();
+    }
+    view.rerender(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={true}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={onStabilized}
+    />);
+    for (const handler of [...mock.eventHandlers.get("stabilizationIterationsDone") ?? []]) {
+      handler();
+    }
+
+    expect(onStabilized).toHaveBeenCalledTimes(2);
+  });
+
+  it("scales the reheat so motion stays visible when a large graph is fit", () => {
+    const callbacks = {
+      onFocus: vi.fn(),
+      onOpenSource: vi.fn(),
+      onOpenRelationshipSource: vi.fn(),
+      onHover: vi.fn(),
+      onHoverEdge: vi.fn(),
+      onClear: vi.fn(),
+      onStabilized: vi.fn()
+    };
+    mock.positionScale = 10_000;
+    const { rerender } = render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...callbacks}
+    />);
+
+    mock.movedNodes.length = 0;
+    rerender(<VisNetworkCanvas
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={true}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      {...callbacks}
+    />);
+
+    expect(mock.movedNodes[0]?.x).toBeCloseTo(96);
+    expect(screen.getByRole("region", { name: "Interactive Compass code graph" }))
+      .toHaveAttribute("data-physics-running", "true");
+  });
+
   it("seeds explicit positions for a paused graph", () => {
     render(<VisNetworkCanvas
       model={model}
@@ -202,5 +372,60 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       x: -40,
       y: 12
     });
+  });
+
+  it("exposes bounded zoom and selected-neighborhood camera controls", () => {
+    const ref = createRef<GraphCanvasHandle>();
+    render(<VisNetworkCanvas
+      ref={ref}
+      model={model}
+      focusedNodeId={null}
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    ref.current?.zoomOut();
+    ref.current?.resetZoom();
+    ref.current?.zoomIn();
+    ref.current?.fitSelection(["caller", "callee"]);
+
+    expect(mock.moves.map((move) => move.scale)).toEqual([0.8, 1, 1.25]);
+    expect(mock.fits.at(-1)?.nodes).toEqual(["caller", "callee"]);
+  });
+
+  it("hides nodes and edges outside an isolated directed neighborhood", () => {
+    render(<VisNetworkCanvas
+      model={model}
+      focusedNodeId="caller"
+      physicsRunning={false}
+      layoutStyle="automatic"
+      forceLabels={false}
+      isolatedNodeIds={new Set(["caller"])}
+      isolatedEdgeIds={new Set()}
+      hiddenCommunities={new Set()}
+      hiddenChanges={new Set()}
+      onFocus={vi.fn()}
+      onOpenSource={vi.fn()}
+      onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()}
+      onHoverEdge={vi.fn()}
+      onClear={vi.fn()}
+      onStabilized={vi.fn()}
+    />);
+
+    expect(mock.updates.some((items) => items.some((item) =>
+      item.id === "callee" && item.hidden === true))).toBe(true);
+    expect(mock.updates.some((items) => items.some((item) =>
+      item.id === "caller-callee" && item.hidden === true))).toBe(true);
   });
 });

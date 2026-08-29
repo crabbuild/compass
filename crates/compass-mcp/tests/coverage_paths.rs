@@ -53,14 +53,14 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
 
     let info = server.get_info();
     assert_eq!(info.server_info.name, "compass");
-    assert_eq!(CompassMcp::tools().len(), 15);
+    assert_eq!(CompassMcp::tools().len(), 18);
     assert!(CompassMcp::tools().iter().all(|tool| {
         tool.input_schema
             .get("properties")
             .and_then(Value::as_object)
             .is_some_and(|properties| properties.contains_key("project_path"))
     }));
-    assert_eq!(CompassMcp::resources().len(), 6);
+    assert_eq!(CompassMcp::resources().len(), 7);
 
     assert!(
         server
@@ -93,7 +93,7 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
                 "get_node",
                 args(&[("source", json!("a")), ("target", json!("b"))])
             )
-            .contains("requires compass.graph/1")
+            .contains("compass.graph/1")
     );
 
     let neighbors = server.invoke(
@@ -207,20 +207,21 @@ fn resources_and_hot_reload_cover_reports_analysis_and_cache_refresh() -> Result
     let graph = write_fixture(temp.path())?;
     let server = CompassMcp::new(&graph);
 
-    assert_eq!(server.read("compass://report")?, "# Fixture report\n");
+    let legacy_report_error = server
+        .read("compass://report")
+        .err()
+        .ok_or("legacy graph report unexpectedly bypassed orientation validation")?;
+    assert!(
+        legacy_report_error
+            .to_string()
+            .contains("requires compass.graph/1")
+    );
     assert!(server.read("compass://stats")?.contains("Nodes: 5"));
     assert!(server.read("compass://god-nodes")?.contains("God nodes"));
     assert!(server.read("compass://audit")?.contains("Total edges: 3"));
     assert!(!server.read("compass://surprises")?.is_empty());
     assert!(!server.read("compass://questions")?.is_empty());
     assert!(server.read("compass://unknown").is_err());
-
-    fs::remove_file(temp.path().join("GRAPH_REPORT.md"))?;
-    assert!(
-        server
-            .read("compass://report")?
-            .contains("GRAPH_REPORT.md not found")
-    );
 
     fs::write(
         &graph,
@@ -277,7 +278,7 @@ fn project_path_override_loads_an_independent_graph_and_reports_corruption()
     assert!(
         server
             .invoke("graph_stats", args(&[("project_path", json!(7))]))
-            .contains("graph.json not found")
+            .contains("project_path must be a string")
     );
     Ok(())
 }
@@ -310,18 +311,20 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
         .await?;
 
     let tools = client.list_tools(None).await?;
-    assert_eq!(tools.tools.len(), 15);
+    assert_eq!(tools.tools.len(), 18);
     let resources = client.list_resources(None).await?;
-    assert_eq!(resources.resources.len(), 6);
+    assert_eq!(resources.resources.len(), 7);
 
     let call = client
         .call_tool(CallToolRequestParams::new("graph_stats"))
         .await?;
     assert!(!call.content.is_empty());
-    let report = client
-        .read_resource(ReadResourceRequestParams::new("compass://report"))
-        .await?;
-    assert_eq!(report.contents.len(), 1);
+    assert!(
+        client
+            .read_resource(ReadResourceRequestParams::new("compass://report"))
+            .await
+            .is_err()
+    );
     let stats = client
         .read_resource(ReadResourceRequestParams::new("compass://stats"))
         .await?;

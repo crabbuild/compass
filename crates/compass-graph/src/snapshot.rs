@@ -9,7 +9,9 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read, Write};
+use std::mem::size_of;
 use std::ops::Range;
+use std::sync::{Arc, Mutex};
 
 use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
@@ -18,8 +20,8 @@ use compass_model::code_graph::{
 use compass_model::{validate_build_metadata_identity, validate_code_graph};
 use compass_store::{
     ImmutableWrite, Key, MAX_GRAPH_BYTES, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS,
-    MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
-    WriteCondition, decode_key_segments, encode_key_segments, max_graph_bytes,
+    MAX_KEY_SEGMENTS, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey,
+    Store, StoreError, WriteCondition, decode_key_segments, encode_key_segments, max_graph_bytes,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -31,11 +33,22 @@ use unicode_normalization::char::is_combining_mark;
 pub const GRAPH_SNAPSHOT_LAYOUT_V2: &str = "compass.store.graph-index/2";
 pub const GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1: &str = "compass.store.graph-selector/1";
 pub const GRAPH_SNAPSHOT_CANONICAL_ENCODING_V1: &str = "canonical-json-v1";
+pub const DISCOVERY_SCOPE_INDEX_CAPABILITY_V1: &str = "compass.discovery-scope-index/1";
+pub const IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1: &str = "__compass_cap_identifier_subwords_v1__";
+pub const OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_operation_role_terms_v1__";
+pub const DECLARATION_TERM_INDEX_CAPABILITY_V1: &str = "__compass_cap_declaration_terms_v1__";
+pub const RELATIONSHIP_TERM_INDEX_CAPABILITY_V2: &str = "__compass_cap_relationship_terms_v2__";
 pub const GRAPH_SNAPSHOT_OBJECT_PARTITION: &str = "graph-snapshot/objects";
 pub const GRAPH_SNAPSHOT_CATALOG_PARTITION: &str = "graph-snapshot/catalog";
 pub const GRAPH_SNAPSHOT_ACTIVE_KEY: &str = "active";
 pub const GRAPH_SNAPSHOT_MAX_DEPTH: usize = 64;
 pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
+/// Maximum records materialized by one snapshot read/export request.
+///
+/// This is deliberately not a limit on the logical graph stored in the
+/// content-addressed tree. Point and range queries remain independently
+/// bounded even when a snapshot contains more records than one materialized
+/// response may return.
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
@@ -53,6 +66,8 @@ pub fn max_canonical_graph_bytes() -> u64 {
 pub const GRAPH_JSON_DELTA_MAX_SOURCE_BYTES: usize = 512 * 1024 * 1024;
 const TREE_ZSTD_MAGIC: &[u8; 5] = b"CSTZ1";
 const TREE_ZSTD_HEADER_BYTES: usize = TREE_ZSTD_MAGIC.len() + std::mem::size_of::<u32>();
+const TREE_OBJECT_CACHE_MAX_BYTES: usize = 7 * 1024 * 1024;
+const TREE_OBJECT_CACHE_MAX_OBJECTS: usize = 1_024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SnapshotError {
@@ -68,6 +83,8 @@ pub enum SnapshotError {
     Unsupported(String),
     #[error("snapshot limit exceeded: {0}")]
     Limit(String),
+    #[error("snapshot capability unavailable: {0}")]
+    CapabilityUnavailable(String),
 }
 
 impl SnapshotError {
@@ -179,13 +196,13 @@ impl GraphSnapshotManifest {
         }
         if self.graph_bytes == 0 {
             return Err(SnapshotError::Corrupt(
-                "graph byte count is empty".to_owned(),
+                "graph byte count must be nonzero".to_owned(),
             ));
         }
-        let maximum = max_canonical_graph_bytes();
-        if self.graph_bytes > maximum {
-            return Err(SnapshotError::canonical_graph_too_large(maximum));
-        }
+        self.validate_roots()
+    }
+
+    fn validate_publication_limits(&self) -> Result<(), SnapshotError> {
         if self.node_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
             || self.edge_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
         {
@@ -193,6 +210,18 @@ impl GraphSnapshotManifest {
                 "graph record count exceeds the {GRAPH_SNAPSHOT_MAX_ITEMS}-item snapshot limit"
             )));
         }
+        Ok(())
+    }
+
+    fn validate_materialization_limit(&self) -> Result<(), SnapshotError> {
+        let maximum = max_canonical_graph_bytes();
+        if self.graph_bytes > maximum {
+            return Err(SnapshotError::canonical_graph_too_large(maximum));
+        }
+        Ok(())
+    }
+
+    fn validate_roots(&self) -> Result<(), SnapshotError> {
         if self.roots.len() != IndexKind::ALL.len() {
             return Err(SnapshotError::Corrupt(format!(
                 "manifest has {} roots; expected {}",
@@ -223,6 +252,27 @@ impl GraphSnapshotManifest {
             return Err(SnapshotError::Corrupt(
                 "manifest contains duplicate or missing index roots".to_owned(),
             ));
+        }
+        for (index, expected) in [
+            (IndexKind::Nodes, self.node_count),
+            (IndexKind::Edges, self.edge_count),
+            (IndexKind::Outgoing, self.edge_count),
+            (IndexKind::Incoming, self.edge_count),
+        ] {
+            let actual = self
+                .roots
+                .iter()
+                .find(|root| root.index == index)
+                .map(|root| root.entry_count)
+                .ok_or_else(|| {
+                    SnapshotError::Corrupt(format!("{} root is missing", index.as_str()))
+                })?;
+            if actual != expected {
+                return Err(SnapshotError::Corrupt(format!(
+                    "{} root count {actual} does not match manifest count {expected}",
+                    index.as_str()
+                )));
+            }
         }
         Ok(())
     }
@@ -264,6 +314,12 @@ pub struct SnapshotReadLimits {
     pub max_bytes: usize,
     pub max_objects: usize,
     pub max_depth: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TermPostingWork {
+    pub chunks_decoded: u64,
+    pub node_ids_decoded: u64,
 }
 
 impl Default for SnapshotReadLimits {
@@ -470,7 +526,7 @@ struct TermPostingChunk {
     node_ids: Vec<String>,
 }
 
-const TERM_POSTING_CHUNK_ITEMS: usize = 128;
+pub const GRAPH_TERM_POSTING_CHUNK_ITEMS: usize = 128;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -499,6 +555,125 @@ enum TreeObject {
         index: IndexKind,
         children: Vec<TreeChild>,
     },
+}
+
+struct CachedTreeObject {
+    object: Arc<TreeObject>,
+    resident_bytes: usize,
+    leaf_last_used: Option<u64>,
+}
+
+#[derive(Default)]
+struct TreeObjectCache {
+    entries: BTreeMap<IndexKind, BTreeMap<String, CachedTreeObject>>,
+    object_count: usize,
+    resident_bytes: usize,
+    clock: u64,
+}
+
+impl TreeObjectCache {
+    fn get(&mut self, index: IndexKind, digest: &str) -> Option<Arc<TreeObject>> {
+        self.clock = self.clock.saturating_add(1);
+        let entry = self.entries.get_mut(&index)?.get_mut(digest)?;
+        if let Some(last_used) = &mut entry.leaf_last_used {
+            *last_used = self.clock;
+        }
+        Some(Arc::clone(&entry.object))
+    }
+
+    fn insert_or_get(
+        &mut self,
+        index: IndexKind,
+        digest: &str,
+        object: TreeObject,
+    ) -> Arc<TreeObject> {
+        if let Some(cached) = self.get(index, digest) {
+            return cached;
+        }
+        self.clock = self.clock.saturating_add(1);
+        let object = Arc::new(object);
+        let key = digest.to_owned();
+        let resident_bytes = cached_tree_object_resident_bytes(&key, object.as_ref());
+        if resident_bytes > TREE_OBJECT_CACHE_MAX_BYTES {
+            return object;
+        }
+        while self.object_count >= TREE_OBJECT_CACHE_MAX_OBJECTS
+            || self.resident_bytes.saturating_add(resident_bytes) > TREE_OBJECT_CACHE_MAX_BYTES
+        {
+            let Some(eviction_key) = self
+                .entries
+                .iter()
+                .flat_map(|(entry_index, entries)| {
+                    entries.iter().filter_map(move |(entry_digest, entry)| {
+                        entry
+                            .leaf_last_used
+                            .map(|used| (used, *entry_index, entry_digest))
+                    })
+                })
+                .min()
+                .map(|(_, entry_index, entry_digest)| (entry_index, entry_digest.clone()))
+            else {
+                return object;
+            };
+            if let Some(entries) = self.entries.get_mut(&eviction_key.0)
+                && let Some(evicted) = entries.remove(&eviction_key.1)
+            {
+                self.object_count = self.object_count.saturating_sub(1);
+                self.resident_bytes = self.resident_bytes.saturating_sub(evicted.resident_bytes);
+            }
+        }
+        let leaf_last_used =
+            matches!(object.as_ref(), TreeObject::Leaf { .. }).then_some(self.clock);
+        self.object_count = self.object_count.saturating_add(1);
+        self.resident_bytes = self.resident_bytes.saturating_add(resident_bytes);
+        self.entries.entry(index).or_default().insert(
+            key,
+            CachedTreeObject {
+                object: Arc::clone(&object),
+                resident_bytes,
+                leaf_last_used,
+            },
+        );
+        object
+    }
+}
+
+fn cached_tree_object_resident_bytes(digest: &String, object: &TreeObject) -> usize {
+    // Account owned allocation capacities, the Arc header, and a conservative
+    // BTreeMap node allowance. This is intentionally stricter than serialized
+    // bytes because decoded entry vectors and their nested buffers coexist.
+    let allocation_overhead = size_of::<CachedTreeObject>()
+        .saturating_add(size_of::<String>())
+        .saturating_add(size_of::<TreeObject>())
+        .saturating_add(size_of::<usize>().saturating_mul(8));
+    let mut bytes = allocation_overhead.saturating_add(digest.capacity());
+    match object {
+        TreeObject::Leaf {
+            schema, entries, ..
+        } => {
+            bytes = bytes
+                .saturating_add(schema.capacity())
+                .saturating_add(entries.capacity().saturating_mul(size_of::<TreeEntry>()));
+            for entry in entries {
+                bytes = bytes
+                    .saturating_add(entry.key.capacity())
+                    .saturating_add(entry.value.capacity());
+            }
+        }
+        TreeObject::Branch {
+            schema, children, ..
+        } => {
+            bytes = bytes
+                .saturating_add(schema.capacity())
+                .saturating_add(children.capacity().saturating_mul(size_of::<TreeChild>()));
+            for child in children {
+                bytes = bytes
+                    .saturating_add(child.first_key.capacity())
+                    .saturating_add(child.digest.capacity());
+            }
+        }
+    }
+    bytes
 }
 
 pub struct GraphSnapshotBuilder;
@@ -734,6 +909,7 @@ impl GraphSnapshotBuilder {
             roots: content.roots,
         };
         manifest.validate()?;
+        manifest.validate_publication_limits()?;
         let manifest_bytes = encode_json(&manifest)?;
         let manifest_digest = hex_digest(&manifest_bytes);
         let mut writer = ObjectWriter::new(store)?;
@@ -1362,6 +1538,7 @@ pub fn activate_graph_snapshot<S: Store + ?Sized>(
     prepared: &PreparedGraphSnapshot,
 ) -> Result<SnapshotSelector, SnapshotError> {
     prepared.manifest.validate()?;
+    prepared.manifest.validate_publication_limits()?;
     parse_digest(&prepared.manifest_digest)?;
     let namespace = NamespaceId::graph();
     let objects = object_partition()?;
@@ -1558,6 +1735,7 @@ pub struct GraphSnapshotReader<'a, S: Store + ?Sized> {
     store: &'a S,
     selector: SnapshotSelector,
     manifest: GraphSnapshotManifest,
+    object_cache: Mutex<TreeObjectCache>,
 }
 
 impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
@@ -1565,10 +1743,29 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         let Some(selector) = active_graph_snapshot(store)? else {
             return Ok(None);
         };
-        Self::open_selector(store, selector).map(Some)
+        Self::open_selector_with_policy(store, selector, false).map(Some)
     }
 
     pub fn open_selector(store: &'a S, selector: SnapshotSelector) -> Result<Self, SnapshotError> {
+        Self::open_selector_with_policy(store, selector, true)
+    }
+
+    /// Open a snapshot for bounded integrity maintenance without applying the
+    /// current process's whole-graph admission ceiling. Status, validation,
+    /// backup, and restore inspect already-published immutable objects and do
+    /// not materialize the canonical graph payload.
+    pub fn open_selector_for_maintenance(
+        store: &'a S,
+        selector: SnapshotSelector,
+    ) -> Result<Self, SnapshotError> {
+        Self::open_selector_with_policy(store, selector, false)
+    }
+
+    fn open_selector_with_policy(
+        store: &'a S,
+        selector: SnapshotSelector,
+        enforce_publication_limits: bool,
+    ) -> Result<Self, SnapshotError> {
         selector.validate()?;
         let namespace = NamespaceId::graph();
         let objects = object_partition()?;
@@ -1581,6 +1778,10 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         verify_digest(&entry.value, &selector.manifest_digest)?;
         let manifest = decode_json::<GraphSnapshotManifest>(&entry.value)?;
         manifest.validate()?;
+        manifest.validate_publication_limits()?;
+        if enforce_publication_limits {
+            manifest.validate_materialization_limit()?;
+        }
         if manifest.snapshot_id != selector.snapshot_id {
             return Err(SnapshotError::Corrupt(
                 "selector snapshot ID does not match its manifest".to_owned(),
@@ -1590,6 +1791,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             store,
             selector,
             manifest,
+            object_cache: Mutex::new(TreeObjectCache::default()),
         })
     }
 
@@ -1634,7 +1836,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 b"diagnostic" => graph
                     .diagnostics
                     .push(decode_json::<GraphDiagnostic>(&entry.value)?),
-                b"diagnostic-code" => {}
+                b"diagnostic-code" | b"scope-capability" => {}
                 _ => {
                     return Err(SnapshotError::Corrupt(
                         "metadata index contains an unknown supplement".to_owned(),
@@ -1648,6 +1850,29 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             multigraph: record.multigraph,
             graph,
         })
+    }
+
+    /// Verify every independently bounded immutable object reachable from the
+    /// selected manifest without materializing the graph.
+    ///
+    /// The traversal validates content addresses, object schemas, index keys,
+    /// branch separators, global key ordering, tree depth, and root entry
+    /// counts. Memory remains bounded by the decoded-object cache and one
+    /// branch path even when the logical graph exceeds whole-document reader
+    /// budgets.
+    pub fn validate_integrity(&self) -> Result<(), SnapshotError> {
+        for root in &self.manifest.roots {
+            let integrity = validate_tree_integrity(self, root.index, &root.digest, 0)?;
+            if integrity.entries != root.entry_count {
+                return Err(SnapshotError::Corrupt(format!(
+                    "{} tree contains {} entries but its root declares {}",
+                    root.index.as_str(),
+                    integrity.entries,
+                    root.entry_count
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Read graph-level metadata without materializing file, coverage, or
@@ -1712,6 +1937,76 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             .transpose()
     }
 
+    /// Resolve a bounded sorted set of node IDs while sharing immutable tree
+    /// branch and leaf reads across all requested keys.
+    pub fn get_nodes_by_ids_bounded_work(
+        &self,
+        ids: &BTreeSet<String>,
+        limits: SnapshotReadLimits,
+    ) -> Result<Vec<NodeRecord>, SnapshotError> {
+        let limits = limits.validate()?;
+        if ids.len() > limits.max_items {
+            return Err(SnapshotError::Limit(
+                "node batch exceeds the snapshot item limit".to_owned(),
+            ));
+        }
+        let keys = ids
+            .iter()
+            .map(|id| encode_graph_index_key(IndexKind::Nodes, &[id.as_bytes()]))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut state = MultiLookupState {
+            limits,
+            objects: 0,
+            bytes: 0,
+            values: BTreeMap::new(),
+        };
+        let root = self.root(IndexKind::Nodes)?.digest.clone();
+        lookup_many_tree(self, IndexKind::Nodes, &root, &keys, &mut state, 0)?;
+        let mut nodes = Vec::with_capacity(ids.len());
+        for key in keys {
+            let value = state.values.remove(&key).ok_or_else(|| {
+                SnapshotError::Corrupt("node batch references a missing node".to_owned())
+            })?;
+            nodes.push(decode_json::<NodeRecord>(&value)?);
+        }
+        Ok(nodes)
+    }
+
+    /// Resolve a bounded sorted set of edge IDs while sharing immutable tree
+    /// branch and leaf reads across all requested keys.
+    pub fn get_edges_by_ids_bounded_work(
+        &self,
+        ids: &BTreeSet<String>,
+        limits: SnapshotReadLimits,
+    ) -> Result<Vec<EdgeRecord>, SnapshotError> {
+        let limits = limits.validate()?;
+        if ids.len() > limits.max_items {
+            return Err(SnapshotError::Limit(
+                "edge batch exceeds the snapshot item limit".to_owned(),
+            ));
+        }
+        let keys = ids
+            .iter()
+            .map(|id| encode_graph_index_key(IndexKind::Edges, &[id.as_bytes()]))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut state = MultiLookupState {
+            limits,
+            objects: 0,
+            bytes: 0,
+            values: BTreeMap::new(),
+        };
+        let root = self.root(IndexKind::Edges)?.digest.clone();
+        lookup_many_tree(self, IndexKind::Edges, &root, &keys, &mut state, 0)?;
+        let mut edges = Vec::with_capacity(ids.len());
+        for key in keys {
+            let value = state.values.remove(&key).ok_or_else(|| {
+                SnapshotError::Corrupt("edge batch references a missing edge".to_owned())
+            })?;
+            edges.push(decode_json::<EdgeRecord>(&value)?);
+        }
+        Ok(edges)
+    }
+
     pub fn nodes(&self, limits: SnapshotReadLimits) -> Result<Vec<NodeRecord>, SnapshotError> {
         self.scan_values(IndexKind::Nodes, None, limits)?
             .into_iter()
@@ -1770,6 +2065,43 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         Ok((nodes, truncated))
     }
 
+    /// Resolve one exact canonical discovery scope through immutable postings.
+    pub fn resolve_scope_values(
+        &self,
+        kind: &str,
+        value: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool), SnapshotError> {
+        let capability_key = encode_graph_index_key(IndexKind::Metadata, &[b"scope-capability"])?;
+        let capability = self
+            .lookup(IndexKind::Metadata, &capability_key)?
+            .map(|value| decode_json::<String>(&value))
+            .transpose()?;
+        if capability.as_deref() != Some(DISCOVERY_SCOPE_INDEX_CAPABILITY_V1) {
+            return Err(SnapshotError::CapabilityUnavailable(
+                "scope_index_unavailable; rebuild the graph store with this Compass version"
+                    .to_owned(),
+            ));
+        }
+        let value_digest = hex_digest(value.as_bytes());
+        let prefix = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"scope", kind.as_bytes(), value_digest.as_bytes()],
+        )?;
+        let (values, truncated) =
+            self.scan_values_bounded(IndexKind::Terms, Some(&prefix), limits)?;
+        let mut canonical = Vec::with_capacity(values.len());
+        for encoded in values {
+            let (stored_requested, stored_canonical) = decode_json::<(String, String)>(&encoded)?;
+            if stored_requested == value {
+                canonical.push(stored_canonical);
+            }
+        }
+        canonical.sort();
+        canonical.dedup();
+        Ok((canonical, truncated))
+    }
+
     /// Return node candidates present in every exact normalized term posting.
     pub fn nodes_for_terms(
         &self,
@@ -1791,11 +2123,6 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 IndexKind::Terms,
                 &[posting_prefix.as_bytes(), b"node_prefix"],
             )?;
-            // `max_items` on the public request bounds candidate node IDs, not
-            // posting chunks. Scan the complete bounded prefix range and keep
-            // only the smallest canonical IDs; otherwise a vocabulary-heavy
-            // prefix can consume the bound before later matching terms are
-            // visited and diverge from the JSON accelerator.
             let posting_limits = SnapshotReadLimits {
                 max_items: GRAPH_SNAPSHOT_MAX_ITEMS,
                 ..limits
@@ -1825,13 +2152,492 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
                 break;
             }
         }
-        let mut nodes = Vec::new();
-        for node_id in intersection.unwrap_or_default() {
-            if let Some(node) = self.get_node(&node_id)? {
-                nodes.push(node);
+        let ids = intersection.unwrap_or_default();
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated))
+    }
+
+    /// Return bounded discovery candidates and report the posting work decoded.
+    pub fn nodes_for_terms_bounded_work(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let searchable_terms = terms
+            .iter()
+            .filter(|term| !normalize_search_term(term).is_empty())
+            .count()
+            .max(1);
+        let total_chunk_budget = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if total_chunk_budget < searchable_terms {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let per_term_chunk_limit = total_chunk_budget / searchable_terms;
+        let per_term_item_limit = per_term_chunk_limit * GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        let mut intersection: Option<BTreeSet<String>> = None;
+        let mut truncated = false;
+        let mut work = TermPostingWork::default();
+        for term in terms {
+            let normalized = normalize_search_term(term);
+            if normalized.is_empty() {
+                continue;
+            }
+            let prefix_length = normalized.len().min(3);
+            let posting_prefix = normalized
+                .get(..prefix_length)
+                .unwrap_or(normalized.as_str());
+            let prefix = encode_graph_index_key(
+                IndexKind::Terms,
+                &[posting_prefix.as_bytes(), b"node_prefix"],
+            )?;
+            let posting_limits = SnapshotReadLimits {
+                // Term values are fixed-size posting chunks. Divide the
+                // caller's candidate ceiling across query terms so decoded
+                // posting work remains independent of graph size. A prefix
+                // collision can truncate recall, which is propagated rather
+                // than hidden behind an unbounded scan.
+                max_items: per_term_chunk_limit,
+                ..limits
+            };
+            let (values, mut posting_truncated) =
+                self.scan_values_bounded(IndexKind::Terms, Some(&prefix), posting_limits)?;
+            let mut ids = BTreeSet::new();
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+                work.node_ids_decoded = work
+                    .node_ids_decoded
+                    .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+                if !normalize_search_term(&posting.term).starts_with(&normalized) {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > per_term_item_limit {
+                        ids.pop_last();
+                        posting_truncated = true;
+                    }
+                }
+            }
+            truncated |= posting_truncated;
+            intersection = Some(match intersection {
+                Some(previous) => previous.intersection(&ids).cloned().collect(),
+                None => ids,
+            });
+            if intersection.as_ref().is_some_and(BTreeSet::is_empty) {
+                break;
             }
         }
-        Ok((nodes, truncated))
+        let ids = intersection.unwrap_or_default();
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated, work))
+    }
+
+    /// Whether this snapshot includes raw identifier-subword term postings.
+    ///
+    /// The sentinel is an ordinary empty posting so readers predating this
+    /// capability continue to accept the additive index entry.
+    pub fn supports_identifier_subwords(&self) -> Result<bool, SnapshotError> {
+        let capability = IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1;
+        let posting_prefix = capability.get(..3).unwrap_or(capability);
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                posting_prefix.as_bytes(),
+                b"node_prefix",
+                capability.as_bytes(),
+                b"00000000",
+            ],
+        )?;
+        let Some(value) = self.lookup(IndexKind::Terms, &key)? else {
+            return Ok(false);
+        };
+        let posting = decode_json::<TermPostingChunk>(&value)?;
+        Ok(posting.term == capability && posting.node_ids.is_empty())
+    }
+
+    /// Whether this snapshot includes exact term postings restricted to
+    /// source-backed operation-role declarations.
+    pub fn supports_operation_role_terms(&self) -> Result<bool, SnapshotError> {
+        let capability = OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1;
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"operation_role", capability.as_bytes(), b"00000000"],
+        )?;
+        let Some(value) = self.lookup(IndexKind::Terms, &key)? else {
+            return Ok(false);
+        };
+        let posting = decode_json::<TermPostingChunk>(&value)?;
+        Ok(posting.term == capability && posting.node_ids.is_empty())
+    }
+
+    /// Whether this snapshot includes exact identifier terms restricted to
+    /// source-backed type declarations.
+    pub fn supports_declaration_terms(&self) -> Result<bool, SnapshotError> {
+        let capability = DECLARATION_TERM_INDEX_CAPABILITY_V1;
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[b"declaration", capability.as_bytes(), b"00000000"],
+        )?;
+        let Some(value) = self.lookup(IndexKind::Terms, &key)? else {
+            return Ok(false);
+        };
+        let posting = decode_json::<TermPostingChunk>(&value)?;
+        Ok(posting.term == capability && posting.node_ids.is_empty())
+    }
+
+    /// Return the bounded union of operation-role declarations matching any
+    /// exact normalized term, together with exact posting work.
+    pub fn operation_role_nodes_for_terms_bounded_work(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let normalized_terms = terms
+            .iter()
+            .map(|term| normalize_search_term(term))
+            .filter(|term| !term.is_empty())
+            .collect::<BTreeSet<_>>();
+        if normalized_terms.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let total_chunk_limit = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if total_chunk_limit < normalized_terms.len() {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let per_term_chunk_limit = total_chunk_limit / normalized_terms.len();
+        let mut ids = BTreeSet::new();
+        let mut truncated = false;
+        let mut work = TermPostingWork::default();
+        for term in normalized_terms {
+            let prefix =
+                encode_graph_index_key(IndexKind::Terms, &[b"operation_role", term.as_bytes()])?;
+            let (values, posting_truncated) = self.scan_values_bounded(
+                IndexKind::Terms,
+                Some(&prefix),
+                SnapshotReadLimits {
+                    max_items: per_term_chunk_limit,
+                    ..limits
+                },
+            )?;
+            truncated |= posting_truncated;
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+                work.node_ids_decoded = work
+                    .node_ids_decoded
+                    .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+                if normalize_search_term(&posting.term) != term {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > limits.max_items {
+                        ids.pop_last();
+                        truncated = true;
+                    }
+                }
+            }
+        }
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated, work))
+    }
+
+    /// Return the bounded union of source-backed type declarations matching
+    /// any exact normalized identifier term, together with exact posting work.
+    pub fn declaration_nodes_for_terms_bounded_work(
+        &self,
+        terms: &[String],
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let normalized_terms = terms
+            .iter()
+            .map(|term| normalize_search_term(term))
+            .filter(|term| !term.is_empty())
+            .collect::<BTreeSet<_>>();
+        if normalized_terms.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let total_chunk_limit = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if total_chunk_limit < normalized_terms.len() {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let per_term_chunk_limit = total_chunk_limit / normalized_terms.len();
+        let mut ids = BTreeSet::new();
+        let mut truncated = false;
+        let mut work = TermPostingWork::default();
+        for term in normalized_terms {
+            let prefix =
+                encode_graph_index_key(IndexKind::Terms, &[b"declaration", term.as_bytes()])?;
+            let (values, posting_truncated) = self.scan_values_bounded(
+                IndexKind::Terms,
+                Some(&prefix),
+                SnapshotReadLimits {
+                    max_items: per_term_chunk_limit,
+                    ..limits
+                },
+            )?;
+            truncated |= posting_truncated;
+            for value in values {
+                let posting = decode_json::<TermPostingChunk>(&value)?;
+                work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+                work.node_ids_decoded = work
+                    .node_ids_decoded
+                    .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+                if normalize_search_term(&posting.term) != term {
+                    continue;
+                }
+                for node_id in posting.node_ids {
+                    ids.insert(node_id);
+                    if ids.len() > limits.max_items {
+                        ids.pop_last();
+                        truncated = true;
+                    }
+                }
+            }
+        }
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated, work))
+    }
+
+    /// Whether this snapshot includes exact direct-caller concept postings.
+    pub fn supports_relationship_terms(&self) -> Result<bool, SnapshotError> {
+        let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
+        let posting_prefix = capability.get(..3).unwrap_or(capability);
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"call_source",
+                posting_prefix.as_bytes(),
+                capability.as_bytes(),
+                b"00000000",
+            ],
+        )?;
+        let Some(value) = self.lookup(IndexKind::Terms, &key)? else {
+            return Ok(false);
+        };
+        let posting = decode_json::<TermPostingChunk>(&value)?;
+        Ok(posting.term == capability && posting.node_ids.is_empty())
+    }
+
+    /// Return sorted source IDs from one exact direct-caller concept posting.
+    pub fn source_ids_for_exact_relationship_term_bounded_work(
+        &self,
+        term: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool, TermPostingWork), SnapshotError> {
+        let normalized = normalize_search_term(term);
+        if normalized.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let chunk_limit = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if chunk_limit == 0 {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let posting_prefix = normalized
+            .get(..normalized.len().min(3))
+            .unwrap_or(normalized.as_str());
+        let prefix = encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"call_source",
+                posting_prefix.as_bytes(),
+                normalized.as_bytes(),
+            ],
+        )?;
+        let (values, mut truncated) = self.scan_values_bounded(
+            IndexKind::Terms,
+            Some(&prefix),
+            SnapshotReadLimits {
+                max_items: chunk_limit,
+                ..limits
+            },
+        )?;
+        let mut source_ids = BTreeSet::new();
+        let mut work = TermPostingWork::default();
+        for value in values {
+            let posting = decode_json::<TermPostingChunk>(&value)?;
+            work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+            work.node_ids_decoded = work
+                .node_ids_decoded
+                .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+            if normalize_search_term(&posting.term) != normalized {
+                continue;
+            }
+            for source_id in posting.node_ids {
+                source_ids.insert(source_id);
+                if source_ids.len() > limits.max_items {
+                    source_ids.pop_last();
+                    truncated = true;
+                }
+            }
+        }
+        Ok((source_ids.into_iter().collect(), truncated, work))
+    }
+
+    /// Test one exact direct-caller concept membership.
+    pub fn relationship_source_matches_term(
+        &self,
+        source_id: &str,
+        term: &str,
+    ) -> Result<bool, SnapshotError> {
+        let normalized = normalize_search_term(term);
+        if normalized.is_empty() {
+            return Ok(false);
+        }
+        let key = encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"call_source_member",
+                source_id.as_bytes(),
+                normalized.as_bytes(),
+            ],
+        )?;
+        self.lookup(IndexKind::Terms, &key)
+            .map(|value| value.is_some())
+    }
+
+    /// Return sorted target IDs supporting one exact caller concept.
+    pub fn relationship_target_ids_for_source_terms_bounded_work(
+        &self,
+        source_id: &str,
+        terms: &BTreeSet<String>,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool, TermPostingWork), SnapshotError> {
+        let normalized = terms
+            .iter()
+            .map(|term| normalize_search_term(term))
+            .filter(|term| !term.is_empty())
+            .collect::<BTreeSet<_>>();
+        if normalized.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let mut target_ids = BTreeSet::new();
+        let term_count = normalized.len();
+        let per_term_items = limits.max_items.div_ceil(term_count);
+        let mut entries_decoded = 0_usize;
+        let mut truncated = false;
+        for term in &normalized {
+            let items_remaining = limits.max_items.saturating_sub(entries_decoded);
+            if items_remaining == 0 {
+                truncated = true;
+                break;
+            }
+            let prefix = encode_graph_index_key(
+                IndexKind::Terms,
+                &[b"call_source_target", source_id.as_bytes(), term.as_bytes()],
+            )?;
+            let (entries, term_truncated) = self.scan_entries_bounded(
+                IndexKind::Terms,
+                Some(&prefix),
+                SnapshotReadLimits {
+                    max_items: items_remaining.min(per_term_items),
+                    max_bytes: (limits.max_bytes / term_count).max(1),
+                    max_objects: (limits.max_objects / term_count).max(1),
+                    max_depth: limits.max_depth,
+                },
+            )?;
+            truncated |= term_truncated;
+            entries_decoded = entries_decoded.saturating_add(entries.len());
+            for entry in entries {
+                let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+                let target_id = segments
+                    .get(4)
+                    .and_then(|segment| std::str::from_utf8(segment).ok())
+                    .ok_or_else(|| {
+                        SnapshotError::Corrupt(
+                            "relationship target index key has an invalid target ID".to_owned(),
+                        )
+                    })?;
+                target_ids.insert(target_id.to_owned());
+            }
+        }
+        Ok((
+            target_ids.into_iter().collect(),
+            truncated,
+            TermPostingWork {
+                chunks_decoded: 0,
+                node_ids_decoded: u64::try_from(entries_decoded).unwrap_or(u64::MAX),
+            },
+        ))
+    }
+
+    /// Return node IDs for one exact normalized term posting without hydrating
+    /// node records. Multi-term discovery intersects these compact IDs first
+    /// so common postings do not force full-record reads for candidates that a
+    /// later term will reject.
+    pub fn node_ids_for_exact_term_bounded_work(
+        &self,
+        term: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool, TermPostingWork), SnapshotError> {
+        let normalized = normalize_search_term(term);
+        if normalized.is_empty() {
+            return Ok((Vec::new(), false, TermPostingWork::default()));
+        }
+        let chunk_limit = limits.max_items / GRAPH_TERM_POSTING_CHUNK_ITEMS;
+        if chunk_limit == 0 {
+            return Ok((Vec::new(), true, TermPostingWork::default()));
+        }
+        let prefix_length = normalized.len().min(3);
+        let posting_prefix = normalized
+            .get(..prefix_length)
+            .unwrap_or(normalized.as_str());
+        let prefix = encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                posting_prefix.as_bytes(),
+                b"node_prefix",
+                normalized.as_bytes(),
+            ],
+        )?;
+        let (values, mut truncated) = self.scan_values_bounded(
+            IndexKind::Terms,
+            Some(&prefix),
+            SnapshotReadLimits {
+                max_items: chunk_limit,
+                ..limits
+            },
+        )?;
+        let mut ids = BTreeSet::new();
+        let mut work = TermPostingWork::default();
+        for value in values {
+            let posting = decode_json::<TermPostingChunk>(&value)?;
+            work.chunks_decoded = work.chunks_decoded.saturating_add(1);
+            work.node_ids_decoded = work
+                .node_ids_decoded
+                .saturating_add(u64::try_from(posting.node_ids.len()).unwrap_or(u64::MAX));
+            if normalize_search_term(&posting.term) != normalized {
+                continue;
+            }
+            for node_id in posting.node_ids {
+                ids.insert(node_id);
+                if ids.len() > limits.max_items {
+                    ids.pop_last();
+                    truncated = true;
+                }
+            }
+        }
+        Ok((ids.into_iter().collect(), truncated, work))
+    }
+
+    /// Return candidates for one exact normalized term posting. Discovery uses
+    /// exact token matches before the broader bounded prefix channel so dense
+    /// shared prefixes cannot hide a present identifier token.
+    pub fn nodes_for_exact_term_bounded_work(
+        &self,
+        term: &str,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<NodeRecord>, bool, TermPostingWork), SnapshotError> {
+        let (ids, truncated, work) = self.node_ids_for_exact_term_bounded_work(term, limits)?;
+        let ids = ids.into_iter().collect::<BTreeSet<_>>();
+        let nodes =
+            self.get_nodes_by_ids_bounded_work(&ids, point_lookup_batch_limits(ids.len()))?;
+        Ok((nodes, truncated, work))
     }
 
     pub fn file_by_path(&self, path: &str) -> Result<Option<FileRecord>, SnapshotError> {
@@ -1859,7 +2665,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
         } else {
             IndexKind::Outgoing
         };
-        let mut edges = BTreeMap::new();
+        let mut edge_ids = BTreeSet::new();
         let mut truncated = false;
         for kind in kinds {
             let prefix =
@@ -1869,15 +2675,73 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             truncated |= bucket_truncated;
             for entry in entries {
                 let edge_id = index_entry_id(&entry, "directional adjacency")?;
-                let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
-                    SnapshotError::Corrupt(format!(
-                        "{index:?} index references missing edge {edge_id}"
-                    ))
-                })?;
-                edges.insert(edge.id.clone(), edge);
+                edge_ids.insert(edge_id);
             }
         }
-        Ok((edges.into_values().collect(), truncated))
+        let edges = self
+            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
+        Ok((edges, truncated))
+    }
+
+    /// Read one globally bounded directional adjacency prefix. Callers may
+    /// filter kinds after this read without multiplying the limit per kind.
+    pub fn directional_adjacency(
+        &self,
+        node_id: &str,
+        incoming: bool,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<EdgeRecord>, bool), SnapshotError> {
+        let index = if incoming {
+            IndexKind::Incoming
+        } else {
+            IndexKind::Outgoing
+        };
+        let prefix = encode_graph_index_key(index, &[node_id.as_bytes()])?;
+        let (entries, truncated) = self.scan_entries_bounded(index, Some(&prefix), limits)?;
+        let mut edge_ids = BTreeSet::new();
+        for entry in entries {
+            let edge_id = index_entry_id(&entry, "directional adjacency")?;
+            edge_ids.insert(edge_id);
+        }
+        let edges = self
+            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
+        Ok((edges, truncated))
+    }
+
+    /// Read outgoing occurrences whose target is already in a bounded selected
+    /// node set. The outgoing index key carries the target and edge ID, so
+    /// external edges are rejected before their full records are hydrated.
+    pub fn outgoing_edge_ids_within_nodes_bounded_work(
+        &self,
+        source_id: &str,
+        selected_node_ids: &BTreeSet<String>,
+        limits: SnapshotReadLimits,
+    ) -> Result<(Vec<String>, bool, usize), SnapshotError> {
+        let prefix = encode_graph_index_key(IndexKind::Outgoing, &[source_id.as_bytes()])?;
+        let (entries, truncated) =
+            self.scan_entries_bounded(IndexKind::Outgoing, Some(&prefix), limits)?;
+        let entries_examined = entries.len();
+        let mut edge_ids = Vec::new();
+        for entry in entries {
+            let segments = decode_key_segments(&entry.key).map_err(SnapshotError::from)?;
+            let target_id = segments
+                .get(3)
+                .and_then(|segment| std::str::from_utf8(segment).ok())
+                .ok_or_else(|| {
+                    SnapshotError::Corrupt("outgoing index key has an invalid target ID".to_owned())
+                })?;
+            if !selected_node_ids.contains(target_id) {
+                continue;
+            }
+            let edge_id = segments
+                .get(4)
+                .and_then(|segment| std::str::from_utf8(segment).ok())
+                .ok_or_else(|| {
+                    SnapshotError::Corrupt("outgoing index key has an invalid edge ID".to_owned())
+                })?;
+            edge_ids.push(edge_id.to_owned());
+        }
+        Ok((edge_ids, truncated, entries_examined))
     }
 
     pub fn incident(
@@ -1891,18 +2755,14 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             self.scan_entries_bounded(IndexKind::Incoming, Some(&incoming_prefix), limits)?;
         let (outgoing, outgoing_truncated) =
             self.scan_entries_bounded(IndexKind::Outgoing, Some(&outgoing_prefix), limits)?;
-        let mut edges = BTreeMap::new();
+        let mut edge_ids = BTreeSet::new();
         for entry in incoming.into_iter().chain(outgoing) {
             let edge_id = index_entry_id(&entry, "incident adjacency")?;
-            let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
-                SnapshotError::Corrupt(format!("incident index references missing edge {edge_id}"))
-            })?;
-            edges.insert(edge.id.clone(), edge);
+            edge_ids.insert(edge_id);
         }
-        Ok((
-            edges.into_values().collect(),
-            incoming_truncated || outgoing_truncated,
-        ))
+        let edges = self
+            .get_edges_by_ids_bounded_work(&edge_ids, point_lookup_batch_limits(edge_ids.len()))?;
+        Ok((edges, incoming_truncated || outgoing_truncated))
     }
 
     pub fn export_graph(&self) -> Result<GraphDocument, SnapshotError> {
@@ -1952,15 +2812,27 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
     ) -> Result<Vec<EdgeRecord>, SnapshotError> {
         let prefix = encode_graph_index_key(index, &[node_id.as_bytes()])?;
         let entries = self.scan_entries(index, Some(&prefix), limits)?;
-        let mut edges = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let edge_id = index_entry_id(&entry, "adjacency")?;
-            let edge = self.get_edge(&edge_id)?.ok_or_else(|| {
+        let edge_ids = entries
+            .iter()
+            .map(|entry| index_entry_id(entry, "adjacency"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let requested = edge_ids.iter().cloned().collect::<BTreeSet<_>>();
+        let edges = self.get_edges_by_ids_bounded_work(
+            &requested,
+            point_lookup_batch_limits(requested.len()),
+        )?;
+        let by_id = edges
+            .into_iter()
+            .map(|edge| (edge.id.clone(), edge))
+            .collect::<BTreeMap<_, _>>();
+        let mut ordered = Vec::with_capacity(edge_ids.len());
+        for edge_id in edge_ids {
+            let edge = by_id.get(&edge_id).cloned().ok_or_else(|| {
                 SnapshotError::Corrupt(format!("{index:?} index references missing edge {edge_id}"))
             })?;
-            edges.push(edge);
+            ordered.push(edge);
         }
-        Ok(edges)
+        Ok(ordered)
     }
 
     fn root(&self, index: IndexKind) -> Result<&SnapshotRoot, SnapshotError> {
@@ -1971,6 +2843,26 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             .ok_or_else(|| SnapshotError::Corrupt(format!("{} root is missing", index.as_str())))
     }
 
+    fn load_tree_object_cached(
+        &self,
+        index: IndexKind,
+        digest: &str,
+    ) -> Result<Arc<TreeObject>, SnapshotError> {
+        {
+            let mut cache = self.object_cache.lock().map_err(|_| {
+                SnapshotError::Corrupt("decoded tree cache lock was poisoned".to_owned())
+            })?;
+            if let Some(object) = cache.get(index, digest) {
+                return Ok(object);
+            }
+        }
+        let object = load_tree_object(self.store, index, digest)?;
+        let mut cache = self.object_cache.lock().map_err(|_| {
+            SnapshotError::Corrupt("decoded tree cache lock was poisoned".to_owned())
+        })?;
+        Ok(cache.insert_or_get(index, digest, object))
+    }
+
     fn lookup(&self, index: IndexKind, key: &[u8]) -> Result<Option<Vec<u8>>, SnapshotError> {
         let root = self.root(index)?.digest.clone();
         let limits = SnapshotReadLimits {
@@ -1979,7 +2871,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             max_objects: 1_024,
             max_depth: GRAPH_SNAPSHOT_MAX_DEPTH,
         };
-        lookup_tree(self.store, index, &root, key, limits, 0)
+        lookup_tree(self, index, &root, key, limits, 0)
     }
 
     fn scan_values(
@@ -1998,7 +2890,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             truncate_on_limit: false,
             truncated: false,
         };
-        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        scan_tree(self, index, &root, prefix, &mut state, 0)?;
         Ok(state.entries.into_iter().map(|entry| entry.value).collect())
     }
 
@@ -2018,7 +2910,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             truncate_on_limit: true,
             truncated: false,
         };
-        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        scan_tree(self, index, &root, prefix, &mut state, 0)?;
         Ok((
             state.entries.into_iter().map(|entry| entry.value).collect(),
             state.truncated,
@@ -2041,7 +2933,7 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             truncate_on_limit: true,
             truncated: false,
         };
-        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        scan_tree(self, index, &root, prefix, &mut state, 0)?;
         Ok((state.entries, state.truncated))
     }
 
@@ -2061,8 +2953,76 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             truncate_on_limit: false,
             truncated: false,
         };
-        scan_tree(self.store, index, &root, prefix, &mut state, 0)?;
+        scan_tree(self, index, &root, prefix, &mut state, 0)?;
         Ok(state.entries)
+    }
+}
+
+struct TreeIntegrity {
+    entries: u64,
+    first_key: Option<Vec<u8>>,
+    last_key: Option<Vec<u8>>,
+}
+
+fn validate_tree_integrity<S: Store + ?Sized>(
+    reader: &GraphSnapshotReader<'_, S>,
+    index: IndexKind,
+    digest: &str,
+    depth: usize,
+) -> Result<TreeIntegrity, SnapshotError> {
+    if depth >= GRAPH_SNAPSHOT_MAX_DEPTH {
+        return Err(SnapshotError::Limit(
+            "tree integrity validation exceeded the depth limit".to_owned(),
+        ));
+    }
+    let object = reader.load_tree_object_cached(index, digest)?;
+    match object.as_ref() {
+        TreeObject::Leaf { entries, .. } => Ok(TreeIntegrity {
+            entries: u64::try_from(entries.len()).map_err(|_| {
+                SnapshotError::Limit("tree leaf entry count does not fit u64".to_owned())
+            })?,
+            first_key: entries.first().map(|entry| entry.key.clone()),
+            last_key: entries.last().map(|entry| entry.key.clone()),
+        }),
+        TreeObject::Branch { children, .. } => {
+            let mut entry_count = 0_u64;
+            let mut first_key = None;
+            let mut last_key: Option<Vec<u8>> = None;
+            for child in children {
+                let child_integrity =
+                    validate_tree_integrity(reader, index, &child.digest, depth.saturating_add(1))?;
+                let child_first = child_integrity.first_key.ok_or_else(|| {
+                    SnapshotError::Corrupt("tree branch references an empty child".to_owned())
+                })?;
+                if child.first_key != child_first {
+                    return Err(SnapshotError::Corrupt(format!(
+                        "{} tree branch separator does not match its child",
+                        index.as_str()
+                    )));
+                }
+                if last_key
+                    .as_ref()
+                    .is_some_and(|previous| previous >= &child_first)
+                {
+                    return Err(SnapshotError::Corrupt(format!(
+                        "{} tree child ranges are not strictly ordered",
+                        index.as_str()
+                    )));
+                }
+                first_key.get_or_insert_with(|| child_first.clone());
+                last_key = child_integrity.last_key;
+                entry_count = entry_count
+                    .checked_add(child_integrity.entries)
+                    .ok_or_else(|| {
+                        SnapshotError::Limit("tree entry count exceeds u64".to_owned())
+                    })?;
+            }
+            Ok(TreeIntegrity {
+                entries: entry_count,
+                first_key,
+                last_key,
+            })
+        }
     }
 }
 
@@ -2208,6 +3168,10 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
         let mut terms = BTreeSet::new();
         terms.extend(search_terms(&node.name));
         terms.extend(search_terms(&node.qualified_name));
+        terms.extend(compass_model::search::identifier_search_terms(&node.name));
+        terms.extend(compass_model::search::identifier_search_terms(
+            &node.qualified_name,
+        ));
         terms.extend(search_terms(node.kind.as_str()));
         for role in &node.roles {
             let role = format!("{role:?}");
@@ -2218,6 +3182,15 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
         }
         if let Some(framework) = &node.framework {
             terms.extend(search_terms(framework));
+        }
+        if let Some(source) = &node.source {
+            terms.extend(search_terms(&source.file));
+        }
+        if let Some(community) = &node.community {
+            terms.extend(search_terms(&community.id.to_string()));
+            if let Some(label) = &community.label {
+                terms.extend(search_terms(label));
+            }
         }
         if let Some(path) = node
             .details
@@ -2239,6 +3212,7 @@ fn build_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
             .flat_map(|aliases| aliases.iter())
         {
             terms.extend(search_terms(alias));
+            terms.extend(compass_model::search::identifier_search_terms(alias));
         }
         for term in terms {
             term_postings.entry(term).or_default().push(node.id.clone());
@@ -2314,6 +3288,11 @@ fn build_index(
                     entries.entry(key).or_insert(value);
                 }
             }
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(IndexKind::Metadata, &[b"scope-capability"])?,
+                &DISCOVERY_SCOPE_INDEX_CAPABILITY_V1,
+            )?;
         }
         IndexKind::Nodes => {
             for node in &graph.nodes {
@@ -2346,7 +3325,9 @@ fn build_index(
             for (term, node_ids) in term_postings {
                 let prefix_length = term.len().min(3);
                 let prefix = term.get(..prefix_length).unwrap_or(term.as_str());
-                for (chunk_index, chunk) in node_ids.chunks(TERM_POSTING_CHUNK_ITEMS).enumerate() {
+                for (chunk_index, chunk) in
+                    node_ids.chunks(GRAPH_TERM_POSTING_CHUNK_ITEMS).enumerate()
+                {
                     let chunk_index = format!("{chunk_index:08}");
                     insert_json(
                         &mut entries,
@@ -2364,6 +3345,186 @@ fn build_index(
                             node_ids: chunk.to_vec(),
                         },
                     )?;
+                }
+            }
+            let capability = IDENTIFIER_SUBWORD_INDEX_CAPABILITY_V1;
+            let prefix = capability.get(..3).unwrap_or(capability);
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        prefix.as_bytes(),
+                        b"node_prefix",
+                        capability.as_bytes(),
+                        b"00000000",
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: capability.to_owned(),
+                    node_ids: Vec::new(),
+                },
+            )?;
+            for (term, node_ids) in operation_role_term_postings(graph) {
+                for (chunk_index, chunk) in
+                    node_ids.chunks(GRAPH_TERM_POSTING_CHUNK_ITEMS).enumerate()
+                {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[b"operation_role", term.as_bytes(), chunk_index.as_bytes()],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+            let operation_capability = OPERATION_ROLE_TERM_INDEX_CAPABILITY_V1;
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        b"operation_role",
+                        operation_capability.as_bytes(),
+                        b"00000000",
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: operation_capability.to_owned(),
+                    node_ids: Vec::new(),
+                },
+            )?;
+            for (term, node_ids) in declaration_term_postings(graph, term_postings) {
+                for (chunk_index, chunk) in
+                    node_ids.chunks(GRAPH_TERM_POSTING_CHUNK_ITEMS).enumerate()
+                {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[b"declaration", term.as_bytes(), chunk_index.as_bytes()],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+            let declaration_capability = DECLARATION_TERM_INDEX_CAPABILITY_V1;
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        b"declaration",
+                        declaration_capability.as_bytes(),
+                        b"00000000",
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: declaration_capability.to_owned(),
+                    node_ids: Vec::new(),
+                },
+            )?;
+            let relationship_postings =
+                compass_model::search::direct_call_source_identifier_postings(graph);
+            for (term, source_ids) in &relationship_postings {
+                for source_id in source_ids {
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[b"call_source_member", source_id.as_bytes(), term.as_bytes()],
+                        )?,
+                        &(),
+                    )?;
+                }
+                let prefix = term.get(..term.len().min(3)).unwrap_or(term.as_str());
+                for (chunk_index, chunk) in source_ids
+                    .chunks(GRAPH_TERM_POSTING_CHUNK_ITEMS)
+                    .enumerate()
+                {
+                    let chunk_index = format!("{chunk_index:08}");
+                    insert_json(
+                        &mut entries,
+                        encode_graph_index_key(
+                            IndexKind::Terms,
+                            &[
+                                b"call_source",
+                                prefix.as_bytes(),
+                                term.as_bytes(),
+                                chunk_index.as_bytes(),
+                            ],
+                        )?,
+                        &TermPostingChunk {
+                            term: term.clone(),
+                            node_ids: chunk.to_vec(),
+                        },
+                    )?;
+                }
+            }
+            for (term, source_id, target_id) in
+                compass_model::search::direct_call_source_identifier_targets(graph)
+            {
+                insert_json(
+                    &mut entries,
+                    encode_graph_index_key(
+                        IndexKind::Terms,
+                        &[
+                            b"call_source_target",
+                            source_id.as_bytes(),
+                            term.as_bytes(),
+                            target_id.as_bytes(),
+                        ],
+                    )?,
+                    &(),
+                )?;
+            }
+            let relationship_capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
+            let relationship_prefix = relationship_capability
+                .get(..3)
+                .unwrap_or(relationship_capability);
+            insert_json(
+                &mut entries,
+                encode_graph_index_key(
+                    IndexKind::Terms,
+                    &[
+                        b"call_source",
+                        relationship_prefix.as_bytes(),
+                        relationship_capability.as_bytes(),
+                        b"00000000",
+                    ],
+                )?,
+                &TermPostingChunk {
+                    term: relationship_capability.to_owned(),
+                    node_ids: Vec::new(),
+                },
+            )?;
+            for node in &graph.nodes {
+                for (kind, value, canonical) in
+                    compass_model::query_contract::discovery_scope_postings(node)
+                {
+                    let value_digest = hex_digest(value.as_bytes());
+                    let canonical_digest = hex_digest(canonical.as_bytes());
+                    let key = encode_graph_index_key(
+                        IndexKind::Terms,
+                        &[
+                            b"scope",
+                            kind.as_bytes(),
+                            value_digest.as_bytes(),
+                            canonical_digest.as_bytes(),
+                        ],
+                    )?;
+                    entries
+                        .entry(key)
+                        .or_insert(encode_json(&(value, canonical))?);
                 }
             }
         }
@@ -2435,6 +3596,71 @@ fn build_index(
         IndexKind::Diagnostics => {}
     }
     Ok(entries)
+}
+
+fn is_operation_role_declaration(node: &NodeRecord) -> bool {
+    is_source_backed_type_declaration(node)
+        && compass_model::search::identifier_search_terms(&node.name)
+            .iter()
+            .any(|term| compass_model::search::OPERATION_ROLE_TOKENS.contains(&term.as_str()))
+}
+
+fn is_source_backed_type_declaration(node: &NodeRecord) -> bool {
+    matches!(
+        node.kind,
+        NodeKind::Class
+            | NodeKind::Struct
+            | NodeKind::Interface
+            | NodeKind::Trait
+            | NodeKind::Protocol
+            | NodeKind::Enum
+            | NodeKind::TypeAlias
+    ) && node.source_file().is_some_and(|file| !file.is_empty())
+}
+
+fn operation_role_term_postings(graph: &GraphDocument) -> BTreeMap<String, Vec<String>> {
+    let mut postings = BTreeMap::<String, Vec<String>>::new();
+    for node in graph
+        .nodes
+        .iter()
+        .filter(|node| is_operation_role_declaration(node))
+    {
+        let mut terms = compass_model::search::identifier_search_terms(&node.name);
+        terms.extend(compass_model::search::identifier_search_terms(
+            &node.qualified_name,
+        ));
+        for term in terms {
+            postings.entry(term).or_default().push(node.id.clone());
+        }
+    }
+    for node_ids in postings.values_mut() {
+        node_ids.sort();
+        node_ids.dedup();
+    }
+    postings
+}
+
+fn declaration_term_postings(
+    graph: &GraphDocument,
+    term_postings: &BTreeMap<String, Vec<String>>,
+) -> BTreeMap<String, Vec<String>> {
+    let declaration_ids = graph
+        .nodes
+        .iter()
+        .filter(|node| is_source_backed_type_declaration(node))
+        .map(|node| node.id.as_str())
+        .collect::<BTreeSet<_>>();
+    term_postings
+        .iter()
+        .filter_map(|(term, node_ids)| {
+            let declarations = node_ids
+                .iter()
+                .filter(|node_id| declaration_ids.contains(node_id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            (!declarations.is_empty()).then(|| (term.clone(), declarations))
+        })
+        .collect()
 }
 
 fn validate_file_node_delta(
@@ -2578,6 +3804,7 @@ fn file_node_index_projection_equal(previous: &NodeRecord, current: &NodeRecord)
         || previous.qualified_name != current.qualified_name
         || previous.language != current.language
         || previous.framework != current.framework
+        || previous.source != current.source
         || previous.community != current.community
     {
         return false;
@@ -2833,7 +4060,7 @@ fn put_immutable_object<S: Store + ?Sized>(
 }
 
 fn lookup_tree<S: Store + ?Sized>(
-    store: &S,
+    reader: &GraphSnapshotReader<'_, S>,
     index: IndexKind,
     digest: &str,
     key: &[u8],
@@ -2843,8 +4070,8 @@ fn lookup_tree<S: Store + ?Sized>(
     if depth >= limits.max_depth {
         return Err(SnapshotError::Limit("tree depth limit exceeded".to_owned()));
     }
-    let object = load_tree_object(store, index, digest)?;
-    match object {
+    let object = reader.load_tree_object_cached(index, digest)?;
+    match object.as_ref() {
         TreeObject::Leaf { entries, .. } => Ok(entries
             .binary_search_by(|entry| entry.key.as_slice().cmp(key))
             .ok()
@@ -2855,10 +4082,86 @@ fn lookup_tree<S: Store + ?Sized>(
                 .take_while(|child| child.first_key.as_slice() <= key)
                 .last();
             child.map_or(Ok(None), |child| {
-                lookup_tree(store, index, &child.digest, key, limits, depth + 1)
+                lookup_tree(reader, index, &child.digest, key, limits, depth + 1)
             })
         }
     }
+}
+
+struct MultiLookupState {
+    limits: SnapshotReadLimits,
+    objects: usize,
+    bytes: usize,
+    values: BTreeMap<Vec<u8>, Vec<u8>>,
+}
+
+fn lookup_many_tree<S: Store + ?Sized>(
+    reader: &GraphSnapshotReader<'_, S>,
+    index: IndexKind,
+    digest: &str,
+    keys: &[Vec<u8>],
+    state: &mut MultiLookupState,
+    depth: usize,
+) -> Result<(), SnapshotError> {
+    if keys.is_empty() {
+        return Ok(());
+    }
+    if depth >= state.limits.max_depth {
+        return Err(SnapshotError::Limit("tree depth limit exceeded".to_owned()));
+    }
+    state.objects = state.objects.saturating_add(1);
+    if state.objects > state.limits.max_objects {
+        return Err(SnapshotError::Limit(
+            "tree object read limit exceeded".to_owned(),
+        ));
+    }
+    let object = reader.load_tree_object_cached(index, digest)?;
+    match object.as_ref() {
+        TreeObject::Leaf { entries, .. } => {
+            for key in keys {
+                let Ok(position) = entries.binary_search_by(|entry| entry.key.cmp(key)) else {
+                    continue;
+                };
+                let Some(entry) = entries.get(position) else {
+                    continue;
+                };
+                state.bytes = state
+                    .bytes
+                    .saturating_add(entry.key.len())
+                    .saturating_add(entry.value.len());
+                if state.bytes > state.limits.max_bytes {
+                    return Err(SnapshotError::Limit(
+                        "snapshot byte limit exceeded".to_owned(),
+                    ));
+                }
+                state.values.insert(entry.key.clone(), entry.value.clone());
+            }
+        }
+        TreeObject::Branch { children, .. } => {
+            let mut grouped = BTreeMap::<usize, Vec<Vec<u8>>>::new();
+            for key in keys {
+                let position =
+                    children.partition_point(|child| child.first_key.as_slice() <= key.as_slice());
+                if let Some(child_index) = position.checked_sub(1) {
+                    grouped.entry(child_index).or_default().push(key.clone());
+                }
+            }
+            for (child_index, child_keys) in grouped {
+                let child = children.get(child_index).ok_or_else(|| {
+                    SnapshotError::Corrupt("tree child index is missing".to_owned())
+                })?;
+                lookup_many_tree(
+                    reader,
+                    index,
+                    &child.digest,
+                    &child_keys,
+                    state,
+                    depth.saturating_add(1),
+                )?;
+            }
+        }
+    }
+    Ok(())
 }
 
 struct ScanState {
@@ -2871,7 +4174,7 @@ struct ScanState {
 }
 
 fn scan_tree<S: Store + ?Sized>(
-    store: &S,
+    reader: &GraphSnapshotReader<'_, S>,
     index: IndexKind,
     digest: &str,
     prefix: Option<&[u8]>,
@@ -2890,7 +4193,8 @@ fn scan_tree<S: Store + ?Sized>(
             "tree object read limit exceeded".to_owned(),
         ));
     }
-    match load_tree_object(store, index, digest)? {
+    let object = reader.load_tree_object_cached(index, digest)?;
+    match object.as_ref() {
         TreeObject::Leaf { entries, .. } => {
             for entry in entries {
                 if let Some(prefix) = prefix
@@ -2920,17 +4224,17 @@ fn scan_tree<S: Store + ?Sized>(
                         "snapshot byte limit exceeded".to_owned(),
                     ));
                 }
-                state.entries.push(entry);
+                state.entries.push(entry.clone());
             }
         }
         TreeObject::Branch { children, .. } => {
             for (child_index, child) in children.iter().enumerate() {
                 if let Some(prefix) = prefix
-                    && !child_may_match_prefix(&children, child_index, prefix)?
+                    && !child_may_match_prefix(children, child_index, prefix)?
                 {
                     continue;
                 }
-                scan_tree(store, index, &child.digest, prefix, state, depth + 1)?;
+                scan_tree(reader, index, &child.digest, prefix, state, depth + 1)?;
             }
         }
     }
@@ -2942,30 +4246,47 @@ fn child_may_match_prefix(
     index: usize,
     prefix: &[u8],
 ) -> Result<bool, SnapshotError> {
-    let prefix_segments = decode_key_segments(prefix).map_err(SnapshotError::from)?;
     let first = children
         .get(index)
         .ok_or_else(|| SnapshotError::Corrupt("tree child index is missing".to_owned()))?;
-    let first_segments = decode_key_segments(&first.first_key).map_err(SnapshotError::from)?;
-    let first_cmp = compare_key_prefix(&first_segments, &prefix_segments);
-    if first_cmp.is_gt() {
-        return Ok(false);
+    let next = children
+        .get(index.saturating_add(1))
+        .map(|child| child.first_key.as_slice());
+    let segments = decode_key_segments(prefix).map_err(SnapshotError::from)?;
+    let prefix_count = segments.len();
+    for total_count in prefix_count..=MAX_KEY_SEGMENTS {
+        let total_count = u8::try_from(total_count).map_err(|_| {
+            SnapshotError::Corrupt("key segment count does not fit the v1 encoding".to_owned())
+        })?;
+        let mut lower = prefix.to_vec();
+        let Some(encoded_count) = lower.get_mut(1) else {
+            return Err(SnapshotError::Corrupt(
+                "encoded key prefix is truncated".to_owned(),
+            ));
+        };
+        *encoded_count = total_count;
+        let upper = lexicographic_successor(&lower);
+        let starts_before_upper = upper
+            .as_ref()
+            .is_none_or(|upper| first.first_key.as_slice() < upper.as_slice());
+        let ends_after_lower = next.is_none_or(|next| next > lower.as_slice());
+        if starts_before_upper && ends_after_lower {
+            return Ok(true);
+        }
     }
-    if first_cmp.is_eq() {
-        return Ok(true);
-    }
-    let Some(next) = children.get(index.saturating_add(1)) else {
-        return Ok(true);
-    };
-    let next_segments = decode_key_segments(&next.first_key).map_err(SnapshotError::from)?;
-    Ok(!compare_key_prefix(&next_segments, &prefix_segments).is_lt())
+    Ok(false)
 }
 
-fn compare_key_prefix(left: &[Vec<u8>], prefix: &[Vec<u8>]) -> std::cmp::Ordering {
-    left.iter()
-        .take(prefix.len())
-        .map(Vec::as_slice)
-        .cmp(prefix.iter().map(Vec::as_slice))
+fn lexicographic_successor(value: &[u8]) -> Option<Vec<u8>> {
+    let mut successor = value.to_vec();
+    for index in (0..successor.len()).rev() {
+        if successor[index] != u8::MAX {
+            successor[index] = successor[index].saturating_add(1);
+            successor.truncate(index.saturating_add(1));
+            return Some(successor);
+        }
+    }
+    None
 }
 
 fn key_has_segment_prefix(key: &[u8], prefix: &[u8]) -> Result<bool, SnapshotError> {
@@ -3103,6 +4424,15 @@ fn normalize_search_term(value: &str) -> String {
         .to_lowercase()
 }
 
+fn point_lookup_batch_limits(item_count: usize) -> SnapshotReadLimits {
+    SnapshotReadLimits {
+        max_items: item_count.max(1),
+        max_bytes: MAX_VALUE_BYTES.saturating_mul(4_096),
+        max_objects: GRAPH_SNAPSHOT_MAX_OBJECTS,
+        max_depth: GRAPH_SNAPSHOT_MAX_DEPTH,
+    }
+}
+
 fn bounded_count(count: u64) -> Result<usize, SnapshotError> {
     let count = usize::try_from(count).map_err(|_| {
         SnapshotError::Limit("snapshot count does not fit this platform".to_owned())
@@ -3121,26 +4451,40 @@ fn encode_json<T: Serialize>(value: &T) -> Result<Vec<u8>, SnapshotError> {
 
 struct DigestWriter {
     hasher: Sha256,
-    bytes: usize,
-    maximum: usize,
+    bytes: u64,
+    maximum: Option<u64>,
+    overflowed: bool,
     exceeded: bool,
 }
 
 impl DigestWriter {
-    fn new(maximum: usize) -> Self {
+    fn new() -> Self {
         Self {
             hasher: Sha256::new(),
             bytes: 0,
-            maximum,
+            maximum: None,
+            overflowed: false,
             exceeded: false,
+        }
+    }
+
+    fn with_maximum(maximum: usize) -> Self {
+        Self {
+            maximum: Some(maximum as u64),
+            ..Self::new()
         }
     }
 }
 
 impl Write for DigestWriter {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
-        let next = self.bytes.saturating_add(buffer.len());
-        if next > self.maximum {
+        let buffer_len = u64::try_from(buffer.len())
+            .map_err(|_| std::io::Error::other("serialized byte count does not fit u64"))?;
+        let Some(next) = self.bytes.checked_add(buffer_len) else {
+            self.overflowed = true;
+            return Err(std::io::Error::other("serialized byte count exceeds u64"));
+        };
+        if self.maximum.is_some_and(|maximum| next > maximum) {
             self.exceeded = true;
             return Err(std::io::Error::other(
                 "serialized value exceeds its byte limit",
@@ -3160,10 +4504,15 @@ fn digest_canonical_graph_json<T: Serialize>(
     value: &T,
     maximum: usize,
 ) -> Result<(String, u64), SnapshotError> {
-    let mut writer = DigestWriter::new(maximum);
+    let mut writer = DigestWriter::with_maximum(maximum);
     if let Err(error) = serde_json::to_writer(&mut writer, value) {
         if writer.exceeded {
             return Err(SnapshotError::canonical_graph_too_large(maximum as u64));
+        }
+        if writer.overflowed {
+            return Err(SnapshotError::Limit(
+                "canonical graph byte count exceeds u64".to_owned(),
+            ));
         }
         return Err(SnapshotError::Encode(error.to_string()));
     }
@@ -3172,8 +4521,7 @@ fn digest_canonical_graph_json<T: Serialize>(
             "canonical graph serialization is empty".to_owned(),
         ));
     }
-    let bytes = writer.bytes as u64;
-    Ok((format!("{:x}", writer.hasher.finalize()), bytes))
+    Ok((format!("{:x}", writer.hasher.finalize()), writer.bytes))
 }
 
 fn encode_tree_object(value: &TreeObject) -> Result<Vec<u8>, SnapshotError> {
@@ -3334,6 +4682,314 @@ mod tests {
         BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails, FileRecord,
         NodeDetails, NodeKind,
     };
+    use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
+    use compass_store::{
+        Entry, KeyRange, MemoryStore, ScanCursor, ScanLimits, ScanPage, StoreCapabilities,
+    };
+    use std::sync::Barrier;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn canonical_digest_counter_has_no_two_gibibyte_cutoff() -> Result<(), std::io::Error> {
+        let mut writer = DigestWriter::new();
+        writer.bytes = (2_u64 * 1024 * 1024 * 1024) + 1;
+
+        writer.write_all(b"x")?;
+
+        assert_eq!(writer.bytes, (2_u64 * 1024 * 1024 * 1024) + 2);
+        writer.bytes = u64::MAX;
+        assert!(writer.write_all(b"x").is_err());
+        assert!(writer.overflowed);
+        Ok(())
+    }
+
+    #[derive(Default)]
+    struct CountingStore {
+        inner: MemoryStore,
+        object_gets: AtomicUsize,
+        object_barrier: Mutex<Option<Arc<Barrier>>>,
+    }
+
+    impl CountingStore {
+        fn reset_object_gets(&self) {
+            self.object_gets.store(0, Ordering::SeqCst);
+        }
+
+        fn object_gets(&self) -> usize {
+            self.object_gets.load(Ordering::SeqCst)
+        }
+
+        fn set_object_barrier(&self, barrier: Option<Arc<Barrier>>) -> Result<(), SnapshotError> {
+            *self.object_barrier.lock().map_err(|_| {
+                SnapshotError::Corrupt("test object barrier lock was poisoned".to_owned())
+            })? = barrier;
+            Ok(())
+        }
+    }
+
+    impl Store for CountingStore {
+        fn capabilities(&self) -> StoreCapabilities {
+            self.inner.capabilities()
+        }
+
+        fn get(
+            &self,
+            namespace: &NamespaceId,
+            partition: &PartitionKey,
+            key: &Key,
+        ) -> Result<Option<Entry>, StoreError> {
+            if partition.as_bytes() == GRAPH_SNAPSHOT_OBJECT_PARTITION.as_bytes()
+                && key.as_bytes().starts_with(b"object/")
+            {
+                self.object_gets.fetch_add(1, Ordering::SeqCst);
+                let barrier = self
+                    .object_barrier
+                    .lock()
+                    .map_err(|_| StoreError::Corrupt("object barrier lock poisoned".to_owned()))?
+                    .clone();
+                if let Some(barrier) = barrier {
+                    barrier.wait();
+                }
+            }
+            self.inner.get(namespace, partition, key)
+        }
+
+        fn scan(
+            &self,
+            namespace: &NamespaceId,
+            partition: &PartitionKey,
+            range: &KeyRange,
+            limits: ScanLimits,
+            cursor: Option<&ScanCursor>,
+        ) -> Result<ScanPage, StoreError> {
+            self.inner.scan(namespace, partition, range, limits, cursor)
+        }
+
+        fn put(
+            &self,
+            namespace: &NamespaceId,
+            partition: &PartitionKey,
+            key: &Key,
+            value: &[u8],
+            condition: WriteCondition,
+        ) -> Result<Entry, StoreError> {
+            self.inner.put(namespace, partition, key, value, condition)
+        }
+
+        fn delete(
+            &self,
+            namespace: &NamespaceId,
+            partition: &PartitionKey,
+            key: &Key,
+            condition: WriteCondition,
+        ) -> Result<bool, StoreError> {
+            self.inner.delete(namespace, partition, key, condition)
+        }
+    }
+
+    fn cache_fixture_graph() -> GraphDocument {
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let source = SourceAnchor {
+            file: "src/lib.rs".to_owned(),
+            start_byte: 0,
+            end_byte: 1,
+            start_line: 1,
+            start_column: 0,
+            end_line: 1,
+            end_column: 1,
+        };
+        graph.graph.files.push(FileRecord {
+            id: compass_model::identity::file_id("src/lib.rs"),
+            path: "src/lib.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:test".to_owned(),
+            byte_size: 1,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: vec!["test".to_owned()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+        graph.nodes.push(NodeRecord {
+            id: "a".to_owned(),
+            kind: NodeKind::Function,
+            roles: Vec::new(),
+            name: "a".to_owned(),
+            qualified_name: "crate::a".to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: Some(source.clone()),
+            details: None,
+            evidence: vec![Provenance {
+                origin: EvidenceOrigin::Ast,
+                extractor: "test".to_owned(),
+                confidence: EvidenceConfidence::Exact,
+                rule: None,
+                anchors: vec![source],
+                wiring_site: None,
+                score: None,
+                candidates: Vec::new(),
+            }],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        });
+        graph
+    }
+
+    #[test]
+    fn decoded_tree_cache_is_bounded_and_retains_branches_over_leaf_lru() {
+        let mut cache = TreeObjectCache::default();
+        cache.insert_or_get(
+            IndexKind::Nodes,
+            "branch",
+            TreeObject::Branch {
+                schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+                index: IndexKind::Nodes,
+                children: vec![TreeChild {
+                    first_key: vec![0],
+                    digest: "child".to_owned(),
+                }],
+            },
+        );
+        for index in 0..16 {
+            cache.insert_or_get(
+                IndexKind::Nodes,
+                &format!("leaf-{index:02}"),
+                TreeObject::Leaf {
+                    schema: GRAPH_SNAPSHOT_LAYOUT_V2.to_owned(),
+                    index: IndexKind::Nodes,
+                    entries: vec![TreeEntry {
+                        key: vec![u8::try_from(index).unwrap_or_default()],
+                        value: vec![0; 1024 * 1024],
+                    }],
+                },
+            );
+        }
+
+        assert!(cache.object_count <= TREE_OBJECT_CACHE_MAX_OBJECTS);
+        assert!(cache.resident_bytes <= TREE_OBJECT_CACHE_MAX_BYTES);
+        assert!(cache.get(IndexKind::Nodes, "branch").is_some());
+        assert!(cache.get(IndexKind::Nodes, "leaf-00").is_none());
+        assert!(cache.get(IndexKind::Nodes, "leaf-15").is_some());
+    }
+
+    #[test]
+    fn graph_snapshot_reader_remains_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<GraphSnapshotReader<'static, MemoryStore>>();
+    }
+
+    #[test]
+    fn repeated_reader_lookup_reuses_verified_tree_objects() -> Result<(), SnapshotError> {
+        let store = CountingStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &cache_fixture_graph())?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot missing".to_owned()))?;
+        store.reset_object_gets();
+
+        let first = reader.get_node("a")?;
+        let first_reads = store.object_gets();
+        let second = reader.get_node("a")?;
+
+        assert!(first_reads > 0);
+        assert_eq!(first, second);
+        assert_eq!(store.object_gets(), first_reads);
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_tree_objects_are_rejected_without_caching() -> Result<(), SnapshotError> {
+        let store = CountingStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &cache_fixture_graph())?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot missing".to_owned()))?;
+        let root = reader
+            .manifest()
+            .roots
+            .iter()
+            .find(|root| root.index == IndexKind::Nodes)
+            .ok_or_else(|| SnapshotError::Corrupt("nodes root missing".to_owned()))?;
+        store.inner.put(
+            &NamespaceId::graph(),
+            &object_partition()?,
+            &object_key(&root.digest)?,
+            b"corrupt",
+            WriteCondition::Any,
+        )?;
+        store.reset_object_gets();
+
+        assert!(matches!(
+            reader.get_node("a"),
+            Err(SnapshotError::Corrupt(_))
+        ));
+        assert!(matches!(
+            reader.get_node("a"),
+            Err(SnapshotError::Corrupt(_))
+        ));
+        assert_eq!(store.object_gets(), 2);
+        assert_eq!(
+            reader
+                .object_cache
+                .lock()
+                .map_err(|_| SnapshotError::Corrupt("cache lock poisoned".to_owned()))?
+                .object_count,
+            0
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_same_key_misses_charge_one_cache_entry() -> Result<(), SnapshotError> {
+        let store = CountingStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &cache_fixture_graph())?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot missing".to_owned()))?;
+        store.reset_object_gets();
+        store.set_object_barrier(Some(Arc::new(Barrier::new(2))))?;
+
+        let (left, right) = std::thread::scope(|scope| {
+            let left = scope.spawn(|| reader.get_node("a"));
+            let right = scope.spawn(|| reader.get_node("a"));
+            (left.join(), right.join())
+        });
+        let left =
+            left.map_err(|_| SnapshotError::Corrupt("left lookup thread panicked".to_owned()))??;
+        let right = right
+            .map_err(|_| SnapshotError::Corrupt("right lookup thread panicked".to_owned()))??;
+        store.set_object_barrier(None)?;
+
+        assert_eq!(left, right);
+        assert_eq!(store.object_gets(), 2);
+        let cache = reader
+            .object_cache
+            .lock()
+            .map_err(|_| SnapshotError::Corrupt("cache lock poisoned".to_owned()))?;
+        assert_eq!(cache.object_count, 1);
+        assert_eq!(
+            cache.resident_bytes,
+            cache
+                .entries
+                .values()
+                .flat_map(BTreeMap::values)
+                .map(|entry| entry.resident_bytes)
+                .sum::<usize>()
+        );
+        Ok(())
+    }
 
     #[test]
     fn streamed_canonical_graph_json_matches_serde_encoding() -> Result<(), SnapshotError> {
@@ -3486,6 +5142,20 @@ mod tests {
             nodes: vec![file_node, symbol_node],
             links: Vec::new(),
         };
+        let mut source_changed = previous.clone();
+        source_changed.nodes[0].source = Some(SourceAnchor {
+            file: "src/main.rs".to_owned(),
+            start_byte: 0,
+            end_byte: 1,
+            start_line: 1,
+            start_column: 0,
+            end_line: 1,
+            end_column: 1,
+        });
+        assert!(matches!(
+            validate_file_node_delta(&previous, &source_changed),
+            Err(SnapshotError::Unsupported(_))
+        ));
         let mut previous_bytes = Vec::new();
         write_canonical_graph_json(&previous, &mut previous_bytes)
             .map_err(|error| SnapshotError::Encode(error.to_string()))?;
@@ -3534,6 +5204,308 @@ mod tests {
             .map_err(|error| SnapshotError::Encode(error.to_string()))?
         );
         assert!(no_output.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_v2_snapshot_without_scope_capability_remains_readable_but_rejects_scopes()
+    -> Result<(), SnapshotError> {
+        let graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "legacy-test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let store = compass_store::MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let mut content = builder.prepare_content(&store, &graph)?;
+        let mut metadata_entries = build_index(&graph, IndexKind::Metadata, None)?;
+        metadata_entries.remove(&encode_graph_index_key(
+            IndexKind::Metadata,
+            &[b"scope-capability"],
+        )?);
+        let metadata_entry_count = metadata_entries.len() as u64;
+        let mut writer = ObjectWriter::new(&store)?;
+        let metadata_digest = build_index_tree(&mut writer, IndexKind::Metadata, metadata_entries)?;
+        let _ = writer.finish()?;
+        let metadata_root = content
+            .roots
+            .iter_mut()
+            .find(|root| root.index == IndexKind::Metadata)
+            .ok_or_else(|| SnapshotError::Corrupt("metadata root is missing".to_owned()))?;
+        metadata_root.digest = metadata_digest;
+        metadata_root.entry_count = metadata_entry_count;
+        let (graph_digest, graph_bytes) = digest_canonical_graph(&graph, false)?;
+        let prepared = builder.finish_content(&store, content, graph_digest, graph_bytes)?;
+        builder.activate(&store, &prepared)?;
+
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
+        assert!(reader.nodes(SnapshotReadLimits::default())?.is_empty());
+        assert_eq!(reader.metadata()?.graph.build, graph.graph.build);
+        assert!(matches!(
+            reader.resolve_scope_values("node-id", "missing", SnapshotReadLimits::default()),
+            Err(SnapshotError::CapabilityUnavailable(message))
+                if message.contains("scope_index_unavailable")
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_snapshot_without_relationship_terms_remains_readable_and_degraded()
+    -> Result<(), SnapshotError> {
+        let graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "legacy-relationship-test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        let store = compass_store::MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let mut content = builder.prepare_content(&store, &graph)?;
+        let term_postings = build_term_postings(&graph);
+        let mut term_entries = build_index(&graph, IndexKind::Terms, Some(&term_postings))?;
+        let capability = RELATIONSHIP_TERM_INDEX_CAPABILITY_V2;
+        let prefix = capability.get(..3).unwrap_or(capability);
+        term_entries.remove(&encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"call_source",
+                prefix.as_bytes(),
+                capability.as_bytes(),
+                b"00000000",
+            ],
+        )?);
+        term_entries.remove(&encode_graph_index_key(
+            IndexKind::Terms,
+            &[
+                b"declaration",
+                DECLARATION_TERM_INDEX_CAPABILITY_V1.as_bytes(),
+                b"00000000",
+            ],
+        )?);
+        let term_entry_count = term_entries.len() as u64;
+        let mut writer = ObjectWriter::new(&store)?;
+        let term_digest = build_index_tree(&mut writer, IndexKind::Terms, term_entries)?;
+        let _ = writer.finish()?;
+        let term_root = content
+            .roots
+            .iter_mut()
+            .find(|root| root.index == IndexKind::Terms)
+            .ok_or_else(|| SnapshotError::Corrupt("terms root is missing".to_owned()))?;
+        term_root.digest = term_digest;
+        term_root.entry_count = term_entry_count;
+        let (graph_digest, graph_bytes) = digest_canonical_graph(&graph, false)?;
+        let prepared = builder.finish_content(&store, content, graph_digest, graph_bytes)?;
+        builder.activate(&store, &prepared)?;
+
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
+        assert!(reader.nodes(SnapshotReadLimits::default())?.is_empty());
+        assert!(reader.supports_identifier_subwords()?);
+        assert!(!reader.supports_declaration_terms()?);
+        assert!(!reader.supports_relationship_terms()?);
+        assert_eq!(
+            reader
+                .source_ids_for_exact_relationship_term_bounded_work(
+                    "checkpoint",
+                    SnapshotReadLimits::default(),
+                )?
+                .0,
+            Vec::<String>::new()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn operation_role_term_index_is_complete_and_excludes_data_types() -> Result<(), SnapshotError>
+    {
+        let mut graph = GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "operation-role-test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "tree".to_owned(),
+            configuration_digest: "config".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        });
+        graph.graph.files.push(FileRecord {
+            id: compass_model::identity::file_id("src/table.rs"),
+            path: "src/table.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: "sha256:test".to_owned(),
+            byte_size: 1,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+        let node = |id: &str, name: &str| NodeRecord {
+            id: id.to_owned(),
+            kind: NodeKind::Struct,
+            roles: Vec::new(),
+            name: name.to_owned(),
+            qualified_name: format!("crate::{name}"),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: Some(SourceAnchor {
+                file: "src/table.rs".to_owned(),
+                start_byte: 0,
+                end_byte: 1,
+                start_line: 1,
+                start_column: 0,
+                end_line: 1,
+                end_column: 1,
+            }),
+            details: None,
+            evidence: vec![Provenance {
+                origin: EvidenceOrigin::Ast,
+                extractor: "test".to_owned(),
+                confidence: EvidenceConfidence::Exact,
+                rule: None,
+                anchors: vec![SourceAnchor {
+                    file: "src/table.rs".to_owned(),
+                    start_byte: 0,
+                    end_byte: 1,
+                    start_line: 1,
+                    start_column: 0,
+                    end_line: 1,
+                    end_column: 1,
+                }],
+                wiring_site: None,
+                score: None,
+                candidates: Vec::new(),
+            }],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        };
+        graph.nodes = vec![
+            node("builder", "DeltaTableBuilder"),
+            node("table", "DeltaTable"),
+        ];
+        let store = compass_store::MemoryStore::default();
+        let builder = GraphSnapshotBuilder::new();
+        let prepared = builder.prepare(&store, &graph)?;
+        builder.activate(&store, &prepared)?;
+        let reader = GraphSnapshotReader::open_active(&store)?
+            .ok_or_else(|| SnapshotError::Corrupt("active snapshot is missing".to_owned()))?;
+
+        assert!(reader.supports_operation_role_terms()?);
+        let (nodes, truncated, work) = reader.operation_role_nodes_for_terms_bounded_work(
+            &["delta".to_owned(), "open".to_owned()],
+            SnapshotReadLimits::default(),
+        )?;
+        assert!(!truncated);
+        assert_eq!(
+            nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["builder"]
+        );
+        assert_eq!(work.node_ids_decoded, 1);
+
+        assert!(reader.supports_declaration_terms()?);
+        let (declarations, truncated, work) = reader.declaration_nodes_for_terms_bounded_work(
+            &["delta".to_owned(), "table".to_owned()],
+            SnapshotReadLimits::default(),
+        )?;
+        assert!(!truncated);
+        assert_eq!(
+            declarations
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["builder", "table"]
+        );
+        assert_eq!(work.node_ids_decoded, 4);
+        Ok(())
+    }
+
+    #[test]
+    fn raw_prefix_child_routing_matches_a_full_scan_across_key_shapes() -> Result<(), SnapshotError>
+    {
+        let mut state = 0x9e37_79b9_u64;
+        let mut encoded = BTreeSet::new();
+        for _ in 0..600 {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let count = usize::try_from(state % 6).unwrap_or(0).saturating_add(1);
+            let mut segments = Vec::new();
+            for _ in 0..count {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1);
+                let length = usize::try_from(state % 12).unwrap_or(0).saturating_add(1);
+                let mut segment = Vec::with_capacity(length);
+                for _ in 0..length {
+                    state = state
+                        .wrapping_mul(6_364_136_223_846_793_005)
+                        .wrapping_add(1);
+                    segment.push(b'a'.saturating_add(u8::try_from(state % 26).unwrap_or(0)));
+                }
+                segments.push(segment);
+            }
+            encoded.insert(
+                encode_key_segments(&segments.iter().map(Vec::as_slice).collect::<Vec<_>>())
+                    .map_err(SnapshotError::from)?,
+            );
+        }
+        let keys = encoded.into_iter().collect::<Vec<_>>();
+        let chunks = keys.chunks(11).collect::<Vec<_>>();
+        let children = chunks
+            .iter()
+            .filter_map(|chunk| chunk.first())
+            .map(|first_key| TreeChild {
+                first_key: first_key.clone(),
+                digest: "test".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        let mut prefixes = Vec::new();
+        for key in keys.iter().step_by(7) {
+            let segments = decode_key_segments(key).map_err(SnapshotError::from)?;
+            for count in 1..=segments.len() {
+                prefixes.push(
+                    encode_key_segments(
+                        &segments[..count]
+                            .iter()
+                            .map(Vec::as_slice)
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(SnapshotError::from)?,
+                );
+            }
+        }
+        prefixes.push(
+            encode_key_segments(&[b"not-present", b"different-length"])
+                .map_err(SnapshotError::from)?,
+        );
+
+        for prefix in prefixes {
+            let expected = keys
+                .iter()
+                .filter(|key| key_has_segment_prefix(key, &prefix).unwrap_or(false))
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut actual = Vec::new();
+            for (index, chunk) in chunks.iter().enumerate() {
+                if child_may_match_prefix(&children, index, &prefix)? {
+                    actual.extend(
+                        chunk
+                            .iter()
+                            .filter(|key| key_has_segment_prefix(key, &prefix).unwrap_or(false))
+                            .cloned(),
+                    );
+                }
+            }
+            assert_eq!(actual, expected);
+        }
         Ok(())
     }
 

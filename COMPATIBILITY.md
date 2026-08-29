@@ -153,6 +153,29 @@ under the selected output root by default. It also materializes
 `GRAPH_REPORT.md`, `manifest.json`, and optional `graph.html` at that stable
 root path. Compass retains an immutable snapshot behind those conventional
 paths as its coherent internal authority.
+
+The additive `compass.graph/1` endpoint matrix accepts exact `calls` edges to
+`property` nodes. This represents source-proven callable fields, callbacks,
+and object properties without changing node or edge identity; consumers that
+validate endpoint kinds should accept this existing-major widening.
+
+Large universal-evidence collections now degrade explicitly instead of
+silently publishing file scaffolding. Compass retains source declarations and
+safe exact relationships in deterministic bounded partitions, records omitted
+relationship candidates in publication statistics, and adds the
+`universal_resolution_partial` error diagnostic to `compass.graph/1`. A build
+that emits this diagnostic publishes the useful partial artifact but exits
+nonzero. This is an additive diagnostic and completeness behavior change; the
+graph schema major and identities of successfully resolved records are
+unchanged.
+
+The self-contained HTML viewer embeds `compass.viewer.workbench/1`, an additive
+ordered container for code, call, impact, affected, architecture, historical,
+and artifact-lens models. Each view carries explicit bounded coverage. Plain
+`compass export json` remains `compass.viewer.graph/1`; requesting one or more
+views, or using `compass export workbench-json`, returns the workbench contract.
+Consumers must reject an unknown workbench major version. The HTML DOM and CSS
+remain presentation details rather than machine contracts.
 Passing `--store sqlite` also publishes a validated `store.sqlite3`
 sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
 `--engine store` explicitly selects and validates the sidecar. The SQLite file
@@ -160,15 +183,50 @@ and reference are internal realizations of the backend-neutral `compass-store`
 contract, not a stable SQL schema or pointer format that consumers may query
 directly.
 
-The additive `compass ask` command routes bounded natural-language questions
-to the existing typed search, callers, callees, impact, or node-trail operation
-and returns the same `compass.query/1` response contract. `compass query`
-automatically uses that path for high-confidence questions against a current
-typed graph. Generic or contradictory questions, historical `--at` queries,
-and requests with `--traverse`, `--dfs`, `--context`, `--budget`, or `--page`
-retain the established text-traversal behavior. Explicit typed query commands
-remain available and unchanged; ambiguous questions never invent a direction
-or select an arbitrary symbol.
+The additive `compass ask` command continues to route bounded questions to the
+typed `compass.query/1` operations. Plain `compass query` against a typed graph
+now defaults to `compass.query.discovery/1`; `--dfs` and `--context` compose
+with discovery. Explicit `--traverse` or legacy-only `--budget`/`--page`
+preserve the established text traversal and reject discovery controls.
+CompassQL and explicit typed query commands remain unchanged. Discovery text
+pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
+JSON rejects those presentation-only controls.
+
+Default discovery JSON remains the strict `compass.query.discovery/1` shape.
+The focused default neighborhood is 64 nodes and 128 edges. The existing hard
+ceilings remain 500 nodes and 1,000 edges, and callers that require the wider
+neighborhood can continue to request it explicitly with `--max-nodes 500
+--max-edges 1000` or the equivalent typed request fields. This changes only
+default breadth; the v1 request and response schemas, ordering, truncation,
+and omission contracts are unchanged.
+The additive `--result-envelope` option requires `--format json` and returns a
+typed `compass.query.discovery-result/1` envelope containing the unchanged v1
+result plus its query-owned `semanticResultDigest`. The digest is computed from
+canonical v1 semantic response bytes; the digest field is outside that result,
+so the v1 payload and its byte/shape contract remain unchanged.
+
+Clustered updates publish `orientation.json` (`compass.orientation/1`) from the
+same fitted model as `GRAPH_REPORT.md` and include it in the coherent snapshot
+and build state. `compass export orientation-json` and
+`compass://orientation` validate that its generation, source/configuration
+identity, commit, graph summary, and exact streamed `graph.json` artifact
+digest match the selected guarded graph. A direct or historical graph without
+that coherent artifact fails explicitly.
+
+MCP structured tool results use the `compass.mcp.tool-result/1` envelope. Its
+`result` retains the domain schema and domain truncation fields unchanged;
+`transportTruncation` separately reports the MCP byte bound. A response that
+would exceed that bound fails with typed required/limit/omitted byte metadata
+instead of publishing a partial semantic result.
+Natural discovery results additionally expose the same query-owned
+`semanticResultDigest` in this transport envelope, enabling direct/persistent
+result parity checks without requiring an agent client to invent a digest.
+Task-oriented results use strict `compass.task-context/1` and
+`compass.task-context-profile/1` contracts through `compass context` and MCP
+`task_context`. Exact identity resolution, digest-verified source, provenance,
+omissions, and domain truncation remain inside the result; fuzzy candidates
+are never selected. The domain digest excludes only its own field and the
+observational response-byte count.
 
 Structural operands use the same bounded exact, alias, term, and typo recall
 channels as search. A unique relationship-role seed may disambiguate a
@@ -190,6 +248,104 @@ been removed. This does not change the `compass.query/1` schema, but intentional
 score and ordering improvements can change which equally lexical candidate is
 ranked first; ordering remains deterministic and backend-neutral.
 
+Discovery term indexes preserve their existing full tokens and add bounded
+camel-case, acronym, and underscore subwords derived from raw symbol names,
+qualified names, and aliases. They also add exact relationship-term postings
+from source-backed callable nodes through direct `calls` edges whose evidence
+is entirely exact and non-heuristic. Relationship postings use only the called
+target's terminal symbol name; namespace and owner terms from its qualified
+name remain available to direct lexical recall but do not become caller
+evidence. Parallel edges are deduplicated for this recall index; inferred,
+ambiguous, mixed-confidence, heuristic, source-less, and non-callable sources
+do not participate.
+
+Direct symbols and candidates with at least two trusted relationship concepts
+share one deterministic behavior-ranking channel. They are ordered by
+production status, bounded operation-predicate alignment, direct
+terminal/owner concept coverage, semantic kind, field and predicate precision,
+relationship concept coverage, distinct supporting targets, and evidence
+confidence. A relationship candidate keeps its lexical or alias source when
+it also has direct indexed evidence; only relationship-only recall is labeled
+as a relation seed. Fixed whole-token operation families (including
+persistence, dispatch, invocation, processing, recognition, refresh,
+resolution, and scheduling) affect ranking only: they cannot add a posting,
+candidate, relationship concept, or relation eligibility. Equal evidence
+vectors remain explicitly ambiguous.
+Natural-query alternatives now require the same channel, operation,
+relationship, and calibrated score rank before they are labeled ambiguous.
+This removes false ambiguity between a specifically ranked operation or
+representation and a weaker same-name/helper candidate. Equal-rank candidates
+and duplicate exact-name lookups remain explicit ambiguity.
+
+For explicit action predicates, discovery first reads one compact exact-term
+index restricted to source-backed operation-role declarations. It may finish
+from that index only when the complete role set proves that the top role
+matches the explicit predicate, covers the query subject, and dominates
+omitted non-role types; location-style questions otherwise continue through
+general recall. A subject-only `Builder` match cannot suppress a more specific
+method. A second compact channel projects the existing full
+term postings onto source-backed type declarations. Discovery may finish from
+that channel only when it is complete, contains every requested seed slot, and
+the existing ranker proves each selected declaration covers the query subject
+and dominates every omitted non-type. This can intentionally keep a direct representation type ahead of a
+less-specific operation-role type that max-level inferred relationship evidence
+would otherwise promote. Legacy snapshots use at most 18 deterministic bounded
+role-name/intersection probes and fall through to general recall when the
+declaration capability is absent. Discovery then performs at most eight general
+multi-concept term-index intersections before independent term unions. Every
+read spends the same candidate, posting, object, byte, and probe budgets;
+exhaustion remains explicit truncation rather than an empty result. A complete
+exact-name lookup can prove its top channel despite truncation in lower recall
+channels, while duplicate exact names remain ambiguous.
+
+For a question with at least three distinct concepts, discovery now requires
+one exact identifier/name, a source-backed operation or representation type,
+at least two direct matched concepts, or trusted multi-concept relationship
+evidence somewhere in the ranked pool. A composite identifier containing at
+least three concepts requires an exact name or ID. If recall finds only
+isolated generic subword hits, the response is an explicit `no_match` instead
+of presenting unrelated symbols as an answer. This tightens result admission
+without changing the `compass.query.discovery/1` schema or deterministic rank
+ordering of admitted candidates.
+An explicit `path from <symbol> to <symbol>` question is admitted when recall
+proves two distinct exact terminal symbol references. This narrow structural
+case preserves path discovery without admitting generic multi-concept noise.
+
+Discovery traversal bounds adjacency reads by remaining node capacity and
+stops endpoint hydration at the node cap. Store-backed final edge assembly
+scans unit-valued outgoing references, rejects targets outside the selected
+subgraph before record hydration, and resolves the remaining edge IDs through
+a bounded shared tree traversal. This preserves canonical parallel-edge order
+and exact edge omissions when the reference scan completes; a shared expansion
+limit still produces explicit incomplete counts. Multi-concept exact-term
+recall intersects compact node IDs before hydrating the surviving node records.
+Exact term candidates and adjacency records use bounded multi-key tree walks so
+immutable branch and leaf
+objects are decoded once per batch. A pinned request reader retains only
+digest-verified, decoded, schema-validated tree objects in an 8 MiB envelope
+with a 7 MiB decoded-object budget and a 1,024-object ceiling. Branches are
+retained preferentially and leaves use LRU eviction; cache hits do not bypass
+any logical item, byte, object, depth, or truncation accounting.
+
+The immutable store records identifier, operation-role, declaration, and
+relationship capabilities as separate empty reserved postings in its existing
+additive terms root, which older same-major readers ignore. Snapshots without
+the operation-role capability remain readable and use the bounded role
+fallback. Snapshots without the declaration capability remain readable and
+continue through general recall; no candidate meaning is invented from either
+missing accelerator. Relationship membership is also stored as a bounded
+unit-valued `(source, term)` key so a complete sparse posting can prove
+membership in one truncated dense posting without scanning adjacency. The v2
+relationship capability also stores bounded unit-valued
+`(source, term, target)` evidence so ranking can count distinct query-supporting
+callees without inflating parallel calls or one callee that matches multiple
+concepts. Current readers still open snapshots without either capability but
+report incomplete discovery coverage; rebuild the graph to make discovery
+recall equivalent across the JSON and store engines. The disposable SQLite
+query cache adds `relationship_terms(term, source_id)` and
+`relationship_term_targets(term, source_id, target_id)` tables, uses internal
+format v7, and is rebuilt automatically.
+
 Optional MCP query feedback remains local and disabled by default.
 `COMPASS_QUERY_LOG=<path>` writes the versioned `compass.query-log/1` JSONL
 contract up to a 16 MiB file bound. The review importer accepts only its
@@ -201,6 +357,55 @@ Structural `init`, `update`, `extract`, and `watch` builds publish
 legacy `--no-program` flag remains accepted and continues to request the
 structural-only profile. Program inspection commands remain read-only and
 require an existing canonical Program IR artifact.
+
+Structural build commands accept the additive
+`--inference-level low|medium|high|max` profile input. `low` is the default and
+publishes exact relationships only. `medium`, `high`, and `max` remain explicit
+opt-ins; `max` preserves the former complete-inference behavior. The selected
+level is part of the build profile and configuration digest, so the default
+cutover republishes a coherent graph without changing `compass.graph/1`.
+Schema-1 build profiles that omit the field still deserialize as historical
+`max`; new default-low profiles serialize `"inference_level":"low"`
+explicitly. There is no environment switch or automatic breadth fallback.
+
+## Pull-request intelligence contract
+
+`compass review` and MCP `review_pull_request` add the strict
+`compass.pr_intelligence.report/1` machine contract. Unknown fields, unknown
+enum values, malformed digests, invalid references, and unknown major versions
+fail explicitly. Finding identities use `cmpprv1:<sha256>`; the advisory
+integer rubric is version 1; each deterministic gate has its own rule version.
+Presentation formats and the reusable GitHub Action consume this report and do
+not redefine its semantics.
+
+Dependency findings in `compass.semantic_diff.report/1` may now carry the
+optional strict `dependency_topology` object. It records source/target community
+IDs when present and bounded directed-cycle participation when the snapshot
+adapter can prove it. Semantic-diff derived-cache engine version 2 prevents
+older cached reports from masquerading as current topology evidence.
+
+The PR Intelligence report binds full Git revision IDs, graph/profile identity,
+and an evidence manifest. A profile mismatch is an error. Conflicts and
+incomplete evidence remain explicit and cannot become a clean gate result.
+Advisory risk is never a merge gate. The Action supports only
+`fail-on: none|deterministic`, where `deterministic` consults typed
+`GateResult::Fail` states rather than risk band, score, SARIF level, or prose.
+Its required `compass-version` input must name an exact released version
+containing `compass review`; there is no fallback binary version.
+
+This is additive in the `0.3.x` line. Existing `compass prs`, graph, history,
+and MCP contracts are unchanged; `compass diff` gains only the optional typed
+topology field above. Consumers that adopt the new
+report must reject unknown majors and validate `report_digest`. See the
+[PR Intelligence reference](docs/reference/pr-intelligence.md).
+
+`compass review --readiness` and MCP `pr_readiness` add the strict
+`compass.pr-readiness/1` envelope. It references the unchanged canonical report
+digest and exact revisions/profile/evidence identity. Documentation drift is
+advisory-only, both extraction fingerprints remain explicit, unavailable test
+evidence remains unknown, and bounded local ownership failure is an explicit
+omission. This addition does not change
+`compass.pr_intelligence.report/1`, its digest, or existing review projections.
 
 The `extract --code-only` profile excludes document extractors from structural
 node and edge publication while retaining the scanned file inventory and its
@@ -241,7 +446,15 @@ surface. Backups are digest-bound directories and restores never overwrite an
 existing destination. Local publication retains two complete snapshots and
 performs bounded reachability GC; remote leases, service quotas, and
 distributed GC remain deferred. The local API enforces bounded values, scans,
-transactions, graph sizes, and request work.
+transactions, and request work. Current `compass.store.graph-index/2`
+snapshots do not impose an aggregate canonical-payload or record-count limit:
+their manifest uses `u64` byte and record counts, while each immutable tree
+object, write batch, scan, and query remains independently bounded. The legacy
+monolithic `compass.store.graph-snapshot/1` compatibility API still enforces
+its 2 GiB materialized-payload limit. `compass store status|validate|backup|restore`
+stream graph and database digests through fixed-size buffers and traverse the
+reachable immutable tree objects with bounded cache and path memory; they do
+not depend on the whole-JSON reader limit.
 
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve
@@ -255,6 +468,14 @@ changing node identity; consumers must preserve unknown attributes, edge
 direction, multiplicity, and source ranges. Markdown frontmatter is part of
 the file hash, so metadata-only edits invalidate compatible extraction/cache
 entries and are rebuilt under the current extraction semantics version.
+Structural blocks now carry section-qualified names and automatic duplicate
+heading slugs use deterministic source-order suffixes. Project resolution may
+connect local document links to a unique heading, document root, directory
+index, or source-file inventory node. Extension inference and wikilink stem
+matching are bounded closed rules; ambiguity or a missing fragment never picks
+one candidate or falls back to the document root. These additive attributes and
+relationships rebuild under extraction semantics v12; graph schema v1 and
+existing relationship direction remain unchanged.
 
 HTML (`.html`/`.htm`) now has the same source-driven structural contract. HTML
 nodes and link evidence preserve exact source ranges and deterministic order;

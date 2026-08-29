@@ -102,6 +102,31 @@ export default async function generate(): Promise<void> {
   const viewerJs = await readFile(path.join(output, "graph.js"), "utf8");
   const viewerCss = await readFile(path.join(output, "viewer.css"), "utf8");
   await writeFile(path.join(output, "graph.html"), `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass graph fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(graph)}</script><script>${viewerJs}</script></body></html>`);
+  const workbench = {
+    schema: "compass.viewer.workbench/1",
+    title: "Fixture workbench",
+    graphIdentity: "fixture-workbench",
+    defaultView: "code",
+    views: [{
+      id: "code",
+      kind: "code",
+      title: "Code graph",
+      description: "Repository structure and relationships",
+      coverage: {
+        status: "complete",
+        truncated: false,
+        nodes: graph.nodes.length,
+        edges: graph.edges.length,
+        limitations: []
+      },
+      model: graph,
+      communityDetails: {}
+    }]
+  };
+  await writeFile(
+    path.join(output, "workbench.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass workbench fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(workbench)}</script><script>${viewerJs}</script></body></html>`
+  );
   // Mirrors the prepared Django overview shape (3,376 communities and roughly
   // three cross-community relationships per community) without carrying the
   // original 281 MB graph fixture in the repository.

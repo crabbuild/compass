@@ -72,6 +72,7 @@ paths.
 | current snapshot `store.ref` | typed selector for the co-published store identity and snapshot | store-engine validation before query execution |
 | `program.json` (optional) | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
+| `orientation.json` | versioned Agent Orientation bound to the same graph generation | coding assistants and MCP |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
 | binary query caches | disposable acceleration | internal query loading |
@@ -150,6 +151,31 @@ share an endpoint pair (ordered for directed graphs, unordered for undirected
 graphs), including repeated self-loops. Consumers do not need to request this
 promotion.
 
+### Inference levels
+
+Graph-building commands accept `--inference-level low|medium|high|max`. The
+levels are deterministic and nested:
+
+| Level | Published relationship evidence |
+| --- | --- |
+| `low` | exact relationships only |
+| `medium` | `low`, plus inferred relationships whose endpoints are both source-backed |
+| `high` | `medium`, plus explicitly qualified external relationships anchored in source syntax |
+| `max` | all retained inference, including deferred-receiver relationships |
+
+`low` is the default. `max` remains an explicit opt-in that preserves the
+former complete graph behavior. Lower levels filter after evidence
+normalization, prune unreferenced inferred placeholder nodes, and keep every
+retained edge endpoint valid. The selected level is part of the build profile
+and configuration digest, so an output built at one level is not reused as
+though it represented another. This policy is intentional selection, not a
+publication omission.
+
+Inference controls graph breadth, not source anchoring. An inferred edge may
+still have an exact relationship site while its target identity remains
+unproven. Use `compass diagnose quality --json` to inspect exact/inferred ratios
+for the selected output.
+
 ### Consumer requirements
 
 - preserve unknown attributes;
@@ -165,6 +191,19 @@ qualified enterprise artifacts while preventing unbounded input reads.
 Operators can set `COMPASS_MAX_GRAPH_BYTES` to an explicit byte count or
 `<N>MB`/`<N>GB`; raising it also raises the memory exposure of JSON decoding
 and indexing.
+
+That whole-JSON reader cap is separate from the current SQLite graph-index
+snapshot used by `--store sqlite`. The graph-index has no aggregate canonical
+payload or record-count limit: it publishes content-addressed tree objects of
+at most 256 KiB through write batches of at most 16 MiB, and bounds each point
+or range query independently. Consumers that request a whole-graph export can
+still encounter the materialized-read record budget and should use indexed
+queries for substantially larger repositories.
+
+`compass store status`, `validate`, `backup`, and `restore` also remain on the
+large-graph path. They stream file digests through fixed-size buffers and
+validate the selected manifest plus every reachable immutable tree object;
+they do not require a `COMPASS_MAX_GRAPH_BYTES` override.
 
 ### Partial publication diagnostics
 
@@ -200,6 +239,53 @@ The report can include:
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
 
+Community evidence labels prefer a meaningful symbol or document heading over
+Markdown pipe-table parser blocks, even when a table container has more
+structural edges. A community containing only pipe-table blocks receives a
+source-anchored `Table (path:line)` label. When other communities share a hub
+name, Compass adds a compact source or wiring-site anchor and, only if needed,
+the graph-local community ID. These labels are deterministic navigation aids,
+not community identity; consumers that need identity should use the community
+ID and member set instead.
+
+The Architecture Map and Community Directory omit communities made entirely
+of Markdown pipe-table parser blocks. Those communities count toward the
+report's omitted-community coverage and their source-backed nodes remain in
+the graph; the report does not present parser partitions as architectural
+subsystems.
+
+The report begins with a bounded Agent Orientation for first-session or broad
+repository context. `orientation.json` is the versioned machine form of that
+same fitted model. Compass publishes both from one coherent build input and
+validates the graph generation and exact streamed `graph.json` digest before
+`compass export orientation-json` or
+`compass://orientation` returns it. `compass://report` renders the human report
+from that validated model; it never trusts an adjacent Markdown file by name.
+
+The Architecture Map highlights up to twelve leading communities. The later
+Community Directory is the broader navigation index: it ranks every non-empty
+community, including thin communities, by member count and connectivity, shows
+as many as fit within the 256,000-character report bound (up to 4,096), and
+splits presentation into two tiers. The top 32 ranked communities receive full
+detail with up to twelve high-connectivity entry points and four strongest
+links per direction. Every remaining retained community receives a compact
+one-line index entry containing its rank, evidence label, exact query scope,
+member count, cohesion, connectivity, and best source-anchored entry point.
+
+The compact orientation remains bounded to 16,000 characters, while its JSON
+and the MCP resource transport share a 4 MiB envelope. Every bounded list
+reports exact shown and omitted counts. Headings and boundary links prefer
+evidence labels; graph-local numeric IDs remain visible as `community:<id>`
+query scopes where an agent needs an exact follow-up command.
+
+Human-facing Markdown prefers `label — source:range` references. When duplicate
+labels have distinct source anchors, Compass omits redundant node IDs. Opaque
+IDs longer than 48 characters are shown only as a bounded prefix/suffix plus a
+deterministic fingerprint when an ID is still needed for disambiguation. Exact
+IDs and exact query argv remain unchanged in `orientation.json`; query argv
+longer than 240 rendered characters are referenced there instead of being
+duplicated into Markdown.
+
 ## `graph.html`
 
 Optional interactive visualization. It may be absent when:
@@ -214,6 +300,34 @@ The document is self-contained and uses the same versioned graph workbench as
 the VS Code extension. It performs no runtime network requests, follows the
 operating system's light or dark color scheme, and retains keyboard, reduced
 motion, narrow-screen, and high-contrast behavior from the shared viewer.
+
+The embedded `compass.viewer.workbench/1` model contains an ordered list of
+independently bounded views with explicit `complete`, `summary`, or `partial`
+coverage. One HTML file can contain code, call, impact, affected, architecture,
+history-comparison, and artifact-specific lenses. Its navigation rail keeps
+the current graph identity and exposes hash links such as `#view=impact-run`.
+Graph lenses share relationship, evidence, node-kind, and language filters;
+call, impact, and affected views start in a deterministic depth-layer layout.
+Architecture views use subsystem routes, while history views overlay added,
+removed, and changed graph evidence.
+
+Node-link graph views provide bounded 1–4-hop selection isolation with exact
+incoming, outgoing, or bidirectional traversal, adjustable layout spacing, and
+a navigable minimap based on the rendered graph coordinates. Workbench graph
+filters live in the top graph-control rail and open as a compact panel, leaving
+the canvas at full height. Filters and their result count follow the graph
+currently on screen when moving between an overview and community detail.
+Neighborhood depth and direction can be prepared before selecting a node;
+isolation becomes available after selection and fits the resulting
+neighborhood. The graph-settings panel documents keyboard controls; press `?`
+while focus is outside a text or selection control to open it. Pause and resume
+are explicit labeled actions; resuming a settled layout reheats it enough to
+remain visible at a fitted overview scale.
+
+The machine form is available from `compass export workbench-json`, or from
+`compass export json` when at least one view is requested. Unknown major
+workbench schemas must be rejected. Plain `compass export json` remains
+`compass.viewer.graph/1` for existing consumers.
 
 When the node limit selects a community overview, the standalone document
 embeds a deterministic bounded set of complete community details: at most
@@ -411,6 +525,29 @@ automation and exact traceability are preserved.
 After writing any HTML page, an interactive Compass CLI asks before opening it
 in the default browser; Enter or `n` leaves the page closed. Scripts, pipes,
 redirected commands, and CI never prompt or launch a browser.
+
+## PR review JSON, Markdown, and SARIF
+
+```bash
+compass review --base BASE --head HEAD --format json
+compass review --base BASE --head HEAD --format markdown
+compass review --base BASE --head HEAD --format sarif
+```
+
+JSON uses strict schema `compass.pr_intelligence.report/1` and is the canonical
+authority. It binds exact revision and graph-profile identity, evidence
+manifest, completeness, ordered `cmpprv1` findings, rubric factors, advisory
+risk, deterministic gates, canonical omissions, and a content digest.
+
+Markdown and text expose the same fingerprints and finding count unless an
+explicit Markdown projection budget omits findings. In that case the footer
+states the exact omitted count; the canonical report and digest are unchanged.
+SARIF 2.1.0 stores each Compass fingerprint in `partialFingerprints` and keeps
+report identity, completeness, factors, gates, evidence, and omissions in
+properties. SARIF severity is a presentation hint, not merge policy.
+
+See the [PR Intelligence contract](pr-intelligence.md) before writing a
+consumer.
 
 ## History export
 

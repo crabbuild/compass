@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
-use compass_model::{EdgeRecord, GraphDocument};
+use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 const MAX_COMMUNITY_FRACTION: f64 = 0.25;
@@ -15,6 +15,40 @@ const LOUVAIN_THRESHOLD: f64 = 1e-4;
 const LOUVAIN_MAX_LEVEL: usize = 10;
 
 pub type Communities = BTreeMap<usize, Vec<String>>;
+
+/// Bounds for a topology-changing incremental community update.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct IncrementalClusterLimits {
+    /// Absolute ceiling for nodes admitted to the local reclustering region.
+    pub max_affected_nodes: usize,
+    /// Fractional ceiling relative to the current graph.
+    pub max_affected_fraction: f64,
+}
+
+impl Default for IncrementalClusterLimits {
+    fn default() -> Self {
+        Self {
+            max_affected_nodes: 4_096,
+            max_affected_fraction: 0.25,
+        }
+    }
+}
+
+/// Community result plus evidence that work stayed within the local bound.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IncrementalClusterResult {
+    pub communities: Communities,
+    pub affected_nodes: usize,
+    pub used_incremental: bool,
+}
+
+#[derive(Clone, Debug)]
+struct CommunityLabelCandidate {
+    community: usize,
+    base: String,
+    context: Option<String>,
+    context_required: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClusterOptions {
@@ -120,6 +154,246 @@ pub fn cluster(document: &GraphDocument, options: ClusterOptions) -> Communities
     communities
 }
 
+/// Recluster only communities touched by changed source files and their
+/// immediate topology boundary.
+///
+/// Unaffected assignments are frozen. If the affected region exceeds either
+/// configured ceiling, this function falls back to the complete algorithm so
+/// a large refactor cannot be mislabeled as a local update.
+#[must_use]
+pub fn cluster_incremental(
+    document: &GraphDocument,
+    previous: &std::collections::HashMap<String, usize>,
+    changed_sources: &BTreeSet<String>,
+    options: ClusterOptions,
+    limits: IncrementalClusterLimits,
+) -> IncrementalClusterResult {
+    if previous.is_empty()
+        || changed_sources.is_empty()
+        || limits.max_affected_nodes == 0
+        || !limits.max_affected_fraction.is_finite()
+        || limits.max_affected_fraction <= 0.0
+    {
+        return full_cluster_result(document, previous, options);
+    }
+
+    let positions = document
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    if previous
+        .keys()
+        .any(|node_id| !positions.contains_key(node_id.as_str()))
+    {
+        return full_cluster_result(document, previous, options);
+    }
+    let current_sources = document
+        .nodes
+        .iter()
+        .map(|node| node.string("source_file").replace('\\', "/"))
+        .filter(|source| !source.is_empty())
+        .collect::<HashSet<_>>();
+    if changed_sources
+        .iter()
+        .any(|source| !current_sources.contains(source))
+    {
+        return full_cluster_result(document, previous, options);
+    }
+    let mut affected = document
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, node)| {
+            let source = node.string("source_file").replace('\\', "/");
+            (!previous.contains_key(&node.id) || changed_sources.contains(&source)).then_some(index)
+        })
+        .collect::<HashSet<_>>();
+    if affected.is_empty() {
+        return IncrementalClusterResult {
+            communities: communities_from_assignments(document, previous),
+            affected_nodes: 0,
+            used_incremental: true,
+        };
+    }
+
+    let touched_communities = affected
+        .iter()
+        .filter_map(|index| previous.get(&document.nodes[*index].id).copied())
+        .collect::<HashSet<_>>();
+    for (index, node) in document.nodes.iter().enumerate() {
+        if previous
+            .get(&node.id)
+            .is_some_and(|community| touched_communities.contains(community))
+        {
+            affected.insert(index);
+        }
+    }
+    let boundary = document
+        .links
+        .iter()
+        .filter_map(|edge| {
+            let source = positions.get(edge.source.as_str()).copied()?;
+            let target = positions.get(edge.target.as_str()).copied()?;
+            (affected.contains(&source) || affected.contains(&target)).then_some([source, target])
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    affected.extend(boundary);
+    let boundary_communities = affected
+        .iter()
+        .filter_map(|index| previous.get(&document.nodes[*index].id).copied())
+        .collect::<HashSet<_>>();
+    for (index, node) in document.nodes.iter().enumerate() {
+        if previous
+            .get(&node.id)
+            .is_some_and(|community| boundary_communities.contains(community))
+        {
+            affected.insert(index);
+        }
+    }
+
+    let fraction_limit =
+        ((document.nodes.len() as f64 * limits.max_affected_fraction).ceil() as usize).max(1);
+    let affected_limit = limits.max_affected_nodes.min(fraction_limit);
+    if affected.len() > affected_limit {
+        return full_cluster_result(document, previous, options);
+    }
+
+    let affected_ids = affected
+        .iter()
+        .map(|index| document.nodes[*index].id.as_str())
+        .collect::<HashSet<_>>();
+    let local_document = GraphDocument {
+        directed: document.directed,
+        multigraph: document.multigraph,
+        graph: Map::new(),
+        nodes: affected
+            .iter()
+            .map(|index| document.nodes[*index].clone())
+            .collect(),
+        links: document
+            .links
+            .iter()
+            .filter(|edge| {
+                affected_ids.contains(edge.source.as_str())
+                    && affected_ids.contains(edge.target.as_str())
+            })
+            .cloned()
+            .collect(),
+        extras: BTreeMap::new(),
+    };
+    let local = cluster(&local_document, options);
+    let local_assignments = stable_local_assignments(&local, previous, &affected_ids);
+    let mut assignments = previous
+        .iter()
+        .filter(|(node, _)| {
+            positions.contains_key(node.as_str()) && !affected_ids.contains(node.as_str())
+        })
+        .map(|(node, community)| (node.clone(), *community))
+        .collect::<std::collections::HashMap<_, _>>();
+    assignments.extend(local_assignments);
+
+    IncrementalClusterResult {
+        communities: communities_from_assignments(document, &assignments),
+        affected_nodes: affected.len(),
+        used_incremental: true,
+    }
+}
+
+fn full_cluster_result(
+    document: &GraphDocument,
+    previous: &std::collections::HashMap<String, usize>,
+    options: ClusterOptions,
+) -> IncrementalClusterResult {
+    let current = cluster(document, options);
+    IncrementalClusterResult {
+        communities: if previous.is_empty() {
+            current
+        } else {
+            remap_communities_to_previous(&current, previous)
+        },
+        affected_nodes: document.nodes.len(),
+        used_incremental: false,
+    }
+}
+
+fn stable_local_assignments(
+    local: &Communities,
+    previous: &std::collections::HashMap<String, usize>,
+    affected_ids: &HashSet<&str>,
+) -> std::collections::HashMap<String, usize> {
+    let unaffected_ids = previous
+        .iter()
+        .filter(|(node, _)| !affected_ids.contains(node.as_str()))
+        .map(|(_, community)| *community)
+        .collect::<HashSet<_>>();
+    let mut used = unaffected_ids;
+    let mut next = previous
+        .values()
+        .copied()
+        .max()
+        .map_or(0, |maximum| maximum.saturating_add(1));
+    let mut assignments = std::collections::HashMap::new();
+    for members in local.values() {
+        let mut overlaps = members
+            .iter()
+            .filter_map(|member| previous.get(member).copied())
+            .fold(BTreeMap::<usize, usize>::new(), |mut counts, community| {
+                *counts.entry(community).or_default() += 1;
+                counts
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        overlaps.sort_by_key(|(community, count)| (std::cmp::Reverse(*count), *community));
+        let community = overlaps
+            .into_iter()
+            .map(|(community, _)| community)
+            .find(|community| used.insert(*community))
+            .unwrap_or_else(|| {
+                while used.contains(&next) {
+                    next = next.saturating_add(1);
+                }
+                let assigned = next;
+                used.insert(assigned);
+                next = next.saturating_add(1);
+                assigned
+            });
+        for member in members {
+            assignments.insert(member.clone(), community);
+        }
+    }
+    assignments
+}
+
+fn communities_from_assignments(
+    document: &GraphDocument,
+    assignments: &std::collections::HashMap<String, usize>,
+) -> Communities {
+    let mut communities = Communities::new();
+    let mut next = assignments
+        .values()
+        .copied()
+        .max()
+        .map_or(0, |maximum| maximum.saturating_add(1));
+    for node in &document.nodes {
+        let community = assignments.get(&node.id).copied().unwrap_or_else(|| {
+            let assigned = next;
+            next = next.saturating_add(1);
+            assigned
+        });
+        communities
+            .entry(community)
+            .or_default()
+            .push(node.id.clone());
+    }
+    for members in communities.values_mut() {
+        members.sort();
+    }
+    communities
+}
+
 fn profile_cluster(label: &str, started: &mut Instant) {
     if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
         eprintln!(
@@ -165,32 +439,155 @@ pub fn label_communities_by_hub(
             degrees[right] += 1;
         }
     }
-    let labels = document
-        .nodes
-        .iter()
-        .map(|node| (node.id.as_str(), node.label()))
-        .collect::<HashMap<_, _>>();
-    let mut output = BTreeMap::new();
+    let mut candidates = Vec::with_capacity(communities.len());
     for (community, members) in communities {
         let hub = members
             .iter()
             .filter_map(|member| positions.get(member.as_str()).map(|index| (member, *index)))
             .min_by(|(left_id, left), (right_id, right)| {
-                degrees[*right]
-                    .cmp(&degrees[*left])
+                is_pipe_table_structure(&document.nodes[*left])
+                    .cmp(&is_pipe_table_structure(&document.nodes[*right]))
+                    .then_with(|| degrees[*right].cmp(&degrees[*left]))
                     .then_with(|| left_id.cmp(right_id))
             });
         let fallback = format!("Community {community}");
-        let name = hub
-            .and_then(|(id, _)| labels.get(id.as_str()).copied().or(Some(id.as_str())))
-            .map(str::trim)
-            .map(|value| value.strip_suffix("()").unwrap_or(value))
-            .filter(|value| !value.is_empty())
-            .unwrap_or(&fallback)
-            .to_owned();
-        output.insert(*community, name);
+        let (base, context, context_required) = hub
+            .and_then(|(_, index)| document.nodes.get(index))
+            .map(|node| {
+                let table_structure = is_pipe_table_structure(node);
+                (
+                    if table_structure {
+                        "Table".to_owned()
+                    } else {
+                        concise_community_label(node).unwrap_or_else(|| fallback.clone())
+                    },
+                    community_label_context(node),
+                    table_structure,
+                )
+            })
+            .unwrap_or((fallback, None, false));
+        candidates.push(CommunityLabelCandidate {
+            community: *community,
+            base,
+            context,
+            context_required,
+        });
     }
-    output
+
+    let mut base_counts = HashMap::<String, usize>::new();
+    for candidate in &candidates {
+        *base_counts.entry(candidate.base.clone()).or_insert(0) += 1;
+    }
+    let mut labels = candidates
+        .into_iter()
+        .map(|candidate| {
+            let duplicate = base_counts.get(&candidate.base).copied().unwrap_or(0) > 1;
+            let label = if duplicate || candidate.context_required {
+                candidate.context.map_or_else(
+                    || format!("{} (community {})", candidate.base, candidate.community),
+                    |context| format!("{} ({context})", candidate.base),
+                )
+            } else {
+                candidate.base
+            };
+            (candidate.community, label)
+        })
+        .collect::<Vec<_>>();
+
+    let mut contextual_counts = HashMap::<String, usize>::new();
+    for (_, label) in &labels {
+        *contextual_counts.entry(label.clone()).or_insert(0) += 1;
+    }
+    for (community, label) in &mut labels {
+        if contextual_counts.get(label).copied().unwrap_or(0) > 1 {
+            label.push_str(&format!(" [community {community}]"));
+        }
+    }
+
+    // An untrusted source label can resemble a generated contextual label. In
+    // that exceptional case, suffix every label once. A trailing unique
+    // community ID guarantees uniqueness without an unbounded retry loop.
+    let mut unique = HashSet::with_capacity(labels.len());
+    if !labels
+        .iter()
+        .all(|(_, label)| unique.insert(label.as_str()))
+    {
+        for (community, label) in &mut labels {
+            label.push_str(&format!(" [community {community}]"));
+        }
+    }
+
+    labels.into_iter().collect()
+}
+
+fn is_pipe_table_structure(node: &NodeRecord) -> bool {
+    matches!(
+        node.string("document_kind").as_str(),
+        "pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell"
+    )
+}
+
+fn concise_community_label(node: &NodeRecord) -> Option<String> {
+    let label = node.label().trim();
+    let label = label.strip_suffix("()").unwrap_or(label).trim();
+    (!label.is_empty()).then(|| label.to_owned())
+}
+
+fn community_label_context(node: &NodeRecord) -> Option<String> {
+    if let Some(file) = node
+        .source_file()
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+    {
+        let location = node
+            .unsigned("line_start")
+            .map(|line| format!("L{line}"))
+            .or_else(|| concise_location(&node.string("source_location")));
+        return Some(community_anchor_label(file, location.as_deref()));
+    }
+
+    let wiring_file = node.string("wiring_file");
+    if !wiring_file.trim().is_empty() {
+        let wiring_location = concise_location(&node.string("wiring_location"));
+        return Some(community_anchor_label(
+            wiring_file.trim(),
+            wiring_location.as_deref(),
+        ));
+    }
+
+    for key in ["qualifiedName", "qualified_name", "signature"] {
+        let value = node.string(key);
+        let value = value.trim();
+        if !value.is_empty() && value != node.label().trim() {
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
+fn concise_location(location: &str) -> Option<String> {
+    let location = location.trim();
+    if let Some(rest) = location.strip_prefix('L') {
+        let digits = rest
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>();
+        if !digits.is_empty() {
+            return Some(format!("L{digits}"));
+        }
+    }
+    (!location.is_empty()).then(|| location.to_owned())
+}
+
+fn community_anchor_label(file: &str, location: Option<&str>) -> String {
+    let mut components = file
+        .rsplit(['/', '\\'])
+        .filter(|component| !component.is_empty());
+    let name = components.next().unwrap_or(file);
+    let path = components
+        .next()
+        .map_or_else(|| name.to_owned(), |parent| format!("{parent}/{name}"));
+    location.map_or(path.clone(), |location| format!("{path}:{location}"))
 }
 
 #[must_use]
@@ -1060,6 +1457,178 @@ mod tests {
     }
 
     #[test]
+    fn incremental_clustering_freezes_unaffected_communities() {
+        let mut document = graph(
+            &["a", "b", "c", "x", "y", "z"],
+            &[("a", "b"), ("b", "c"), ("x", "y"), ("y", "z")],
+        );
+        for node in &mut document.nodes {
+            let source = if matches!(node.id.as_str(), "a" | "b" | "c") {
+                "src/left.rs"
+            } else {
+                "src/right.rs"
+            };
+            node.attributes
+                .insert("source_file".to_owned(), Value::String(source.to_owned()));
+        }
+        let previous = std::collections::HashMap::from([
+            ("a".to_owned(), 7),
+            ("b".to_owned(), 7),
+            ("c".to_owned(), 7),
+            ("x".to_owned(), 11),
+            ("y".to_owned(), 11),
+            ("z".to_owned(), 11),
+        ]);
+
+        let result = cluster_incremental(
+            &document,
+            &previous,
+            &BTreeSet::from(["src/left.rs".to_owned()]),
+            ClusterOptions::default(),
+            IncrementalClusterLimits {
+                max_affected_nodes: 4_096,
+                max_affected_fraction: 0.75,
+            },
+        );
+
+        assert!(result.used_incremental);
+        assert!(result.affected_nodes < document.nodes.len());
+        assert_eq!(
+            result.communities.get(&11),
+            Some(&vec!["x".to_owned(), "y".to_owned(), "z".to_owned()])
+        );
+        assert!(
+            result.communities.values().any(|members| {
+                members == &vec!["a".to_owned(), "b".to_owned(), "c".to_owned()]
+            })
+        );
+    }
+
+    #[test]
+    fn incremental_clustering_falls_back_when_the_region_exceeds_its_bound() {
+        let mut document = graph(&["a", "b", "c"], &[("a", "b"), ("b", "c")]);
+        for node in &mut document.nodes {
+            node.attributes.insert(
+                "source_file".to_owned(),
+                Value::String("src/all.rs".to_owned()),
+            );
+        }
+        let previous = std::collections::HashMap::from([
+            ("a".to_owned(), 0),
+            ("b".to_owned(), 0),
+            ("c".to_owned(), 0),
+        ]);
+
+        let result = cluster_incremental(
+            &document,
+            &previous,
+            &BTreeSet::from(["src/all.rs".to_owned()]),
+            ClusterOptions::default(),
+            IncrementalClusterLimits {
+                max_affected_nodes: 1,
+                max_affected_fraction: 1.0,
+            },
+        );
+
+        assert!(!result.used_incremental);
+        assert_eq!(result.affected_nodes, document.nodes.len());
+    }
+
+    #[test]
+    fn incremental_clustering_falls_back_for_a_removed_source() {
+        let mut document = graph(&["a", "b"], &[("a", "b")]);
+        for node in &mut document.nodes {
+            node.attributes.insert(
+                "source_file".to_owned(),
+                Value::String("src/remaining.rs".to_owned()),
+            );
+        }
+        let previous = std::collections::HashMap::from([
+            ("a".to_owned(), 3),
+            ("b".to_owned(), 3),
+            ("deleted".to_owned(), 3),
+        ]);
+
+        let result = cluster_incremental(
+            &document,
+            &previous,
+            &BTreeSet::from(["src/deleted.rs".to_owned()]),
+            ClusterOptions::default(),
+            IncrementalClusterLimits::default(),
+        );
+
+        assert!(!result.used_incremental);
+        assert_eq!(result.affected_nodes, document.nodes.len());
+    }
+
+    #[test]
+    fn incremental_clustering_falls_back_when_a_node_was_removed_elsewhere() {
+        let mut document = graph(&["a", "b"], &[("a", "b")]);
+        document.nodes[0].attributes.insert(
+            "source_file".to_owned(),
+            Value::String("src/changed.rs".to_owned()),
+        );
+        document.nodes[1].attributes.insert(
+            "source_file".to_owned(),
+            Value::String("src/remaining.rs".to_owned()),
+        );
+        let previous = std::collections::HashMap::from([
+            ("a".to_owned(), 3),
+            ("b".to_owned(), 4),
+            ("deleted".to_owned(), 4),
+        ]);
+
+        let result = cluster_incremental(
+            &document,
+            &previous,
+            &BTreeSet::from(["src/changed.rs".to_owned()]),
+            ClusterOptions::default(),
+            IncrementalClusterLimits::default(),
+        );
+
+        assert!(!result.used_incremental);
+        assert_eq!(result.affected_nodes, document.nodes.len());
+    }
+
+    #[test]
+    fn incremental_clustering_admits_a_boundary_community_as_a_whole() {
+        let mut document = graph(
+            &["a", "b", "x", "y", "z"],
+            &[("a", "b"), ("b", "x"), ("x", "y"), ("y", "z")],
+        );
+        for node in &mut document.nodes {
+            let source = if matches!(node.id.as_str(), "a" | "b") {
+                "src/changed.rs"
+            } else {
+                "src/boundary.rs"
+            };
+            node.attributes
+                .insert("source_file".to_owned(), Value::String(source.to_owned()));
+        }
+        let previous = std::collections::HashMap::from([
+            ("a".to_owned(), 7),
+            ("b".to_owned(), 7),
+            ("x".to_owned(), 11),
+            ("y".to_owned(), 11),
+            ("z".to_owned(), 11),
+        ]);
+
+        let result = cluster_incremental(
+            &document,
+            &previous,
+            &BTreeSet::from(["src/changed.rs".to_owned()]),
+            ClusterOptions::default(),
+            IncrementalClusterLimits {
+                max_affected_nodes: document.nodes.len(),
+                max_affected_fraction: 1.0,
+            },
+        );
+
+        assert!(result.used_incremental);
+        assert_eq!(result.affected_nodes, document.nodes.len());
+    }
+
+    #[test]
     fn empty_edgeless_and_split_graphs_have_total_deterministic_results() {
         assert!(cluster(&graph(&[], &[]), ClusterOptions::default()).is_empty());
         assert_eq!(
@@ -1210,5 +1779,208 @@ mod tests {
         let weighted = WeightedGraph::from_document(&document);
         assert_eq!(weighted.len(), 1);
         assert_eq!(weighted.edge_count(), 0);
+    }
+
+    #[test]
+    fn duplicate_hub_labels_add_source_context_only_when_needed() {
+        let mut document = graph(&["a", "b", "c", "d", "unique"], &[("a", "b"), ("c", "d")]);
+        for (index, file, line) in [
+            (0, "crates/core/src/left.rs", 10),
+            (2, "crates/core/src/right.rs", 20),
+        ] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!("shared"));
+            document.nodes[index]
+                .attributes
+                .insert("source_file".to_owned(), json!(file));
+            document.nodes[index]
+                .attributes
+                .insert("line_start".to_owned(), json!(line));
+        }
+        let communities = BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+            (2, vec!["unique".to_owned()]),
+        ]);
+
+        assert_eq!(
+            label_communities_by_hub(&document, &communities),
+            BTreeMap::from([
+                (0, "shared (src/left.rs:L10)".to_owned()),
+                (1, "shared (src/right.rs:L20)".to_owned()),
+                (2, "unique".to_owned()),
+            ])
+        );
+    }
+
+    #[test]
+    fn meaningful_document_anchor_outranks_pipe_table_hub() {
+        let mut document = graph(
+            &["heading", "table", "header", "row", "cell-a", "cell-b"],
+            &[
+                ("heading", "table"),
+                ("table", "header"),
+                ("table", "row"),
+                ("header", "cell-a"),
+                ("row", "cell-b"),
+            ],
+        );
+        document.nodes[0]
+            .attributes
+            .insert("label".to_owned(), json!("Storage contract"));
+        document.nodes[0]
+            .attributes
+            .insert("document_kind".to_owned(), json!("heading"));
+        for (index, kind) in [
+            (1, "pipe_table"),
+            (2, "pipe_table_header"),
+            (3, "pipe_table_row"),
+            (4, "pipe_table_cell"),
+            (5, "pipe_table_cell"),
+        ] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!(kind.replace('_', " ")));
+            document.nodes[index]
+                .attributes
+                .insert("document_kind".to_owned(), json!(kind));
+        }
+        let communities = BTreeMap::from([(
+            0,
+            document.nodes.iter().map(|node| node.id.clone()).collect(),
+        )]);
+
+        assert_eq!(
+            label_communities_by_hub(&document, &communities),
+            BTreeMap::from([(0, "Storage contract".to_owned())])
+        );
+    }
+
+    #[test]
+    fn pipe_table_only_communities_use_source_anchored_table_labels() {
+        let mut document = graph(&["left", "right"], &[]);
+        for (index, line) in [(0, 12), (1, 44)] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!("pipe table"));
+            document.nodes[index]
+                .attributes
+                .insert("document_kind".to_owned(), json!("pipe_table"));
+            document.nodes[index]
+                .attributes
+                .insert("source_file".to_owned(), json!("docs/reference/outputs.md"));
+            document.nodes[index]
+                .attributes
+                .insert("line_start".to_owned(), json!(line));
+        }
+        let communities =
+            BTreeMap::from([(3, vec!["left".to_owned()]), (8, vec!["right".to_owned()])]);
+
+        assert_eq!(
+            label_communities_by_hub(&document, &communities),
+            BTreeMap::from([
+                (3, "Table (reference/outputs.md:L12)".to_owned()),
+                (8, "Table (reference/outputs.md:L44)".to_owned()),
+            ])
+        );
+    }
+
+    #[test]
+    fn duplicate_external_hubs_use_wiring_site_context() {
+        let mut document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("c", "d")]);
+        for (index, file, line) in [
+            (0, "python/tests/test_alter.py", 25),
+            (2, "python/tests/test_writer.py", 81),
+        ] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!("DeltaTable"));
+            document.nodes[index].attributes.insert(
+                "evidence".to_owned(),
+                json!([{"wiringSite": {"file": file, "startLine": line}}]),
+            );
+        }
+        let communities = BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+
+        assert_eq!(
+            label_communities_by_hub(&document, &communities),
+            BTreeMap::from([
+                (0, "DeltaTable (tests/test_alter.py:L25)".to_owned()),
+                (1, "DeltaTable (tests/test_writer.py:L81)".to_owned()),
+            ])
+        );
+    }
+
+    #[test]
+    fn identical_contexts_receive_deterministic_community_suffixes() {
+        let mut document = graph(&["a", "b", "c", "d"], &[("a", "b"), ("c", "d")]);
+        for index in [0, 2] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!("shared"));
+            document.nodes[index]
+                .attributes
+                .insert("source_file".to_owned(), json!("src/shared.rs"));
+            document.nodes[index]
+                .attributes
+                .insert("line_start".to_owned(), json!(10));
+        }
+        let communities = BTreeMap::from([
+            (7, vec!["a".to_owned(), "b".to_owned()]),
+            (9, vec!["c".to_owned(), "d".to_owned()]),
+        ]);
+
+        let labels = label_communities_by_hub(&document, &communities);
+        assert_eq!(
+            labels.get(&7),
+            Some(&"shared (src/shared.rs:L10) [community 7]".to_owned())
+        );
+        assert_eq!(
+            labels.get(&9),
+            Some(&"shared (src/shared.rs:L10) [community 9]".to_owned())
+        );
+        assert_eq!(labels.values().collect::<HashSet<_>>().len(), labels.len());
+    }
+
+    #[test]
+    fn generated_label_collisions_from_untrusted_names_still_finish_unique() {
+        let mut document = graph(&["a", "b", "c", "d", "e", "f"], &[("a", "b"), ("c", "d")]);
+        for (index, label) in [
+            (0, "shared"),
+            (2, "shared"),
+            (4, "shared (src/left.rs:L10)"),
+            (5, "shared (src/left.rs:L10) [community 0]"),
+        ] {
+            document.nodes[index]
+                .attributes
+                .insert("label".to_owned(), json!(label));
+        }
+        for (index, file, line) in [
+            (0, "crates/core/src/left.rs", 10),
+            (2, "crates/core/src/right.rs", 20),
+        ] {
+            document.nodes[index]
+                .attributes
+                .insert("source_file".to_owned(), json!(file));
+            document.nodes[index]
+                .attributes
+                .insert("line_start".to_owned(), json!(line));
+        }
+        let communities = BTreeMap::from([
+            (0, vec!["a".to_owned(), "b".to_owned()]),
+            (1, vec!["c".to_owned(), "d".to_owned()]),
+            (2, vec!["e".to_owned()]),
+            (3, vec!["f".to_owned()]),
+        ]);
+
+        let labels = label_communities_by_hub(&document, &communities);
+        assert_eq!(labels.values().collect::<HashSet<_>>().len(), labels.len());
+        for (community, label) in labels {
+            assert!(label.ends_with(&format!("[community {community}]")));
+        }
     }
 }

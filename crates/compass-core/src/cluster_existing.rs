@@ -3,16 +3,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use compass_files::{BuildGuard, write_json_atomic, write_text_atomic};
+use compass_files::{BuildGuard, write_atomic_with_digest, write_json_atomic, write_text_atomic};
 use compass_graph::{
     ClusterOptions, Communities, GodNode, cluster, community_member_signatures, god_nodes,
     label_communities_by_hub, remap_communities_to_previous, score_communities, suggest_questions,
-    surprising_connections,
+    surprising_connections, write_canonical_graph_json,
 };
 use compass_model::GraphDocument;
+use compass_model::GraphError;
+use compass_model::code_graph::{CommunityMetadata, GraphDocument as V1GraphDocument};
 use compass_output::{
-    DetectionSummary, HtmlOptions, JsonExportOptions, ReportOptions, TokenCost,
-    backup_if_protected, generate_report, write_html, write_json,
+    DetectionSummary, FreshnessBasis, FreshnessStatus, HtmlOptions, JsonExportOptions,
+    OrientationHealth, ReportOptions, TokenCost, agent_orientation, backup_if_protected_to,
+    graph_artifact_identity, render_agent_report_markdown, render_orientation_json, write_html,
+    write_json,
 };
 use serde_json::{Value, json};
 
@@ -114,21 +118,33 @@ where
 {
     let total_started = Instant::now();
     let load_started = Instant::now();
-    let load_warning = GraphDocument::size_cap_exceeded(&options.graph_path).map(|(size, _)| {
-        format!(
-            "warning: graph.json exceeds cap ({size} bytes); falling back to community-aggregation view (node_limit=5000)"
-        )
-    });
-    let mut document = GraphDocument::load_for_recluster(&options.graph_path)?;
-    normalize_recluster_document(&mut document);
-    if document.nodes.is_empty() {
-        return Err(CoreError::EmptyGraph);
-    }
+    let load_warning = None;
+    let (mut typed_document, document) =
+        match V1GraphDocument::load_for_recluster_with_artifact_digest(&options.graph_path) {
+            Ok((typed, _artifact_digest)) => {
+                let legacy = typed.to_legacy_document()?;
+                (Some(typed), legacy)
+            }
+            Err(GraphError::UnsupportedGraphSchema { found: None }) => (
+                None,
+                GraphDocument::load_for_recluster(&options.graph_path)?,
+            ),
+            Err(error) => return Err(error.into()),
+        };
+    let mut clustering_document = Some(document);
+    {
+        let document = clustering_document
+            .as_mut()
+            .ok_or_else(|| CoreError::InvalidBuildState("graph document missing".to_owned()))?;
+        normalize_recluster_document(document);
+        if document.nodes.is_empty() {
+            return Err(CoreError::EmptyGraph);
+        }
+    };
+    let document = clustering_document
+        .as_ref()
+        .ok_or_else(|| CoreError::InvalidBuildState("graph document missing".to_owned()))?;
     let load_elapsed = load_started.elapsed();
-    fs::create_dir_all(&options.output_dir).map_err(|source| compass_files::FileError::Io {
-        path: options.output_dir.clone(),
-        source,
-    })?;
     let previous = document
         .nodes
         .iter()
@@ -143,7 +159,7 @@ where
         .collect::<HashMap<_, _>>();
     let cluster_started = Instant::now();
     let fresh = cluster(
-        &document,
+        document,
         ClusterOptions {
             resolution: options.resolution,
             exclude_hubs_percentile: options.exclude_hubs,
@@ -156,37 +172,78 @@ where
     };
     let cluster_elapsed = cluster_started.elapsed();
     let analyze_started = Instant::now();
-    let hub_labels = label_communities_by_hub(&document, &communities);
+    let hub_labels = label_communities_by_hub(document, &communities);
     let signatures = community_member_signatures(&communities);
     let saved_labels = load_usize_string_map(&options.output_dir.join("labels.json"));
     let saved_signatures = load_usize_string_map(&options.output_dir.join("labels.json.sig"));
-    let cohesion = score_communities(&document, &communities);
-    let gods = god_nodes(&document, 10);
-    let surprises = surprising_connections(&document, &communities, 5);
+    let cluster_gods = god_nodes(document, 10);
     let analyze_elapsed = analyze_started.elapsed();
     let label_started = Instant::now();
     let selection = labeler(&ClusterLabelContext {
-        document: &document,
+        document,
         communities: &communities,
         hub_labels: &hub_labels,
         saved_labels: &saved_labels,
         saved_signatures: &saved_signatures,
         signatures: &signatures,
-        gods: &gods,
+        gods: &cluster_gods,
     });
     let label_elapsed = label_started.elapsed();
     let labels = selection.labels;
     let report_started = Instant::now();
-    let questions = suggest_questions(&document, &communities, &labels, 10);
+    if let Some(typed) = &mut typed_document {
+        let node_communities = communities
+            .iter()
+            .flat_map(|(community, members)| {
+                members
+                    .iter()
+                    .map(move |member| (member.as_str(), *community))
+            })
+            .collect::<HashMap<_, _>>();
+        for node in &mut typed.nodes {
+            let Some(&community_index) = node_communities.get(node.id.as_str()) else {
+                continue;
+            };
+            node.community = Some(CommunityMetadata {
+                id: u64::try_from(community_index).map_err(|_| {
+                    CoreError::InvalidBuildState("community ID exceeds u64".to_owned())
+                })?,
+                label: labels.get(&community_index).cloned(),
+                score: None,
+                color: None,
+            });
+        }
+    }
+    if typed_document.is_some() {
+        clustering_document = None;
+    }
+    let exact_typed_projection = typed_document
+        .as_ref()
+        .map(V1GraphDocument::to_legacy_document)
+        .transpose()?;
+    let published_document = exact_typed_projection
+        .as_ref()
+        .or(clustering_document.as_ref())
+        .ok_or_else(|| CoreError::InvalidBuildState("graph document missing".to_owned()))?;
+    let cohesion = score_communities(published_document, &communities);
+    let gods = god_nodes(published_document, 10);
+    let surprises = surprising_connections(published_document, &communities, 5);
+    let questions = suggest_questions(published_document, &communities, &labels, 10);
     let commit_root = std::env::current_dir().unwrap_or_else(|_| options.root.clone());
     let commit = git_commit(&commit_root);
     let report_root = options.root.to_string_lossy();
-    let mut report_options = ReportOptions::new(&report_root);
-    report_options.min_community_size = options.min_community_size;
-    report_options.built_at_commit = commit.as_deref();
+    let report_commit = match &typed_document {
+        Some(typed) => typed.graph.build.source_commit.clone(),
+        None => commit.clone(),
+    };
+    let report_options = cluster_only_report_options(
+        &report_root,
+        options.min_community_size,
+        report_commit.as_deref(),
+    );
     let learning = load_learning_for_report(&options.output_dir.join("graph.json"));
-    let report = generate_report(
-        &document,
+    let mut orientation = agent_orientation(
+        published_document,
         &communities,
         &cohesion,
         &labels,
@@ -201,12 +258,13 @@ where
         learning.as_ref(),
         &report_options,
     );
-    write_text_atomic(options.output_dir.join("GRAPH_REPORT.md"), &report)?;
-    let report_elapsed = report_started.elapsed();
     let export_started = Instant::now();
-    let backup = backup_if_protected(&options.output_dir);
+    let output_container = BuildGuard::output_container_for_artifact(&options.graph_path);
+    let backup = backup_if_protected_to(&options.output_dir, &output_container);
+    let guard = BuildGuard::begin_excluding(&output_container, &[])?;
+    let staging = guard.staging_directory();
     write_json_atomic(
-        options.output_dir.join("analysis.json"),
+        staging.join("analysis.json"),
         &json!({
             "communities": communities.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
             "cohesion": cohesion.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
@@ -216,26 +274,49 @@ where
         }),
         true,
     )?;
-    write_json(
-        &document,
-        &communities,
-        options.output_dir.join("graph.json"),
-        &JsonExportOptions {
-            force: false,
-            built_at_commit: commit.as_deref(),
-            community_labels: Some(&labels),
-        },
+    let graph_path = staging.join("graph.json");
+    let graph_identity = if let Some(typed) = typed_document {
+        let receipt = write_atomic_with_digest(&graph_path, |writer| {
+            write_canonical_graph_json(&typed, writer).map_err(|source| {
+                compass_files::FileError::Io {
+                    path: graph_path.clone(),
+                    source,
+                }
+            })
+        })?;
+        format!("sha256:{}", receipt.sha256)
+    } else {
+        write_json(
+            published_document,
+            &communities,
+            &graph_path,
+            &JsonExportOptions {
+                force: false,
+                built_at_commit: commit.as_deref(),
+                community_labels: Some(&labels),
+            },
+        )?;
+        graph_artifact_identity(&graph_path)?
+    };
+    orientation.evidence_status.artifact_set_identity = Some(graph_identity);
+    let report = render_agent_report_markdown(&orientation, report_options.obsidian)?;
+    let orientation_json = render_orientation_json(&orientation)?;
+    write_text_atomic(staging.join("GRAPH_REPORT.md"), &report)?;
+    write_text_atomic(
+        staging.join("orientation.json"),
+        &format!("{orientation_json}\n"),
     )?;
-    write_python_string_map(options.output_dir.join("labels.json"), &labels)?;
-    write_python_string_map(options.output_dir.join("labels.json.sig"), &signatures)?;
-    write_graph_overview_artifact(&document, &communities, &labels, &options.output_dir)?;
-    let html_path = options.output_dir.join("graph.html");
+    let report_elapsed = report_started.elapsed();
+    write_python_string_map(staging.join("labels.json"), &labels)?;
+    write_python_string_map(staging.join("labels.json.sig"), &signatures)?;
+    write_graph_overview_artifact(published_document, &communities, &labels, staging)?;
+    let html_path = staging.join("graph.html");
     let html_written = if options.no_viz {
         remove_if_exists(&html_path)?;
         false
     } else {
         let rendered = write_html(
-            &document,
+            published_document,
             &communities,
             &html_path,
             &HtmlOptions {
@@ -249,11 +330,27 @@ where
         }
         rendered.is_some()
     };
-    let output_container = BuildGuard::output_container_for_artifact(&options.graph_path);
+    let mut artifacts = vec![
+        "graph.json",
+        "GRAPH_REPORT.md",
+        "orientation.json",
+        "analysis.json",
+        "labels.json",
+        "labels.json.sig",
+        "graph-overview.json",
+    ];
+    if html_written {
+        artifacts.push("graph.html");
+    }
+    guard.commit_with_artifacts(&artifacts)?;
     BuildGuard::publish_root_artifacts(
         &output_container,
         &[
             "GRAPH_REPORT.md",
+            "orientation.json",
+            "analysis.json",
+            "labels.json",
+            "labels.json.sig",
             "graph-overview.json",
             "graph.html",
             "graph.json",
@@ -262,8 +359,8 @@ where
     )?;
     let export_elapsed = export_started.elapsed();
     Ok(ClusterExistingResult {
-        nodes: document.nodes.len(),
-        edges: document.links.len(),
+        nodes: published_document.nodes.len(),
+        edges: published_document.links.len(),
         communities: communities.len(),
         labels_reused: selection.labels_reused,
         html_written,
@@ -280,6 +377,29 @@ where
             total: total_started.elapsed(),
         },
     })
+}
+
+fn cluster_only_orientation_health() -> OrientationHealth {
+    OrientationHealth {
+        freshness: FreshnessStatus::Unknown,
+        freshness_basis: FreshnessBasis::Unavailable,
+        publication: None,
+        build_profile: Some("cluster-only".to_owned()),
+        corpus_measurements_available: false,
+        ..OrientationHealth::default()
+    }
+}
+
+fn cluster_only_report_options<'a>(
+    root: &'a str,
+    min_community_size: usize,
+    commit: Option<&'a str>,
+) -> ReportOptions<'a> {
+    let mut options = ReportOptions::new(root);
+    options.min_community_size = min_community_size;
+    options.built_at_commit = commit;
+    options.health = cluster_only_orientation_health();
+    options
 }
 
 /// Python's cluster-only path deliberately rebuilds extraction JSON through
@@ -348,9 +468,33 @@ fn write_python_string_map(
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+    use std::fs::OpenOptions;
+
     use serde_json::Value;
+    use tempfile::TempDir;
 
     use super::*;
+
+    #[test]
+    fn cluster_only_health_does_not_invent_completeness_or_freshness() {
+        let health = cluster_only_orientation_health();
+        assert_eq!(health.freshness, FreshnessStatus::Unknown);
+        assert_eq!(health.freshness_basis, FreshnessBasis::Unavailable);
+        assert_eq!(health.publication, None);
+        assert_eq!(health.omitted_nodes, None);
+        assert!(!health.corpus_measurements_available);
+        assert_eq!(health.build_profile.as_deref(), Some("cluster-only"));
+    }
+
+    #[test]
+    fn cluster_only_report_preserves_commit_identity_without_claiming_freshness() {
+        let options = cluster_only_report_options("fixture", 7, Some("abc123"));
+        assert_eq!(options.built_at_commit, Some("abc123"));
+        assert_eq!(options.min_community_size, 7);
+        assert_eq!(options.health.freshness, FreshnessStatus::Unknown);
+        assert_eq!(options.health.freshness_basis, FreshnessBasis::Unavailable);
+    }
 
     #[test]
     fn recluster_normalization_matches_python_simple_graph_edges() {
@@ -375,5 +519,211 @@ mod tests {
         assert_eq!(document.links[0].attributes["first"], Value::from(1));
         assert_eq!(document.links[0].attributes["second"], Value::from(2));
         assert_eq!(document.links[0].attributes["shared"], "new");
+    }
+
+    #[test]
+    fn cluster_only_publishes_one_coherent_snapshot_after_an_interrupted_staging_attempt()
+    -> Result<(), Box<dyn Error>> {
+        let fixture = managed_graph_fixture()?;
+        let previous_pointer = fs::read_to_string(fixture.output.join("current-snapshot"))?;
+        let interrupted = BuildGuard::begin(&fixture.output)?;
+        write_text_atomic(
+            interrupted.staging_directory().join("GRAPH_REPORT.md"),
+            "partial",
+        )?;
+        drop(interrupted);
+
+        let result = cluster_existing_graph(&fixture.options)?;
+        assert_eq!(result.nodes, 2);
+        let current_pointer = fs::read_to_string(fixture.output.join("current-snapshot"))?;
+        assert_ne!(current_pointer, previous_pointer);
+        let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
+        for artifact in [
+            "graph.json",
+            "GRAPH_REPORT.md",
+            "orientation.json",
+            "analysis.json",
+            "labels.json",
+            "labels.json.sig",
+            "graph-overview.json",
+        ] {
+            assert!(current.join(artifact).is_file(), "missing {artifact}");
+            assert_eq!(
+                fs::read(current.join(artifact))?,
+                fs::read(fixture.output.join(artifact))?,
+                "root projection differs for {artifact}"
+            );
+        }
+        assert!(!current.join("graph.html").exists());
+        assert!(!fixture.output.join("graph.html").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn cluster_only_publishes_disambiguated_community_labels_in_graph_report()
+    -> Result<(), Box<dyn Error>> {
+        let mut fixture = managed_graph_fixture_with_json(
+            r#"{
+                "directed": false,
+                "multigraph": false,
+                "graph": {},
+                "nodes": [
+                    {"id": "a", "label": "shared", "kind": "function", "source_file": "crates/core/src/left.rs", "line_start": 10},
+                    {"id": "b", "label": "left_member", "kind": "function", "source_file": "crates/core/src/left.rs", "line_start": 20},
+                    {"id": "c", "label": "shared", "kind": "function", "source_file": "crates/core/src/right.rs", "line_start": 30},
+                    {"id": "d", "label": "right_member", "kind": "function", "source_file": "crates/core/src/right.rs", "line_start": 40}
+                ],
+                "links": [
+                    {"source": "a", "target": "b", "relation": "calls"},
+                    {"source": "c", "target": "d", "relation": "calls"}
+                ]
+            }"#,
+        )?;
+        fixture.options.no_label = false;
+        fixture.options.min_community_size = 1;
+
+        let result = cluster_existing_graph(&fixture.options)?;
+        assert_eq!(result.communities, 2);
+        let report = fs::read_to_string(fixture.output.join("GRAPH_REPORT.md"))?;
+        assert!(report.contains("Evidence label: shared (src/left.rs:L10)"));
+        assert!(report.contains("Evidence label: shared (src/right.rs:L30)"));
+        Ok(())
+    }
+
+    #[test]
+    fn cluster_only_failure_does_not_publish_a_partial_artifact_set() -> Result<(), Box<dyn Error>>
+    {
+        let fixture = managed_graph_fixture()?;
+        fs::create_dir(fixture.active.join("analysis.json"))?;
+        write_text_atomic(
+            fixture.active.join("analysis.json").join("blocker"),
+            "force the staged atomic writer to fail",
+        )?;
+        let pointer_before = fs::read(fixture.output.join("current-snapshot"))?;
+        let graph_before = fs::read(fixture.output.join("graph.json"))?;
+
+        assert!(cluster_existing_graph(&fixture.options).is_err());
+
+        assert_eq!(
+            fs::read(fixture.output.join("current-snapshot"))?,
+            pointer_before
+        );
+        assert_eq!(fs::read(fixture.output.join("graph.json"))?, graph_before);
+        assert_eq!(
+            BuildGuard::resolve_current_snapshot_directory(&fixture.output)?,
+            fixture.active
+        );
+        assert!(!fixture.output.join("GRAPH_REPORT.md").exists());
+        assert!(!fixture.output.join("orientation.json").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn cluster_only_rejects_an_invalid_declared_v1_graph_instead_of_publishing_legacy_json()
+    -> Result<(), Box<dyn Error>> {
+        let fixture = managed_graph_fixture()?;
+        write_text_atomic(
+            fixture.active.join("graph.json"),
+            r#"{
+                "directed": true,
+                "multigraph": true,
+                "graph": {"schema": "compass.graph/1"},
+                "nodes": [{"id": "legacy-shaped-node", "label": "Legacy"}],
+                "links": []
+            }"#,
+        )?;
+        let pointer_before = fs::read(fixture.output.join("current-snapshot"))?;
+
+        assert!(cluster_existing_graph(&fixture.options).is_err());
+
+        assert_eq!(
+            fs::read(fixture.output.join("current-snapshot"))?,
+            pointer_before
+        );
+        assert!(!fixture.output.join("orientation.json").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn cluster_only_rejects_an_oversized_declared_v1_graph_before_fallback()
+    -> Result<(), Box<dyn Error>> {
+        assert_oversized_graph_is_rejected(r#"{"graph":{"schema":"compass.graph/1"}}"#)
+    }
+
+    #[test]
+    fn cluster_only_rejects_an_oversized_legacy_graph_before_loading() -> Result<(), Box<dyn Error>>
+    {
+        assert_oversized_graph_is_rejected(r#"{"graph":{}}"#)
+    }
+
+    fn assert_oversized_graph_is_rejected(prefix: &str) -> Result<(), Box<dyn Error>> {
+        let fixture = managed_graph_fixture()?;
+        write_text_atomic(fixture.active.join("graph.json"), prefix)?;
+        OpenOptions::new()
+            .write(true)
+            .open(fixture.active.join("graph.json"))?
+            .set_len(compass_model::DEFAULT_GRAPH_SIZE_CAP_BYTES + 1)?;
+        let pointer_before = fs::read(fixture.output.join("current-snapshot"))?;
+
+        assert!(cluster_existing_graph(&fixture.options).is_err());
+
+        assert_eq!(
+            fs::read(fixture.output.join("current-snapshot"))?,
+            pointer_before
+        );
+        assert!(!fixture.output.join("orientation.json").exists());
+        Ok(())
+    }
+
+    struct ManagedGraphFixture {
+        _temporary: TempDir,
+        output: PathBuf,
+        active: PathBuf,
+        options: ClusterExistingOptions,
+    }
+
+    fn managed_graph_fixture() -> Result<ManagedGraphFixture, Box<dyn Error>> {
+        managed_graph_fixture_with_json(
+            r#"{
+                "directed": true,
+                "multigraph": false,
+                "graph": {},
+                "nodes": [
+                    {"id": "a", "label": "A", "kind": "function", "language": "rust", "file": "src/lib.rs", "line": 1},
+                    {"id": "b", "label": "B", "kind": "function", "language": "rust", "file": "src/lib.rs", "line": 2}
+                ],
+                "links": [
+                    {"source": "a", "target": "b", "relation": "calls", "file": "src/lib.rs", "line": 1}
+                ]
+            }"#,
+        )
+    }
+
+    fn managed_graph_fixture_with_json(
+        graph_json: &str,
+    ) -> Result<ManagedGraphFixture, Box<dyn Error>> {
+        let temporary = tempfile::tempdir()?;
+        let output = temporary.path().join("compass-out");
+        let guard = BuildGuard::begin(&output)?;
+        write_text_atomic(guard.staging_directory().join("graph.json"), graph_json)?;
+        guard.commit_with_artifacts(&["graph.json"])?;
+        BuildGuard::publish_root_artifacts(&output, &["graph.json"], true)?;
+        let active = BuildGuard::resolve_current_snapshot_directory(&output)?;
+        let options = ClusterExistingOptions {
+            graph_path: active.join("graph.json"),
+            output_dir: active.clone(),
+            root: temporary.path().to_path_buf(),
+            no_viz: true,
+            no_label: true,
+            resolution: 1.0,
+            exclude_hubs: None,
+            min_community_size: 1,
+        };
+        Ok(ManagedGraphFixture {
+            _temporary: temporary,
+            output,
+            active,
+            options,
+        })
     }
 }

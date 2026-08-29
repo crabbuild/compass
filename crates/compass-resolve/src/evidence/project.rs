@@ -229,10 +229,10 @@ pub(in crate::evidence) fn unique_inventory_source<'a>(
 }
 
 pub(in crate::evidence) fn typescript_module_indices(
-    declarations: &AHashMap<String, DeclarationFact>,
+    declarations: &FactTable<DeclarationFact>,
     declaration_ids: &[String],
-    bindings: &AHashMap<String, BindingFact>,
-    scopes: &AHashMap<String, compass_languages::ScopeFact>,
+    bindings: &FactTable<BindingFact>,
+    scopes: &FactTable<compass_languages::ScopeFact>,
     root: &Path,
     project_modules: &TypeScriptProjectModuleIndex,
 ) -> (

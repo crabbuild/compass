@@ -28,6 +28,7 @@ compass init [PATH]
   [--exclude GLOB]
   [--program]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--yes]
   [--force]
 ```
@@ -52,6 +53,7 @@ compass update [PATH]
   [--program-artifact PATH]
   [--out DIR]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--no-program]
   [--no-cluster]
   [--force]
@@ -73,6 +75,10 @@ projected. `--no-program` conflicts with `--program-artifact`.
 Graph storage defaults to `sqlite`; `--store json` opts out of the validated
 local store sidecar without replacing `graph.json`. JSON remains the portable
 authority, while the sidecar keeps large graphs queryable under bounded memory.
+Inference defaults to `low` and publishes exact relationships only. Use
+`medium` for source-backed inferred resolution, `high` to additionally retain
+explicitly qualified external references, or explicit `max` to retain all
+inferred relationships including deferred receivers.
 
 ### `extract`
 
@@ -99,6 +105,7 @@ compass extract [PATH]
   [--timing]
   [--out DIR]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--no-cluster]
   [--force]
   [--no-viz]
@@ -131,6 +138,7 @@ compass watch [PATH]
   [--program-artifact PATH]
   [--no-program]
   [--store json|sqlite]
+  [--inference-level low|medium|high|max]
   [--out DIR]
   [--no-cluster]
   [--no-viz]
@@ -197,26 +205,44 @@ compass query "<question>"
   [--traverse]
   [--dfs]
   [--context VALUE]
+  [--direction auto|incoming|outgoing|both]
+  [--scope KIND:VALUE]
+  [--format text|json]
+  [--result-envelope]
+  [--text-budget N]
+  [--cursor TOKEN]
   [--budget N]
   [--page N]
+  [--max-nodes N]
+  [--max-edges N]
   [--graph PATH | --at REV]
 ```
 
-Clear symbol-search, callers, callees, impact, and directed source-to-target path
-questions against the current typed graph use the bounded `compass.query/1`
-framework automatically. Generic or contradictory questions and historical
-`--at` queries retain relevance traversal. Pass `--traverse`, or any explicit
-`--dfs`, `--context`, `--budget`, or `--page` control, to select traversal
-explicitly.
+Plain questions against a typed graph use bounded
+`compass.query.discovery/1` discovery. Direction, repeatable OR scope,
+relationship context, and DFS compose within that contract. `--result-envelope`
+requires `--format json` and opt-in wraps the unchanged discovery result in
+`compass.query.discovery-result/1` with a query-owned `semanticResultDigest`.
+Without this flag, the existing JSON shape remains unchanged. `--traverse`,
+`--budget`, or `--page` explicitly select legacy relevance traversal and cannot
+be mixed with discovery controls. CompassQL routing is unchanged.
+The default focused neighborhood is 64 nodes and 128 edges. Use
+`--max-nodes 500 --max-edges 1000` when a query intentionally needs the full
+supported breadth; these remain hard ceilings rather than new defaults.
 
-`--budget` is the approximate token budget for one result page. It defaults to
-2,000 and may be raised when the caller has a larger context window.
-Every matched result includes a deterministic `Pagination:` line with the
-current page, total pages, fact range, and previous/next page numbers. Fetch the
-next page by repeating the unchanged query, graph selector, contexts, traversal
-mode, and budget with `--page N`. Pagination is stable for an unchanged graph;
-use `--at REV` when multiple page requests must be pinned to one immutable
-snapshot.
+`--context VALUE` is a relationship filter for traversal evidence contexts such
+as `call`, `import`, or `route`. It is not a node, file, package, community, or
+subsystem selector. Use repeatable `--scope KIND:VALUE` for explicit OR scope
+over `community`, `source`, `package`, or `node`.
+
+`--text-budget` bounds the discovery text projection. Its opaque cursor binds
+the contract version, normalized request/options, selected graph generation and
+digest, semantic-response digest, and next stable section/item. Fetch the next
+page with `--cursor TOKEN` and otherwise unchanged semantic inputs. The
+presentation-only `--text-budget` may change between pages. Pages contain whole
+deterministic entries; changed inputs fail instead of silently continuing a
+different result. JSON rejects text pagination controls. Legacy `--budget` and
+numeric `--page` retain their existing meaning only with legacy traversal.
 
 Query seeds prefer source-backed declarations over unresolved external-symbol
 placeholders with the same callable label. Source-less placeholder nodes retain
@@ -293,6 +319,22 @@ compass affected "<node-or-label>"
 ```
 
 Traverses incoming impact-relevant relations.
+
+### `context`
+
+```text
+compass context explain|modify|debug|test TARGET
+  [--graph PATH] [--program PATH] [--root PATH] [--memory PATH]
+  [--engine default|json|store] [--format text|json]
+  [--max-depth N] [--max-nodes N] [--max-edges N]
+  [--max-paths N] [--max-candidates N] [--max-source-bytes N]
+  [--max-knowledge-items N] [--max-response-bytes N]
+```
+
+Emits `compass.task-context/1` after exact target resolution. It composes
+digest-verified source, exact calls, related tests, bounded impact, and
+identity-linked reflection memory. Ambiguous and fuzzy-only targets retain
+candidates but do not compose structural evidence.
 
 ### `tree`
 
@@ -389,6 +431,41 @@ diffs, the exact Git patch fallback, and meaningful code-graph changes.
 `--output` is rejected for text and JSON; there is no alternate semantic-diff
 export command.
 
+### `review`
+
+```text
+compass review --base REV --head REV
+  [--repo OWNER/REPO] [--host HOST] [--pull-request-number N]
+  [--fingerprint SHA256]
+  [--format text|json|markdown|sarif]
+  [--readiness]
+  [--output PATH]
+  [--max-findings N --max-output-bytes N]
+
+compass review --pr NUMBER --repo OWNER/REPO [--host HOST]
+  [--fingerprint SHA256]
+  [--format text|json|markdown|sarif]
+  [--output PATH]
+```
+
+`review` emits the canonical `compass.pr_intelligence.report/1` result or one
+of its deterministic projections. Local mode resolves exact objects and never
+fetches. `--repo`, `--host`, and `--pull-request-number` bind a frozen CI
+identity without selecting the GitHub adapter. `--pr` selects bounded GitHub
+metadata/file pagination through `gh` and requires those full objects locally.
+
+The command creates or reuses comparable immutable graph realizations and
+fails explicitly on profile mismatch. A clean candidate is analyzed at its
+deterministic synthetic merge; a conflict uses the PR-head realization and
+reports unavailable/indeterminate merge-dependent conclusions. `--output`
+writes atomically. Markdown-only budgets report exact projection omissions.
+Advisory risk and typed gate state do not change the CLI success code.
+With `--readiness`, JSON or Markdown emits the additive
+`compass.pr-readiness/1` envelope referencing the unchanged report digest.
+
+See [PR Intelligence](pr-intelligence.md) for schema, rubric, bounds, MCP, and
+gate semantics.
+
 ## Service
 
 ### `serve`
@@ -422,6 +499,8 @@ Formats include:
 
 ```text
 html
+json
+workbench-json
 callflow-html
 obsidian
 wiki
@@ -441,6 +520,32 @@ compass export callflow-html --help
 
 Common inputs include `--graph PATH`, labels/report/sections, output directory,
 node/diagram limits, and database connection arguments.
+
+`html`, `json`, and `workbench-json` accept repeatable graph views. Compass
+preserves their command-line order and puts them in one navigable workbench:
+
+```bash
+compass export html --code-graph --architecture-graph
+compass export html --call-graph checkout --impact-graph checkout
+compass export html --affected-graph checkout --relation calls --relation imports
+compass export html --artifact-lens routes --artifact-lens data
+compass export html --history-graph main~10..main
+```
+
+The equivalent generic syntax is repeatable `--view` with `code`,
+`architecture`, `call:SYMBOL`, `impact:SYMBOL`, `affected:NODE`,
+`history:OLD..NEW`, or `artifact:LENS`. Call, impact, and affected views share
+bounded `--depth`, `--max-nodes`, and `--max-edges` controls. `--direction`
+applies to call views, `--include-heuristic` to impact views, repeatable
+`--relation` to affected views, and `--program PATH` enriches call views with
+Program IR evidence. Unsupported, misspelled, and format-incompatible options
+fail instead of being ignored.
+
+With no requested view, `html` contains a code-graph workbench and plain
+`json` retains the existing `compass.viewer.graph/1` response. Any requested
+view makes `json` return `compass.viewer.workbench/1`; `workbench-json` always
+returns that contract. `--community` remains a graph-only JSON operation and
+cannot be combined with workbench views. `--output PATH` selects the HTML file.
 
 For `html` and `callflow-html`, an interactive terminal asks before opening the
 generated page in the default browser. Non-interactive commands never prompt or
@@ -797,6 +902,8 @@ the detailed operational workflow is in the
 ```text
 compass capabilities --format json
 compass export json [--community ID]
+compass export workbench-json [VIEW ...]
+compass export html [VIEW ...]
 compass export callflow-json --output PATH
 compass program call-graph (--symbol SYMBOL | --source FILE --byte BYTE)
   [--direction callers|callees|both] [--depth N] --format json

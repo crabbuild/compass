@@ -12,6 +12,7 @@
     "./contracts/graph": "./src/contracts/graph.ts",
     "./contracts/history": "./src/contracts/history.ts",
     "./graph/CompassBrandMark": "./src/graph/CompassBrandMark.tsx",
+    "./graph/codeQueryGraph": "./src/graph/codeQueryGraph.ts",
     "./graph/VisNetworkCanvas": "./src/graph/VisNetworkCanvas.tsx",
     "./graph/NodeHoverCard": "./src/graph/NodeHoverCard.tsx",
     "./graph/EdgeHoverCard": "./src/graph/EdgeHoverCard.tsx",

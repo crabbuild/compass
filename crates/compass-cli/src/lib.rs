@@ -22,13 +22,15 @@ mod provider_commands;
 mod prs_commands;
 mod query_commands;
 mod result_commands;
+mod review_commands;
 mod semantic_commands;
 mod semantic_diff_commands;
 mod semantic_diff_render;
 mod store_commands;
+mod task_context_commands;
 mod upgrade_commands;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Write};
@@ -38,10 +40,14 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use compass_analysis::{
+    CallGraphDirection, UniversalCallGraphRequest, UniversalCallGraphRoot,
+    build_universal_call_graph,
+};
 use compass_core::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
-    ClusterExistingOptions, ExportInputs, GraphStorage, LoadedGraph, SemanticLayer, WatchBackend,
-    WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
+    ClusterExistingOptions, ExportInputs, GraphStorage, InferenceLevel, LoadedGraph, SemanticLayer,
+    WatchBackend, WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
     build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
     cluster_existing_graph, default_graph_path, diagnose_graph_file, diagnose_graph_quality,
     format_diagnostic_json, format_diagnostic_report, format_quality_json, format_quality_report,
@@ -54,17 +60,25 @@ use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
+use compass_model::query_contract::{
+    CodeQueryLimits, DiscoveryDirection, DiscoveryLimits, DiscoveryQueryRequest,
+    DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ImpactRequest,
+};
 use compass_output::{
-    CallflowOptions, CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions,
-    TreeOptions, WikiOptions, callflow_view_model, export_obsidian, export_wiki,
-    graph_community_view_model_document, graph_view_model_document, node_filenames,
-    write_callflow_html, write_canvas, write_cypher, write_graphml, write_html, write_svg,
-    write_tree_html,
+    AffectedLensOptions, AgentOrientation, ArtifactLens, CallflowOptions, CallflowSection,
+    CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions, TreeOptions, WikiOptions,
+    WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
+    WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model, callflow_view_model,
+    export_obsidian, export_wiki, graph_artifact_identity, graph_community_view_model_document,
+    graph_view_model_bundle_document, graph_view_model_document, node_filenames,
+    render_orientation_json, validate_orientation_graph_identity, write_callflow_html,
+    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html, write_workbench_html,
 };
 use compass_query::{
-    DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, TextPageOptions, TraversalMode,
-    format_affected, format_benchmark, plan_natural_query, query_graph_text_page,
-    render_explanation_page, render_shortest_path, run_benchmark,
+    DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions,
+    TextPageOptions, TraversalMode, discovery_request_digest, format_affected, format_benchmark,
+    open as open_code_query, open_with_verified_document, query_graph_text_page,
+    render_discovery_text_page, render_explanation_page, render_shortest_path, run_benchmark,
 };
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
@@ -360,6 +374,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "impact" => code_query_commands::command("impact", &args),
         "explore" => code_query_commands::command("explore", &args),
         "node" => code_query_commands::command("node", &args),
+        "context" => task_context_commands::command(&args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
         "query" => query_commands::command_query(frontend, &args),
@@ -386,6 +401,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "add" => ingest_commands::command_add(frontend, &args),
         "label" => label_commands::command_label(frontend, &args),
         "prs" => prs_commands::command_prs(frontend, &args),
+        "review" => review_commands::command(&args),
         "hook" => hook_commands::command_hook(frontend, &args),
         "hook-spawn" => hook_commands::command_hook_spawn(frontend, &args),
         "hook-refresh" => command_hook_refresh(frontend, &args),
@@ -1024,6 +1040,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     let mut excludes = Vec::new();
     let mut program_artifacts = Vec::new();
     let mut graph_storage = GraphStorage::default();
+    let mut inference_level = InferenceLevel::default();
     let mut force_polling = false;
     let mut index = 0;
     while index < args.len() {
@@ -1057,6 +1074,18 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
                 graph_storage = parse_graph_storage(&value[8..])?;
             }
             "--store" => return Err("error: --store requires json or sqlite".to_owned()),
+            "--inference-level" if index + 1 < args.len() => {
+                inference_level = parse_inference_level(&args[index + 1])?;
+                index += 1;
+            }
+            value if value.starts_with("--inference-level=") => {
+                inference_level = parse_inference_level(&value[18..])?;
+            }
+            "--inference-level" => {
+                return Err(
+                    "error: --inference-level requires low, medium, high, or max".to_owned(),
+                );
+            }
             "--exclude" if index + 1 < args.len() => {
                 excludes.push(args[index + 1].clone());
                 index += 1;
@@ -1104,6 +1133,7 @@ fn parse_watch_options(args: &[String]) -> Result<Option<WatchOptions>, String> 
     options.build.no_cluster = no_cluster;
     options.build.no_viz = no_viz;
     options.build.graph_storage = graph_storage;
+    options.build.inference_level = inference_level;
     options.build.gitignore = gitignore;
     options.build.extra_excludes = excludes;
     options.build.program_analysis = program_requested || !program_artifacts.is_empty();
@@ -1653,6 +1683,7 @@ fn command_build_with_validation_inner(
     let mut no_program = false;
     let mut program_requested = false;
     let mut graph_storage = GraphStorage::default();
+    let mut inference_level = InferenceLevel::default();
     let mut gitignore = true;
     let mut code_only = false;
     let mut cargo = false;
@@ -1806,6 +1837,25 @@ fn command_build_with_validation_inner(
                     "error: --store requires json or sqlite".to_owned(),
                 );
             }
+            "--inference-level" if index + 1 < args.len() => {
+                inference_level = match parse_inference_level(&args[index + 1]) {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+                index += 1;
+            }
+            value if value.starts_with("--inference-level=") => {
+                inference_level = match parse_inference_level(&value[18..]) {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error),
+                };
+            }
+            "--inference-level" => {
+                return extract_parse_failure(
+                    frontend,
+                    "error: --inference-level requires low, medium, high, or max".to_owned(),
+                );
+            }
             "--exclude" if index + 1 < args.len() => {
                 excludes.push(args[index + 1].clone());
                 index += 1;
@@ -1896,7 +1946,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1949,6 +1999,7 @@ fn command_build_with_validation_inner(
     options.no_cluster = no_cluster;
     options.no_viz = no_viz;
     options.graph_storage = graph_storage;
+    options.inference_level = inference_level;
     options.gitignore = gitignore;
     if environment_truthy("COMPASS_HISTORY_BUILD") {
         options.ignore_policy = compass_files::IgnorePolicy::HistoricalCommit;
@@ -2178,9 +2229,7 @@ fn command_build_with_validation_inner(
                 output.push_str(&notes.join("\n"));
             }
             let mut outcome = Outcome::success(output);
-            if let Some(warning) = format_partial_graph_warning(&result) {
-                outcome.stderr = warning;
-            }
+            apply_build_quality_outcome(&result, &mut outcome);
             if let Some(warning) = global_warning {
                 if !outcome.stderr.is_empty() {
                     outcome.stderr.push('\n');
@@ -2213,6 +2262,18 @@ fn parse_graph_storage(value: &str) -> Result<GraphStorage, String> {
         "sqlite" => Ok(GraphStorage::Sqlite),
         _ => Err(format!(
             "error: --store must be json or sqlite (found {value})"
+        )),
+    }
+}
+
+pub(crate) fn parse_inference_level(value: &str) -> Result<InferenceLevel, String> {
+    match value {
+        "low" => Ok(InferenceLevel::Low),
+        "medium" => Ok(InferenceLevel::Medium),
+        "high" => Ok(InferenceLevel::High),
+        "max" => Ok(InferenceLevel::Max),
+        _ => Err(format!(
+            "error: --inference-level must be low, medium, high, or max (found {value})"
         )),
     }
 }
@@ -2787,7 +2848,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -2797,15 +2858,231 @@ fn saved_graph_root() -> Option<PathBuf> {
     (!root.is_empty()).then(|| PathBuf::from(root))
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ExportViewRequest {
+    Code,
+    Architecture,
+    Call(String),
+    Impact(String),
+    Affected(String),
+    History { base: String, target: String },
+    Artifact(ArtifactLens),
+}
+
+struct ExportViewOptions<'a> {
+    direction: CallGraphDirection,
+    depth: u32,
+    max_nodes: usize,
+    max_edges: usize,
+    include_heuristic: bool,
+    relations: &'a [String],
+    program_path: Option<&'a Path>,
+}
+
+fn parse_export_view(value: &str) -> Result<ExportViewRequest, String> {
+    if value == "code" {
+        Ok(ExportViewRequest::Code)
+    } else if value == "architecture" {
+        Ok(ExportViewRequest::Architecture)
+    } else if let Some(root) = value.strip_prefix("call:").filter(|root| !root.is_empty()) {
+        Ok(ExportViewRequest::Call(root.to_owned()))
+    } else if let Some(root) = value
+        .strip_prefix("impact:")
+        .filter(|root| !root.is_empty())
+    {
+        Ok(ExportViewRequest::Impact(root.to_owned()))
+    } else if let Some(root) = value
+        .strip_prefix("affected:")
+        .filter(|root| !root.is_empty())
+    {
+        Ok(ExportViewRequest::Affected(root.to_owned()))
+    } else if let Some(range) = value.strip_prefix("history:") {
+        parse_history_view(range)
+    } else if let Some(lens) = value.strip_prefix("artifact:") {
+        parse_artifact_lens(lens).map(ExportViewRequest::Artifact)
+    } else {
+        Err(format!(
+            "invalid view '{value}'; expected code, architecture, call:SYMBOL, impact:SYMBOL, affected:NODE, history:OLD..NEW, or artifact:LENS"
+        ))
+    }
+}
+
+fn parse_history_view(value: &str) -> Result<ExportViewRequest, String> {
+    let (base, target) = value
+        .split_once("..")
+        .filter(|(base, target)| !base.is_empty() && !target.is_empty())
+        .ok_or_else(|| "history view must use OLD..NEW".to_owned())?;
+    Ok(ExportViewRequest::History {
+        base: base.to_owned(),
+        target: target.to_owned(),
+    })
+}
+
+fn parse_artifact_lens(value: &str) -> Result<ArtifactLens, String> {
+    match value {
+        "dependencies" | "dependency" => Ok(ArtifactLens::Dependencies),
+        "routes" | "route" => Ok(ArtifactLens::Routes),
+        "data" => Ok(ArtifactLens::Data),
+        "messaging" | "messages" | "jobs" => Ok(ArtifactLens::Messaging),
+        "tests" | "test" => Ok(ArtifactLens::Tests),
+        "provenance" | "aliases" => Ok(ArtifactLens::Provenance),
+        _ => Err(format!(
+            "unknown artifact lens '{value}'; expected dependencies, routes, data, messaging, tests, or provenance"
+        )),
+    }
+}
+
+fn parse_call_direction(value: &str) -> Result<CallGraphDirection, String> {
+    match value {
+        "callers" => Ok(CallGraphDirection::Callers),
+        "callees" => Ok(CallGraphDirection::Callees),
+        "both" => Ok(CallGraphDirection::Both),
+        _ => Err("--direction must be callers, callees, or both".to_owned()),
+    }
+}
+
+fn validate_export_options(
+    format: &str,
+    seen: &std::collections::BTreeSet<&str>,
+    views: &[ExportViewRequest],
+) -> Result<(), String> {
+    let allowed: &[&str] = match format {
+        "html" => &[
+            "--graph",
+            "--labels",
+            "--node-limit",
+            "--no-viz",
+            "--output",
+            "--view",
+            "--direction",
+            "--depth",
+            "--max-nodes",
+            "--max-edges",
+            "--relation",
+            "--include-heuristic",
+            "--program",
+        ],
+        "json" | "viewer-json" => &[
+            "--graph",
+            "--labels",
+            "--node-limit",
+            "--community",
+            "--view",
+            "--direction",
+            "--depth",
+            "--max-nodes",
+            "--max-edges",
+            "--relation",
+            "--include-heuristic",
+            "--program",
+        ],
+        "workbench-json" => &[
+            "--graph",
+            "--labels",
+            "--node-limit",
+            "--view",
+            "--direction",
+            "--depth",
+            "--max-nodes",
+            "--max-edges",
+            "--relation",
+            "--include-heuristic",
+            "--program",
+        ],
+        "callflow-html" => &[
+            "--graph",
+            "--labels",
+            "--report",
+            "--sections",
+            "--output",
+            "--lang",
+            "--max-sections",
+            "--diagram-scale",
+            "--max-diagram-nodes",
+            "--max-diagram-edges",
+        ],
+        "callflow-json" => &[
+            "--graph",
+            "--labels",
+            "--report",
+            "--sections",
+            "--lang",
+            "--max-sections",
+            "--diagram-scale",
+            "--max-diagram-nodes",
+            "--max-diagram-edges",
+        ],
+        "obsidian" => &["--graph", "--labels", "--dir"],
+        "wiki" | "svg" => &["--graph", "--labels"],
+        "graphml" => &["--graph"],
+        "neo4j" | "falkordb" => &["--graph", "--push", "--user", "--password"],
+        _ => &[],
+    };
+    if let Some(option) = seen.iter().find(|option| !allowed.contains(option)) {
+        return Err(format!("{option} is not valid with export {format}"));
+    }
+    if seen.contains("--community") && !views.is_empty() {
+        return Err("--community cannot be combined with workbench views".to_owned());
+    }
+    if seen.contains("--direction")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Call(_)))
+    {
+        return Err("--direction requires a call graph view".to_owned());
+    }
+    if seen.contains("--include-heuristic")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Impact(_)))
+    {
+        return Err("--include-heuristic requires an impact graph view".to_owned());
+    }
+    if seen.contains("--relation")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Affected(_)))
+    {
+        return Err("--relation requires an affected graph view".to_owned());
+    }
+    if seen.contains("--program")
+        && !views
+            .iter()
+            .any(|view| matches!(view, ExportViewRequest::Call(_)))
+    {
+        return Err("--program requires a call graph view".to_owned());
+    }
+    if seen.contains("--depth")
+        && !views.iter().any(|view| {
+            matches!(
+                view,
+                ExportViewRequest::Call(_)
+                    | ExportViewRequest::Impact(_)
+                    | ExportViewRequest::Affected(_)
+            )
+        })
+    {
+        return Err("--depth requires a call, impact, or affected graph view".to_owned());
+    }
+    if (seen.contains("--max-nodes") || seen.contains("--max-edges")) && views.is_empty() {
+        return Err("--max-nodes and --max-edges require a requested view".to_owned());
+    }
+    Ok(())
+}
+
 fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let Some(format) = args.first().map(String::as_str) else {
         return Outcome::failure(export_help());
     };
+    if format == "orientation-json" {
+        return command_export_orientation_json(&args[1..]);
+    }
     if !matches!(
         format,
         "html"
             | "json"
             | "viewer-json"
+            | "workbench-json"
             | "callflow-html"
             | "callflow-json"
             | "obsidian"
@@ -2816,6 +3093,14 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             | "falkordb"
     ) {
         return Outcome::failure(export_help());
+    }
+    if args.len() == 2 && matches!(args[1].as_str(), "-h" | "--help") {
+        return Outcome::success(match format {
+            "html" | "workbench-json" => export_workbench_help(format),
+            "json" | "viewer-json" => export_json_help(),
+            "callflow-html" | "callflow-json" => callflow_help(),
+            _ => export_help(),
+        });
     }
     let mut graph_path = default_graph_path();
     let mut graph_explicit = false;
@@ -2844,6 +3129,15 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         .unwrap_or_else(|| Path::new("."))
         .join("obsidian");
     let mut push_uri = None;
+    let mut view_requests = Vec::new();
+    let mut view_depth = 3_u32;
+    let mut view_max_nodes = 500_usize;
+    let mut view_max_edges = 1_000_usize;
+    let mut view_direction = CallGraphDirection::Both;
+    let mut include_heuristic = false;
+    let mut view_relations = Vec::new();
+    let mut program_path = None;
+    let mut seen_options = std::collections::BTreeSet::new();
     let mut push_user = "neo4j".to_owned();
     let mut push_password = if format == "falkordb" {
         std::env::var("FALKORDB_PASSWORD").ok()
@@ -2857,6 +3151,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         let next = || args.get(index + 1).cloned();
         match argument {
             "--graph" => {
+                seen_options.insert("--graph");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --graph requires a path".to_owned());
                 };
@@ -2865,6 +3160,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--labels" => {
+                seen_options.insert("--labels");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --labels requires a path".to_owned());
                 };
@@ -2873,6 +3169,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--report" => {
+                seen_options.insert("--report");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --report requires a path".to_owned());
                 };
@@ -2881,6 +3178,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--sections" => {
+                seen_options.insert("--sections");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --sections requires a path".to_owned());
                 };
@@ -2888,6 +3186,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--output" => {
+                seen_options.insert("--output");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --output requires a path".to_owned());
                 };
@@ -2895,6 +3194,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--dir" => {
+                seen_options.insert("--dir");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --dir requires a path".to_owned());
                 };
@@ -2902,6 +3202,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--push" => {
+                seen_options.insert("--push");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --push requires a URI".to_owned());
                 };
@@ -2909,6 +3210,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--user" => {
+                seen_options.insert("--user");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --user requires a value".to_owned());
                 };
@@ -2916,6 +3218,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--password" => {
+                seen_options.insert("--password");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --password requires a value".to_owned());
                 };
@@ -2923,6 +3226,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--lang" => {
+                seen_options.insert("--lang");
                 let Some(value) = next() else {
                     return Outcome::failure("error: --lang requires a value".to_owned());
                 };
@@ -2930,6 +3234,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--max-sections" => {
+                seen_options.insert("--max-sections");
                 let Some(value) = parse_usize(next(), "--max-sections") else {
                     return Outcome::failure("error: --max-sections must be an integer".to_owned());
                 };
@@ -2937,6 +3242,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--max-diagram-nodes" => {
+                seen_options.insert("--max-diagram-nodes");
                 let Some(value) = parse_usize(next(), "--max-diagram-nodes") else {
                     return Outcome::failure(
                         "error: --max-diagram-nodes must be an integer".to_owned(),
@@ -2946,6 +3252,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--max-diagram-edges" => {
+                seen_options.insert("--max-diagram-edges");
                 let Some(value) = parse_usize(next(), "--max-diagram-edges") else {
                     return Outcome::failure(
                         "error: --max-diagram-edges must be an integer".to_owned(),
@@ -2955,6 +3262,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--node-limit" => {
+                seen_options.insert("--node-limit");
                 let Some(value) = next().and_then(|value| value.parse::<isize>().ok()) else {
                     return Outcome::failure("error: --node-limit must be an integer".to_owned());
                 };
@@ -2962,6 +3270,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--community" if matches!(format, "json" | "viewer-json") => {
+                seen_options.insert("--community");
                 let Some(value) = next().and_then(|value| value.parse::<usize>().ok()) else {
                     return Outcome::failure(
                         "error: --community must be a non-negative integer".to_owned(),
@@ -2977,6 +3286,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 if matches!(format, "json" | "viewer-json")
                     && value.starts_with("--community=") =>
             {
+                seen_options.insert("--community");
                 let Some(value) = value
                     .strip_prefix("--community=")
                     .and_then(|value| value.parse::<usize>().ok())
@@ -3002,6 +3312,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 );
             }
             "--diagram-scale" => {
+                seen_options.insert("--diagram-scale");
                 let Some(value) = next().and_then(|value| value.parse::<f64>().ok()) else {
                     return Outcome::failure("error: --diagram-scale must be a number".to_owned());
                 };
@@ -3009,8 +3320,155 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 index += 2;
             }
             "--no-viz" => {
+                seen_options.insert("--no-viz");
                 no_viz = true;
                 index += 1;
+            }
+            "--view" => {
+                let Some(value) = next() else {
+                    return Outcome::failure(
+                        "error: --view requires a view specification".to_owned(),
+                    );
+                };
+                match parse_export_view(&value) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--code-graph" => {
+                view_requests.push(ExportViewRequest::Code);
+                seen_options.insert("--view");
+                index += 1;
+            }
+            "--architecture-graph" => {
+                view_requests.push(ExportViewRequest::Architecture);
+                seen_options.insert("--view");
+                index += 1;
+            }
+            "--call-graph" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure("error: --call-graph requires a symbol".to_owned());
+                };
+                view_requests.push(ExportViewRequest::Call(value));
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--impact-graph" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure("error: --impact-graph requires a symbol".to_owned());
+                };
+                view_requests.push(ExportViewRequest::Impact(value));
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--affected-graph" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure(
+                        "error: --affected-graph requires a node or label".to_owned(),
+                    );
+                };
+                view_requests.push(ExportViewRequest::Affected(value));
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--history-graph" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --history-graph requires OLD..NEW".to_owned());
+                };
+                match parse_history_view(&value) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--artifact-lens" => {
+                let Some(value) = next() else {
+                    return Outcome::failure(
+                        "error: --artifact-lens requires a lens name".to_owned(),
+                    );
+                };
+                match parse_artifact_lens(&value) {
+                    Ok(lens) => view_requests.push(ExportViewRequest::Artifact(lens)),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 2;
+            }
+            "--direction" => {
+                let Some(value) = next() else {
+                    return Outcome::failure(
+                        "error: --direction requires callers, callees, or both".to_owned(),
+                    );
+                };
+                match parse_call_direction(&value) {
+                    Ok(direction) => view_direction = direction,
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--direction");
+                index += 2;
+            }
+            "--depth" => {
+                let Some(value) = next()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .filter(|value| *value > 0)
+                else {
+                    return Outcome::failure(
+                        "error: --depth must be a positive integer".to_owned(),
+                    );
+                };
+                view_depth = value;
+                seen_options.insert("--depth");
+                index += 2;
+            }
+            "--max-nodes" => {
+                let Some(value) = next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|value| *value > 0)
+                else {
+                    return Outcome::failure(
+                        "error: --max-nodes must be a positive integer".to_owned(),
+                    );
+                };
+                view_max_nodes = value;
+                seen_options.insert("--max-nodes");
+                index += 2;
+            }
+            "--max-edges" => {
+                let Some(value) = next()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .filter(|value| *value > 0)
+                else {
+                    return Outcome::failure(
+                        "error: --max-edges must be a positive integer".to_owned(),
+                    );
+                };
+                view_max_edges = value;
+                seen_options.insert("--max-edges");
+                index += 2;
+            }
+            "--relation" => {
+                let Some(value) = next().filter(|value| !value.is_empty()) else {
+                    return Outcome::failure("error: --relation requires a value".to_owned());
+                };
+                view_relations.push(value);
+                seen_options.insert("--relation");
+                index += 2;
+            }
+            "--include-heuristic" => {
+                include_heuristic = true;
+                seen_options.insert("--include-heuristic");
+                index += 1;
+            }
+            "--program" => {
+                let Some(value) = next() else {
+                    return Outcome::failure("error: --program requires a path".to_owned());
+                };
+                program_path = Some(PathBuf::from(value));
+                seen_options.insert("--program");
+                index += 2;
             }
             "-h" | "--help" if matches!(format, "callflow-html" | "callflow-json") => {
                 return Outcome::success(callflow_help());
@@ -3037,11 +3495,71 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 graph_explicit = true;
                 index += 1;
             }
-            _ => index += 1,
+            value if value.starts_with("--view=") => {
+                match parse_export_view(&value[7..]) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--call-graph=") => {
+                let symbol = &value[13..];
+                if symbol.is_empty() {
+                    return Outcome::failure("error: --call-graph requires a symbol".to_owned());
+                }
+                view_requests.push(ExportViewRequest::Call(symbol.to_owned()));
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--impact-graph=") => {
+                let symbol = &value[15..];
+                if symbol.is_empty() {
+                    return Outcome::failure("error: --impact-graph requires a symbol".to_owned());
+                }
+                view_requests.push(ExportViewRequest::Impact(symbol.to_owned()));
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--affected-graph=") => {
+                let root = &value[17..];
+                if root.is_empty() {
+                    return Outcome::failure(
+                        "error: --affected-graph requires a node or label".to_owned(),
+                    );
+                }
+                view_requests.push(ExportViewRequest::Affected(root.to_owned()));
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--history-graph=") => {
+                match parse_history_view(&value[16..]) {
+                    Ok(view) => view_requests.push(view),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value if value.starts_with("--artifact-lens=") => {
+                match parse_artifact_lens(&value[16..]) {
+                    Ok(lens) => view_requests.push(ExportViewRequest::Artifact(lens)),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                }
+                seen_options.insert("--view");
+                index += 1;
+            }
+            value => {
+                return Outcome::failure(format!(
+                    "error: unexpected export {format} argument {value}"
+                ));
+            }
         }
     }
     if format == "neo4j" && push_uri.is_some() && push_password.is_none() {
         return Outcome::failure("error: --password required for --push".to_owned());
+    }
+    if let Err(error) = validate_export_options(format, &seen_options, &view_requests) {
+        return Outcome::failure(format!("error: {error}"));
     }
     graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
         Ok(path) => path,
@@ -3058,7 +3576,10 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             report_path = output_dir.join("GRAPH_REPORT.md");
         }
     }
-    if matches!(format, "json" | "viewer-json") && node_limit < 1 {
+    if (matches!(format, "json" | "viewer-json" | "workbench-json")
+        || (format == "html" && !no_viz))
+        && node_limit < 1
+    {
         return Outcome::failure("error: --node-limit must be a positive integer".to_owned());
     }
     let mut inputs = match ExportInputs::load(&graph_path) {
@@ -3081,44 +3602,118 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         inputs.report = fs::read_to_string(&report_path).unwrap_or_default();
     }
     let output_dir = graph_path.parent().unwrap_or_else(|| Path::new("."));
+    let requested_workbench = !view_requests.is_empty() || format == "workbench-json";
     let result = match format {
-        "html" => export_html(&inputs, output_dir, no_viz, node_limit),
-        "json" | "viewer-json" => {
-            let options = HtmlOptions {
-                community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-                member_counts: None,
-                node_limit: Some(node_limit),
-                learning_overlay: None,
-            };
-            let model = if let Some(community) = community {
-                graph_community_view_model_document(
-                    &inputs.document,
-                    &inputs.communities,
-                    &graph_path,
-                    &options,
-                    community,
-                )
-                .map_err(|error| error.to_string())
+        "html" => {
+            let path = output_path
+                .clone()
+                .unwrap_or_else(|| output_dir.join("graph.html"));
+            if no_viz {
+                if path.exists()
+                    && let Err(error) = fs::remove_file(&path)
+                {
+                    return Outcome::failure(format!(
+                        "error: could not remove {}: {error}",
+                        path.display()
+                    ));
+                }
+                Ok(ExportOutput::text(
+                    "--no-viz: skipped graph.html".to_owned(),
+                ))
             } else {
-                graph_view_model_document(
-                    &inputs.document,
-                    &inputs.communities,
+                build_export_workbench(
+                    &inputs,
                     &graph_path,
-                    &options,
+                    node_limit,
+                    &view_requests,
+                    &ExportViewOptions {
+                        direction: view_direction,
+                        depth: view_depth,
+                        max_nodes: view_max_nodes,
+                        max_edges: view_max_edges,
+                        include_heuristic,
+                        relations: &view_relations,
+                        program_path: program_path.as_deref(),
+                    },
                 )
-                .map_err(|error| error.to_string())
-                .and_then(|model| {
-                    model.ok_or_else(|| "graph has no renderable community overview".to_owned())
-                })
-            };
-            model
+                .and_then(|model| export_workbench_html(&model, path))
+            }
+        }
+        "json" | "viewer-json" => {
+            if requested_workbench {
+                build_export_workbench(
+                    &inputs,
+                    &graph_path,
+                    node_limit,
+                    &view_requests,
+                    &ExportViewOptions {
+                        direction: view_direction,
+                        depth: view_depth,
+                        max_nodes: view_max_nodes,
+                        max_edges: view_max_edges,
+                        include_heuristic,
+                        relations: &view_relations,
+                        program_path: program_path.as_deref(),
+                    },
+                )
                 .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
                 .map(ExportOutput::text)
+            } else {
+                let options = HtmlOptions {
+                    community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+                    member_counts: None,
+                    node_limit: Some(node_limit),
+                    learning_overlay: None,
+                };
+                let model = if let Some(community) = community {
+                    graph_community_view_model_document(
+                        &inputs.document,
+                        &inputs.communities,
+                        &graph_path,
+                        &options,
+                        community,
+                    )
+                    .map_err(|error| error.to_string())
+                } else {
+                    graph_view_model_document(
+                        &inputs.document,
+                        &inputs.communities,
+                        &graph_path,
+                        &options,
+                    )
+                    .map_err(|error| error.to_string())
+                    .and_then(|model| {
+                        model.ok_or_else(|| "graph has no renderable community overview".to_owned())
+                    })
+                };
+                model
+                    .and_then(|model| {
+                        serde_json::to_string(&model).map_err(|error| error.to_string())
+                    })
+                    .map(ExportOutput::text)
+            }
         }
+        "workbench-json" => build_export_workbench(
+            &inputs,
+            &graph_path,
+            node_limit,
+            &view_requests,
+            &ExportViewOptions {
+                direction: view_direction,
+                depth: view_depth,
+                max_nodes: view_max_nodes,
+                max_edges: view_max_edges,
+                include_heuristic,
+                relations: &view_relations,
+                program_path: program_path.as_deref(),
+            },
+        )
+        .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
+        .map(ExportOutput::text),
         "callflow-html" => export_callflow(
             &inputs,
             &graph_path,
-            output_path,
+            output_path.clone(),
             sections_path.as_deref(),
             &language,
             max_sections,
@@ -3179,7 +3774,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     };
     match result {
         Ok(mut output) => {
-            if format == "html" {
+            if format == "html" && output_path.is_none() {
                 let artifact_directory = graph_path.parent().unwrap_or_else(|| Path::new("."));
                 let output_container =
                     compass_files::BuildGuard::output_container_for_artifact(&graph_path);
@@ -3206,6 +3801,353 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
         }
         Err(error) => Outcome::failure(format!("error: {error}")),
     }
+}
+
+fn build_export_workbench(
+    inputs: &ExportInputs,
+    graph_path: &Path,
+    node_limit: isize,
+    requested_views: &[ExportViewRequest],
+    options: &ExportViewOptions<'_>,
+) -> Result<WorkbenchModel, String> {
+    let default_views = [ExportViewRequest::Code];
+    let requests = if requested_views.is_empty() {
+        &default_views[..]
+    } else {
+        requested_views
+    };
+    let title = export_project_title(inputs, graph_path);
+    let graph_identity = graph_artifact_identity(graph_path).map_err(|error| error.to_string())?;
+    let labels = (!inputs.labels.is_empty()).then_some(&inputs.labels);
+    let html_options = HtmlOptions {
+        community_labels: labels,
+        member_counts: None,
+        node_limit: Some(node_limit),
+        learning_overlay: None,
+    };
+    let analysis = options
+        .program_path
+        .map(program_commands::load_program)
+        .transpose()?;
+    let mut ids = std::collections::BTreeMap::<String, usize>::new();
+    let mut views = Vec::with_capacity(requests.len());
+    for request in requests {
+        let (base_id, view) = match request {
+            ExportViewRequest::Code => {
+                let bundle = graph_view_model_bundle_document(
+                    &inputs.document,
+                    &inputs.communities,
+                    graph_path,
+                    &html_options,
+                )
+                .map_err(|error| error.to_string())?;
+                let coverage = if bundle.truncated {
+                    WorkbenchCoverage::bounded(
+                        bundle.overview.stats.nodes,
+                        bundle.overview.stats.edges,
+                        true,
+                    )
+                } else {
+                    WorkbenchCoverage::graph(&bundle.overview)
+                };
+                (
+                    "code".to_owned(),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: "Code graph".to_owned(),
+                        description: "Repository structure, ownership, and relationships"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Code {
+                            model: bundle.overview,
+                            community_details: bundle.community_details,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Architecture => {
+                let model = architecture_view_model(inputs, graph_path, &title)?;
+                let coverage = WorkbenchCoverage::bounded(
+                    model.statistics.nodes,
+                    model.statistics.edges,
+                    false,
+                );
+                (
+                    "architecture".to_owned(),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: "Architecture".to_owned(),
+                        description: "Subsystems, scopes, and cross-section calls".to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Architecture { model },
+                    },
+                )
+            }
+            ExportViewRequest::Call(root) => {
+                let graph = build_universal_call_graph(
+                    &inputs.document,
+                    analysis.as_ref(),
+                    &UniversalCallGraphRequest {
+                        root: UniversalCallGraphRoot::Symbol {
+                            symbol: root.clone(),
+                        },
+                        direction: options.direction,
+                        depth: options.depth,
+                        max_nodes: options.max_nodes,
+                        max_edges: options.max_edges,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                let coverage = WorkbenchCoverage {
+                    status: if graph.truncated || graph.coverage.partial {
+                        WorkbenchCoverageStatus::Partial
+                    } else {
+                        WorkbenchCoverageStatus::Complete
+                    },
+                    truncated: graph.truncated,
+                    nodes: graph.nodes.len(),
+                    edges: graph.edges.len(),
+                    limitations: graph.coverage.limitations.clone(),
+                };
+                (
+                    format!("call-{}", safe_output_name(root)),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("Calls · {root}"),
+                        description: "Caller and callee evidence around one symbol".to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Call {
+                            root: root.clone(),
+                            graph,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Impact(root) => {
+                let cache = graph_path
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("cache");
+                let engine =
+                    open_code_query(graph_path, None, &cache).map_err(|error| error.to_string())?;
+                let max_nodes = u32::try_from(options.max_nodes)
+                    .map_err(|_| "--max-nodes exceeds the impact query limit".to_owned())?;
+                let max_edges = u32::try_from(options.max_edges)
+                    .map_err(|_| "--max-edges exceeds the impact query limit".to_owned())?;
+                let result = engine
+                    .impact(ImpactRequest {
+                        symbol: root.clone(),
+                        include_heuristic: options.include_heuristic,
+                        limits: CodeQueryLimits {
+                            max_depth: options.depth,
+                            max_nodes,
+                            max_edges,
+                            ..CodeQueryLimits::default()
+                        },
+                    })
+                    .map_err(|error| error.to_string())?;
+                let coverage = WorkbenchCoverage::bounded(
+                    result.nodes.len(),
+                    result.edges.len(),
+                    result.truncated,
+                );
+                (
+                    format!("impact-{}", safe_output_name(root)),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("Impact · {root}"),
+                        description: "Inbound code paths that can be affected by a change"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Impact {
+                            root: root.clone(),
+                            result,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Affected(root) => {
+                let relations = if options.relations.is_empty() {
+                    DEFAULT_AFFECTED_RELATIONS
+                        .iter()
+                        .map(|relation| (*relation).to_owned())
+                        .collect::<Vec<_>>()
+                } else {
+                    options.relations.to_vec()
+                };
+                let projection = affected_lens_view_model(
+                    &inputs.document,
+                    &inputs.communities,
+                    labels,
+                    root,
+                    AffectedLensOptions {
+                        relations: &relations,
+                        depth: usize::try_from(options.depth).unwrap_or(usize::MAX),
+                        max_nodes: options.max_nodes,
+                        max_edges: options.max_edges,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                let coverage = WorkbenchCoverage::bounded(
+                    projection.model.stats.nodes,
+                    projection.model.stats.edges,
+                    projection.truncated,
+                );
+                (
+                    format!("affected-{}", safe_output_name(root)),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("Affected · {root}"),
+                        description: "Reverse dependency expansion from the selected node"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::Affected {
+                            root: root.clone(),
+                            relations,
+                            depth: usize::try_from(options.depth).unwrap_or(usize::MAX),
+                            model: projection.model,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::History { base, target } => {
+                let (base_revision, _, before) =
+                    history_commands::load_history_view_model_at(base, node_limit)?;
+                let (target_revision, _, after) =
+                    history_commands::load_history_view_model_at(target, node_limit)?;
+                let summarized = before.stats.aggregated || after.stats.aggregated;
+                let coverage = WorkbenchCoverage {
+                    status: if summarized {
+                        WorkbenchCoverageStatus::Summary
+                    } else {
+                        WorkbenchCoverageStatus::Complete
+                    },
+                    truncated: false,
+                    nodes: before.stats.nodes.saturating_add(after.stats.nodes),
+                    edges: before.stats.edges.saturating_add(after.stats.edges),
+                    limitations: if summarized {
+                        vec!["At least one historical graph is aggregated by community.".to_owned()]
+                    } else {
+                        Vec::new()
+                    },
+                };
+                (
+                    format!(
+                        "history-{}-{}",
+                        safe_output_name(base),
+                        safe_output_name(target)
+                    ),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: format!("History · {base}..{target}"),
+                        description: "Structural comparison between immutable realizations"
+                            .to_owned(),
+                        coverage,
+                        content: WorkbenchViewContent::History {
+                            base_revision,
+                            target_revision,
+                            before,
+                            after,
+                        },
+                    },
+                )
+            }
+            ExportViewRequest::Artifact(lens) => {
+                let projection = artifact_lens_view_model(
+                    &inputs.document,
+                    &inputs.communities,
+                    labels,
+                    *lens,
+                    options.max_nodes,
+                    options.max_edges,
+                );
+                let relations = lens.relations();
+                let coverage = WorkbenchCoverage::bounded(
+                    projection.model.stats.nodes,
+                    projection.model.stats.edges,
+                    projection.truncated,
+                );
+                (
+                    format!("artifact-{}", lens.key()),
+                    WorkbenchView {
+                        id: String::new(),
+                        title: lens.label().to_owned(),
+                        description: format!(
+                            "Artifact lens over {} relationship kinds",
+                            relations.len()
+                        ),
+                        coverage,
+                        content: WorkbenchViewContent::Artifact {
+                            lens: *lens,
+                            relations,
+                            model: projection.model,
+                        },
+                    },
+                )
+            }
+        };
+        let count = ids.entry(base_id.clone()).or_default();
+        *count += 1;
+        let id = if *count == 1 {
+            base_id
+        } else {
+            format!("{base_id}-{count}")
+        };
+        views.push(WorkbenchView { id, ..view });
+    }
+    Ok(WorkbenchModel::new(title, graph_identity, views))
+}
+
+fn export_project_title(inputs: &ExportInputs, graph_path: &Path) -> String {
+    inputs
+        .document
+        .graph
+        .get("project_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            graph_path
+                .parent()
+                .and_then(Path::parent)
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "Compass graph".to_owned())
+}
+
+fn architecture_view_model(
+    inputs: &ExportInputs,
+    graph_path: &Path,
+    title: &str,
+) -> Result<compass_output::CallflowViewModel, String> {
+    callflow_view_model(
+        &inputs.document,
+        &inputs.communities,
+        &CallflowOptions {
+            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+            report: &inputs.report,
+            project_name: title,
+            ..CallflowOptions::default()
+        },
+    )
+    .map_err(|error| {
+        format!(
+            "could not build architecture view for {}: {error}",
+            graph_path.display()
+        )
+    })
+}
+
+fn export_workbench_html(model: &WorkbenchModel, path: PathBuf) -> Result<ExportOutput, String> {
+    write_workbench_html(model, &path).map_err(|error| error.to_string())?;
+    Ok(ExportOutput::html(
+        format!(
+            "{} written - open in any browser, no server needed",
+            path.display()
+        ),
+        path,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3336,42 +4278,6 @@ fn export_falkordb(
             path.display()
         ))
     }
-}
-
-fn export_html(
-    inputs: &ExportInputs,
-    output_dir: &Path,
-    no_viz: bool,
-    node_limit: isize,
-) -> Result<ExportOutput, String> {
-    let path = output_dir.join("graph.html");
-    if no_viz {
-        if path.exists() {
-            fs::remove_file(&path).map_err(|error| error.to_string())?;
-        }
-        return Ok(ExportOutput::text(
-            "--no-viz: skipped graph.html".to_owned(),
-        ));
-    }
-    let result = write_html(
-        &inputs.document,
-        &inputs.communities,
-        &path,
-        &HtmlOptions {
-            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            member_counts: None,
-            node_limit: Some(node_limit),
-            learning_overlay: None,
-        },
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(match result {
-        Some(_) => ExportOutput::html(
-            "graph.html written - open in any browser, no server needed".to_owned(),
-            path,
-        ),
-        None => ExportOutput::text(String::new()),
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3585,11 +4491,91 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  html      [--graph PATH] [--labels PATH] [--node-limit N] [--no-viz]\n  json      [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]".to_owned()
+    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
+}
+
+fn export_workbench_help(format: &str) -> String {
+    format!(
+        "Usage: compass export {format} [--graph PATH] [--labels PATH] [--node-limit N] [--output HTML] [VIEW ...]\n\nViews are emitted in command order into one navigable workbench:\n  --code-graph\n  --architecture-graph\n  --call-graph SYMBOL\n  --impact-graph SYMBOL\n  --affected-graph NODE\n  --history-graph OLD..NEW\n  --artifact-lens dependencies|routes|data|messaging|tests|provenance\n  --view code|architecture|call:SYMBOL|impact:SYMBOL|affected:NODE|history:OLD..NEW|artifact:LENS\n\nView options:\n  --direction callers|callees|both\n  --depth N\n  --max-nodes N\n  --max-edges N\n  --relation RELATION (repeatable; affected views)\n  --include-heuristic (impact views)\n  --program PATH (Program IR enrichment for call views)"
+    )
+}
+
+fn command_export_orientation_json(args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(
+            "Usage: compass export orientation-json [--graph PATH]\n\nEmit the versioned Agent Orientation that was atomically published with the selected graph generation."
+                .to_owned(),
+        );
+    }
+    let mut requested_graph = default_graph_path();
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--graph" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --graph requires a path".to_owned());
+                };
+                requested_graph = PathBuf::from(value);
+                index += 2;
+            }
+            value if value.starts_with("--graph=") => {
+                requested_graph = PathBuf::from(&value[8..]);
+                index += 1;
+            }
+            value => {
+                return Outcome::failure(format!(
+                    "error: unexpected orientation-json export argument {value}"
+                ));
+            }
+        }
+    }
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested_graph) {
+        Ok(path) => path,
+        Err(error) => return Outcome::failure(format!("error: could not resolve graph: {error}")),
+    };
+    let (graph, graph_digest) =
+        match compass_model::code_graph::GraphDocument::load_with_artifact_digest(&graph_path) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                return Outcome::failure(format!("error: could not load selected graph: {error}"));
+            }
+        };
+    let orientation_path = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("orientation.json");
+    const MAX_ORIENTATION_JSON_BYTES: u64 = 1024 * 1024;
+    let orientation_json =
+        match hook_commands::read_text_bounded(&orientation_path, MAX_ORIENTATION_JSON_BYTES) {
+            Ok(orientation_json) => orientation_json,
+            Err(error) => {
+                return Outcome::failure(format!(
+                    "error: coherent orientation artifact is unavailable for {}: {error}",
+                    graph_path.display()
+                ));
+            }
+        };
+    let orientation = match serde_json::from_str::<AgentOrientation>(&orientation_json) {
+        Ok(orientation) => orientation,
+        Err(error) => {
+            return Outcome::failure(format!("error: invalid orientation artifact: {error}"));
+        }
+    };
+    let graph_identity = format!("sha256:{graph_digest}");
+    if let Err(error) = validate_orientation_graph_identity(&orientation, &graph, &graph_identity) {
+        return Outcome::failure(format!("error: {error}"));
+    }
+    match render_orientation_json(&orientation) {
+        Ok(json) => Outcome::success(json),
+        Err(error) => Outcome::failure(format!("error: {error}")),
+    }
 }
 
 fn export_json_help() -> String {
-    "Usage: compass export json [--graph PATH] [--labels PATH] [--node-limit N] [--community ID]\n  --graph PATH       graph JSON (default compass-out/graph.json)\n  --labels PATH      community-label JSON\n  --node-limit N     maximum overview or community-detail nodes (default 5000)\n  --community ID     export one complete community detail graph".to_owned()
+    "Usage: compass export json [--graph PATH] [--labels PATH] [--node-limit N] [--community ID] [VIEW ...]\n  With no VIEW, emit the compatible compass.viewer.graph/1 model.\n  With any VIEW, emit compass.viewer.workbench/1.\n  --community ID exports one complete community and cannot be combined with VIEW.".to_owned()
 }
 
 fn callflow_help() -> String {
@@ -3619,18 +4605,30 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     let mut contexts = Vec::new();
     let mut budget = DEFAULT_TEXT_TOKEN_BUDGET;
     let mut page = 1_usize;
-    let mut mode = TraversalMode::Bfs;
-    let mut force_traversal = false;
+    let mode = TraversalMode::Bfs;
+    let mut legacy_requested = false;
+    let mut discovery_requested = false;
+    let mut discovery_text_budget = DEFAULT_TEXT_TOKEN_BUDGET;
+    let mut discovery_cursor = None::<String>;
+    let mut discovery_text_pagination_requested = false;
+    let mut discovery_direction = DiscoveryDirection::Auto;
+    let mut discovery_scope = Vec::new();
+    let mut discovery_traversal = DiscoveryTraversal::Bfs;
+    let mut discovery_include_heuristic = false;
+    let mut discovery_limits = DiscoveryLimits::default();
+    let mut discovery_format = "text".to_owned();
+    let mut discovery_result_envelope = false;
+    let mut seen_discovery_options = HashSet::new();
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
             "--traverse" => {
-                force_traversal = true;
+                legacy_requested = true;
                 index += 1;
             }
             "--dfs" => {
-                mode = TraversalMode::Dfs;
-                force_traversal = true;
+                discovery_traversal = DiscoveryTraversal::Dfs;
+                discovery_requested = true;
                 index += 1;
             }
             "--budget" => {
@@ -3641,7 +4639,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --budget must be an integer".to_owned());
                 };
                 budget = value;
-                force_traversal = true;
+                legacy_requested = true;
                 index += 2;
             }
             "--context" => {
@@ -3649,7 +4647,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --context requires a value".to_owned());
                 };
                 contexts.push(value.clone());
-                force_traversal = true;
+                discovery_requested = true;
                 index += 2;
             }
             "--page" => {
@@ -3660,7 +4658,81 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --page must be an integer".to_owned());
                 };
                 page = value;
-                force_traversal = true;
+                legacy_requested = true;
+                index += 2;
+            }
+            "--text-budget" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --text-budget must be an integer".to_owned());
+                };
+                let Ok(value) = value.parse::<usize>() else {
+                    return Outcome::failure("error: --text-budget must be an integer".to_owned());
+                };
+                discovery_text_budget = value;
+                discovery_text_pagination_requested = true;
+                discovery_requested = true;
+                index += 2;
+            }
+            "--cursor" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --cursor requires a value".to_owned());
+                };
+                discovery_cursor = Some(value.clone());
+                discovery_text_pagination_requested = true;
+                discovery_requested = true;
+                index += 2;
+            }
+            "--direction" | "--scope" | "--format" => {
+                let name = args[index].as_str();
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure(format!("error: {name} requires a value"));
+                };
+                if name != "--scope" && !seen_discovery_options.insert(name.to_owned()) {
+                    return Outcome::failure(format!("error: {name} must not be repeated"));
+                }
+                if let Err(error) = apply_discovery_option(
+                    name,
+                    value,
+                    &mut discovery_direction,
+                    &mut discovery_scope,
+                    &mut discovery_format,
+                ) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
+                index += 2;
+            }
+            "--include-heuristic" => {
+                if !seen_discovery_options.insert("--include-heuristic".to_owned()) {
+                    return Outcome::failure(
+                        "error: --include-heuristic must not be repeated".to_owned(),
+                    );
+                }
+                discovery_include_heuristic = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            "--result-envelope" => {
+                if !seen_discovery_options.insert("--result-envelope".to_owned()) {
+                    return Outcome::failure(
+                        "error: --result-envelope must not be repeated".to_owned(),
+                    );
+                }
+                discovery_result_envelope = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            value if is_discovery_limit(value) => {
+                if !seen_discovery_options.insert(value.to_owned()) {
+                    return Outcome::failure(format!("error: {value} must not be repeated"));
+                }
+                let Some(raw) = args.get(index + 1) else {
+                    return Outcome::failure(format!("error: {value} requires an integer"));
+                };
+                if let Err(error) = apply_discovery_limit(&mut discovery_limits, value, raw) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
                 index += 2;
             }
             value if value.starts_with("--budget=") => {
@@ -3668,12 +4740,12 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --budget must be an integer".to_owned());
                 };
                 budget = value;
-                force_traversal = true;
+                legacy_requested = true;
                 index += 1;
             }
             value if value.starts_with("--context=") => {
                 contexts.push(value[10..].to_owned());
-                force_traversal = true;
+                discovery_requested = true;
                 index += 1;
             }
             value if value.starts_with("--page=") => {
@@ -3681,7 +4753,62 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     return Outcome::failure("error: --page must be an integer".to_owned());
                 };
                 page = value;
-                force_traversal = true;
+                legacy_requested = true;
+                index += 1;
+            }
+            value if value.starts_with("--text-budget=") => {
+                let Ok(value) = value[14..].parse::<usize>() else {
+                    return Outcome::failure("error: --text-budget must be an integer".to_owned());
+                };
+                discovery_text_budget = value;
+                discovery_text_pagination_requested = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            value if value.starts_with("--cursor=") => {
+                discovery_cursor = Some(value[9..].to_owned());
+                discovery_text_pagination_requested = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            value
+                if ["--direction=", "--scope=", "--format="]
+                    .iter()
+                    .any(|prefix| value.starts_with(prefix)) =>
+            {
+                let Some((name, option_value)) = value.split_once('=') else {
+                    return Outcome::failure("error: invalid discovery option".to_owned());
+                };
+                if name != "--scope" && !seen_discovery_options.insert(name.to_owned()) {
+                    return Outcome::failure(format!("error: {name} must not be repeated"));
+                }
+                if let Err(error) = apply_discovery_option(
+                    name,
+                    option_value,
+                    &mut discovery_direction,
+                    &mut discovery_scope,
+                    &mut discovery_format,
+                ) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
+                index += 1;
+            }
+            value
+                if value
+                    .split_once('=')
+                    .is_some_and(|(name, _)| is_discovery_limit(name)) =>
+            {
+                let Some((name, raw)) = value.split_once('=') else {
+                    return Outcome::failure("error: invalid discovery limit".to_owned());
+                };
+                if !seen_discovery_options.insert(name.to_owned()) {
+                    return Outcome::failure(format!("error: {name} must not be repeated"));
+                }
+                if let Err(error) = apply_discovery_limit(&mut discovery_limits, name, raw) {
+                    return Outcome::failure(format!("error: {error}"));
+                }
+                discovery_requested = true;
                 index += 1;
             }
             value => {
@@ -3689,26 +4816,46 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
             }
         }
     }
+    if legacy_requested && discovery_requested {
+        return Outcome::failure(
+            "error: legacy traversal controls cannot be combined with discovery controls"
+                .to_owned(),
+        );
+    }
+    if !legacy_requested {
+        if discovery_format == "json" && discovery_text_pagination_requested {
+            return Outcome::failure(
+                "error: --cursor and --text-budget are text-only and cannot be used with --format json"
+                    .to_owned(),
+            );
+        }
+        if discovery_result_envelope && discovery_format != "json" {
+            return Outcome::failure("error: --result-envelope requires --format json".to_owned());
+        }
+        let request = DiscoveryQueryRequest {
+            question: question.clone(),
+            direction: discovery_direction,
+            relation_contexts: contexts,
+            scope: discovery_scope,
+            traversal: discovery_traversal,
+            include_heuristic: discovery_include_heuristic,
+            limits: discovery_limits,
+        };
+        let outcome = command_discovery_query(
+            &selection,
+            request,
+            &discovery_format,
+            discovery_text_budget,
+            discovery_cursor.as_deref(),
+            discovery_result_envelope,
+        );
+        if outcome.code == 0 {
+            touch_selected_query_stamp(&selection);
+        }
+        return outcome;
+    }
     if let Err(error) = validate_text_pagination(budget, page) {
         return Outcome::failure(format!("error: {error}"));
-    }
-    if !force_traversal && let GraphSelection::File(path) = &selection {
-        let plan = match plan_natural_query(question) {
-            Ok(plan) => plan,
-            Err(error) => return Outcome::failure(format!("error: {error}")),
-        };
-        if plan.routes_to_typed_query() {
-            let typed_args = vec![
-                question.clone(),
-                "--graph".to_owned(),
-                path.to_string_lossy().into_owned(),
-            ];
-            let outcome = code_query_commands::command("ask", &typed_args);
-            if outcome.code == 0 {
-                touch_selected_query_stamp(&selection);
-            }
-            return outcome;
-        }
     }
     let loaded = match load_selection(frontend, &selection, false) {
         Ok(loaded) => loaded,
@@ -3731,6 +4878,216 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     };
     touch_selected_query_stamp(&selection);
     Outcome::success(output)
+}
+
+fn apply_discovery_option(
+    name: &str,
+    value: &str,
+    direction: &mut DiscoveryDirection,
+    scope: &mut Vec<DiscoveryScope>,
+    format: &mut String,
+) -> Result<(), String> {
+    match name {
+        "--direction" => {
+            *direction = match value {
+                "auto" => DiscoveryDirection::Auto,
+                "incoming" => DiscoveryDirection::Incoming,
+                "outgoing" => DiscoveryDirection::Outgoing,
+                "both" => DiscoveryDirection::Both,
+                _ => {
+                    return Err("--direction must be auto, incoming, outgoing, or both".to_owned());
+                }
+            };
+        }
+        "--scope" => scope.push(parse_discovery_scope(value)?),
+        "--format" => {
+            if !matches!(value, "text" | "json") {
+                return Err("--format must be text or json for discovery queries".to_owned());
+            }
+            *format = value.to_owned();
+        }
+        _ => return Err(format!("unsupported discovery option {name}")),
+    }
+    Ok(())
+}
+
+fn parse_discovery_scope(value: &str) -> Result<DiscoveryScope, String> {
+    let Some((kind, value)) = value.split_once(':') else {
+        return Err(
+            "--scope must use kind:value with kind community, source, package, or node".to_owned(),
+        );
+    };
+    if value.is_empty() {
+        return Err("--scope value must not be empty".to_owned());
+    }
+    let kind = match kind {
+        "community" => DiscoveryScopeKind::Community,
+        "source" => DiscoveryScopeKind::Source,
+        "package" => DiscoveryScopeKind::Package,
+        "node" => DiscoveryScopeKind::Node,
+        _ => {
+            return Err("--scope kind must be community, source, package, or node".to_owned());
+        }
+    };
+    Ok(DiscoveryScope {
+        kind,
+        value: value.to_owned(),
+    })
+}
+
+fn is_discovery_limit(name: &str) -> bool {
+    matches!(
+        name,
+        "--max-depth"
+            | "--max-seeds"
+            | "--max-candidates"
+            | "--max-nodes"
+            | "--max-edges"
+            | "--max-expanded-relationships"
+            | "--max-response-bytes"
+            | "--timeout-ms"
+    )
+}
+
+fn apply_discovery_limit(
+    limits: &mut DiscoveryLimits,
+    name: &str,
+    raw: &str,
+) -> Result<(), String> {
+    let value = raw
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| format!("{name} requires a positive integer"))?;
+    let as_u32 =
+        || u32::try_from(value).map_err(|_| format!("{name} requires a positive 32-bit integer"));
+    match name {
+        "--max-depth" => limits.max_depth = as_u32()?,
+        "--max-seeds" => limits.max_seeds = as_u32()?,
+        "--max-candidates" => limits.max_candidates = as_u32()?,
+        "--max-nodes" => limits.max_nodes = as_u32()?,
+        "--max-edges" => limits.max_edges = as_u32()?,
+        "--max-expanded-relationships" => limits.max_expanded_relationships = value,
+        "--max-response-bytes" => limits.max_response_bytes = value,
+        "--timeout-ms" => limits.timeout_ms = value,
+        _ => return Err(format!("unsupported discovery limit {name}")),
+    }
+    Ok(())
+}
+
+fn command_discovery_query(
+    selection: &GraphSelection,
+    request: DiscoveryQueryRequest,
+    format: &str,
+    text_budget: usize,
+    cursor: Option<&str>,
+    result_envelope: bool,
+) -> Outcome {
+    let include_heuristic = request.include_heuristic;
+    let execution = match discovery_query(selection, request) {
+        Ok(response) => response,
+        Err(error) => return Outcome::failure(format!("error: {error}")),
+    };
+    if format == "json" {
+        let output = if result_envelope {
+            let envelope = match compass_query::discovery_result_envelope(execution.response) {
+                Ok(envelope) => envelope,
+                Err(error) => return Outcome::failure(format!("error: {error}")),
+            };
+            serde_json::to_string_pretty(&envelope)
+        } else {
+            serde_json::to_string_pretty(&execution.response)
+        };
+        match output {
+            Ok(output) => Outcome::success(output),
+            Err(error) => Outcome::failure(format!("error: {error}")),
+        }
+    } else {
+        let request_digest = match discovery_request_digest(&execution.response, include_heuristic)
+        {
+            Ok(digest) => digest,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        match render_discovery_text_page(
+            &execution.response,
+            DiscoveryTextPageOptions {
+                token_budget: text_budget,
+                cursor,
+                request_digest: &request_digest,
+                graph_identity: &execution.graph_identity,
+                graph_digest: &execution.graph_digest,
+            },
+        ) {
+            Ok(page) => Outcome::success(page.text),
+            Err(error) => Outcome::failure(format!("error: {error}")),
+        }
+    }
+}
+
+struct DiscoveryExecution {
+    response: DiscoveryQueryResponse,
+    graph_identity: String,
+    graph_digest: String,
+}
+
+fn discovery_query(
+    selection: &GraphSelection,
+    request: DiscoveryQueryRequest,
+) -> Result<DiscoveryExecution, String> {
+    match selection {
+        GraphSelection::File(path) => {
+            let graph = compass_files::BuildGuard::resolve_requested_artifact(path)
+                .map_err(|error| error.to_string())?;
+            let cache = graph
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join("cache");
+            let engine =
+                open_code_query(&graph, None, &cache).map_err(|error| error.to_string())?;
+            let graph_identity = engine.build_generation_identity().to_owned();
+            let graph_digest = engine.graph_identity().to_owned();
+            let response = engine
+                .discover(request)
+                .map_err(|error| error.to_string())?;
+            Ok(DiscoveryExecution {
+                response,
+                graph_identity,
+                graph_digest,
+            })
+        }
+        GraphSelection::Commit(revision) => {
+            let (realization, document) = history_commands::load_typed_graph_at(revision)?;
+            let current = std::env::current_dir().map_err(|error| error.to_string())?;
+            let cache = current
+                .join(".compass")
+                .join("cache")
+                .join("history-query")
+                .join(realization.to_string());
+            let graph_path = current
+                .join(".compass")
+                .join("history-query")
+                .join(realization.to_string())
+                .join("graph.json");
+            let engine = open_with_verified_document(
+                document,
+                realization.as_hex(),
+                &graph_path,
+                None,
+                &cache,
+            )
+            .map_err(|error| error.to_string())?;
+            let graph_identity = engine.build_generation_identity().to_owned();
+            let graph_digest = engine.graph_identity().to_owned();
+            let response = engine
+                .discover(request)
+                .map_err(|error| error.to_string())?;
+            Ok(DiscoveryExecution {
+                response,
+                graph_identity,
+                graph_digest,
+            })
+        }
+    }
 }
 
 fn command_path(frontend: Frontend, args: &[String]) -> Outcome {
@@ -3992,6 +5349,29 @@ pub(crate) fn load_selection(
     }
 }
 
+pub(crate) fn load_indexed_selection(
+    frontend: Frontend,
+    selection: &GraphSelection,
+) -> Result<LoadedGraph, Outcome> {
+    match selection {
+        GraphSelection::File(path) => {
+            let path =
+                compass_files::BuildGuard::resolve_requested_artifact(path).map_err(|error| {
+                    Outcome::failure(format!("error: could not resolve graph: {error}"))
+                })?;
+            let graph = compass_model::Graph::load_directed(&path).map_err(graph_load_outcome)?;
+            Ok(LoadedGraph {
+                graph,
+                overlay: HashMap::new(),
+            })
+        }
+        GraphSelection::Commit(revision) => {
+            history_commands::load_graph_at(frontend, revision, true)
+                .map_err(|error| Outcome::failure(format!("error: {error}")))
+        }
+    }
+}
+
 fn touch_selected_query_stamp(selection: &GraphSelection) {
     if let GraphSelection::File(path) = selection {
         integration_commands::touch_query_stamp(path);
@@ -4000,8 +5380,20 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
+    let help = format!(
+        "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--format text|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --format <text|json>              Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 2000]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text pagination controls. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
+    );
+    let help = help
+        .replace(
+            "default/hard maximum: 500",
+            "default: 64; hard maximum: 500",
+        )
+        .replace(
+            "default/hard maximum: 1000",
+            "default: 128; hard maximum: 1000",
+        );
     format!(
-        "Usage: {prefix} query \"<question>\" [--traverse] [--dfs] [--context VALUE] [--budget N] [--page N] [--graph PATH|--at REV]"
+        "{help}\n  --result-envelope                 Wrap JSON with a query-owned semantic digest"
     )
 }
 
@@ -4050,7 +5442,7 @@ fn graph_load_outcome(error: GraphError) -> Outcome {
 }
 
 fn watch_help() -> String {
-    "Usage: compass watch [PATH] [--program] [--program-artifact PATH] [--no-program] [--debounce SECONDS] [--store json|sqlite] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
+    "Usage: compass watch [PATH] [--program] [--program-artifact PATH] [--no-program] [--debounce SECONDS] [--store json|sqlite] [--inference-level low|medium|high|max] [--out DIR] [--no-cluster] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--poll]"
         .to_owned()
 }
 
@@ -4071,11 +5463,27 @@ fn format_program_analysis(result: &BuildResult) -> String {
 
 fn format_partial_graph_warning(result: &BuildResult) -> Option<String> {
     result.partial_graph.then(|| {
-        format!(
-            "warning: Compass published a partial graph after omitting {} nodes and {} edges; {} identity collisions quarantined.",
-            result.omitted_nodes, result.omitted_edges, result.identity_collisions
-        )
+        if result.resolution_degraded {
+            format!(
+                "error: Compass published a bounded partial graph because universal collection resolution omitted {} relationship candidates; declarations remain available. See graph diagnostic 'universal_resolution_partial'.",
+                result.omitted_edges
+            )
+        } else {
+            format!(
+                "warning: Compass published a partial graph after omitting {} nodes and {} edges; {} identity collisions quarantined.",
+                result.omitted_nodes, result.omitted_edges, result.identity_collisions
+            )
+        }
     })
+}
+
+fn apply_build_quality_outcome(result: &BuildResult, outcome: &mut Outcome) {
+    if let Some(warning) = format_partial_graph_warning(result) {
+        outcome.stderr = warning;
+    }
+    if result.resolution_degraded {
+        outcome.code = 1;
+    }
 }
 
 #[cfg(test)]
@@ -4112,6 +5520,7 @@ mod mcp_option_tests {
             omitted_edges: 0,
             identity_collisions: 0,
             partial_graph: false,
+            resolution_degraded: false,
             html_written,
             outputs_changed,
             program_modules: 0,
@@ -4140,6 +5549,23 @@ mod mcp_option_tests {
             Some(
                 "warning: Compass published a partial graph after omitting 3 nodes and 5 edges; 2 identity collisions quarantined."
             )
+        );
+    }
+
+    #[test]
+    fn degraded_resolution_is_a_non_success_with_a_machine_diagnostic_pointer() {
+        let mut result = sample_build_result(true, false);
+        result.partial_graph = true;
+        result.resolution_degraded = true;
+        result.omitted_edges = 7;
+        let mut outcome = Outcome::success("graph published".to_owned());
+
+        apply_build_quality_outcome(&result, &mut outcome);
+
+        assert_eq!(outcome.code, 1);
+        assert_eq!(
+            outcome.stderr,
+            "error: Compass published a bounded partial graph because universal collection resolution omitted 7 relationship candidates; declarations remain available. See graph diagnostic 'universal_resolution_partial'."
         );
     }
 
@@ -4474,6 +5900,8 @@ mod mcp_option_tests {
             "0.25".to_owned(),
             "--out".to_owned(),
             "artifacts".to_owned(),
+            "--inference-level".to_owned(),
+            "high".to_owned(),
             "--exclude".to_owned(),
             "target".to_owned(),
             "--poll".to_owned(),
@@ -4481,6 +5909,7 @@ mod mcp_option_tests {
         let watch = parse_watch_options(&args)?.ok_or("unexpected help")?;
         assert_eq!(watch.debounce, Duration::from_millis(250));
         assert_eq!(watch.build.output_root, Some(PathBuf::from("artifacts")));
+        assert_eq!(watch.build.inference_level, InferenceLevel::High);
         assert_eq!(watch.build.extra_excludes, ["target"]);
         assert!(watch.force_polling);
         assert!(watch.adaptive);
@@ -4545,5 +5974,21 @@ mod mcp_option_tests {
             assert!(parse_positive_u64(invalid, "--max-source-bytes").is_err());
         }
         assert!(extract_help().contains("[--max-source-bytes N]"));
+    }
+
+    #[test]
+    fn inference_level_parser_is_closed_and_defaults_to_low()
+    -> Result<(), Box<dyn std::error::Error>> {
+        assert_eq!(InferenceLevel::default(), InferenceLevel::Low);
+        assert_eq!(parse_inference_level("low")?, InferenceLevel::Low);
+        assert_eq!(parse_inference_level("medium")?, InferenceLevel::Medium);
+        assert_eq!(parse_inference_level("high")?, InferenceLevel::High);
+        assert_eq!(parse_inference_level("max")?, InferenceLevel::Max);
+        for invalid in ["", "none", "maximum", "HIGH"] {
+            assert!(parse_inference_level(invalid).is_err());
+        }
+        assert!(watch_help().contains("--inference-level low|medium|high|max"));
+        assert!(extract_help().contains("--inference-level low|medium|high|max"));
+        Ok(())
     }
 }

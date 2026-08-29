@@ -669,7 +669,12 @@ children. Completed leaves are encoded once and oversized leaves split
 deterministically; construction does not repeatedly clone and serialize partial
 leaves. Content-addressed writes use bounded `put_immutable_batch`, so repeated
 builds reuse byte-identical leaves and branches without one existence read or
-durable transaction per object. The reader verifies the object
+durable transaction per object. There is no aggregate canonical-payload or
+record-count limit on this graph-index layout: manifests use `u64` counts and
+cross-check node and edge totals against their tree roots. Every immutable
+object remains at most 256 KiB, every immutable write batch remains at most
+16 MiB, and reads retain independent item, byte, object, and depth budgets.
+The reader verifies the object
 digest, schema, index kind, ordering, root selection, and graph validation
 before returning a record. Point reads and scans enforce item, byte, object,
 and depth limits; corruption is never converted into an empty result.
@@ -689,6 +694,14 @@ reachable from the active and previous complete snapshots and deletes other
 entries in bounded transactions. A malformed or stale store fails the
 unpublished build and leaves the previous snapshot and its JSON engine
 readable.
+
+Operational status, validation, backup, and restore do not reopen the portable
+JSON artifact through its whole-document reader. They stream graph and store
+digests through a fixed 1 MiB buffer, bind the graph byte count and digest to
+the selected manifest, and traverse every reachable tree object. That
+traversal validates content addresses, schemas, key ordering, branch
+separators, depth, and root entry counts while retaining only the bounded
+decoded-object cache and current branch path.
 
 ### Structural sharing and incremental update
 

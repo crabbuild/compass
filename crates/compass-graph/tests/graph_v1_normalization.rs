@@ -2,9 +2,12 @@ use std::path::Path;
 use std::{collections::BTreeMap, fs};
 
 use compass_graph::{
-    BuildEvidence, InventoryEvidence, SourceDigest, build_from_extraction, extraction_from_v1,
-    normalize_document_v1, normalize_document_v1_with_inventory_best_effort_owned, normalize_v1,
-    normalize_v1_best_effort,
+    BuildEvidence, InferenceLevel, InventoryEvidence, SourceDigest, apply_inference_level,
+    build_from_extraction, build_owned_with_tiebreaker, build_owned_with_tiebreaker_at_inference,
+    extraction_from_v1, normalize_document_v1,
+    normalize_document_v1_with_evidence_best_effort_owned_at_inference,
+    normalize_document_v1_with_inventory_best_effort_owned, normalize_v1, normalize_v1_best_effort,
+    normalize_v1_best_effort_with_inference,
 };
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
@@ -230,6 +233,65 @@ fn repeated_document_blocks_use_occurrence_stable_identity()
     )?;
     assert_eq!(outcome.document.nodes.len(), 2);
     assert_eq!(outcome.omissions.identity_collisions, 0);
+    Ok(())
+}
+
+#[test]
+fn markdown_heading_identity_uses_hierarchy_and_survives_source_movement()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let heading = |start| RawNodeRecord {
+        id: format!("raw:heading:{start}"),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!("Problem")),
+            (
+                "qualified_name".to_owned(),
+                json!("Cookbook::Recipe 1::Problem"),
+            ),
+            ("symbol_kind".to_owned(), json!("markdown_block")),
+            ("file_type".to_owned(), json!("document")),
+            ("document_kind".to_owned(), json!("heading")),
+            ("heading_style".to_owned(), json!("atx")),
+            ("anchor_slug".to_owned(), json!("problem")),
+            ("language".to_owned(), json!("markdown")),
+            ("extractor".to_owned(), json!("compass.markdown")),
+            ("source_file".to_owned(), json!("src/lib.rs")),
+            ("source_anchor".to_owned(), anchor(root, start)),
+        ]),
+    };
+
+    let before = normalize_v1(
+        Extraction {
+            nodes: vec![heading(10)],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+    let after = normalize_v1(
+        Extraction {
+            nodes: vec![heading(30)],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(before.nodes[0].id, after.nodes[0].id);
+    assert_ne!(before.nodes[0].source, after.nodes[0].source);
+    let round_trip = normalize_v1(extraction_from_v1(&after), build_evidence(root)?)?;
+    assert_eq!(round_trip.nodes[0].id, after.nodes[0].id);
+    assert_eq!(
+        round_trip.nodes[0]
+            .details
+            .as_ref()
+            .and_then(|details| match details {
+                compass_model::code_graph::NodeDetails::Resource(resource) => {
+                    resource.uri.as_deref()
+                }
+                _ => None,
+            }),
+        Some("#problem")
+    );
     Ok(())
 }
 
@@ -2493,6 +2555,150 @@ fn build_evidence_reuses_precomputed_source_digests_without_changing_file_record
     )?;
     assert_eq!(extraction_reused.files, extraction_baseline.files);
     assert_eq!(extraction_reused.build, extraction_baseline.build);
+    Ok(())
+}
+
+#[test]
+fn early_inference_admission_preserves_low_publication_and_omission_diagnostics()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut placeholder = RawNodeRecord {
+        id: "deferred:helper".to_owned(),
+        attributes: Map::from_iter([
+            ("label".to_owned(), json!("helper")),
+            ("qualified_name".to_owned(), json!("external::helper")),
+            ("file_type".to_owned(), json!("code")),
+            (
+                "extractor".to_owned(),
+                json!("compass.graph.external-placeholder"),
+            ),
+            ("_origin".to_owned(), json!("heuristic")),
+            ("confidence".to_owned(), json!("INFERRED")),
+        ]),
+    };
+    placeholder
+        .attributes
+        .insert("rule".to_owned(), json!("deferred-receiver"));
+    let extraction = Extraction {
+        nodes: vec![raw_node(root, "source", "source", 0), placeholder],
+        edges: vec![RawEdgeRecord {
+            source: "source".to_owned(),
+            target: "deferred:helper".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("calls")),
+                ("extractor".to_owned(), json!("test.rust")),
+                ("_origin".to_owned(), json!("heuristic")),
+                ("confidence".to_owned(), json!("INFERRED")),
+                ("rule".to_owned(), json!("deferred-receiver")),
+                ("source_anchor".to_owned(), anchor(root, 10)),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+    let mut baseline = normalize_v1_best_effort(extraction.clone(), build_evidence(root)?)?;
+    apply_inference_level(&mut baseline.document, InferenceLevel::Low);
+    let mut admitted = normalize_v1_best_effort_with_inference(
+        extraction.clone(),
+        build_evidence(root)?,
+        InferenceLevel::Low,
+    )?;
+    apply_inference_level(&mut admitted.document, InferenceLevel::Low);
+
+    assert_eq!(admitted.omissions, baseline.omissions);
+    assert_eq!(admitted.document, baseline.document);
+
+    let baseline_document = build_from_extraction(&extraction, true, Some(root));
+    let mut built_baseline = normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+        baseline_document,
+        build_evidence(root)?,
+        InferenceLevel::Low,
+    )?;
+    apply_inference_level(&mut built_baseline.document, InferenceLevel::Low);
+    let early_document = build_owned_with_tiebreaker_at_inference(
+        extraction,
+        true,
+        false,
+        Some(root),
+        None,
+        InferenceLevel::Low,
+    )?;
+    let mut built_early = normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+        early_document,
+        build_evidence(root)?,
+        InferenceLevel::Low,
+    )?;
+    apply_inference_level(&mut built_early.document, InferenceLevel::Low);
+
+    assert_eq!(built_early.omissions, built_baseline.omissions);
+    assert_eq!(built_early.document, built_baseline.document);
+    Ok(())
+}
+
+#[test]
+fn early_build_inference_admission_preserves_coalesced_duplicate_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut exact = RawEdgeRecord {
+        source: "source".to_owned(),
+        target: "target".to_owned(),
+        attributes: Map::from_iter([
+            ("relation".to_owned(), json!("calls")),
+            ("extractor".to_owned(), json!("test.rust")),
+            ("_origin".to_owned(), json!("parser")),
+            ("confidence".to_owned(), json!("EXTRACTED")),
+            ("rule".to_owned(), json!("direct-call")),
+            ("source_anchor".to_owned(), anchor(root, 10)),
+        ]),
+    };
+    let mut inferred = exact.clone();
+    inferred
+        .attributes
+        .insert("_origin".to_owned(), json!("heuristic"));
+    inferred
+        .attributes
+        .insert("confidence".to_owned(), json!("INFERRED"));
+    exact
+        .attributes
+        .insert("confidence_score".to_owned(), json!(1.0));
+    inferred
+        .attributes
+        .insert("confidence_score".to_owned(), json!(0.5));
+    let extraction = Extraction {
+        nodes: vec![
+            raw_node(root, "source", "source", 0),
+            raw_node(root, "target", "target", 20),
+        ],
+        edges: vec![exact, inferred],
+        ..Extraction::default()
+    };
+
+    let baseline_document =
+        build_owned_with_tiebreaker(extraction.clone(), true, false, Some(root), None)?;
+    let early_document = build_owned_with_tiebreaker_at_inference(
+        extraction,
+        true,
+        false,
+        Some(root),
+        None,
+        InferenceLevel::Low,
+    )?;
+    let mut baseline = normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+        baseline_document,
+        build_evidence(root)?,
+        InferenceLevel::Low,
+    )?;
+    apply_inference_level(&mut baseline.document, InferenceLevel::Low);
+    let mut early = normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+        early_document,
+        build_evidence(root)?,
+        InferenceLevel::Low,
+    )?;
+    apply_inference_level(&mut early.document, InferenceLevel::Low);
+
+    assert_eq!(early.omissions, baseline.omissions);
+    assert_eq!(early.document, baseline.document);
     Ok(())
 }
 

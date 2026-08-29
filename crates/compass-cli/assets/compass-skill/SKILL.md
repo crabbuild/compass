@@ -1,6 +1,6 @@
 ---
 name: compass
-description: "Use for graph-first codebase navigation and repository analysis: architecture maps, dependency or call-graph tracing, symbol and repository search, change-impact review, historical diffs, CompassQL, graph refreshes, exports, MCP serving, or project artifacts. Also use when the user invokes /compass or asks about Compass."
+description: "Use for graph-first codebase navigation and repository analysis: architecture maps, dependency or call-graph tracing, symbol and repository search, pull-request risk review, change-impact review, historical diffs, CompassQL, graph refreshes, exports, MCP serving, or project artifacts. Also use when the user invokes /compass or asks about Compass."
 compatibility: "Requires the Compass CLI; works with Agent Skills-compatible coding agents."
 metadata:
   version: "1"
@@ -69,18 +69,18 @@ codebase question:
 
 1. Run `compass reflect --if-stale`.
 2. Read `compass-out/reflections/LESSONS.md` if it exists and is relevant.
-3. Run `compass query "<question>"` before broad source searches. Keep the
-   automatic typed result for a clear search, callers, callees, impact, or path
-   intent. For broader relevance traversal, pass `--traverse`; keep its
-   2,000-token default or set `--budget N` based on the context available for
-   graph evidence.
-4. Read the final `Pagination:` line when present. If it reports `next=N`,
-   repeat the same query, graph/revision selector, contexts, traversal mode, and
-   budget with `--page N`. Follow pages through `next=none` before making an
-   exhaustive claim; if sufficient evidence arrives earlier, disclose that
-   additional pages remain.
-5. Inspect the returned nodes, relations, and source locations.
-6. Open only the source files needed to verify the answer.
+3. For a focused task, run `compass query "<question>"` first. For a first
+   session or broad repository orientation, read only the bounded Agent
+   Orientation at the start of `compass-out/GRAPH_REPORT.md`, then query.
+4. Inspect direction, ambiguity, graph completeness, domain truncation, and
+   the final `Pagination:` line. If a seed is ambiguous, repeat the query with
+   its exact node ID.
+5. If pagination reports `next=<cursor>`, repeat the unchanged question and
+   semantic options with `--cursor <cursor>`; `--text-budget N` may change.
+   Reach `next=none` before an exhaustive
+   claim; otherwise disclose that additional pages remain.
+6. Inspect the returned nodes, relations, and source locations.
+7. Open only the source files needed to verify decisive claims.
 
 Use the specialized navigation commands when they fit:
 
@@ -150,6 +150,10 @@ Choose the least expensive command that satisfies the request:
   visual outputs need regeneration.
 - `compass watch .` for continuous deterministic refresh during active work.
 
+For the normal assistant setup, run `compass init`, then `compass install`, and
+keep `compass watch` running in a second terminal. If watch is unavailable or
+reports a failure, use `compass update .` as the synchronization fallback.
+
 `update`, local queries, reports, and local exports do not require network
 access. Semantic providers, URL ingestion, repository cloning, database pushes,
 and HTTP serving may use the network; do not start them unless the request
@@ -182,6 +186,8 @@ Do not force every request through `query`:
 - Repository structure: `tree`.
 - Editor or automation capability negotiation: `capabilities --format json`.
 - Revision-specific evidence: `history`, `diff`, or `--at REV`.
+- Exact pull-request risk evidence: `review` with either local `--base`/`--head`
+  revisions or an explicit GitHub `--pr`/`--repo` identity.
 - Stale structural output: `update`; stale semantic output: `extract`.
 - Existing extraction with stale communities: `cluster-only`; stale names only:
   `label --missing-only`.
@@ -231,7 +237,7 @@ Load only the reference needed for the current request:
 - Watch mode and added external sources: `references/add-watch.md`
 - Wiki, visual, graph-database exports: `references/exports.md`
 - MCP serving and client boundaries: `references/serve.md`
-- Repository cloning, PRs, global and merged graphs: `references/github-and-merge.md`
+- Repository cloning, PR triage and risk review, global and merged graphs: `references/github-and-merge.md`
 - Saved answers and learned project lessons: `references/reflections.md`
 - Diagnostics, benchmarks, and recovery tools: `references/operations.md`
 - Graph schema, confidence, and provenance: `references/extraction-spec.md`

@@ -8,6 +8,8 @@ mod merge;
 mod pipeline;
 mod program;
 mod raw_guard;
+mod review;
+mod task_context;
 mod watch;
 mod watch_scheduler;
 
@@ -15,6 +17,7 @@ pub use cluster_existing::{
     ClusterExistingOptions, ClusterExistingResult, ClusterExistingTimings, ClusterLabelContext,
     ClusterLabelSelection, cluster_existing_graph, cluster_existing_graph_with_labeler,
 };
+pub use compass_graph::InferenceLevel;
 pub use diagnostics::{
     diagnose_graph_file, diagnose_graph_quality, format_diagnostic_json, format_diagnostic_report,
     format_quality_json, format_quality_report,
@@ -31,6 +34,16 @@ pub use pipeline::{
     build_graph_with_layers, build_graph_with_layers_and_progress,
     build_graph_with_layers_and_tiebreaker, build_graph_with_layers_retained,
     build_graph_with_semantic, build_local_graph,
+};
+pub use review::{
+    PullRequestReadinessBundle, ReviewError, review_change_request, review_change_request_exact,
+    review_change_request_ready_exact,
+};
+pub use task_context::{
+    TASK_CONTEXT_PROFILE_SCHEMA, TASK_CONTEXT_SCHEMA, TaskContext, TaskContextError,
+    TaskContextIntent, TaskContextKnowledge, TaskContextLimits, TaskContextOmission,
+    TaskContextRequest, TaskContextSection, TaskContextSectionKind, TaskContextTarget,
+    TaskContextWork, build_task_context,
 };
 pub use watch::{
     WatchBackend, WatchBuildReason, WatchError, WatchOptions, WatchStatus, watch_local_graph,

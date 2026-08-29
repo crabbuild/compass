@@ -537,6 +537,83 @@ fn rust_local_module_reexports_resolve_without_external_placeholders() {
 }
 
 #[test]
+fn rust_same_package_bench_imports_resolve_named_reexported_types_and_functions() {
+    let provider_source = b"pub struct MergeTestCase;\npub async fn prepare_source_and_table() {}\n";
+    let facade_source =
+        b"pub mod merge;\npub use merge::{prepare_source_and_table, MergeTestCase};\n";
+    // A package binary has the same crate-level qualified name as the library,
+    // but its private imports must not become public aliases of the facade.
+    let main_source =
+        b"use delta_benchmarks::{prepare_source_and_table, MergeTestCase};\nfn main() {}\n";
+    let consumer_source = b"use delta_benchmarks::{prepare_source_and_table, MergeTestCase};\nfn bench(case: &MergeTestCase) { let _ = prepare_source_and_table(); }\n";
+    let resolved = compass_resolve::resolve(
+        &[
+            extract("delta-benchmarks/src/merge.rs", provider_source),
+            extract("delta-benchmarks/src/lib.rs", facade_source),
+            extract("delta-benchmarks/src/main.rs", main_source),
+            extract("delta-benchmarks/benches/merge.rs", consumer_source),
+        ],
+        &HashMap::from([
+            (
+                "delta-benchmarks/src/merge.rs".to_owned(),
+                String::from_utf8(provider_source.to_vec()).expect("provider source"),
+            ),
+            (
+                "delta-benchmarks/src/lib.rs".to_owned(),
+                String::from_utf8(facade_source.to_vec()).expect("facade source"),
+            ),
+            (
+                "delta-benchmarks/src/main.rs".to_owned(),
+                String::from_utf8(main_source.to_vec()).expect("main source"),
+            ),
+            (
+                "delta-benchmarks/benches/merge.rs".to_owned(),
+                String::from_utf8(consumer_source.to_vec()).expect("consumer source"),
+            ),
+        ]),
+    );
+    let case = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "delta_benchmarks::merge::MergeTestCase")
+        .expect("re-exported case type");
+    let prepare = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("qualified_name")
+                == "delta_benchmarks::merge::prepare_source_and_table"
+        })
+        .expect("re-exported prepare function");
+    let bench = resolved
+        .nodes
+        .iter()
+        .find(|node| {
+            node.string("source_file") == "delta-benchmarks/benches/merge.rs"
+                && node.string("qualified_name").ends_with("::bench")
+        })
+        .expect("bench consumer");
+
+    for target in [case, prepare] {
+        assert!(resolved.edges.iter().any(|edge| {
+            edge.target == target.id
+                && edge.string("relation") == "imports_from"
+                && edge.string("source_file") == "delta-benchmarks/benches/merge.rs"
+        }), "missing consumer import for {}; edges={:#?}", target.string("qualified_name"), resolved.edges);
+    }
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == bench.id
+            && edge.target == case.id
+            && edge.string("relation") == "references"
+    }));
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == bench.id
+            && edge.target == prepare.id
+            && edge.string("relation") == "calls"
+    }));
+}
+
+#[test]
 fn rust_mutually_exclusive_platform_reexports_preserve_every_possible_call_target() {
     let source = br#"mod unix {
     pub fn get_cpu_time() {}

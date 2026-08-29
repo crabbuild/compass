@@ -17,11 +17,11 @@ const MERGE_MAX_NODES: usize = 100_000;
 const MANIFEST_MAX_BYTES: u64 = 2_000_000;
 const SESSION_ID_MAX_CHARS: usize = 64;
 
-const SEARCH_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run `compass query \"<question>\"` before grepping raw files. Only grep after compass has oriented you, or to modify/debug specific lines.";
-const READ_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. You MUST run compass before reading source files. Use: `compass query \"<question>\"` (scoped subgraph), `compass explain \"<concept>\"`, or `compass path \"<A>\" \"<B>\"`. Only read raw files after compass has oriented you, or to modify/debug specific lines. This rule applies to subagents too — include it in every subagent prompt involving code exploration.";
+const SEARCH_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. For a focused task, run `compass query \"<question>\"` before broad search. For first-session or broad orientation, read only the Agent Orientation at the start of compass-out/GRAPH_REPORT.md, then query. Inspect direction, ambiguity, completeness, domain truncation, and pagination before verifying minimal cited source.";
+const READ_NUDGE_TEXT: &str = "MANDATORY: compass-out/graph.json exists. Use `compass query \"<question>\"` first for focused work. For first-session or broad orientation, read only the Agent Orientation at the start of compass-out/GRAPH_REPORT.md, then query. Resolve ambiguous seeds by exact node ID and inspect only cited source needed to verify decisive claims.";
 const READ_STALE_TEXT: &str = "compass-out/graph.json exists but may be STALE for this file (the file changed after the last build). Prefer `compass query \"<question>\"` for orientation, and run `compass update` to refresh the graph. Reading the file directly is fine.";
 const READ_DENY_TEXT: &str = "compass strict mode: this project has a fresh knowledge graph that covers this file. Run `compass query \"<your question>\"` (or `compass explain` / `compass path`) FIRST to orient yourself, then re-issue this Read — it will be allowed. This block fires at most once per session; reading raw files to modify or debug specific lines is fine after one query. Apply the same rule in any subagent prompt that explores code.";
-const GEMINI_NUDGE_TEXT: &str = "compass: knowledge graph at compass-out/. For focused questions, run `compass query \"<question>\"` (scoped subgraph, usually much smaller than GRAPH_REPORT.md) instead of grepping raw files. Read GRAPH_REPORT.md only for broad architecture context.";
+const GEMINI_NUDGE_TEXT: &str = "compass: focused task means query first; first-session or broad orientation means read only Agent Orientation at the start of GRAPH_REPORT.md, then query. Inspect direction, ambiguity, completeness, domain truncation, pagination, and minimal cited source. Keep watch running or update after edits.";
 const SOURCE_EXTENSIONS: &[&str] = &[
     "py", "js", "cjs", "ts", "tsx", "jsx", "astro", "vue", "svelte", "go", "rs", "java", "rb", "c",
     "h", "cpp", "hpp", "cc", "cs", "kt", "swift", "php", "scala", "lua", "sh", "md", "rst", "txt",
@@ -313,6 +313,18 @@ pub(super) fn command_check_update(frontend: Frontend, args: &[String]) -> Outco
 }
 
 pub(super) fn command_hook_guard(_frontend: Frontend, args: &[String]) -> Outcome {
+    let valid = matches!(
+        args.iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .as_slice(),
+        ["search"] | ["read"] | ["read", "--strict"] | ["gemini"]
+    );
+    if !valid {
+        return Outcome::failure(
+            "error: hook-guard requires search, read [--strict], or gemini".to_owned(),
+        );
+    }
     let kind = args.first().map_or("", String::as_str);
     if kind == "gemini" {
         let mut payload = Map::new();

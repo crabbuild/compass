@@ -144,6 +144,673 @@ body.vscode-high-contrast {
   color-scheme: dark;
 }
 
+/* Multi-lens visualization workbench */
+.visualization-workbench {
+  display: grid;
+  width: 100vw;
+  height: 100vh;
+  grid-template-columns: minmax(220px, 268px) minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--background);
+}
+
+.visualization-rail {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-right: 1px solid var(--compass-line);
+  background:
+    linear-gradient(180deg, var(--compass-focus-soft), transparent 180px),
+    var(--compass-panel);
+}
+
+.visualization-rail > header {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 18px 16px 16px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.visualization-bearing {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 48%, var(--border));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--compass-focus) 12%, transparent);
+  color: var(--compass-focus);
+  box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--compass-focus) 5%, transparent);
+}
+
+.visualization-bearing svg {
+  width: 18px;
+  height: 18px;
+}
+
+.visualization-rail header > span:last-child,
+.visualization-rail nav button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.visualization-rail header strong {
+  font-size: 14px;
+  letter-spacing: 0.02em;
+}
+
+.visualization-rail header small,
+.visualization-rail nav small {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visualization-rail nav {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 8px;
+  overflow: auto;
+}
+
+.visualization-rail nav button {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr) 8px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.visualization-rail nav button:hover {
+  background: var(--workbench-hover);
+}
+
+.visualization-rail nav button[aria-current="page"] {
+  border-color: color-mix(in srgb, var(--compass-focus) 28%, var(--border));
+  background: color-mix(in srgb, var(--compass-focus) 13%, var(--compass-panel));
+  box-shadow: inset 2px 0 var(--compass-focus);
+}
+
+.visualization-rail nav svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+
+.visualization-rail nav button[aria-current="page"] svg {
+  color: var(--compass-focus);
+}
+
+.visualization-rail nav strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visualization-rail nav i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--compass-success);
+}
+
+.visualization-rail nav i[data-status="summary"] {
+  background: var(--compass-warning);
+}
+
+.visualization-rail nav i[data-status="partial"] {
+  background: var(--destructive);
+}
+
+.visualization-rail > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+  border-top: 1px solid var(--compass-line);
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.visualization-rail > footer code {
+  color: var(--foreground);
+  font-family: var(--compass-font-mono);
+}
+
+.visualization-main {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: 49px minmax(0, 1fr);
+}
+
+.visualization-context {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 7px 14px 7px 16px;
+  border-bottom: 1px solid var(--compass-line);
+  background: color-mix(in srgb, var(--background) 92%, var(--compass-panel));
+}
+
+.visualization-context > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.visualization-context > div:first-child span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.visualization-context > div:first-child strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visualization-coverage {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.visualization-coverage strong {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--compass-success) 36%, var(--border));
+  border-radius: 999px;
+  color: var(--compass-success);
+  font-weight: 600;
+}
+
+.visualization-coverage[data-status="summary"] strong {
+  border-color: color-mix(in srgb, var(--compass-warning) 42%, var(--border));
+  color: var(--compass-warning);
+}
+
+.visualization-coverage[data-status="partial"] strong {
+  border-color: color-mix(in srgb, var(--destructive) 42%, var(--border));
+  color: var(--destructive);
+}
+
+.visualization-stage,
+.workbench-graph-lens,
+.workbench-history-view,
+.workbench-architecture {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.workbench-architecture {
+  display: grid;
+  grid-template-rows: 39px minmax(0, 1fr);
+}
+
+.workbench-graph-lens {
+  position: relative;
+}
+
+.workbench-graph-lens > .compass-workspace,
+.workbench-history-view .compass-workspace {
+  height: 100%;
+  min-height: 0;
+}
+
+.visualization-stage .call-graph-view {
+  height: 100%;
+}
+
+.visualization-stage .call-graph-direction {
+  top: 58px;
+}
+
+.visualization-stage .call-graph-summary {
+  max-height: min(42%, 360px);
+  overflow: auto;
+}
+
+.workbench-filter-strip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--compass-line);
+  overflow-x: auto;
+  background: var(--compass-panel);
+}
+
+.workbench-filter-strip label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.workbench-filter-strip select {
+  height: 27px;
+  max-width: 160px;
+  padding: 2px 22px 2px 7px;
+  border: 1px solid var(--input);
+  border-radius: 3px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 10px;
+}
+
+.workbench-filter-strip > span {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.compass-toolbar-leading {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+.workbench-filter-trigger {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, transparent);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.workbench-filter-trigger:hover,
+.workbench-filter-trigger[aria-expanded="true"] {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.workbench-filter-trigger:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.workbench-filter-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+.workbench-filter-trigger b {
+  display: inline-grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--compass-focus);
+  color: var(--vscode-button-foreground, #fff);
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.workbench-filter-trigger small {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.workbench-filter-popover {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 8px);
+  right: 6px;
+  display: grid;
+  box-sizing: border-box;
+  width: min(310px, 100%);
+  max-height: calc(100vh - 84px);
+  gap: 10px;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 5px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  box-shadow: none;
+}
+
+.workbench-filter-popover > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.workbench-filter-popover > header span {
+  display: grid;
+  gap: 2px;
+}
+
+.workbench-filter-popover > header strong {
+  font-size: 11px;
+}
+
+.workbench-filter-popover > header small,
+.workbench-filter-popover > footer {
+  color: var(--compass-faint);
+  font-size: 10px;
+}
+
+.workbench-filter-popover > header button {
+  min-height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.workbench-filter-popover > header button:disabled {
+  opacity: 0.45;
+}
+
+.workbench-filter-popover > label {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.workbench-filter-popover select {
+  width: 100%;
+  min-height: 30px;
+  padding: 2px 24px 2px 8px;
+  border: 1px solid var(--input);
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, var(--background));
+  color: var(--vscode-dropdown-foreground, var(--foreground));
+  font: inherit;
+}
+
+.workbench-filter-popover select:focus-visible,
+.workbench-filter-popover button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.workbench-filter-popover > footer {
+  padding-top: 8px;
+  border-top: 1px solid var(--compass-line);
+}
+
+.workbench-graph-empty {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  box-sizing: border-box;
+  width: min(360px, calc(100% - 32px));
+  justify-items: center;
+  gap: 7px;
+  padding: 18px;
+  border: 1px solid var(--compass-line);
+  border-radius: 5px;
+  transform: translate(-50%, -50%);
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.workbench-graph-empty svg {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 3px;
+  color: var(--compass-faint);
+}
+
+.workbench-graph-empty strong {
+  color: var(--foreground);
+  font-size: 12px;
+}
+
+.workbench-graph-empty span {
+  max-width: 290px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.workbench-graph-empty button {
+  min-height: 30px;
+  margin-top: 5px;
+  padding: 0 10px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 3px;
+  background: var(--vscode-button-background, var(--compass-focus));
+  color: var(--vscode-button-foreground, #fff);
+  font: inherit;
+  font-size: 10px;
+}
+
+.workbench-graph-empty button:hover {
+  background: var(--vscode-button-hoverBackground, var(--compass-focus));
+}
+
+.workbench-graph-empty button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.workbench-history-view {
+  position: relative;
+}
+
+.workbench-history-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 5px;
+  transform: translateX(-50%);
+  background: var(--compass-panel-raised);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.workbench-history-banner svg {
+  width: 17px;
+  color: var(--compass-focus);
+}
+
+.workbench-history-banner span {
+  display: grid;
+  gap: 1px;
+}
+
+.workbench-history-banner strong {
+  font-size: 11px;
+}
+
+.workbench-history-banner small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.workbench-architecture-body {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 310px);
+}
+
+.workbench-architecture-body > .architecture-map-panel {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.workbench-architecture-body > aside {
+  min-width: 0;
+  padding: 16px;
+  border-left: 1px solid var(--compass-line);
+  overflow: auto;
+  background: var(--compass-panel);
+}
+
+.workbench-architecture-body > aside > span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.workbench-architecture-body > aside h2 {
+  margin: 5px 0;
+  font-size: 15px;
+}
+
+.workbench-architecture-body > aside p {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.workbench-symbol-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+}
+
+.workbench-symbol-list button {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+
+.workbench-symbol-list button:hover:not(:disabled) {
+  border-color: var(--border);
+  background: var(--workbench-hover);
+}
+
+.workbench-symbol-list button:disabled {
+  cursor: default;
+}
+
+.workbench-symbol-list strong,
+.workbench-symbol-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workbench-symbol-list strong {
+  font-size: 10px;
+}
+
+.workbench-symbol-list small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.visualization-workbench button:focus-visible,
+.visualization-workbench select:focus-visible {
+  outline: 1px solid var(--compass-focus);
+  outline-offset: 1px;
+}
+
+@media (max-width: 760px) {
+  .visualization-workbench {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .visualization-rail > header {
+    justify-content: center;
+    padding-inline: 8px;
+  }
+
+  .visualization-rail header > span:last-child,
+  .visualization-rail nav button > span,
+  .visualization-rail nav i,
+  .visualization-rail > footer {
+    display: none;
+  }
+
+  .visualization-rail nav button {
+    display: grid;
+    grid-template-columns: 1fr;
+    place-items: center;
+  }
+
+  .visualization-coverage > span {
+    display: none;
+  }
+
+  .workbench-architecture-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workbench-architecture-body > aside {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .visualization-rail nav button[aria-current="page"] {
+    animation: compass-bearing 180ms ease-out;
+  }
+}
+
+@keyframes compass-bearing {
+  from { transform: translateX(-3px); opacity: 0.7; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
 * {
   border-color: var(--border);
 }
@@ -887,8 +1554,53 @@ button:not(:disabled),
 
 .compass-toolbar-actions {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.compass-physics-button {
+  border-color: var(--compass-line);
+  background: var(--vscode-dropdown-background, transparent);
+}
+
+.compass-physics-button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--compass-focus) 55%, var(--compass-line));
+  background: color-mix(in srgb, var(--compass-focus) 13%, transparent);
+  color: var(--foreground);
+}
+
+.compass-toolbar-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.compass-toolbar-separator {
+  width: 1px;
+  height: 18px;
+  flex: 0 0 auto;
+  background: var(--compass-line);
+}
+
+.compass-zoom-controls {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, transparent);
+}
+
+.compass-zoom-controls .compass-tool-button {
+  min-height: 28px;
+  border: 0;
+  border-radius: 0;
+}
+
+.compass-zoom-controls .compass-tool-button + .compass-tool-button {
+  border-left: 1px solid var(--compass-line);
 }
 
 .compass-layout-picker {
@@ -948,6 +1660,22 @@ button:not(:disabled),
   height: 15px;
 }
 
+.compass-tool-icon-button {
+  width: 30px;
+  flex: 0 0 30px;
+  justify-content: center;
+  padding: 0;
+}
+
+.compass-zoom-reset {
+  min-width: 42px;
+  justify-content: center;
+  padding: 0 7px;
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.02em;
+}
+
 .compass-tool-button:hover,
 .compass-tool-button[aria-pressed="true"] {
   border-color: var(--compass-line);
@@ -956,6 +1684,9 @@ button:not(:disabled),
 }
 
 .compass-tool-button:focus-visible,
+.compass-explore-panel button:focus-visible,
+.compass-explore-panel select:focus-visible,
+.compass-minimap button:focus-visible,
 .compass-change-legend button:focus-visible,
 .compass-search-field input:focus-visible,
 .compass-search-item:focus-visible,
@@ -968,6 +1699,347 @@ button:not(:disabled),
 .compass-community-item:focus-within {
   outline: 2px solid var(--compass-focus);
   outline-offset: 2px;
+}
+
+.compass-explore-panel {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 7px);
+  right: 0;
+  display: grid;
+  width: min(330px, calc(100vw - 24px));
+  max-height: calc(100vh - 84px);
+  gap: 10px;
+  overflow-y: auto;
+  padding: 12px;
+  border-radius: 5px;
+  color: var(--foreground);
+}
+
+.compass-explore-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-explore-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.compass-explore-heading strong,
+.compass-explore-toggle strong,
+.compass-shortcut-title strong {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.compass-explore-heading span,
+.compass-explore-toggle small {
+  color: var(--compass-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.compass-selection-prompt {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--compass-focus) 28%, var(--compass-line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--compass-focus) 7%, transparent);
+  color: var(--muted-foreground);
+}
+
+.compass-selection-prompt > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--compass-focus);
+}
+
+.compass-selection-prompt > span {
+  display: grid;
+  gap: 3px;
+}
+
+.compass-selection-prompt strong {
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.compass-selection-prompt small {
+  color: var(--compass-faint);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.compass-explore-panel kbd {
+  display: inline-flex;
+  min-width: 20px;
+  min-height: 19px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border: 1px solid var(--compass-line);
+  border-bottom-color: color-mix(in srgb, var(--compass-line) 72%, var(--foreground));
+  border-radius: 3px;
+  background: var(--vscode-keybindingLabel-background, var(--workbench-hover));
+  color: var(--vscode-keybindingLabel-foreground, var(--foreground));
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.compass-explore-toggle {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+}
+
+.compass-explore-toggle:hover,
+.compass-explore-toggle[aria-pressed="true"] {
+  border-color: var(--compass-line);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.compass-explore-toggle:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.compass-explore-toggle > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.compass-explore-toggle > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.compass-explore-toggle > i {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border: 1px solid var(--compass-line);
+  border-radius: 8px;
+  background: var(--compass-canvas-deep);
+}
+
+.compass-explore-toggle > i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--compass-faint);
+}
+
+.compass-explore-toggle[aria-pressed="true"] > i {
+  border-color: color-mix(in srgb, var(--compass-focus) 65%, var(--compass-line));
+  background: color-mix(in srgb, var(--compass-focus) 24%, var(--compass-canvas-deep));
+}
+
+.compass-explore-toggle[aria-pressed="true"] > i::after {
+  left: 14px;
+  background: var(--compass-focus);
+}
+
+.compass-explore-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.compass-explore-field:disabled {
+  opacity: 0.5;
+}
+
+.compass-explore-field legend,
+.compass-explore-select > span {
+  margin-bottom: 6px;
+  color: var(--compass-faint);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compass-segmented-control {
+  display: grid;
+  grid-auto-columns: 1fr;
+  grid-auto-flow: column;
+  overflow: hidden;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+}
+
+.compass-segmented-control button {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--compass-faint);
+  font: 10px/1 var(--compass-font-mono);
+}
+
+.compass-segmented-control button + button {
+  border-left: 1px solid var(--compass-line);
+}
+
+.compass-segmented-control button:hover,
+.compass-segmented-control button[aria-pressed="true"] {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.compass-segmented-control button[aria-pressed="true"] {
+  box-shadow: inset 0 -2px var(--compass-focus);
+}
+
+.compass-explore-select {
+  display: grid;
+}
+
+.compass-explore-select select {
+  min-height: 30px;
+  padding: 0 28px 0 8px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: var(--vscode-dropdown-background, var(--compass-canvas-deep));
+  color: var(--vscode-dropdown-foreground, var(--foreground));
+  font-size: 10px;
+}
+
+.compass-shortcut-guide {
+  display: grid;
+  gap: 9px;
+  padding-top: 10px;
+  border-top: 1px solid var(--compass-line);
+}
+
+.compass-shortcut-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted-foreground);
+}
+
+.compass-shortcut-title svg {
+  width: 15px;
+  height: 15px;
+}
+
+.compass-shortcut-guide dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 14px;
+  margin: 0;
+}
+
+.compass-shortcut-guide dl > div {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+}
+
+.compass-shortcut-guide dt,
+.compass-shortcut-guide dd {
+  margin: 0;
+}
+
+.compass-shortcut-guide dt {
+  display: flex;
+  gap: 3px;
+}
+
+.compass-shortcut-guide dd {
+  color: var(--compass-faint);
+  font-size: 9px;
+}
+
+.compass-minimap {
+  position: absolute;
+  z-index: 3;
+  right: 12px;
+  bottom: 12px;
+  width: 178px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.compass-minimap header {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--compass-line);
+  color: var(--muted-foreground);
+  font: 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compass-minimap header small {
+  color: var(--compass-faint);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.compass-minimap button {
+  display: block;
+  width: 100%;
+  height: 108px;
+  padding: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--compass-canvas) 90%, transparent);
+  color: var(--compass-faint);
+}
+
+.compass-minimap svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.compass-minimap-edges line {
+  stroke: var(--compass-line);
+  stroke-width: 0.65;
+  vector-effect: non-scaling-stroke;
+}
+
+.compass-minimap-nodes circle[data-focused="true"] {
+  stroke: var(--foreground);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.compass-minimap-viewport {
+  fill: color-mix(in srgb, var(--compass-focus) 8%, transparent);
+  stroke: var(--compass-focus);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
 
 .compass-changed-symbols button:focus-visible,
@@ -2566,6 +3638,10 @@ body.vscode-high-contrast-light .compass-load-logo {
   .compass-toolbar-actions {
     max-width: 62%;
     overflow-x: auto;
+  }
+
+  .compass-explore-panel {
+    max-height: calc(62vh - 82px);
   }
 
   .compass-info-panel {

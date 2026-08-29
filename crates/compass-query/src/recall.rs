@@ -1,6 +1,7 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use compass_model::code_graph::NodeRecord;
+use compass_model::code_graph::{EdgeKind, NodeRecord};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum RecallTruncationReason {
@@ -40,6 +41,30 @@ impl CandidateSource {
 pub(crate) struct SearchCandidate {
     pub(crate) node: NodeRecord,
     pub(crate) sources: BTreeSet<CandidateSource>,
+    pub(crate) indexed_matches: BTreeSet<String>,
+    pub(crate) relationship_matches: BTreeSet<RelationshipTermMatch>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RelationshipTermMatch {
+    pub(crate) term: String,
+    pub(crate) kind: EdgeKind,
+    pub(crate) target_ids: BTreeSet<String>,
+}
+
+impl Ord for RelationshipTermMatch {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.term
+            .cmp(&other.term)
+            .then_with(|| self.kind.as_str().cmp(other.kind.as_str()))
+            .then_with(|| self.target_ids.cmp(&other.target_ids))
+    }
+}
+
+impl PartialOrd for RelationshipTermMatch {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,7 +74,7 @@ pub(crate) struct RecallBudget {
     pub(crate) max_fuzzy_candidates: usize,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct SearchCandidatePool {
     candidates: BTreeMap<String, SearchCandidate>,
     source_counts: BTreeMap<CandidateSource, usize>,
@@ -57,7 +82,6 @@ pub(crate) struct SearchCandidatePool {
     truncation_reasons: BTreeSet<RecallTruncationReason>,
     fuzzy_limit_reached: bool,
     fuzzy_candidates_added: usize,
-    candidates_read: u64,
 }
 
 impl SearchCandidatePool {
@@ -69,7 +93,6 @@ impl SearchCandidatePool {
             truncation_reasons: BTreeSet::new(),
             fuzzy_limit_reached: false,
             fuzzy_candidates_added: 0,
-            candidates_read: 0,
         }
     }
 
@@ -94,7 +117,6 @@ impl SearchCandidatePool {
     }
 
     pub(crate) fn add(&mut self, source: CandidateSource, node: NodeRecord) -> bool {
-        self.candidates_read = self.candidates_read.saturating_add(1);
         if let Some(record) = self.candidates.get_mut(&node.id) {
             record.sources.insert(source);
             return false;
@@ -123,6 +145,8 @@ impl SearchCandidatePool {
             SearchCandidate {
                 node,
                 sources: BTreeSet::from([source]),
+                indexed_matches: BTreeSet::new(),
+                relationship_matches: BTreeSet::new(),
             },
         );
         if source == CandidateSource::Fuzzy {
@@ -131,23 +155,9 @@ impl SearchCandidatePool {
         true
     }
 
-    pub(crate) fn add_many<I>(&mut self, source: CandidateSource, nodes: I)
-    where
-        I: IntoIterator<Item = NodeRecord>,
-    {
-        for node in nodes {
-            self.add(source, node);
-        }
-    }
-
     #[must_use]
     pub(crate) fn into_vec(self) -> Vec<SearchCandidate> {
         self.candidates.into_values().collect()
-    }
-
-    #[must_use]
-    pub(crate) fn candidates_read(&self) -> u64 {
-        self.candidates_read
     }
 
     pub(crate) fn candidate_ids(&self) -> Vec<String> {
@@ -161,6 +171,37 @@ impl SearchCandidatePool {
         candidate.sources.insert(source)
     }
 
+    pub(crate) fn add_relationship_matches(
+        &mut self,
+        node_id: &str,
+        matches: impl IntoIterator<Item = RelationshipTermMatch>,
+    ) -> bool {
+        let Some(candidate) = self.candidates.get_mut(node_id) else {
+            return false;
+        };
+        candidate.sources.insert(CandidateSource::RelationSeed);
+        candidate.relationship_matches.extend(matches);
+        true
+    }
+
+    pub(crate) fn add_indexed_matches(
+        &mut self,
+        node_id: &str,
+        matches: impl IntoIterator<Item = String>,
+    ) -> bool {
+        let Some(candidate) = self.candidates.get_mut(node_id) else {
+            return false;
+        };
+        candidate.indexed_matches.extend(matches);
+        true
+    }
+
+    pub(crate) fn extend_total_budget(&mut self, max_total_candidates: usize) {
+        self.budget.max_total_candidates =
+            self.budget.max_total_candidates.max(max_total_candidates);
+        self.budget.max_per_source = self.budget.max_per_source.max(max_total_candidates);
+    }
+
     #[must_use]
     pub(crate) fn truncated_by_fuzzy_capacity(&self) -> bool {
         self.fuzzy_limit_reached
@@ -169,12 +210,34 @@ impl SearchCandidatePool {
 
 impl SearchCandidate {
     #[must_use]
-    pub(crate) fn best_source_rank(&self) -> u8 {
+    pub(crate) fn best_source(&self) -> CandidateSource {
         self.sources
             .iter()
-            .map(|source| source.priority())
-            .max()
-            .unwrap_or(0)
+            .copied()
+            .max_by_key(|source| source.priority())
+            .unwrap_or(CandidateSource::HeuristicFallback)
+    }
+
+    #[must_use]
+    pub(crate) fn best_source_rank(&self) -> u8 {
+        self.best_source().priority()
+    }
+
+    #[must_use]
+    pub(crate) fn relationship_terms(&self) -> BTreeSet<String> {
+        self.relationship_matches
+            .iter()
+            .map(|matched| matched.term.clone())
+            .collect()
+    }
+
+    #[must_use]
+    pub(crate) fn relationship_target_count(&self) -> usize {
+        self.relationship_matches
+            .iter()
+            .flat_map(|matched| matched.target_ids.iter())
+            .collect::<BTreeSet<_>>()
+            .len()
     }
 }
 

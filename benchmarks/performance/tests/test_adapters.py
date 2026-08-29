@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
 from pathlib import Path
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -21,6 +24,31 @@ def revision(name: str) -> ToolRevision:
 
 
 class AdapterTests(unittest.TestCase):
+    def test_bounded_validation_runner_rejects_nonzero_timeout_and_oversized_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "failed"):
+                adapters_module._run_bounded(
+                    [sys.executable, "-c", "raise SystemExit(7)"],
+                    cwd=root,
+                    timeout_seconds=2,
+                    max_output_bytes=1024,
+                )
+            with self.assertRaises(TimeoutError):
+                adapters_module._run_bounded(
+                    [sys.executable, "-c", "import time; time.sleep(5)"],
+                    cwd=root,
+                    timeout_seconds=0.05,
+                    max_output_bytes=1024,
+                )
+            with self.assertRaisesRegex(RuntimeError, "output bound"):
+                adapters_module._run_bounded(
+                    [sys.executable, "-c", "print('x' * 4096)"],
+                    cwd=root,
+                    timeout_seconds=2,
+                    max_output_bytes=128,
+                )
+
     def test_cargo_target_directory_matches_cargo_environment_rules(self) -> None:
         source = Path("/work/compass")
         with mock.patch.dict(os.environ, {}, clear=True):
@@ -67,19 +95,38 @@ class AdapterTests(unittest.TestCase):
                 "extract",
                 "/repo",
                 "--code-only",
-                "--no-cluster",
                 "--no-viz",
                 "--store",
                 "json",
                 "--timing",
                 "--out",
                 "/output",
+                "--no-cluster",
             ),
         )
         self.assertEqual(
             adapter.query_command(Path("/graph.json"), "authentication"),
-            ("/opt/compass", "query", "authentication", "--graph", "/graph.json"),
+            (
+                "/opt/compass",
+                "query",
+                "authentication",
+                "--graph",
+                "/graph.json",
+                "--format",
+                "json",
+            ),
         )
+
+    def test_compass_comparison_profile_controls_inference_and_clustering(self) -> None:
+        adapter = CompassAdapter(
+            Path("/opt/compass"),
+            revision("compass"),
+            inference_level="low",
+            cluster=True,
+        )
+        build = adapter.build_command(Path("/repo"), Path("/output"))
+        self.assertNotIn("--no-cluster", build)
+        self.assertEqual(build[-2:], ("--inference-level", "low"))
 
     def test_graphify_is_explicit_and_isolated(self) -> None:
         adapter = GraphifyAdapter(Path("/venv/bin/python"), revision("graphify"))
@@ -118,6 +165,45 @@ class AdapterTests(unittest.TestCase):
             (active / "build-incomplete").touch()
             with self.assertRaisesRegex(RuntimeError, "incomplete"):
                 adapter.graph_path(output)
+
+    def test_compass_query_artifact_validates_typed_store_identity(self) -> None:
+        adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))
+        with tempfile.TemporaryDirectory() as directory:
+            graph = Path(directory) / "graph.json"
+            graph.write_bytes(b"graph")
+            digest = hashlib.sha256(b"graph").hexdigest()
+            reference = {
+                "schema": "compass.store.ref/1",
+                "store_schema": "compass.store/1",
+                "adapter": "sqlite",
+                "store_id": "fixture",
+                "namespace": "graph",
+                "snapshot_id": "a" * 64,
+                "manifest_digest": "b" * 64,
+                "graph_digest": digest,
+            }
+            (graph.parent / "store.ref").write_text(json.dumps(reference), encoding="utf-8")
+            with mock.patch.object(
+                adapters_module,
+                "_run_bounded",
+                return_value='{"schema":"compass.query/1","operation":"search"}',
+            ) as run:
+                evidence = adapter.validate_query_artifact(graph)
+            self.assertEqual(evidence["store_graph_digest"], digest)
+            self.assertEqual(evidence["store_snapshot_id"], "a" * 64)
+            self.assertIn("--engine", run.call_args.args[0])
+
+            self.assertEqual(evidence["graph_sha256"], digest)
+            reference["graph_digest"] = "c" * 64
+            (graph.parent / "store.ref").write_text(json.dumps(reference), encoding="utf-8")
+            with mock.patch.object(
+                adapters_module,
+                "_run_bounded",
+                return_value='{"schema":"compass.query/1","operation":"search"}',
+            ):
+                distinct = adapter.validate_query_artifact(graph)
+            self.assertEqual(distinct["graph_sha256"], digest)
+            self.assertEqual(distinct["store_graph_digest"], "c" * 64)
 
     def test_snapshot_pointer_cannot_escape(self) -> None:
         adapter = CompassAdapter(Path("/opt/compass"), revision("compass"))

@@ -83,6 +83,12 @@ fn history_help_and_empty_status_are_actionable_and_non_mutating()
     let build_help = String::from_utf8_lossy(&build_help.stdout);
     assert!(build_help.contains("--all"));
     assert!(build_help.contains("--first-parent"));
+    let query_help = run(compass, directory.path(), &["help", "query"])?;
+    assert!(query_help.status.success());
+    let query_help = String::from_utf8_lossy(&query_help.stdout);
+    assert!(query_help.contains("Resolve REV once to an immutable typed realization"));
+    assert!(!query_help.contains("Query an exact immutable realization"));
+    assert!(query_help.contains("Repeatable OR scope"));
     for arguments in [
         vec!["history", "build", "HEAD", "--first-parent"],
         vec!["history", "build", "HEAD", "--all=true"],
@@ -1573,7 +1579,7 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     let query = run(
         compass,
         directory.path(),
-        &["query", "legacy service", "--at", "HEAD~1"],
+        &["query", "legacy service", "--traverse", "--at", "HEAD~1"],
     )?;
     assert!(
         query.status.success(),
@@ -1583,6 +1589,27 @@ fn query_path_and_explain_read_the_selected_materialized_commit()
     let query_text = String::from_utf8_lossy(&query.stdout);
     assert!(query_text.contains("LegacyService"));
     assert!(!query_text.contains("ReplacementService"));
+
+    let typed_discovery = run(
+        compass,
+        directory.path(),
+        &[
+            "query",
+            "legacy service",
+            "--direction",
+            "both",
+            "--at",
+            "HEAD~1",
+            "--format=json",
+        ],
+    )?;
+    assert_eq!(typed_discovery.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&typed_discovery.stderr)
+            .contains("no trusted compass.graph/1 artifact"),
+        "{}",
+        String::from_utf8_lossy(&typed_discovery.stderr)
+    );
 
     let cql = run(
         compass,
@@ -2225,9 +2252,17 @@ fn historical_build_uses_only_the_exact_commit_tree_and_historical_ignore_policy
         let query = run(
             compass,
             directory.path(),
-            &["query", absent, "--at", "HEAD"],
+            &["query", absent, "--format=json", "--at", "HEAD"],
         )?;
-        assert!(!String::from_utf8_lossy(&query.stdout).contains(absent));
+        assert!(query.status.success());
+        let response: serde_json::Value = serde_json::from_slice(&query.stdout)?;
+        let nodes = response["nodes"].as_array().ok_or("discovery nodes")?;
+        assert!(nodes.iter().all(|node| {
+            node["name"].as_str() != Some(absent)
+                && node["qualifiedName"]
+                    .as_str()
+                    .is_none_or(|name| !name.ends_with(absent))
+        }));
     }
     assert!(!directory.path().join("compass-out").exists());
     Ok(())
@@ -2612,6 +2647,24 @@ fn normal_graph_export_and_historical_queries_are_semantically_identical()
             vec!["explain", source, "--graph", graph],
             vec!["explain", source, "--at", "HEAD"],
         ),
+        (
+            vec![
+                "query",
+                "--cql",
+                "MATCH (caller)-[:CALLS]->(callee) RETURN caller.id AS caller, callee.id AS callee",
+                "--format=json",
+                "--graph",
+                graph,
+            ],
+            vec![
+                "query",
+                "--cql",
+                "MATCH (caller)-[:CALLS]->(callee) RETURN caller.id AS caller, callee.id AS callee",
+                "--format=json",
+                "--at",
+                "HEAD",
+            ],
+        ),
     ] {
         let from_file = run(compass, directory.path(), &file_args)?;
         let from_history = run(compass, directory.path(), &history_args)?;
@@ -2623,6 +2676,62 @@ fn normal_graph_export_and_historical_queries_are_semantically_identical()
         assert_eq!(from_file.status.code(), from_history.status.code());
         assert_eq!(from_file.stdout, from_history.stdout, "{file_args:?}");
         assert_eq!(from_file.stderr, from_history.stderr, "{file_args:?}");
+    }
+
+    let from_file = run(
+        compass,
+        directory.path(),
+        &[
+            "query",
+            source,
+            "--direction",
+            "outgoing",
+            "--format=json",
+            "--graph",
+            graph,
+        ],
+    )?;
+    let from_history = run(
+        compass,
+        directory.path(),
+        &[
+            "query",
+            source,
+            "--direction",
+            "outgoing",
+            "--format=json",
+            "--at",
+            "HEAD",
+        ],
+    )?;
+    assert!(
+        from_file.status.success(),
+        "{}",
+        String::from_utf8_lossy(&from_file.stderr)
+    );
+    assert!(
+        from_history.status.success(),
+        "{}",
+        String::from_utf8_lossy(&from_history.stderr)
+    );
+    let from_file: serde_json::Value = serde_json::from_slice(&from_file.stdout)?;
+    let from_history: serde_json::Value = serde_json::from_slice(&from_history.stdout)?;
+    assert_eq!(from_file["schema"], "compass.query.discovery/1");
+    assert_eq!(from_history["schema"], "compass.query.discovery/1");
+    for field in [
+        "selectedDirection",
+        "directionSource",
+        "relationContexts",
+        "scope",
+        "traversal",
+        "seeds",
+        "nodes",
+        "edges",
+        "diagnostics",
+        "omissions",
+        "truncated",
+    ] {
+        assert_eq!(from_file[field], from_history[field], "field={field}");
     }
     Ok(())
 }

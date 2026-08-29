@@ -2,7 +2,7 @@ schema = "compass.distribution/1"
 
 [package]
 name = "compass"
-version = "0.3.7"
+version = "0.3.12"
 description = "Local-first code intelligence, structural navigation, and bounded MCP tools."
 author = "Compass contributors"
 homepage = "https://github.com/crabbuild/compass"

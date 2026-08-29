@@ -618,7 +618,7 @@ mod tests {
         let payload: Value = serde_json::from_str(response_body(&listed))?;
         assert_eq!(
             payload["result"]["tools"].as_array().map(Vec::len),
-            Some(15)
+            Some(18)
         );
 
         cancellation.cancel();

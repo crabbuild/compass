@@ -3,7 +3,9 @@ import {
   GraphViewModelSchema,
   type GraphViewModel
 } from "./contracts/graph";
+import { WorkbenchModelSchema } from "./contracts/workbench";
 import { CompassGraph } from "./graph/CompassGraph";
+import { VisualizationWorkbench, dispatchOpenSource } from "./workbench/VisualizationWorkbench";
 import "./theme.css";
 
 function mount() {
@@ -12,8 +14,19 @@ function mount() {
   if (!rootElement || !modelElement) {
     throw new Error("Compass viewer root or model is missing");
   }
-  const overview = GraphViewModelSchema.parse(JSON.parse(modelElement.textContent ?? ""));
+  const untrusted = JSON.parse(modelElement.textContent ?? "");
   const root = createRoot(rootElement);
+  const workbench = WorkbenchModelSchema.safeParse(untrusted);
+  if (workbench.success) {
+    root.render(
+      <VisualizationWorkbench
+        workbench={workbench.data}
+        host={{ openSource: dispatchOpenSource }}
+      />
+    );
+    return;
+  }
+  const overview = GraphViewModelSchema.parse(untrusted);
   const detailCache = new Map<number, GraphViewModel>();
   let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
   let communityLoading: number | null = null;

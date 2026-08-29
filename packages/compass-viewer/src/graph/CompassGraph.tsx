@@ -1,11 +1,13 @@
 import {
   useCallback,
   useDeferredValue,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
-  type CSSProperties
+  type CSSProperties,
+  type ReactNode
 } from "react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
@@ -24,7 +26,12 @@ import { navigableRelationshipSource } from "./sourceNavigation";
 import type { GraphSourceRevisions } from "./ChangeEvidence";
 import { VisNetworkCanvas, type GraphCanvasHandle } from "./VisNetworkCanvas";
 import {
-  graphRenderingProfile,
+  graphNeighborhood,
+  MAX_NEIGHBORHOOD_DEPTH,
+  MIN_NEIGHBORHOOD_DEPTH,
+  type GraphEdgeDirection
+} from "./neighborhood";
+import {
   visibleGraphEdges,
   type GraphLayoutStyle
 } from "./renderingProfile";
@@ -45,11 +52,22 @@ const CHANGE_TYPES: Array<{
 ];
 
 const FIXED_LAYOUT_STATUS: Record<Exclude<GraphLayoutStyle, "automatic">, string> = {
+  hierarchical: "Depth-layer layout",
   circle: "Circle layout",
   concentric: "Concentric layout",
   spiral: "Spiral layout",
   grid: "Square grid layout"
 };
+
+const EDGE_DIRECTIONS: readonly GraphEdgeDirection[] = ["both", "outgoing", "incoming"];
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable
+      || target.tagName === "INPUT"
+      || target.tagName === "TEXTAREA"
+      || target.tagName === "SELECT");
+}
 
 export type GraphHost = {
   openSource(source: SourceLocation, revision?: string): void;
@@ -78,6 +96,12 @@ export type CompassGraphProps = {
   queryResult?: CodeQueryResponse | undefined;
   initialInspectorLayout?: Partial<InspectorLayout> | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
+  preferredLayout?: GraphLayoutStyle | undefined;
+  toolbarLeading?: ReactNode;
+  toolbarLeadingPanel?: ReactNode;
+  toolbarLeadingOpen?: boolean | undefined;
+  onToolbarLeadingClose?: (() => void) | undefined;
+  stageOverlay?: ReactNode;
 };
 
 export function CompassGraph({
@@ -90,7 +114,13 @@ export function CompassGraph({
   sourceRevisions,
   queryResult,
   initialInspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  preferredLayout = "automatic",
+  toolbarLeading,
+  toolbarLeadingPanel,
+  toolbarLeadingOpen,
+  onToolbarLeadingClose,
+  stageOverlay
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -116,6 +146,12 @@ export function CompassGraph({
       queryResult={queryResult}
       inspectorLayout={inspectorLayout}
       onInspectorLayoutChange={updateInspectorLayout}
+      preferredLayout={preferredLayout}
+      toolbarLeading={toolbarLeading}
+      toolbarLeadingPanel={toolbarLeadingPanel}
+      toolbarLeadingOpen={toolbarLeadingOpen}
+      onToolbarLeadingClose={onToolbarLeadingClose}
+      stageOverlay={stageOverlay}
     />
   );
 }
@@ -131,7 +167,13 @@ function CompassGraphView({
   sourceRevisions,
   queryResult,
   inspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  preferredLayout,
+  toolbarLeading,
+  toolbarLeadingPanel,
+  toolbarLeadingOpen,
+  onToolbarLeadingClose,
+  stageOverlay
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -144,8 +186,18 @@ function CompassGraphView({
   queryResult?: CodeQueryResponse | undefined;
   inspectorLayout: InspectorLayout;
   onInspectorLayoutChange(layout: InspectorLayout): void;
+  preferredLayout: GraphLayoutStyle;
+  toolbarLeading?: ReactNode;
+  toolbarLeadingPanel?: ReactNode;
+  toolbarLeadingOpen?: boolean | undefined;
+  onToolbarLeadingClose?: (() => void) | undefined;
+  stageOverlay?: ReactNode;
 }) {
-  const [state, dispatch] = useReducer(graphReducer, model, initialGraphStateForModel);
+  const [state, dispatch] = useReducer(
+    graphReducer,
+    model,
+    (initial) => initialGraphStateForModel(initial, preferredLayout)
+  );
   const [hover, setHover] = useState<GraphHover | null>(null);
   const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
@@ -192,6 +244,22 @@ function CompassGraphView({
   const selected = state.focusedNodeId
     ? nodeById.get(state.focusedNodeId)
     : undefined;
+  const selectedNeighborhood = useMemo(
+    () => selected
+      ? graphNeighborhood(
+        model,
+        selected.id,
+        state.neighborhoodDepth,
+        state.edgeDirection
+      )
+      : null,
+    [
+      model,
+      selected,
+      state.edgeDirection,
+      state.neighborhoodDepth
+    ]
+  );
   const hovered = hover ? nodeById.get(hover.nodeId) : undefined;
   const hoveredActivation = hovered
     ? graphNodeActivation(model, hovered, detailCommunityId)
@@ -247,6 +315,68 @@ function CompassGraphView({
     setEdgeHover(null);
     dispatch({ type: "clearFocus" });
   }, []);
+  useEffect(() => {
+    if (state.focusedNodeId && !nodeById.has(state.focusedNodeId)) clear();
+  }, [clear, nodeById, state.focusedNodeId]);
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.metaKey
+        || event.ctrlKey
+        || event.altKey
+        || isEditableKeyboardTarget(event.target)
+      ) return;
+      const key = event.key.toLocaleLowerCase();
+      let handled = true;
+      if (key === "f") {
+        if (event.shiftKey && selectedNeighborhood) {
+          canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+        } else if (!event.shiftKey) {
+          canvasRef.current?.fit();
+        } else {
+          handled = false;
+        }
+      } else if (key === "+" || key === "=") {
+        canvasRef.current?.zoomIn();
+      } else if (key === "-" || key === "_") {
+        canvasRef.current?.zoomOut();
+      } else if (key === "0") {
+        canvasRef.current?.resetZoom();
+      } else if (key === "i" && selected) {
+        dispatch({ type: "setIsolation", isolated: !state.isolateSelection });
+      } else if (key === "[") {
+        dispatch({
+          type: "setNeighborhoodDepth",
+          depth: Math.max(MIN_NEIGHBORHOOD_DEPTH, state.neighborhoodDepth - 1)
+        });
+      } else if (key === "]") {
+        dispatch({
+          type: "setNeighborhoodDepth",
+          depth: Math.min(MAX_NEIGHBORHOOD_DEPTH, state.neighborhoodDepth + 1)
+        });
+      } else if (key === "d") {
+        const index = EDGE_DIRECTIONS.indexOf(state.edgeDirection);
+        dispatch({
+          type: "setEdgeDirection",
+          direction: EDGE_DIRECTIONS[(index + 1) % EDGE_DIRECTIONS.length] ?? "both"
+        });
+      } else if (key === "m") {
+        dispatch({ type: "setMinimap", visible: !state.showMinimap });
+      } else {
+        handled = false;
+      }
+      if (handled) event.preventDefault();
+    };
+    document.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => document.removeEventListener("keydown", handleKeyDown, { capture: true });
+  }, [
+    selected,
+    selectedNeighborhood,
+    state.edgeDirection,
+    state.isolateSelection,
+    state.neighborhoodDepth,
+    state.showMinimap
+  ]);
   const handleStabilized = useCallback(() => {
     dispatch({ type: "stabilized" });
   }, []);
@@ -283,11 +413,13 @@ function CompassGraphView({
       edge.change === "removed" ? sourceRevisions?.before : sourceRevisions?.after
     );
   }, [edgeById, sourceRevisions?.after, sourceRevisions?.before]);
-  const status = selected
+  const status = selected && state.isolateSelection && selectedNeighborhood
+    ? `Isolated ${selectedNeighborhood.nodeIds.size} nodes · ${state.neighborhoodDepth} hop${state.neighborhoodDepth === 1 ? "" : "s"}`
+    : selected
     ? `Inspecting ${selected.label}`
     : state.layoutStyle !== "automatic"
       ? FIXED_LAYOUT_STATUS[state.layoutStyle]
-      : state.physicsRunning ? "Layout running" : "Layout paused";
+      : state.physicsRunning ? "Layout running" : "Layout static";
   const loadingCommunity = communityLoading !== undefined && communityLoading !== null
     ? model.communities.find((community) => community.id === communityLoading)
     : undefined;
@@ -320,10 +452,19 @@ function CompassGraphView({
           <VisNetworkCanvas
             ref={canvasRef}
             model={model}
-            focusedNodeId={state.focusedNodeId}
+            focusedNodeId={selected?.id ?? null}
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
+            showEdgeLabels={state.showEdgeLabels}
+            isolatedNodeIds={state.isolateSelection
+              ? selectedNeighborhood?.nodeIds
+              : undefined}
+            isolatedEdgeIds={state.isolateSelection
+              ? selectedNeighborhood?.edgeIds
+              : undefined}
+            layoutSpacing={state.layoutSpacing}
+            showMinimap={state.showMinimap}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
@@ -334,11 +475,23 @@ function CompassGraphView({
             onClear={clear}
             onStabilized={handleStabilized}
           />
+          {stageOverlay}
           <GraphToolbar
             status={status}
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
+            showEdgeLabels={state.showEdgeLabels}
+            hasSelection={selected !== undefined}
+            isolateSelection={state.isolateSelection}
+            neighborhoodDepth={state.neighborhoodDepth}
+            edgeDirection={state.edgeDirection}
+            layoutSpacing={state.layoutSpacing}
+            showMinimap={state.showMinimap}
+            leadingControls={toolbarLeading}
+            leadingPanel={toolbarLeadingPanel}
+            leadingPanelOpen={toolbarLeadingOpen}
+            onLeadingPanelClose={onToolbarLeadingClose}
             onTogglePhysics={() => dispatch({
               type: "setPhysics",
               running: !state.physicsRunning
@@ -346,17 +499,54 @@ function CompassGraphView({
             onLayoutChange={(layout: GraphLayoutStyle) => dispatch({
               type: "setLayout",
               layout,
-              runPhysics: layout === "automatic"
-                && graphRenderingProfile(model) === "interactive"
+              runPhysics: false
             })}
+            onZoomOut={() => canvasRef.current?.zoomOut()}
+            onResetZoom={() => canvasRef.current?.resetZoom()}
+            onZoomIn={() => canvasRef.current?.zoomIn()}
             onFit={() => canvasRef.current?.fit()}
+            onFitSelection={() => {
+              if (selectedNeighborhood) {
+                canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+              }
+            }}
             onReset={() => {
               clear();
+              dispatch({ type: "setIsolation", isolated: false });
               canvasRef.current?.reset();
             }}
             onToggleLabels={() => dispatch({
               type: "setLabels",
               visible: !state.forceLabels
+            })}
+            onToggleEdgeLabels={() => dispatch({
+              type: "setEdgeLabels",
+              visible: !state.showEdgeLabels
+            })}
+            onToggleIsolation={() => {
+              const isolated = !state.isolateSelection;
+              dispatch({ type: "setIsolation", isolated });
+              if (isolated && selectedNeighborhood) {
+                window.requestAnimationFrame(() => {
+                  canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+                });
+              }
+            }}
+            onNeighborhoodDepthChange={(depth) => dispatch({
+              type: "setNeighborhoodDepth",
+              depth
+            })}
+            onEdgeDirectionChange={(direction) => dispatch({
+              type: "setEdgeDirection",
+              direction
+            })}
+            onLayoutSpacingChange={(spacing) => dispatch({
+              type: "setLayoutSpacing",
+              spacing
+            })}
+            onToggleMinimap={() => dispatch({
+              type: "setMinimap",
+              visible: !state.showMinimap
             })}
             onBack={onBackToOverview}
           />

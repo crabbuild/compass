@@ -31,10 +31,11 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::inference::{InferenceLevel, prefilter_extraction_inference};
 use crate::quarantine::{PublicationOutcome, QuarantineCollector};
 
 /// Version of the normalization and publication contract behind graph schema v1.
-pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/3";
+pub const V1_PUBLICATION_SEMANTICS_VERSION: &str = "compass.graph.publication/4";
 use sha2::{Digest, Sha256};
 
 const TRUSTED_NODE_RECORD: &str = TRUSTED_NODE_RECORD_ATTRIBUTE;
@@ -732,8 +733,13 @@ pub fn normalize_v1(
     extraction: Extraction,
     evidence: BuildEvidence,
 ) -> Result<GraphDocument, GraphError> {
-    normalize_v1_with_mode(extraction, evidence, PublicationMode::Strict)
-        .map(|outcome| outcome.document)
+    normalize_v1_with_mode(
+        extraction,
+        evidence,
+        PublicationMode::Strict,
+        InferenceLevel::Max,
+    )
+    .map(|outcome| outcome.document)
 }
 
 /// Publish the largest strict-valid graph after quarantining invalid records.
@@ -741,7 +747,23 @@ pub fn normalize_v1_best_effort(
     extraction: Extraction,
     evidence: BuildEvidence,
 ) -> Result<PublicationOutcome, GraphError> {
-    normalize_v1_with_mode(extraction, evidence, PublicationMode::BestEffort)
+    normalize_v1_best_effort_with_inference(extraction, evidence, InferenceLevel::Max)
+}
+
+/// Publish the largest strict-valid graph while suppressing provably
+/// disallowed call edges after they have contributed raw normalization facts
+/// but before typed edge materialization.
+pub fn normalize_v1_best_effort_with_inference(
+    extraction: Extraction,
+    evidence: BuildEvidence,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    normalize_v1_with_mode(
+        extraction,
+        evidence,
+        PublicationMode::BestEffort,
+        inference_level,
+    )
 }
 
 fn prepare_edge(
@@ -1021,6 +1043,7 @@ fn normalize_v1_with_mode(
     mut extraction: Extraction,
     mut evidence: BuildEvidence,
     mode: PublicationMode,
+    inference_level: InferenceLevel,
 ) -> Result<PublicationOutcome, GraphError> {
     let mut profile_started = Instant::now();
     let mut quarantine = QuarantineCollector::default();
@@ -1059,6 +1082,8 @@ fn normalize_v1_with_mode(
         &mut quarantine,
     )?;
     profile_v1("v1 generic symbol resolution", &mut profile_started);
+    prefilter_extraction_inference(&mut extraction, inference_level);
+    profile_v1("v1 inference admission", &mut profile_started);
 
     if mode == PublicationMode::BestEffort && !canonical_raw_order {
         if extraction.nodes.len() < 512 {
@@ -1485,12 +1510,10 @@ fn normalize_v1_with_mode(
 fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, GraphError> {
     let mut node = serde_json::from_value::<NodeRecord>(value)
         .map_err(|error| raw_error(raw_id, &error.to_string()))?;
-    // Trusted records already carry typed semantics, but older producers used a
-    // global qualified-name identity for document blocks.  Documents are
-    // occurrences: preserve their source anchor in the canonical identity even
-    // when they arrive through the trusted path (which bypasses raw
-    // normalization).  This prevents repeated Markdown/HTML blocks with the
-    // same heading from quarantining one another.
+    // Trusted records already carry typed semantics. Markdown headings with a
+    // retained fragment URI have a hierarchical identity that survives source
+    // movement; other document resources remain positional occurrences so
+    // repeated blocks cannot quarantine one another.
     if node.kind == NodeKind::Resource
         && matches!(
             node.details,
@@ -1501,15 +1524,15 @@ fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, Grap
         )
         && let Some(site) = node.source.as_ref()
     {
-        let identity_name = if semantic_document_resource(node.details.as_ref()) {
-            node.qualified_name.clone()
+        node.id = if typed_markdown_heading(&node) {
+            domain_id(NodeKind::Resource, &site.file, &node.qualified_name)
         } else {
-            format!(
+            let positional_name = format!(
                 "{}@{}:{}",
                 node.qualified_name, site.start_byte, site.end_byte
-            )
+            );
+            domain_id(NodeKind::Resource, &site.file, &positional_name)
         };
-        node.id = domain_id(NodeKind::Resource, &site.file, &identity_name);
     }
     if node.source.is_none() {
         for evidence in &mut node.evidence {
@@ -2810,6 +2833,24 @@ pub fn normalize_document_v1_with_inventory_best_effort(
     normalize_v1_best_effort(extraction, evidence)
 }
 
+pub fn normalize_document_v1_with_inventory_best_effort_at_inference(
+    document: &compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+    )?;
+    normalize_v1_best_effort_with_inference(extraction, evidence, inference_level)
+}
+
 /// Publish an owned analysis document without cloning its node and edge facts.
 ///
 /// Callers that already hold a deterministic publication-only document can
@@ -2857,6 +2898,26 @@ pub fn normalize_document_v1_with_inventory_and_source_digests_best_effort_owned
     normalize_v1_best_effort(extraction, evidence)
 }
 
+pub fn normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference(
+    document: compass_model::GraphDocument,
+    repository_root: &Path,
+    configuration_digest: impl Into<String>,
+    source_commit: Option<&str>,
+    inventory: Vec<InventoryEvidence>,
+    source_digests: Option<&BTreeMap<String, SourceDigest>>,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    let (extraction, evidence) = document_publication_input_owned(
+        document,
+        repository_root,
+        configuration_digest,
+        source_commit,
+        inventory,
+        source_digests,
+    )?;
+    normalize_v1_best_effort_with_inference(extraction, evidence, inference_level)
+}
+
 /// Publish an owned analysis document using evidence prepared from the same
 /// immutable document before ownership transfer.
 pub fn normalize_document_v1_with_evidence_best_effort_owned(
@@ -2864,6 +2925,18 @@ pub fn normalize_document_v1_with_evidence_best_effort_owned(
     evidence: BuildEvidence,
 ) -> Result<PublicationOutcome, GraphError> {
     normalize_v1_best_effort(document_extraction_owned(document), evidence)
+}
+
+pub fn normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+    document: compass_model::GraphDocument,
+    evidence: BuildEvidence,
+    inference_level: InferenceLevel,
+) -> Result<PublicationOutcome, GraphError> {
+    normalize_v1_best_effort_with_inference(
+        document_extraction_owned(document),
+        evidence,
+        inference_level,
+    )
 }
 
 fn document_publication_input(
@@ -4233,7 +4306,12 @@ fn node_details(
         })),
         NodeKind::Resource => Some(NodeDetails::Resource(ResourceNodeDetails {
             resource_kind: resource_kind.unwrap_or(ResourceKind::Document),
-            uri: optional_string(attributes, "uri"),
+            uri: optional_string(attributes, "uri").or_else(|| {
+                raw_markdown_heading(attributes)
+                    .then(|| optional_string(attributes, "anchor_slug"))
+                    .flatten()
+                    .map(|slug| format!("#{slug}"))
+            }),
             media_type: optional_string(attributes, "media_type"),
         })),
         NodeKind::Event | NodeKind::Message | NodeKind::Topic | NodeKind::Queue => {
@@ -4419,6 +4497,17 @@ fn node_identity(
                     resource_kind: ResourceKind::Document,
                     ..
                 }))
+            ) && raw_markdown_heading(attributes) =>
+        {
+            domain_id(kind, source_path, qualified_name)
+        }
+        NodeKind::Resource
+            if matches!(
+                details,
+                Some(NodeDetails::Resource(ResourceNodeDetails {
+                    resource_kind: ResourceKind::Document,
+                    ..
+                }))
             ) =>
         {
             if semantic_document_resource(details) {
@@ -4509,6 +4598,27 @@ fn semantic_document_resource(details: Option<&NodeDetails>) -> bool {
             ..
         })) if uri.starts_with('#')
     )
+}
+
+fn raw_markdown_heading(attributes: &Map<String, Value>) -> bool {
+    optional_any_string(attributes, &["language", "lang"]).as_deref() == Some("markdown")
+        && optional_string(attributes, "document_kind").as_deref() == Some("heading")
+        && matches!(
+            optional_string(attributes, "heading_style").as_deref(),
+            Some("atx" | "setext")
+        )
+}
+
+fn typed_markdown_heading(node: &NodeRecord) -> bool {
+    node.language.as_deref() == Some("markdown")
+        && matches!(
+            node.details.as_ref(),
+            Some(NodeDetails::Resource(ResourceNodeDetails {
+                resource_kind: ResourceKind::Document,
+                uri: Some(uri),
+                ..
+            })) if uri.starts_with('#')
+        )
 }
 
 fn raw_anchor(

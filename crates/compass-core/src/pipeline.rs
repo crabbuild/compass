@@ -17,15 +17,16 @@ use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
     GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
-    InventoryEvidence, PublicationOmissions, SnapshotError, SnapshotSelector, SourceDigest,
-    build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
-    cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
-    graph_insights, graph_snapshot_needs_gc, label_communities_by_hub, max_canonical_graph_bytes,
-    normalize_document_v1_with_evidence_best_effort_owned,
-    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
-    normalize_document_v1_with_inventory_best_effort, remap_communities_to_previous,
-    score_communities, write_canonical_graph_json,
-    write_fact_neutral_graph_json_delta_prevalidated,
+    IncrementalClusterLimits, InferenceLevel, InventoryEvidence, PublicationOmissions,
+    SnapshotError, SnapshotSelector, SourceDigest, apply_inference_level,
+    build_owned_with_tiebreaker_at_inference as build_document, canonical_edge_kind,
+    canonical_raw_edge_sites, cluster_incremental, deduped_node_count, extraction_from_v1,
+    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    label_communities_by_hub, max_canonical_graph_bytes,
+    normalize_document_v1_with_evidence_best_effort_owned_at_inference,
+    normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
+    normalize_document_v1_with_inventory_best_effort_at_inference, score_communities,
+    write_canonical_graph_json, write_fact_neutral_graph_json_delta_prevalidated,
 };
 use compass_languages::{
     BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
@@ -46,12 +47,14 @@ use compass_model::provenance::{
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
-    DetectionSummary, GraphViewModel, HtmlOptions, OutputError, ReportOptions, TokenCost,
-    generate_report, graph_view_model_document, write_html,
+    DetectionSummary, FreshnessBasis, FreshnessStatus, GraphViewModel, HtmlOptions,
+    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost, agent_orientation,
+    graph_view_model_document, render_agent_report_markdown, render_orientation_json, write_html,
 };
 use compass_resolve::{
-    apply_program_projection, collect_program_projection_sites, merge_decl_def_classes_if_needed,
-    merge_decl_def_classes_if_needed_changed, resolve_prevalidated_owned_with_root,
+    ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
+    merge_decl_def_classes_if_needed, merge_decl_def_classes_if_needed_changed,
+    resolve_prevalidated_owned_with_root_at_inference, universal_resolution_report,
 };
 use compass_store::{
     GRAPH_SCHEMA_V1, STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef,
@@ -80,6 +83,10 @@ use crate::raw_guard::enforce_incomplete_raw_guard;
 pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = "semantic-marker.json";
 const PIPELINE_RAYON_WORKER_CAP: usize = 12;
+// Debug builds and deeply nested parser inputs can exhaust Rayon's platform
+// default (commonly 2 MiB) while one worker owns the full collection pipeline.
+// Keep the bound explicit and portable; stack pages remain demand-paged.
+const PIPELINE_RAYON_STACK_SIZE_BYTES: usize = 8 * 1024 * 1024;
 const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 // Calibrated on the C-003 deterministic fixture: 112,893 source bytes produced
 // 6,843,452 canonical bytes (60.62x). Rounding down avoids claiming precision
@@ -89,8 +96,9 @@ const PREFLIGHT_GRAPH_BYTES_PER_SOURCE_BYTE: u64 = 60;
 const PREFLIGHT_PARTIAL_FILE_BYTES: u64 = 512;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
-const ROOT_ARTIFACTS: [&str; 6] = [
+const ROOT_ARTIFACTS: [&str; 7] = [
     "GRAPH_REPORT.md",
+    "orientation.json",
     "graph-overview.json",
     "graph.html",
     "manifest.json",
@@ -117,6 +125,11 @@ pub struct BuildOptions {
     /// default query index for bounded, large-graph reads; `--store json`
     /// opts out when only the portable artifact is wanted.
     pub graph_storage: GraphStorage,
+    /// Maximum inferred relationship class admitted to the published graph.
+    ///
+    /// Extraction caches retain complete evidence regardless of this policy;
+    /// changing the level deterministically republishes a coherent subgraph.
+    pub inference_level: InferenceLevel,
     pub gitignore: bool,
     pub ignore_policy: IgnorePolicy,
     pub extra_excludes: Vec<String>,
@@ -200,6 +213,8 @@ struct OutputStats {
     omitted_edges: usize,
     #[serde(default)]
     identity_collisions: usize,
+    #[serde(default)]
+    resolution_degraded: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -357,6 +372,7 @@ impl BuildOptions {
             no_cluster: false,
             no_viz: false,
             graph_storage: GraphStorage::default(),
+            inference_level: InferenceLevel::default(),
             gitignore: true,
             ignore_policy: IgnorePolicy::CurrentCheckout,
             extra_excludes: Vec::new(),
@@ -1454,7 +1470,6 @@ fn fact_neutral_pre_cache_sources(
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
         || options.purpose != BuildPurpose::Extract
-        || !options.no_cluster
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1573,7 +1588,6 @@ fn fact_neutral_incremental_candidate(
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
         || options.purpose != BuildPurpose::Extract
-        || !options.no_cluster
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1854,6 +1868,7 @@ fn publish_fact_neutral_incremental(
     let published_nodes = current.nodes.len();
     let published_edges = current.links.len();
     let omissions = saved_publication_omissions(&output_dir);
+    let resolution_degraded = saved_resolution_degraded(&output_dir);
     let graph_path = output_dir.join("graph.json");
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let previous = previous.ok_or_else(|| {
@@ -1911,14 +1926,24 @@ fn publish_fact_neutral_incremental(
     if let Some(metrics) = store_metrics {
         record_store_metrics(timings, metrics);
     }
-    remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+    let community_ids = current
+        .nodes
+        .iter()
+        .filter_map(|node| node.community.as_ref().map(|community| community.id))
+        .collect::<BTreeSet<_>>();
+    let communities = community_ids.len();
+    let clustered = !options.no_cluster;
+    if !clustered {
+        remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+    }
     save_output_stats(
         &output_dir,
         published_nodes,
         published_edges,
-        0,
-        false,
+        communities,
+        clustered,
         omissions,
+        resolution_degraded,
     )?;
     write_ast_fact_digest_state(&output_dir, fact_state)?;
     write_semantic_marker(&output_dir, None)?;
@@ -1937,7 +1962,7 @@ fn publish_fact_neutral_incremental(
         sources.len(),
         published_nodes,
         published_edges,
-        0,
+        communities,
         omissions,
         None,
         graph_seal,
@@ -1964,11 +1989,12 @@ fn publish_fact_neutral_incremental(
         empty_files,
         nodes: published_nodes,
         edges: published_edges,
-        communities: 0,
+        communities,
         omitted_nodes: omissions.nodes,
         omitted_edges: omissions.edges,
         identity_collisions: omissions.identity_collisions,
-        partial_graph: omissions.is_partial(),
+        partial_graph: omissions.is_partial() || resolution_degraded,
+        resolution_degraded,
         html_written: false,
         outputs_changed: true,
         program_modules: 0,
@@ -2000,6 +2026,8 @@ pub struct BuildResult {
     pub omitted_edges: usize,
     pub identity_collisions: usize,
     pub partial_graph: bool,
+    /// Universal collection resolution omitted candidates under its bounded strategy.
+    pub resolution_degraded: bool,
     pub html_written: bool,
     pub outputs_changed: bool,
     pub program_modules: usize,
@@ -2235,6 +2263,7 @@ fn build_graph_inner(
     let worker_count = pipeline_rayon_workers(options);
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(worker_count)
+        .stack_size(PIPELINE_RAYON_STACK_SIZE_BYTES)
         .thread_name(|index| format!("compass-pipeline-{index}"))
         .build()
         .map_err(|error| CoreError::WorkerPool(error.to_string()))?;
@@ -2453,7 +2482,9 @@ fn build_graph_inner_unscoped(
                     identity_collisions: state.stats.identity_collisions,
                     partial_graph: state.stats.omitted_nodes > 0
                         || state.stats.omitted_edges > 0
-                        || state.stats.identity_collisions > 0,
+                        || state.stats.identity_collisions > 0
+                        || saved_resolution_degraded(&output_dir),
+                    resolution_degraded: saved_resolution_degraded(&output_dir),
                     html_written: output_dir.join("graph.html").is_file(),
                     outputs_changed: false,
                     program_modules: state.stats.program_modules,
@@ -2536,7 +2567,8 @@ fn build_graph_inner_unscoped(
                 omitted_nodes: stats.omitted_nodes,
                 omitted_edges: stats.omitted_edges,
                 identity_collisions: stats.identity_collisions,
-                partial_graph: stats.omissions().is_partial(),
+                partial_graph: stats.omissions().is_partial() || stats.resolution_degraded,
+                resolution_degraded: stats.resolution_degraded,
                 html_written: output_dir.join("graph.html").is_file(),
                 outputs_changed: false,
                 program_modules: program_modules(unchanged_program.as_ref()),
@@ -2714,7 +2746,8 @@ fn build_graph_inner_unscoped(
     }
     let worker_count = options
         .max_workers
-        .unwrap_or_else(|| default_ast_workers(missing.len()));
+        .unwrap_or_else(|| default_ast_workers(missing.len()))
+        .max(1);
     // Resolver source text is only consulted by the PHP type-reference pass.
     // Keeping every decoded source string alive across extraction and graph
     // publication otherwise duplicates the repository's source footprint in
@@ -2726,29 +2759,13 @@ fn build_graph_inner_unscoped(
     });
     // An explicit worker count is an opt-in performance decision. Honor it
     // even for smaller repositories so callers can trade parser-table
-    // residency for throughput instead of silently falling back to the
-    // sequential path below. The automatic path uses the same bounded local
-    // pool once enough missing files exist to amortize parser-table residency.
-    // On small repositories, a single requested worker remains sequential; it
-    // avoids paying for a pool that cannot add parallelism.
+    // residency for throughput. On small repositories, a single requested
+    // worker remains sequential so pool scheduling cannot dominate extraction.
     let parallel_extraction = should_parallel_extract(options, missing.len());
-    let worker_pool = if parallel_extraction {
-        Some(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(worker_count)
-                .thread_name(|index| format!("compass-ast-{index}"))
-                .build()
-                .map_err(|error| CoreError::WorkerPool(error.to_string()))?,
-        )
-    } else {
-        None
-    };
     profile_internal("extract setup and cache load", &mut internal_started);
-    // A Rayon worker pool costs more resident memory than it saves time when
-    // only a handful of files are missing. Below the measured crossover stay
-    // sequential; above it use a bounded local pool so an embedding
-    // application's global Rayon settings cannot silently serialize cold
-    // extraction or multiply parser working sets without an explicit opt-in.
+    // The full build already runs inside Compass's bounded pipeline pool.
+    // Reuse those workers so parser/evidence pages remain available to later
+    // phases instead of being abandoned when a short-lived nested pool exits.
     let completed_files = Mutex::new(0_usize);
     let total_files = missing.len();
     let extract_source =
@@ -2860,20 +2877,22 @@ fn build_graph_inner_unscoped(
             .collect::<Vec<_>>()
     } else {
         let worker_evidence = Arc::clone(&project_evidence);
-        let extract = || {
-            missing
-                .par_iter()
-                .map_init(
-                    || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
-                    extract_source,
-                )
-                .collect::<Vec<_>>()
-        };
-        if let Some(pool) = &worker_pool {
-            pool.install(extract)
-        } else {
-            extract()
-        }
+        let chunk_size = missing.len().div_ceil(worker_count).max(1);
+        missing
+            .par_chunks(chunk_size)
+            .map_init(
+                || Engine::with_project_evidence(Arc::clone(&worker_evidence)),
+                |engine, paths| {
+                    paths
+                        .iter()
+                        .map(|path| extract_source(engine, path))
+                        .collect::<Vec<_>>()
+                },
+            )
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect()
     };
     let mut extraction_failures = BTreeMap::new();
     let mut fresh = missing
@@ -3216,23 +3235,35 @@ fn build_graph_inner_unscoped(
     };
     let cached_source_text: HashMap<_, _> = if sources.len() < 256 {
         sources.iter().filter_map(read_cached_source).collect()
-    } else if let Some(pool) = &worker_pool {
-        pool.install(|| sources.par_iter().filter_map(read_cached_source).collect())
     } else {
         sources.par_iter().filter_map(read_cached_source).collect()
     };
     fresh_source_text.extend(cached_source_text);
     let source_text = fresh_source_text;
     profile_internal("resolver source inventory", &mut internal_started);
-    drop(worker_pool);
     drop(project_evidence);
     drop(fresh_paths);
     drop(ordered_paths);
     drop(ast_id_remap);
     drop(ast_root_marker);
+    profile_extraction_inventory(&ordered);
     let program_projection_sites = collect_program_projection_sites(&ordered);
     profile_internal("Program projection site collection", &mut internal_started);
-    let mut resolved = resolve_prevalidated_owned_with_root(ordered, &source_text, &root);
+    let resolution_admission = match options.inference_level {
+        InferenceLevel::Low => ResolutionAdmission::Low,
+        InferenceLevel::Medium => ResolutionAdmission::Medium,
+        InferenceLevel::High => ResolutionAdmission::High,
+        InferenceLevel::Max => ResolutionAdmission::Max,
+    };
+    let mut resolved = resolve_prevalidated_owned_with_root_at_inference(
+        ordered,
+        &source_text,
+        &root,
+        resolution_admission,
+    );
+    let resolution_report = universal_resolution_report(&resolved).unwrap_or_default();
+    let resolution_degraded = resolution_report.degraded;
+    let resolution_omitted_candidates = resolution_report.omitted_candidates;
     profile_internal("cross-file resolution total", &mut internal_started);
     drop(source_text);
     internal_started = Instant::now();
@@ -3311,6 +3342,7 @@ fn build_graph_inner_unscoped(
         && !source_removed
         && supplemental.is_empty()
         && semantic.is_some_and(semantic_layer_is_empty)
+        && !resolution_degraded
         && let Ok(document) = GraphDocument::load(&output_dir.join("graph.json"))
     {
         let omissions = saved_publication_omissions(&output_dir);
@@ -3361,6 +3393,7 @@ fn build_graph_inner_unscoped(
                 omitted_edges: omissions.edges,
                 identity_collisions: omissions.identity_collisions,
                 partial_graph: omissions.is_partial(),
+                resolution_degraded: false,
                 html_written: false,
                 outputs_changed: false,
                 program_modules: program_modules(program.as_ref()),
@@ -3395,7 +3428,14 @@ fn build_graph_inner_unscoped(
             &root,
             deduped_node_count(&resolved.nodes),
         )?;
-        let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+        let document = build_document(
+            resolved,
+            true,
+            true,
+            Some(&root),
+            tiebreaker,
+            options.inference_level,
+        )?;
         profile_internal_duration(
             "no-cluster graph document build",
             no_cluster_graph_started.elapsed(),
@@ -3406,20 +3446,23 @@ fn build_graph_inner_unscoped(
             .clone()
             .or_else(|| git_commit(&root));
         let no_cluster_normalization_started = Instant::now();
-        let published = normalize_document_v1_with_inventory_and_source_digests_best_effort_owned(
-            document,
-            &root,
-            configuration_digest,
-            source_commit.as_deref(),
-            detection_inventory(
-                &detection,
-                semantic,
-                &extraction_failures,
-                &extraction_partials,
+        let mut published =
+            normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference(
+                document,
                 &root,
-            ),
-            Some(&fresh_source_digests),
-        )?;
+                configuration_digest,
+                source_commit.as_deref(),
+                detection_inventory(
+                    &detection,
+                    semantic,
+                    &extraction_failures,
+                    &extraction_partials,
+                    &root,
+                ),
+                Some(&fresh_source_digests),
+                options.inference_level,
+            )?;
+        apply_inference_level(&mut published.document, options.inference_level);
         profile_internal_duration(
             "no-cluster v1 normalization",
             no_cluster_normalization_started.elapsed(),
@@ -3427,7 +3470,10 @@ fn build_graph_inner_unscoped(
         if published.document.nodes.is_empty() {
             return Err(CoreError::EmptyGraph);
         }
-        let omissions = published.omissions;
+        let mut omissions = published.omissions;
+        omissions.edges = omissions
+            .edges
+            .saturating_add(resolution_omitted_candidates);
         let published_nodes = published.document.nodes.len();
         let published_edges = published.document.links.len();
         let no_cluster_graph_write_started = Instant::now();
@@ -3472,6 +3518,7 @@ fn build_graph_inner_unscoped(
             0,
             false,
             omissions,
+            resolution_degraded,
         )?;
         write_ast_fact_digest_state(&output_dir, &current_fact_state)?;
         write_semantic_marker(&output_dir, semantic)?;
@@ -3547,7 +3594,8 @@ fn build_graph_inner_unscoped(
                 omitted_nodes: omissions.nodes,
                 omitted_edges: omissions.edges,
                 identity_collisions: omissions.identity_collisions,
-                partial_graph: omissions.is_partial(),
+                partial_graph: omissions.is_partial() || resolution_degraded,
+                resolution_degraded,
                 html_written: false,
                 outputs_changed: true,
                 program_modules: program_modules(program.as_ref()),
@@ -3574,7 +3622,14 @@ fn build_graph_inner_unscoped(
             None,
         ));
     }
-    let document = build_document(resolved, true, true, Some(&root), tiebreaker)?;
+    let document = build_document(
+        resolved,
+        true,
+        true,
+        Some(&root),
+        tiebreaker,
+        options.inference_level,
+    )?;
     profile_internal("graph document build and dedup", &mut internal_started);
     timings.graph_assembly = stage_started.elapsed();
     stage_started = Instant::now();
@@ -3600,7 +3655,7 @@ fn build_graph_inner_unscoped(
     if unchanged_layers && supplemental.is_empty() && !options.force && unchanged_artifacts_complete
     {
         let preflight_started = Instant::now();
-        let preflight = normalize_document_v1_with_inventory_best_effort(
+        let mut preflight = normalize_document_v1_with_inventory_best_effort_at_inference(
             &document,
             &root,
             graph_configuration_digest(options, &output_dir)?,
@@ -3612,11 +3667,15 @@ fn build_graph_inner_unscoped(
                 &extraction_partials,
                 &root,
             ),
+            options.inference_level,
         )?;
+        apply_inference_level(&mut preflight.document, options.inference_level);
+        let preflight_document = preflight.document.to_legacy_document()?;
         profile_internal_duration("graph.json v1 preflight", preflight_started.elapsed());
-        if !preflight.omissions.is_partial()
+        if !resolution_degraded
+            && !preflight.omissions.is_partial()
             && GraphDocument::load(&output_dir.join("graph.json"))
-                .is_ok_and(|existing| topology_is_unchanged(&existing, &document))
+                .is_ok_and(|existing| topology_is_unchanged(&existing, &preflight_document))
         {
             let communities = previous_communities(&output_dir.join("graph.json"))
                 .values()
@@ -3640,8 +3699,8 @@ fn build_graph_inner_unscoped(
                 &output_dir,
                 &manifest_path,
                 sources.len(),
-                document.nodes.len(),
-                document.links.len(),
+                preflight_document.nodes.len(),
+                preflight_document.links.len(),
                 communities,
                 PublicationOmissions::default(),
                 program.as_ref(),
@@ -3667,13 +3726,14 @@ fn build_graph_inner_unscoped(
                     files_extracted: missing.len(),
                     files_cached: sources.len().saturating_sub(missing.len()),
                     empty_files,
-                    nodes: document.nodes.len(),
-                    edges: document.links.len(),
+                    nodes: preflight_document.nodes.len(),
+                    edges: preflight_document.links.len(),
                     communities,
                     omitted_nodes: 0,
                     omitted_edges: 0,
                     identity_collisions: 0,
                     partial_graph: false,
+                    resolution_degraded: false,
                     html_written: output_dir.join("graph.html").is_file(),
                     outputs_changed: false,
                     program_modules: program_modules(program.as_ref()),
@@ -3730,8 +3790,12 @@ fn build_graph_inner_unscoped(
         publication_evidence_started.elapsed(),
     );
     let normalization_started = Instant::now();
-    let mut published =
-        normalize_document_v1_with_evidence_best_effort_owned(raw_document, publication_evidence)?;
+    let mut published = normalize_document_v1_with_evidence_best_effort_owned_at_inference(
+        raw_document,
+        publication_evidence,
+        options.inference_level,
+    )?;
+    apply_inference_level(&mut published.document, options.inference_level);
     profile_internal_duration(
         "graph.json v1 normalization",
         normalization_started.elapsed(),
@@ -3739,7 +3803,16 @@ fn build_graph_inner_unscoped(
     if published.document.nodes.is_empty() {
         return Err(CoreError::EmptyGraph);
     }
-    let document = published.document.to_legacy_document()?;
+    let mut omissions = published.omissions;
+    omissions.edges = omissions
+        .edges
+        .saturating_add(resolution_omitted_candidates);
+    let report_health = current_orientation_health(options, omissions);
+    // Legacy clustering and report code needs a compatibility projection, but
+    // retaining it beside the complete typed authority doubles the dominant
+    // graph working set. Move records into the projection and reconstruct the
+    // strict authority after those consumers finish instead.
+    let document = published.document.into_legacy_document()?;
 
     // A history realization must depend only on the target commit and build
     // profile. Prior community numbering is current-worktree operational state
@@ -3748,36 +3821,53 @@ fn build_graph_inner_unscoped(
         resolution: options.resolution,
         exclude_hubs_percentile: options.exclude_hubs,
     };
-    let ((previous, previous_elapsed), (current, cluster_elapsed)) = rayon::join(
-        || {
-            let started = Instant::now();
-            let previous = if std::env::var_os("COMPASS_HISTORY_BUILD").is_some() {
-                HashMap::new()
-            } else {
-                previous_communities(&output_dir.join("graph.json"))
-            };
-            (previous, started.elapsed())
-        },
-        || {
-            let started = Instant::now();
-            let current = cluster(&document, cluster_options);
-            (current, started.elapsed())
-        },
-    );
-    profile_internal_duration("load previous communities", previous_elapsed);
-    profile_internal_duration("Louvain clustering", cluster_elapsed);
-    internal_started = Instant::now();
-    let communities = if previous.is_empty() {
-        current
+    let previous_started = Instant::now();
+    let history_build = std::env::var_os("COMPASS_HISTORY_BUILD").is_some();
+    let previous = if history_build {
+        HashMap::new()
     } else {
-        remap_communities_to_previous(&current, &previous)
+        previous_communities(&output_dir.join("graph.json"))
     };
+    let previous_elapsed = previous_started.elapsed();
+    profile_internal_duration("load previous communities", previous_elapsed);
+    let changed_sources = missing
+        .iter()
+        .map(|path| relative_fact_path(path, &root))
+        .collect::<BTreeSet<_>>();
+    let cluster_started = Instant::now();
+    let clustered = cluster_incremental(
+        &document,
+        &previous,
+        &changed_sources,
+        cluster_options,
+        IncrementalClusterLimits::default(),
+    );
+    let cluster_elapsed = cluster_started.elapsed();
+    profile_internal_duration(
+        if clustered.used_incremental {
+            "bounded incremental clustering"
+        } else {
+            "Louvain clustering"
+        },
+        cluster_elapsed,
+    );
+    internal_started = Instant::now();
+    let communities = clustered.communities;
     timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
     let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
 
-    let graph_analyses = || -> Result<(bool, Duration, Option<Value>), CoreError> {
+    let graph_analyses = ||
+     -> Result<
+        (
+            bool,
+            Duration,
+            Option<Value>,
+            Option<compass_output::AgentOrientation>,
+        ),
+        CoreError,
+    > {
         let started = Instant::now();
         let analysis_compute_started = Instant::now();
         let (cohesion, (gods, surprises, questions)) = rayon::join(
@@ -3818,18 +3908,17 @@ fn build_graph_inner_unscoped(
             })?;
             write_text_atomic(output_dir.join("labels.json"), &format!("{labels_json}\n"))?;
         }
-        let detection_summary = DetectionSummary {
-            total_files: detection.total_files,
-            total_words: usize::try_from(detection.total_words).unwrap_or(usize::MAX),
-            warning: (options.purpose == BuildPurpose::Extract)
-                .then(|| detection.warning.clone())
-                .flatten(),
-        };
-        let html_written = if options.purpose == BuildPurpose::Update {
+        let detection_summary = report_detection_summary(
+            detection.total_files,
+            detection.total_words,
+            detection.warning.clone(),
+        );
+        let orientation = if options.purpose == BuildPurpose::Update {
             let report_root = report_root_label(&options.root);
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
-            let report = generate_report(
+            report_options.health = report_health.clone();
+            Some(agent_orientation(
                 &document,
                 &communities,
                 &cohesion,
@@ -3841,8 +3930,11 @@ fn build_graph_inner_unscoped(
                 Some(&questions),
                 None,
                 &report_options,
-            );
-            write_text_atomic(output_dir.join("GRAPH_REPORT.md"), &report)?;
+            ))
+        } else {
+            None
+        };
+        let html_written = if options.purpose == BuildPurpose::Update {
             let html_path = output_dir.join("graph.html");
             if options.no_viz {
                 remove_if_exists(&html_path)?;
@@ -3879,6 +3971,7 @@ fn build_graph_inner_unscoped(
             html_written,
             started.elapsed(),
             retain_artifacts.then_some(analysis),
+            orientation,
         ))
     };
     let overview_output = || -> Result<(Duration, Option<GraphViewModel>), CoreError> {
@@ -3895,7 +3988,7 @@ fn build_graph_inner_unscoped(
         Ok((started.elapsed(), model))
     };
     let (analysis_result, overview_result) = rayon::join(graph_analyses, overview_output);
-    let (html_written, analysis_elapsed, retained_analysis) = analysis_result?;
+    let (html_written, analysis_elapsed, retained_analysis, orientation) = analysis_result?;
     let (overview_elapsed, overview_model) = overview_result?;
     profile_internal_duration(
         "parallel graph analyses and report publication",
@@ -3906,11 +3999,10 @@ fn build_graph_inner_unscoped(
         overview_elapsed,
     );
 
-    // The legacy projection is needed only by clustering, reports, and the
-    // bounded overview.  Release it before serializing the typed authority so
-    // large builds do not retain two complete graph representations while the
-    // SQLite/JSON publication path is writing its final artifacts.
-    drop(document);
+    // Move the compatibility records back into the typed authority before
+    // publication. The consuming conversion drains each record, so the two
+    // complete representations never coexist.
+    let mut published_document = V1GraphDocument::from_legacy_document(document)?;
 
     let publish_started = Instant::now();
     let graph_output_started = Instant::now();
@@ -3923,7 +4015,7 @@ fn build_graph_inner_unscoped(
                 .map(move |member| (member.as_str(), *community))
         })
         .collect::<HashMap<_, _>>();
-    for node in &mut published.document.nodes {
+    for node in &mut published_document.nodes {
         let Some(&community_index) = node_communities.get(node.id.as_str()) else {
             continue;
         };
@@ -3936,22 +4028,21 @@ fn build_graph_inner_unscoped(
             color: None,
         });
     }
-    let published_nodes = published.document.nodes.len();
-    let published_edges = published.document.links.len();
-    let omissions = published.omissions;
+    let published_nodes = published_document.nodes.len();
+    let published_edges = published_document.links.len();
     let serialization_started = Instant::now();
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let (metrics, seal) =
-            if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
-                publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
+            if let Some(previous) = load_graph_delta_base(&output_dir, &published_document) {
+                publish_graph_and_store_delta(&output_dir, &previous, &published_document)?
             } else {
-                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+                publish_graph_and_store_from_canonical(&output_dir, &published_document)?
             };
         (Some(metrics), Some(seal))
     } else {
         let graph_path = output_dir.join("graph.json");
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
-            write_canonical_graph_json(&published.document, writer).map_err(|source| {
+            write_canonical_graph_json(&published_document, writer).map_err(|source| {
                 compass_files::FileError::Io {
                     path: graph_path.clone(),
                     source,
@@ -3972,11 +4063,26 @@ fn build_graph_inner_unscoped(
     if options.purpose == BuildPurpose::Update {
         write_prepared_graph_overview(overview_model, &output_dir)?;
     }
+    if let Some(mut orientation) = orientation {
+        let seal = graph_seal.as_ref().ok_or_else(|| {
+            CoreError::InvalidBuildState(
+                "graph artifact seal is unavailable for Agent Orientation".to_owned(),
+            )
+        })?;
+        orientation.evidence_status.artifact_set_identity = Some(format!("sha256:{}", seal.sha256));
+        let report = render_agent_report_markdown(&orientation, false)?;
+        let orientation_json = render_orientation_json(&orientation)?;
+        write_text_atomic(output_dir.join("GRAPH_REPORT.md"), &report)?;
+        write_text_atomic(
+            output_dir.join("orientation.json"),
+            &format!("{orientation_json}\n"),
+        )?;
+    }
     let serialization_elapsed = serialization_started.elapsed();
     profile_internal_duration("graph.json v1 serialization", serialization_elapsed);
     profile_internal("graph.json v1 publication", &mut output_profile_started);
     let graph_output_elapsed = graph_output_started.elapsed();
-    let retained_document = retain_artifacts.then_some(published.document);
+    let retained_document = retain_artifacts.then_some(published_document);
     profile_internal_duration("graph publication", graph_output_elapsed);
     internal_started = Instant::now();
     timings.graph_assembly += stage_started.elapsed();
@@ -4001,6 +4107,7 @@ fn build_graph_inner_unscoped(
                 communities.len(),
                 true,
                 omissions,
+                resolution_degraded,
             )
         },
     );
@@ -4052,7 +4159,8 @@ fn build_graph_inner_unscoped(
         omitted_nodes: omissions.nodes,
         omitted_edges: omissions.edges,
         identity_collisions: omissions.identity_collisions,
-        partial_graph: omissions.is_partial(),
+        partial_graph: omissions.is_partial() || resolution_degraded,
+        resolution_degraded,
         html_written,
         outputs_changed: true,
         program_modules: program_modules(program.as_ref()),
@@ -4239,7 +4347,66 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
             GraphStorage::Sqlite => "sqlite",
         }
         .to_owned(),
+        inference_level: options.inference_level.as_str().to_owned(),
         max_source_bytes: options.max_source_bytes,
+    }
+}
+
+fn current_orientation_health(
+    options: &BuildOptions,
+    omissions: PublicationOmissions,
+) -> OrientationHealth {
+    let publication = if omissions.is_partial() {
+        PublicationStatus::Partial
+    } else {
+        PublicationStatus::Complete
+    };
+    let mut profile = format!(
+        "{}; cluster={}; code_only={}; program={}; storage={}",
+        match options.purpose {
+            BuildPurpose::Update => "update",
+            BuildPurpose::Extract => "extract",
+        },
+        !options.no_cluster,
+        options.code_only,
+        options.program_analysis,
+        match options.graph_storage {
+            GraphStorage::Json => "json",
+            GraphStorage::Sqlite => "sqlite",
+        }
+    );
+    if options.inference_level != InferenceLevel::Max {
+        profile.push_str(&format!("; inference={}", options.inference_level.as_str()));
+    }
+    let mut exclusions = options.scope.exclude.clone();
+    exclusions.extend(options.extra_excludes.iter().cloned());
+    exclusions.sort();
+    exclusions.dedup();
+    OrientationHealth {
+        freshness: FreshnessStatus::Current,
+        freshness_basis: FreshnessBasis::JustBuiltSelectedInputs,
+        publication: Some(publication),
+        omitted_nodes: Some(omissions.nodes),
+        omitted_edges: Some(omissions.edges),
+        identity_collisions: Some(omissions.identity_collisions),
+        diagnostic_examples_omitted: Some(omissions.examples_omitted),
+        build_profile: Some(profile),
+        scope_includes: options.scope.include.clone(),
+        configured_exclusions: exclusions,
+        corpus_measurements_available: true,
+        ..OrientationHealth::default()
+    }
+}
+
+fn report_detection_summary(
+    total_files: usize,
+    total_words: u64,
+    warning: Option<String>,
+) -> DetectionSummary {
+    DetectionSummary {
+        total_files,
+        total_words: usize::try_from(total_words).unwrap_or(usize::MAX),
+        warning,
     }
 }
 
@@ -4275,6 +4442,7 @@ fn publish_build_state(
                     output_dir.join(GRAPH_OVERVIEW_FILE),
                     output_dir.join("labels.json"),
                     output_dir.join("GRAPH_REPORT.md"),
+                    output_dir.join("orientation.json"),
                 ]);
             }
         }
@@ -4487,14 +4655,15 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
     if previous.directed != current.directed || previous.multigraph != current.multigraph {
         return false;
     }
-    // A valid externally supplied graph is not required to retain Compass's
-    // publication order. The merge walk below is correct only for sorted
-    // records, so fail closed to a full snapshot when either input was
-    // reordered instead of miscounting changes (or tripping debug builds).
-    if !records_are_sorted(&previous.nodes, |node| node.id.as_str())
-        || !records_are_sorted(&current.nodes, |node| node.id.as_str())
-        || !records_are_sorted(&previous.links, |edge| edge.id.as_str())
-        || !records_are_sorted(&current.links, |edge| edge.id.as_str())
+    // The normal publication path emits both collections in stable-ID order,
+    // but graph.json is still an input boundary: an older, hand-authored, or
+    // otherwise non-canonical yet structurally valid artifact can reach this
+    // check. Never feed such records to the merge walk. Falling back to full
+    // publication preserves correctness and restores canonical order on disk.
+    if !records_are_sorted_by(&previous.nodes, |node| node.id.as_str())
+        || !records_are_sorted_by(&previous.links, |edge| edge.id.as_str())
+        || !records_are_sorted_by(&current.nodes, |node| node.id.as_str())
+        || !records_are_sorted_by(&current.links, |edge| edge.id.as_str())
     {
         return false;
     }
@@ -4522,13 +4691,13 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
     true
 }
 
-fn records_are_sorted<T, F>(records: &[T], key: F) -> bool
+fn records_are_sorted_by<T, F>(records: &[T], key: F) -> bool
 where
     F: Fn(&T) -> &str,
 {
     records
         .windows(2)
-        .all(|pair| key(&pair[0]) <= key(&pair[1]))
+        .all(|records| key(&records[0]) <= key(&records[1]))
 }
 
 fn changed_record_count<T, F>(previous: &[T], current: &[T], key: F) -> usize
@@ -4536,16 +4705,8 @@ where
     T: PartialEq,
     F: Fn(&T) -> &str,
 {
-    debug_assert!(
-        previous
-            .windows(2)
-            .all(|records| key(&records[0]) <= key(&records[1]))
-    );
-    debug_assert!(
-        current
-            .windows(2)
-            .all(|records| key(&records[0]) <= key(&records[1]))
-    );
+    debug_assert!(records_are_sorted_by(previous, &key));
+    debug_assert!(records_are_sorted_by(current, &key));
 
     let mut previous_index = 0;
     let mut current_index = 0;
@@ -4701,14 +4862,6 @@ fn write_store_ref(output_dir: &Path, reference: &StoreRef) -> Result<(), CoreEr
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
-fn default_ast_workers(missing: usize) -> usize {
-    available_worker_count()
-        .min(default_ast_worker_cap(missing))
-        .max(1)
-}
-
-#[cfg(not(target_os = "macos"))]
 fn default_ast_workers(missing: usize) -> usize {
     available_worker_count()
         .min(default_ast_worker_cap(missing))
@@ -4726,10 +4879,9 @@ fn available_worker_count() -> usize {
     num_cpus::get()
 }
 
-// Large cold repositories retain enough per-file parser state for worker
-// parallelism to dominate peak RSS. Keep the automatic path bounded by the
-// host-aware pipeline ceiling; callers that have a known memory budget can
-// still opt into a different count through BuildOptions::max_workers.
+// Large cold repositories have enough files to amortize the pipeline ceiling.
+// Smaller repositories retain the established lower parser concurrency while
+// still reusing the long-lived pool's allocator pages in later build phases.
 const LARGE_REPOSITORY_AST_WORKER_CAP: usize = PIPELINE_RAYON_WORKER_CAP;
 const LARGE_REPOSITORY_AST_WORKER_MIN_FILES: usize = 1_024;
 const AUTOMATIC_PARALLEL_EXTRACT_MIN_FILES: usize = 32;
@@ -6650,6 +6802,7 @@ fn update_artifacts_complete(options: &BuildOptions, output_dir: &Path) -> bool 
     let mut required = vec![
         "graph.json",
         "GRAPH_REPORT.md",
+        "orientation.json",
         "labels.json",
         "source-root.txt",
         GRAPH_OVERVIEW_FILE,
@@ -6780,6 +6933,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
             omitted_nodes: 0,
             omitted_edges: 0,
             identity_collisions: 0,
+            resolution_degraded: false,
         };
         let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
         return Some(stats);
@@ -6808,6 +6962,7 @@ fn unchanged_output_stats(options: &BuildOptions, output_dir: &Path) -> Option<O
         omitted_nodes: 0,
         omitted_edges: 0,
         identity_collisions: 0,
+        resolution_degraded: false,
     };
     let _ = write_json_atomic(output_dir.join(OUTPUT_STATS_FILE), &stats, true);
     Some(stats)
@@ -6820,6 +6975,13 @@ fn saved_publication_omissions(output_dir: &Path) -> PublicationOmissions {
         .map_or_else(PublicationOmissions::default, |stats| stats.omissions())
 }
 
+fn saved_resolution_degraded(output_dir: &Path) -> bool {
+    fs::read(output_dir.join(OUTPUT_STATS_FILE))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OutputStats>(&bytes).ok())
+        .is_some_and(|stats| stats.resolution_degraded)
+}
+
 fn save_output_stats(
     output_dir: &Path,
     nodes: usize,
@@ -6827,6 +6989,7 @@ fn save_output_stats(
     communities: usize,
     clustered: bool,
     omissions: PublicationOmissions,
+    resolution_degraded: bool,
 ) -> Result<(), CoreError> {
     let graph_bytes = fs::metadata(output_dir.join("graph.json"))
         .map_err(|source| compass_files::FileError::Io {
@@ -6845,6 +7008,7 @@ fn save_output_stats(
             omitted_nodes: omissions.nodes,
             omitted_edges: omissions.edges,
             identity_collisions: omissions.identity_collisions,
+            resolution_degraded,
         },
         true,
     )?;
@@ -6961,6 +7125,59 @@ fn profile_internal_duration(label: &str, elapsed: Duration) {
     if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
         eprintln!("[compass internal] {label}: {:.3}s", elapsed.as_secs_f64());
     }
+}
+
+fn profile_extraction_inventory(extractions: &[Extraction]) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_none() {
+        return;
+    }
+    let mut declarations = 0_usize;
+    let mut scopes = 0_usize;
+    let mut bindings = 0_usize;
+    let mut occurrences = 0_usize;
+    let mut candidates = 0_usize;
+    let mut external_candidates = 0_usize;
+    let mut hierarchy_candidates = 0_usize;
+    let mut relations = BTreeMap::<&'static str, usize>::new();
+    for batch in extractions
+        .iter()
+        .filter_map(|extraction| extraction.semantic_evidence.as_ref())
+    {
+        declarations = declarations.saturating_add(batch.declarations.len());
+        scopes = scopes.saturating_add(batch.scopes.len());
+        bindings = bindings.saturating_add(batch.bindings.len());
+        occurrences = occurrences.saturating_add(batch.occurrences.len());
+        candidates = candidates.saturating_add(batch.candidates.len());
+        for candidate in &batch.candidates {
+            if candidate.constraints.allow_external {
+                external_candidates = external_candidates.saturating_add(1);
+            }
+            if candidate.constraints.hierarchy.is_some() {
+                hierarchy_candidates = hierarchy_candidates.saturating_add(1);
+            }
+            let relation = match candidate.relation {
+                compass_languages::CandidateRelation::Calls => "calls",
+                compass_languages::CandidateRelation::IndirectCalls => "indirect_calls",
+                compass_languages::CandidateRelation::Tests => "tests",
+                compass_languages::CandidateRelation::References => "references",
+                compass_languages::CandidateRelation::Contains => "contains",
+                compass_languages::CandidateRelation::Owns => "owns",
+                _ => "other",
+            };
+            *relations.entry(relation).or_default() += 1;
+        }
+    }
+    eprintln!(
+        "[compass internal] extraction inventory: raw_nodes={} raw_edges={} declarations={declarations} scopes={scopes} bindings={bindings} occurrences={occurrences} candidates={candidates} external_candidates={external_candidates} hierarchy_candidates={hierarchy_candidates} relations={relations:?}",
+        extractions
+            .iter()
+            .map(|extraction| extraction.nodes.len())
+            .sum::<usize>(),
+        extractions
+            .iter()
+            .map(|extraction| extraction.edges.len())
+            .sum::<usize>(),
+    );
 }
 
 fn join_program_worker(
@@ -7081,9 +7298,160 @@ mod tests {
 
     use compass_graph::{GraphSnapshotReader, IndexKind};
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
+    use compass_model::provenance::{EvidenceConfidence, effective_confidence};
     use serde_json::{Map, Value};
 
     use super::*;
+
+    #[test]
+    fn current_orientation_health_preserves_scope_and_partial_publication() {
+        let mut options = BuildOptions::new(".");
+        options.scope.include = vec!["src/".to_owned()];
+        options.scope.exclude = vec!["src/generated/".to_owned()];
+        options.extra_excludes = vec!["vendor".to_owned(), "src/generated/".to_owned()];
+        options.code_only = true;
+        let health = current_orientation_health(
+            &options,
+            PublicationOmissions {
+                nodes: 7,
+                edges: 11,
+                identity_collisions: 2,
+                examples_omitted: 3,
+            },
+        );
+        assert_eq!(health.freshness, FreshnessStatus::Current);
+        assert_eq!(
+            health.freshness_basis,
+            FreshnessBasis::JustBuiltSelectedInputs
+        );
+        assert_eq!(health.publication, Some(PublicationStatus::Partial));
+        assert_eq!(health.omitted_nodes, Some(7));
+        assert_eq!(health.omitted_edges, Some(11));
+        assert_eq!(health.identity_collisions, Some(2));
+        assert_eq!(health.diagnostic_examples_omitted, Some(3));
+        assert_eq!(health.scope_includes, ["src/"]);
+        assert_eq!(health.configured_exclusions, ["src/generated/", "vendor"]);
+        assert!(health.corpus_measurements_available);
+        assert!(
+            health.build_profile.as_deref().is_some_and(|value| {
+                value.contains("update") && value.contains("code_only=true")
+            })
+        );
+    }
+
+    #[test]
+    fn default_low_inference_is_explicit_in_profile_identity() {
+        let default = BuildOptions::new(".");
+        assert_eq!(default.inference_level, InferenceLevel::Low);
+        let default_profile = build_profile(&default);
+        let default_json = serde_json::to_value(&default_profile).unwrap_or_default();
+        assert_eq!(
+            default_json.get("inference_level"),
+            Some(&Value::String("low".to_owned()))
+        );
+
+        let mut medium = default;
+        medium.inference_level = InferenceLevel::Medium;
+        let medium_profile = build_profile(&medium);
+        assert_eq!(
+            serde_json::to_value(&medium_profile)
+                .unwrap_or_default()
+                .get("inference_level"),
+            Some(&Value::String("medium".to_owned()))
+        );
+        assert_ne!(default_profile, medium_profile);
+        assert!(
+            current_orientation_health(&medium, PublicationOmissions::default())
+                .build_profile
+                .as_deref()
+                .is_some_and(|profile| profile.contains("inference=medium"))
+        );
+    }
+
+    #[test]
+    fn build_inference_levels_publish_nested_coherent_graphs() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path().join("source");
+        fs::create_dir(&root)?;
+        fs::write(
+            root.join("lib.rs"),
+            r#"
+                use external_crate::ExternalType;
+
+                struct LocalService;
+
+                impl LocalService {
+                    fn call() {}
+                }
+
+                fn run(value: ExternalType) {
+                    value.execute();
+                    external_crate::Service::call();
+                }
+
+                #[test]
+                fn test_run() {
+                    LocalService::call();
+                    external_crate::Service::call();
+                }
+            "#,
+        )?;
+
+        let mut previous = None;
+        let mut low_graph = None;
+        let mut max_graph = None;
+        for level in [
+            InferenceLevel::Low,
+            InferenceLevel::Medium,
+            InferenceLevel::High,
+            InferenceLevel::Max,
+        ] {
+            let mut options = BuildOptions::new(&root);
+            options.output_root = Some(directory.path().join("artifacts"));
+            options.graph_storage = GraphStorage::Json;
+            options.inference_level = level;
+            options.no_cluster = true;
+            options.no_viz = true;
+            let result = build_local_graph(&options)?;
+            let document = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+            let inferred = document
+                .links
+                .iter()
+                .filter(|edge| {
+                    effective_confidence(&edge.evidence) == Some(EvidenceConfidence::Inferred)
+                })
+                .count();
+            if level == InferenceLevel::Low {
+                assert_eq!(inferred, 0);
+                low_graph = Some((document.nodes.clone(), document.links.clone()));
+            } else if level == InferenceLevel::Max {
+                max_graph = Some(document.clone());
+            }
+            if let Some((nodes, edges, inferred_before)) = previous {
+                assert!(document.nodes.len() >= nodes);
+                assert!(document.links.len() >= edges);
+                assert!(inferred >= inferred_before);
+            }
+            previous = Some((document.nodes.len(), document.links.len(), inferred));
+        }
+        let (_, _, max_inferred) = previous.ok_or("inference levels were not built")?;
+        assert!(max_inferred > 0);
+        let (low_nodes, low_edges) = low_graph.ok_or("low inference graph was not built")?;
+        let mut filtered_max = max_graph.ok_or("max inference graph was not built")?;
+        apply_inference_level(&mut filtered_max, InferenceLevel::Low);
+        assert_eq!(low_nodes, filtered_max.nodes);
+        assert_eq!(low_edges, filtered_max.links);
+        Ok(())
+    }
+
+    #[test]
+    fn current_report_preserves_detection_warning_for_every_build_purpose() {
+        let warning = "small corpus warning".to_owned();
+        let summary = report_detection_summary(4, 99, Some(warning.clone()));
+        assert_eq!(summary.total_files, 4);
+        assert_eq!(summary.total_words, 99);
+        assert_eq!(summary.warning, Some(warning));
+    }
 
     #[test]
     fn force_cache_reuse_never_authorizes_prior_published_graph_input() {
@@ -7445,6 +7813,46 @@ mod tests {
             changed_record_count(&current, &previous, |record| record.0),
             2
         );
+    }
+
+    #[test]
+    fn graph_delta_candidate_falls_back_for_unsorted_records() {
+        let build = compass_model::code_graph::BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: "schema".to_owned(),
+            source_tree_digest: "source".to_owned(),
+            configuration_digest: "configuration".to_owned(),
+            generation_id: "generation".to_owned(),
+            source_commit: None,
+        };
+        let node = |id: &str| compass_model::code_graph::NodeRecord {
+            id: id.to_owned(),
+            kind: compass_model::code_graph::NodeKind::Function,
+            roles: Vec::new(),
+            name: id.to_owned(),
+            qualified_name: id.to_owned(),
+            language: Some("rust".to_owned()),
+            framework: None,
+            source: None,
+            details: None,
+            evidence: Vec::new(),
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+            community: None,
+        };
+        let mut previous = V1GraphDocument::empty_v1(build);
+        previous.nodes = vec![node("a"), node("b")];
+        let mut current = previous.clone();
+        current.nodes[0].name = "changed".to_owned();
+        assert!(graph_delta_candidate(&previous, &current));
+
+        let mut unsorted_previous = previous.clone();
+        unsorted_previous.nodes.reverse();
+        assert!(!graph_delta_candidate(&unsorted_previous, &current));
+
+        let mut unsorted_current = current;
+        unsorted_current.nodes.reverse();
+        assert!(!graph_delta_candidate(&previous, &unsorted_current));
     }
 
     #[test]
@@ -7916,13 +8324,18 @@ mod tests {
         let directory = tempfile::tempdir()?;
         fs::write(
             directory.path().join("guide.md"),
-            "# Guide\n[Implementation](documented.rs)\n",
+            "# Guide\n[Implementation](documented.rs)\n[Details](details#usage)\n",
+        )?;
+        fs::write(
+            directory.path().join("details.md"),
+            "# Details\n\n## Usage\n\nExact project documentation.\n",
         )?;
         fs::write(
             directory.path().join("documented.rs"),
             "pub fn documented() {}\n",
         )?;
         let mut options = BuildOptions::new(directory.path());
+        options.inference_level = InferenceLevel::Low;
         options.no_cluster = true;
         options.no_viz = true;
         options.force = true;
@@ -7934,6 +8347,16 @@ mod tests {
                 .iter()
                 .any(|edge| edge.kind.as_str() == "documents"),
             "graph={graph:#?}"
+        );
+        assert!(
+            graph.links.iter().any(|edge| {
+                edge.kind.as_str() == "references"
+                    && edge
+                        .relationship_site
+                        .as_ref()
+                        .is_some_and(|site| site.file == "guide.md")
+            }),
+            "exact document resolution must survive default-low publication: {graph:#?}"
         );
         Ok(())
     }
@@ -8245,6 +8668,60 @@ mod tests {
         assert_ne!(
             implementation_hash(&semantic_graph),
             implementation_hash(&changed_graph)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn clustered_fact_neutral_incremental_reuses_community_artifacts() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("main.py");
+        fs::write(
+            &source,
+            "def helper():\n    return 1\n\ndef main():\n    return helper()\n",
+        )?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = false;
+        options.no_viz = true;
+        options.purpose = BuildPurpose::Extract;
+        options.graph_storage = GraphStorage::Json;
+        let empty_semantic = SemanticLayer {
+            fragment: json!({"nodes": [], "edges": [], "hyperedges": []}),
+            refreshed_files: Vec::new(),
+            partial_files: Vec::new(),
+            allow_partial: false,
+        };
+
+        let cold = build_graph_with_semantic(&options, &empty_semantic)?;
+        assert!(cold.communities > 0);
+        let cold_analysis = fs::read(cold.output_dir.join("analysis.json"))?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        let cold_assignments = cold_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.community.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        fs::write(
+            &source,
+            "def helper():\n    return 1\n\ndef main():\n    return helper()\n\n# metadata only\n",
+        )?;
+        let changed = build_graph_with_semantic(&options, &empty_semantic)?;
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        let changed_assignments = changed_graph
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.community.clone()))
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
+        assert_eq!(changed.communities, cold.communities);
+        assert_eq!(changed_assignments, cold_assignments);
+        assert_eq!(
+            fs::read(changed.output_dir.join("analysis.json"))?,
+            cold_analysis
         );
         Ok(())
     }

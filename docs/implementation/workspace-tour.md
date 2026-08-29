@@ -47,6 +47,11 @@ slice        bounded source slicing
 **Change here when:** adding detection policy, a cache/manifest contract, or an
 atomic filesystem primitive.
 
+Built-in output-directory pruning is path-aware where language namespace
+layouts can collide with conventional artifact names. In particular,
+`src/<source-set>/java/build/...` is a Java package namespace, while a normal
+top-level or module-level `build/` directory remains generated-output noise.
+
 **Evidence:** crate tests plus CLI update/extract/watch tests that exercise
 incremental behavior and output safety.
 

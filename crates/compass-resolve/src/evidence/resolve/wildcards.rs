@@ -21,7 +21,7 @@ impl ResolutionDb<'_> {
             .filter(|binding| binding.spelling == "*")?;
         let qualifier = self
             .occurrence(candidate)
-            .and_then(|occurrence| occurrence.qualifier.as_deref());
+            .and_then(OccurrenceRef::qualifier);
         let declarations = match self.wildcard_declarations(
             language,
             std::slice::from_ref(&binding.qualified_target),
@@ -75,7 +75,7 @@ impl ResolutionDb<'_> {
     ) -> Option<ResolutionDecision> {
         let qualifier = self
             .occurrence(candidate)
-            .and_then(|occurrence| occurrence.qualifier.as_deref());
+            .and_then(OccurrenceRef::qualifier);
         if language != "rust"
             || candidate.binding_id.is_some()
             || matches!(

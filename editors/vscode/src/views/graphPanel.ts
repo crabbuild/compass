@@ -19,7 +19,6 @@ import { CurrentGraphSnapshot } from "./graphSnapshot";
 import { openGraphSource } from "./sourceNavigation";
 import { graphStaticLoadingMarkup } from "../webviews/graphLoadingMarkup";
 import { codeQueryRequiresRebuild, runCodeQuery } from "./codeQueryClient";
-import { codeQueryGraphViewModel } from "./codeQueryGraph";
 
 const LARGE_GRAPH_BYTES = 8 * 1024 * 1024;
 export const GRAPH_EXPORT_STDOUT_LIMIT = 256 * 1024 * 1024;
@@ -119,12 +118,6 @@ export class GraphPanel {
 
   private async hydrate(): Promise<void> {
     try {
-      if (this.queryResult && this.queryTitle) {
-        await this.publishOverview(
-          codeQueryGraphViewModel(this.queryResult, this.queryTitle)
-        );
-        return;
-      }
       const nodeLimit = vscode.workspace
         .getConfiguration("compass")
         .get("graphNodeLimit", 5000);
@@ -243,7 +236,7 @@ export class GraphPanel {
   }
 
   private async publishOverview(model: GraphViewModel): Promise<void> {
-    this.overview = this.queryTitle ? model : this.withRepositoryTitle(model);
+    this.overview = this.withRepositoryTitle(model);
     this.communityCache.clear();
     await this.panel.webview.postMessage({
       type: "hydrateGraph",
@@ -275,10 +268,8 @@ export class GraphPanel {
       if (this.queryTitle) {
         this.queryTitle = queryResultTitle(operation, symbol);
         this.panel.title = `${this.queryTitle} — ${vscode.workspace.asRelativePath(this.session.root)}`;
-        await this.publishOverview(codeQueryGraphViewModel(result, this.queryTitle));
-      } else {
-        await this.publishQueryResult(result);
       }
+      await this.publishQueryResult(result);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       this.output.appendLine(`[code-query] ${detail}`);
