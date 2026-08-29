@@ -241,6 +241,11 @@ compass label [PATH]
   [--timing]
 ```
 
+`--min-community-size` controls which communities are presented for labeling
+and in the bounded architecture report. It does not remove nodes, edges, or
+community assignments from the graph; omitted communities remain queryable and
+are included in the report's coverage disclosure. The default is `3`.
+
 ## Read and query
 
 ### `query`

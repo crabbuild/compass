@@ -443,8 +443,13 @@ pub fn agent_orientation(
     let node_communities = invert_communities(communities);
     let graph = ReportGraph::new(document, &node_communities);
     let cycle_probe = find_import_cycles(document, 5, DETAIL_LIMIT.saturating_add(1));
-    let (community_models, community_total) =
-        build_communities(&graph, communities, cohesion_scores, community_labels);
+    let (community_models, community_total) = build_communities(
+        &graph,
+        communities,
+        cohesion_scores,
+        community_labels,
+        options.min_community_size,
+    );
     let hub_total = god_node_list.len();
     let hubs = god_node_list
         .iter()
@@ -992,6 +997,7 @@ fn build_communities(
     communities: &Communities,
     cohesion_scores: &BTreeMap<usize, f64>,
     labels: &BTreeMap<usize, String>,
+    min_community_size: usize,
 ) -> (Vec<OrientationCommunity>, usize) {
     let mut eligible = communities
         .iter()
@@ -1009,7 +1015,12 @@ fn build_communities(
         })
         .collect::<Vec<_>>();
     let total = eligible.len();
-    eligible.retain(|(_, document_table_only, _)| !document_table_only);
+    // This threshold only bounds the architecture report. The graph document
+    // and its source-backed community assignments remain complete and
+    // queryable, including singleton communities.
+    eligible.retain(|(_, document_table_only, real)| {
+        !document_table_only && real.len() >= min_community_size
+    });
     eligible.sort_by(|(left_id, _, left_members), (right_id, _, right_members)| {
         right_members
             .len()
