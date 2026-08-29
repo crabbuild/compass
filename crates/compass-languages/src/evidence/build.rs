@@ -8867,7 +8867,11 @@ fn python_call_argument_shape(call: Node<'_>) -> (Option<u32>, Vec<Option<String
     let mut cursor = arguments.walk();
     let arguments = arguments
         .children(&mut cursor)
-        .filter(|child| child.is_named())
+        // Tree-sitter exposes comments inside an argument list as named
+        // children. They are source trivia, not callable arguments. Counting
+        // one makes an otherwise exact call fail signature selection, as in
+        // `call(  # explanation\n keyword=value)`.
+        .filter(|child| child.is_named() && child.kind() != "comment")
         .collect::<Vec<_>>();
     if arguments
         .iter()

@@ -5,6 +5,7 @@ use crate::facts::stamp_source_range;
 use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use serde_json::{Map, Value, json};
 use tree_sitter::{Node, Parser};
+use tree_sitter_language_pack::{DataNode, DataNodeKind, ProcessConfig};
 use tree_sitter_md::{INLINE_LANGUAGE, LANGUAGE};
 
 const FRONTMATTER_MAX_BYTES: usize = 64 * 1024;
@@ -14,7 +15,19 @@ const MAX_DIAGNOSTICS: usize = 256;
 const MAX_METADATA_KEYS: usize = 256;
 const MAX_METADATA_STRING_BYTES: usize = 16 * 1024;
 const MAX_METADATA_ARRAY_ITEMS: usize = 256;
+const MAX_METADATA_DEPTH: usize = 12;
+const MAX_METADATA_GRAPH_NODES: usize = 512;
 const MAX_LABEL_CHARS: usize = 512;
+const MAX_TABLE_COLUMNS: usize = 128;
+const MAX_TABLE_ROWS: usize = 10_000;
+const MAX_TABLE_CELL_BYTES: usize = 4 * 1024;
+const MAX_TABLE_TEXT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TABLE_CELLS: usize = 100_000;
+const MAX_TABLE_NODES_PER_TABLE: usize = 20_000;
+const MAX_TABLE_CELLS_PER_TABLE: usize = 16_384;
+const MAX_TABLE_TEXT_BYTES_PER_TABLE: usize = 512 * 1024;
+const MAX_DOCUMENT_REFERENCES: usize = 128;
+const MAX_REFERENCE_SPELLING_BYTES: usize = 4 * 1024;
 
 /// Extract Markdown from bytes supplied by the caller.
 ///
@@ -47,9 +60,10 @@ pub(crate) fn extract_source(
             detail: error.to_string(),
         })?;
 
-    let (metadata, frontmatter_diagnostic) = parse_frontmatter(source);
+    let (frontmatter, frontmatter_diagnostic) = parse_frontmatter(source);
     let stem = crate::file_stem(path);
     let file_id = crate::make_id(&[source_file]);
+    let line_starts = newline_offsets(source);
     let mut state = State {
         path,
         source,
@@ -70,13 +84,28 @@ pub(crate) fn extract_source(
         pending_links: Vec::new(),
         unresolved_links: Vec::new(),
         external_links: Vec::new(),
+        document_references: HashMap::new(),
         diagnostics: Vec::new(),
         inline_parser,
+        line_starts,
         next_block_index: 1,
         other_count: 0,
+        table_occurrences: HashMap::new(),
+        table_cells_retained: 0,
+        table_text_bytes: 0,
+        table_limit_diagnostics: HashSet::new(),
+        document_reference_limit_reported: false,
     };
 
-    state.add_root(file_id, metadata);
+    state.add_root(
+        file_id,
+        frontmatter
+            .as_ref()
+            .map(|frontmatter| frontmatter.metadata.clone()),
+    );
+    if let Some(frontmatter) = frontmatter {
+        state.add_frontmatter_nodes(frontmatter.facts);
+    }
     if let Some(diagnostic) = frontmatter_diagnostic {
         state.add_diagnostic(diagnostic);
     }
@@ -106,6 +135,7 @@ pub(crate) fn extract_source(
     state.scan_footnotes();
     state.scan_other_constructs();
     state.finalize_links();
+    state.publish_document_references();
 
     state
         .extraction
@@ -175,10 +205,17 @@ struct State<'source, 'path> {
     pending_links: Vec<PendingLink>,
     unresolved_links: Vec<Value>,
     external_links: Vec<Value>,
+    document_references: HashMap<String, Vec<Value>>,
     diagnostics: Vec<String>,
     inline_parser: Parser,
+    line_starts: Vec<usize>,
     next_block_index: usize,
     other_count: usize,
+    table_occurrences: HashMap<String, usize>,
+    table_cells_retained: usize,
+    table_text_bytes: usize,
+    table_limit_diagnostics: HashSet<&'static str>,
+    document_reference_limit_reported: bool,
 }
 
 #[derive(Clone)]
@@ -211,19 +248,310 @@ struct DocumentTargetHint {
     root_relative: bool,
 }
 
+struct FrontmatterExtraction {
+    metadata: Map<String, Value>,
+    facts: Vec<FrontmatterFact>,
+}
+
+struct FrontmatterFact {
+    key: String,
+    key_path: String,
+    parent_path: Option<String>,
+    value: Value,
+    start_byte: usize,
+    end_byte: usize,
+}
+
+#[derive(Default)]
+struct MetadataBudget {
+    keys: usize,
+    array_items: usize,
+}
+
+#[derive(Clone)]
+struct TableCellFact {
+    text: String,
+    raw_start: usize,
+    raw_end: usize,
+}
+
+#[derive(Clone, Copy)]
+enum TableAlignment {
+    Left,
+    Center,
+    Right,
+    Unspecified,
+}
+
+impl TableAlignment {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Center => "center",
+            Self::Right => "right",
+            Self::Unspecified => "unspecified",
+        }
+    }
+}
+
+fn table_children<'tree>(
+    node: Node<'tree>,
+) -> (Option<Node<'tree>>, Option<Node<'tree>>, Vec<Node<'tree>>) {
+    let mut header = None;
+    let mut delimiter = None;
+    let mut rows = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(Node::is_named) {
+        match child.kind() {
+            "pipe_table_header" => header = Some(child),
+            "pipe_table_delimiter_row" => delimiter = Some(child),
+            "pipe_table_row" => rows.push(child),
+            _ => {}
+        }
+    }
+    (header, delimiter, rows)
+}
+
+fn table_cells(node: Node<'_>, source: &[u8]) -> Vec<TableCellFact> {
+    let mut cells = Vec::new();
+    let mut cursor = node.walk();
+    for child in node
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "pipe_table_cell")
+    {
+        cells.push(TableCellFact::empty(
+            child.start_byte(),
+            child.end_byte(),
+            node_text(source, child.start_byte(), child.end_byte()),
+        ));
+    }
+    cells
+}
+
+fn table_alignments(node: Node<'_>, source: &[u8]) -> Vec<TableAlignment> {
+    let mut alignments = Vec::new();
+    let mut cursor = node.walk();
+    for cell in node
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "pipe_table_delimiter_cell")
+    {
+        let text = node_text(source, cell.start_byte(), cell.end_byte());
+        let text = text.trim();
+        let alignment = match (text.starts_with(':'), text.ends_with(':')) {
+            (true, true) => TableAlignment::Center,
+            (true, false) => TableAlignment::Left,
+            (false, true) => TableAlignment::Right,
+            (false, false) => TableAlignment::Unspecified,
+        };
+        alignments.push(alignment);
+    }
+    alignments
+}
+
+fn normalize_table_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn table_label(section: &str, headers: &[String]) -> String {
+    let header = headers
+        .iter()
+        .filter(|header| !header.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let title = if header.is_empty() {
+        "table".to_owned()
+    } else {
+        format!("table: {header}")
+    };
+    if section.is_empty() {
+        bounded_label(&title)
+    } else {
+        bounded_label(&format!("{section} — {title}"))
+    }
+}
+
+fn row_label(headers: &[String], cells: &[String]) -> String {
+    let values = cells
+        .iter()
+        .enumerate()
+        .filter(|(_, cell)| !cell.is_empty())
+        .take(4)
+        .map(
+            |(index, cell)| match headers.get(index).filter(|header| !header.is_empty()) {
+                Some(header) => format!("{header}={cell}"),
+                None => cell.clone(),
+            },
+        )
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        "table row".to_owned()
+    } else {
+        bounded_label(&values.join(" · "))
+    }
+}
+
+fn table_cell_label(header: Option<&str>, text: &str, column_index: usize) -> String {
+    let value = if text.is_empty() { "(empty)" } else { text };
+    let column = header
+        .filter(|header| !header.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("column {}", column_index.saturating_add(1)));
+    bounded_label(&format!("{column}: {value}"))
+}
+
+fn compact_identity(value: &str) -> String {
+    let mut output = String::new();
+    for character in value.chars() {
+        if output.len() >= 64 {
+            break;
+        }
+        if character.is_ascii_alphanumeric() || matches!(character, '_' | '-') {
+            output.push(character.to_ascii_lowercase());
+        } else if !output.ends_with('-') {
+            output.push('-');
+        }
+    }
+    let trimmed = output.trim_matches('-');
+    if trimmed.is_empty() {
+        "row".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+fn truncate_utf8(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = limit;
+    while end > 0 && !text.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    text[..end].to_owned()
+}
+
+fn is_inline_reference_candidate(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > MAX_REFERENCE_SPELLING_BYTES
+        || value.chars().any(char::is_whitespace)
+        || value.contains('`')
+    {
+        return false;
+    }
+    let valid = value.chars().all(|character| {
+        character.is_ascii_alphanumeric()
+            || matches!(character, '_' | '-' | '/' | '.' | ':' | '$' | '#' | '@')
+    });
+    if !valid {
+        return false;
+    }
+    // A path, qualified symbol, or identifier with an explicit separator is
+    // useful evidence. Keep ordinary single-word spans too: the backticks are
+    // the syntax proof that the author intended a literal identifier.
+    value
+        .chars()
+        .any(|character| character.is_ascii_alphanumeric())
+}
+
+/// Encode a nested source anchor using the same camel-case contract as the
+/// strict graph model. Raw extraction attributes otherwise use snake case,
+/// but table columns/cells are typed payloads and must be round-trippable.
+fn source_anchor_json(
+    source_file: &str,
+    source: &[u8],
+    line_starts: &[usize],
+    start: usize,
+    end: usize,
+) -> Value {
+    let start = start.min(source.len());
+    let end = end.clamp(start, source.len());
+    let (start_line, start_column) = indexed_source_point(line_starts, start);
+    let (end_line, end_column) = indexed_source_point(line_starts, end);
+    json!({
+        "file": source_file,
+        "startByte": start as u64,
+        "endByte": end as u64,
+        "startLine": start_line as u64,
+        "startColumn": start_column as u64,
+        "endLine": end_line as u64,
+        "endColumn": end_column as u64,
+    })
+}
+
+fn newline_offsets(source: &[u8]) -> Vec<usize> {
+    let mut offsets = vec![0];
+    offsets.extend(
+        source
+            .iter()
+            .enumerate()
+            .filter_map(|(index, byte)| (*byte == b'\n').then_some(index.saturating_add(1))),
+    );
+    offsets
+}
+
+fn indexed_source_point(line_starts: &[usize], offset: usize) -> (usize, usize) {
+    let line_index = match line_starts.binary_search(&offset) {
+        Ok(index) => index,
+        Err(index) => index.saturating_sub(1),
+    };
+    let line_start = line_starts.get(line_index).copied().unwrap_or(0);
+    (
+        line_index.saturating_add(1),
+        offset.saturating_sub(line_start),
+    )
+}
+
+fn stamp_source_range_indexed(
+    attributes: &mut Map<String, Value>,
+    source: &[u8],
+    line_starts: &[usize],
+    start: usize,
+    end: usize,
+) {
+    let start = start.min(source.len());
+    let end = end.clamp(start, source.len());
+    let (start_line, start_column) = indexed_source_point(line_starts, start);
+    let (end_line, end_column) = indexed_source_point(line_starts, end);
+    attributes.insert("start_byte".to_owned(), Value::from(start as u64));
+    attributes.insert("end_byte".to_owned(), Value::from(end as u64));
+    attributes.insert("line_start".to_owned(), Value::from(start_line as u64));
+    attributes.insert("line_end".to_owned(), Value::from(end_line as u64));
+    attributes.insert("column_start".to_owned(), Value::from(start_column as u64));
+    attributes.insert("column_end".to_owned(), Value::from(end_column as u64));
+}
+
+impl TableCellFact {
+    fn empty(start: usize, end: usize, text: String) -> Self {
+        Self {
+            text,
+            raw_start: start,
+            raw_end: end,
+        }
+    }
+}
+
 impl State<'_, '_> {
     fn add_root(&mut self, id: String, metadata: Option<Map<String, Value>>) {
         self.seen_nodes.insert(id.clone());
         let mut attributes = Map::new();
+        let source_name = self
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let label = metadata
+            .as_ref()
+            .and_then(|metadata| metadata.get("title"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .map(bounded_label)
+            .unwrap_or_else(|| source_name.to_owned());
+        attributes.insert("label".to_owned(), Value::String(label));
         attributes.insert(
-            "label".to_owned(),
-            Value::String(
-                self.path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or_default()
-                    .to_owned(),
-            ),
+            "qualified_name".to_owned(),
+            Value::String(self.source_file.clone()),
         );
         attributes.insert("file_type".to_owned(), Value::String("document".to_owned()));
         attributes.insert(
@@ -249,6 +577,98 @@ impl State<'_, '_> {
             attributes,
         });
         self.file_id = id;
+    }
+
+    fn add_frontmatter_nodes(&mut self, facts: Vec<FrontmatterFact>) {
+        let mut ids = HashMap::new();
+        for fact in facts {
+            let id = crate::make_id(&[&self.source_file, "markdown_frontmatter", &fact.key_path]);
+            let parent = fact
+                .parent_path
+                .as_ref()
+                .and_then(|path| ids.get(path))
+                .cloned()
+                .unwrap_or_else(|| self.file_id.clone());
+            let mut attributes = Map::new();
+            attributes.insert(
+                "symbol_kind".to_owned(),
+                Value::String("config_key".to_owned()),
+            );
+            attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+            attributes.insert(
+                "label".to_owned(),
+                Value::String(frontmatter_fact_label(&fact.key, &fact.value)),
+            );
+            attributes.insert(
+                "qualified_name".to_owned(),
+                Value::String(format!("frontmatter{}", fact.key_path)),
+            );
+            attributes.insert("key_path".to_owned(), Value::String(fact.key_path.clone()));
+            attributes.insert(
+                "format".to_owned(),
+                Value::String("yaml_frontmatter".to_owned()),
+            );
+            attributes.insert(
+                "namespace".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
+            attributes.insert(
+                "source_file".to_owned(),
+                Value::String(self.source_file.clone()),
+            );
+            attributes.insert(
+                "source_location".to_owned(),
+                Value::String(format!("L{}", self.line_at(fact.start_byte))),
+            );
+            attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
+            attributes.insert(
+                "rule".to_owned(),
+                Value::String("markdown-frontmatter-key".to_owned()),
+            );
+            stamp_source_range_indexed(
+                &mut attributes,
+                self.source,
+                &self.line_starts,
+                fact.start_byte,
+                fact.end_byte,
+            );
+            self.seen_nodes.insert(id.clone());
+            self.extraction.nodes.push(NodeRecord {
+                id: id.clone(),
+                attributes,
+            });
+            self.add_frontmatter_relation(&parent, &id, fact.start_byte, fact.end_byte);
+            ids.insert(fact.key_path, id);
+        }
+    }
+
+    fn add_frontmatter_relation(&mut self, source: &str, target: &str, start: usize, end: usize) {
+        let mut attributes = Map::new();
+        attributes.insert("relation".to_owned(), Value::String("contains".to_owned()));
+        attributes.insert(
+            "confidence".to_owned(),
+            Value::String("EXTRACTED".to_owned()),
+        );
+        attributes.insert(
+            "source_file".to_owned(),
+            Value::String(self.source_file.clone()),
+        );
+        attributes.insert(
+            "source_location".to_owned(),
+            Value::String(format!("L{}", self.line_at(start))),
+        );
+        attributes.insert("_origin".to_owned(), Value::String("config".to_owned()));
+        attributes.insert(
+            "rule".to_owned(),
+            Value::String("markdown-frontmatter-containment".to_owned()),
+        );
+        stamp_source_range_indexed(&mut attributes, self.source, &self.line_starts, start, end);
+        attributes.insert("weight".to_owned(), json!(1.0));
+        self.extraction.edges.push(EdgeRecord {
+            source: source.to_owned(),
+            target: target.to_owned(),
+            attributes,
+        });
     }
 
     fn add_diagnostic(&mut self, diagnostic: String) {
@@ -373,6 +793,10 @@ impl State<'_, '_> {
                 self.emit_heading(node, parent);
                 return;
             }
+            "pipe_table" => {
+                self.emit_pipe_table(node, parent);
+                return;
+            }
             "inline" | "block_continuation" | "minus_metadata" | "plus_metadata" => return,
             _ => {}
         }
@@ -407,13 +831,6 @@ impl State<'_, '_> {
                 extra.insert("task_checked".to_owned(), Value::Bool(checked));
             }
         }
-        if kind == "pipe_table_header" {
-            extra.insert("table_role".to_owned(), Value::String("header".to_owned()));
-        } else if kind == "pipe_table_row" {
-            extra.insert("table_role".to_owned(), Value::String("row".to_owned()));
-        } else if kind == "pipe_table_cell" {
-            extra.insert("table_role".to_owned(), Value::String("cell".to_owned()));
-        }
         if let Some(section) = self.heading_stack.last() {
             extra.insert(
                 "document_section".to_owned(),
@@ -431,6 +848,12 @@ impl State<'_, '_> {
                 "qualified_name".to_owned(),
                 Value::String(format!("{}::{kind}#{}", self.stem, self.next_block_index)),
             );
+        }
+        if !matches!(kind, "table" | "table_row") {
+            let content = truncate_utf8(&normalize_table_text(&text), MAX_TABLE_CELL_BYTES);
+            if !content.is_empty() {
+                extra.insert("document_content".to_owned(), Value::String(content));
+            }
         }
         let id = self.add_block_node(
             id,
@@ -453,6 +876,542 @@ impl State<'_, '_> {
         }
     }
 
+    fn emit_pipe_table(&mut self, node: Node<'_>, parent: Option<&str>) {
+        if self.next_block_index > MAX_BLOCKS {
+            self.add_table_limit_diagnostic("blocks");
+            return;
+        }
+
+        let (header_node, delimiter_node, rows) = table_children(node);
+        let headers = header_node
+            .map(|header| table_cells(header, self.source))
+            .unwrap_or_default();
+        let delimiter_alignments = delimiter_node
+            .map(|delimiter| table_alignments(delimiter, self.source))
+            .unwrap_or_default();
+        let row_facts = rows
+            .iter()
+            .map(|row| table_cells(*row, self.source))
+            .collect::<Vec<_>>();
+
+        let source_section = self
+            .heading_stack
+            .last()
+            .map(|heading| heading.qualified_name.clone())
+            .unwrap_or_else(|| self.stem.clone());
+        let header_signature = headers
+            .iter()
+            .take(MAX_TABLE_COLUMNS)
+            .map(|cell| truncate_utf8(&normalize_table_text(&cell.text), MAX_TABLE_CELL_BYTES))
+            .collect::<Vec<_>>()
+            .join("\u{1f}");
+        // Table ordinals are scoped to the containing section, not to the
+        // header signature. Different tables can share a section and must
+        // still receive distinct qualified names and structural identities.
+        let occurrence = self
+            .table_occurrences
+            .entry(source_section.clone())
+            .or_default();
+        *occurrence = occurrence.saturating_add(1);
+        let table_ordinal = *occurrence;
+        let table_qualified_name = format!("{source_section}::pipe_table#{table_ordinal}");
+        let table_id = crate::make_id(&[
+            &self.source_file,
+            "markdown_table",
+            &source_section,
+            &header_signature,
+            &table_ordinal.to_string(),
+        ]);
+
+        let column_count = headers
+            .len()
+            .max(row_facts.iter().map(Vec::len).max().unwrap_or(0));
+        let retained_columns = column_count.min(MAX_TABLE_COLUMNS);
+        let omitted_columns = column_count.saturating_sub(retained_columns);
+        if omitted_columns > 0 {
+            self.add_table_limit_diagnostic("columns");
+        }
+        let mut retained_headers = Vec::with_capacity(retained_columns);
+        let mut header_truncated = false;
+        for cell in headers.iter().take(retained_columns) {
+            let mut header = normalize_table_text(&cell.text);
+            if header.len() > MAX_TABLE_CELL_BYTES {
+                header = truncate_utf8(&header, MAX_TABLE_CELL_BYTES);
+                header_truncated = true;
+                self.add_table_limit_diagnostic("cell_text");
+            }
+            if self.table_text_bytes.saturating_add(header.len()) > MAX_TABLE_TEXT_BYTES {
+                header.clear();
+                header_truncated = true;
+                self.add_table_limit_diagnostic("text");
+            } else {
+                self.table_text_bytes = self.table_text_bytes.saturating_add(header.len());
+            }
+            retained_headers.push(header);
+        }
+        let table_initially_truncated = header_truncated || omitted_columns > 0;
+        let table_label = table_label(&source_section, &retained_headers);
+        let mut table_extra = Map::new();
+        table_extra.insert(
+            "qualified_name".to_owned(),
+            Value::String(table_qualified_name.clone()),
+        );
+        table_extra.insert("table_role".to_owned(), Value::String("table".to_owned()));
+        table_extra.insert(
+            "table_headers".to_owned(),
+            Value::Array(
+                retained_headers
+                    .iter()
+                    .map(|header| Value::String(header.clone()))
+                    .collect(),
+            ),
+        );
+        table_extra.insert(
+            "table_alignments".to_owned(),
+            Value::Array(
+                (0..retained_columns)
+                    .map(|index| {
+                        Value::String(
+                            delimiter_alignments
+                                .get(index)
+                                .copied()
+                                .unwrap_or(TableAlignment::Unspecified)
+                                .as_str()
+                                .to_owned(),
+                        )
+                    })
+                    .collect(),
+            ),
+        );
+        table_extra.insert(
+            "table_columns".to_owned(),
+            Value::Array(
+                retained_headers
+                    .iter()
+                    .enumerate()
+                    .map(|(index, header)| {
+                        let mut column = Map::new();
+                        column.insert("index".to_owned(), json!(index));
+                        column.insert("header".to_owned(), Value::String(header.clone()));
+                        column.insert(
+                            "alignment".to_owned(),
+                            Value::String(
+                                delimiter_alignments
+                                    .get(index)
+                                    .copied()
+                                    .unwrap_or(TableAlignment::Unspecified)
+                                    .as_str()
+                                    .to_owned(),
+                            ),
+                        );
+                        if let Some(cell) = headers.get(index) {
+                            column.insert(
+                                "source".to_owned(),
+                                source_anchor_json(
+                                    &self.source_file,
+                                    self.source,
+                                    &self.line_starts,
+                                    cell.raw_start,
+                                    cell.raw_end,
+                                ),
+                            );
+                        }
+                        Value::Object(column)
+                    })
+                    .collect(),
+            ),
+        );
+        table_extra.insert(
+            "table_body_row_count".to_owned(),
+            json!(rows.len().min(MAX_TABLE_ROWS)),
+        );
+        table_extra.insert("table_omitted_row_count".to_owned(), json!(0));
+        table_extra.insert(
+            "table_omitted_column_count".to_owned(),
+            json!(omitted_columns),
+        );
+        table_extra.insert(
+            "table_truncated".to_owned(),
+            Value::Bool(table_initially_truncated),
+        );
+        let table_id = self.add_block_node(
+            table_id,
+            &table_label,
+            "pipe_table",
+            node.start_byte()..node.end_byte(),
+            parent,
+            table_extra,
+        );
+
+        // Keep the complete parser-backed table hierarchy in graph/1, but
+        // give each record bounded semantic labels and stable structural
+        // identities. Consumers can navigate exact header/cell evidence while
+        // architecture analysis treats these containment edges as zero-weight.
+        let mut table_node_count = 1usize;
+        let mut table_cell_count = 0usize;
+        let mut table_text_bytes = retained_headers.iter().map(String::len).sum::<usize>();
+        if let Some(header) = header_node
+            && self.next_block_index <= MAX_BLOCKS
+            && table_node_count < MAX_TABLE_NODES_PER_TABLE
+        {
+            let header_cells = table_cells(header, self.source);
+            let header_qualified_name = format!("{table_qualified_name}::pipe_table_header#1");
+            let header_id = crate::make_id(&[&table_id, "markdown_table_header"]);
+            let mut header_extra = Map::new();
+            header_extra.insert(
+                "qualified_name".to_owned(),
+                Value::String(header_qualified_name.clone()),
+            );
+            header_extra.insert("table_role".to_owned(), Value::String("header".to_owned()));
+            let header_content = retained_headers.join(" | ");
+            if !header_content.is_empty() {
+                header_extra.insert(
+                    "document_content".to_owned(),
+                    Value::String(header_content.clone()),
+                );
+            }
+            let header_id = self.add_block_node(
+                header_id,
+                &bounded_label(&format!("header: {header_content}")),
+                "pipe_table_header",
+                header.start_byte()..header.end_byte(),
+                Some(&table_id),
+                header_extra,
+            );
+            table_node_count = table_node_count.saturating_add(1);
+
+            for (column_index, cell) in header_cells.iter().take(retained_columns).enumerate() {
+                if self.next_block_index > MAX_BLOCKS
+                    || table_node_count >= MAX_TABLE_NODES_PER_TABLE
+                    || table_cell_count >= MAX_TABLE_CELLS_PER_TABLE
+                    || self.table_cells_retained >= MAX_TABLE_CELLS
+                {
+                    header_truncated = true;
+                    self.add_table_limit_diagnostic("cells");
+                    break;
+                }
+                let text = retained_headers
+                    .get(column_index)
+                    .cloned()
+                    .unwrap_or_default();
+                let cell_id = crate::make_id(&[
+                    &table_id,
+                    "markdown_table_header_cell",
+                    &column_index.to_string(),
+                ]);
+                let mut cell_extra = Map::new();
+                cell_extra.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!(
+                        "{header_qualified_name}::pipe_table_cell#{}",
+                        column_index.saturating_add(1)
+                    )),
+                );
+                cell_extra.insert(
+                    "table_role".to_owned(),
+                    Value::String("header_cell".to_owned()),
+                );
+                cell_extra.insert("table_column_index".to_owned(), json!(column_index));
+                cell_extra.insert(
+                    "table_alignment".to_owned(),
+                    Value::String(
+                        delimiter_alignments
+                            .get(column_index)
+                            .copied()
+                            .unwrap_or(TableAlignment::Unspecified)
+                            .as_str()
+                            .to_owned(),
+                    ),
+                );
+                cell_extra.insert(
+                    "table_cell_state".to_owned(),
+                    Value::String(if text.is_empty() { "empty" } else { "present" }.to_owned()),
+                );
+                if !text.is_empty() {
+                    cell_extra.insert("document_content".to_owned(), Value::String(text.clone()));
+                }
+                let cell_id = self.add_block_node(
+                    cell_id,
+                    &table_cell_label(None, &text, column_index),
+                    "pipe_table_cell",
+                    cell.raw_start..cell.raw_end,
+                    Some(&header_id),
+                    cell_extra,
+                );
+                self.collect_inline_text_range(cell.raw_start, cell.raw_end, &cell_id);
+                table_node_count = table_node_count.saturating_add(1);
+                table_cell_count = table_cell_count.saturating_add(1);
+                self.table_cells_retained = self.table_cells_retained.saturating_add(1);
+            }
+        }
+
+        let mut row_occurrences = HashMap::<String, usize>::new();
+        let mut retained_rows = 0usize;
+        let mut table_truncated = table_initially_truncated || header_truncated;
+        for (row_index, row) in rows.iter().enumerate() {
+            if row_index >= MAX_TABLE_ROWS {
+                table_truncated = true;
+                self.add_table_limit_diagnostic("rows");
+                break;
+            }
+            if self.next_block_index > MAX_BLOCKS {
+                table_truncated = true;
+                self.add_table_limit_diagnostic("blocks");
+                break;
+            }
+            if table_node_count >= MAX_TABLE_NODES_PER_TABLE {
+                table_truncated = true;
+                self.add_table_limit_diagnostic("per_table_nodes");
+                break;
+            }
+            if table_cell_count >= MAX_TABLE_CELLS_PER_TABLE
+                || self.table_cells_retained >= MAX_TABLE_CELLS
+            {
+                table_truncated = true;
+                self.add_table_limit_diagnostic("cells");
+                break;
+            }
+            let cells = table_cells(*row, self.source);
+            let normalized_cells = cells
+                .iter()
+                .take(retained_columns)
+                .map(|cell| truncate_utf8(&normalize_table_text(&cell.text), MAX_TABLE_CELL_BYTES))
+                .collect::<Vec<_>>();
+            let identity = normalized_cells
+                .iter()
+                .enumerate()
+                .find(|(_, value)| !value.is_empty())
+                .map(|(index, value)| (index, value.clone()));
+            let identity_key = identity.as_ref().map_or_else(
+                || format!("ordinal:{row_index}"),
+                |(index, value)| format!("column:{index}:{value}"),
+            );
+            let identity_occurrence = row_occurrences.entry(identity_key.clone()).or_default();
+            *identity_occurrence = identity_occurrence.saturating_add(1);
+            let row_qualified_name = format!(
+                "{table_qualified_name}::pipe_table_row#{}-{}",
+                compact_identity(&identity_key),
+                *identity_occurrence
+            );
+            let row_id = crate::make_id(&[
+                &table_id,
+                "markdown_table_row",
+                &identity_key,
+                &identity_occurrence.to_string(),
+            ]);
+            let mut row_extra = Map::new();
+            row_extra.insert(
+                "qualified_name".to_owned(),
+                Value::String(row_qualified_name.clone()),
+            );
+            row_extra.insert("table_role".to_owned(), Value::String("row".to_owned()));
+            row_extra.insert("table_row_index".to_owned(), json!(row_index));
+            if let Some((index, _)) = identity.as_ref() {
+                row_extra.insert("table_identity_cell_index".to_owned(), json!(*index));
+            }
+            let mut row_truncated = omitted_columns > 0;
+            let mut serialized_cells = Vec::with_capacity(retained_columns);
+            let mut emitted_cells = Vec::<(usize, String, &'static str, usize, usize)>::new();
+            for column_index in 0..retained_columns {
+                if self.next_block_index.saturating_add(emitted_cells.len()) > MAX_BLOCKS
+                    || table_node_count
+                        .saturating_add(1)
+                        .saturating_add(emitted_cells.len())
+                        >= MAX_TABLE_NODES_PER_TABLE
+                    || table_cell_count.saturating_add(emitted_cells.len())
+                        >= MAX_TABLE_CELLS_PER_TABLE
+                    || self
+                        .table_cells_retained
+                        .saturating_add(emitted_cells.len())
+                        >= MAX_TABLE_CELLS
+                {
+                    row_truncated = true;
+                    table_truncated = true;
+                    self.add_table_limit_diagnostic("cells");
+                    break;
+                }
+                let Some(cell) = cells.get(column_index) else {
+                    serialized_cells.push(json!({
+                        "columnIndex": column_index,
+                        "state": "missing",
+                        "text": ""
+                    }));
+                    continue;
+                };
+                let mut text = normalize_table_text(&cell.text);
+                let mut state = if text.is_empty() { "empty" } else { "present" };
+                if text.len() > MAX_TABLE_CELL_BYTES {
+                    text = truncate_utf8(&text, MAX_TABLE_CELL_BYTES);
+                    row_truncated = true;
+                    self.add_table_limit_diagnostic("cell_text");
+                }
+                let text_bytes = text.len();
+                if self.table_text_bytes.saturating_add(text_bytes) > MAX_TABLE_TEXT_BYTES
+                    || table_text_bytes.saturating_add(text_bytes) > MAX_TABLE_TEXT_BYTES_PER_TABLE
+                {
+                    text.clear();
+                    state = "limited";
+                    row_truncated = true;
+                    table_truncated = true;
+                    self.add_table_limit_diagnostic("text");
+                } else {
+                    self.table_text_bytes = self.table_text_bytes.saturating_add(text_bytes);
+                    table_text_bytes = table_text_bytes.saturating_add(text_bytes);
+                }
+                serialized_cells.push(json!({
+                    "columnIndex": column_index,
+                    "state": state,
+                    "text": text,
+                    "source": source_anchor_json(
+                        &self.source_file,
+                        self.source,
+                        &self.line_starts,
+                        cell.raw_start,
+                        cell.raw_end,
+                    )
+                }));
+                emitted_cells.push((column_index, text, state, cell.raw_start, cell.raw_end));
+            }
+            if cells.len() > retained_columns {
+                row_truncated = true;
+            }
+            row_extra.insert("table_cells".to_owned(), Value::Array(serialized_cells));
+            row_extra.insert("table_truncated".to_owned(), Value::Bool(row_truncated));
+            let row_label = row_label(&retained_headers, &normalized_cells);
+            let row_id = self.add_block_node(
+                row_id,
+                &row_label,
+                "pipe_table_row",
+                row.start_byte()..row.end_byte(),
+                Some(&table_id),
+                row_extra,
+            );
+            table_node_count = table_node_count.saturating_add(1);
+
+            for (column_index, text, state, start, end) in emitted_cells {
+                let cell_id =
+                    crate::make_id(&[&row_id, "markdown_table_cell", &column_index.to_string()]);
+                let mut cell_extra = Map::new();
+                cell_extra.insert(
+                    "qualified_name".to_owned(),
+                    Value::String(format!(
+                        "{}::pipe_table_cell#{}",
+                        row_qualified_name,
+                        column_index.saturating_add(1)
+                    )),
+                );
+                cell_extra.insert(
+                    "table_role".to_owned(),
+                    Value::String("body_cell".to_owned()),
+                );
+                cell_extra.insert("table_column_index".to_owned(), json!(column_index));
+                cell_extra.insert(
+                    "table_header".to_owned(),
+                    Value::String(
+                        retained_headers
+                            .get(column_index)
+                            .cloned()
+                            .unwrap_or_default(),
+                    ),
+                );
+                cell_extra.insert(
+                    "table_cell_state".to_owned(),
+                    Value::String(state.to_owned()),
+                );
+                if !text.is_empty() {
+                    cell_extra.insert("document_content".to_owned(), Value::String(text.clone()));
+                }
+                let label = if state == "limited" {
+                    table_cell_label(
+                        retained_headers.get(column_index).map(String::as_str),
+                        "(limited)",
+                        column_index,
+                    )
+                } else {
+                    table_cell_label(
+                        retained_headers.get(column_index).map(String::as_str),
+                        &text,
+                        column_index,
+                    )
+                };
+                let cell_id = self.add_block_node(
+                    cell_id,
+                    &label,
+                    "pipe_table_cell",
+                    start..end,
+                    Some(&row_id),
+                    cell_extra,
+                );
+                if state != "limited" {
+                    self.collect_inline_text_range(start, end, &cell_id);
+                }
+                table_node_count = table_node_count.saturating_add(1);
+                table_cell_count = table_cell_count.saturating_add(1);
+                self.table_cells_retained = self.table_cells_retained.saturating_add(1);
+            }
+            retained_rows = retained_rows.saturating_add(1);
+        }
+        let omitted_rows = rows.len().saturating_sub(retained_rows);
+        table_truncated |= omitted_rows > 0;
+        self.update_table_metadata(&table_id, retained_rows, omitted_rows, table_truncated);
+    }
+
+    fn update_table_metadata(
+        &mut self,
+        table_id: &str,
+        retained_rows: usize,
+        omitted_rows: usize,
+        truncated: bool,
+    ) {
+        if let Some(table) = self
+            .extraction
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == table_id)
+        {
+            table
+                .attributes
+                .insert("table_body_row_count".to_owned(), json!(retained_rows));
+            table
+                .attributes
+                .insert("table_omitted_row_count".to_owned(), json!(omitted_rows));
+            table
+                .attributes
+                .insert("table_truncated".to_owned(), Value::Bool(truncated));
+        }
+    }
+
+    fn collect_inline_text_range(&mut self, start: usize, end: usize, owner_id: &str) {
+        let start = start.min(self.source.len());
+        let end = end.clamp(start, self.source.len());
+        if start >= end {
+            return;
+        }
+        let inline_source = &self.source[start..end];
+        let Some(tree) = self.inline_parser.parse(inline_source, None) else {
+            self.add_diagnostic("Markdown inline parser was cancelled".to_owned());
+            return;
+        };
+        self.walk_inline_node(tree.root_node(), start, owner_id);
+        self.scan_reference_links(start, inline_source, owner_id);
+        self.scan_wikilinks(start, inline_source, owner_id);
+        self.scan_inline_code_references(start, inline_source, owner_id);
+    }
+
+    fn add_table_limit_diagnostic(&mut self, class: &'static str) {
+        if self.table_limit_diagnostics.insert(class) {
+            self.add_diagnostic(format!("Markdown table {class} limit exceeded"));
+            self.extraction.extensions.insert(
+                crate::EXTRACTION_QUALITY_EXTENSION.to_owned(),
+                json!(crate::EXTRACTION_QUALITY_PARTIAL),
+            );
+            self.extraction.extensions.insert(
+                crate::EXTRACTION_QUALITY_REASON_EXTENSION.to_owned(),
+                json!("markdown_table_limit"),
+            );
+        }
+    }
+
     fn add_block_node(
         &mut self,
         id: String,
@@ -469,6 +1428,10 @@ impl State<'_, '_> {
         self.next_block_index = self.next_block_index.saturating_add(1);
         extra.insert("label".to_owned(), Value::String(bounded_label(label)));
         extra.insert("file_type".to_owned(), Value::String("document".to_owned()));
+        extra.insert(
+            "document_format".to_owned(),
+            Value::String("markdown".to_owned()),
+        );
         extra.insert("document_kind".to_owned(), Value::String(kind.to_owned()));
         extra.insert(
             "source_file".to_owned(),
@@ -480,7 +1443,13 @@ impl State<'_, '_> {
         );
         extra.insert("block_index".to_owned(), json!(block_index));
         extra.insert("_origin".to_owned(), Value::String("artifact".to_owned()));
-        stamp_source_range(&mut extra, self.source, range.start, range.end);
+        stamp_source_range_indexed(
+            &mut extra,
+            self.source,
+            &self.line_starts,
+            range.start,
+            range.end,
+        );
         self.extraction.nodes.push(NodeRecord {
             id: id.clone(),
             attributes: extra,
@@ -522,6 +1491,193 @@ impl State<'_, '_> {
         self.walk_inline_node(tree.root_node(), start, owner_id);
         self.scan_reference_links(start, inline_source, owner_id);
         self.scan_wikilinks(start, inline_source, owner_id);
+        self.scan_inline_code_references(start, inline_source, owner_id);
+    }
+
+    /// Retain only explicitly delimited code spans that have a shape useful
+    /// to a deterministic repository resolver. Ordinary prose remains prose;
+    /// a backtick span is evidence of intentional reference syntax, but it is
+    /// still resolved fail-closed later by the graph publisher.
+    fn scan_inline_code_references(&mut self, base: usize, source: &[u8], owner_id: &str) {
+        let mut offset = 0usize;
+        while offset < source.len() {
+            if source[offset] != b'`' {
+                offset = offset.saturating_add(1);
+                continue;
+            }
+            let mut run = 1usize;
+            while offset.saturating_add(run) < source.len() && source[offset + run] == b'`' {
+                run = run.saturating_add(1);
+            }
+            let body_start = offset.saturating_add(run);
+            let mut search = body_start;
+            let mut close = None;
+            while search < source.len() {
+                if source[search] != b'`' {
+                    search = search.saturating_add(1);
+                    continue;
+                }
+                let mut close_run = 1usize;
+                while search.saturating_add(close_run) < source.len()
+                    && source[search + close_run] == b'`'
+                {
+                    close_run = close_run.saturating_add(1);
+                }
+                if close_run == run {
+                    close = Some(search);
+                    break;
+                }
+                search = search.saturating_add(close_run);
+            }
+            let Some(close) = close else {
+                break;
+            };
+            let absolute_start = base.saturating_add(offset);
+            let absolute_end = base
+                .saturating_add(close.saturating_add(run))
+                .min(self.source.len());
+            let body = String::from_utf8_lossy(&source[body_start..close]);
+            let spelling = body.trim();
+            if is_inline_reference_candidate(spelling) {
+                self.record_document_reference(
+                    owner_id,
+                    spelling,
+                    "inline_code",
+                    self.link_site(absolute_start, absolute_end),
+                    "unresolved",
+                    None,
+                    Vec::new(),
+                );
+            }
+            offset = close.saturating_add(run);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_document_reference(
+        &mut self,
+        owner_id: &str,
+        spelling: &str,
+        kind: &str,
+        site: LinkSite,
+        resolution: &str,
+        target: Option<&str>,
+        mut candidates: Vec<Value>,
+    ) {
+        let spelling = truncate_utf8(spelling.trim(), MAX_REFERENCE_SPELLING_BYTES);
+        if spelling.is_empty() {
+            return;
+        }
+        let references = self
+            .document_references
+            .entry(owner_id.to_owned())
+            .or_default();
+        if references.len() >= MAX_DOCUMENT_REFERENCES {
+            if !self.document_reference_limit_reported {
+                self.document_reference_limit_reported = true;
+                self.add_diagnostic("Markdown document reference limit exceeded".to_owned());
+                self.extraction.extensions.insert(
+                    crate::EXTRACTION_QUALITY_EXTENSION.to_owned(),
+                    json!(crate::EXTRACTION_QUALITY_PARTIAL),
+                );
+                self.extraction.extensions.insert(
+                    crate::EXTRACTION_QUALITY_REASON_EXTENSION.to_owned(),
+                    json!("markdown_reference_limit"),
+                );
+            }
+            return;
+        }
+        let duplicate = references.iter().any(|value| {
+            value.as_object().is_some_and(|object| {
+                object.get("kind").and_then(Value::as_str) == Some(kind)
+                    && object.get("spelling").and_then(Value::as_str) == Some(&spelling)
+                    && object
+                        .get("site")
+                        .and_then(Value::as_object)
+                        .and_then(|site| site.get("startByte"))
+                        .and_then(Value::as_u64)
+                        == Some(site.start_byte as u64)
+            })
+        });
+        if duplicate {
+            return;
+        }
+        candidates.sort_by_cached_key(|value| {
+            let object = value.as_object();
+            (
+                object
+                    .and_then(|object| object.get("nodeId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                object
+                    .and_then(|object| object.get("reason"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+                object
+                    .and_then(|object| object.get("confidence"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            )
+        });
+        candidates.dedup();
+        let mut reference = Map::new();
+        reference.insert("spelling".to_owned(), Value::String(spelling));
+        reference.insert("kind".to_owned(), Value::String(kind.to_owned()));
+        reference.insert(
+            "site".to_owned(),
+            source_anchor_json(
+                &self.source_file,
+                self.source,
+                &self.line_starts,
+                site.start_byte,
+                site.end_byte,
+            ),
+        );
+        reference.insert(
+            "resolution".to_owned(),
+            Value::String(resolution.to_owned()),
+        );
+        if let Some(target) = target.filter(|target| !target.is_empty()) {
+            reference.insert("target".to_owned(), Value::String(target.to_owned()));
+        }
+        if !candidates.is_empty() {
+            reference.insert("candidates".to_owned(), Value::Array(candidates));
+        }
+        references.push(Value::Object(reference));
+    }
+
+    fn publish_document_references(&mut self) {
+        for node in &mut self.extraction.nodes {
+            let Some(mut references) = self.document_references.remove(&node.id) else {
+                continue;
+            };
+            references.sort_by_cached_key(|value| {
+                let object = value.as_object();
+                (
+                    object
+                        .and_then(|object| object.get("site"))
+                        .and_then(Value::as_object)
+                        .and_then(|site| site.get("startByte"))
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default(),
+                    object
+                        .and_then(|object| object.get("kind"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    object
+                        .and_then(|object| object.get("spelling"))
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                )
+            });
+            node.attributes
+                .insert("document_references".to_owned(), Value::Array(references));
+        }
     }
 
     fn walk_inline_node(&mut self, node: Node<'_>, base: usize, owner_id: &str) {
@@ -998,7 +2154,21 @@ impl State<'_, '_> {
                             );
                         }
                     }
-                    Some(_) => self.add_unresolved(&pending, "ambiguous_footnote", &pending.raw),
+                    Some(candidates) => self.add_unresolved_with_candidates(
+                        &pending,
+                        "ambiguous_footnote",
+                        &pending.raw,
+                        candidates
+                            .iter()
+                            .map(|target| {
+                                json!({
+                                    "nodeId": target,
+                                    "reason": "multiple footnote definitions",
+                                    "confidence": "ambiguous"
+                                })
+                            })
+                            .collect(),
+                    ),
                     None => {
                         self.add_unresolved(&pending, "missing_footnote_definition", &pending.raw)
                     }
@@ -1036,6 +2206,15 @@ impl State<'_, '_> {
                     "column_start": pending.site.start_byte.saturating_sub(pending.site.line_start),
                     "column_end": pending.site.end_byte.saturating_sub(self.line_start(pending.site.end_byte)),
                 }));
+                self.record_document_reference(
+                    &pending.owner_id,
+                    raw,
+                    pending.kind,
+                    pending.site,
+                    "unresolved",
+                    None,
+                    Vec::new(),
+                );
                 continue;
             }
             let (path_part, fragment) =
@@ -1089,13 +2268,30 @@ impl State<'_, '_> {
                                 );
                             }
                         }
-                        Some(_) => self.add_unresolved(&pending, "ambiguous_fragment", fragment),
+                        Some(candidates) => self.add_unresolved_with_candidates(
+                            &pending,
+                            "ambiguous_fragment",
+                            fragment,
+                            candidates
+                                .iter()
+                                .map(|target| {
+                                    json!({
+                                        "nodeId": target,
+                                        "reason": "multiple matching heading anchors",
+                                        "confidence": "ambiguous"
+                                    })
+                                })
+                                .collect(),
+                        ),
                         None => self.add_unresolved(&pending, "missing_fragment", fragment),
                     }
+                } else {
+                    self.add_unresolved(&pending, "same_file_without_fragment", raw);
                 }
                 continue;
             }
             if !is_supported_local_link(&target_path) {
+                self.add_unresolved(&pending, "unsupported_local_target", raw);
                 continue;
             }
             let target_id = crate::make_id(&[&target_path.to_string_lossy()]);
@@ -1124,6 +2320,19 @@ impl State<'_, '_> {
         relation: Option<(&str, Option<&str>)>,
     ) {
         let (relation, fragment) = relation.unwrap_or(("references", None));
+        let spelling = pending
+            .reference_label
+            .as_deref()
+            .unwrap_or(pending.raw.as_str());
+        self.record_document_reference(
+            &pending.owner_id,
+            spelling,
+            pending.kind,
+            pending.site,
+            "exact",
+            Some(&target),
+            Vec::new(),
+        );
         self.add_relation_with_site(
             &pending.owner_id,
             &target,
@@ -1157,7 +2366,28 @@ impl State<'_, '_> {
     }
 
     fn add_unresolved(&mut self, pending: &PendingLink, reason: &str, target: &str) {
+        self.add_unresolved_with_candidates(pending, reason, target, Vec::new());
+    }
+
+    fn add_unresolved_with_candidates(
+        &mut self,
+        pending: &PendingLink,
+        reason: &str,
+        target: &str,
+        candidates: Vec<Value>,
+    ) {
         if self.unresolved_links.len() >= MAX_DIAGNOSTICS {
+            // Keep the typed evidence bounded independently of the diagnostic
+            // list. A limit is still an observable partial result.
+            self.record_document_reference(
+                &pending.owner_id,
+                target,
+                pending.kind,
+                pending.site,
+                "limited",
+                None,
+                Vec::new(),
+            );
             return;
         }
         self.unresolved_links.push(json!({
@@ -1175,6 +2405,28 @@ impl State<'_, '_> {
             "column_start": pending.site.start_byte.saturating_sub(pending.site.line_start),
             "column_end": pending.site.end_byte.saturating_sub(self.line_start(pending.site.end_byte)),
         }));
+        let spelling = pending
+            .reference_label
+            .as_deref()
+            .unwrap_or(if target.is_empty() {
+                pending.raw.as_str()
+            } else {
+                target
+            });
+        let resolution = if candidates.is_empty() {
+            "unresolved"
+        } else {
+            "ambiguous"
+        };
+        self.record_document_reference(
+            &pending.owner_id,
+            spelling,
+            pending.kind,
+            pending.site,
+            resolution,
+            None,
+            candidates,
+        );
     }
 
     fn add_relation(
@@ -1248,19 +2500,16 @@ impl State<'_, '_> {
     }
 
     fn line_at(&self, offset: usize) -> usize {
-        self.source[..offset.min(self.source.len())]
-            .iter()
-            .filter(|byte| **byte == b'\n')
-            .count()
-            .saturating_add(1)
+        indexed_source_point(&self.line_starts, offset.min(self.source.len())).0
     }
 
     fn line_start(&self, offset: usize) -> usize {
-        let prefix = &self.source[..offset.min(self.source.len())];
-        prefix
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map_or(0, |newline| newline.saturating_add(1))
+        let offset = offset.min(self.source.len());
+        let line_index = match self.line_starts.binary_search(&offset) {
+            Ok(index) => index,
+            Err(index) => index.saturating_sub(1),
+        };
+        self.line_starts.get(line_index).copied().unwrap_or(0)
     }
 
     fn pending_link_count(&self) -> usize {
@@ -1274,7 +2523,7 @@ impl State<'_, '_> {
     }
 }
 
-fn parse_frontmatter(source: &[u8]) -> (Option<Map<String, Value>>, Option<String>) {
+fn parse_frontmatter(source: &[u8]) -> (Option<FrontmatterExtraction>, Option<String>) {
     let Some((first_end, first_line)) = next_line(source, 0) else {
         return (None, None);
     };
@@ -1306,10 +2555,18 @@ fn parse_frontmatter(source: &[u8]) -> (Option<Map<String, Value>>, Option<Strin
                     Some("Markdown frontmatter aliases and tags are not supported".to_owned()),
                 );
             }
-            let yaml = String::from_utf8_lossy(yaml);
-            return match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&yaml) {
+            let Ok(yaml) = std::str::from_utf8(yaml) else {
+                return (
+                    None,
+                    Some("Markdown frontmatter must be valid UTF-8".to_owned()),
+                );
+            };
+            return match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(yaml) {
                 Ok(value) => match yaml_metadata(&value) {
-                    Ok(metadata) => (Some(metadata), None),
+                    Ok(metadata) => match frontmatter_facts(yaml, first_end, &metadata) {
+                        Ok(facts) => (Some(FrontmatterExtraction { metadata, facts }), None),
+                        Err(diagnostic) => (None, Some(diagnostic)),
+                    },
                     Err(diagnostic) => (None, Some(diagnostic.to_owned())),
                 },
                 Err(_) => (
@@ -1378,45 +2635,31 @@ fn yaml_metadata(value: &serde_yaml_ng::Value) -> Result<Map<String, Value>, &'s
     let serde_yaml_ng::Value::Mapping(mapping) = value else {
         return Err("Markdown frontmatter must be a mapping");
     };
-    if mapping.len() > MAX_METADATA_KEYS {
-        return Err("Markdown frontmatter has too many keys");
+    let mut budget = MetadataBudget::default();
+    yaml_mapping(mapping, 0, &mut budget)
+}
+
+fn yaml_mapping(
+    mapping: &serde_yaml_ng::Mapping,
+    depth: usize,
+    budget: &mut MetadataBudget,
+) -> Result<Map<String, Value>, &'static str> {
+    if depth > MAX_METADATA_DEPTH {
+        return Err("Markdown frontmatter exceeds the nesting-depth limit");
     }
     let mut entries = Vec::with_capacity(mapping.len());
     for (key, value) in mapping {
         let serde_yaml_ng::Value::String(key) = key else {
             return Err("Markdown frontmatter keys must be strings");
         };
+        budget.keys = budget.keys.saturating_add(1);
+        if budget.keys > MAX_METADATA_KEYS {
+            return Err("Markdown frontmatter has too many keys");
+        }
         if key.len() > MAX_METADATA_STRING_BYTES {
             return Err("Markdown frontmatter key exceeds the byte limit");
         }
-        let json_value = match value {
-            serde_yaml_ng::Value::Null => Value::Null,
-            serde_yaml_ng::Value::Bool(value) => Value::Bool(*value),
-            serde_yaml_ng::Value::Number(value) => {
-                serde_json::to_value(value).map_err(|_| "Markdown frontmatter number is invalid")?
-            }
-            serde_yaml_ng::Value::String(value) => {
-                if value.len() > MAX_METADATA_STRING_BYTES {
-                    return Err("Markdown frontmatter value exceeds the byte limit");
-                }
-                Value::String(value.clone())
-            }
-            serde_yaml_ng::Value::Sequence(values) => {
-                if values.len() > MAX_METADATA_ARRAY_ITEMS {
-                    return Err("Markdown frontmatter array exceeds the item limit");
-                }
-                let mut output = Vec::with_capacity(values.len());
-                for value in values {
-                    let scalar = yaml_scalar(value)
-                        .ok_or("Markdown frontmatter arrays must contain scalars")?;
-                    output.push(scalar);
-                }
-                Value::Array(output)
-            }
-            serde_yaml_ng::Value::Mapping(_) | serde_yaml_ng::Value::Tagged(_) => {
-                return Err("Markdown frontmatter nested values are not supported");
-            }
-        };
+        let json_value = yaml_value(value, depth.saturating_add(1), budget)?;
         entries.push((key.clone(), json_value));
     }
     entries.sort_by(|left, right| left.0.cmp(&right.0));
@@ -1427,16 +2670,216 @@ fn yaml_metadata(value: &serde_yaml_ng::Value) -> Result<Map<String, Value>, &'s
     Ok(output)
 }
 
-fn yaml_scalar(value: &serde_yaml_ng::Value) -> Option<Value> {
-    match value {
-        serde_yaml_ng::Value::Null => Some(Value::Null),
-        serde_yaml_ng::Value::Bool(value) => Some(Value::Bool(*value)),
-        serde_yaml_ng::Value::Number(value) => serde_json::to_value(value).ok(),
-        serde_yaml_ng::Value::String(value) if value.len() <= MAX_METADATA_STRING_BYTES => {
-            Some(Value::String(value.clone()))
-        }
-        _ => None,
+fn yaml_value(
+    value: &serde_yaml_ng::Value,
+    depth: usize,
+    budget: &mut MetadataBudget,
+) -> Result<Value, &'static str> {
+    if depth > MAX_METADATA_DEPTH {
+        return Err("Markdown frontmatter exceeds the nesting-depth limit");
     }
+    match value {
+        serde_yaml_ng::Value::Null => Ok(Value::Null),
+        serde_yaml_ng::Value::Bool(value) => Ok(Value::Bool(*value)),
+        serde_yaml_ng::Value::Number(value) => {
+            serde_json::to_value(value).map_err(|_| "Markdown frontmatter number is invalid")
+        }
+        serde_yaml_ng::Value::String(value) => {
+            if value.len() > MAX_METADATA_STRING_BYTES {
+                return Err("Markdown frontmatter value exceeds the byte limit");
+            }
+            Ok(Value::String(value.clone()))
+        }
+        serde_yaml_ng::Value::Sequence(values) => {
+            budget.array_items = budget.array_items.saturating_add(values.len());
+            if values.len() > MAX_METADATA_ARRAY_ITEMS
+                || budget.array_items > MAX_METADATA_ARRAY_ITEMS
+            {
+                return Err("Markdown frontmatter array exceeds the item limit");
+            }
+            values
+                .iter()
+                .map(|value| yaml_value(value, depth.saturating_add(1), budget))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array)
+        }
+        serde_yaml_ng::Value::Mapping(mapping) => {
+            yaml_mapping(mapping, depth.saturating_add(1), budget).map(Value::Object)
+        }
+        serde_yaml_ng::Value::Tagged(_) => Err("Markdown frontmatter YAML tags are not supported"),
+    }
+}
+
+fn frontmatter_facts(
+    yaml: &str,
+    source_offset: usize,
+    metadata: &Map<String, Value>,
+) -> Result<Vec<FrontmatterFact>, String> {
+    let config = ProcessConfig::new("yaml")
+        .minimal()
+        .with_data_extraction(true);
+    let parsed = tree_sitter_language_pack::process(yaml, &config)
+        .map_err(|error| format!("Markdown frontmatter source anchoring failed: {error}"))?;
+    let root = parsed
+        .data
+        .ok_or_else(|| "Markdown frontmatter source anchoring produced no data".to_owned())?;
+    let root_value = Value::Object(metadata.clone());
+    let mut facts = Vec::new();
+    let mut seen_paths = HashSet::new();
+    collect_frontmatter_facts(
+        &root.children,
+        "",
+        None,
+        &root_value,
+        source_offset,
+        yaml.len(),
+        &mut seen_paths,
+        &mut facts,
+    )?;
+    if !metadata.is_empty() && facts.is_empty() {
+        return Err("Markdown frontmatter keys could not be source-anchored".to_owned());
+    }
+    Ok(facts)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_frontmatter_facts(
+    nodes: &[DataNode],
+    parent_path: &str,
+    parent_fact_path: Option<&str>,
+    root: &Value,
+    source_offset: usize,
+    yaml_len: usize,
+    seen_paths: &mut HashSet<String>,
+    facts: &mut Vec<FrontmatterFact>,
+) -> Result<(), &'static str> {
+    for node in nodes {
+        let Some(segment) = node.key.as_deref() else {
+            continue;
+        };
+        let key_path = frontmatter_key_path(parent_path, segment);
+        let Some(value) = json_pointer_value(root, &key_path) else {
+            return Err("Markdown frontmatter syntax and normalized keys disagree");
+        };
+        if !seen_paths.insert(key_path.clone()) {
+            return Err("Markdown frontmatter contains a duplicate key path");
+        }
+        let scalar_sequence_item = node.kind == DataNodeKind::Sequence
+            && node.children.is_empty()
+            && !matches!(value, Value::Array(_) | Value::Object(_));
+        let emitted_path = if scalar_sequence_item {
+            parent_fact_path.map(str::to_owned)
+        } else {
+            if facts.len() >= MAX_METADATA_GRAPH_NODES {
+                return Err("Markdown frontmatter graph-node limit exceeded");
+            }
+            if node.span.start_byte >= node.span.end_byte || node.span.end_byte > yaml_len {
+                return Err("Markdown frontmatter contains an invalid source range");
+            }
+            facts.push(FrontmatterFact {
+                key: if node.kind == DataNodeKind::Sequence {
+                    segment
+                        .parse::<usize>()
+                        .ok()
+                        .map_or_else(|| segment.to_owned(), |index| format!("item {}", index + 1))
+                } else {
+                    segment.to_owned()
+                },
+                key_path: key_path.clone(),
+                parent_path: parent_fact_path.map(str::to_owned),
+                value: value.clone(),
+                start_byte: source_offset.saturating_add(node.span.start_byte),
+                end_byte: source_offset.saturating_add(node.span.end_byte),
+            });
+            Some(key_path.clone())
+        };
+        collect_frontmatter_facts(
+            &node.children,
+            &key_path,
+            emitted_path.as_deref(),
+            root,
+            source_offset,
+            yaml_len,
+            seen_paths,
+            facts,
+        )?;
+    }
+    Ok(())
+}
+
+fn frontmatter_key_path(parent: &str, segment: &str) -> String {
+    let escaped = segment.replace('~', "~0").replace('/', "~1");
+    if parent.is_empty() {
+        format!("/{escaped}")
+    } else {
+        format!("{parent}/{escaped}")
+    }
+}
+
+fn json_pointer_value<'value>(root: &'value Value, pointer: &str) -> Option<&'value Value> {
+    root.pointer(pointer)
+}
+
+fn frontmatter_fact_label(key: &str, value: &Value) -> String {
+    let semantic_key = key.to_ascii_lowercase().replace(['-', '_'], "");
+    let show_value = matches!(
+        semantic_key.as_str(),
+        "title"
+            | "tag"
+            | "tags"
+            | "alias"
+            | "aliases"
+            | "author"
+            | "authors"
+            | "description"
+            | "summary"
+            | "category"
+            | "categories"
+            | "layout"
+            | "status"
+            | "draft"
+            | "date"
+            | "published"
+            | "updated"
+            | "slug"
+            | "permalink"
+            | "navlabel"
+            | "contenttype"
+            | "audience"
+            | "owner"
+            | "owners"
+    );
+    let Some(summary) = show_value
+        .then(|| frontmatter_value_summary(value))
+        .flatten()
+    else {
+        return bounded_label(key);
+    };
+    bounded_label(&format!("{key}: {summary}"))
+}
+
+fn frontmatter_value_summary(value: &Value) -> Option<String> {
+    let summary = match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => compact_label(value),
+        Value::Array(values) if values.len() <= 16 => {
+            let values = values
+                .iter()
+                .map(|value| match value {
+                    Value::Null => Some("null".to_owned()),
+                    Value::Bool(value) => Some(value.to_string()),
+                    Value::Number(value) => Some(value.to_string()),
+                    Value::String(value) => Some(compact_label(value)),
+                    Value::Array(_) | Value::Object(_) => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            values.join(", ")
+        }
+        Value::Array(_) | Value::Object(_) => return None,
+    };
+    (!summary.is_empty()).then(|| truncate_utf8(&summary, MAX_LABEL_CHARS))
 }
 
 fn next_line(source: &[u8], start: usize) -> Option<(usize, &[u8])> {

@@ -90,6 +90,7 @@ const COMPASS_STATIC_LANGUAGES: &[&str] = &[
     "typescript",
     "verilog",
     "vue",
+    "yaml",
     "zig",
 ];
 

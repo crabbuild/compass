@@ -609,7 +609,7 @@ fn yaml_children(node: &Node, source: &str) -> Vec<DataNode> {
             "block_mapping" | "flow_mapping" => {
                 result.extend(yaml_children(&child, source));
             }
-            "block_sequence" => {
+            "block_sequence" | "flow_sequence" => {
                 let items = yaml_sequence_items(&child, source);
                 result.extend(items);
             }
@@ -674,7 +674,7 @@ fn yaml_sequence_items(node: &Node, source: &str) -> Vec<DataNode> {
     let mut result = Vec::new();
     let mut cursor = node.walk();
     for (idx, child) in node.named_children(&mut cursor).enumerate() {
-        if child.kind() == "block_sequence_item" {
+        if matches!(child.kind(), "block_sequence_item" | "flow_node") {
             let sub = yaml_children(&child, source);
             let value = if sub.is_empty() {
                 let mut c2 = child.walk();
@@ -1249,6 +1249,35 @@ mod tests {
             .iter()
             .find(|c| c.key.as_deref() == Some("server"));
         assert!(server.is_some(), "should find nested server key");
+    }
+
+    #[test]
+    fn test_yaml_flow_sequence_retains_nested_mapping_items() {
+        let source = "authors: [{name: Ada, role: editor}]\n";
+        let Some(root) = extract(source, "yaml") else {
+            return;
+        };
+        let authors = root
+            .children
+            .iter()
+            .find(|child| child.key.as_deref() == Some("authors"));
+        let Some(author) = authors.and_then(|authors| authors.children.first()) else {
+            std::process::abort();
+        };
+        assert_eq!(author.kind, DataNodeKind::Sequence);
+        assert_eq!(author.key.as_deref(), Some("0"));
+        assert!(
+            author
+                .children
+                .iter()
+                .any(|child| child.key.as_deref() == Some("name"))
+        );
+        assert!(
+            author
+                .children
+                .iter()
+                .any(|child| child.key.as_deref() == Some("role"))
+        );
     }
 
     #[test]

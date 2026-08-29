@@ -8,6 +8,7 @@ use serde_json::Value;
 pub(super) enum TargetFamily {
     Route,
     Callable,
+    Dependency,
     Type,
     DatabaseTable,
 }
@@ -471,6 +472,7 @@ fn bounded_union_measured<'a>(
 
 fn target_families(node: &RawNodeRecord) -> &'static [TargetFamily] {
     const ROUTE_CALLABLE: &[TargetFamily] = &[TargetFamily::Route, TargetFamily::Callable];
+    const ROUTE_DEPENDENCY: &[TargetFamily] = &[TargetFamily::Route, TargetFamily::Dependency];
     const ROUTE_TYPE: &[TargetFamily] = &[TargetFamily::Route, TargetFamily::Type];
     const ROUTE: &[TargetFamily] = &[TargetFamily::Route];
     const TYPE: &[TargetFamily] = &[TargetFamily::Type];
@@ -520,7 +522,7 @@ fn target_families(node: &RawNodeRecord) -> &'static [TargetFamily] {
         // variable (`const Page = withData(...)`).  A same-source route
         // reference is bounded and deterministic, so variables belong to the
         // route target family as well.
-        Some("variable") => ROUTE,
+        Some("variable") => ROUTE_DEPENDENCY,
         Some("class") => ROUTE_TYPE,
         Some("component") => ROUTE,
         Some("struct" | "interface" | "trait" | "protocol" | "enum") => TYPE,

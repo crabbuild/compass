@@ -5,6 +5,26 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Rebuild SQLite adjacency sidecars
+
+Store snapshots now declare edge-ID-ordered directional adjacency so bounded
+JSON and SQLite queries retain the same canonical edge prefix. Existing
+`graph.json` artifacts remain compatible. A SQLite sidecar created before this
+capability can still be validated, backed up, and used to recover canonical
+JSON, but directional store queries reject it with
+`edge_id_ordered_adjacency_unavailable`.
+
+Preserve `graph.json`, then rebuild the disposable sidecar with:
+
+```bash
+compass update --force --store sqlite
+compass store validate compass-out --format json
+```
+
+Use `--engine json` until the rebuild completes. Do not edit or copy SQLite
+tables to add the capability marker; the directional index key order must be
+rebuilt from the validated graph.
+
 ## Frontend graph vocabulary
 
 Recent pre-release builds can add React-oriented `renders` edges and UI/server
@@ -86,7 +106,7 @@ existing cached evidence is regenerated when its pipeline identity changes.
 ## Universal evidence schema reset
 
 The universal evidence envelope is now `compass.languages.evidence/2` and the
-extraction semantics identity is `compass.languages.extraction/3`. The envelope
+extraction semantics identity is `compass.languages.extraction/4`. The envelope
 field is `pipeline` (with `qualification` and `emitter` metadata), replacing
 the provisional `adapter`/`profile`/`producer` shape. Compass intentionally
 does not translate or reuse pre-refactor universal evidence; run a forced
@@ -94,6 +114,11 @@ update to regenerate one coherent artifact set. Qualification manifests,
 candidate exports, and TypeScript scorecards likewise require their `/2`
 schemas and use `producer` for the language evidence identity; regenerate
 those audit inputs rather than trying to load the old field names.
+
+Version 4 also invalidates pre-enhancement Markdown caches so nested
+frontmatter can be republished as exact graph-v1 config nodes. Normal builds
+re-extract affected files automatically; no graph schema migration or manual
+artifact editing is required.
 
 ## Python project identity and stubs
 

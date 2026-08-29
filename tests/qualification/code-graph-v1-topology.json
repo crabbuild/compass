@@ -1,0 +1,62 @@
+{
+  "schema": "compass.code-graph-topology-policy/1",
+  "topology": {
+    "minimums": {
+      "edges": 1284,
+      "exactCrossCommunityEdges": 21,
+      "exactCrossFileEdges": 81,
+      "exactCrossFileEdgesPerThousandNodes": 63,
+      "exactEdgeBearingNodePermille": 711,
+      "exactEdgeBearingNodes": 908,
+      "exactEdges": 965,
+      "exactLargestComponentNodes": 54,
+      "exactUniqueTypedEndpointPairs": 956,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 749,
+      "nodes": 1276,
+      "uniqueTypedEndpointPairs": 1261
+    },
+    "maximums": {
+      "communities": 242,
+      "connectedComponents": 222,
+      "exactConnectedComponents": 496,
+      "exactIsolatedNodes": 368,
+      "exactSelfLoops": 0,
+      "isolatedNodes": 96,
+      "selfLoops": 0,
+      "singletonCommunities": 108
+    },
+    "relationshipMinimums": {
+      "calls": {
+        "exactUniqueEndpointPairs": 13
+      },
+      "contains": {
+        "exactCrossFileEdges": 31,
+        "exactUniqueEndpointPairs": 624
+      },
+      "documents": {
+        "exactCrossFileEdges": 3,
+        "exactUniqueEndpointPairs": 3
+      },
+      "imports": {
+        "exactCrossFileEdges": 12,
+        "exactUniqueEndpointPairs": 29
+      },
+      "maps_to": {
+        "exactCrossFileEdges": 10,
+        "exactUniqueEndpointPairs": 10
+      },
+      "references": {
+        "exactCrossFileEdges": 7,
+        "exactUniqueEndpointPairs": 49
+      },
+      "renders": {
+        "exactCrossFileEdges": 4,
+        "exactUniqueEndpointPairs": 5
+      },
+      "routes_to": {
+        "exactCrossFileEdges": 14,
+        "exactUniqueEndpointPairs": 111
+      }
+    }
+  }
+}

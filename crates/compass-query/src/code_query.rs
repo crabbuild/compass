@@ -1002,13 +1002,17 @@ impl PinnedDiscoveryBackend<'_> {
             }
             Self::Store(reader) => {
                 let (mut edges, truncated) = reader
-                    .directional_adjacency(node, inbound, snapshot_limits(limit.saturating_add(1))?)
+                    .adjacency_by_kinds(
+                        node,
+                        inbound,
+                        kinds,
+                        snapshot_limits(limit.saturating_add(1))?,
+                    )
                     .map_err(snapshot_error)?;
                 edges.sort_by(|left, right| left.id.cmp(&right.id));
                 let truncated = truncated || edges.len() > limit;
                 edges.truncate(limit);
                 let examined = edges.len().saturating_add(usize::from(truncated));
-                edges.retain(|edge| kinds.contains(&edge.kind));
                 if !include_heuristic {
                     edges.retain(|edge| !is_heuristic(edge));
                 }

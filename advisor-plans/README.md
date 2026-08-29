@@ -90,6 +90,12 @@ determinism, lifecycle, and performance evidence before promoting any pack
 claim. Python language promotion remains a separate complete-capability
 decision.
 
+Plan 024 deepens Plan 009's parser-backed Markdown support without changing the
+`compass.graph/1` wire contract. It retains table, header, row, and cell nodes,
+adds semantic identities and labels, resolves cell-owned references before the
+normalization facts are projected back to graph-v1 resources, keeps table
+navigation out of architecture topology, and adds an independent quality gate.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -117,6 +123,7 @@ decision.
 | 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | DONE |
 | 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
 | 023 | Make Python framework graphs source-proven and production-qualified | P1 | XXL | —; final gate should consume 005 or equivalent | BLOCKED |
+| 024 | Harden Markdown graph-v1 intelligence | P1 | XL | 009; coordinate with 012 | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -183,6 +190,10 @@ helper runtimes prerequisites for native document support.
   gates, the native structural qualification. The final public claim should
   consume Plan 005's exact-production-evidence model or an equivalent release
   gate.
+- Plan 024 keeps graph-v1 publication strict. Rich typed document facts are an
+  internal normalization representation only; the publisher resolves their
+  evidence and downgrades them to established resource details before strict
+  validation. Table navigation nodes remain public and searchable.
 
 ## Direction options not promoted to implementation plans
 
@@ -209,6 +220,8 @@ helper runtimes prerequisites for native document support.
   010.
 - **ODT/ODS/ODP and EPUB:** architecturally fit the document artifact after the
   core formats are qualified, but have their own package and semantic rules.
+- **HTML and Office table convergence in Plan 024:** deferred to Plan 012 or a
+  focused follow-up; this change is limited to Markdown extraction semantics.
 
 ## Findings considered and rejected
 

@@ -12,7 +12,7 @@ use compass_graph::{
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
     BuildMetadata, CoverageRecord, CoverageStatus, DiagnosticSeverity, EdgeKind, ExtractionStatus,
-    FileRecord, GraphDiagnostic, NodeKind,
+    FileRecord, GraphDiagnostic, NodeDetails, NodeKind, ResourceKind,
 };
 use compass_model::identity::edge_id;
 use compass_model::provenance::{
@@ -143,6 +143,45 @@ fn file_nodes_canonicalize_extension_preserving_identity_before_coalescing()
     assert_eq!(outcome.document.nodes[0].kind, NodeKind::File);
     assert_eq!(outcome.document.nodes[0].name, "lib.rs");
     assert_eq!(outcome.document.nodes[0].qualified_name, "src/lib.rs");
+    Ok(())
+}
+
+#[test]
+fn framework_file_set_resources_do_not_fall_back_to_document_details()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut file_set = raw_node(root, "raw:file-set", "import.meta.glob", 10);
+    file_set
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("resource"));
+    file_set
+        .attributes
+        .insert("qualified_name".to_owned(), json!("framework_file_set"));
+    file_set
+        .attributes
+        .insert("resource_kind".to_owned(), json!("framework_file_set"));
+    file_set
+        .attributes
+        .insert("component_type".to_owned(), json!("framework_file_set"));
+    file_set
+        .attributes
+        .insert("framework".to_owned(), json!("vite"));
+
+    let outcome = normalize_v1(
+        Extraction {
+            nodes: vec![file_set],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(outcome.nodes.len(), 1);
+    assert!(matches!(
+        &outcome.nodes[0].details,
+        Some(NodeDetails::Resource(details))
+            if details.resource_kind == ResourceKind::Concept
+    ));
     Ok(())
 }
 
@@ -2347,6 +2386,11 @@ fn canonical_external_exact_binding_is_published_as_inferred_placeholder()
         .iter()
         .find(|node| node.qualified_name == "flask.Blueprint")
         .ok_or("missing canonical external placeholder")?;
+    assert!(
+        matches!(external.details.as_ref(), Some(NodeDetails::Symbol(_))),
+        "unexpected placeholder details: {:?}",
+        external.details
+    );
     assert!(external.evidence.iter().any(|evidence| {
         evidence.extractor == "compass.graph.external-placeholder"
             && evidence.origin == EvidenceOrigin::Heuristic

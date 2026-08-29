@@ -1,0 +1,53 @@
+{
+  "schema": "compass.markdown-graph-qualification/3",
+  "graphSchema": "compass.graph/1",
+  "minimumQualityScore": 17,
+  "frontmatter": [
+    {
+      "id": "qualification-guide-frontmatter",
+      "source": "fixtures/code-graph/qualification/guide.md",
+      "documentName": "Qualification Guide",
+      "paths": [
+        {"qualifiedName": "frontmatter/title", "keyPath": "/title", "name": "title: Qualification Guide"},
+        {"qualifiedName": "frontmatter/tags", "keyPath": "/tags", "name": "tags: markdown, graph"},
+        {"qualifiedName": "frontmatter/owners", "keyPath": "/owners", "name": "owners"},
+        {"qualifiedName": "frontmatter/owners/quality", "keyPath": "/owners/quality", "name": "quality", "parent": "frontmatter/owners"},
+        {"qualifiedName": "frontmatter/owners/quality/team", "keyPath": "/owners/quality/team", "name": "team", "parent": "frontmatter/owners/quality"},
+        {"qualifiedName": "frontmatter/api_token", "keyPath": "/api_token", "name": "api_token"}
+      ],
+      "forbiddenGraphValues": ["fixture-private-value"]
+    }
+  ],
+  "tables": [
+    {
+      "id": "qualification-guide-table",
+      "source": "fixtures/code-graph/qualification/guide.md",
+      "headers": ["Area", "Owner", "Status"],
+      "bodyRows": 2,
+      "bodyCells": 6
+    }
+  ],
+  "references": [
+    {
+      "id": "qualification-guide-link",
+      "source": "fixtures/code-graph/qualification/guide.md",
+      "ownerContains": "Runtime source",
+      "targetSource": "fixtures/code-graph/qualification/rich.rs",
+      "relationship": "documents"
+    },
+    {
+      "id": "qualification-guide-cell-link",
+      "source": "fixtures/code-graph/qualification/guide.md",
+      "ownerContains": "Rust source",
+      "targetSource": "fixtures/code-graph/qualification/rich.rs",
+      "relationship": "documents"
+    },
+    {
+      "id": "qualification-semantic-doc-link",
+      "source": "fixtures/code-graph/qualification/semantic-doc.md",
+      "ownerContains": "Documented runtime",
+      "targetSource": "fixtures/code-graph/routes/typescript/express.ts",
+      "relationship": "documents"
+    }
+  ]
+}

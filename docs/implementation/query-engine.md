@@ -62,6 +62,13 @@ The corresponding immutable term-posting layout is
 `compass.store.graph-index/1`. Unknown layouts are rejected rather than being
 reinterpreted with the current analyzer.
 
+Bounded directional queries merge the requested relationship-kind buckets by
+canonical edge ID and retain one global prefix before heuristic filtering.
+Store snapshots declare that edge-ordered adjacency capability explicitly. A
+snapshot without it can still be exported and validated, but the store query
+engine requires a sidecar rebuild instead of using the older endpoint-ordered
+keys with different truncation semantics.
+
 Search candidate truncation is observable and therefore backend-neutral. Both
 engines select matching candidates in canonical node-ID order, apply the bound,
 then run common Rust ranking and tie-breaking. Store prefix scans traverse the

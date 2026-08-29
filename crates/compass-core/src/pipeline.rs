@@ -36,8 +36,8 @@ use compass_languages::{
     ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, file_stem, make_id,
 };
 use compass_model::code_graph::{
-    CommunityMetadata, CoverageRecord, DiagnosticSeverity, ExtractionStatus, FileNodeDetails,
-    GraphDiagnostic, GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
+    CommunityMetadata, CoverageRecord, DiagnosticSeverity, ExtractionStatus, GraphDiagnostic,
+    GraphDocument as V1GraphDocument, NodeKind,
 };
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
@@ -1860,16 +1860,14 @@ fn prepare_fact_neutral_document(
             continue;
         };
         let source = relative_fact_path(Path::new(source), root);
-        let Some(file) = files.get(source.as_str()) else {
+        if !files.contains_key(source.as_str()) {
             continue;
-        };
-        if node.kind == NodeKind::File {
-            node.details = Some(NodeDetails::File(FileNodeDetails {
-                content_digest: file.content_digest.clone(),
-                byte_size: file.byte_size,
-                generated: file.generated,
-            }));
         }
+        // The canonical graph-v1 file inventory owns digest, size, and generated
+        // state. Do not synthesize an optional file-node payload only on the
+        // fact-neutral route: full publication intentionally preserves the
+        // established graph-v1 node shape, and adding it here makes an
+        // edit-then-restore build differ from a clean build.
         let refreshed_envelope = source_digests.contains_key(&source).then(|| {
             anchors
                 .get(&source)

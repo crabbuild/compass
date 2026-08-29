@@ -182,6 +182,21 @@ with this vocabulary. Strict query, MCP, CLI, VS Code, and viewer consumers
 must use the matching manifest; they must reject an unknown `edgeKind` or
 `nodeRole` instead of filtering it into an older response shape.
 
+Markdown semantic table intelligence remains within `compass.graph/1` by using
+the established resource-node, qualified-name, source-anchor, and relationship
+contracts. Pipe tables continue to publish table, header, row, and cell nodes.
+Their semantic labels, stable identities, exact cell-owned references, and
+bounded extraction are producer-logic improvements; no new graph wire fields
+or schema migration are required. Consumers must continue to reject unknown
+graph majors and must not infer document roles from display labels.
+
+Markdown frontmatter intelligence likewise remains within `compass.graph/1`.
+Bounded nested YAML metadata publishes through established `config_key` nodes,
+Config provenance, exact source anchors, canonical key paths, and `contains`
+relationships. Value-independent IDs and JSON Pointer escaping are producer
+identity rules, not new wire fields. Generic metadata values are not copied
+into graph labels; strict readers need no schema migration.
+
 Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
 universal evidence pipelines. The four pipelines are `Qualified` under the
 checked-in universal-evidence promotion decision: they use one bounded,
@@ -638,6 +653,14 @@ its 2 GiB materialized-payload limit. `compass store status|validate|backup|rest
 stream graph and database digests through fixed-size buffers and traverse the
 reachable immutable tree objects with bounded cache and path memory; they do
 not depend on the whole-JSON reader limit.
+
+Directional adjacency indexes advertise an edge-ID-order capability. Bounded
+JSON and store queries select the same canonical edge-ID prefix across the
+requested relationship kinds before applying heuristic filtering. A sidecar
+without that capability remains available for validation, backup, JSON export,
+and recovery, but directional store queries reject it with a rebuild
+instruction; they never reinterpret endpoint-ordered keys as edge-ordered
+results.
 
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve
