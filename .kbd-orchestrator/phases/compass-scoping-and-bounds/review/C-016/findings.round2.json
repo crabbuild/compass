@@ -1,0 +1,55 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-cli/src/install_commands.rs",
+      "line": 2975,
+      "claim": "Uninstall never removes focused skills: remove_managed_focused_skills gates deletion on is_managed_skill(), which delegates to legacy_skill_is_unmodified(), and that function builds its expected digest map exclusively from the umbrella `compass-skill/` bundle (REFERENCE_BUNDLE/SKILL_ASSET), so every focused directory fails the comparison and is always reported as 'preserved unowned or modified focused skill'.",
+      "evidence": "New code: `if !is_managed_skill(&destination) { lines.push(\"preserved unowned or modified focused skill ...\"); continue; }` in remove_managed_focused_skills, combined with the unchanged `is_managed_skill` body (`parent.join(\".compass_version\").is_file() && legacy_skill_is_unmodified(parent)`) and the modified `legacy_skill_is_unmodified` which still hardcodes `asset_text(SKILL_ASSET)` and `expected_package_digests(&format!(\"{REFERENCE_BUNDLE}/\"))`. A focused dir's SKILL.md digest can never equal the umbrella SKILL.md digest, and the focused dir lacks the umbrella references/agents entries. This violates the spec scenario 'Last consumer uninstall removes focused trees' (openspec/changes/focused-agent-skills/specs/focused-agent-skills/spec.md) and contradicts the diff's own tests `every_project_platform_installs_native_content` (asserts `!tree_contains_focused_skill` after uninstall) and `uninstall_removes_one_shared_consumer_without_breaking_another` (asserts each focused dir `!exists()`). Task 3.2 (running the tests) is unchecked, consistent with this escaping.",
+      "suggested_fix": "In remove_managed_focused_skills, replace the is_managed_skill gate with verify_manifest(directory) (checksum verification against the directory's own .compass-install.json, as update_focused_skill_consumers already does), or parameterize legacy_skill_is_unmodified by asset prefix/SKILL_ASSET so each focused tree is compared against its own embedded package."
+    },
+    {
+      "severity": "WARNING",
+      "file": "CHANGELOG.md",
+      "line": 5,
+      "claim": "The diff documents numerous features that are not part of this change (MCP `compass.code_context.v1` envelope, stateless MCP 2026-07-28 HTTP contract, rmcp 3.1.4 upgrade, compass-partition crate, COMPASS_MAX_GRAPH_BYTES handling, canonical graph-size preflight, SQLite chunk-streaming reads) in CHANGELOG.md, COMPATIBILITY.md, and docs/reference/commands.md (`compass serve` section), none of which have any implementing code in this diff.",
+      "evidence": "CHANGELOG.md adds eight entries before the relevance-matrix entry, only the first of which (focused Agent Skills) corresponds to any code in the diff; COMPATIBILITY.md adds 'MCP HTTP compatibility' and 'MCP structured result compatibility' sections; docs/reference/commands.md adds `--session-timeout` deprecation and stateless-HTTP contract text to `compass serve`. The constraint `no-unrelated-diff-noise` states 'git diff and git status --short contain no unrelated or generated noise', and these entries assert shipped user-visible behavior with no supporting change here, which also makes the compatibility documentation inaccurate for this delta.",
+      "suggested_fix": "Restrict this change's doc entries to the focused-agent-skills surface; land the MCP/partition/graph-bytes/SQLite entries with the diffs that actually implement them."
+    },
+    {
+      "severity": "WARNING",
+      "file": "tools/skillgen/mod.rs",
+      "line": 231,
+      "claim": "The Windows absolute-path marker in validate_portable_paths decodes to `C:\\\\` (two literal backslashes), which is never a substring of a normal single-backslash Windows path like `C:\\repo\\file`, so the 'no absolute filesystem paths' validation does not fire for the most common Windows path form.",
+      "evidence": "`for forbidden in [\"/Users/\", \"/home/\", \"file://\", \"C:\\\\\\\\\", \"C:/\"]` \u2014 as written the literal is C: followed by two backslashes; the spec requirement 'Portable complete skill trees' says focused content 'MUST contain no absolute filesystem paths' and the scenario 'Invalid portable content is rejected' requires validation to fail on absolute paths.",
+      "suggested_fix": "Use a single-backslash literal (`\"C:\\\\\"` in Rust source) or, more robustly, reject any `[A-Za-z]:[\\\\/]` prefix pattern and UNC `\\\\` prefixes."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/Cargo.toml",
+      "line": 63,
+      "claim": "A new build-dependency (`sha2.workspace = true`) is added to compass-cli without any accompanying Cargo.lock change in the diff; if sha2 was not already a dependency edge of the compass-cli package, all `--locked` build/test/lint commands fail.",
+      "evidence": "The diff adds `[build-dependencies] sha2.workspace = true` but contains no Cargo.lock hunk; the blocking constraint `locked-dependencies` requires 'Build and test commands use --locked; Cargo.lock is updated when dependency resolution changes'. This is safe only if sha2 already appears in compass-cli's locked dependency set (e.g., backing the pre-existing digest_bytes), which cannot be confirmed from the packet.",
+      "suggested_fix": "Verify `cargo metadata --locked` succeeds and include the Cargo.lock update in the change if the lock's compass-cli dependency edges change."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/src/install_commands.rs",
+      "line": 543,
+      "claim": "The install error path now unconditionally calls restore_transaction, removing the previous guard that skipped rollback when staging failed before any installed package was modified; this rewrites a healthy installed tree from snapshots (and changes the rollback message) even for pre-mutation failures such as a missing embedded asset.",
+      "evidence": "Old code: `let rollback = if error.contains(\"could not restore previous package\") { restore_transaction(...) } else { \"package staging or activation failed before changing the installed package\".to_owned() };` replaced by `let rollback = restore_transaction(&skill_snapshot, &adapter_snapshots);`. Collection-wide restore is needed for partial mid-collection installs, but not for errors raised before any destination changed.",
+      "suggested_fix": "Keep collection-wide restore for activation/partial-install failures, but retain the pre-mutation fast path (no restore, explicit 'no installed files changed' message) for errors that occur during staging before any rename."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

@@ -5,8 +5,8 @@ use rayon::prelude::*;
 use serde_json::Value;
 
 use crate::code_graph::{
-    CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument as CodeGraphDocument, NodeDetails, NodeKind,
-    NodeRole,
+    BuildMetadata, CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument as CodeGraphDocument, NodeDetails,
+    NodeKind, NodeRole,
 };
 use crate::identity::{edge_id, file_id};
 use crate::provenance::{Provenance, SourceAnchor};
@@ -231,6 +231,9 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
             document.graph.schema
         ));
     }
+    report
+        .document_errors
+        .extend(build_metadata_identity_errors(&document.graph.build));
 
     let mut files = HashMap::new();
     for file in &document.graph.files {
@@ -462,6 +465,33 @@ pub fn validate_code_graph(document: &CodeGraphDocument) -> Result<(), CodeGraph
     } else {
         Err(CodeGraphValidationError { errors })
     }
+}
+
+/// Validate the realization identities shared by typed graphs, immutable
+/// stores, and structured query-result envelopes.
+pub fn validate_build_metadata_identity(
+    build: &BuildMetadata,
+) -> Result<(), CodeGraphValidationError> {
+    let errors = build_metadata_identity_errors(build);
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(CodeGraphValidationError { errors })
+    }
+}
+
+fn build_metadata_identity_errors(build: &BuildMetadata) -> Vec<String> {
+    [
+        (
+            "graph.build.sourceTreeDigest",
+            build.source_tree_digest.as_str(),
+        ),
+        ("graph.build.generationId", build.generation_id.as_str()),
+    ]
+    .into_iter()
+    .filter(|(_, value)| value.trim().is_empty())
+    .map(|(field, _)| format!("{field} must not be empty"))
+    .collect()
 }
 
 fn validate_evidence(

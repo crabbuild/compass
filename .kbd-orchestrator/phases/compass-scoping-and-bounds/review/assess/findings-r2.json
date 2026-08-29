@@ -1,0 +1,42 @@
+{
+  "mode": "artifact",
+  "verdict": "BLOCK",
+  "judge_model": "kbd-judge",
+  "producer_model": "claude-fable-5",
+  "isolation_mode": "rest-gateway:http://localhost:8181/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The assessment bases the first required action and change sequencing on an unverified claim that C-001 is already substantially implemented in an uncommitted diff.",
+      "evidence": "Assessment \u00a73 states: \"C-001 ... **substantially implemented but uncommitted**: `crates/compass-store/src/lib.rs` (+152/\u221217) adds `read_snapshot_manifest()` + streaming `read_snapshot_chunks()`\" and \"First required action ... reconcile C-001 \u2014 create its OpenSpec change, absorb the existing diff\". The packet's file_tree only proves `crates/compass-store/src/lib.rs` exists; no diff, branch state, git status, or source content is included.",
+      "suggested_fix": "Either include verifiable source/diff evidence in the packet or restate C-001 as unverified pending work and assess the gap from repository-visible facts only."
+    },
+    {
+      "severity": "WARNING",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "Multiple codebase-specific assertions are unsupported by the file tree and cited paths, so downstream analysis may inherit incorrect premises.",
+      "evidence": "Assessment \u00a75 claims: \"`Cargo.toml:86` pins `rmcp = \\\"2.2.0\\\"`\", \"`compass-store-redb` (~869 lines) ...\", \"`compass-mcp` serves 15 tools + 6 resources\", and \"Rust toolchain 1.97.1 satisfies rmcp 3.x's 1.88 MSRV.\" The file_tree shows only that `Cargo.toml`, `crates/compass-store-redb`, `crates/compass-mcp`, and `rust-toolchain.toml` exist; it does not provide these contents, counts, tool lists, or versions.",
+      "suggested_fix": "Limit findings to what the packet proves, or attach the inspected snippets/command outputs needed to substantiate each codebase claim."
+    },
+    {
+      "severity": "WARNING",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The assessment cites docs/future research content as the basis for expanded gaps without packet evidence for that research document or its contents.",
+      "evidence": "Assessment \u00a73 says \"docs/future | did not exist | 3 notes (1,294 lines): research report, SurrealDB proposal, upstream contribution plan\" and \u00a77 says \"the qualification thresholds in the research doc are stated as \\\"ratify before measuring.\\\"\" The cited_paths only list `docs/future/SURREAL_DB.md` and `docs/future/upstream-contribution-plan.md`; the file_tree lists `./docs/future` only as a directory and does not include a research-report filename or contents.",
+      "suggested_fix": "Identify the specific research document path and include it in cited_paths, or remove conclusions that depend on unavailable research-doc contents."
+    },
+    {
+      "severity": "WARNING",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The gap report for expanded goals is too coarse to drive planning for several multi-part goals.",
+      "evidence": "For E3, the goal requires \"schemafull nodes/relations, generation activation, bounded native reads, dual-engine semantic equivalence,\" but the gap is only \"entire crate + equivalence corpus.\" For E6, the goal requires \"Codex `.codex-plugin`, Claude `.claude-plugin` + marketplace, OpenCode plugin/npm\" generated from one inventory, but the gap is only \"inventory + generators + installed-artifact validation.\" These omit separate gap assessment for generation activation, bounded native reads, marketplace packaging, and npm/TypeScript plugin requirements.",
+      "suggested_fix": "Break each expanded goal into assessable sub-gaps that map directly to required implementation and validation work."
+    }
+  ]
+}

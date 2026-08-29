@@ -39,13 +39,22 @@ Maintainers will use the private advisory to coordinate questions, credit, affec
 Compass parses untrusted project content and graph files. Its default structural build and query workflow stays local, but these opt-in features cross process or network boundaries:
 
 - Semantic extraction sends selected content to the configured model provider
-- Streamable HTTP exposes the Model Context Protocol server on the configured interface
+- Stateless MCP 2026-07-28 Streamable HTTP exposes the server on the configured
+  interface; every request remains independently subject to host validation,
+  authentication when configured, and body limits
 - Neo4j and FalkorDB pushes connect to external databases
 - URL acquisition and Google Workspace extraction access configured external services
 - PostgreSQL extraction connects to the supplied database server
 - Assistant setup can register local command hooks. Review generated hook files
   before trusting them in the host, and reinstall after moving the Compass
   executable so the managed command path remains accurate.
+- `compass agent export` publishes only the embedded seven-skill collection and
+  credential-free native MCP configuration. `compass agent validate` treats
+  bundles and managed installations as untrusted: it bounds files and bytes,
+  rejects symlinks, escaping paths and common machine-specific roots, verifies
+  manifests and
+  checksums, accepts only the documented Compass stdio command or loopback HTTP
+  endpoint, and reports likely literal credentials without echoing their values.
 - `compass upgrade` downloads the bounded `compass.release/1` manifest and the
   selected archive from official GitHub release URLs. It validates the schema,
   stable tag/version binding, bounded unique targets, selected archive name and

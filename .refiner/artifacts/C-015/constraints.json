@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-015",
+  "blocking": [
+    {
+      "id": "semantic-equivalence",
+      "status": "PASS",
+      "evidence": "The medium and large scale samples and the exact 100000-node/250000-edge medium run produced zero structural semantic mismatches"
+    },
+    {
+      "id": "bounded-publication",
+      "status": "PASS",
+      "evidence": "Activation uses resumable idempotent 512-record staging commits, an incomplete manifest claim, exact identity validation, and pointer-last visibility; the corrected exact medium run completed with 3646308352 bytes maximum RSS"
+    },
+    {
+      "id": "query-regression-budget",
+      "status": "FAIL",
+      "evidence": "Warm in-process callers and callees p95 were 10226.12x and 8132.06x current, exceeding the pre-ratified maximum 1.10x"
+    },
+    {
+      "id": "native-value-budget",
+      "status": "FAIL",
+      "evidence": "Depth-3 impact and path p95 were 14800.04x and 38903.71x current instead of at least 10% lower, and canonical response-byte reduction was 0% instead of at least 15%"
+    },
+    {
+      "id": "falsifier-integrity",
+      "status": "PASS",
+      "evidence": "The retained decision invokes REJECT without changing any threshold after results were visible and leaves uncompleted post-falsifier measurements explicit"
+    },
+    {
+      "id": "repository-integration",
+      "status": "PASS",
+      "evidence": "The complete workspace integration suite, Mem/SurrealKV/RocksDB integration targets, feature isolation, formatting, Clippy, product boundary, qualification manifest, and strict OpenSpec validation passed"
+    }
+  ]
+}

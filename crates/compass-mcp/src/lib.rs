@@ -5,6 +5,16 @@ mod transport;
 
 pub use transport::{HttpOptions, serve_http, serve_stdio};
 
+/// MCP protocol version accepted by the native Compass transports.
+pub const SUPPORTED_PROTOCOL_VERSION: &str = "2026-07-28";
+
+/// Return whether the native transports accept the supplied MCP protocol.
+#[must_use]
+pub fn supports_protocol(version: &str) -> bool {
+    version == SUPPORTED_PROTOCOL_VERSION
+}
+
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::fs::OpenOptions;
@@ -16,6 +26,7 @@ use std::time::{Duration, Instant};
 
 use compass_core::LoadedGraph;
 use compass_graph::{Communities, god_nodes, suggest_questions, surprising_connections};
+use compass_model::query_contract::CodeQueryOperation;
 use compass_model::{Graph, GraphDocument, NodeIndex};
 use compass_prs::{
     ProcessRunner, SystemRunner, compute_pr_impact, detect_default_branch, fetch_pr_files,
@@ -26,9 +37,11 @@ use compass_query::{
     sanitize_label, score_nodes,
 };
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ContentBlock, ErrorData, Implementation,
-    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ReadResourceRequestParams,
-    ReadResourceResult, Resource, ResourceContents, ServerCapabilities, ServerInfo, Tool,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+    ErrorData, Implementation, InitializeRequestParams, InitializeResult, ListPromptsResult,
+    ListResourcesResult, ListToolsResult, MetaObject, PaginatedRequestParams, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerInfo, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{RoleServer, ServerHandler};
@@ -88,7 +101,7 @@ struct GraphContext {
 impl GraphContext {
     fn load(path: &Path) -> Result<Self, String> {
         let loaded = LoadedGraph::load_directed(path).map_err(|error| error.to_string())?;
-        let typed_query_supported = GraphDocument::load(path).is_ok();
+        let typed_query_supported = compass_model::code_graph::GraphDocument::load(path).is_ok();
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
             if let Some(community) = node
@@ -213,6 +226,13 @@ impl GraphStore {
 #[derive(Clone, Debug)]
 pub struct CompassMcp {
     store: GraphStore,
+    protocol_profile: ProtocolProfile,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProtocolProfile {
+    Stdio2026,
+    Http2026,
 }
 
 impl CompassMcp {
@@ -220,6 +240,14 @@ impl CompassMcp {
     pub fn new(graph_path: impl Into<PathBuf>) -> Self {
         Self {
             store: GraphStore::new(graph_path),
+            protocol_profile: ProtocolProfile::Stdio2026,
+        }
+    }
+
+    pub(crate) fn new_http(graph_path: impl Into<PathBuf>) -> Self {
+        Self {
+            store: GraphStore::new(graph_path),
+            protocol_profile: ProtocolProfile::Http2026,
         }
     }
 
@@ -253,6 +281,22 @@ impl CompassMcp {
 }
 
 impl ServerHandler for CompassMcp {
+    fn initialize(
+        &self,
+        _request: InitializeRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<InitializeResult, ErrorData>> + Send + '_ {
+        std::future::ready(Err(ErrorData::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            "initialize is not available in MCP 2026-07-28; use server/discover",
+            None,
+        )))
+    }
+
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(&[ProtocolVersion::V_2026_07_28])
+    }
+
     fn get_info(&self) -> ServerInfo {
         let mut capabilities = ServerCapabilities::builder()
             .enable_experimental()
@@ -266,6 +310,12 @@ impl ServerHandler for CompassMcp {
         if let Some(tools) = capabilities.tools.as_mut() {
             tools.list_changed = Some(false);
         }
+        if self.protocol_profile == ProtocolProfile::Http2026 {
+            capabilities.prompts = Some(Default::default());
+            if let Some(prompts) = capabilities.prompts.as_mut() {
+                prompts.list_changed = Some(false);
+            }
+        }
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new(SERVER_NAME, env!("CARGO_PKG_VERSION")))
     }
@@ -275,14 +325,19 @@ impl ServerHandler for CompassMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(tool_specs()))
+        let result = ListToolsResult::with_all_items(tool_specs());
+        Ok(if self.protocol_profile == ProtocolProfile::Http2026 {
+            result.with_ttl_ms(0).with_cache_scope(CacheScope::Private)
+        } else {
+            result
+        })
     }
 
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
+    ) -> Result<CallToolResponse, ErrorData> {
         let mut arguments = request.arguments.unwrap_or_default();
         let result = self
             .invoke_result(&request.name, &mut arguments)
@@ -292,7 +347,7 @@ impl ServerHandler for CompassMcp {
             CallToolResult::structured,
         );
         response.content = vec![ContentBlock::text(result.text)];
-        Ok(response)
+        Ok(response.into())
     }
 
     async fn list_resources(
@@ -300,25 +355,51 @@ impl ServerHandler for CompassMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        Ok(ListResourcesResult::with_all_items(resource_specs()))
+        let result = ListResourcesResult::with_all_items(resource_specs());
+        Ok(if self.protocol_profile == ProtocolProfile::Http2026 {
+            result.with_ttl_ms(0).with_cache_scope(CacheScope::Private)
+        } else {
+            result
+        })
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, ErrorData> {
+        let result = ListPromptsResult::with_all_items(Vec::new());
+        Ok(if self.protocol_profile == ProtocolProfile::Http2026 {
+            result.with_ttl_ms(0).with_cache_scope(CacheScope::Private)
+        } else {
+            result
+        })
     }
 
     async fn read_resource(
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, ErrorData> {
+    ) -> Result<ReadResourceResponse, ErrorData> {
+        let uri = request.uri;
         let text = self
-            .read(&request.uri)
-            .map_err(|error| ErrorData::invalid_params(error, None))?;
-        let mime = if request.uri == "compass://report" {
+            .read(&uri)
+            .map_err(|error| ErrorData::invalid_params(error, Some(json!({"uri": uri.clone()}))))?;
+        let mime = if uri == "compass://report" {
             "text/markdown"
         } else {
             "text/plain"
         };
-        Ok(ReadResourceResult::new(vec![
-            ResourceContents::text(text, request.uri).with_mime_type(mime),
-        ]))
+        let result =
+            ReadResourceResult::new(vec![ResourceContents::text(text, uri).with_mime_type(mime)]);
+        Ok(if self.protocol_profile == ProtocolProfile::Http2026 {
+            result
+                .with_ttl_ms(0)
+                .with_cache_scope(CacheScope::Private)
+                .into()
+        } else {
+            result.into()
+        })
     }
 }
 
@@ -357,7 +438,8 @@ impl CompassMcp {
             && should_route_natural_query(arguments, &context)?);
         if typed_query {
             let started = Instant::now();
-            let response = code_query::invoke(name, arguments, &context.path)?;
+            let invoked = code_query::invoke(name, arguments, &context.path)?;
+            let response = invoked.response;
             let text = format!(
                 "{:?}: {} nodes, {} edges, {} paths{}",
                 response.operation,
@@ -375,12 +457,18 @@ impl CompassMcp {
             {
                 log_typed_mcp_query(question, &context.path, &response, started.elapsed());
             }
+            let structured_content = if core_navigation_tool(name) {
+                let envelope = code_query::envelope(&response, &invoked.build)
+                    .map_err(|error| InvocationError::Internal(error.to_string()))?;
+                enforce_structured_response_size(&envelope, response.limits.max_response_bytes)?;
+                envelope
+            } else {
+                serde_json::to_value(response)
+                    .map_err(|error| InvocationError::Internal(error.to_string()))?
+            };
             return Ok(ToolInvocation {
                 text,
-                structured_content: Some(
-                    serde_json::to_value(response)
-                        .map_err(|error| InvocationError::Internal(error.to_string()))?,
-                ),
+                structured_content: Some(structured_content),
             });
         }
         Ok(ToolInvocation {
@@ -421,25 +509,29 @@ fn tool_specs() -> Vec<Tool> {
         "description": "Absolute path to a project directory containing compass-out/graph.json. Optional — defaults to the graph this server was started with."
     });
     let mut specs = vec![
-        tool(
+        typed_navigation_tool(
             "search_symbols",
             "Search Compass code symbols with the trusted FTS5 index.",
             code_query::schema(&["query"]),
+            CodeQueryOperation::Search,
         ),
-        tool(
+        typed_navigation_tool(
             "get_callers",
             "Return one-hop callers and route bindings for a symbol.",
             code_query::schema(&["symbol"]),
+            CodeQueryOperation::Callers,
         ),
-        tool(
+        typed_navigation_tool(
             "get_callees",
             "Return one-hop callees for a symbol.",
             code_query::schema(&["symbol"]),
+            CodeQueryOperation::Callees,
         ),
-        tool(
+        typed_navigation_tool(
             "get_impact",
             "Return the bounded transitive impact radius for a symbol.",
             code_query::schema(&["symbol"]),
+            CodeQueryOperation::Impact,
         ),
         tool(
             "explore_code",
@@ -453,7 +545,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "query_graph",
-            "Route clear natural-language intents through bounded typed code queries; use explicit traversal controls for BFS/DFS text context.",
+            "Route clear natural-language intents through bounded typed code queries. DEPRECATED text mode: explicit BFS/DFS traversal controls return legacy text; use the typed navigation tools.",
             json!({"type":"object","properties":{
                 "question":{"type":"string","description":"Natural language question or keyword search"},
                 "mode":{"type":"string","enum":["bfs","dfs"],"default":"bfs","description":"bfs=broad context, dfs=trace a specific path"},
@@ -464,46 +556,67 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "get_neighbors",
-            "Get all direct neighbors of a node with edge details.",
+            "DEPRECATED text result: get direct neighbors of a node with edge details; use typed navigation tools for machine-readable evidence.",
             json!({"type":"object","properties":{"label":{"type":"string"},"relation_filter":{"type":"string","description":"Optional: filter by relation type"}},"required":["label"]}),
         ),
         tool(
             "get_community",
-            "Get all nodes in a community by community ID.",
+            "DEPRECATED text result: get nodes in a community; a typed replacement is pending.",
             json!({"type":"object","properties":{"community_id":{"type":"integer","description":"Community ID (0-indexed by size)"}},"required":["community_id"]}),
         ),
         tool(
             "god_nodes",
-            "Return the most connected nodes - the core abstractions of the knowledge graph.",
+            "DEPRECATED text result: return the most connected nodes; a typed replacement is pending.",
             json!({"type":"object","properties":{"top_n":{"type":"integer","default":10}}}),
         ),
         tool(
             "graph_stats",
-            "Return summary statistics: node count, edge count, communities, confidence breakdown.",
+            "DEPRECATED text result: return graph summary statistics; a typed replacement is pending.",
             json!({"type":"object","properties":{}}),
         ),
         tool(
             "shortest_path",
-            "Find the shortest path between two concepts in the knowledge graph.",
+            "DEPRECATED text result: find a shortest path; use get_node for typed directed evidence.",
             json!({"type":"object","properties":{"source":{"type":"string","description":"Source concept label or keyword"},"target":{"type":"string","description":"Target concept label or keyword"},"max_hops":{"type":"integer","default":8,"description":"Maximum hops to consider"}},"required":["source","target"]}),
         ),
         tool(
             "list_prs",
-            "List open GitHub PRs with CI status, review state, and graph impact (which communities each PR touches, blast radius). Use this before starting work to check if a PR already covers the area you're about to change.",
+            "DEPRECATED text result: list open GitHub PRs with CI, review, and graph-impact context; a typed replacement is pending.",
             json!({"type":"object","properties":{"base":{"type":"string","description":"Base branch to filter PRs by (auto-detected if omitted)"},"repo":{"type":"string","description":"GitHub repo (owner/repo). Defaults to current repo."}}}),
         ),
         tool(
             "get_pr_impact",
-            "Get detailed graph impact for a specific PR: which files it changes, which knowledge-graph communities are affected, and how many nodes are touched. Use this to assess merge risk or check for overlap with your current work.",
+            "DEPRECATED text result: get graph impact for a pull request; use get_impact for typed symbol impact or await the typed PR replacement.",
             json!({"type":"object","properties":{"pr_number":{"type":"integer","description":"PR number to analyse"},"repo":{"type":"string","description":"GitHub repo (owner/repo). Defaults to current repo."}},"required":["pr_number"]}),
         ),
         tool(
             "triage_prs",
-            "Return all actionable open PRs (correct base, not stale) with full graph impact data so you can reason about review priority, merge order, and conflict risk. Call this when the user asks 'what PRs should I review?' or 'what's ready to merge?'",
+            "DEPRECATED text result: triage actionable open pull requests; a typed replacement is pending.",
             json!({"type":"object","properties":{"base":{"type":"string","description":"Base branch to filter PRs by (auto-detected if omitted)"},"repo":{"type":"string","description":"GitHub repo (owner/repo). Defaults to current repo."}}}),
         ),
     ];
     for spec in &mut specs {
+        if legacy_text_tool(spec.name.as_ref()) {
+            spec.meta = Some(MetaObject(Map::from_iter([
+                ("compass/deprecated".to_owned(), Value::Bool(true)),
+                (
+                    "compass/deprecatedSince".to_owned(),
+                    Value::String("0.4.0".to_owned()),
+                ),
+                (
+                    "compass/deprecationReason".to_owned(),
+                    Value::String("legacy text result; use a typed navigation result".to_owned()),
+                ),
+            ])));
+        } else if spec.name == "query_graph" {
+            spec.meta = Some(MetaObject(Map::from_iter([
+                ("compass/deprecatedTextMode".to_owned(), Value::Bool(true)),
+                (
+                    "compass/deprecatedSince".to_owned(),
+                    Value::String("0.4.0".to_owned()),
+                ),
+            ])));
+        }
         Arc::make_mut(&mut spec.input_schema)
             .entry("properties".to_owned())
             .or_insert_with(|| Value::Object(Map::new()));
@@ -520,6 +633,53 @@ fn tool_specs() -> Vec<Tool> {
 fn tool(name: &'static str, description: &'static str, schema: Value) -> Tool {
     let object = schema.as_object().cloned().unwrap_or_default();
     Tool::new(name, description, object)
+}
+
+fn typed_navigation_tool(
+    name: &'static str,
+    description: &'static str,
+    input_schema: Value,
+    operation: CodeQueryOperation,
+) -> Tool {
+    let input = input_schema.as_object().cloned().unwrap_or_default();
+    let output = code_query::output_schema(operation)
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    Tool::new(name, description, input).with_raw_output_schema(Arc::new(output))
+}
+
+fn core_navigation_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "search_symbols" | "get_callers" | "get_callees" | "get_impact"
+    )
+}
+
+fn legacy_text_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "get_neighbors"
+            | "get_community"
+            | "god_nodes"
+            | "graph_stats"
+            | "shortest_path"
+            | "list_prs"
+            | "get_pr_impact"
+            | "triage_prs"
+    )
+}
+
+fn enforce_structured_response_size(value: &Value, maximum: u64) -> Result<(), InvocationError> {
+    let actual = serde_json::to_vec(value)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?
+        .len() as u64;
+    if actual > maximum {
+        return Err(InvocationError::Internal(format!(
+            "query_response_too_large: query response is {actual} bytes after MCP envelope encoding; limit is {maximum}"
+        )));
+    }
+    Ok(())
 }
 
 fn resource_specs() -> Vec<Resource> {

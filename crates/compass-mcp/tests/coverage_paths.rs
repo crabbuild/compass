@@ -2,8 +2,11 @@ use std::error::Error;
 use std::fs;
 
 use compass_mcp::{CompassMcp, HttpOptions, serve_http};
-use rmcp::model::{CallToolRequestParams, ReadResourceRequestParams};
-use rmcp::{ServerHandler, ServiceExt};
+use rmcp::model::{
+    CallToolRequestParams, ClientCapabilities, ClientInfo, Implementation, ProtocolVersion,
+    ReadResourceRequestParams,
+};
+use rmcp::{ClientLifecycleMode, ClientServiceExt, ServerHandler, ServiceExt};
 use serde_json::{Map, Value, json};
 
 fn write_fixture(root: &std::path::Path) -> Result<std::path::PathBuf, Box<dyn Error>> {
@@ -292,7 +295,19 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
             .map_err(|error| error.to_string())?;
         running.waiting().await.map_err(|error| error.to_string())
     });
-    let client = ().serve(client_transport).await?;
+    let client_info = ClientInfo::new(
+        ClientCapabilities::default(),
+        Implementation::new("compass-handler-test", env!("CARGO_PKG_VERSION")),
+    )
+    .with_protocol_version(ProtocolVersion::V_2026_07_28);
+    let client = client_info
+        .serve_with_lifecycle(
+            client_transport,
+            ClientLifecycleMode::Discover {
+                preferred_versions: vec![ProtocolVersion::V_2026_07_28],
+            },
+        )
+        .await?;
 
     let tools = client.list_tools(None).await?;
     assert_eq!(tools.tools.len(), 15);

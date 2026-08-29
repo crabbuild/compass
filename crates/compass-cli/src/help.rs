@@ -121,6 +121,7 @@ const GROUPS: &[Group] = &[
             "add",
             "prs",
             "hook",
+            "agent",
             "install",
             "uninstall",
             "upgrade",
@@ -479,7 +480,7 @@ const PAGES: &[Page] = &[
         "serve",
         "Serve the knowledge graph through the Model Context Protocol",
         ["compass serve [GRAPH_PATH] [OPTIONS]"],
-        "Arguments:\n  [GRAPH_PATH]                   Graph JSON [default: compass-out/graph.json]\n\nOptions:\n  --graph <PATH>                 Graph JSON; conflicts with GRAPH_PATH\n  --transport <stdio|http>       Transport [default: stdio]\n  --host <HOST>                  HTTP bind host [default: 127.0.0.1]\n  --port <PORT>                  HTTP bind port [default: 8080]\n  --api-key <KEY>                HTTP bearer token [env: COMPASS_API_KEY]\n  --path <PATH>                  HTTP endpoint [default: /mcp]\n  --json-response                Use JSON responses for HTTP\n  --stateless                    Disable HTTP sessions\n  --session-timeout <SECONDS>    Session timeout [default: 3600]\n\nExamples:\n  compass serve\n  compass serve --transport http --port 9000\n\nNotes:\n  HTTP transport requires an API key when binding outside a trusted local environment."
+        "Arguments:\n  [GRAPH_PATH]                   Graph JSON [default: compass-out/graph.json]\n\nOptions:\n  --graph <PATH>                 Graph JSON; conflicts with GRAPH_PATH\n  --transport <stdio|http>       Transport [default: stdio]\n  --host <HOST>                  HTTP bind host [default: 127.0.0.1]\n  --port <PORT>                  HTTP bind port [default: 8080]\n  --api-key <KEY>                HTTP bearer token [env: COMPASS_API_KEY]\n  --path <PATH>                  HTTP endpoint [default: /mcp]\n  --json-response                Use JSON responses for HTTP\n  --stateless                    Use stateless HTTP (default; compatibility spelling)\n  --session-timeout <SECONDS>    Deprecated and ignored; removed in 0.5.0\n\nExamples:\n  compass serve\n  compass serve --transport http --port 9000\n\nNotes:\n  HTTP uses stateless MCP 2026-07-28 and requires an API key when binding outside a trusted local environment."
     ),
     page!(
         "global",
@@ -552,6 +553,48 @@ const PAGES: &[Page] = &[
         "Show whether managed Compass Git hooks are installed",
         ["compass hook status"],
         "Examples:\n  compass hook status"
+    ),
+    page!(
+        "agent",
+        "Manage Compass integrations for coding agents",
+        ["compass agent <COMMAND>"],
+        "Commands:\n  list        List supported agent platforms\n  install     Install the managed Compass skill collection\n  doctor      Diagnose a local agent integration\n  export      Export a portable seven-skill bundle\n  validate    Validate an exported or managed bundle\n  mcp-config  Render platform-native MCP configuration\n\nExamples:\n  compass agent list\n  compass agent install --platform codex\n  compass agent doctor --platform codex\n  compass agent export --platform claude --out ./compass-agent\n  compass agent validate --path ./compass-agent\n  compass agent mcp-config --platform opencode --transport stdio"
+    ),
+    page!(
+        "agent list",
+        "List supported Compass agent platforms",
+        ["compass agent list [--format text|json]"],
+        "Options:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass agent list\n  compass agent list --format json"
+    ),
+    page!(
+        "agent install",
+        "Install Compass guidance through the managed installer",
+        ["compass agent install [PLATFORM] [OPTIONS]"],
+        "Arguments and options are identical to `compass install`.\n\nExamples:\n  compass agent install --platform codex\n  compass agent install --all --dry-run\n\nNotes:\n  This command delegates to `compass install` without translating arguments."
+    ),
+    page!(
+        "agent doctor",
+        "Diagnose a local Compass agent integration",
+        ["compass agent doctor --platform <NAME> [OPTIONS]"],
+        "Options:\n  --platform <NAME>        MCP platform: codex, claude, opencode, or agents\n  --project-root <PATH>    Project root [default: .]\n  --user-root <PATH>       User configuration root; skips project graph checks\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass agent doctor --platform codex\n  compass agent doctor --platform claude --project-root ./repo --format json\n\nNotes:\n  --project and --user remain accepted as compatibility aliases that take a path. Project diagnostics honor COMPASS_OUT and resolve artifacts through the current immutable snapshot. Agent list reports every installable platform; doctor is limited to platforms with a supported MCP configuration schema."
+    ),
+    page!(
+        "agent export",
+        "Export a deterministic portable Compass agent bundle",
+        ["compass agent export --platform <NAME> --out <DIR>"],
+        "Options:\n  --platform <NAME>        codex, claude, opencode, or agents\n  --out <DIR>              Missing or empty destination directory\n  --transport <stdio|http> MCP transport [default: stdio]\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass agent export --platform codex --out ./compass-agent"
+    ),
+    page!(
+        "agent validate",
+        "Validate a portable or managed Compass agent bundle",
+        ["compass agent validate --path <DIR> [OPTIONS]"],
+        "Options:\n  --path <DIR>             Exported bundle or managed skill directory\n  --platform <NAME>        Require a matching exported platform\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass agent validate --path ./compass-agent\n  compass agent validate --path .agents/skills/compass --platform codex"
+    ),
+    page!(
+        "agent mcp-config",
+        "Render credential-free native MCP configuration",
+        ["compass agent mcp-config --platform <NAME> --transport <stdio|http>"],
+        "Options:\n  --platform <NAME>        codex, claude, opencode, or agents\n  --transport <stdio|http> MCP transport [default: stdio]\n\nExamples:\n  compass agent mcp-config --platform codex --transport stdio\n  compass agent mcp-config --platform opencode --transport http"
     ),
     page!(
         "install",

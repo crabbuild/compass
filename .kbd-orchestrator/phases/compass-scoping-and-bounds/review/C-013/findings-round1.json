@@ -1,0 +1,71 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 0,
+      "claim": "The checked-in generator script cannot reproduce the retained baseline artifact: it never emits the `rawTraversal` or `source` blocks present in `current-engine-baseline-v1.json`, and it resolves binary/graph to absolute paths (`args.binary.resolve(strict=True)`, payload uses `str(binary)`) while the retained file and the test suite require relative paths \u2014 so the retained evidence was necessarily hand-augmented and the README's 'Reproduce the current-engine baseline' command produces a different document.",
+      "evidence": "Criterion 3.1 requires the current engine be measured 'reproducibly'. `current-engine-baseline-v1.json` contains top-level `rawTraversal` and `source` (gitHead, workspacePatchSha256) objects, but `main()` in run_current_baseline.py builds `payload` with only schema/recordedAt/host/binary/graph/measurement. Meanwhile `binary = args.binary.resolve(strict=True)` and `graph = args.graph.resolve(strict=True)` guarantee absolute paths in output, which `test_current_baseline.py::test_retained_baseline_is_complete_and_portable` rejects (`assertFalse(Path(document['binary']['path']).is_absolute())`) and which would also risk committing machine-specific paths (constraint no-secrets-or-machine-paths) if the script output were checked in verbatim.",
+      "suggested_fix": "Make the script emit the full retained schema (add --git-head/--workspace-patch-sha256/--raw-traversal-input parameters or a merge step), write repository-relative paths, and add a test that regenerates the baseline document structure and diffs it (excluding recordedAt/timings) against the retained file."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 0,
+      "claim": "The `path-depth-3` workload command passes no depth, node/edge, engine, format, or cache flags \u2014 unlike every other query workload \u2014 so the retained 'Depth-3 path' baseline was measured without an explicit bound and possibly not with the json engine the baseline is supposed to characterize.",
+      "evidence": "`query_commands` returns `\"path-depth-3\": (str(binary), \"path\", \"qualification::Node0000000\", \"qualification::Node0000003\", \"--graph\", str(graph))` \u2014 no `--max-depth 3`, `--max-nodes`, `--max-edges`, `--engine json`, `--format json`, or `--cache`, while callers/callees/impact all pass explicit bounds. The ratified gate in docs/future/qualification-corpora-baselines.md compares 'depth-3+ impact/path' p95 against this baseline, and the constraint bounded-work requires all query work to remain bounded. Notably this workload's peak RSS (1,990,377,472 B) is ~2.2x the other workloads.",
+      "suggested_fix": "Add `--max-depth 3 --max-nodes 512 --max-edges 1024 --engine json --format json --cache <cache>` to the path command, re-measure, and update the retained baseline and docs table."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 0,
+      "claim": "Malformed task input (missing `source`/`query`/`target` keys, non-dict entries) raises KeyError/TypeError, which is not caught by the main exception handler, producing an exit-1 traceback instead of the documented exit-2 input failure.",
+      "evidence": "README.md states 'Exit status 2 is a limit or input failure'. `main` is wrapped in `except (LimitExceeded, OSError, ValueError)`, but `execute_task` indexes `task[\"query\"]`, `task[\"source\"]`, and `task[\"target\"]` directly \u2014 a missing key raises KeyError (not a ValueError subclass), escaping the handler.",
+      "suggested_fix": "Validate each task's required keys per operation and raise ValueError with context, or add KeyError/TypeError to the caught exceptions mapped to exit 2."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/generate_graph.py",
+      "line": 0,
+      "claim": "Profile validation permits parameter combinations that crash the generator with an uncaught ZeroDivisionError instead of failing closed: `nodes=2` with `edges>=3` reaches `band % (nodes - 2)` with a zero divisor, and `sampleOrdinals` are never validated against the node/edge ranges.",
+      "evidence": "`_profile` only enforces `2 <= nodes <= MAX_NODES` and `nodes <= edges <= MAX_EDGES`. In `edge_endpoints`, `offset = 2 + (band % (nodes - 2))`; with nodes=2 and any ordinal beyond the parallel edge (chord >= 1) this divides by zero. The verification claim 'Oversized or invalid profiles fail closed' does not hold for this class of invalid profile, and generate_graph.py has no error-mapping wrapper so the failure is a traceback with exit 1.",
+      "suggested_fix": "Raise the nodes lower bound to 3 (or guard nodes-2 == 0), validate sampleOrdinals < nodes/edges, and map ValueError to a clean non-zero exit in main."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/tests/test_raw_traversal.py",
+      "line": 0,
+      "claim": "No regression test validates the versioned `expected` evidence of the 30 agent tasks against the raw-traversal oracle; the suite exercises only a 128-node toy graph with inline expectations, so the 'All pass the bounded raw oracle against the exact medium graph' claim is asserted once in the retained JSON but never continuously tested.",
+      "evidence": "Criterion 2.3 versions 'expected evidence and bounded tool/raw traversal routes', and the constraint regression-test-present requires regression tests at the lowest useful layer for behavior changes. `test_raw_traversal.py` builds a 128-node graph and never loads `agent-tasks-v1.json`; `test_corpora.py` only checks task count/balance/ids, not that raw-traversal results satisfy each task's `expected` block (containsNodeIds, minimumEdgeCount, first/lastNodeId).",
+      "suggested_fix": "Add a test that runs raw_traversal over the materialized medium graph (or a metadata-only deterministic equivalent) with agent-tasks-v1.json and asserts every `expected` block against the oracle output."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".refiner/artifacts/C-013/artifact_manifest.json",
+      "line": 0,
+      "claim": "The diff commits a new `.refiner/` local tooling-state tree (logs, receipts, constraint records) that does not exist in the repository file tree, analogous to the local state directories the constraints prohibit committing, and constitutes generated record noise in the change surface.",
+      "evidence": "Constraint no-secrets-or-machine-paths forbids committing 'local .compass/ state, compass-out/' content, and no-unrelated-diff-noise requires 'git diff ... contain no unrelated or generated noise'. The `.refiner/artifacts/C-013/` files (refinement_log.md, dist/refinement-receipt.md, artifact_manifest.json) are adapter-generated records \u2014 the log itself states 'The repository's deterministic fallback record format was used' \u2014 and `.refiner/` appears nowhere in the existing file tree alongside other excluded tool-state dirs.",
+      "suggested_fix": "Confirm with the project whether `.refiner/` is intended to be versioned; if it is local tooling state, remove it from the change and add it to the ignore rules next to `.compass/` and `compass-out/`."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 0,
+      "claim": "The time limit is not enforced during full-graph scans in `search` and `_resolve`, which iterate all nodes inside comprehensions with no `_check_time` call, so the documented timeout bound can be exceeded on adversarially large inputs within a single scan.",
+      "evidence": "The bounded-work constraint and the file's own limit list include a time ceiling, but `_check_time(deadline)` is only called inside the load loops and the impact/path BFS loops; `matches = sorted(node_id for ... nodes.items() ...)` in both `search` and `_resolve` runs to completion unchecked.",
+      "suggested_fix": "Convert the comprehensions to loops that call `_check_time(deadline)` per chunk of scanned nodes."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

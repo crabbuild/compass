@@ -1,0 +1,23 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-store/src/lib.rs",
+      "line": 988,
+      "claim": "The compatibility full-read path still pre-allocates from the unverified manifest: `Vec::with_capacity(capacity)` reserves up to MAX_GRAPH_BYTES (2 GiB) based solely on `manifest.payload_bytes` before any chunk or digest verification, so a corrupt-but-schema-valid manifest can force a bounded-but-large throwaway allocation \u2014 the very trust-based allocation pattern this change eliminates elsewhere.",
+      "evidence": "Hunk in `read_snapshot`: `let capacity = usize::try_from(manifest.payload_bytes)...; if capacity > MAX_GRAPH_BYTES { ... } let mut bytes = Vec::with_capacity(capacity);` \u2014 the allocation happens before `read_snapshot_chunks_for_manifest` verifies length/digest. Contrast with the change's stated goal ('Why': 'creates an avoidable payload-sized allocation') and the new doc on `read_snapshot_chunks` ('a corrupt manifest cannot drive unbounded work').",
+      "suggested_fix": "Start with an empty `Vec` and let `extend_from_slice` grow it per verified-bounded chunk (or `reserve` incrementally), so allocation tracks actually stored chunk bytes rather than the manifest's unverified claim; the per-loop `total > MAX_GRAPH_BYTES` check already bounds growth."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

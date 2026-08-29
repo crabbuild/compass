@@ -30,6 +30,16 @@ allow = [
 # instead of allowing the license for every future dependency.
 exceptions = [
   { allow = ["BSL-1.0"], crate = "xxhash-rust@0.8.18" },
+  # C-011 accepted the exact SurrealDB 3.2.4 artifact profiles under the
+  # retained tagged BUSL-1.1 license and notice conditions. Keep every
+  # exception dependency/version scoped; upgrades require a fresh review.
+  { allow = ["BUSL-1.1"], crate = "surrealdb@3.2.4" },
+  { allow = ["BUSL-1.1"], crate = "surrealdb-collections@3.2.4" },
+  { allow = ["BUSL-1.1"], crate = "surrealdb-core@3.2.4" },
+  { allow = ["BUSL-1.1"], crate = "surrealdb-protocol@0.10.2" },
+  { allow = ["BUSL-1.1"], crate = "surrealdb-strand@3.2.4" },
+  { allow = ["BUSL-1.1"], crate = "surrealdb-types@3.2.4" },
+  { allow = ["BUSL-1.1"], crate = "surrealdb-types-derive@3.2.4" },
 ]
 
 [bans]

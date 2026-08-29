@@ -1,0 +1,5 @@
+.github/workflows/compass-ci.yml
+scripts/bounded_redacted_log.mjs
+scripts/qualify_harness_packages.sh
+docs/implementation/agent-distribution.md
+openspec/changes/harness-install-validation

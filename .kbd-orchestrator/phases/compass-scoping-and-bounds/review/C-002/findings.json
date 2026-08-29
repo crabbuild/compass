@@ -1,0 +1,55 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-cli/Cargo.toml",
+      "line": 66,
+      "claim": "Acceptance criterion 3.1 (binary-level CLI regression asserting rendered remediation text, absent COMPASS_MAX_GRAPH_BYTES, and exit code 1) is marked complete, but the diff contains no CLI test at all; the only test added is a compass-graph unit test.",
+      "evidence": "The diff adds `[dev-dependencies] rusqlite.workspace = true` to crates/compass-cli/Cargo.toml and a matching Cargo.lock entry, yet no file under crates/compass-cli/tests/ (or any other CLI test target) is added or modified. The only new test is `canonical_graph_limit_errors_name_shipped_scope_controls` in crates/compass-graph/src/snapshot.rs, which is a library unit test and cannot assert exit code 1 or rendered CLI stderr. Criterion 3.1 is checked [x] but unsatisfied.",
+      "suggested_fix": "Add the promised binary-level CLI regression test (e.g. under crates/compass-cli/tests/) that drives publication past the byte limit, asserts stderr contains '--exclude <pattern>' and '.compassignore', does not contain 'COMPASS_MAX_GRAPH_BYTES', and asserts exit status 1 \u2014 or uncheck criterion 3.1."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/Cargo.toml",
+      "line": 66,
+      "claim": "rusqlite is added as a dev-dependency of compass-cli with no code in the diff that uses it, leaving a dead dependency and an unexplained Cargo.lock mutation.",
+      "evidence": "Cargo.toml hunk adds `rusqlite.workspace = true` under a new `[dev-dependencies]` section and Cargo.lock adds `\"rusqlite\"` to the compass-cli dependency list, but no test or source file in the diff references rusqlite. This also trips the `workspace-dependencies-reused` warning constraint ('new dependencies are justified') since nothing justifies it here.",
+      "suggested_fix": "Either land the test that consumes rusqlite in this diff, or drop the dev-dependency and the Cargo.lock change."
+    },
+    {
+      "severity": "WARNING",
+      "file": "CHANGELOG.md",
+      "line": 9,
+      "claim": "The CHANGELOG entry describes 'manifest-only and bounded chunk-streaming reads for SQLite graph snapshots' and production validation/reference-generation changes that are not present anywhere in this diff, bundling unrelated release notes into this change.",
+      "evidence": "The second added CHANGELOG bullet describes SQLite snapshot streaming behavior, but the diff touches only the error-message construction in crates/compass-graph/src/snapshot.rs plus the unused rusqlite dev-dependency. Constraint `no-unrelated-diff-noise` (warning): 'git diff ... contain no unrelated or generated noise.'",
+      "suggested_fix": "Remove the chunk-streaming CHANGELOG bullet (and the associated rusqlite dependency if it belongs to that work) from this change and ship it with the diff that actually implements it."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-graph/src/snapshot.rs",
+      "line": 69,
+      "claim": "The actionable remediation text is now also emitted from GraphSnapshotManifest::validate, which runs when reading/validating existing snapshots, where advising the user to 'reduce the build scope with --exclude' is misleading for a consumer of an already-published snapshot.",
+      "evidence": "The hunk changes `GraphSnapshotManifest::validate` to return `SnapshotError::canonical_graph_too_large(MAX_GRAPH_BYTES as u64)` for `graph_bytes > MAX_GRAPH_BYTES`; that constructor bakes in publication-time advice ('reduce the build scope with --exclude <pattern> or add persistent patterns to .compassignore'). validate() is a shared manifest-validation path, not publication-specific, so read-side callers will surface build-time remediation.",
+      "suggested_fix": "Keep the Corrupt/limit classification in validate() with a neutral message, and attach the --exclude/.compassignore remediation only at the publication call site (e.g. digest_json and the publish path), or split the constructor into publication-specific and validation-specific variants."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "CHANGELOG.md",
+      "line": 4,
+      "claim": "The user-visible error-category reclassification (oversized manifest from SnapshotError::Corrupt to SnapshotError::Limit) is documented in the proposal's Compatibility section but not in the CHANGELOG entry.",
+      "evidence": "The proposal states 'corrects the error category from corruption to a resource-limit failure', and the diff changes `manifest.validate()` from `SnapshotError::Corrupt` to `SnapshotError::Limit`, but the CHANGELOG bullet only mentions naming --exclude and .compassignore. The `compatibility-documented` warning constraint lists error/contract-visible changes as compatibility-sensitive.",
+      "suggested_fix": "Add a sentence to the CHANGELOG noting that oversized canonical-graph manifests now surface as a limit failure rather than a corruption failure."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

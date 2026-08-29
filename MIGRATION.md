@@ -27,6 +27,30 @@ compass update .
 
 Set `COMPASS_OUT` before running Compass when you need a custom output directory.
 
+Standalone `compass.graph/1` files used by MCP clients must carry non-empty
+`graph.build.sourceTreeDigest` and `graph.build.generationId` values. Regenerate
+older or hand-authored files with `compass update` instead of substituting
+placeholder-empty identities.
+
+## Regenerate portable agent bundles
+
+Portable bundles exported before the native distribution inventory do not
+carry the recorded harness version or the complete harness-native manifests.
+They also used legacy `mcp/` configuration paths. The current validator rejects
+those bundles instead of guessing their platform contract. Regenerate them with
+the current binary:
+
+```bash
+compass agent export --platform codex --out ./compass-codex
+compass agent export --platform claude --out ./compass-claude
+compass agent export --platform opencode --out ./compass-opencode
+```
+
+The regenerated layouts use `.mcp.json` for Codex and Claude Code,
+`opencode.json` for OpenCode, and `.agents/mcp.json` for the generic Agent
+Skills package. Replace old generated bundles as whole directories; do not mix
+files from the old and new layouts.
+
 The new directory exposes the main artifacts directly:
 
 ```text
@@ -196,5 +220,44 @@ Compass exposes its Model Context Protocol server through `compass serve`. Reins
 ```bash
 compass install --platform codex --project
 ```
+
+### Migrate MCP clients to MCP 2026-07-28
+
+Compass stdio and HTTP now reject protocol revisions older than 2026-07-28.
+Upgrade clients to begin with `server/discover` and send the protocol's
+per-request `_meta` fields. HTTP no longer creates MCP sessions and additionally
+requires `Mcp-Protocol-Version: 2026-07-28`, the matching `Mcp-Method`, and any
+applicable parameter headers. Authentication, endpoint paths, size limits, and
+`project_path` selection are unchanged.
+
+There is no legacy MCP-2025 HTTP mode or compatibility flag. `--stateless` may
+remain in existing scripts but is now redundant. Remove `--session-timeout`
+from scripts: Compass 0.4.x accepts and ignores it with a warning, and Compass
+0.5.0 removes it. An obsolete `Mcp-Session-Id` header is ignored on an otherwise
+valid current request and never creates or restores state; clients should stop
+sending it. Stdio clients that previously negotiated a 2025 revision must
+upgrade; there is no legacy stdio compatibility flag.
+
+### Read core navigation results through the MCP envelope
+
+The structured content returned by `search_symbols`, `get_callers`,
+`get_callees`, and `get_impact` now uses `compass.code_context.v1`. If a client
+previously read `schema`, `operation`, `nodes`, `edges`, `paths`, `diagnostics`,
+`limits`, or `truncated` directly from `structuredContent`, read the same fields
+from `structuredContent.data` instead. The nested object remains
+`compass.query/1`; no query record or ordering changed.
+
+Use `structuredContent.schema` to select the Compass decoder. Do not treat MCP
+`resultType` as that schema: for these synchronous MCP 2026 results it is the
+separate protocol value `complete`. A `truncation.next` value of null means this
+envelope version exposes no continuation token; reduce or adjust the request
+bounds rather than inventing a page cursor.
+
+Legacy text results remain callable, but discovery marks `get_neighbors`,
+`get_community`, `god_nodes`, `graph_stats`, `shortest_path`, `list_prs`,
+`get_pr_impact`, `triage_prs`, and explicit `query_graph` traversal text mode
+deprecated from 0.4.0. Migrate automation to typed navigation tools where an
+equivalent exists. Compass has not scheduled removal before typed replacements
+are available and separately reviewed.
 
 Keep the old Graphify installation and `graphify-out/` directory until the new `compass-out/` graph has passed your project checks. The two tools don't share runtime output paths.

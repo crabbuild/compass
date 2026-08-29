@@ -60,10 +60,45 @@ jobs:
       - run: npm run package -w editors/vscode
       - run: npm run smoke:vsix -w editors/vscode
 
+  installed-agent-packages:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.13.1"
+          cache: npm
+      - name: Install pinned agent harnesses
+        run: |
+          npm install --global \
+            @openai/codex@0.146.0 \
+            @anthropic-ai/claude-code@2.1.251 \
+            opencode-ai@1.18.23
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: .
+      - run: npm ci
+      - name: Verify generated OpenCode plugin
+        run: |
+          npm run typecheck -w @compass/opencode-plugin
+          npm run test -w @compass/opencode-plugin
+      - name: Build the completed phase once
+        run: cargo build -p compass-cli --bin compass --locked
+      - name: Qualify installed native packages
+        run: scripts/qualify_harness_packages.sh --compass target/debug/compass
+
   quality:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24.13.1"
 
       - name: Enforce Compass product boundary
         run: sh scripts/check_product_boundary.sh
@@ -78,21 +113,24 @@ jobs:
         with:
           workspaces: .
 
-      - name: Install pinned nextest runner
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2
-        with:
-          tool: nextest@0.9.124
-
       - name: Formatting
         run: cargo fmt --all -- --check
 
       - name: Lints
         run: cargo clippy --workspace --lib --bins --locked -- -D warnings
 
-      - name: Native tests
+      - name: Full integration tests
+        run: cargo test --workspace --test '*' --locked
+
+      - name: Build MCP conformance binary
+        run: cargo build -p compass-cli --bin compass --locked
+
+      - name: MCP stdio conformance
+        run: cargo test -p compass-mcp --test protocol_conformance --locked
+
+      - name: MCP HTTP conformance
         run: |
-          cargo test --workspace --lib --bins --locked
-          cargo test -p compass-cli --test compass_product --locked
+          bash scripts/qualify_mcp_conformance.sh
 
       - name: Qualify natural-language query relevance
         env:
@@ -104,9 +142,6 @@ jobs:
           cargo test -p compass-cypher --test tck --locked
           cargo test -p compass-query --test opencypher_tck --locked
           python3 scripts/check_compassql_support.py
-
-      - name: Isolated native tests
-        run: cargo nextest run --workspace --lib --bins --locked
 
       - name: Verify publishable crate archives
         run: |
@@ -169,8 +204,8 @@ jobs:
           workspaces: .
           key: ${{ matrix.target }}
 
-      - name: Native tests
-        run: cargo test --workspace --lib --bins --locked --target ${{ matrix.target }}
+      - name: Full integration tests
+        run: cargo test --workspace --test '*' --locked --target ${{ matrix.target }}
 
       - name: Code graph deterministic publication and SQLite recovery
         run: |

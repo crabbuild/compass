@@ -1,0 +1,91 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-mcp/src/code_query.rs",
+      "line": 478,
+      "claim": "envelope() cannot compile: json! moves `response` at `\"data\": response` and then uses `response.truncated` and `response.diagnostics` later in the same macro invocation (use of moved value, E0382).",
+      "evidence": "In the new `envelope` body: `\"data\": response,` followed by `\"truncation\": {\"truncated\": response.truncated, ...},` and `\"warnings\": response.diagnostics`. serde_json's json! macro converts each interpolated expression with `to_value($other)`, which takes the value by move, so the later field accesses are uses of a moved struct. Violates blocking constraint `build-passes`.",
+      "suggested_fix": "Compute `let truncated = response.truncated;` and `let warnings = response.diagnostics.clone();` (or serialize diagnostics before the json! block) before moving `response` into `\"data\"`."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-cli/build.rs",
+      "line": 49,
+      "claim": "The diff adds build-time collection of `compass-focused-skills/`, tests that read `compass-focused-skills/<name>/SKILL.md` and `trigger-corpus.json`, and skillgen validation of that directory \u2014 but the diff contains none of the six skill trees, no `trigger-corpus.json`, and no OpenSpec contract files, so the build/tests have no assets to operate on.",
+      "evidence": "build.rs now collects `\"compass-focused-skills\"`; `focused_skill_trigger_corpus_has_unique_boundaries_and_umbrella_fallback` asserts `cases.len() >= 14` from `compass-focused-skills/trigger-corpus.json` (returns Value::Null \u2192 0 cases \u2192 assert fails); `install_skill_package_at_scoped` errors with 'not found in package' when `asset_text(skill_asset)` is None; `validate_focused_skills` does `fs::read_dir(root)?` on the directory. Acceptance criteria 1.1 ('Add the focused-skill OpenSpec contract and deterministic trigger corpus') and 1.2 ('Add six spec-conformant focused skill trees') have no corresponding files anywhere in the diff. Violates blocking constraints `build-passes` and `tests-pass`.",
+      "suggested_fix": "Include the `crates/compass-cli/compass-focused-skills/{six skills}/**` trees, `trigger-corpus.json`, and the `openspec/changes/focused-agent-skills/` contract artifacts in the change."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-cli/src/install_commands.rs",
+      "line": 2930,
+      "claim": "Focused skills can never be recognized as managed, so uninstall always preserves them: `remove_managed_focused_skills` gates removal on `is_managed_skill`, which calls `legacy_skill_is_unmodified(parent)` \u2014 and that function validates the directory's files against the umbrella's `compass-skill/` digest set, which a focused skill tree can never match.",
+      "evidence": "`legacy_skill_is_unmodified` (hunk at ~3758) builds `expected_package_digests(&format!(\"{REFERENCE_BUNDLE}/\"))`, i.e. umbrella asset digests including the umbrella SKILL.md; a focused `SKILL.md` digest differs, so `is_managed_skill(focused/SKILL.md)` is false and `remove_managed_focused_skills` hits the 'preserved unowned or modified focused skill' branch every time. The new test `every_project_platform_installs_native_content` asserts `!tree_contains_focused_skill(...)` after uninstall and `uninstall_removes_one_shared_consumer_without_breaking_another` asserts the focused dirs are gone after the last consumer \u2014 both fail. Violates acceptance criterion 2.2 ('uninstall the complete sibling collection') and blocking constraint `tests-pass`.",
+      "suggested_fix": "In `remove_managed_focused_skills`, verify each focused tree against its own `.compass-install.json` manifest via `verify_manifest(directory)` (as `update_focused_skill_consumers` already does) instead of the umbrella-digest-based `is_managed_skill`."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": ".prometheus/events.jsonl",
+      "line": 4,
+      "claim": "Newly committed event records embed the contributor's absolute machine path, violating the blocking no-machine-paths constraint.",
+      "evidence": "The eight added JSONL lines all contain an absolute `project_root` for the local checkout. Constraint `no-secrets-or-machine-paths`: 'No credentials, machine-specific paths ... committed outside the repository-owned .prometheus/knowledge/wiki transcript exception' \u2014 `.prometheus/events.jsonl` is not under `.prometheus/knowledge/wiki`.",
+      "suggested_fix": "Drop the events.jsonl additions from the change, or strip/relative-ize `project_root` before committing."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "N/A",
+      "claim": "Acceptance criterion 3.2 is not satisfied: it is explicitly unchecked in the packet and no evidence of focused tests, Clippy, workspace baselines, strict OpenSpec validation, graph refresh, or adversarial review is present.",
+      "evidence": "acceptance_criteria shows `[ ] 3.2 Run focused tests, formatting, Clippy, workspace baselines, strict OpenSpec validation, graph refresh, refinement, and adversarial review.` Blocking constraint `clippy-clean`/`tests-pass` cannot be confirmed, and per findings above the workspace as diffed does not compile or pass the new installer tests.",
+      "suggested_fix": "Run and record the criterion 3.2 gates before shipping."
+    },
+    {
+      "severity": "WARNING",
+      "file": "N/A",
+      "claim": "The diff for the 'focused-agent-skills' change bundles the entire C-001..C-010 wave (snapshot streaming, COMPASS_MAX_GRAPH_BYTES, preflight estimation, compass-partition extraction, rmcp 3.1.4 upgrade, stateless MCP HTTP, result envelope), CI workflow changes, AGENTS.md/CLAUDE.md managed blocks, and .kbd-orchestrator/.prometheus state \u2014 far outside the change's acceptance criteria.",
+      "evidence": "Warning constraint `no-unrelated-diff-noise`: 'git diff and git status --short contain no unrelated or generated noise'. The acceptance criteria cover only focused skills + installer + verification, yet the diff touches ~60 files across a dozen crates, docs, workflows, and orchestrator state.",
+      "suggested_fix": "Split the wave work into its own changes per the phase plan (C-001..C-010 each has its own OpenSpec name) and keep this diff to C-016 files only."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".kbd-orchestrator/current-waypoint.md",
+      "claim": "Orchestrator state files contradict each other: progress.json marks C-001 through C-009 as DONE/COMPLETE (9/20) while current-waypoint.md says 'Implementation: 0/20' with 'Next pending change: C-001', and decision-log.md says C-001 is an uncommitted draft with remaining work.",
+      "evidence": "progress.json: `\"implementation_completed\": 9`, C-001 `\"status\": \"DONE\"`, `\"tasks_done\": 5`. current-waypoint.md: `**Implementation:** 0/20`, `Next pending change: C-001`. decision-log.md 2026-08-28: 'Remaining C-001 work is unchanged: reimplement validate_snapshot/snapshot_reference...'.",
+      "suggested_fix": "Reconcile the ledger: regenerate progress.json/waypoint from one source of truth so DONE markers reflect reality."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".codex/skills/openspec-apply-change/SKILL.md",
+      "claim": "All `.codex/skills/openspec-*` and `.kimi/skills/openspec-*` skill files are deleted with no replacement, while the `.claude` and `.opencode` copies are updated to generatedBy 1.10.0 \u2014 Codex and Kimi harnesses lose the OpenSpec skills entirely in this change.",
+      "evidence": "16 deleted files under `.codex/skills/` and `.kimi/skills/`; the matching `.claude/skills/*` and `.opencode/skills/*` files are modified, not deleted. Nothing in the acceptance criteria covers removing those harnesses' skills, and E6 (native harness packages) is a future wave per plan.md.",
+      "suggested_fix": "Either keep the Codex/Kimi skill copies in sync with the 1.10.0 content or record the removal as an explicit, documented decision in the change."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-core/src/pipeline.rs",
+      "line": 84,
+      "claim": "The new preflight rejects any build whose total admitted source bytes \u00d7 60 exceeds the graph cap, which can fail-fast builds whose actual canonical graph would have been under 2 GiB \u2014 the 60x factor is calibrated on a single fixture and there is no escape except raising COMPASS_MAX_GRAPH_BYTES (which weakens the real cap).",
+      "evidence": "`PREFLIGHT_GRAPH_BYTES_PER_SOURCE_BYTE: u64 = 60` with comment 'Calibrated on the C-003 deterministic fixture: 112,893 source bytes produced 6,843,452 canonical bytes (60.62x)'; `enforce_preflight_graph_size` returns `SnapshotError::canonical_graph_too_large` before extraction. A repository with ~34 MB of in-scope sources (e.g., 2,000 \u00d7 17 KB markdown) is rejected pre-extraction even though its real graph may be far smaller.",
+      "suggested_fix": "Emit a progressive warning at the estimate and fail only on measured payload growth, or gate the hard failure behind a conservative confidence bound documented in the change's design doc."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".kbd-orchestrator/phases/compass-scoping-and-bounds/progress.json",
+      "line": 2,
+      "claim": "progress.json schema regresses: `schemaVersion` changes from \"5\" to \"2\" and `children` changes type from array (`[]`) to object (`{}`), which may break consumers written against the v5 shape.",
+      "evidence": "Diff shows `\"schemaVersion\": \"5\"` \u2192 `\"schemaVersion\": \"2\"` and `\"children\": []` \u2192 `\"children\": {}`.",
+      "suggested_fix": "Confirm the kbd-runtime writer and all readers agree on the v2 shape, or keep schemaVersion/children compatible with the previous schema."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

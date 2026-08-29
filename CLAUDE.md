@@ -10,15 +10,36 @@ conventions, test/fixture policy, public-contract rules, and the completion
 checklist. Read it before editing. This file only adds the mechanics AGENTS.md
 does not spell out.
 
+## Immutable implementation order
+
+Complete the entire active phase's production implementation before compiling,
+linting compiled code, or testing. Do not use incremental `cargo check`,
+per-crate builds, filtered tests, or per-change green gates. Tests run only after
+the phase fully covers its specification, and only full integration tests count;
+never add, run, or cite unit tests as correctness evidence. This rule overrides
+workflow/skill defaults that request per-task or per-change compilation and QA.
+
+After implementation, one process owns the verification wave. Run the complete
+workspace integration target set with
+`cargo test --workspace --test '*' --locked`; Cargo's `--tests`, `--lib`,
+`--bins`, and default selections include unit-test harnesses and are prohibited
+here. Run complete feature-gated integration target sets afterward where the
+phase requires them.
+
 ## Build artifacts
 
-Compass build artifacts are large. Where they live is a per-contributor
-environment choice — this repository mandates no specific path or volume.
+Compass build artifacts are large. `.cargo/config.toml` and the root profiles
+place artifacts in the checkout-local `target/`, cap compilation at four jobs,
+disable incremental artifact growth, retain only line-table debug information
+for workspace code, and omit dependency debuginfo. Never point
+`CARGO_TARGET_DIR` at a shared repository/worktree cache. Run only one Compass
+Cargo command at a time on the host.
 
-If you redirect Cargo output with `CARGO_TARGET_DIR`, set it on every invocation
-that can compile (it does not persist between tool calls), and give each
-checkout and worktree its own directory — never share one across repositories or
-concurrent worktrees, since feature sets, build scripts, and locks can collide.
+If `sccache` is installed, a phase-level build may opt in with
+`RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0 SCCACHE_CACHE_SIZE=5G`. Do not make
+the wrapper unconditional: it is not portable when absent, and its Rust cache
+does not support incremental crates. Use `--profile debugging` only when the
+post-implementation integration wave proves that a debugger is necessary.
 
 Note a related Makefile wrinkle: several targets (`install`, `dist`,
 `release-check`) look up binaries through a literal `target/` path after Cargo
@@ -31,15 +52,11 @@ running it so it does not silently trigger a second build.
 Rust (Edition 2024, pinned toolchain 1.97.1, always `--locked`):
 
 ```bash
-cargo test -p <crate> --locked                              # narrowest loop
-cargo test -p <crate> --test <integration_test> --locked    # one integration file
-cargo test -p compass-cli --test compass_product --locked   # CLI product contract
-cargo clippy -p <crate> --all-targets --all-features --locked -- -D warnings
-
-# Repository baseline before finishing a Rust change
+# Run only after every production-code task in the active phase is complete.
+cargo test --workspace --test '*' --locked                  # integration targets only
+cargo test -p <affected-package> --test '*' --all-features --locked
 cargo fmt --all -- --check
 cargo clippy --workspace --lib --bins --locked -- -D warnings
-cargo test --workspace --lib --bins --locked
 ```
 
 Surface-specific gates (run the ones matching what changed):
@@ -62,13 +79,23 @@ npm run test:js
 node scripts/check_viewer_assets.mjs   # generated viewer assets match source
 ```
 
-`make help` lists wrappers. `make test`, `make lint`, `make test-js`,
-`make qualify-code-graph-v1`, and `make ci-fast` cover the common paths.
-`make test` is workspace `--lib --bins` only; `make test-all` adds
-`--all-targets --all-features` and needs the Python oracle setup.
+`make help` lists wrappers. `make test`, `make test-all`, `make test-release`,
+and `make ci-fast` select integration targets only and remain phase-end commands;
+they are never an incremental implementation loop. `make watch` is deliberately
+disabled. `make lint`, `make test-js`, and `make qualify-code-graph-v1` remain
+post-implementation surface gates.
 
-CI (`.github/workflows/compass-ci.yml`) additionally runs nextest, isolated
-native tests, crate-archive publishing checks, `cargo install` launch
+The build policy follows Cargo's official build-performance, profile,
+integration-target selection, and cache guidance:
+
+- <https://doc.rust-lang.org/cargo/guide/build-performance.html>
+- <https://doc.rust-lang.org/cargo/reference/profiles.html>
+- <https://doc.rust-lang.org/cargo/commands/cargo-test.html>
+- <https://doc.rust-lang.org/cargo/reference/build-cache.html>
+- <https://github.com/mozilla/sccache/blob/main/docs/Rust.md>
+
+CI (`.github/workflows/compass-ci.yml`) additionally runs isolated native
+integration tests, crate-archive publishing checks, `cargo install` launch
 verification, query-relevance qualification, dependency audit/policy, and a
 native platform matrix. Consult it before touching those surfaces.
 
@@ -203,3 +230,30 @@ a `CHANGELOG.md` entry when release-visible. See `COMPATIBILITY.md`.
   aesthetic, VS Code theme tokens, evidence over implication).
 - Docs distinguish shipped behavior from plans; never cite anything under
   `docs/superpowers/` as shipped evidence.
+
+<!-- compass:managed:start -->
+## compass
+
+When `compass-out/graph.json` exists, use the Compass knowledge graph as the
+first navigation layer. If it is absent and the task needs repository-wide
+architecture, dependency, history, or impact evidence, run `compass update .`
+once and continue. Skip the build for a narrow task that already identifies the
+files to edit or when the user asked not to create generated files.
+
+Rules:
+
+- Run `compass query "<question>"` before broad source searches
+- Set `--budget N` to fit available context; when query or explain reports
+  `next=N`, repeat the unchanged command with `--page N` and reach `next=none`
+  before exhaustive claims
+- Use `compass path "<source>" "<target>"` for dependency paths
+- Use `compass explain "<concept>"` for one concept and its neighbors
+- Use `compass affected "<symbol>"` for change-review scope
+- Read `compass-out/GRAPH_REPORT.md` for broad architecture
+- Navigate `compass-out/wiki/index.md` when the wiki exists
+- Run `compass update .` after code changes unless the user prohibited generated files
+- Verify important graph conclusions in the cited source
+- Treat missing paths and inferred edges as uncertain evidence, not proof
+- Keep explicit `--graph`, `--at`, provider, and output selections unchanged
+- Report failed refreshes; an older graph file does not make a failed update current
+<!-- compass:managed:end -->

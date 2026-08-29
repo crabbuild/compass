@@ -1,0 +1,123 @@
+{
+  "serverInfo": { "name": "compass", "version": "0.3.7" },
+  "capabilities": {
+    "experimental": {},
+    "resources": { "subscribe": false, "listChanged": false },
+    "tools": { "listChanged": false }
+  },
+  "tools": [
+    {
+      "name": "search_symbols",
+      "description": "Search Compass code symbols with the trusted FTS5 index.",
+      "inputSchemaSha256": "df170b3f22be4fc77387451f05377db4edec7d19c9df1e21d449d34cde47623f",
+      "outputSchemaSha256": "4f21d4f3609e8de41ed866beeb00eb8dc160f87039c5ab9a16e43d0b832d6811",
+      "meta": null
+    },
+    {
+      "name": "get_callers",
+      "description": "Return one-hop callers and route bindings for a symbol.",
+      "inputSchemaSha256": "1ba62b0f7c36273912f66f28fc87b7e6e6d0f5b4195a8cf9b1f7b41d3a869f24",
+      "outputSchemaSha256": "d8a8e3afa72e1543381e7a0876cc628645a1cf130ed9425c802e85d83a560597",
+      "meta": null
+    },
+    {
+      "name": "get_callees",
+      "description": "Return one-hop callees for a symbol.",
+      "inputSchemaSha256": "1ba62b0f7c36273912f66f28fc87b7e6e6d0f5b4195a8cf9b1f7b41d3a869f24",
+      "outputSchemaSha256": "e70af59566e98b2565979f0810e52de25d679cc7d8f7fcfcf2e10c381590cc90",
+      "meta": null
+    },
+    {
+      "name": "get_impact",
+      "description": "Return the bounded transitive impact radius for a symbol.",
+      "inputSchemaSha256": "1ba62b0f7c36273912f66f28fc87b7e6e6d0f5b4195a8cf9b1f7b41d3a869f24",
+      "outputSchemaSha256": "0999677d330f016ceaa747342e17a5cb53c21311dfb6a3f9dec0b8054a9a63c9",
+      "meta": null
+    },
+    {
+      "name": "explore_code",
+      "description": "Return related symbols, connecting paths, and verified source grouped by file.",
+      "inputSchemaSha256": "5a398ec333fe461aad7e7aeef15bc7842f5f098f57ac9de445d5b009e88fdfa1",
+      "outputSchemaSha256": null,
+      "meta": null
+    },
+    {
+      "name": "get_node",
+      "description": "Return the trusted evidence trail between two code-graph nodes.",
+      "inputSchemaSha256": "ec0b8e297e45abfab2654128199b3a3a0af8dfe0628aae08f098fb22c8e3fe32",
+      "outputSchemaSha256": null,
+      "meta": null
+    },
+    {
+      "name": "query_graph",
+      "description": "Route clear natural-language intents through bounded typed code queries. DEPRECATED text mode: explicit BFS/DFS traversal controls return legacy text; use the typed navigation tools.",
+      "inputSchemaSha256": "4dcfe2279aa911354ddcd5f272e55358addf462922a38923bae85515034749d3",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecatedTextMode": true, "compass/deprecatedSince": "0.4.0"}
+    },
+    {
+      "name": "get_neighbors",
+      "description": "DEPRECATED text result: get direct neighbors of a node with edge details; use typed navigation tools for machine-readable evidence.",
+      "inputSchemaSha256": "12796fe72a0b8ab8dd19e537713d3b761170b4c88ae4781741e5ee870ef9c512",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "get_community",
+      "description": "DEPRECATED text result: get nodes in a community; a typed replacement is pending.",
+      "inputSchemaSha256": "5f13bd931adf8f9bf8e057c7a917bc4bdcaec9fa3fa9f688ce2e7a6f5b8b40d4",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "god_nodes",
+      "description": "DEPRECATED text result: return the most connected nodes; a typed replacement is pending.",
+      "inputSchemaSha256": "df352c1270d201428785d2a222339df526ea26add33f3b9a0bff35882ddcb18b",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "graph_stats",
+      "description": "DEPRECATED text result: return graph summary statistics; a typed replacement is pending.",
+      "inputSchemaSha256": "30af74bece539d75af9d33b742faa1679a684daa11fb081aa4f4052ff9390346",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "shortest_path",
+      "description": "DEPRECATED text result: find a shortest path; use get_node for typed directed evidence.",
+      "inputSchemaSha256": "3c41eef041a3e532995559db0f57c58f206fd962c19f601b891a3747a897aa0d",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "list_prs",
+      "description": "DEPRECATED text result: list open GitHub PRs with CI, review, and graph-impact context; a typed replacement is pending.",
+      "inputSchemaSha256": "878ed13d2d718235d0fbbf3eea60405018ed32bc3ca9d797d0b7c9824829bdbf",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "get_pr_impact",
+      "description": "DEPRECATED text result: get graph impact for a pull request; use get_impact for typed symbol impact or await the typed PR replacement.",
+      "inputSchemaSha256": "4f0abdeb62d25d91210ada4310071176039f74a85c24bd38adf8bccb778ac454",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    },
+    {
+      "name": "triage_prs",
+      "description": "DEPRECATED text result: triage actionable open pull requests; a typed replacement is pending.",
+      "inputSchemaSha256": "878ed13d2d718235d0fbbf3eea60405018ed32bc3ca9d797d0b7c9824829bdbf",
+      "outputSchemaSha256": null,
+      "meta": {"compass/deprecated": true, "compass/deprecatedSince": "0.4.0", "compass/deprecationReason": "legacy text result; use a typed navigation result"}
+    }
+  ],
+  "resources": [
+    { "uri": "compass://report", "name": "Graph Report", "description": "Full GRAPH_REPORT.md", "mimeType": "text/markdown" },
+    { "uri": "compass://stats", "name": "Graph Stats", "description": "Node/edge/community counts and confidence breakdown", "mimeType": "text/plain" },
+    { "uri": "compass://god-nodes", "name": "God Nodes", "description": "Top 10 most-connected nodes", "mimeType": "text/plain" },
+    { "uri": "compass://surprises", "name": "Surprising Connections", "description": "Cross-community surprising connections", "mimeType": "text/plain" },
+    { "uri": "compass://audit", "name": "Confidence Audit", "description": "EXTRACTED/INFERRED/AMBIGUOUS edge breakdown", "mimeType": "text/plain" },
+    { "uri": "compass://questions", "name": "Suggested Questions", "description": "Suggested questions for this codebase", "mimeType": "text/plain" }
+  ]
+}

@@ -60,5 +60,8 @@ compass-semantic = { path = "../compass-semantic", version = "0.3.7" }
 compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.7" }
 url.workspace = true
 
+[build-dependencies]
+sha2.workspace = true
+
 [lints]
 workspace = true

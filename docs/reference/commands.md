@@ -407,7 +407,12 @@ compass serve [GRAPH_PATH]
 ```
 
 Prefer stdio for a single local client. Avoid putting secret values directly in
-shell history; use the deployment's supported secret mechanism.
+shell history; use the deployment's supported secret mechanism. HTTP implements
+the stateless MCP 2026-07-28 contract: begin with `server/discover`, then carry
+`Mcp-Protocol-Version`, `Mcp-Method`, and required `_meta` on each request.
+`--stateless` is an accepted compatibility spelling for this default.
+`--session-timeout` is deprecated and ignored with a warning through 0.4.x and
+will be removed in 0.5.0.
 
 ## Export and visualization
 
@@ -519,6 +524,60 @@ workflows.
 
 ## Assistant and hook lifecycle
 
+### `agent`
+
+```text
+compass agent list [--format text|json]
+compass agent install [PLATFORM] [INSTALL OPTIONS]
+compass agent doctor --platform codex|claude|opencode|agents
+  [--project-root PATH | --user-root PATH]
+  [--format text|json]
+compass agent export --platform codex|claude|opencode|agents --out DIR
+  [--transport stdio|http]
+  [--format text|json]
+compass agent validate --path DIR
+  [--platform codex|claude|opencode|agents]
+  [--format text|json]
+compass agent mcp-config --platform codex|claude|opencode|agents
+  [--transport stdio|http]
+```
+
+`list` returns registry order sorted by platform identifier; its JSON schema is
+`compass.agent-list/1`. `install` passes every remaining argument unchanged to
+the established managed installer, so `compass install` remains the
+compatibility entry point with identical output and side effects.
+
+`doctor` is an offline, read-only aggregate check. It verifies the running
+binary version, compiled MCP 2026-07-28 contract, graph presence and manifest
+freshness, all seven managed skill checksums, and the selected platform's MCP
+configuration. It does not launch a server or contact a network service. JSON
+uses `compass.agent-doctor/1`; exit `0` means every check passed, exit `1`
+means at least one check failed, and exit `2` means invalid arguments.
+
+`agent list` enumerates every installable platform. Commands that inspect or
+render MCP configuration accept the four platforms shown above. Project-scoped
+doctor checks honor `COMPASS_OUT` and resolve graph and manifest files through
+the current immutable snapshot. `--user-root <PATH>` inspects the user installation
+and configuration and reports project graph checks as not applicable.
+
+`export` atomically publishes the embedded umbrella and six focused skills,
+platform-native credential-free MCP configuration, native package and
+marketplace manifests generated from `distribution.toml`, the OpenCode
+TypeScript bridge where applicable, and a sorted SHA-256 manifest using
+`compass.agent-bundle/1`. Native manifests record the exact harness version
+used for lifecycle qualification. The destination must be missing or empty.
+`validate` accepts an exported bundle or a checksum-owned managed skill
+directory and never executes its contents. It bounds file count and bytes,
+rejects symlinks, traversal, machine-specific absolute paths, and likely
+literal credentials, requires every native artifact and harness version, and
+reports only file names and rules so secret values are not echoed. Validation
+JSON uses `compass.agent-validation/1`.
+
+`mcp-config` emits Codex `mcp_servers` TOML, Claude `.mcp.json`, OpenCode `mcp`
+JSON, or the versioned generic Agent Skills JSON envelope. Stdio invokes
+`compass serve --transport stdio` as separate arguments; HTTP uses the
+loopback `http://127.0.0.1:8080/mcp` endpoint.
+
 ### `install`
 
 ```text
@@ -533,9 +592,12 @@ compass install
 
 Run `compass install --help` for the version's platform list. `--strict`
 requires a project-scoped Claude target. With no explicit platform, Compass
-detects agents and also installs the portable Agent Skills package. Dry-run
-output includes the complete skill and adapter path plan and performs read-only
-preflight checks.
+detects agents and installs the canonical `compass` Agent Skill plus focused
+`compass-navigate`, `compass-debug`, `compass-change-impact`,
+`compass-architecture`, `compass-index-maintenance`, and `compass-mcp-setup`
+sibling trees. Dry-run output includes every skill and adapter path and performs
+read-only preflight checks. Equivalent managed trees are current; unowned or
+checksum-modified skill directories are never overwritten.
 
 ### `uninstall`
 
@@ -782,6 +844,15 @@ CompassQL:
 
 Other command families preserve documented compatibility-specific codes. Test
 the exact command boundary your automation uses.
+
+Agent namespace:
+
+- successful list, install, export, validation, configuration, or wholly
+  healthy doctor result: exit `0`;
+- failed doctor check, unsafe/invalid bundle, checksum mismatch, or export
+  publication failure: exit `1`;
+- invalid subcommand, option, platform, transport, format, or missing required
+  argument: exit `2`.
 
 ## Related pages
 

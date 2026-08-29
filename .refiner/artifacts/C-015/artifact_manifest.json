@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-015",
+  "artifactType": "integration",
+  "contentType": "rust:library",
+  "status": "rejected",
+  "sourceArtifacts": [
+    "benchmarks/qualification/surreal-dual-engine-decision-v1.json",
+    "crates/compass-graphdb-surreal",
+    "crates/compass-model/src/query_contract.rs",
+    "crates/compass-query/src/code_query.rs",
+    "crates/compass-query/tests/query_contract.rs",
+    "docs/implementation/surreal-graph-projection.md",
+    "openspec/changes/surreal-dual-engine-equivalence"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

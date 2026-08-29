@@ -1,0 +1,50 @@
+{
+  "mode": "artifact",
+  "verdict": "BLOCK",
+  "judge_model": "kbd-judge",
+  "producer_model": "claude-fable-5",
+  "isolation_mode": "rest-gateway:http://localhost:8181/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The assessment expands the phase to E1\u2013E7 docs/future work that is not present in the supplied phase goals.",
+      "evidence": "The provided goals list only G1\u2013G4 and the architecture question under objective 'Make Compass fail gracefully...' with non-goals including 'Building a scoping feature' and 'Raising the 2 GiB default'; prior_handoffs is null. The assessment instead states 'Trigger: user directive to absorb implementation of the `docs/future/` program (SurrealDB, MCP 2026, Agent Skills, harness distribution) into this phase' and adds 'Expanded goals (new, from docs/future)' E1\u2013E7.",
+      "suggested_fix": "Remove E1\u2013E7 from this assessment or update the review packet goals with the explicit approved expanded scope before assessing it."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The assessment does not settle the required architecture question about graph partitioning/sharding versus a larger limit.",
+      "evidence": "The goals require: 'If a repository of this size genuinely cannot publish under 2 GiB even with correct exclusions, is the right answer graph partitioning/sharding rather than a larger number? Settle this before writing code.' The assessment only lists '\u2014 partition crate extraction | open | C-005 (gated on C-001)' and recommends 'Wave 2 ... C-004, C-005' without giving a verdict or rationale on partitioning/sharding versus larger number.",
+      "suggested_fix": "Add an explicit architecture verdict with evidence: whether partitioning/sharding is the chosen answer, why raising the default remains rejected, and what gap remains for implementation."
+    },
+    {
+      "severity": "WARNING",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The assessment depends on undefined prior change IDs C-001 through C-006 while the packet contains no prior handoff.",
+      "evidence": "The assessment says 'original findings incorporated by reference below' and uses 'C-001\u2026C-006' throughout, but the packet has 'prior_handoffs': null and the provided goals do not define those change IDs.",
+      "suggested_fix": "Inline the definitions and findings for C-001 through C-006, or attach the prior assessment/plan as prior_handoffs."
+    },
+    {
+      "severity": "WARNING",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "Several codebase state claims are unsupported by the file tree or cited paths in the packet.",
+      "evidence": "The assessment claims '`crates/compass-store/src/lib.rs` (+152/\u221217)', 'work sits on branch `docs/claude-md`', 'installed `compass` 0.3.6, source manifest 0.3.7', and 'tool list spot-verified against the live MCP server this session'. The packet file_tree only lists paths, cited_paths only confirms existence of a few paths, and no git status, branch, diff, installed-binary output, or MCP server output is included.",
+      "suggested_fix": "Either remove these unverifiable claims or include concrete evidence in the packet, such as git status/diff summaries, version command output, and MCP tool-list output."
+    },
+    {
+      "severity": "WARNING",
+      "file": "assessment.md",
+      "line": 0,
+      "claim": "The assessment's external-fact claims are unverifiable from the packet.",
+      "evidence": "The assessment states 'external facts validated 2026-08-28 via Firecrawl search' and lists claims such as '`rmcp` 3.1.4 is current', 'MCP `2026-07-28` is the latest spec', and 'SurrealDB 3.2.4 is latest stable', but the packet includes no URLs, excerpts, or source records for those validations.",
+      "suggested_fix": "Include source URLs or quoted excerpts for each external fact, or move these claims to analysis where external landscape validation belongs."
+    }
+  ]
+}

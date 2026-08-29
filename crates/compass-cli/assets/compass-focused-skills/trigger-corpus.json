@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "id": "explicit-umbrella",
+      "prompt": "Use /compass to help with this repository.",
+      "expected": "compass"
+    },
+    {
+      "id": "broad-umbrella",
+      "prompt": "Use Compass to navigate, refresh the graph, inspect architecture, and configure MCP.",
+      "expected": "compass"
+    },
+    {
+      "id": "navigate-callers",
+      "prompt": "Find this symbol and show its callers and callees before I open files.",
+      "expected": "compass-navigate"
+    },
+    {
+      "id": "navigate-path",
+      "prompt": "Trace the dependency path between these two functions.",
+      "expected": "compass-navigate"
+    },
+    {
+      "id": "debug-failure",
+      "prompt": "Diagnose this failing test and trace the stack symbol to the root cause.",
+      "expected": "compass-debug"
+    },
+    {
+      "id": "debug-regression",
+      "prompt": "Investigate this crash and unexpected regression using nearby callers and tests.",
+      "expected": "compass-debug"
+    },
+    {
+      "id": "impact-blast-radius",
+      "prompt": "Assess the blast radius and affected tests before I change this public function.",
+      "expected": "compass-change-impact"
+    },
+    {
+      "id": "impact-review",
+      "prompt": "What dependents and review scope are affected by this edit?",
+      "expected": "compass-change-impact"
+    },
+    {
+      "id": "architecture-boundaries",
+      "prompt": "Explain the repository architecture, crate ownership boundaries, and dependency layers.",
+      "expected": "compass-architecture"
+    },
+    {
+      "id": "architecture-hubs",
+      "prompt": "Map the major modules, communities, and architectural hubs in this system.",
+      "expected": "compass-architecture"
+    },
+    {
+      "id": "index-stale",
+      "prompt": "The Compass graph is stale; refresh the index and verify the output artifacts.",
+      "expected": "compass-index-maintenance"
+    },
+    {
+      "id": "index-invalid",
+      "prompt": "Diagnose a missing or invalid graph build and recover its freshness.",
+      "expected": "compass-index-maintenance"
+    },
+    {
+      "id": "mcp-stdio",
+      "prompt": "Configure the Compass MCP server for a client over stdio and verify discovery.",
+      "expected": "compass-mcp-setup"
+    },
+    {
+      "id": "mcp-http",
+      "prompt": "Set up stateless HTTP MCP transport, protocol headers, authentication, and a tool invocation.",
+      "expected": "compass-mcp-setup"
+    }
+  ]
+}

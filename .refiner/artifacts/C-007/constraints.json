@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-007",
+  "blocking": [
+    {"id":"exact-pin","status":"PASS","evidence":"Workspace resolves only rmcp 3.1.4 from an exact =3.1.4 declaration"},
+    {"id":"stdio-parity","status":"PASS","evidence":"Existing duplex initialization, tool/resource, error, and shutdown tests pass unchanged"},
+    {"id":"discovery-parity","status":"PASS","evidence":"Real server/discover plus live tool/resource lists match the rmcp 2.2 golden"},
+    {"id":"dependency-delta","status":"PASS","evidence":"rmcp subtree adds only base64 0.23.1 while retaining Apache-2.0 and a compatible MSRV"},
+    {"id":"dependency-policy","status":"PASS","evidence":"cargo-deny advisories, bans, licenses, and sources all pass"},
+    {"id":"unsafe-policy","status":"PASS","evidence":"Workspace unsafe_code=forbid remains active and workspace Clippy passes"},
+    {"id":"scope-boundary","status":"PASS","evidence":"No tools, envelopes, SurrealDB dependencies, or public CLI flags were added"},
+    {"id":"workspace-baseline","status":"PASS","evidence":"fmt, workspace lib/bin Clippy, and workspace lib/bin tests pass under --locked"},
+    {"id":"graph-refresh","status":"PASS","evidence":"119961 nodes, 282152 edges, 68 pre-existing omitted edges, zero identity collisions"}
+  ]
+}

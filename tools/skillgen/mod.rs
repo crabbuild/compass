@@ -10,11 +10,23 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 const MINIMUM_CORE_WORDS: usize = 500;
 const MAXIMUM_CORE_TOKENS: usize = 5_000;
 const MINIMUM_REFERENCES: usize = 10;
 const MINIMUM_REFERENCE_WORDS: usize = 120;
 const MINIMUM_BUNDLE_WORDS: usize = 5_000;
+const CANONICAL_SKILL_SHA256: &str =
+    "c6c097e081043c3f57cacb113423ff5783b0391f9881cb3262501277663a5d91";
+const FOCUSED_SKILLS: &[&str] = &[
+    "compass-architecture",
+    "compass-change-impact",
+    "compass-debug",
+    "compass-index-maintenance",
+    "compass-mcp-setup",
+    "compass-navigate",
+];
 const REQUIRED_CORE_SECTIONS: &[&str] = &[
     "## Invocation contract",
     "## Select the evidence before acting",
@@ -45,6 +57,13 @@ pub(crate) fn validate(assets: &Path, cli_source: &Path, help_source: &Path) -> 
         has_canonical_frontmatter(&skill),
         &skill_path,
         "frontmatter must start with the canonical Compass skill name",
+    )?;
+    let canonical_skill = canonical_text(&skill);
+    let canonical_digest = format!("{:x}", Sha256::digest(canonical_skill.as_bytes()));
+    require(
+        canonical_digest == CANONICAL_SKILL_SHA256,
+        &skill_path,
+        "canonical umbrella skill changed; focused skills must remain additive",
     )?;
     require(
         skill.split_whitespace().count() >= MINIMUM_CORE_WORDS,
@@ -130,8 +149,177 @@ pub(crate) fn validate(assets: &Path, cli_source: &Path, help_source: &Path) -> 
         "complete skill bundle is unexpectedly small",
     )?;
     validate_command_coverage(cli_source, help_source, &all_docs)?;
+    validate_focused_skills(&assets.join("compass-focused-skills"))?;
     validate_integrations(&assets.join("compass-integrations"))?;
     Ok(())
+}
+
+fn validate_focused_skills(root: &Path) -> io::Result<()> {
+    let actual = fs::read_dir(root)?
+        .map(|entry| entry.map(|value| value.path()))
+        .collect::<io::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|path| path.is_dir())
+        .filter_map(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .collect::<BTreeSet<_>>();
+    let expected = FOCUSED_SKILLS
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<BTreeSet<_>>();
+    require(
+        actual == expected,
+        root,
+        &format!("focused skill inventory drift: expected={expected:?}, actual={actual:?}"),
+    )?;
+
+    let corpus = root.join("trigger-corpus.json");
+    require(
+        corpus.is_file() && fs::metadata(&corpus)?.len() > 100,
+        &corpus,
+        "focused trigger corpus is missing or unexpectedly small",
+    )?;
+
+    for name in FOCUSED_SKILLS {
+        let skill_root = root.join(name);
+        let skill_path = skill_root.join("SKILL.md");
+        let body = canonical_text(&read_utf8(&skill_path)?);
+        require(
+            body.starts_with(&format!("---\nname: {name}\n")),
+            &skill_path,
+            "focused skill name must match its lower-kebab directory",
+        )?;
+        require(
+            is_lower_kebab(name),
+            &skill_path,
+            "focused skill name is not lower-kebab",
+        )?;
+        let description = frontmatter_value(&body, "description").ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{}: missing description", skill_path.display()),
+            )
+        })?;
+        require(
+            !description.is_empty() && description.len() <= 1_024,
+            &skill_path,
+            "focused skill description must contain 1-1024 characters",
+        )?;
+        require(
+            description.contains("Use ") || description.contains("use "),
+            &skill_path,
+            "focused skill description must say when to use it",
+        )?;
+        require(
+            body.split_whitespace().count() >= 100,
+            &skill_path,
+            "focused skill instructions are unexpectedly small",
+        )?;
+        require(
+            approximate_token_count(&body) <= MAXIMUM_CORE_TOKENS,
+            &skill_path,
+            "focused skill exceeds the Agent Skills activation budget",
+        )?;
+        validate_native(&skill_path, &body)?;
+        validate_portable_paths(&skill_root, &skill_path, &body)?;
+    }
+    Ok(())
+}
+
+fn validate_portable_paths(root: &Path, skill_path: &Path, body: &str) -> io::Result<()> {
+    for forbidden in ["/Users/", "/home/", "file://"] {
+        require(
+            !body.contains(forbidden),
+            skill_path,
+            &format!("focused skill contains absolute path marker {forbidden:?}"),
+        )?;
+    }
+    require(
+        !contains_windows_absolute_path(body),
+        skill_path,
+        "focused skill contains an absolute Windows path marker",
+    )?;
+    for reference in linked_references(body) {
+        let relative = Path::new(&reference);
+        require(
+            !relative.is_absolute()
+                && !relative
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir)),
+            skill_path,
+            &format!("focused skill reference is not a safe relative path: {reference}"),
+        )?;
+        require(
+            root.join(relative).is_file(),
+            skill_path,
+            &format!("focused skill reference is not bundled: {reference}"),
+        )?;
+    }
+    Ok(())
+}
+
+fn contains_windows_absolute_path(body: &str) -> bool {
+    let bytes = body.as_bytes();
+    bytes.windows(3).enumerate().any(|(index, window)| {
+        let has_drive_boundary = index == 0 || !bytes[index - 1].is_ascii_alphanumeric();
+        has_drive_boundary
+            && window[0].is_ascii_alphabetic()
+            && window[1] == b':'
+            && matches!(window[2], b'\\' | b'/')
+    }) || contains_unc_path(bytes)
+}
+
+fn contains_unc_path(bytes: &[u8]) -> bool {
+    bytes.windows(2).enumerate().any(|(index, prefix)| {
+        if prefix != b"\\\\"
+            || index
+                .checked_sub(1)
+                .is_some_and(|previous| bytes[previous] == b'\\')
+        {
+            return false;
+        }
+        let server_start = index.saturating_add(2);
+        let Some(separator_offset) = bytes[server_start..].iter().position(|byte| *byte == b'\\')
+        else {
+            return false;
+        };
+        separator_offset > 0
+            && bytes
+                .get(
+                    server_start
+                        .saturating_add(separator_offset)
+                        .saturating_add(1),
+                )
+                .is_some_and(|byte| !byte.is_ascii_whitespace() && *byte != b'\\')
+    })
+}
+
+fn frontmatter_value<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let prefix = format!("{key}:");
+    body.lines()
+        .skip(1)
+        .take_while(|line| *line != "---")
+        .find_map(|line| {
+            line.strip_prefix(&prefix)
+                .map(str::trim)
+                .map(|value| value.trim_matches('"'))
+        })
+}
+
+fn is_lower_kebab(value: &str) -> bool {
+    !value.is_empty()
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+        && !value.contains("--")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn canonical_text(input: &str) -> String {
+    input.replace("\r\n", "\n").replace('\r', "\n")
 }
 
 fn skill_documents(

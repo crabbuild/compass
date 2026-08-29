@@ -14,12 +14,12 @@ subset for automated verification; it does not replace the completion checklist.
 constraints:
   - id: build-passes
     severity: blocking
-    description: 'Workspace compile check must pass'
+    description: 'After the complete phase implementation, the workspace integration targets must compile without running unit harnesses'
     command: '<see .kbd-orchestrator/project.json build_health_command>'
 
   - id: tests-pass
     severity: blocking
-    description: 'Native workspace tests must pass'
+    description: 'After the complete phase implementation, the full workspace integration suite must pass; unit tests are not valid evidence'
     command: '<see .kbd-orchestrator/project.json test_command>'
 
   - id: clippy-clean
@@ -62,13 +62,18 @@ constraints:
     description: 'No credentials, machine-specific paths, generated graphs, local .compass/ state, compass-out/, or private repository content committed outside the repository-owned .prometheus/knowledge/wiki transcript exception'
     check: "rg -n 'sk-|api_key|API_KEY|BEGIN [A-Z ]*PRIVATE KEY' crates/ scripts/ --glob '!*.lock'"
 
+  - id: refiner-qa-evidence
+    severity: blocking
+    description: 'Per-change .refiner/artifacts/<change-id>/ manifests, constraints, decisions, logs, and receipts are repository-owned KBD certification evidence and remain tracked; they must be deterministic, portable, secret-free, and contain no generated product data or machine-specific paths'
+    note: 'This classification is required by the kbd-execute per-change QA gate and does not extend to arbitrary .refiner runtime state.'
+
   - id: locked-dependencies
     severity: blocking
     description: 'Build and test commands use --locked; Cargo.lock is updated when dependency resolution changes'
 
   - id: regression-test-present
     severity: blocking
-    description: 'Behavior changes require a regression test at the lowest useful layer, plus an interface/contract test when user-visible behavior changes'
+    description: 'Behavior changes require full integration coverage at the lowest public boundary; inline and library unit tests are prohibited as new evidence'
 
   - id: determinism-preserved
     severity: blocking
@@ -173,8 +178,9 @@ constraints:
   proof a behavior exists.
 - Unknown graph attributes are preserved unless the relevant contract explicitly
   rejects them.
-- `make test` is workspace `--lib --bins` only. `make test-all` adds
-  `--all-targets --all-features` and requires the documented Python oracle setup.
+- `make test`, `make test-all`, and `make test-release` select integration-test
+  targets only. They are phase-end commands and must not run during production
+  implementation. The incremental Cargo watch target is deliberately disabled.
 - Some Makefile targets (`install`, `dist`, `release-check`) resolve binaries
   through a literal `target/` path after Cargo finishes. Inspect them before use
   so they do not silently trigger a second local build.

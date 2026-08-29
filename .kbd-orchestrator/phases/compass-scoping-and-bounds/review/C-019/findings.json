@@ -1,0 +1,71 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 95,
+      "claim": "No harness subprocess has a duration bound, violating the project constraint that subprocess integrations 'bound duration plus captured output'.",
+      "evidence": "run_logged() executes `\"$@\" 2>&1 | node \"$log_filter\" ...` with no `timeout` wrapper anywhere in the script; constraint `no-shell-construction` states 'Subprocess integrations pass arguments separately and bound duration plus captured output'. A hung `claude plugin install` / `codex plugin add` blocks until the CI job-level timeout.",
+      "suggested_fix": "Wrap each stage invocation in `timeout <seconds> -- \"$@\"` (or an equivalent bounded runner) and treat timeout as a distinct failure from stage failure."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 205,
+      "claim": "Sentinel preservation is only verified once, after uninstall, so the spec scenario requiring install, upgrade, and uninstall to each preserve the sentinel is not individually enforced.",
+      "evidence": "openspec/changes/harness-install-validation/specs/harness-lifecycle/spec.md: '**THEN** install, upgrade, and uninstall SHALL preserve its bytes'; the script calls `require_sentinel \"$codex_sentinel\"` only after `codex-uninstall`, `require_sentinel \"$claude_sentinel\"` only after `claude-uninstall`, and `require_sentinel \"$opencode_sentinel\"` only after `opencode-uninstall`.",
+      "suggested_fix": "Call require_sentinel after each mutating stage (install, upgrade, uninstall) for all three harnesses so the failing stage is identified and intermediate clobbering cannot be masked."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 293,
+      "claim": "The 'upgrade' stages reinstall the byte-identical artifact, so they cannot detect upgrade-transition defects (stale removed files, changed manifests, version migration), despite the design requiring that the lifecycle 'performs an upgrade'.",
+      "evidence": "openspec design.md: 'performs an upgrade'; but `codex-upgrade` repeats the identical `plugin add compass@compass-plugins --json` against the same unchanged marketplace directory, `claude-upgrade` runs `plugin update` against the same unchanged marketplace, and `opencode-upgrade` runs `npm install --force` of the same `$scratch/$tarball` that was just installed.",
+      "suggested_fix": "Export a second, deliberately different artifact (e.g., an added/removed skill file or bumped bundle version) and upgrade from the first export to the second, asserting the installed tree matches the new export exactly."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 90,
+      "claim": "CI no longer compiles or runs any unit test code: the lib/bins test steps and the nextest run were removed, and clippy covers only --lib --bins (not --all-targets), so #[cfg(test)] modules can silently stop compiling.",
+      "evidence": "Removed hunks: 'Native tests' (`cargo test --workspace --lib --bins --locked`), 'Install pinned nextest runner', and 'Isolated native tests' (`cargo nextest run --workspace --lib --bins --locked`); replacements are `cargo test --workspace --test '*'` (integration targets only, which do not compile #[cfg(test)] code) and `cargo clippy --workspace --lib --bins`.",
+      "suggested_fix": "Keep a compile-only check of test code (e.g., `cargo check --workspace --all-targets --locked` or retain the lib/bins test step) so unit test code cannot bitrot undetected."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 252,
+      "claim": "Parsing the npm pack tarball filename is fragile because the log merges stderr into stdout, so any npm notice containing '[' before the JSON array corrupts the slice and fails with an opaque node exception.",
+      "evidence": "run_logged pipes `\"$@\" 2>&1` into the log; the parse does `JSON.parse(input.slice(input.indexOf(\"[\")))`. npm routes `npm notice` output to stderr, so notices land in the same log before/after the JSON array.",
+      "suggested_fix": "Capture `npm pack --json` stdout to a separate file (or use `npm pack --json 2>stderr.log` and parse only stdout), or extract the JSON with a strict regex anchored to the array."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 178,
+      "claim": "Harness version extraction via awk first/last field over the whole log is brittle: any extra output line produces a multi-line 'version' and confusing mismatch errors.",
+      "evidence": "`actual_codex_version=\"$(awk '{print $NF}' \"$logs/codex-version.log\")\"`, `actual_claude_version=\"$(awk '{print $1}' ...)\"`, `actual_opencode_version=\"$(awk '{print $NF}' ...)\"` operate on unfiltered combined-output logs.",
+      "suggested_fix": "Extract with a strict anchored regex (e.g., `grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1`) or parse a `--json` version output where the harness supports it."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/bounded_redacted_log.mjs",
+      "line": 20,
+      "claim": "Redaction runs after the 64 KiB truncation, so a secret split at the truncation boundary can leave an unredacted fragment (e.g., 'sk-' plus fewer than 8 characters) in the persisted log.",
+      "evidence": "Truncation cuts `chunks` at maximumBytes before `rendered.replaceAll(/\\bsk-[A-Za-z0-9_-]{8,}\\b/g, ...)` runs; the `{8,}` minimum means a truncated token tail shorter than 8 chars survives redaction in the file written by writeFile.",
+      "suggested_fix": "Redact before enforcing the byte cap (redact the full stream buffer, then truncate the redacted text), or lower the minimum and also redact trailing partial tokens at the cut boundary."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

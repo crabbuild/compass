@@ -2,6 +2,98 @@
 
 ## Unreleased
 
+- Add one deterministic `distribution.toml` inventory and native package
+  generators for Codex, Claude Code, and OpenCode. Exports now include the
+  harness manifests, credential-free MCP configuration, complete copied skill
+  trees, recorded qualification versions, Codex and Claude marketplace
+  catalogs, and a thin OpenCode TypeScript plugin pinned to
+  `@opencode-ai/plugin` 1.18.25. Installed-artifact lifecycle qualification
+  covers discovery, MCP loading, upgrade, ownership preservation, and
+  uninstall. Native exports now use the harness-owned configuration paths and
+  require the recorded harness version and complete native artifact inventory;
+  regenerate older portable bundles before validating or installing them.
+
+- Add generation-pinned Surreal native reads for callers, callees, impact,
+  directed trails, connected structural subgraphs, and deterministic relation
+  pagination. Static parameter-bound statements preserve canonical identities,
+  direction, multiplicity, provenance, confidence, ordering, independent
+  bounds, and opaque repository/generation-bound cursors while exposing no raw
+  SurrealQL surface.
+- Bound Surreal projection publication to idempotent 512-record staging commits
+  with an incomplete-manifest claim and pointer-last activation, preventing the
+  Mem engine from retaining graph-sized transaction savepoints while keeping
+  interrupted candidates invisible and safely resumable.
+
+- Add the optional `compass-graphdb-surreal` library crate for deterministic,
+  schemafull projection of one immutable `compass.graph/1` generation. Candidate
+  nodes and typed relations are validated and activated in one transaction;
+  parallel edges, direction, self-loops, provenance, confidence, and stable IDs
+  round-trip through the Mem profile. SurrealDB remains pinned to 3.2.4 behind
+  non-default Mem, SurrealKV, and RocksDB features and does not reach default
+  Compass binaries. Surreal-enabled artifacts are subject to the recorded BSL
+  1.1 notice and redistribution conditions.
+
+- Add the public `compass agent list|install|doctor|export|validate|mcp-config`
+  namespace. It provides deterministic `compass.agent-list/1`,
+  `compass.agent-doctor/1`, `compass.agent-bundle/1`, and
+  `compass.agent-validation/1` contracts; offline graph, protocol, config, and
+  skill health checks; atomically published seven-skill exports; bounded
+  credential-redacting validation; and credential-free native MCP
+  configuration for Codex, Claude, OpenCode, and generic Agent Skills clients.
+  `compass agent install` delegates unchanged to the managed installer, while
+  `compass install` retains its existing bytes, side effects, and exit codes.
+
+- Add six focused, portable Agent Skills for navigation, debugging, change
+  impact, architecture, index maintenance, and MCP setup. `compass install`
+  places them as checksum-owned sibling trees while preserving the canonical
+  `compass` umbrella skill byte-for-byte, idempotent reinstall, shared-consumer
+  ownership, rollback, and unowned-file safety.
+
+- Add the versioned `compass.code_context.v1` MCP result envelope and advertised
+  output schemas to `search_symbols`, `get_callers`, `get_callees`, and
+  `get_impact`. Existing `compass.query/1` records remain unchanged under
+  `data`; MCP `resultType` remains the separate protocol discriminator. Mark
+  remaining legacy text results deprecated in discovery without renaming or
+  removing them. Reject typed graph artifacts with empty source-tree or
+  generation identities before an MCP result can violate its advertised schema.
+
+- Make stdio and Streamable HTTP require the MCP 2026-07-28 discovery and
+  per-request metadata contract, with HTTP remaining stateless and without
+  `Mcp-Session-Id`. Older protocol revisions are rejected on both transports.
+  The compatibility
+  spelling `--stateless` remains accepted. `--session-timeout` is accepted with
+  a warning and ignored through 0.4.x, then removed in 0.5.0; no legacy
+  MCP-2025 transport mode ships.
+
+- Upgrade the native MCP SDK from rmcp 2.2.0 to exactly 3.1.4 while preserving
+  stdio operation, server identity, tool names and input schemas, and resource
+  inventory. Add `server/discover` compatibility coverage against the
+  pre-migration golden contract.
+
+- Extract storage-neutral partition records, stable typed-key construction, and
+  canonical JSON encoding into a dependency-light `compass-partition` crate.
+  Existing history APIs, encoded bytes, persisted formats, and round trips
+  remain compatible.
+
+- Honor `COMPASS_MAX_GRAPH_BYTES` consistently across canonical graph
+  preflight, snapshot publication, validation, and reads while retaining the
+  2 GiB default and failing closed on invalid override values.
+
+- Add a deterministic, bounded canonical graph-size preflight after discovery,
+  so inputs estimated above the snapshot limit fail before project-wide
+  extraction with the existing actionable scope-reduction guidance.
+
+- Make oversized canonical graph failures actionable by naming `--exclude`
+  and `.compassignore` as safe ways to reduce publication scope. The CLI keeps
+  runtime exit code 1 and does not advertise the graph-byte override until the
+  snapshot publication path supports it. Oversized manifests now surface as
+  resource-limit failures rather than corruption failures.
+
+- Add manifest-only and bounded chunk-streaming reads for SQLite graph
+  snapshots. Production validation and reference generation now verify chunks
+  without retaining the canonical payload in one allocation, while the public
+  full-read API and store formats remain compatible.
+
 - Add a digest-pinned 500-question, AI-reviewed synthetic relevance matrix
   covering all query classes, execute it in CI with strict ranking, recall,
   intent, structural, no-answer, and work bounds, and keep its generated JSON

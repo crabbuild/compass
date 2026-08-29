@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-004",
+  "blocking": [
+    {"id":"default-bound","status":"PASS","evidence":"MAX_GRAPH_BYTES remains 2 GiB"},
+    {"id":"explicit-opt-in","status":"PASS","evidence":"Only COMPASS_MAX_GRAPH_BYTES changes the effective bound"},
+    {"id":"invalid-fails-closed","status":"PASS","evidence":"Unit coverage for missing, zero, invalid, overflow and valid byte/MB/GB forms"},
+    {"id":"publication-consistency","status":"PASS","evidence":"Preflight, canonical digest, manifest validation, delta, read and legacy publication paths share the effective limit"},
+    {"id":"streaming-gate","status":"PASS","evidence":"C-001 completed before C-004; production snapshot reads stream bounded chunks"},
+    {"id":"public-error","status":"PASS","evidence":"Graph and real CLI regressions require the override guidance"},
+    {"id":"workspace-baseline","status":"PASS","evidence":"fmt, diff, workspace Clippy and lib/bin tests pass"},
+    {"id":"product-and-qualification","status":"PASS","evidence":"compass_product, product boundary and fixture qualification pass"},
+    {"id":"graph-refresh","status":"PASS","evidence":"119856 nodes, 281856 edges, 68 existing omitted edges, zero identity collisions"}
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-014",
+  "blocking": [
+    {
+      "id": "optional-dependency-isolation",
+      "status": "PASS",
+      "evidence": "SurrealDB is exact-pinned at 3.2.4 behind explicit Mem, SurrealKV, and RocksDB features; default Compass CLI, MCP, core, and projection dependency trees contain no Surreal package, and the default compass binary is built only from that SurrealDB-free dependency closure"
+    },
+    {
+      "id": "license-boundary",
+      "status": "PASS",
+      "evidence": "The accepted C-011 profile is preserved through exact BUSL-1.1 package exceptions, THIRD_PARTY_NOTICES disclosure, and feature/profile documentation; no version other than the reviewed 3.2.4 is permitted"
+    },
+    {
+      "id": "deterministic-lossless-projection",
+      "status": "PASS",
+      "evidence": "Validated compass.graph/1 inputs produce ordered length-delimited SHA-256 record identities, exact typed JSON payloads, and an exhaustive five-family mapping for all 29 edge kinds; tests preserve parallel, reverse, self-loop, direction, provenance, anchor, and confidence semantics"
+    },
+    {
+      "id": "generation-atomic-publication",
+      "status": "PASS",
+      "evidence": "Schemafull records, candidate identity validation, immutable manifest publication, and repository-pointer activation occur in one SurrealDB transaction; a real Mem failure-injection test proves cancellation leaves the prior complete generation visible"
+    },
+    {
+      "id": "typed-bounded-surface",
+      "status": "PASS",
+      "evidence": "The public API exposes typed plans and operations only, all untrusted values are bound, relation tables are a closed enum, positive node/relation/serialized-byte limits are checked before activation and reads, every set query has a finite LIMIT, and returned records must match manifest counts and bytes"
+    },
+    {
+      "id": "repository-baseline",
+      "status": "PASS",
+      "evidence": "Rust formatting, workspace lib/bin Clippy with denied warnings, workspace lib/bin tests, default and Mem tests, all three embedded feature compile gates, product boundary, feature isolation, default binary build, strict OpenSpec validation, package inventory, and diff whitespace checks pass"
+    },
+    {
+      "id": "graph-refresh",
+      "status": "PASS",
+      "evidence": "compass update . completed after the final review follow-up and published 121737 nodes and 286776 edges; it truthfully reported the repository's partial-graph warning for 68 unresolved edges and zero omitted nodes"
+    }
+  ]
+}

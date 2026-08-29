@@ -1,0 +1,50 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "scripts/fixtures/surreal-persistent-probes/input-v1.json",
+      "claim": "The retained vector is not replayable: 2,048 of the 2,051 relations are specified only as `scaleEdgeCount: 2048`, with no retained definition of their endpoints, provenance, or confidence values, and the generator code was deleted, so the design goal of 'replayable, deterministic input and expected-output vectors' (design.md Goals) cannot be satisfied from the retained artifacts alone.",
+      "evidence": "input-v1.json contains only three literal relations plus `\"scaleEdgeCount\": 2048`; expected-v1.json pins only `scaleFirstId`/`scaleLastId` and counts, not the per-relation provenance/confidence of generated edges; refinement_log.md confirms the runner was deleted ('Built one disposable SurrealDB 3.2.4 runner...') and proposal.md requires 'Delete the spike'. Nothing retained defines how the 2,048 scale edges are constructed.",
+      "suggested_fix": "Add the deterministic generation rule for scale edges (ID pattern, endpoint assignment, provenance, confidence formula) to input-v1.json or a companion spec file so the full workload can be regenerated without the deleted runner."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/fixtures/surreal-persistent-probes/expected-v1.json",
+      "claim": "The expected-output vector contains no expected canonical digest or per-relation expected content, so acceptance criterion 1.1's 'verify vector schema and canonical bytes' is only checkable against engine-produced outputs, making the verification circular for everything except counts and boundary IDs.",
+      "evidence": "expected-v1.json has only counts, page parameters, three base relation IDs, and first/last scale IDs; the only canonical digest (`orderedIdsSha256`) appears solely inside rocksdb-result-v1.json and surrealkv-result-v1.json, i.e., produced by the engines under test. verification.md claims 'Independent ordered-ID SHA-256 derivation: matched both engine results' but the derivation source is the same underspecified generation procedure, and no expected semantic bytes are pinned for comparison.",
+      "suggested_fix": "Add the independently computed expected `orderedIdsSha256` (and ideally a canonical digest of the full expected semantic summary) to expected-v1.json so engine results are verified against a pinned expectation rather than against themselves."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/fixtures/surreal-persistent-probes/rocksdb-result-v1.json",
+      "claim": "The dirty-shutdown recovery claim 'Reopen preserved the complete active g-0001 result' (and the docs table row 'with all 2,051 records') is not substantiated by any retained post-crash evidence: the result JSON records only the string `activeAfterCrash: \"g-0001\"`, with no post-crash relation count or ordered-ID digest, so the design requirement that the parent 'verifies the previous generation exactly' is unverifiable from retained evidence.",
+      "evidence": "design.md: 'The parent terminates the child at that marker, reopens the same database, and verifies the previous generation exactly.' Both engine result files contain only `activeBeforeCrash`/`activeAfterCrash` strings; `relationCount: 2051` and `orderedIdsSha256` describe the final post-activation g-0002 read, not the post-crash g-0001 read. docs/future/surreal-persistent-probe-results.md asserts 'Active generation remains g-0001 with all 2,051 records' with no corresponding field.",
+      "suggested_fix": "Include in each engine result a post-crash section capturing the reopened active generation's relation count and ordered-ID digest so the 'exactly preserved' claim is auditable."
+    },
+    {
+      "severity": "WARNING",
+      "file": "openspec/changes/surreal-persistent-probes/verification.md",
+      "claim": "The dependency-cleanliness and disposal gate rests on unrecorded evidence: no pre/post SHA-256 digests of Compass manifests or `Cargo.lock` are retained anywhere, unlike the fixture files whose hashes are pinned in manifest-v1.json, so the 'stayed byte-identical' claim cannot be independently re-verified.",
+      "evidence": "verification.md: 'Pre/post Compass manifest and `Cargo.lock` digest comparison: identical' \u2014 but no digest values are recorded in verification.md, the results doc, constraints.json, or any retained file. By contrast, manifest-v1.json pins hashes for the five fixture files, showing the project knows how to retain such evidence.",
+      "suggested_fix": "Record the actual pre/post SHA-256 values for the root Cargo.toml files and Cargo.lock in verification.md or a retained evidence file."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "docs/future/surreal-persistent-probe-results.md",
+      "claim": "The relative link to `surrealdb-license-decision.md` targets a document not present in the change's file list, so the link may dangle.",
+      "evidence": "docs/future/surreal-persistent-probe-results.md links `[surrealdb-license-decision.md](surrealdb-license-decision.md)`, but files.txt and the packet file tree contain no such file under docs/future/.",
+      "suggested_fix": "Confirm the target exists in the repository; if not, create it or point the link at the actual C-011 decision record."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

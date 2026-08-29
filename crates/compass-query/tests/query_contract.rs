@@ -1,7 +1,7 @@
 use compass_model::code_graph::{NodeKind, NodeRole};
 use compass_model::query_contract::{
     CODE_QUERY_SCHEMA_V1, CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, QueryNode,
-    SearchHit, SearchRequest,
+    STRUCTURAL_QUERY_SCHEMA_V1, SearchHit, SearchRequest,
 };
 use std::fs;
 use std::path::Path;
@@ -59,6 +59,18 @@ fn shared_query_contract_is_strict_bounded_and_deterministic()
         ["a", "b", "c"]
     );
     assert!(response.edges.is_empty());
+    let structural = response.structural_view("repository", "generation");
+    assert_eq!(structural.schema, STRUCTURAL_QUERY_SCHEMA_V1);
+    assert_eq!(structural.repository_id, "repository");
+    assert_eq!(structural.generation_id, "generation");
+    assert_eq!(
+        structural
+            .nodes
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "c"]
+    );
     Ok(())
 }
 

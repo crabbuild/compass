@@ -1,0 +1,17 @@
+{
+  "schema": "compass.qualification-profiles/1",
+  "profiles": [
+    {
+      "name": "qualification-medium",
+      "nodes": 100000,
+      "edges": 250000,
+      "sampleOrdinals": [0, 1, 97, 50000, 99999]
+    },
+    {
+      "name": "qualification-large",
+      "nodes": 1000000,
+      "edges": 2500000,
+      "sampleOrdinals": [0, 1, 97, 500000, 999999]
+    }
+  ]
+}

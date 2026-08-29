@@ -1,0 +1,20 @@
+{
+  "schema": "compass.qualification-profile-digests/1",
+  "canonicalization": "Each canonical compact sorted-key JSON record is prefixed by its unsigned 64-bit big-endian byte length before SHA-256 accumulation",
+  "profiles": [
+    {
+      "name": "qualification-medium",
+      "nodes": 100000,
+      "edges": 250000,
+      "nodeRecordsSha256": "f167e9b711d1846966e9217ff1635fd8bcf06f94751bd2935475a6ec5c794740",
+      "edgeRecordsSha256": "86cd281fa741be786de2639989a7e70abdb2e846042f5e5225f1ad1c417139fd"
+    },
+    {
+      "name": "qualification-large",
+      "nodes": 1000000,
+      "edges": 2500000,
+      "nodeRecordsSha256": "f15fb4c062cfa90ab39df507c70980d56642ca122dbb8a63d2359225ae7e193f",
+      "edgeRecordsSha256": "d6a49817fbb7a553bbdea1cbb546812ded1a49b6dc6f704cab40eb7a9b6ff404"
+    }
+  ]
+}

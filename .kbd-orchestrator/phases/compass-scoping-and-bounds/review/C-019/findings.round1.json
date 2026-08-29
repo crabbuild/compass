@@ -1,0 +1,111 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 136,
+      "claim": "The OpenCode plugin-load check reads the project path from process.argv[2], but `node --input-type=module - \"$opencode_project\"` (script from stdin) places the first user argument at process.argv[1], so argv[2] is undefined and `path.join(undefined, ...)` throws \u2014 the gate can never pass and the new CI job is permanently red.",
+      "evidence": "Hunk: `node --input-type=module - \"$opencode_project\" <<'NODE'` followed by `const project = process.argv[2]`. For stdin/`-e` scripts Node omits the script-path slot, so argv is [execPath, \"$opencode_project\"]. The same script's own `manifest_harness_version` correctly uses `process.argv[1]` for the same invocation pattern, proving the off-by-one.",
+      "suggested_fix": "Change to `process.argv[2] ?? process.argv[1]` validation or, concretely, use `const project = process.argv[1]` and assert it is defined before path.join."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 2,
+      "claim": "Task 1.1 requires 'bounded redacted logs', but the script implements no log capture, bounding, or redaction whatsoever \u2014 harness output is either discarded to /dev/null (destroying failure diagnostics under set -e) or streamed raw and unbounded to the CI log.",
+      "evidence": "Acceptance criterion 1.1: 'lifecycle qualification with named-version enforcement and bounded redacted logs'. The script contains no log file, no size cap, no redaction pass; e.g. `CODEX_HOME=... \"$codex_binary\" plugin marketplace add ... --json >/dev/null` and unredirected stderr from every harness invocation.",
+      "suggested_fix": "Capture each stage's output to a bounded file (e.g. head -c N), apply a redaction filter for tokens/paths, and emit the redacted excerpt only on failure."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 100,
+      "claim": "The 'upgrade' stages reinstall the byte-identical artifact (Codex re-runs `plugin add` on the same marketplace package; OpenCode runs `npm install --force` of the same tarball), so file-replacement/stale-file semantics of a real version-to-version upgrade are never exercised.",
+      "evidence": "Hunk comment 'Codex documents plugin add as the reinstall/update operation' followed by repeating the identical `plugin add compass@compass-plugins`; `npm install --ignore-scripts --force --prefix \"$opencode_project\" \"$scratch/$tarball\"` reuses the same tarball packed moments earlier. Criterion 1.2 requires upgrade coverage of the lifecycle.",
+      "suggested_fix": "Export a second, modified package (or bump a content file) and upgrade from artifact A to artifact B, then assert B's content is what the harness serves."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 98,
+      "claim": "Criterion 1.2's 'complete skill discovery, MCP configuration/load' is not verified for Codex or Claude: the script only greps `plugin list`/`mcp list` output, which matches registered config entries without proving the harness discovered skills or completed an MCP handshake with the compass server.",
+      "evidence": "`CODEX_HOME=... \"$codex_binary\" mcp list | grep -q 'compass'` and `CLAUDE_CONFIG_DIR=... \"$claude_binary\" mcp list | grep -q 'compass'` \u2014 listing registered servers is configuration presence, not load; a stale or broken entry that fails to spawn would still grep-match. Only the OpenCode plugin is actually executed (via direct node import, not via the harness).",
+      "suggested_fix": "Drive an actual MCP initialize/tools-list round trip against the registered server per harness, and assert the harness reports the umbrella/focused skills as discovered."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 94,
+      "claim": "The user-sentinel preservation scenario proves nothing for Codex: HOME is never redirected for codex commands (only CODEX_HOME), and the sentinel at $state/user is outside Codex's managed state, so a Codex install/upgrade/uninstall that clobbered user files beside its real state would go undetected.",
+      "evidence": "Sentinel is `$state/user/USER-INSTRUCTIONS.md`; claude/opencode invocations set `HOME=\"$state/user\"`, but all codex invocations set only `CODEX_HOME=\"$codex_home\"`. Spec scenario: 'a sentinel instruction exists beside managed harness state \u2026 install, upgrade, and uninstall SHALL preserve its bytes' \u2014 for Codex the sentinel is not beside any state the harness touches.",
+      "suggested_fix": "Place a sentinel inside/adjacent to CODEX_HOME-managed territory (and run codex with an isolated HOME) so the preservation assertion binds to each harness's lifecycle."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 62,
+      "claim": "`export PATH=\"$(dirname \"$compass_binary\"):$PATH\"` exports a relative PATH entry (`target/debug` given the CI invocation `--compass target/debug/compass`), so any PATH-based `compass` resolution by a harness breaks after the script's `cd \"$opencode_project\"`.",
+      "evidence": "CI hunk: `scripts/qualify_harness_packages.sh --compass target/debug/compass`; script line 62 exports dirname verbatim; line 129 changes cwd inside a subshell that then invokes the opencode harness whose MCP configuration may spawn `compass` from PATH.",
+      "suggested_fix": "Resolve to an absolute path first, e.g. `compass_dir=\"$(cd \"$(dirname \"$compass_binary\")\" && pwd)\"; export PATH=\"$compass_dir:$PATH\"`."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 0,
+      "claim": "CI no longer runs the existing unit/library/binary test suites anywhere: `--lib --bins` runs were deleted from both the quality and cross-target matrix jobs, and `cargo test --workspace --test '*'` skips doctests, so previously-green unit and doc tests can silently rot.",
+      "evidence": "Removed lines: `cargo test --workspace --lib --bins --locked` (quality), `cargo nextest run --workspace --lib --bins --locked`, and `cargo test --workspace --lib --bins --locked --target ${{ matrix.target }}`; replacements select only `--test '*'`, which excludes lib tests, bin tests, and doctests. The constraints prohibit unit tests as *new evidence* but do not direct removing existing coverage from CI.",
+      "suggested_fix": "Keep a `--lib --bins` (and doctests, if any) leg in CI alongside the new integration-target runs, or document the deliberate removal in the change."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 0,
+      "claim": "`cargo nextest run --workspace --test '*' --locked` relies on cargo-style glob target selection that nextest does not necessarily implement; if unsupported or zero-matching, the isolation gate either errors out or silently runs no tests while passing.",
+      "evidence": "Hunk: `- run: cargo nextest run --workspace --test '*' --locked`. The prior line used `--lib --bins`, which nextest documents; glob patterns in `--test` are a cargo target-selection feature and are not a documented nextest target-selection behavior.",
+      "suggested_fix": "Use nextest's supported selection (e.g. `cargo nextest run --workspace --tests` or a filterset expression) and verify locally that the command enumerates the intended integration targets."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 0,
+      "claim": "Task 2.1 requires wiring 'the lifecycle and OpenCode JavaScript integration gates into CI', but the new installed-agent-packages job runs only `npm ci` \u2014 no `npm run typecheck:js` or `npm run test:js` step appears anywhere in the diff.",
+      "evidence": "Acceptance criterion 2.1; new job steps end at `Qualify installed native packages` with no JS typecheck/test step; constraint js-surface-verified (`npm ci && npm run typecheck:js && npm run test:js`) applies to the OpenCode plugin surface this change exercises.",
+      "suggested_fix": "Add `npm run typecheck:js` and `npm run test:js` steps to the new job (or cite the existing job that covers them in the change record)."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 95,
+      "claim": "Every `harness \u2026 | grep -q \u2026` runs under `set -o pipefail`; grep -q exits immediately on first match, so a harness that keeps writing receives SIGPIPE (exit 141) and the pipeline fails spuriously for large outputs, making the gate flaky.",
+      "evidence": "`set -euo pipefail` at line 2 combined with e.g. `\"$codex_binary\" plugin list --available --json | grep -q '\"compass\"'` and `\"$opencode_binary\" mcp list` piped to `grep -q 'compass'`.",
+      "suggested_fix": "Capture output into a bounded variable/file first, then grep the capture (which also enables the required log bounding)."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 0,
+      "claim": "The globally installed harness packages are version-pinned but not integrity-pinned, and the version-equality checks in the script parse `--version` output with inconsistent, format-fragile awk fields that fail silently via bare `[[ ]]` with no diagnostic message.",
+      "evidence": "Workflow: `npm install --global @openai/codex@0.146.0 @anthropic-ai/claude-code@2.1.251 opencode-ai@1.18.23` (no lockfile/integrity, unlike the SHA-pinned actions in the same file). Script: `awk '{print $NF}'` for codex/opencode vs `awk '{print $1}'` for claude, then bare `[[ \"$actual_codex_version\" == \"$expected_codex_version\" ]]` which exits 1 with no output on mismatch.",
+      "suggested_fix": "Install via a lockfile-controlled `npm ci` (or record integrity), and emit an echo of expected-vs-actual before each comparison."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 85,
+      "claim": "The harness binary variables are expanded unquoted in command substitutions (`$($codex_binary --version \u2026)` etc.), so an override path containing spaces passed via --codex/--claude/--opencode silently mis-parses.",
+      "evidence": "`actual_codex_version=\"$($codex_binary --version | awk '{print $NF}')\"` and the analogous claude/opencode lines, despite the script accepting arbitrary paths for these options.",
+      "suggested_fix": "Quote the expansions: `\"$(\"$codex_binary\" --version | awk '{print $NF}')\"`."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

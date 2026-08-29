@@ -1,0 +1,39 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "gpt-5.6-sol",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "harness-native",
+  "cross_model_check": "fresh-context-same-model-family",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-cli/src/lib.rs",
+      "line": 3,
+      "claim": "The cumulative packet omitted unrelated new CLI, partition, and skill files.",
+      "evidence": "Packet assembly failed to resolve C-010 to its OpenSpec directory and therefore reviewed the full dirty tree.",
+      "suggested_fix": "Rebuild with the OpenSpec change name so files.txt scopes the packet."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-mcp/src/lib.rs",
+      "line": 281,
+      "claim": "Production stdio still advertised legacy MCP versions.",
+      "evidence": "CompassMcp::new used a profile whose supported versions were ProtocolVersion::KNOWN_VERSIONS.",
+      "suggested_fix": "Advertise only 2026-07-28 on stdio and reject the removed initialize lifecycle."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": ".prometheus/events.jsonl",
+      "line": 4,
+      "claim": "The cumulative packet included machine paths in unrelated local runtime state.",
+      "evidence": "The file is outside C-010's declared review surface and appeared only because packet scoping failed.",
+      "suggested_fix": "Use the declared C-010 files list when rebuilding the packet."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

@@ -1,0 +1,16 @@
+Cargo.toml
+Cargo.lock
+CHANGELOG.md
+crates/compass-partition/Cargo.toml
+crates/compass-partition/src/lib.rs
+crates/compass-history/Cargo.toml
+crates/compass-history/src/artifacts.rs
+crates/compass-history/src/canonical.rs
+crates/compass-history/src/error.rs
+crates/compass-history/src/keys.rs
+openspec/changes/extract-compass-partition/.openspec.yaml
+openspec/changes/extract-compass-partition/proposal.md
+openspec/changes/extract-compass-partition/design.md
+openspec/changes/extract-compass-partition/specs/partition-contract/spec.md
+openspec/changes/extract-compass-partition/tasks.md
+openspec/changes/extract-compass-partition/verification.md

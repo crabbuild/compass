@@ -1,0 +1,63 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/distribution.rs",
+      "line": 115,
+      "claim": "distribution.rs introduces a `toml` crate dependency (`toml::from_str::<DistributionInventory>`) but the diff contains no `crates/compass-cli/Cargo.toml`, root `Cargo.toml`, `Cargo.lock`, or `build.rs` hunks even though `openspec/changes/distribution-inventory-generators/files.txt` declares all four as changed \u2014 if `toml` is not already a direct dependency of compass-cli, the build-passes and locked-dependencies blocking constraints fail.",
+      "evidence": "distribution.rs `load_inventory()` calls `toml::from_str`; files.txt lists `Cargo.toml`, `Cargo.lock`, `crates/compass-cli/Cargo.toml`, and `crates/compass-cli/build.rs` but none of those files appear in the diff.",
+      "suggested_fix": "Include the manifest hunks adding `toml` via `{ workspace = true }` (or drop the build.rs/files.txt entries if the embedded include_str! approach made them unnecessary), and regenerate Cargo.lock with --locked."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 1627,
+      "claim": "The diff deletes the entire inline test module (~15 tests covering doctor freshness/stale detection, symlink rejection, snapshot-selector escape, doctor scope conflicts, portability/credential rules, bounded collection, and manifest transport validation) while adding only one integration test, leaving those behaviors \u2014 and new behaviors like the `--platform`-on-managed-bundle rejection and `inline_option_value` \u2014 with no visible coverage at any level.",
+      "evidence": "The removed `#[cfg(test)] mod tests` block (tests `doctor_reports_healthy_stale_and_bad_checksum_states`, `validation_rejects_symbolic_links`, `doctor_fails_closed_on_invalid_snapshot_selector`, `doctor_scope_options_distinguish_duplicates_and_conflicts`, `portability_rules_reject_paths_and_secrets_but_allow_https`, etc.) versus a single added integration test `generic_agents_export_uses_the_doctor_configuration_path` in tests/agent_cli.rs; constraint `regression-test-present` requires integration coverage at the lowest public boundary for behavior changes, and `ambiguity-and-negative-cases` requires negative-case coverage.",
+      "suggested_fix": "Port the deleted behavior assertions (stale graph, corrupt checksums, symlink rejection, unsafe manifest path, transport mismatch, scope conflicts, new managed-bundle --platform rejection) into crates/compass-cli/tests/agent_cli.rs as integration tests."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 1563,
+      "claim": "User-visible export layout changes (codex `mcp/codex.toml` \u2192 `.mcp.json` JSON, claude `mcp/claude.json` \u2192 `.mcp.json`, opencode `mcp/opencode.json` \u2192 `opencode.json`, agents `mcp/agents.json` \u2192 `.agents/mcp.json`) and the new mandatory `harness_version`/native-artifact requirements mean previously exported bundles now fail validation, yet the diff contains no MIGRATION.md note or CHANGELOG.md entry.",
+      "evidence": "`bundle_config_path` rewrite and `validate_native_package_files` requiring artifacts/`harness_version` that old bundles lack; constraint `compatibility-documented`: 'Incompatible user-visible changes include regression coverage, updated reference docs, a MIGRATION.md note when users must act, and a CHANGELOG.md entry when release-visible' \u2014 output files are explicitly listed as compatibility-sensitive.",
+      "suggested_fix": "Add a MIGRATION.md note describing the new bundle layout and validation requirements, and a CHANGELOG.md entry for the release-visible export format change."
+    },
+    {
+      "severity": "WARNING",
+      "file": "tools/skillgen/mod.rs",
+      "line": 263,
+      "claim": "`contains_windows_absolute_path` rejects any occurrence of a double backslash (`body.contains(r\"\\\\\")`), which is far broader than the previous targeted `C:\\\\` check and will false-positive on legitimate skill content such as regex escapes (`\\\\d`), JSON/string escape examples, or LaTeX line breaks, failing validation for previously valid skills.",
+      "evidence": "Old check: `for forbidden in [\"/Users/\", \"/home/\", \"file://\", \"C:\\\\\\\\\", \"C:/\"]`; new code adds `|| body.contains(r\"\\\\\")` to `contains_windows_absolute_path`, flagging any `\\` pair anywhere in the body regardless of whether it denotes a path.",
+      "suggested_fix": "Restrict the double-backslash check to UNC-style prefixes (e.g., `\\\\` at a token boundary followed by a non-space) instead of rejecting every escaped backslash pair."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 1527,
+      "claim": "The non-Unix `opened_file_matches_path` fallback only compares file_type, length, and mtime, so a swapped-in replacement file with identical size and timestamp passes the TOCTOU check, giving false assurance on Windows/macOS.",
+      "evidence": "`#[cfg(not(unix))] fn opened_file_matches_path` returns `opened.file_type() == current.file_type() && opened.len() == current.len() && opened.modified().ok() == current.modified().ok()`.",
+      "suggested_fix": "Document the fallback as best-effort, or use a stronger identity check (e.g., opening with exclusive/no-follow semantics via OpenOptions on platforms that support it) instead of len+mtime equality."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/src/distribution.rs",
+      "line": 262,
+      "claim": "`mcp_config` hardcodes `\"plugin\": [\"@compass/opencode-plugin\"]` instead of using the inventory's `npm_name`, so changing `npm_name` in distribution.toml silently produces a package.json and opencode.json that reference different plugin names.",
+      "evidence": "`harness.opencode` defines `npm_name = \"@compass/opencode-plugin\"` used by `opencode_manifest`, but `mcp_config` emits the literal string; `load_inventory` performs no cross-field consistency check between the two.",
+      "suggested_fix": "Pass the harness inventory (or npm_name) into `mcp_config`, or validate in `load_inventory` that the generated opencode.json plugin entry matches `npm_name`."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

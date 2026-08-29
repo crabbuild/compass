@@ -1,0 +1,10 @@
+distribution.toml
+package-lock.json
+crates/compass-cli/src/agent_commands.rs
+crates/compass-cli/src/distribution.rs
+crates/compass-cli/src/lib.rs
+crates/compass-cli/tests/agent_cli.rs
+packages/compass-opencode
+tools/skillgen/mod.rs
+docs/implementation/agent-distribution.md
+openspec/changes/distribution-inventory-generators

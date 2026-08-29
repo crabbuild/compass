@@ -1,6 +1,27 @@
 # Update Log
 
+## 2026-08-28
+* **Update**: [Compass scoping and bounds executor session complete](/compass-scoping-and-bounds-executor-completion-status.md)
+* **Ingest**: [Karpathy session 0c9f8df23506](/karpathy-session-0c9f8df23506c16a.md)
+* **Update**: [Compass scoping and bounds executor completion status](/compass-scoping-and-bounds-executor-completion-status.md)
+* **Ingest**: [Karpathy session 2143b246d1cf](/karpathy-session-2143b246d1cf0ba5.md)
+* **Update**: [Compass scoping and bounds executor session status](/compass-scoping-and-bounds-executor-completion-status.md)
+* **Ingest**: [Karpathy session d968e02c779c](/karpathy-session-d968e02c779c42b0.md)
+* **Update**: [Compass scoping and bounds executor status capture](/compass-scoping-and-bounds-executor-completion-status.md)
+* **Ingest**: [Karpathy session a217668de21b](/karpathy-session-a217668de21b25d6.md)
+* **Ingest**: [Karpathy session 361f6082f855](/karpathy-session-361f6082f855b168.md)
+* **Creation**: [Compass scoping and bounds executor completion status](/compass-scoping-and-bounds-executor-completion-status.md)
+* **Ingest**: [Karpathy session 6c67c5011b34](/karpathy-session-6c67c5011b34fce2.md)
+
 ## 2026-08-09
+* **Ingest**: [Karpathy session f437ebdbcc68](/karpathy-session-f437ebdbcc6811b9.md)
+* **Creation**: [Compass scoping and bounds executor completion](/compass-scoping-and-bounds-executor-completion.md)
+* **Ingest**: [Karpathy session ef9837e583f6](/karpathy-session-ef9837e583f69b53.md)
+* **Ingest**: [Karpathy session 6f294af7050a](/karpathy-session-6f294af7050aa95f.md)
+* **Creation**: [Compass scoping and bounds executor completion record](/compass-scoping-and-bounds-executor-completion-record.md)
+* **Ingest**: [Karpathy session e9325c7eec4c](/karpathy-session-e9325c7eec4c9735.md)
+* **Ingest**: [Karpathy session 1ecfe43654c6](/karpathy-session-1ecfe43654c6f90b.md)
+* **Ingest**: [Karpathy session e0ee5520d062](/karpathy-session-e0ee5520d0620fb6.md)
 * **Creation**: [Compass scoping and bounds completion capture](/compass-scoping-and-bounds-completion-capture.md)
 * **Ingest**: [Karpathy session 495b53196088](/karpathy-session-495b53196088c2c2.md)
 * **Ingest**: [Karpathy session 87bd3daa965e](/karpathy-session-87bd3daa965ea4d0.md)

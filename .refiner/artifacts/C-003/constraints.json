@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-003",
+  "blocking": [
+    {"id":"focused-regression","status":"PASS","evidence":"Unit and pipeline-scale preflight regressions pass"},
+    {"id":"workspace-baseline","status":"PASS","evidence":"fmt, diff check, workspace lib/bin Clippy and tests pass"},
+    {"id":"bounded-work","status":"PASS","evidence":"One metadata lookup per discovered source with saturating arithmetic; no source read or extraction"},
+    {"id":"determinism","status":"PASS","evidence":"Root-relative equivalent-checkout regression and fixture qualification pass"},
+    {"id":"typed-limit","status":"PASS","evidence":"Reuses SnapshotError::canonical_graph_too_large and actionable C-002 text"},
+    {"id":"product-boundary","status":"PASS","evidence":"compass_product and check_product_boundary.sh pass"},
+    {"id":"qualification","status":"PASS","evidence":"qualify_code_graph_v1.sh --fixtures-only passes all byte comparisons"},
+    {"id":"openspec","status":"PASS","evidence":"strict validation passes"},
+    {"id":"graph-refresh","status":"PASS","evidence":"119836 nodes, 281818 edges, 68 existing omitted edges, zero identity collisions"}
+  ]
+}

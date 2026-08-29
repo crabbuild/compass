@@ -1,0 +1,7 @@
+crates/compass-store/src/lib.rs
+crates/compass-graph/src/snapshot.rs
+crates/compass-graph/src/lib.rs
+crates/compass-core/src/pipeline.rs
+crates/compass-cli/tests/snapshot_limit_cli.rs
+CHANGELOG.md
+openspec/changes/honor-max-graph-bytes-on-publication

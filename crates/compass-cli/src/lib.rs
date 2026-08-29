@@ -1,9 +1,11 @@
 //! Command implementation for the native Compass CLI.
 
+mod agent_commands;
 mod call_graph_commands;
 mod capability_commands;
 mod code_query_commands;
 mod dedup_commands;
+mod distribution;
 mod help;
 mod history_batch;
 mod history_build;
@@ -75,6 +77,7 @@ pub use init_commands::{run_init, run_init_jsonl};
 
 static PROCESS_CANCELLED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
+const SESSION_TIMEOUT_DEPRECATION: &str = "warning: --session-timeout is deprecated and ignored because MCP HTTP is stateless; it will be removed in Compass 0.5.0";
 
 pub(crate) fn process_cancellation() -> Result<&'static AtomicBool, String> {
     let installed = SIGNAL_HANDLER.get_or_init(|| {
@@ -346,6 +349,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         command.clone()
     };
     let outcome = match command.as_str() {
+        "agent" => agent_commands::command(frontend, &args),
         "history" => history_commands::command(frontend, &args),
         "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
@@ -510,6 +514,9 @@ pub fn run_mcp(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut imp
             return 2;
         }
     };
+    if options.session_timeout_used && options.transport == "http" {
+        let _result = writeln!(stderr, "{SESSION_TIMEOUT_DEPRECATION}");
+    }
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -554,6 +561,7 @@ struct McpOptions {
     json_response: bool,
     stateless: bool,
     session_timeout: Option<Duration>,
+    session_timeout_used: bool,
 }
 
 fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
@@ -571,8 +579,9 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
     let mut api_key = std::env::var("COMPASS_API_KEY").ok();
     let mut path = "/mcp".to_owned();
     let mut json_response = false;
-    let mut stateless = false;
-    let mut session_timeout = Some(Duration::from_secs(3600));
+    let mut stateless = true;
+    let session_timeout = None;
+    let mut session_timeout_used = false;
     let mut index = 0_usize;
     while index < args.len() {
         let value = &args[index];
@@ -599,7 +608,8 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
             "--stateless" => stateless = true,
             "--session-timeout" => {
                 let raw = mcp_value(args, &mut index, "--session-timeout")?;
-                session_timeout = parse_session_timeout(raw)?;
+                let _validated = parse_session_timeout(raw)?;
+                session_timeout_used = true;
             }
             _ if value.starts_with("--graph=") => {
                 graph_flag = Some(PathBuf::from(&value[8..]));
@@ -623,7 +633,8 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
             _ if value.starts_with("--path=") => path = value[7..].to_owned(),
             _ if value.starts_with("--session-timeout=") => {
                 let raw = &value[18..];
-                session_timeout = parse_session_timeout(raw)?;
+                let _validated = parse_session_timeout(raw)?;
+                session_timeout_used = true;
             }
             _ if value.starts_with('-') => {
                 return Err(format!("error: unrecognized arguments: {value}"));
@@ -650,6 +661,7 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
         json_response,
         stateless,
         session_timeout,
+        session_timeout_used,
     }))
 }
 
@@ -676,7 +688,7 @@ fn parse_session_timeout(raw: &str) -> Result<Option<Duration>, String> {
 }
 
 fn mcp_help() -> String {
-    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]".to_owned()
+    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]\n\nHTTP uses stateless MCP 2026-07-28. --stateless is retained as a compatibility spelling. --session-timeout is deprecated, ignored, and will be removed in Compass 0.5.0.".to_owned()
 }
 
 /// Run Compass's long-lived native watcher, streaming status as changes arrive.
@@ -3027,6 +3039,9 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             }
             _ => index += 1,
         }
+    }
+    if format == "neo4j" && push_uri.is_some() && push_password.is_none() {
+        return Outcome::failure("error: --password required for --push".to_owned());
     }
     graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
         Ok(path) => path,

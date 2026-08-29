@@ -5,13 +5,17 @@ use std::time::Instant;
 
 use compass_graph::{GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, SnapshotReadLimits};
 use compass_ir::ProgramBundle;
-use compass_model::code_graph::{EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord};
-use compass_model::provenance::{EvidenceConfidence, ResolutionState};
+use compass_model::code_graph::{
+    BuildMetadata, EdgeKind, EdgeRecord, FileRecord, GraphDocument, NodeRecord,
+};
+use compass_model::provenance::EvidenceConfidence;
 use compass_model::query_contract::{
     CallRequest, CodeQueryOperation, CodeQueryResponse, ExploreRequest, ImpactRequest,
-    NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryEvidence,
-    QueryEvidenceLayer, QueryFile, QueryNode, QueryPath, SearchHit, SearchRequest,
+    NodeTrailRequest, QueryDiagnostic, QueryDiagnosticCode, QueryEdge, QueryFile, QueryNode,
+    QueryPath, SearchHit, SearchRequest, normalize_query_symbol, query_edge_from_record,
+    query_node_from_record, query_path_from_records,
 };
+use compass_model::validate_build_metadata_identity;
 use rusqlite::{Connection, params};
 
 use crate::cql::{QueryError, QueryErrorKind};
@@ -174,6 +178,29 @@ pub struct CodeQueryEngine {
     pub(crate) engine_kind: QueryEngineKind,
     pub(crate) search_query_cache: Mutex<SearchQueryCache>,
     pub(crate) fuzzy_lookup_cache: Mutex<FuzzyLookupCache>,
+}
+
+impl CodeQueryEngine {
+    /// Return the build identity pinned to this engine's exact graph
+    /// realization.
+    pub fn build_metadata(&self) -> Result<BuildMetadata, QueryError> {
+        let build = match &self.backend {
+            CodeGraphBackend::Materialized { graph, .. } => Ok(graph.graph.build.clone()),
+            CodeGraphBackend::Store(snapshot) => snapshot
+                .reader()?
+                .metadata_summary()
+                .map(|metadata| metadata.graph.build)
+                .map_err(snapshot_error),
+        }?;
+        validate_build_metadata_identity(&build).map_err(|error| {
+            QueryError::new(
+                QueryErrorKind::CorruptArtifact,
+                "invalid_graph_build_identity",
+                error.to_string(),
+            )
+        })?;
+        Ok(build)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1164,12 +1191,24 @@ impl CodeQueryEngine {
     }
 
     pub fn explore(&self, request: ExploreRequest) -> Result<CodeQueryResponse, QueryError> {
-        self.explore_instrumented(request, &mut QueryInstrumentation::default())
+        self.explore_instrumented(request, true, &mut QueryInstrumentation::default())
+    }
+
+    /// Return the bounded structural subgraph without reading source files.
+    ///
+    /// This is the backend-neutral comparison route for graph engines. Public
+    /// `explore` behavior remains unchanged and still includes verified source.
+    pub fn structural_subgraph(
+        &self,
+        request: ExploreRequest,
+    ) -> Result<CodeQueryResponse, QueryError> {
+        self.explore_instrumented(request, false, &mut QueryInstrumentation::default())
     }
 
     fn explore_instrumented(
         &self,
         request: ExploreRequest,
+        include_files: bool,
         instrumentation: &mut QueryInstrumentation,
     ) -> Result<CodeQueryResponse, QueryError> {
         validate_limits(&request.limits)?;
@@ -1231,7 +1270,9 @@ impl CodeQueryEngine {
         }
         self.add_nodes(&ids, &mut response)?;
         self.add_edges(&edge_ids, &mut response)?;
-        self.add_verified_files(&request.root, &mut response)?;
+        if include_files {
+            self.add_verified_files(&request.root, &mut response)?;
+        }
         self.apply_path_bound(&mut response);
         budget.record_work(instrumentation);
         let response = self.finish_response(&mut response);
@@ -1765,38 +1806,11 @@ fn default_repository_root(graph_path: &Path) -> PathBuf {
 }
 
 fn path_record(nodes: &[String], edges: &[String], selected: &[EdgeRecord]) -> QueryPath {
-    let weakest_confidence = selected
-        .iter()
-        .flat_map(|edge| &edge.evidence)
-        .map(|evidence| evidence.confidence)
-        .max_by_key(|confidence| match confidence {
-            EvidenceConfidence::Exact => 0,
-            EvidenceConfidence::Inferred => 1,
-            EvidenceConfidence::Ambiguous => 2,
-        })
-        .unwrap_or(EvidenceConfidence::Exact);
-    let weakest_resolution = if weakest_confidence == EvidenceConfidence::Ambiguous {
-        ResolutionState::Ambiguous
-    } else if weakest_confidence == EvidenceConfidence::Inferred {
-        ResolutionState::Unresolved
-    } else {
-        ResolutionState::Exact
-    };
-    QueryPath {
-        id: format!("path:{}", edges.join(":")),
-        node_ids: nodes.to_vec(),
-        edge_ids: edges.to_vec(),
-        weakest_resolution,
-        weakest_confidence,
-    }
+    query_path_from_records(nodes, edges, selected)
 }
 
 fn normalize_symbol(value: &str) -> String {
-    value
-        .trim()
-        .trim_end_matches("()")
-        .trim_start_matches('.')
-        .to_lowercase()
+    normalize_query_symbol(value)
 }
 
 fn is_heuristic(edge: &EdgeRecord) -> bool {
@@ -1818,54 +1832,11 @@ fn evidence_quality(edge: &EdgeRecord) -> u8 {
 }
 
 pub(crate) fn query_node(node: &NodeRecord) -> QueryNode {
-    QueryNode {
-        id: node.id.clone(),
-        kind: node.kind,
-        roles: node.roles.clone(),
-        name: node.name.clone(),
-        qualified_name: node.qualified_name.clone(),
-        language: node.language.clone(),
-        framework: node.framework.clone(),
-        source: node.source.clone(),
-        details: node.details.clone(),
-        evidence: node.evidence.iter().map(structural_evidence).collect(),
-    }
+    query_node_from_record(node)
 }
 
 pub(crate) fn query_edge(edge: &EdgeRecord) -> QueryEdge {
-    QueryEdge {
-        id: edge.id.clone(),
-        source: edge.source.clone(),
-        target: edge.target.clone(),
-        kind: edge.kind,
-        relationship_site: edge.relationship_site.clone(),
-        details: edge.details.clone(),
-        evidence: edge.evidence.iter().map(structural_evidence).collect(),
-    }
-}
-
-fn structural_evidence(evidence: &compass_model::provenance::Provenance) -> QueryEvidence {
-    QueryEvidence {
-        layer: QueryEvidenceLayer::StructuralGraph,
-        origin: evidence.origin,
-        extractor: evidence.extractor.clone(),
-        confidence: evidence.confidence,
-        anchor: evidence.anchors.first().cloned(),
-        rule: evidence.rule.clone(),
-        wiring_site: evidence.wiring_site.clone(),
-        resolution: if evidence.confidence == EvidenceConfidence::Ambiguous
-            || evidence.candidates.len() > 1
-        {
-            ResolutionState::Ambiguous
-        } else if evidence.confidence == EvidenceConfidence::Inferred
-            && evidence.candidates.is_empty()
-        {
-            ResolutionState::Unresolved
-        } else {
-            ResolutionState::Exact
-        },
-        candidates: evidence.candidates.clone(),
-    }
+    query_edge_from_record(edge)
 }
 
 pub(crate) fn validate_limits(

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-006",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "crates/compass-files/tests/contracts.rs",
+    "crates/compass-core/tests/vendor_policy.rs",
+    "docs/reference/configuration.md",
+    "openspec/changes/vendor-skip-policy"
+  ],
+  "distFiles": ["qa-receipt.md"],
+  "validatedAt": "2026-08-28T15:59:11Z"
+}

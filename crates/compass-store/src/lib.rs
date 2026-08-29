@@ -45,10 +45,45 @@ pub const MAX_IMMUTABLE_BATCH_BYTES: usize = 16 * 1024 * 1024;
 ///
 /// The portable in-memory JSON readers intentionally keep their independent
 /// 1 GiB cap.  The local store is the bounded large-graph path and therefore
-/// accepts up to 2 GiB while serving records through indexed scans instead of
-/// materializing the whole document.  The limit is still finite so malformed
-/// or hostile snapshots cannot request unbounded allocation.
+/// accepts up to 2 GiB.  Reads reach records through indexed scans
+/// (`GraphSnapshotReader`) or stream stored chunks
+/// (`SqliteStore::read_snapshot_chunks`) rather than materializing the whole
+/// document; `SqliteStore::read_snapshot` is the explicit opt-in that does
+/// allocate the full payload.  The limit is still finite so malformed or
+/// hostile snapshots cannot request unbounded allocation.
 pub const MAX_GRAPH_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+/// Effective opt-in graph byte bound used by snapshot publication and reads.
+/// Invalid, zero, overflowing, or unrepresentable values fail closed to the
+/// 2 GiB default. Accepted forms match Compass graph readers: raw bytes, `MB`,
+/// and `GB`, with optional underscores in the numeric component.
+#[must_use]
+pub fn max_graph_bytes() -> usize {
+    let raw = std::env::var("COMPASS_MAX_GRAPH_BYTES").ok();
+    parse_max_graph_bytes(raw.as_deref())
+}
+
+fn parse_max_graph_bytes(raw: Option<&str>) -> usize {
+    let Some(raw) = raw else {
+        return MAX_GRAPH_BYTES;
+    };
+    let upper = raw.trim().to_ascii_uppercase();
+    let (number, multiplier) = if let Some(number) = upper.strip_suffix("GB") {
+        (number.trim(), 1024_u128 * 1024 * 1024)
+    } else if let Some(number) = upper.strip_suffix("MB") {
+        (number.trim(), 1024_u128 * 1024)
+    } else {
+        (upper.as_str(), 1)
+    };
+    number
+        .replace('_', "")
+        .parse::<u128>()
+        .ok()
+        .filter(|value| *value > 0)
+        .and_then(|value| value.checked_mul(multiplier))
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(MAX_GRAPH_BYTES)
+}
 const GRAPH_NAMESPACE: &[u8] = b"compass.current.graph.v1";
 const CATALOG_PARTITION: &[u8] = b"catalog";
 const OBJECT_PARTITION: &[u8] = b"object";
@@ -826,7 +861,12 @@ impl SqliteStore {
         &self.path
     }
 
-    pub fn read_snapshot(&self) -> Result<(SnapshotManifest, Vec<u8>), StoreError> {
+    /// Read and validate the active snapshot manifest without touching chunk
+    /// objects.
+    ///
+    /// Callers that only need manifest metadata must prefer this over
+    /// [`Self::read_snapshot`], which reconstructs the entire payload in memory.
+    pub fn read_snapshot_manifest(&self) -> Result<SnapshotManifest, StoreError> {
         let namespace = NamespaceId::graph();
         let catalog = PartitionKey::new(CATALOG_PARTITION)?;
         let active = Key::new(ACTIVE_KEY)?;
@@ -836,34 +876,167 @@ impl SqliteStore {
         let manifest: SnapshotManifest = serde_json::from_slice(&entry.value)
             .map_err(|error| StoreError::Corrupt(format!("active manifest: {error}")))?;
         validate_manifest(&manifest)?;
+        Ok(manifest)
+    }
+
+    /// Stream the active snapshot payload one stored chunk at a time.
+    ///
+    /// The payload is never materialized as a single allocation. Each chunk is
+    /// bounded by `CHUNK_BYTES`; the running total is still checked against
+    /// [`MAX_GRAPH_BYTES`] so a corrupt manifest cannot drive unbounded work,
+    /// and the manifest length and digest are verified after the final chunk.
+    ///
+    /// # Integrity
+    ///
+    /// Delivered chunks are provisional until this method returns `Ok`: a
+    /// terminal length or digest mismatch can reject bytes already passed to
+    /// `consume`. Consumers with irreversible side effects must write to
+    /// staging storage and commit it only after successful return, or perform
+    /// an equivalent independent verification before committing.
+    pub fn read_snapshot_chunks<F>(&self, mut consume: F) -> Result<SnapshotManifest, StoreError>
+    where
+        F: FnMut(&[u8]) -> Result<(), StoreError>,
+    {
+        let manifest = self.read_snapshot_manifest()?;
+        self.read_snapshot_chunks_for_manifest(manifest, &mut consume)
+    }
+
+    fn read_snapshot_chunks_for_manifest<F>(
+        &self,
+        manifest: SnapshotManifest,
+        mut consume: F,
+    ) -> Result<SnapshotManifest, StoreError>
+    where
+        F: FnMut(&[u8]) -> Result<(), StoreError>,
+    {
+        let namespace = NamespaceId::graph();
         let object = PartitionKey::new(OBJECT_PARTITION)?;
-        let capacity = usize::try_from(manifest.payload_bytes).unwrap_or(MAX_GRAPH_BYTES);
-        let mut bytes = Vec::with_capacity(capacity);
+        let mut hasher = Sha256::new();
+        let mut total: usize = 0;
+        let maximum = max_graph_bytes();
         for index in 0..manifest.chunk_count {
             let key = Key::new(chunk_key(&manifest.snapshot_id, index))?;
-            let Some(chunk) = self.get(&namespace, &object, &key)? else {
+            let Some(chunk) = self.read_snapshot_chunk(&namespace, &object, &key, index)? else {
                 return Err(StoreError::Corrupt(format!(
                     "snapshot chunk {index} is missing"
                 )));
             };
-            bytes.extend_from_slice(&chunk.value);
-            if bytes.len() > MAX_GRAPH_BYTES {
+            total = total.saturating_add(chunk.value.len());
+            if total > maximum {
                 return Err(StoreError::ValueTooLarge {
-                    actual: bytes.len(),
-                    maximum: MAX_GRAPH_BYTES,
+                    actual: total,
+                    maximum,
                 });
             }
+            hasher.update(&chunk.value);
+            consume(&chunk.value)?;
         }
-        if bytes.len() as u64 != manifest.payload_bytes {
+        if total as u64 != manifest.payload_bytes {
             return Err(StoreError::Corrupt(
                 "snapshot payload length does not match its manifest".to_owned(),
             ));
         }
-        if hex_digest(&bytes) != manifest.graph_digest {
+        if lower_hex(&hasher.finalize()) != manifest.graph_digest {
             return Err(StoreError::Corrupt(
                 "snapshot payload digest does not match its manifest".to_owned(),
             ));
         }
+        Ok(manifest)
+    }
+
+    /// Read one snapshot chunk only after SQLite has established that its BLOB
+    /// length is within the portable chunk bound. SQLite can obtain a BLOB's
+    /// byte length without reading its complete content from disk.
+    fn read_snapshot_chunk(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+        index: u32,
+    ) -> Result<Option<Entry>, StoreError> {
+        let connection = self.connection()?;
+        let stored_shape = connection
+            .query_row(
+                "SELECT typeof(value), length(value) FROM kv
+                 WHERE namespace = ?1 AND partition = ?2 AND key = ?3",
+                params![namespace.as_bytes(), partition.as_bytes(), key.as_bytes()],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        let Some((storage_class, stored_bytes)) = stored_shape else {
+            return Ok(None);
+        };
+        if storage_class != "blob" {
+            return Err(StoreError::Corrupt(format!(
+                "snapshot chunk {index} has SQLite storage class {storage_class}; expected blob"
+            )));
+        }
+        let stored_bytes = usize::try_from(stored_bytes).map_err(|_| {
+            StoreError::Corrupt(format!(
+                "snapshot chunk {index} has an invalid stored length"
+            ))
+        })?;
+        if stored_bytes > CHUNK_BYTES {
+            return Err(StoreError::Corrupt(format!(
+                "snapshot chunk {index} is {stored_bytes} bytes; maximum is {CHUNK_BYTES}"
+            )));
+        }
+        let maximum = i64::try_from(CHUNK_BYTES).map_err(|_| {
+            StoreError::Corrupt("snapshot chunk limit cannot be represented by SQLite".to_owned())
+        })?;
+        let entry = connection
+            .query_row(
+                "SELECT key, value, digest, version FROM kv
+                 WHERE namespace = ?1 AND partition = ?2 AND key = ?3
+                   AND typeof(value) = 'blob' AND length(value) <= ?4",
+                params![
+                    namespace.as_bytes(),
+                    partition.as_bytes(),
+                    key.as_bytes(),
+                    maximum,
+                ],
+                read_entry,
+            )
+            .optional()?;
+        let Some(entry) = entry else {
+            return Err(StoreError::Corrupt(format!(
+                "snapshot chunk {index} changed while reading"
+            )));
+        };
+        if entry.value.len() > CHUNK_BYTES {
+            return Err(StoreError::Corrupt(format!(
+                "snapshot chunk {index} is {} bytes; maximum is {CHUNK_BYTES}",
+                entry.value.len()
+            )));
+        }
+        Ok(Some(entry))
+    }
+
+    /// Read the active snapshot and reconstruct its full payload in memory.
+    ///
+    /// This allocates proportional to `payload_bytes` (up to
+    /// [`MAX_GRAPH_BYTES`]). Prefer [`Self::read_snapshot_manifest`] when only
+    /// metadata is needed, or [`Self::read_snapshot_chunks`] to stream the
+    /// payload without a single large allocation.
+    pub fn read_snapshot(&self) -> Result<(SnapshotManifest, Vec<u8>), StoreError> {
+        let manifest = self.read_snapshot_manifest()?;
+        let capacity = usize::try_from(manifest.payload_bytes).map_err(|_| {
+            StoreError::Corrupt(
+                "snapshot payload length cannot be represented on this platform".to_owned(),
+            )
+        })?;
+        let maximum = max_graph_bytes();
+        if capacity > maximum {
+            return Err(StoreError::ValueTooLarge {
+                actual: capacity,
+                maximum,
+            });
+        }
+        let mut bytes = Vec::with_capacity(capacity);
+        let manifest = self.read_snapshot_chunks_for_manifest(manifest, |chunk| {
+            bytes.extend_from_slice(chunk);
+            Ok(())
+        })?;
         Ok((manifest, bytes))
     }
 
@@ -879,10 +1052,11 @@ impl SqliteStore {
                 "cannot publish through a read-only store".to_owned(),
             ));
         }
-        if graph_bytes.is_empty() || graph_bytes.len() > MAX_GRAPH_BYTES {
+        let maximum = max_graph_bytes();
+        if graph_bytes.is_empty() || graph_bytes.len() > maximum {
             return Err(StoreError::ValueTooLarge {
                 actual: graph_bytes.len(),
-                maximum: MAX_GRAPH_BYTES,
+                maximum,
             });
         }
         if graph_schema != GRAPH_SCHEMA_V1 {
@@ -894,7 +1068,7 @@ impl SqliteStore {
         let chunk_count = u32::try_from(graph_bytes.len().div_ceil(CHUNK_BYTES)).map_err(|_| {
             StoreError::ValueTooLarge {
                 actual: graph_bytes.len(),
-                maximum: MAX_GRAPH_BYTES,
+                maximum,
             }
         })?;
         let manifest = SnapshotManifest {
@@ -932,7 +1106,7 @@ impl SqliteStore {
     }
 
     pub fn validate_snapshot(&self) -> Result<SnapshotManifest, StoreError> {
-        self.read_snapshot().map(|(manifest, _)| manifest)
+        self.read_snapshot_chunks(|_| Ok(()))
     }
 
     /// Flush all acknowledged WAL frames before a filesystem snapshot is
@@ -1181,7 +1355,10 @@ impl SqliteStore {
         if let Some(reference) = self.graph_snapshot_reference()? {
             return Ok(reference);
         }
-        let (manifest, _) = self.read_snapshot()?;
+        // Preserve the pre-streaming contract: a reference is issued only for
+        // a snapshot whose payload is complete and digest-valid. The streaming
+        // validator returns the manifest without retaining payload chunks.
+        let manifest = self.validate_snapshot()?;
         let manifest_bytes = serde_json::to_vec(&manifest)
             .map_err(|error| StoreError::Corrupt(format!("manifest encode: {error}")))?;
         let reference = StoreRef {
@@ -2181,7 +2358,11 @@ fn digest(value: &[u8]) -> [u8; 32] {
 }
 
 fn hex_digest(value: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(value))
+    lower_hex(&Sha256::digest(value))
+}
+
+fn lower_hex(value: &impl fmt::LowerHex) -> String {
+    format!("{value:x}")
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
@@ -2307,7 +2488,7 @@ fn validate_manifest(manifest: &SnapshotManifest) -> Result<(), StoreError> {
         || manifest.snapshot_id != manifest.graph_digest
         || manifest.chunk_count == 0
         || manifest.payload_bytes == 0
-        || manifest.payload_bytes > MAX_GRAPH_BYTES as u64
+        || manifest.payload_bytes > max_graph_bytes() as u64
         || expected_chunks != Some(manifest.chunk_count)
     {
         return Err(StoreError::Corrupt(

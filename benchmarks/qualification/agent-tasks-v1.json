@@ -1,0 +1,47 @@
+{
+  "schema": "compass.qualification-agent-tasks/1",
+  "profile": "qualification-medium",
+  "limits": {
+    "maxDepth": 32,
+    "maxEdges": 250000,
+    "maxNodes": 100000,
+    "maxResultsPerTask": 10000,
+    "timeoutSeconds": 120
+  },
+  "tasks": [
+    {"id":"search-01","operation":"search","prompt":"Find the first qualification symbol.","query":"qualification::Node0000000","expected":{"containsNodeIds":["n:qualification:0000000"],"status":"complete"}},
+    {"id":"search-02","operation":"search","prompt":"Find qualification node 1 by qualified name.","query":"qualification::Node0000001","expected":{"containsNodeIds":["n:qualification:0000001"],"status":"complete"}},
+    {"id":"search-03","operation":"search","prompt":"Locate qualification node 97.","query":"qualification::Node0000097","expected":{"containsNodeIds":["n:qualification:0000097"],"status":"complete"}},
+    {"id":"search-04","operation":"search","prompt":"Locate the midpoint qualification function.","query":"qualification::Node0050000","expected":{"containsNodeIds":["n:qualification:0050000"],"status":"complete"}},
+    {"id":"search-05","operation":"search","prompt":"Find the penultimate qualification function.","query":"qualification::Node0099998","expected":{"containsNodeIds":["n:qualification:0099998"],"status":"complete"}},
+    {"id":"search-06","operation":"search","prompt":"Find the last qualification function.","query":"qualification::Node0099999","expected":{"containsNodeIds":["n:qualification:0099999"],"status":"complete"}},
+
+    {"id":"callers-01","operation":"callers","prompt":"Show every caller occurrence of node 1, preserving parallel edges.","source":"qualification::Node0000001","expected":{"containsNodeIds":["n:qualification:0000000"],"minimumEdgeCount":2,"status":"complete"}},
+    {"id":"callers-02","operation":"callers","prompt":"Who calls qualification node 2?","source":"qualification::Node0000002","expected":{"containsNodeIds":["n:qualification:0000001"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callers-03","operation":"callers","prompt":"Find callers of qualification node 97.","source":"qualification::Node0000097","expected":{"containsNodeIds":["n:qualification:0000096"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callers-04","operation":"callers","prompt":"Find callers at the medium fixture midpoint.","source":"qualification::Node0050000","expected":{"containsNodeIds":["n:qualification:0049999"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callers-05","operation":"callers","prompt":"Find callers of qualification node 99998.","source":"qualification::Node0099998","expected":{"containsNodeIds":["n:qualification:0099997"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callers-06","operation":"callers","prompt":"Find callers of the last qualification function.","source":"qualification::Node0099999","expected":{"containsNodeIds":["n:qualification:0099998"],"minimumEdgeCount":1,"status":"complete"}},
+
+    {"id":"callees-01","operation":"callees","prompt":"Show every callee occurrence from node 0, preserving parallel edges.","source":"qualification::Node0000000","expected":{"containsNodeIds":["n:qualification:0000001"],"minimumEdgeCount":2,"status":"complete"}},
+    {"id":"callees-02","operation":"callees","prompt":"What does qualification node 1 call?","source":"qualification::Node0000001","expected":{"containsNodeIds":["n:qualification:0000002"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callees-03","operation":"callees","prompt":"Find callees of qualification node 96.","source":"qualification::Node0000096","expected":{"containsNodeIds":["n:qualification:0000097"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callees-04","operation":"callees","prompt":"Find callees immediately before the fixture midpoint.","source":"qualification::Node0049999","expected":{"containsNodeIds":["n:qualification:0050000"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callees-05","operation":"callees","prompt":"Find callees of qualification node 99997.","source":"qualification::Node0099997","expected":{"containsNodeIds":["n:qualification:0099998"],"minimumEdgeCount":1,"status":"complete"}},
+    {"id":"callees-06","operation":"callees","prompt":"Find callees of the penultimate qualification function.","source":"qualification::Node0099998","expected":{"containsNodeIds":["n:qualification:0099999"],"minimumEdgeCount":1,"status":"complete"}},
+
+    {"id":"impact-01","operation":"impact","prompt":"Assess the depth-3 blast radius of node 3.","source":"qualification::Node0000003","maxDepth":3,"expected":{"containsNodeIds":["n:qualification:0000000","n:qualification:0000003"],"minimumEdgeCount":3,"status":"complete"}},
+    {"id":"impact-02","operation":"impact","prompt":"Assess depth-3 impact for node 97.","source":"qualification::Node0000097","maxDepth":3,"expected":{"containsNodeIds":["n:qualification:0000094","n:qualification:0000097"],"minimumEdgeCount":3,"status":"complete"}},
+    {"id":"impact-03","operation":"impact","prompt":"Assess depth-4 impact for node 100.","source":"qualification::Node0000100","maxDepth":4,"expected":{"containsNodeIds":["n:qualification:0000096","n:qualification:0000100"],"minimumEdgeCount":4,"status":"complete"}},
+    {"id":"impact-04","operation":"impact","prompt":"Assess depth-5 impact for node 1000.","source":"qualification::Node0001000","maxDepth":5,"expected":{"containsNodeIds":["n:qualification:0000995","n:qualification:0001000"],"minimumEdgeCount":5,"status":"complete"}},
+    {"id":"impact-05","operation":"impact","prompt":"Assess depth-3 impact at the fixture midpoint.","source":"qualification::Node0050000","maxDepth":3,"expected":{"containsNodeIds":["n:qualification:0049997","n:qualification:0050000"],"minimumEdgeCount":3,"status":"complete"}},
+    {"id":"impact-06","operation":"impact","prompt":"Assess depth-3 impact of the final qualification function.","source":"qualification::Node0099999","maxDepth":3,"expected":{"containsNodeIds":["n:qualification:0099996","n:qualification:0099999"],"minimumEdgeCount":3,"status":"complete"}},
+
+    {"id":"path-01","operation":"path","prompt":"Trace a path from qualification node 0 to node 3.","source":"qualification::Node0000000","target":"qualification::Node0000003","expected":{"firstNodeId":"n:qualification:0000000","lastNodeId":"n:qualification:0000003","status":"complete"}},
+    {"id":"path-02","operation":"path","prompt":"Trace a path from qualification node 10 to node 15.","source":"qualification::Node0000010","target":"qualification::Node0000015","expected":{"firstNodeId":"n:qualification:0000010","lastNodeId":"n:qualification:0000015","status":"complete"}},
+    {"id":"path-03","operation":"path","prompt":"Trace a path from qualification node 90 to node 97.","source":"qualification::Node0000090","target":"qualification::Node0000097","expected":{"firstNodeId":"n:qualification:0000090","lastNodeId":"n:qualification:0000097","status":"complete"}},
+    {"id":"path-04","operation":"path","prompt":"Trace a path near the medium fixture midpoint.","source":"qualification::Node0049990","target":"qualification::Node0049995","expected":{"firstNodeId":"n:qualification:0049990","lastNodeId":"n:qualification:0049995","status":"complete"}},
+    {"id":"path-05","operation":"path","prompt":"Trace a path across the final ten qualification nodes.","source":"qualification::Node0099990","target":"qualification::Node0099999","expected":{"firstNodeId":"n:qualification:0099990","lastNodeId":"n:qualification:0099999","status":"complete"}},
+    {"id":"path-06","operation":"path","prompt":"Trace the direct first qualification call.","source":"qualification::Node0000000","target":"qualification::Node0000001","expected":{"firstNodeId":"n:qualification:0000000","lastNodeId":"n:qualification:0000001","minimumEdgeCount":1,"status":"complete"}}
+  ]
+}

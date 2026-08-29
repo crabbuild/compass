@@ -1,0 +1,9 @@
+crates/compass-files/tests/contracts.rs
+crates/compass-core/tests/vendor_policy.rs
+docs/reference/configuration.md
+openspec/changes/vendor-skip-policy/.openspec.yaml
+openspec/changes/vendor-skip-policy/proposal.md
+openspec/changes/vendor-skip-policy/design.md
+openspec/changes/vendor-skip-policy/specs/vendor-discovery-policy/spec.md
+openspec/changes/vendor-skip-policy/tasks.md
+openspec/changes/vendor-skip-policy/verification.md

@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "claim": "Nested node/edge detail variants and graph enums were still under-specified.",
+      "resolution": "FIXED: output schemas now enumerate every NodeKind, NodeRole, and EdgeKind and define closed tagged schemas for all NodeDetails and EdgeDetails variants; regressions accept valid non-null variants and reject unknown tags, fields, and enum values."
+    },
+    {
+      "severity": "MAJOR",
+      "claim": "The rmcp wire-discovery golden discarded outputSchema and deprecation metadata.",
+      "resolution": "FIXED: normalized local and wire discovery now retain output-schema digests and exact metadata for all tools, and the checked-in golden pins those fields."
+    },
+    {
+      "severity": "MINOR",
+      "claim": "Final-envelope overflow lost the stable query_response_too_large diagnostic identifier.",
+      "resolution": "FIXED: the outer bound preserves query_response_too_large, and a protocol-level call_tool regression exercises the inner-pass/outer-fail case."
+    }
+  ],
+  "checked_classes": [
+    "closed tagged detail schemas and enums",
+    "wire discovery output-schema and metadata contract",
+    "protocol-level final-envelope bounds"
+  ]
+}

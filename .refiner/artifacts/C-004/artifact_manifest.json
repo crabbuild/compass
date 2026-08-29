@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-004",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "crates/compass-store/src/lib.rs",
+    "crates/compass-graph/src/lib.rs",
+    "crates/compass-graph/src/snapshot.rs",
+    "crates/compass-core/src/pipeline.rs",
+    "crates/compass-cli/tests/snapshot_limit_cli.rs",
+    "CHANGELOG.md",
+    "openspec/changes/honor-max-graph-bytes-on-publication"
+  ],
+  "distFiles": ["qa-receipt.md"],
+  "validatedAt": "2026-08-28T17:20:00Z"
+}

@@ -1,0 +1,50 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "benchmarks/qualification/README.md",
+      "claim": "The documented baseline-reproduction command writes its output directly over the pinned, manifest-checksummed artifact current-engine-baseline-v1.json, which changes bytes/SHA-256 on every run (recordedAt timestamp, fresh timings) and therefore breaks the closed manifest invariant that test_manifest_is_closed_and_all_digests_match enforces.",
+      "evidence": "README section 'Reproduce the current-engine baseline' passes `--output benchmarks/qualification/current-engine-baseline-v1.json`; run_current_baseline.py always emits a fresh `\"recordedAt\": datetime.now(timezone.utc).isoformat()`; manifest-v1.json pins that file at bytes 17891 / sha256 f0f3... and the test asserts exact byte size and digest for every listed path.",
+      "suggested_fix": "Point the documented reproduction command at a disposable path (e.g. target/qualification-c013/current-engine-baseline.json) and document that promoting a new baseline requires re-running the manifest update plus digest tests as an explicit, dated decision."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "openspec/changes/qualification-corpora-baselines/verification.md",
+      "claim": "The verification record claims 'Its synthetic file identity is profile-specific', but the generated file node ID is identical for every profile \u2014 only the contentDigest was made profile-specific \u2014 so the evidence statement is false and both scale graphs collide on the same file identity.",
+      "evidence": "generate_graph.py write_graph(): `file_id = _stable_id(\"file\", (SOURCE_PATH,))` depends only on the constant SOURCE_PATH ('qualification/generated.rs'), while profile name feeds only contentDigest/sourceTreeDigest/generationId. The refinement log iteration 3 confirms only contentDigest was changed ('Made the synthetic source file's contentDigest profile-specific').",
+      "suggested_fix": "Either include the profile name in the file stable ID (e.g. _stable_id(\"file\", (SOURCE_PATH, str(profile[\"name\"])))) and regenerate the pinned medium graph, oracle, and baseline digests, or correct the verification.md claim to state that only contentDigest is profile-specific."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "claim": "The workload measurement path _measure() applies no output-size bound at all, contradicting the recorded evidence that 'every ... subprocess ... uses the existing measured-process helper with explicit time and output limits', and bounded_capture only checks stdout/stderr sizes after the process has already written unbounded bytes to disk.",
+      "evidence": "_measure() passes stdout_path/stderr_path to run_measured and never checks resulting file sizes (compare bounded_capture, which at least enforces max_output_bytes post-hoc); constraints.json 'bounded-work' evidence asserts explicit output limits on every subprocess.",
+      "suggested_fix": "Add a post-hoc size check in _measure (as in bounded_capture) or thread a max_output_bytes limit through ProcessSpec/run_measured, and soften the constraints.json wording if the bound remains post-hoc."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "claim": "The retained baseline payload hardcodes graph profile, node count, and edge count (qualification-medium / 100000 / 250000) instead of deriving them from the --graph input, so invoking the runner with any other graph silently records false identity metadata in a schema meant to freeze measurement conditions.",
+      "evidence": "main() emits `\"graph\": {\"profile\": \"qualification-medium\", ..., \"nodes\": 100000, \"edges\": 250000}` as literals while only path/bytes/sha256 are measured from the actual file.",
+      "suggested_fix": "Validate the supplied graph against the pinned profile (e.g. require its sha256 to match scale-profile-digests-v1.json-derived materialization or a --expected-graph-sha256 argument) and fail closed on mismatch, or record measured/derived counts."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/tests/test_current_baseline.py",
+      "claim": "test_workspace_patch_identity_is_bounded_and_reproducible uses tempfile.TemporaryDirectory(dir=root / 'target'), which raises FileNotFoundError on a fresh checkout where target/ does not yet exist, making the qualification test suite order-dependent on a prior build.",
+      "evidence": "tempfile.TemporaryDirectory does not create the parent directory; nothing in the test suite creates root/'target' before this test runs.",
+      "suggested_fix": "Create the directory first ((root / 'target').mkdir(exist_ok=True)) or use the default system temp directory."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

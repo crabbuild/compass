@@ -15,11 +15,11 @@ use compass_model::code_graph::{
     CODE_GRAPH_SCHEMA_V1, EdgeRecord, FileRecord, GraphDiagnostic, GraphDocument, GraphMetadata,
     NodeDetails, NodeKind, NodeRecord,
 };
-use compass_model::validate_code_graph;
+use compass_model::{validate_build_metadata_identity, validate_code_graph};
 use compass_store::{
     ImmutableWrite, Key, MAX_GRAPH_BYTES, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS,
     MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
-    WriteCondition, decode_key_segments, encode_key_segments,
+    WriteCondition, decode_key_segments, encode_key_segments, max_graph_bytes,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,14 @@ pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
+/// Default maximum size of the canonical graph published by a snapshot.
+pub const MAX_CANONICAL_GRAPH_BYTES: u64 = MAX_GRAPH_BYTES as u64;
+/// Effective canonical publication bound, including the explicit opt-in
+/// `COMPASS_MAX_GRAPH_BYTES` override.
+#[must_use]
+pub fn max_canonical_graph_bytes() -> u64 {
+    max_graph_bytes() as u64
+}
 /// Maximum previous JSON artifact retained while attempting a byte-preserving
 /// fact-neutral publication. Larger artifacts use the bounded streaming
 /// serializer instead of adding another resident graph-sized buffer.
@@ -60,6 +68,17 @@ pub enum SnapshotError {
     Unsupported(String),
     #[error("snapshot limit exceeded: {0}")]
     Limit(String),
+}
+
+impl SnapshotError {
+    /// Construct the stable, actionable failure for canonical graph
+    /// publication above a byte limit.
+    #[must_use]
+    pub fn canonical_graph_too_large(maximum: u64) -> Self {
+        Self::Limit(format!(
+            "canonical graph exceeds the {maximum}-byte limit; retry or rebuild with a smaller scope using --exclude <pattern> or persistent patterns in .compassignore, or explicitly raise the bound with COMPASS_MAX_GRAPH_BYTES=<bytes|NMB|NGB>"
+        ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -158,10 +177,14 @@ impl GraphSnapshotManifest {
                 SnapshotError::Corrupt(format!("{name} is not a SHA-256 digest: {error}"))
             })?;
         }
-        if self.graph_bytes == 0 || self.graph_bytes > MAX_GRAPH_BYTES as u64 {
-            return Err(SnapshotError::Corrupt(format!(
-                "graph byte count exceeds the {MAX_GRAPH_BYTES}-byte limit"
-            )));
+        if self.graph_bytes == 0 {
+            return Err(SnapshotError::Corrupt(
+                "graph byte count is empty".to_owned(),
+            ));
+        }
+        let maximum = max_canonical_graph_bytes();
+        if self.graph_bytes > maximum {
+            return Err(SnapshotError::canonical_graph_too_large(maximum));
         }
         if self.node_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
             || self.edge_count > GRAPH_SNAPSHOT_MAX_ITEMS as u64
@@ -881,7 +904,7 @@ fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
     writer: &mut W,
 ) -> io::Result<bool> {
     if previous_bytes.is_empty()
-        || previous_bytes.len() > MAX_GRAPH_BYTES
+        || previous_bytes.len() > max_graph_bytes()
         || previous_bytes.len() > GRAPH_JSON_DELTA_MAX_SOURCE_BYTES
     {
         return Ok(false);
@@ -1635,6 +1658,9 @@ impl<'a, S: Store + ?Sized> GraphSnapshotReader<'a, S> {
             .lookup(IndexKind::Metadata, &key)?
             .ok_or_else(|| SnapshotError::Corrupt("metadata index entry is missing".to_owned()))?;
         let record = decode_json::<MetadataRecord>(&value)?;
+        validate_build_metadata_identity(&record.graph.build).map_err(|error| {
+            SnapshotError::Corrupt(format!("graph build identity is invalid: {error}"))
+        })?;
         Ok(GraphSnapshotMetadata {
             directed: record.directed,
             multigraph: record.multigraph,
@@ -2125,9 +2151,9 @@ fn digest_canonical_graph(
     graph: &GraphDocument,
     clear_generation: bool,
 ) -> Result<(String, u64), SnapshotError> {
-    digest_json(
+    digest_canonical_graph_json(
         &canonical_graph_document_with_generation(graph, clear_generation),
-        MAX_GRAPH_BYTES,
+        max_graph_bytes(),
     )
 }
 
@@ -3130,13 +3156,14 @@ impl Write for DigestWriter {
     }
 }
 
-fn digest_json<T: Serialize>(value: &T, maximum: usize) -> Result<(String, u64), SnapshotError> {
+fn digest_canonical_graph_json<T: Serialize>(
+    value: &T,
+    maximum: usize,
+) -> Result<(String, u64), SnapshotError> {
     let mut writer = DigestWriter::new(maximum);
     if let Err(error) = serde_json::to_writer(&mut writer, value) {
         if writer.exceeded {
-            return Err(SnapshotError::Limit(format!(
-                "canonical graph exceeds the {maximum}-byte limit"
-            )));
+            return Err(SnapshotError::canonical_graph_too_large(maximum as u64));
         }
         return Err(SnapshotError::Encode(error.to_string()));
     }
@@ -3283,9 +3310,17 @@ fn object_key(digest: &str) -> Result<Key, SnapshotError> {
     Key::new(format!("object/{digest}").as_bytes()).map_err(SnapshotError::from)
 }
 
-fn manifest_key(digest: &str) -> Result<Key, SnapshotError> {
+/// Return the versioned store key for an immutable graph snapshot manifest.
+///
+/// Store adapters and contract tests use this helper instead of duplicating
+/// the snapshot layout's key encoding outside its owning crate.
+pub fn graph_snapshot_manifest_key(digest: &str) -> Result<Key, SnapshotError> {
     parse_digest(digest)?;
     Key::new(format!("manifest/{digest}").as_bytes()).map_err(SnapshotError::from)
+}
+
+fn manifest_key(digest: &str) -> Result<Key, SnapshotError> {
+    graph_snapshot_manifest_key(digest)
 }
 
 fn digest_bytes(value: &[u8]) -> [u8; 32] {

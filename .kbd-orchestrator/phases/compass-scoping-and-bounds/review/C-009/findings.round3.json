@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "claim": "Standalone graphs with empty repository or generation identities could produce schema-invalid envelopes.",
+      "resolution": "FIXED: compass-model graph validation now rejects empty sourceTreeDigest and generationId values; an MCP regression proves malformed standalone input fails before structured content is published."
+    },
+    {
+      "severity": "MINOR",
+      "claim": "Malformed-schema regressions did not mutate edge details, edge kinds, or node roles.",
+      "resolution": "FIXED: the schema suite now rejects unknown edge detail tags, extra edge detail fields, unknown edge kinds, and unknown node roles."
+    }
+  ],
+  "checked_classes": [
+    "standalone graph identity validation",
+    "edge detail and enum negative coverage"
+  ]
+}

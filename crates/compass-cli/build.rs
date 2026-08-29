@@ -46,7 +46,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &manifest.join("src/help.rs"),
     )?;
     let mut files = Vec::new();
-    for directory in ["compass-skill", "compass-integrations"] {
+    for directory in [
+        "compass-skill",
+        "compass-focused-skills",
+        "compass-integrations",
+    ] {
         collect(&root, &root.join(directory), &mut files)?;
     }
     let output = PathBuf::from(env::var("OUT_DIR")?);

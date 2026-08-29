@@ -112,6 +112,20 @@ applied as built-in safety skips, Git ignores, configured includes, configured
 excludes, then command-line exclusions. Invalid configuration stops the build
 instead of silently widening its scope.
 
+`vendor/` is deliberately not a built-in skip. Vendored directories can contain
+real Go source and can also be explicit workspace members, as Compass's vendored
+parser pack is. A language-neutral discovery layer cannot infer that this source
+is disposable from the directory name alone. Repositories that do not want
+vendored source in a graph should exclude it explicitly and reviewably:
+
+```bash
+compass init . --exclude 'vendor/**' --yes
+```
+
+The same pattern may be placed in `.compassignore`. Keeping this opt-out explicit
+preserves existing discovery behavior and applies consistently to builds and
+filesystem watching.
+
 Common explicit options:
 
 | Concern | Options |
@@ -311,7 +325,10 @@ The current service surface includes:
 ```
 
 Avoid literal API keys in command history. Bind to loopback for local use and
-use stdio when one local client is sufficient.
+use stdio when one local client is sufficient. HTTP is always stateless MCP
+2026-07-28 and does not use `Mcp-Session-Id`; `--stateless` remains accepted for
+script compatibility. `--session-timeout` is deprecated, validated and ignored
+with a warning through 0.4.x, and is removed in 0.5.0.
 
 ## Graph database configuration
 

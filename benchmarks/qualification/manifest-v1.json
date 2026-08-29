@@ -1,0 +1,92 @@
+{
+  "schema": "compass.qualification-manifest/1",
+  "artifacts": [
+    {
+      "bytes": 5291,
+      "path": "benchmarks/qualification/README.md",
+      "sha256": "75099e812e2b9879f41fa74c30dcdbd5e79b221cdfa4d16e2daaa78144fdeb67"
+    },
+    {
+      "bytes": 7866,
+      "path": "benchmarks/qualification/agent-tasks-v1.json",
+      "sha256": "54d2a83f3979dfaa1faa3ec32cb492ef9f9d4e6f24d3ab0407b62515848449d4"
+    },
+    {
+      "bytes": 18737,
+      "path": "benchmarks/qualification/current-engine-baseline-v1.json",
+      "sha256": "cde033262bbe29f62199553ad16c6b626048befcd22d8d62abb7f2a0d64708e6"
+    },
+    {
+      "bytes": 11092,
+      "path": "benchmarks/qualification/generate_graph.py",
+      "sha256": "2f40402f2f7d22cdb03ce32b79763db103a02414edb701904f7fe86c954caaa7"
+    },
+    {
+      "bytes": 1362,
+      "path": "benchmarks/qualification/io.py",
+      "sha256": "f6f1afca74a76886c05ed01c6a9ec815f24a163bcbcf49aa2cc7ae09a64643c6"
+    },
+    {
+      "bytes": 366,
+      "path": "benchmarks/qualification/profiles-v1.json",
+      "sha256": "c8e1ffe0fe8ba3cdac2153915f112c64e66094629de3eefcd582dad3fee0da99"
+    },
+    {
+      "bytes": 24693,
+      "path": "benchmarks/qualification/raw-traversal-oracle-v1.json",
+      "sha256": "42b3c959da80cefdc4db25c4ef6409234152aba490b1a8955ce0fe2af3dec843"
+    },
+    {
+      "bytes": 17473,
+      "path": "benchmarks/qualification/raw_traversal.py",
+      "sha256": "2d96d30eaa7d9a19bb8b1674569cd9b529f1e1989dc7617dcbf6fdba542ac407"
+    },
+    {
+      "bytes": 25307,
+      "path": "benchmarks/qualification/run_current_baseline.py",
+      "sha256": "a88e6a970ba6afc3afcd3f6ef769e66ba5436b0a4c34a612bc0e9c3da2176b88"
+    },
+    {
+      "bytes": 808,
+      "path": "benchmarks/qualification/scale-profile-digests-v1.json",
+      "sha256": "5629ecf406b893460868fe2fd0f1f8fc2b04796d74e70b1dee51e6c84649da7f"
+    },
+    {
+      "bytes": 863,
+      "path": "benchmarks/qualification/semantic-corpus-v1.json",
+      "sha256": "7427792156d310efde773c92a5b11a51058be45e9f2aa3dab3ea2061b43929c4"
+    },
+    {
+      "bytes": 997,
+      "path": "benchmarks/qualification/skill-corpora-v1.json",
+      "sha256": "38b50957f87a6d8d27d3ac4a0a929b6a53382cb42f15311dfa24229526c7deae"
+    },
+    {
+      "bytes": 5745,
+      "path": "benchmarks/qualification/surreal-dual-engine-decision-v1.json",
+      "sha256": "294c46930b7dde2803b2124e18ae0db29a7b96e9ccaab98c882882b26b276c97"
+    },
+    {
+      "bytes": 5492,
+      "path": "benchmarks/qualification/tests/test_corpora.py",
+      "sha256": "8feebde294cc2a9e9aea7b638181a2e9b54a5c79296baedcd2faedb759075dd3"
+    },
+    {
+      "bytes": 12333,
+      "path": "benchmarks/qualification/tests/test_current_baseline.py",
+      "sha256": "529da0bdba1ddc1ff950b1b219712f3ed887450454c1f7839aa3c7a9dda4c82b"
+    },
+    {
+      "bytes": 7411,
+      "path": "benchmarks/qualification/tests/test_generate_graph.py",
+      "sha256": "220359eb4b57335474a28a74d057150372cebf3aebd7c4078d6a30cfd0b22619"
+    },
+    {
+      "bytes": 12098,
+      "path": "benchmarks/qualification/tests/test_raw_traversal.py",
+      "sha256": "d92848d6c9ccbf40e9b6f3a8324caced451b7c8681d8be3d5e82edd15bba3332"
+    }
+  ],
+  "decisionDate": "2026-08-28",
+  "profileSchema": "compass.qualification-profiles/1"
+}

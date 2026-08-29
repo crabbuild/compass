@@ -1,0 +1,55 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 160,
+      "claim": "HttpOptions.stateless and HttpOptions.session_timeout are now silently ignored by build_http_router, so any caller that constructs HttpOptions with stateless: false or a non-None session_timeout gets stateless 2026-only behavior with no error or warning.",
+      "evidence": "The hunk deletes `manager.session_config.keep_alive = if options.stateless { None } else { options.session_timeout.filter(...) }` and `.with_stateful_mode(!options.stateless)`, replacing them with hardcoded `.with_legacy_session_mode(false)`; meanwhile the struct still declares both fields and `HttpOptions::new` still sets them (`stateless: true, session_timeout: None`). No remaining read of either field appears anywhere in the shown code \u2014 a dead configuration surface that masks a behavior override (silent-failure class).",
+      "suggested_fix": "Remove the two fields from HttpOptions (or gate them behind a compile-time-visible deprecation) so programmatic misuse is impossible, or return an error/log when a caller sets stateful options that cannot be honored."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 218,
+      "claim": "The diff introduces `http_body_util` as a direct dependency of compass-mcp (both src and test code) but the packet contains no Cargo.toml change adding it, so the build cannot be verified to satisfy build-passes from the packet alone.",
+      "evidence": "New code at `enforce_response_limit` uses `http_body_util::Limited::new(body, limit)` and the test module adds `use http_body_util::BodyExt;` plus `http_body_util::channel::Channel` and `http_body_util::LengthLimitError`. No `crates/compass-mcp/Cargo.toml` or root `Cargo.toml` hunk is present in the packet declaring this dependency; if it is not already a declared (non-transitive) dependency, `cargo build --locked` fails. Transitive availability does not permit direct use under Cargo.",
+      "suggested_fix": "Confirm `http-body-util` is declared in compass-mcp's Cargo.toml via `{ name }.workspace = true` per the workspace-dependencies-reused rule, and include that hunk in the review surface."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 168,
+      "claim": "run_checked buffers subprocess stdout and stderr unboundedly in memory, conflicting with the bounded-work constraint that subprocess output remains bounded.",
+      "evidence": "`subprocess.run(command, ..., capture_output=True, timeout=30)` \u2014 capture_output accumulates the entire child output in memory; the 30s timeout bounds duration, not bytes, and the `[-4000:]` truncation happens only after full capture. The blocking constraint `bounded-work` states: 'All work over source files, graphs, archives, network responses, queries, and subprocess output remains bounded.'",
+      "suggested_fix": "Stream output to a bounded ring buffer (as AppServerClient already does with `deque(maxlen=100)` for stderr) instead of capture_output=True."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 158,
+      "claim": "free_port() has a bind-then-release TOCTOU race: the chosen port can be claimed by another process between socket close and Compass binding it, producing a flaky interop failure.",
+      "evidence": "`with socket.socket() as listener: listener.bind((\"127.0.0.1\", 0)); return int(listener.getsockname()[1])` \u2014 the socket is closed on return, and Compass is only spawned afterwards in run(). wait_for_server then reports 'Compass HTTP server exited before becoming ready' on the collision, which is diagnosable but wasteful.",
+      "suggested_fix": "Keep the listener open and pass its fd, or retry the spawn on bind failure with a fresh port."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_mcp_conformance.sh",
+      "line": 10,
+      "claim": "The conformance leg defaults to fixed port 39091 on the CI host; any concurrent or leaked process on that port makes the leg fail even though an ephemeral port would eliminate the class.",
+      "evidence": "`readonly PORT=\"${COMPASS_MCP_CONFORMANCE_PORT:-39091}\"` \u2014 the spawned-server liveness check (`kill -0`) plus curl readiness mitigates squatters only because Compass would fail to bind and exit; the failure still costs a CI run and is indistinguishable from a product regression at first glance.",
+      "suggested_fix": "Default to an ephemeral port selected the same way qualify_codex_mcp_client.py does (bind :0, close, retry-on-failure), keeping the env override for debugging."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

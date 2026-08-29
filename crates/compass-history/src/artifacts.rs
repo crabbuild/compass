@@ -8,6 +8,7 @@ use compass_files::{write_bytes_atomic, write_json_atomic};
 use compass_ir::{EvidenceRecord, FunctionIr, ModuleIr, ProgramBundle, ProviderDescriptor};
 use compass_model::code_graph::GraphDocument as TrustedGraphDocument;
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+pub use compass_partition::PartitionedGraph;
 use prolly::{KeyBuilder, VersionedValue, decode_segments};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -69,18 +70,6 @@ pub struct GraphArtifacts {
 pub struct CompletedGraphArtifacts {
     pub artifacts: GraphArtifacts,
     pub completion: CompletionEvidence,
-}
-
-/// Deterministic typed records used to construct the five Prolly trees.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PartitionedGraph {
-    pub nodes: Vec<(Vec<u8>, Vec<u8>)>,
-    pub edges: Vec<(Vec<u8>, Vec<u8>)>,
-    pub hyperedges: Vec<(Vec<u8>, Vec<u8>)>,
-    pub analysis: Vec<(Vec<u8>, Vec<u8>)>,
-    pub metadata: Vec<(Vec<u8>, Vec<u8>)>,
-    pub program_facts: Vec<(Vec<u8>, Vec<u8>)>,
-    pub program_summaries: Vec<(Vec<u8>, Vec<u8>)>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -204,7 +193,7 @@ impl GraphArtifacts {
         analysis: Option<Value>,
         manifest: Option<Value>,
     ) -> Result<Self, HistoryError> {
-        let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+        let trusted_bytes = canonical_trusted_graph_bytes(&trusted)?;
         let graph = serde_json::to_value(&trusted.graph)?
             .as_object()
             .cloned()
@@ -891,7 +880,7 @@ impl GraphArtifacts {
             } else {
                 restore_order(&mut nodes, node_order, "node")?
             };
-            trusted.sort_by(|left, right| left.id.cmp(&right.id));
+            sort_trusted_nodes(&mut trusted);
             let compatible = trusted
                 .iter()
                 .map(compat_node)
@@ -908,20 +897,7 @@ impl GraphArtifacts {
             } else {
                 restore_order(&mut edges, edge_order, "edge")?
             };
-            trusted.sort_by(|left, right| {
-                (
-                    left.source.as_str(),
-                    left.kind.as_str(),
-                    left.target.as_str(),
-                    left.key.as_str(),
-                )
-                    .cmp(&(
-                        right.source.as_str(),
-                        right.kind.as_str(),
-                        right.target.as_str(),
-                        right.key.as_str(),
-                    ))
-            });
+            sort_trusted_edges(&mut trusted);
             let compatible = trusted
                 .iter()
                 .map(compat_edge)
@@ -1065,7 +1041,7 @@ impl GraphArtifacts {
 
 fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryError> {
     let trusted = TrustedGraphDocument::load_for_recluster(path)?;
-    let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+    let trusted_bytes = canonical_trusted_graph_bytes(&trusted)?;
     let graph = serde_json::to_value(&trusted.graph)?
         .as_object()
         .cloned()
@@ -1091,6 +1067,34 @@ fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryEr
         },
         trusted_bytes,
     ))
+}
+
+fn canonical_trusted_graph_bytes(trusted: &TrustedGraphDocument) -> Result<Vec<u8>, HistoryError> {
+    let mut canonical = trusted.clone();
+    sort_trusted_nodes(&mut canonical.nodes);
+    sort_trusted_edges(&mut canonical.links);
+    canonical_json_bytes(&serde_json::to_value(canonical)?)
+}
+
+fn sort_trusted_nodes(nodes: &mut [compass_model::code_graph::NodeRecord]) {
+    nodes.sort_by(|left, right| left.id.cmp(&right.id));
+}
+
+fn sort_trusted_edges(edges: &mut [compass_model::code_graph::EdgeRecord]) {
+    edges.sort_by(|left, right| {
+        (
+            left.source.as_str(),
+            left.kind.as_str(),
+            left.target.as_str(),
+            left.key.as_str(),
+        )
+            .cmp(&(
+                right.source.as_str(),
+                right.kind.as_str(),
+                right.target.as_str(),
+                right.key.as_str(),
+            ))
+    });
 }
 
 fn compat_node(node: &compass_model::code_graph::NodeRecord) -> Result<NodeRecord, HistoryError> {

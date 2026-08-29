@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-012",
+  "artifactType": "evaluation",
+  "contentType": "direct:evidence",
+  "status": "refined",
+  "sourceArtifacts": [
+    "docs/future/surreal-persistent-probe-results.md",
+    "scripts/fixtures/surreal-persistent-probes",
+    "openspec/changes/archive/2026-08-28-surreal-persistent-probes"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

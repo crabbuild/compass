@@ -27,6 +27,15 @@ use crate::{Frontend, Outcome};
 const SKILL_VERSION: &str = env!("CARGO_PKG_VERSION");
 const SKILL_ASSET: &str = "compass-skill/SKILL.md";
 const REFERENCE_BUNDLE: &str = "compass-skill";
+const FOCUSED_SKILL_ASSET_ROOT: &str = "compass-focused-skills";
+const FOCUSED_SKILLS: &[&str] = &[
+    "compass-architecture",
+    "compass-change-impact",
+    "compass-debug",
+    "compass-index-maintenance",
+    "compass-mcp-setup",
+    "compass-navigate",
+];
 const PLATFORM_NAMES: &[&str] = &[
     "claude",
     "cline",
@@ -82,6 +91,25 @@ struct EmbeddedAsset {
     bytes: &'static [u8],
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AgentInventoryEntry {
+    pub id: &'static str,
+    pub aliases: &'static [&'static str],
+    pub support: &'static str,
+    pub commands: &'static [&'static str],
+    pub config_paths: &'static [&'static str],
+    pub project_skill: Option<&'static str>,
+    pub user_skill: Option<&'static str>,
+    pub documentation_url: &'static str,
+    pub verified_on: &'static str,
+}
+
+#[derive(Clone)]
+pub(crate) struct EmbeddedSkillFile {
+    pub path: String,
+    pub bytes: &'static [u8],
+}
+
 include!(concat!(env!("OUT_DIR"), "/install_assets.rs"));
 
 #[derive(Clone, Copy)]
@@ -99,6 +127,144 @@ pub(crate) fn command_install(frontend: Frontend, args: &[String]) -> Outcome {
         return command_install_compass(args);
     }
     command_install_legacy(frontend, args)
+}
+
+pub(crate) fn agent_inventory() -> Result<Vec<AgentInventoryEntry>, String> {
+    let registry = AgentRegistry::new()?;
+    let mut entries = registry
+        .iter()
+        .map(|agent| AgentInventoryEntry {
+            id: agent.id,
+            aliases: agent.aliases,
+            support: match agent.tier {
+                SupportTier::SharedSkill => "shared_skill",
+                SupportTier::NativeSkill => "native_skill",
+                SupportTier::AdapterOnly => "adapter_only",
+            },
+            commands: agent.commands,
+            config_paths: agent.config_paths,
+            project_skill: agent.project_skill,
+            user_skill: agent.user_skill,
+            documentation_url: agent.documentation_url,
+            verified_on: agent.verified_on,
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.id);
+    Ok(entries)
+}
+
+pub(crate) fn embedded_skill_files() -> Vec<EmbeddedSkillFile> {
+    let mut files = Vec::new();
+    for asset in EMBEDDED_ASSETS {
+        let target = if let Some(relative) = asset.path.strip_prefix("compass-skill/") {
+            Some(format!("skills/compass/{relative}"))
+        } else if let Some(relative) = asset.path.strip_prefix("compass-focused-skills/") {
+            let mut parts = relative.splitn(2, '/');
+            let name = parts.next();
+            let child = parts.next();
+            match (name, child) {
+                (Some(name), Some(child)) if FOCUSED_SKILLS.contains(&name) => {
+                    Some(format!("skills/{name}/{child}"))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(path) = target {
+            files.push(EmbeddedSkillFile {
+                path,
+                bytes: asset.bytes,
+            });
+        }
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    files
+}
+
+pub(crate) fn managed_skill_directory(
+    platform: &str,
+    root: &Path,
+    user: bool,
+) -> Result<PathBuf, String> {
+    let registry = AgentRegistry::new()?;
+    let agent = registry.resolve(platform).ok_or_else(|| {
+        format!(
+            "error: unknown platform '{platform}'. Choose from: {}",
+            registry.ids()
+        )
+    })?;
+    let scope = if user {
+        InstallScope::User(root.to_path_buf())
+    } else {
+        InstallScope::Project(root.to_path_buf())
+    };
+    let destination = agent
+        .skill_destination(&scope)
+        .ok_or_else(|| format!("error: platform '{platform}' has no managed skill destination"))?;
+    destination
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "error: invalid managed skill destination".to_owned())
+}
+
+pub(crate) fn verify_managed_skill_collection(primary: &Path) -> Result<(), String> {
+    let directories = managed_skill_collection_directories(primary)?;
+    let container = primary
+        .parent()
+        .ok_or_else(|| "error: invalid managed skill collection path".to_owned())?;
+    let mut expected = BTreeMap::from([(primary.to_path_buf(), format!("{REFERENCE_BUNDLE}/"))]);
+    for name in FOCUSED_SKILLS {
+        expected.insert(
+            container.join(name),
+            format!("{FOCUSED_SKILL_ASSET_ROOT}/{name}/"),
+        );
+    }
+    let actual_paths = directories.into_iter().collect::<BTreeSet<_>>();
+    let expected_paths = expected.keys().cloned().collect::<BTreeSet<_>>();
+    if actual_paths != expected_paths {
+        return Err(
+            "error: managed skill collection does not contain the expected seven skill directories"
+                .to_owned(),
+        );
+    }
+    for (directory, prefix) in expected {
+        let manifest = verify_manifest(&directory)?;
+        if manifest.compass_version != SKILL_VERSION {
+            return Err(format!(
+                "error: managed skill {} was installed by Compass {} instead of {}",
+                directory.display(),
+                manifest.compass_version,
+                SKILL_VERSION
+            ));
+        }
+        let mut expected_files = expected_package_digests(&prefix);
+        expected_files.insert(
+            ".compass_version".to_owned(),
+            digest_bytes(SKILL_VERSION.as_bytes()),
+        );
+        if manifest.files != expected_files {
+            return Err(format!(
+                "error: managed skill {} does not match the embedded Compass {} collection",
+                directory.display(),
+                SKILL_VERSION
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn managed_skill_collection_directories(primary: &Path) -> Result<Vec<PathBuf>, String> {
+    let destination = primary.join("SKILL.md");
+    skill_collection_destinations(&destination)?
+        .into_iter()
+        .map(|skill| {
+            skill
+                .parent()
+                .map(Path::to_path_buf)
+                .ok_or_else(|| "error: invalid managed skill destination".to_owned())
+        })
+        .collect()
 }
 
 fn command_install_legacy(frontend: Frontend, args: &[String]) -> Outcome {
@@ -446,13 +612,11 @@ fn execute_skill_target(
     };
     if request.dry_run {
         let paths = planned_target_paths(scope, Some(&destination), &consumers);
-        let preflight = validate_skill_destination(&destination, scope.root())
-            .and_then(|()| require_owned_or_absent(&destination))
-            .and_then(|()| {
-                consumers
-                    .iter()
-                    .try_for_each(|consumer| preflight_agent_adapter(scope, consumer))
-            });
+        let preflight = preflight_skill_collection(&destination, scope.root()).and_then(|()| {
+            consumers
+                .iter()
+                .try_for_each(|consumer| preflight_agent_adapter(scope, consumer))
+        });
         return TargetResult {
             id,
             consumers,
@@ -471,17 +635,7 @@ fn execute_skill_target(
         };
     }
     let existed = destination.exists();
-    if let Err(error) = validate_skill_destination(&destination, scope.root()) {
-        return TargetResult {
-            id,
-            consumers,
-            status: InstallStatus::Failed,
-            paths: vec![destination],
-            reason: Some(error),
-            rollback: None,
-        };
-    }
-    if let Err(error) = require_owned_or_absent(&destination) {
+    if let Err(error) = preflight_skill_collection(&destination, scope.root()) {
         return TargetResult {
             id,
             consumers,
@@ -503,6 +657,8 @@ fn execute_skill_target(
             };
         }
     }
+    let skill_paths =
+        skill_collection_destinations(&destination).unwrap_or_else(|_| vec![destination.clone()]);
     let adapter_snapshots = match snapshot_files(&adapter_paths_for(scope, &consumers)) {
         Ok(snapshots) => snapshots,
         Err(error) => {
@@ -516,7 +672,7 @@ fn execute_skill_target(
             };
         }
     };
-    let skill_snapshot = match SkillSnapshot::capture(&destination) {
+    let skill_snapshot = match SkillCollectionSnapshot::capture(&destination) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             return TargetResult {
@@ -541,17 +697,12 @@ fn execute_skill_target(
     ) {
         Ok(skill) => skill,
         Err(error) => {
-            let rollback = if error.contains("could not restore previous package") {
-                restore_transaction(&skill_snapshot, &adapter_snapshots)
-            } else {
-                "package staging or activation failed before changing the installed package"
-                    .to_owned()
-            };
+            let rollback = restore_transaction(&skill_snapshot, &adapter_snapshots);
             return TargetResult {
                 id,
                 consumers,
                 status: InstallStatus::Failed,
-                paths: vec![destination],
+                paths: skill_paths,
                 reason: Some(error),
                 rollback: Some(rollback),
             };
@@ -567,7 +718,7 @@ fn execute_skill_target(
                     id,
                     consumers,
                     status: InstallStatus::Failed,
-                    paths: std::iter::once(destination).chain(adapter_paths).collect(),
+                    paths: skill_paths.into_iter().chain(adapter_paths).collect(),
                     reason: Some(error),
                     rollback: Some(rollback),
                 };
@@ -585,7 +736,7 @@ fn execute_skill_target(
         } else {
             InstallStatus::Installed
         },
-        paths: std::iter::once(destination).chain(adapter_paths).collect(),
+        paths: skill_paths.into_iter().chain(adapter_paths).collect(),
         reason: None,
         rollback: None,
     }
@@ -647,6 +798,34 @@ impl SkillSnapshot {
             }
         }
         Ok(())
+    }
+}
+
+struct SkillCollectionSnapshot {
+    skills: Vec<SkillSnapshot>,
+}
+
+impl SkillCollectionSnapshot {
+    fn capture(destination: &Path) -> Result<Self, String> {
+        let skills = skill_collection_destinations(destination)?
+            .iter()
+            .map(|path| SkillSnapshot::capture(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { skills })
+    }
+
+    fn restore(&self) -> Result<(), String> {
+        let mut errors = Vec::new();
+        for skill in self.skills.iter().rev() {
+            if let Err(error) = skill.restore() {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
     }
 }
 
@@ -739,7 +918,7 @@ fn restore_files(snapshots: &[FileSnapshot]) -> String {
     }
 }
 
-fn restore_transaction(skill: &SkillSnapshot, adapters: &[FileSnapshot]) -> String {
+fn restore_transaction(skill: &SkillCollectionSnapshot, adapters: &[FileSnapshot]) -> String {
     let adapter_result = restore_files(adapters);
     match skill.restore() {
         Ok(()) if !adapter_result.starts_with("rollback incomplete") => {
@@ -811,7 +990,10 @@ fn planned_target_paths(
 ) -> Vec<PathBuf> {
     skill_destination
         .into_iter()
-        .map(Path::to_path_buf)
+        .flat_map(|destination| {
+            skill_collection_destinations(destination)
+                .unwrap_or_else(|_| vec![destination.to_path_buf()])
+        })
         .chain(adapter_paths_for(scope, consumers))
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -1307,7 +1489,7 @@ fn command_uninstall_compass(args: &[String]) -> Outcome {
             .resolve(&platform)
             .and_then(|agent| agent.skill_destination(&scope))
             .filter(|destination| is_managed_skill(destination))
-            .map(|destination| SkillSnapshot::capture(&destination))
+            .map(|destination| SkillCollectionSnapshot::capture(&destination))
             .transpose();
         let skill_snapshot = match skill_snapshot {
             Ok(snapshot) => snapshot,
@@ -2032,6 +2214,34 @@ fn is_managed_skill(path: &Path) -> bool {
     parent.join(".compass_version").is_file() && legacy_skill_is_unmodified(parent)
 }
 
+fn focused_skill_destination(destination: &Path, name: &str) -> Result<PathBuf, String> {
+    let skill_directory = destination
+        .parent()
+        .ok_or_else(|| "error: invalid skill destination".to_owned())?;
+    let container = skill_directory
+        .parent()
+        .ok_or_else(|| "error: invalid skill destination".to_owned())?;
+    Ok(container.join(name).join("SKILL.md"))
+}
+
+fn skill_collection_destinations(destination: &Path) -> Result<Vec<PathBuf>, String> {
+    std::iter::once(Ok(destination.to_path_buf()))
+        .chain(
+            FOCUSED_SKILLS
+                .iter()
+                .map(|name| focused_skill_destination(destination, name)),
+        )
+        .collect()
+}
+
+fn preflight_skill_collection(destination: &Path, root: &Path) -> Result<(), String> {
+    for path in skill_collection_destinations(destination)? {
+        validate_skill_destination(&path, root)?;
+        require_owned_or_absent(&path)?;
+    }
+    Ok(())
+}
+
 fn install_skill(
     config: Platform,
     project: bool,
@@ -2198,7 +2408,7 @@ fn install_skill_at_scoped(
     scope: &str,
     root: &Path,
 ) -> Result<SkillInstall, String> {
-    require_owned_or_absent(&destination)?;
+    preflight_skill_collection(&destination, root)?;
     let parent = destination
         .parent()
         .ok_or_else(|| "error: invalid skill destination".to_owned())?
@@ -2213,13 +2423,64 @@ fn install_skill_at_scoped(
         )
     })?;
     let _lock = InstallLock::acquire(container)?;
+
+    let mut installs = vec![install_skill_package_at_scoped(
+        destination.clone(),
+        consumers.clone(),
+        scope,
+        root,
+        &format!("{REFERENCE_BUNDLE}/"),
+        SKILL_ASSET,
+    )?];
+    for name in FOCUSED_SKILLS {
+        let focused_destination = focused_skill_destination(&destination, name)?;
+        let asset_prefix = format!("{FOCUSED_SKILL_ASSET_ROOT}/{name}/");
+        let skill_asset = format!("{asset_prefix}SKILL.md");
+        installs.push(install_skill_package_at_scoped(
+            focused_destination,
+            consumers.clone(),
+            scope,
+            root,
+            &asset_prefix,
+            &skill_asset,
+        )?);
+    }
+
+    let changed = installs.iter().any(|install| install.changed);
+    let messages = installs
+        .into_iter()
+        .flat_map(|install| install.messages)
+        .collect();
+    Ok(SkillInstall {
+        path: destination,
+        messages,
+        changed,
+    })
+}
+
+fn install_skill_package_at_scoped(
+    destination: PathBuf,
+    consumers: BTreeSet<String>,
+    scope: &str,
+    root: &Path,
+    asset_prefix: &str,
+    skill_asset: &str,
+) -> Result<SkillInstall, String> {
+    require_owned_or_absent(&destination)?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "error: invalid skill destination".to_owned())?
+        .to_path_buf();
+    let container = parent
+        .parent()
+        .ok_or_else(|| "error: invalid skill destination".to_owned())?;
     let mut merged_consumers = consumers;
     if let Ok(Some(existing)) = read_manifest(&parent) {
         merged_consumers.extend(existing.consumers);
     }
-    let body = asset_text(SKILL_ASSET)
-        .ok_or_else(|| format!("error: {SKILL_ASSET} not found in package - reinstall compass"))?;
-    if manifest_is_current(&parent, body, &merged_consumers)? {
+    let _body = asset_text(skill_asset)
+        .ok_or_else(|| format!("error: {skill_asset} not found in package - reinstall compass"))?;
+    if manifest_is_current(&parent, asset_prefix, &merged_consumers)? {
         return Ok(SkillInstall {
             path: destination,
             messages: vec![format!("  skill current    ->  {}", parent.display())],
@@ -2233,15 +2494,7 @@ fn install_skill_at_scoped(
     fs::create_dir(&stage)
         .map_err(|error| format!("error: could not stage {}: {error}", stage.display()))?;
     let staged_result = (|| {
-        install_asset_tree(
-            &format!("{REFERENCE_BUNDLE}/references/"),
-            &stage.join("references"),
-        )?;
-        install_asset_tree(
-            &format!("{REFERENCE_BUNDLE}/agents/"),
-            &stage.join("agents"),
-        )?;
-        write_owned(stage.join("SKILL.md"), body)?;
+        install_asset_tree(asset_prefix, &stage)?;
         write_owned(stage.join(".compass_version"), SKILL_VERSION)?;
         let manifest = build_manifest(&stage, scope, root, merged_consumers)?;
         let text = serde_json::to_string_pretty(&manifest)
@@ -2284,16 +2537,10 @@ fn install_skill_at_scoped(
     }
     Ok(SkillInstall {
         path: destination,
-        messages: vec![
-            format!(
-                "  references       ->  {}",
-                parent.join("references").display()
-            ),
-            format!(
-                "  skill installed  ->  {}",
-                parent.join("SKILL.md").display()
-            ),
-        ],
+        messages: vec![format!(
+            "  skill installed  ->  {}",
+            parent.join("SKILL.md").display()
+        )],
         changed: true,
     })
 }
@@ -2779,10 +3026,13 @@ fn remove_skill(
                 .map_err(|error| format!("error: could not encode ownership manifest: {error}"))
                 .and_then(|text| write_owned(parent.join(".compass-install.json"), &text))
             {
-                Ok(()) => lines.push(format!(
-                    "  {consumer} removed from shared skill consumers -> {}",
-                    parent.display()
-                )),
+                Ok(()) => {
+                    update_focused_skill_consumers(&path, &manifest.consumers, lines);
+                    lines.push(format!(
+                        "  {consumer} removed from shared skill consumers -> {}",
+                        parent.display()
+                    ));
+                }
                 Err(error) => {
                     lines.push(error);
                     return original_consumers;
@@ -2791,6 +3041,7 @@ fn remove_skill(
             return manifest.consumers;
         }
     }
+    remove_managed_focused_skills(&path, project, project_dir, lines);
     if path.exists() {
         match fs::remove_file(&path) {
             Ok(()) => lines.push(format!(
@@ -2832,6 +3083,75 @@ fn remove_skill(
         remove_empty_ancestors(&parent, if project { project_dir } else { Path::new("") });
     }
     BTreeSet::new()
+}
+
+fn update_focused_skill_consumers(
+    primary: &Path,
+    consumers: &BTreeSet<String>,
+    lines: &mut Vec<String>,
+) {
+    let Ok(destinations) = skill_collection_destinations(primary) else {
+        return;
+    };
+    for destination in destinations.into_iter().skip(1) {
+        let Some(directory) = destination.parent() else {
+            continue;
+        };
+        if !directory.exists() {
+            continue;
+        }
+        let Ok(mut manifest) = verify_manifest(directory) else {
+            lines.push(format!(
+                "  preserved modified focused skill -> {}",
+                directory.display()
+            ));
+            continue;
+        };
+        manifest.consumers = consumers.clone();
+        let result = serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("error: could not encode ownership manifest: {error}"))
+            .and_then(|text| write_owned(directory.join(".compass-install.json"), &text));
+        if let Err(error) = result {
+            lines.push(error);
+        }
+    }
+}
+
+fn remove_managed_focused_skills(
+    primary: &Path,
+    project: bool,
+    project_dir: &Path,
+    lines: &mut Vec<String>,
+) {
+    let Ok(destinations) = skill_collection_destinations(primary) else {
+        return;
+    };
+    for (destination, name) in destinations.into_iter().skip(1).zip(FOCUSED_SKILLS) {
+        let Some(directory) = destination.parent() else {
+            continue;
+        };
+        if !directory.exists() {
+            continue;
+        }
+        let asset_prefix = format!("{FOCUSED_SKILL_ASSET_ROOT}/{name}/");
+        if !managed_package_is_unmodified(directory, &asset_prefix) {
+            lines.push(format!(
+                "  preserved unowned or modified focused skill -> {}",
+                directory.display()
+            ));
+            continue;
+        }
+        match fs::remove_dir_all(directory) {
+            Ok(()) => lines.push(format!(
+                "  skill removed    ->  {}",
+                display_path(&destination, project, project_dir)
+            )),
+            Err(error) => lines.push(format!(
+                "error: could not remove {}: {error}",
+                directory.display()
+            )),
+        }
+    }
 }
 
 fn uninstall_vscode(project_dir: &Path) -> Outcome {
@@ -3480,7 +3800,7 @@ fn verify_manifest(directory: &Path) -> Result<OwnershipManifest, String> {
 
 fn manifest_is_current(
     directory: &Path,
-    skill_body: &str,
+    asset_prefix: &str,
     consumers: &BTreeSet<String>,
 ) -> Result<bool, String> {
     let Some(manifest) = read_manifest(directory)? else {
@@ -3490,7 +3810,7 @@ fn manifest_is_current(
     if verified.compass_version != SKILL_VERSION || &verified.consumers != consumers {
         return Ok(false);
     }
-    let mut expected = expected_package_digests(skill_body);
+    let mut expected = expected_package_digests(asset_prefix);
     expected.insert(
         ".compass_version".to_owned(),
         digest_bytes(SKILL_VERSION.as_bytes()),
@@ -3498,13 +3818,10 @@ fn manifest_is_current(
     Ok(manifest.files == expected)
 }
 
-fn expected_package_digests(skill_body: &str) -> BTreeMap<String, String> {
-    let mut files = BTreeMap::from([("SKILL.md".to_owned(), digest_bytes(skill_body.as_bytes()))]);
-    let prefix = format!("{REFERENCE_BUNDLE}/");
+fn expected_package_digests(asset_prefix: &str) -> BTreeMap<String, String> {
+    let mut files = BTreeMap::new();
     for asset in EMBEDDED_ASSETS {
-        if let Some(relative) = asset.path.strip_prefix(&prefix)
-            && (relative.starts_with("references/") || relative.starts_with("agents/"))
-        {
+        if let Some(relative) = asset.path.strip_prefix(asset_prefix) {
             files.insert(relative.to_owned(), digest_bytes(asset.bytes));
         }
     }
@@ -3599,15 +3916,25 @@ fn digest_bytes(bytes: &[u8]) -> String {
 }
 
 fn legacy_skill_is_unmodified(directory: &Path) -> bool {
-    let Some(body) = asset_text(SKILL_ASSET) else {
+    if asset_text(SKILL_ASSET).is_none() {
         return false;
-    };
-    let mut expected = expected_package_digests(body);
+    }
+    managed_package_is_unmodified(directory, &format!("{REFERENCE_BUNDLE}/"))
+}
+
+fn managed_package_is_unmodified(directory: &Path, asset_prefix: &str) -> bool {
+    let mut expected = expected_package_digests(asset_prefix);
     expected.insert(
         ".compass_version".to_owned(),
         digest_bytes(SKILL_VERSION.as_bytes()),
     );
-    collect_managed_files(directory).is_ok_and(|actual| actual == expected)
+    if directory.join(".compass-install.json").is_file() {
+        return verify_manifest(directory).is_ok_and(|manifest| {
+            manifest.compass_version == SKILL_VERSION && manifest.files == expected
+        });
+    }
+    directory.join(".compass_version").is_file()
+        && collect_managed_files(directory).is_ok_and(|actual| actual == expected)
 }
 
 struct InstallLock {

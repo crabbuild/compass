@@ -1,0 +1,13 @@
+docs/future/compass-surrealdb-mcp-skills-research.md
+docs/future/surreal-persistent-probe-results.md
+scripts/fixtures/surreal-persistent-probes/SURREALDB-3.2.4-LICENSE.txt
+scripts/fixtures/surreal-persistent-probes/expected-v1.json
+scripts/fixtures/surreal-persistent-probes/input-v1.json
+scripts/fixtures/surreal-persistent-probes/manifest-v1.json
+scripts/fixtures/surreal-persistent-probes/rocksdb-result-v1.json
+scripts/fixtures/surreal-persistent-probes/surrealkv-result-v1.json
+openspec/changes/surreal-persistent-probes/.openspec.yaml
+openspec/changes/surreal-persistent-probes/design.md
+openspec/changes/surreal-persistent-probes/proposal.md
+openspec/changes/surreal-persistent-probes/tasks.md
+openspec/changes/surreal-persistent-probes/verification.md

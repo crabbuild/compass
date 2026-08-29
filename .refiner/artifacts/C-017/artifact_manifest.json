@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-017",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "refined",
+  "sourceArtifacts": [
+    "crates/compass-cli/src/agent_commands.rs",
+    "crates/compass-cli/src/install_commands.rs",
+    "crates/compass-cli/src/help.rs",
+    "crates/compass-cli/tests/agent_cli.rs",
+    "docs/reference/commands.md",
+    "COMPATIBILITY.md",
+    "CHANGELOG.md",
+    "openspec/changes/compass-agent-cli"
+  ],
+  "distFiles": ["dist/refinement-receipt.md"],
+  "validatedAt": "2026-08-28"
+}

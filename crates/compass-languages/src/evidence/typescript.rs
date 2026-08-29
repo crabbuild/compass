@@ -4257,47 +4257,49 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         ) {
             collect_import_bindings(self.source, clause, reexport, type_only, &mut bindings);
         }
-        let owner = self.owner_for_scope(scope_id);
-        let module_occurrence = self.builder.occur_with_context(
-            if reexport {
-                SemanticRole::Reexport
-            } else {
-                SemanticRole::Import
-            },
-            &owner,
-            &module,
-            None,
-            Some(scope_id),
-            Some(if type_only {
-                "type_only_module"
-            } else {
-                "module"
-            }),
-            range_for_node(self.source_file, module_node),
-        )?;
-        self.builder.relate(
-            if reexport {
-                CandidateRelation::Reexports
-            } else {
-                CandidateRelation::Imports
-            },
-            &owner,
-            Some(&module_occurrence),
-            None,
-            &module,
-            ResolutionConstraint {
-                exact_language: Some(self.language.to_owned()),
-                module_or_package: Some(module.clone()),
-                allowed_target_kinds: vec!["module".to_owned()],
-                allow_external: true,
-                ..ResolutionConstraint::default()
-            },
-        )?;
-        if reexport
+        let wildcard_reexport = reexport
             && bindings.is_empty()
             && (statement_text.trim_start().starts_with("export *")
-                || statement_text.trim_start().starts_with("export type *"))
-        {
+                || statement_text.trim_start().starts_with("export type *"));
+        let owner = self.owner_for_scope(scope_id);
+        if !wildcard_reexport {
+            let module_occurrence = self.builder.occur_with_context(
+                if reexport {
+                    SemanticRole::Reexport
+                } else {
+                    SemanticRole::Import
+                },
+                &owner,
+                &module,
+                None,
+                Some(scope_id),
+                Some(if type_only {
+                    "type_only_module"
+                } else {
+                    "module"
+                }),
+                range_for_node(self.source_file, module_node),
+            )?;
+            self.builder.relate(
+                if reexport {
+                    CandidateRelation::Reexports
+                } else {
+                    CandidateRelation::Imports
+                },
+                &owner,
+                Some(&module_occurrence),
+                None,
+                &module,
+                ResolutionConstraint {
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: Some(module.clone()),
+                    allowed_target_kinds: vec!["module".to_owned()],
+                    allow_external: true,
+                    ..ResolutionConstraint::default()
+                },
+            )?;
+        }
+        if wildcard_reexport {
             // An export-star statement is represented as a wildcard
             // reexport binding. The resolver expands this bounded edge only
             // for a requested named export, preserving barrel cycles and

@@ -1,0 +1,90 @@
+{
+  "schema": "compass.surreal-persistent-probe-engine-result/1",
+  "engine": "rocksdb",
+  "engineVersion": "surrealdb-rocksdb 0.24.0-surreal.5 via surrealdb 3.2.4",
+  "status": "PASS",
+  "host": {
+    "architecture": "arm64",
+    "cargo": "1.97.1 (c980f4866 2026-06-30)",
+    "operatingSystem": "macOS 26.7 (25G224), Darwin 25.6.0",
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)"
+  },
+  "measurements": {
+    "cleanReleaseBuild": {
+      "maximumResidentSetBytes": 466075648,
+      "peakMemoryFootprintBytes": 111903440,
+      "wallSeconds": 289.65
+    },
+    "coldStart": {
+      "internalMicroseconds": [
+        49044,
+        48863,
+        48211,
+        48201,
+        52123
+      ],
+      "medianInternalMicroseconds": 48863,
+      "medianMaximumResidentSetBytes": 120963072,
+      "samples": 5
+    },
+    "releaseExecutableBytes": 70950208,
+    "selectedNormalDependencyLines": 411,
+    "workload": {
+      "maximumResidentSetBytes": 155287552,
+      "peakMemoryFootprintBytes": 132186736,
+      "wallSeconds": 2.59
+    }
+  },
+  "postCrash": {
+    "activeGeneration": "g-0001",
+    "orderedIdsSha256": "8d95d3971f96e27f5e2f1dcfc0a1f1fba900dd958e3bb4fbadff43346bb160d3",
+    "relationCount": 2051
+  },
+  "semantic": {
+    "activeAfterActivation": "g-0002",
+    "activeAfterCrash": "g-0001",
+    "activeBeforeCrash": "g-0001",
+    "baseRelations": [
+      {
+        "confidence": "0.875000",
+        "fromRecord": "node:g_0002_node_alpha",
+        "id": "edge-parallel-0001",
+        "provenance": {
+          "column": 4,
+          "line": 11,
+          "path": "src/alpha.rs"
+        },
+        "toRecord": "node:g_0002_node_beta"
+      },
+      {
+        "confidence": "0.625000",
+        "fromRecord": "node:g_0002_node_alpha",
+        "id": "edge-parallel-0002",
+        "provenance": {
+          "column": 9,
+          "line": 29,
+          "path": "src/alpha.rs"
+        },
+        "toRecord": "node:g_0002_node_beta"
+      },
+      {
+        "confidence": "1.000000",
+        "fromRecord": "node:g_0002_node_beta",
+        "id": "edge-reverse-0001",
+        "provenance": {
+          "column": 2,
+          "line": 7,
+          "path": "src/beta.rs"
+        },
+        "toRecord": "node:g_0002_node_alpha"
+      }
+    ],
+    "directedParallelCount": 2,
+    "orderedIdsSha256": "8d95d3971f96e27f5e2f1dcfc0a1f1fba900dd958e3bb4fbadff43346bb160d3",
+    "pageCount": 17,
+    "pageSize": 128,
+    "relationCount": 2051,
+    "scaleFirstId": "edge-scale-000000",
+    "scaleLastId": "edge-scale-002047"
+  }
+}

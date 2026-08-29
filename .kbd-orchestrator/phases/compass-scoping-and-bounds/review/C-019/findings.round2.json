@@ -1,0 +1,78 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "scripts/qualify_harness_packages.sh",
+      "claim": "No stage of the lifecycle harness verifies skill discovery (or plugin load) for any harness, so acceptance criterion 1.2 ('Cover complete skill discovery, MCP configuration/load') is unsatisfied for Codex and Claude Code.",
+      "evidence": "The script only asserts `plugin list`/`plugin list --available` output contains '\"compass\"' and `mcp list` output contains 'compass' (require_log_contains calls after codex-install, codex-list, claude-install). Nothing lists installed skills, inspects the harness plugin cache for copied `skills/**` files, or runs any harness command that exercises skill loading. Criterion 1.2 requires skill discovery coverage; spec.md Requirement 'Installed-artifact evidence' requires discovery and load to operate on the generated artifact. Only the OpenCode plugin gets a direct load check (opencode-plugin-load).",
+      "suggested_fix": "Add post-install assertions that the harness-managed skill directories/files exist and are byte-equal to the exported package, and/or invoke a harness command that enumerates discovered skills, for each of Codex, Claude Code, and OpenCode."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 127,
+      "claim": "The sentinel preservation check strips all newlines before comparing, so it does not verify the spec's byte-identical preservation requirement.",
+      "evidence": "spec.md Scenario 'User sentinel': 'install, upgrade, and uninstall SHALL preserve its bytes'; Requirement 'Ownership preservation': 'User-authored instructions ... SHALL remain byte-identical.' The implementation is `if [[ \"$(tr -d '\\n' <\"$1\")\" != \"$sentinel_content\" ]]`, which passes even if the harness appends or removes trailing newlines (e.g., a plugin manager normalizing the file), a modification the spec forbids.",
+      "suggested_fix": "Use `cmp -s \"$1\" <(printf '%s\\n' \"$sentinel_content\")` or compare against a stored copy with `cmp` so byte identity is actually enforced."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 183,
+      "claim": "Uninstall effectiveness is never verified, and the 'upgrade' stage reinstalls the identical artifact version, so neither operation's effect on the generated artifact is actually exercised.",
+      "evidence": "After codex-uninstall / claude-uninstall / opencode-uninstall there is no `plugin list`/`mcp list` assertion that 'compass' is absent and no check that managed files were removed \u2014 only exit status is checked. The upgrade stages (`plugin add compass@compass-plugins` again, `plugin update`, `npm install --force` of the same tarball) reinstall the exact same version, so no version-transition path is tested despite design.md claiming the harness 'performs an upgrade' and spec.md requiring upgrade to 'operate on the generated artifact.'",
+      "suggested_fix": "Assert post-uninstall absence of the plugin, MCP entry, and managed skill files; perform the upgrade against a differently-versioned export (e.g., a bumped manifest) so a real upgrade path runs."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 213,
+      "claim": "The OpenCode sentinel is placed in OPENCODE_CONFIG_DIR, but the install/upgrade/uninstall stages operate via npm --prefix on the project directory and never touch the config dir, making the OpenCode ownership-preservation check largely vacuous.",
+      "evidence": "`opencode_sentinel=\"$opencode_config/USER-INSTRUCTIONS.md\"` while opencode-install/upgrade/uninstall run `npm install/uninstall --prefix \"$opencode_project\"`; npm cannot modify `$opencode_config`, so require_sentinel for OpenCode cannot fail from the lifecycle operations it is meant to guard (unlike codex/claude, whose sentinels sit inside CODEX_HOME/CLAUDE_CONFIG_DIR that the harness commands mutate).",
+      "suggested_fix": "Place the OpenCode sentinel beside the managed files that install/uninstall actually mutate (e.g., inside the project directory next to node_modules/opencode.json), or add a step where the opencode harness itself performs install/remove against its config dir."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 63,
+      "claim": "The installed-agent-packages job runs in parallel with the quality job's integration tests, contradicting the documented ordering that qualification runs after the phase-end integration build, and a lifecycle pass can coincide with failing integration tests.",
+      "evidence": "The new `installed-agent-packages` job has no `needs:` on the `quality` job (which owns `cargo test --workspace --test '*'`). design.md states 'CI runs it after the normal phase-end integration build and the OpenCode workspace JavaScript gates,' and docs/implementation/agent-distribution.md states 'The verification wave runs the full Rust integration targets, the installed-artifact harness qualification, and the workspace JavaScript typecheck and integration suite.' The job only builds compass-cli and runs the plugin's typecheck/test; the full integration targets run concurrently in a different job.",
+      "suggested_fix": "Either add `needs: quality` (or fold the qualification into the quality job after the integration-test step), or correct the docs to state the gates are independent."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 167,
+      "claim": "No network egress isolation or telemetry/update-check disabling is applied to the real Codex, Claude Code, and OpenCode CLIs, despite the spec scenario requiring every stage to pass 'without credentials, network model calls.'",
+      "evidence": "run_logged invocations only set CODEX_HOME/CLAUDE_CONFIG_DIR/OPENCODE_CONFIG_DIR/HOME; no env such as DISABLE_TELEMETRY/update-suppression flags, no firewall/proxy sandbox, and no detection of outbound connections. The version checks (codex-version, claude-version, opencode-version) run with the real user HOME entirely outside the isolated roots.",
+      "suggested_fix": "Set the documented telemetry/update-disable environment variables for each harness, run the version probes under the isolated HOME as well, and document (or enforce) that no model endpoint is contacted."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 222,
+      "claim": "Tarball extraction parses JSON out of the redacted, stderr-merged npm pack log with `input.slice(input.indexOf(\"[\"))`, which breaks if npm emits any warning containing '[' before the JSON array or any trailing text after it.",
+      "evidence": "opencode-pack pipes `npm pack ... --json` through `2>&1 | node bounded_redacted_log.mjs` and later does `JSON.parse(input.slice(input.indexOf(\"[\")))`. npm warnings/notices share the stream and the redaction pass can alter content; a stray '[' in a warning line or trailing notice makes JSON.parse throw. It fails closed, but the failure mode is opaque.",
+      "suggested_fix": "Capture npm pack stdout to a separate unfiltered JSON file (redact only the human log), or list `$scratch/*.tgz` after packing instead of parsing npm's JSON."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_harness_packages.sh",
+      "line": 172,
+      "claim": "MCP registration assertions use bare substring matches (`grep -Fq compass`) over free-form CLI output, which can be satisfied by unrelated text such as binary paths in the output.",
+      "evidence": "`require_log_contains codex-mcp-list compass` and `require_log_contains claude-mcp-list compass` pass if 'compass' appears anywhere in the log, e.g., as part of a path or an unrelated server entry; `--json` variants (codex-mcp-list is not run with structured output parsed) would allow precise assertions.",
+      "suggested_fix": "Where the harness supports JSON output, parse it and assert a server entry named exactly 'compass' exists; otherwise match an anchored pattern such as a line beginning with the server name."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

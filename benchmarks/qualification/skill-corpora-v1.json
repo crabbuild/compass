@@ -1,0 +1,38 @@
+{
+  "schema": "compass.qualification-skill-corpora/1",
+  "source": {
+    "path": "crates/compass-cli/assets/compass-focused-skills/trigger-corpus.json",
+    "schema": 1,
+    "sha256": "62b7208aeac2e81f3919924fc8604de1be79d9b3d66569ec882cf1ffcf94f877"
+  },
+  "umbrellaInvocations": {
+    "caseIds": ["broad-umbrella", "explicit-umbrella"],
+    "allowedRegressions": 0
+  },
+  "focusedSkillBoundaries": {
+    "caseIds": [
+      "architecture-boundaries",
+      "architecture-hubs",
+      "debug-failure",
+      "debug-regression",
+      "impact-blast-radius",
+      "impact-review",
+      "index-invalid",
+      "index-stale",
+      "mcp-http",
+      "mcp-stdio",
+      "navigate-callers",
+      "navigate-path"
+    ],
+    "expectedSkills": [
+      "compass-architecture",
+      "compass-change-impact",
+      "compass-debug",
+      "compass-index-maintenance",
+      "compass-mcp-setup",
+      "compass-navigate"
+    ],
+    "allowedAmbiguousSelections": 0,
+    "allowedIncorrectSelections": 0
+  }
+}

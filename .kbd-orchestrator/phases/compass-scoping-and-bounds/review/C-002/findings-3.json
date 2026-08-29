@@ -1,0 +1,39 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-graph/src/snapshot.rs",
+      "line": 172,
+      "claim": "Reclassifying an oversized manifest from SnapshotError::Corrupt to SnapshotError::Limit changes the variant observed by every existing caller of GraphSnapshotManifest::validate() (reader open, activation, GC paths across compass-store-redb/compass-graphdb/compass-cli), and the packet contains no call-site audit showing none of them branch on the Corrupt variant (e.g., for fallback, quarantine, or error-mapping behavior).",
+      "evidence": "Hunk in `GraphSnapshotManifest::validate` replacing the combined `graph_bytes == 0 || graph_bytes > MAX_GRAPH_BYTES` Corrupt arm with `SnapshotError::canonical_graph_too_large(...)` (a `Limit` variant) for the oversized case; the diff shows no grep or test evidence that `match` sites on `SnapshotError::Corrupt` were reviewed.",
+      "suggested_fix": "Audit all consumers of SnapshotError (rg 'SnapshotError::Corrupt' and 'SnapshotError::Limit' across crates/) and either confirm variant-agnostic handling or update any Corrupt-specific branching to also handle Limit; note the result in the design doc."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-graph/src/snapshot.rs",
+      "line": 3150,
+      "claim": "digest_json is generic over any serializable payload (`fn digest_json<T: Serialize>(value: &T, maximum: usize)`), but the failure it now returns unconditionally advises graph-scope remediation (`--exclude <pattern>`, `.compassignore`), so any current or future non-graph call site (e.g., selector or delta digest encoding in the same module) would emit a misleading recovery action tied to an unrelated limit.",
+      "evidence": "Hunk in `digest_json` replacing the plain limit message with `SnapshotError::canonical_graph_too_large(maximum as u64)`; the constructor hardcodes 'canonical graph exceeds ... retry or rebuild with a smaller scope using --exclude <pattern> or persistent patterns in .compassignore' regardless of what `value` was being encoded.",
+      "suggested_fix": "Either make digest_json graph-specific (rename to digest_canonical_graph_json) or have it return a neutral Limit and attach the scope-remediation suffix only at the canonical-graph publication call site."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/tests/snapshot_limit_cli.rs",
+      "line": 76,
+      "claim": "The CLI regression passes the graph path to the binary via `graph_path.to_string_lossy()`, which silently mangles non-UTF-8 paths; on Windows temp directories with non-UTF-8 components the test would exercise a path that is not the real artifact path, weakening the platform-portable guarantee the constraint requires.",
+      "evidence": "`.args([\"search\", \"sample\", \"--graph\", graph_path.to_string_lossy().as_ref(), ...])`; constraint `platform-portable`: 'No assumption of UTF-8 paths ... without a guarded implementation and test.'",
+      "suggested_fix": "Pass the path as an OsStr argument (`graph_path.as_os_str()`) so the test exercises the exact artifact path on all platforms."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

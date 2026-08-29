@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-017",
+  "blocking": [
+    {
+      "id": "six-command-namespace",
+      "status": "PASS",
+      "evidence": "Nested help and public CLI tests cover list, install, doctor, export, validate, and mcp-config"
+    },
+    {
+      "id": "install-compatibility",
+      "status": "PASS",
+      "evidence": "Success and failure bytes, exit codes, and installed trees match the legacy install entry point"
+    },
+    {
+      "id": "deterministic-export",
+      "status": "PASS",
+      "evidence": "Repeated exports have identical bytes and the JSON result is the exact compass.agent-bundle/1 manifest"
+    },
+    {
+      "id": "bounded-validation",
+      "status": "PASS",
+      "evidence": "File and byte limits, symlink and traversal rejection, checksum verification, portability checks, and secret redaction pass"
+    },
+    {
+      "id": "doctor-evidence",
+      "status": "PASS",
+      "evidence": "Healthy, stale graph, missing config, modified file, and embedded-collection mismatch paths are covered"
+    },
+    {
+      "id": "native-mcp-schemas",
+      "status": "PASS",
+      "evidence": "Codex TOML, Claude JSON, OpenCode JSON, and generic versioned JSON are deterministic for stdio and HTTP"
+    },
+    {
+      "id": "workspace-baseline",
+      "status": "PASS",
+      "evidence": "Formatting, focused and workspace Clippy, focused CLI tests, workspace lib/bin tests, product boundary, and strict OpenSpec pass"
+    },
+    {
+      "id": "graph-refresh",
+      "status": "PASS",
+      "evidence": "713 files, 121261 nodes, 285681 edges, 3389 communities, 68 omitted edges, and zero identity collisions"
+    },
+    {
+      "id": "adversarial-review",
+      "status": "PASS",
+      "evidence": "Isolated K3 review passed with 0 critical findings; all 2 warnings and 3 suggestions were subsequently resolved"
+    }
+  ]
+}

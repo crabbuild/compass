@@ -1,0 +1,79 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": ".kbd-orchestrator/phases/compass-scoping-and-bounds/execution.md",
+      "line": 7,
+      "claim": "A machine-specific absolute path is committed to the repository, breaching the blocking no-secrets-or-machine-paths constraint.",
+      "evidence": "New-file hunk line contained an absolute user-home path to `.codex/skills/kbd-apply/kbd-apply.sh`. Constraint no-secrets-or-machine-paths (blocking): 'No credentials, machine-specific paths ... committed outside the repository-owned .prometheus/knowledge/wiki transcript exception.'",
+      "suggested_fix": "Replace the absolute path with a repository-relative or environment-derived reference (e.g. '$CODEX_HOME/skills/kbd-apply/kbd-apply.sh' or a documented install location)."
+    },
+    {
+      "severity": "WARNING",
+      "file": "openspec/changes/mcp-conformance-interop/verification.md",
+      "line": 46,
+      "claim": "The verification receipt claims header-handling checks are not baselined, but the committed expected-failures file baselines exactly one http-header-validation check, so the gate evidence contradicts the actual baseline.",
+      "evidence": "verification.md: 'transport, wire-schema, discovery, routing, version/header handling, resource errors, and DNS-rebinding checks are not baselined.' vs scripts/fixtures/mcp-conformance-expected-failures.yaml entry '- http-header-validation:sep-2243-server-accepts-whitespace-header-value'. docs/implementation/mcp-conformance-and-interop.md does acknowledge the baselined header check, confirming the verification.md claim is the inaccurate one.",
+      "suggested_fix": "Amend verification.md to state that one header check is baselined due to the runner invoking the first listed tool with invalid arguments, matching the interop doc and the yaml."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 101,
+      "claim": "The design requires the stdio and HTTP conformance legs to be named separately in CI so neither can disappear behind the other, but the workflow runs both inside a single step, so a stdio failure prevents the HTTP leg from running and being reported.",
+      "evidence": "design.md: 'The two legs are named separately in CI so neither can disappear behind the other.' The workflow hunk adds one step 'MCP stdio and HTTP conformance' containing all three commands; with default step semantics, failure of 'cargo test -p compass-mcp --test protocol_conformance' aborts the step before 'bash scripts/qualify_mcp_conformance.sh' runs.",
+      "suggested_fix": "Split into two named steps (e.g. 'MCP stdio conformance' and 'MCP HTTP conformance'), keeping the binary build as its own step or folded into the first."
+    },
+    {
+      "severity": "WARNING",
+      "file": "openspec/changes/mcp-conformance-interop/verification.md",
+      "line": 18,
+      "claim": "verification.md declares crates/compass-mcp/tests/fixtures/mcp-discovery-golden.json as a new qualification artifact, but that file appears nowhere in the diff, files.txt, or the refiner artifact manifest, and the added test reads no golden fixture \u2014 while design.md's claimed 'ordered tool and resource listing' verification is not actually performed.",
+      "evidence": "verification.md 'New qualification artifacts' lists 'crates/compass-mcp/tests/fixtures/mcp-discovery-golden.json'; openspec/changes/mcp-conformance-interop/files.txt and .refiner/artifacts/C-010/artifact_manifest.json omit it; protocol_conformance.rs only asserts 'tools.tools.len() == 15' and 'resources.resources.len() == 6' plus presence of graph_stats \u2014 no ordering assertion exists despite design.md claiming the stdio leg 'verifies initialization/discovery, ordered tool and resource listing'.",
+      "suggested_fix": "Either add the golden fixture and ordering assertions to protocol_conformance.rs and declare the file in files.txt and the artifact manifest, or remove the golden-file reference from verification.md and the 'ordered' claim from design.md."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_mcp_conformance.sh",
+      "line": 56,
+      "claim": "The readiness probe can false-positive against a pre-existing listener on the fixed default port, causing the conformance suite to run against the wrong server and pass or fail on evidence Compass did not produce.",
+      "evidence": "'readonly PORT=\"${COMPASS_MCP_CONFORMANCE_PORT:-39091}\"' fixes the port; the loop 'curl --silent --output /dev/null --connect-timeout 1 \"http://127.0.0.1:$PORT/mcp\"' succeeds on any HTTP response (curl returns 0 even for 405/404 without --fail) and never checks that $server_pid is still alive or that the responding process is the Compass server just started.",
+      "suggested_fix": "Bind an ephemeral port (or verify a Compass-specific marker in the response), and add a 'kill -0 $server_pid' liveness check inside the readiness loop so a crashed server fails fast with its log."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_mcp_conformance.sh",
+      "line": 70,
+      "claim": "The npx conformance invocations have no duration bound, conflicting with the blocking bounded-work constraint's requirement that subprocess work remains bounded.",
+      "evidence": "Constraint bounded-work (blocking): 'All work over source files, graphs, archives, network responses, queries, and subprocess output remains bounded.' The script runs 'npx --yes \"github:modelcontextprotocol/conformance#$CONFORMANCE_REF\" server ...' seven times with no timeout wrapper; a hung runner or stalled package fetch blocks the CI job until the outer workflow timeout, with no distinction between a hang and a slow run. Contrast scripts/qualify_codex_mcp_client.py, which bounds every wait (30 s request deadline, 15 s server readiness, 30 s run_checked timeout).",
+      "suggested_fix": "Wrap each npx invocation in a bounded wait (e.g. 'timeout 300 npx ...') and treat expiry as a distinct failure outcome from a conformance failure."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_mcp_conformance.sh",
+      "line": 13,
+      "claim": "All conformance runner output is written under WORK_ROOT, which the EXIT trap deletes, so no persistent machine-checkable evidence of which checks passed or were baselined survives a CI run.",
+      "evidence": "'--output-dir \"$WORK_ROOT/results\"' combined with 'trap cleanup EXIT' where cleanup runs 'rm -rf \"$WORK_ROOT\"'; the only retained signal is the script's exit code and transient console output.",
+      "suggested_fix": "Preserve the results directory (e.g. copy it to a caller-specified path or upload it as a CI artifact) before cleanup, or gate deletion on success only."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": ".kbd-orchestrator/phases/compass-scoping-and-bounds/execution.md",
+      "line": 95,
+      "claim": "The progress ledger still records C-010 as [PENDING] while the same diff ships tasks.md with tasks 1.1\u20133.1 checked and a PASS refinement receipt, leaving the canonical projection inconsistent with the change's own evidence.",
+      "evidence": "execution.md PROGRESS LEDGER: '- [PENDING] C-010 \u2014 SELF/OpenSpec, gated by C-008 and C-009' vs openspec/changes/mcp-conformance-interop/tasks.md ([x] 1.1, [x] 2.1, [x] 3.1) and .refiner/artifacts/C-010/dist/refinement-receipt.md 'Status: PASS'. execution.md itself declares 'progress.json is the canonical projection; implementation completion is marked independently of evidence/certification/publication', but the ledger was not updated to that state.",
+      "suggested_fix": "Update the C-010 ledger entry (and progress.json) to the implementation-complete-but-uncertified state the dispatch contract defines, or note explicitly why it remains PENDING."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

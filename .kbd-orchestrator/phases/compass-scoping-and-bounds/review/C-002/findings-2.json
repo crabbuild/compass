@@ -1,0 +1,39 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/tests/snapshot_limit_cli.rs",
+      "line": 8,
+      "claim": "The new CLI regression imports sha2 (and uses tempfile), but the Cargo.toml hunk adds only rusqlite to compass-cli's dev-dependencies; if sha2/tempfile are not already declared for compass-cli, the workspace build/test constraint fails.",
+      "evidence": "Test header: `use sha2::{Digest, Sha256};` and `tempfile::tempdir()?`; the Cargo.toml diff shows only `+[dev-dependencies]\\n+rusqlite.workspace = true` for compass-cli, and the Cargo.lock hunk shows only the rusqlite edge added to compass-cli. Blocking constraints `build-passes` and `tests-pass` require the workspace to compile and test.",
+      "suggested_fix": "Verify compass-cli already declares sha2 and tempfile (dev-)dependencies; if not, add `sha2.workspace = true` / `tempfile.workspace = true` under [dev-dependencies] and refresh Cargo.lock."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/tests/snapshot_limit_cli.rs",
+      "line": 10,
+      "claim": "The CLI test hard-codes compass-store's private SQLite layout (kv table schema, namespace `compass.current.graph.v1`, partitions `graph-snapshot/catalog`/`graph-snapshot/objects`, the `manifest/` key prefix, and the digest-column convention), coupling a compass-cli test to another crate's unversioned internal storage format.",
+      "evidence": "Lines 10-13 define GRAPH_NAMESPACE/CATALOG_PARTITION/OBJECT_PARTITION/ACTIVE_KEY constants duplicating compass-store internals, and the test issues raw `INSERT INTO kv(namespace, partition, key, value, digest, version)` / `UPDATE kv SET ...` statements. The warning constraint `correct-ownership-boundary` requires changes to live in the owning crate; this test reaches across that boundary and will break (or, worse, fabricate rows the store no longer reads) on any store schema change.",
+      "suggested_fix": "Move the manifest-forging helper into compass-store as a test-support API (or share the constants via a pub module), so the CLI regression asserts behavior while the store owns its layout."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-graph/src/snapshot.rs",
+      "line": 3322,
+      "claim": "The unit test asserts only two substrings of the remediation text, so the middle of the message (`retry or rebuild with a smaller scope using`) \u2014 which design.md designates as a stable, deliberate contract \u2014 can drift without any test failing.",
+      "evidence": "design.md: 'becomes SnapshotError::Limit with this stable actionable suffix: `retry or rebuild with a smaller scope using --exclude <pattern> or persistent patterns in .compassignore`'; the test only checks `message.contains(\"--exclude <pattern>\")` and `message.contains(\".compassignore\")`.",
+      "suggested_fix": "Assert the full rendered message (or the complete stable suffix) with assert_eq!/contains on the entire string so the documented contract is pinned verbatim."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

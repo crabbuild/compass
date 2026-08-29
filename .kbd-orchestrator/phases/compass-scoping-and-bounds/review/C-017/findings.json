@@ -1,0 +1,50 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "claim": "When graph.json resolves and exists but manifest.json is missing or unloadable, doctor misattributes the Manifest::load failure to source detection, reporting \"source detection failed: {error}\" even though detect() succeeded or never ran \u2014 a health-check tool whose purpose is accurate diagnosis emits a wrong cause.",
+      "evidence": "In doctor(): `let freshness = detect(root, &DetectOptions {...}).map(|detection| Manifest::load(&manifest_path, Some(root)).is_unchanged(&detection.files, ManifestKind::Ast));` followed by `Err(error) => fail_check(\"graph_freshness\", format!(\"source detection failed: {error}\"))`. The Manifest::load error is funneled into the same Err arm as a detect() failure.",
+      "suggested_fix": "Match on detect() and Manifest::load() separately so a missing/corrupt manifest produces a distinct \"could not load graph manifest\" detail (or a dedicated manifest_presence check), keeping load failure distinct from detection failure."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "claim": "Bundle/MCP-config file reads reject symlinks via entry.file_type()/symlink_metadata and then open the path in a separate syscall, so a writer with access to the bundle directory can swap a verified regular file for a symlink between the check and File::open, defeating the documented symlink-rejection guarantee for content that is then hashed and credential-scanned.",
+      "evidence": "collect_files_bounded_with_limits: `if file_type.is_symlink() { return Err(...) }` then later `let bytes = read_file_with_limit(&path, limit)` which does `fs::File::open(path)` with no O_NOFOLLOW; SECURITY.md excerpt added in this diff states validate \"rejects symlinks\" while treating bundles as untrusted.",
+      "suggested_fix": "Open with O_NOFOLLOW (std::os::unix::fs::OpenOptionsExt::custom_flags / equivalent guarded Windows handling) or verify symlink_metadata on the opened file handle, so the symlink check and the read are the same object."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "claim": "`--project=`/`--user=` (and `--project-root=`/`--user-root=`) with an explicitly empty value are silently accepted as an empty root path, while the space-separated forms error on a missing value, yielding an inconsistent boundary and a doctor run against \"\" instead of a usage error.",
+      "evidence": "parse_doctor_options: `root = PathBuf::from(value.split_once('=').map_or(\"\", |(_, value)| value));` \u2014 for `--project-root=` this produces PathBuf::from(\"\") with no error, unlike `required_value` which returns \"error: --project-root requires a value\".",
+      "suggested_fix": "Route the `=` forms through the same non-empty validation: `let v = value.split_once('=').map_or(\"\", |(_, v)| v); if v.is_empty() { return Err(...) }`."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "claim": "`compass agent validate --platform <NAME>` silently ignores the platform requirement for managed-install bundles, even though the help text says the option \"Require[s] a matching exported platform\" without qualification.",
+      "evidence": "validate_path: `if root.join(\"manifest.json\").is_file() { validate_export_bundle(root, expected_platform) } else if root.join(\".compass-install.json\").is_file() { validate_managed_bundle(root) }` \u2014 expected_platform is dropped on the managed path; help.rs page for \"agent validate\" documents `--platform <NAME>  Require a matching exported platform`.",
+      "suggested_fix": "Either reject --platform when the target is a managed install, or document that the option applies only to exported bundles."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/tests/install_cli.rs",
+      "claim": "normalize_manifest_roots re-serializes both manifests through serde_json::to_vec_pretty before comparison, so byte-level differences in formatting or key ordering between direct and generic installs are normalized away and can no longer be detected by the byte-identical tree assertion.",
+      "evidence": "`let mut manifest: serde_json::Value = serde_json::from_slice(bytes)?; manifest[\"root\"] = ...; *bytes = serde_json::to_vec_pretty(&manifest)?;` applied to both trees before `assert_eq!(generic_tree, direct_tree)`.",
+      "suggested_fix": "Compare the parsed serde_json::Value of the manifests (with root normalized) for semantic equality, and separately compare raw bytes after a targeted byte-level replacement of the known root string, so formatting drift still fails the test."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

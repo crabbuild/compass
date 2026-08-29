@@ -4,15 +4,15 @@
   "roles": {
     "judge": {
       "model": "k3",
-      "source": "/Users/gqadonis/.prometheus/kbd/models.toml"
+      "source": "~/.prometheus/kbd/models.toml"
     },
     "critic": {
       "model": "MiniMax-M3",
-      "source": "/Users/gqadonis/.prometheus/kbd/models.toml"
+      "source": "~/.prometheus/kbd/models.toml"
     },
     "generator": {
       "model": "kbd-frontier",
-      "source": "/Users/gqadonis/.prometheus/kbd/models.toml"
+      "source": "~/.prometheus/kbd/models.toml"
     }
   },
   "providers_detected": [
@@ -28,8 +28,8 @@
     "frontier"
   ],
   "distinct_models": 2,
-  "config_path": "/Users/gqadonis/.config/liter-llm/liter-llm-proxy.toml",
+  "config_path": "~/.config/liter-llm/liter-llm-proxy.toml",
   "config_exists": true,
   "config_defects": [],
-  "checked_at": "2026-08-09T11:08:23Z"
+  "checked_at": "2026-08-29T03:47:53Z"
 }

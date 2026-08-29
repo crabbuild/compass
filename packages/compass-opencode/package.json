@@ -1,0 +1,24 @@
+{
+  "name": "@compass/opencode-plugin",
+  "version": "0.3.7",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.js",
+  "files": [
+    "src/index.js",
+    "src/index.ts"
+  ],
+  "scripts": {
+    "build": "node scripts/generate.mjs",
+    "check-generated": "node scripts/generate.mjs --check",
+    "typecheck": "npm run check-generated && tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@opencode-ai/plugin": "1.18.25"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

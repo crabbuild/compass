@@ -98,6 +98,8 @@ tools and must not replace normal extraction without a reason.
 
 ## Installation and hooks
 
+- `compass agent`: list, install, diagnose, export, validate, or render MCP
+  configuration for a supported coding-agent integration.
 - `compass install`: install the canonical skill and platform integration.
 - `compass uninstall`: remove managed integrations; `--purge` additionally
   removes Compass output and requires explicit user intent.

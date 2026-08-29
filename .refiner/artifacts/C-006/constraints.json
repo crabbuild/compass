@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-006",
+  "blocking": [
+    {"id":"deliberate-decision","status":"PASS","evidence":"Design compares all three planned policies and records leave with explicit exclusion"},
+    {"id":"compatibility","status":"PASS","evidence":"Default discovery remains unchanged; no migration required"},
+    {"id":"workspace-member","status":"PASS","evidence":"Regression discovers vendor/parser-pack/src/lib.rs under a declared workspace member"},
+    {"id":"go-vendor","status":"PASS","evidence":"Regressions discover and publish non-workspace vendor/go-dependency/tool.go"},
+    {"id":"publication","status":"PASS","evidence":"compass-core build contract publishes both vendor sources by default and omits their file inventory and anchored nodes for every explicit exclusion surface"},
+    {"id":"watcher-parity","status":"PASS","evidence":"WatchPathFilter allows both eligible vendor paths"},
+    {"id":"focused-tests","status":"PASS","evidence":"All compass-files tests pass"},
+    {"id":"workspace-baseline","status":"PASS","evidence":"fmt, workspace lib/bin Clippy, and workspace lib/bin tests pass under --locked"},
+    {"id":"product-boundary","status":"PASS","evidence":"scripts/check_product_boundary.sh passes"},
+    {"id":"graph-refresh","status":"PASS","evidence":"119880 nodes, 281907 edges, 68 pre-existing omitted edges, zero identity collisions"}
+  ]
+}

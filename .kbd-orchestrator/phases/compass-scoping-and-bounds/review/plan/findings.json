@@ -1,0 +1,38 @@
+{
+  "mode": "artifact",
+  "verdict": "BLOCK",
+  "judge_model": "kbd-judge",
+  "producer_model": "claude-fable-5",
+  "isolation_mode": "rest-gateway:http://localhost:8181/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "plan.md",
+      "claim": "The plan does not include a concrete decision point that settles the phase's graph partitioning/sharding architecture question before implementation work begins.",
+      "evidence": "Goals require: \"If a repository of this size genuinely cannot publish under 2 GiB even with correct exclusions, is the right answer graph partitioning/sharding rather than a larger number? Settle this before writing code.\" The plan's only partitioning-related change says: \"It positions for current-graph partitioned publication; it does not deliver it. That is a further change requiring the identity decision below.\" The only blocked decision listed is \"Identity/namespacing for shared record keys,\" not whether partitioning/sharding is the selected architecture.",
+      "suggested_fix": "Add an explicit architecture decision change before C-001/C-003/C-005 implementation work, with acceptance criteria that records partitioning/sharding vs non-partitioning recovery strategy and the implications for the rest of the plan."
+    },
+    {
+      "severity": "WARNING",
+      "file": "plan.md",
+      "claim": "C-004 leaves the required error-message follow-up ambiguous and potentially unassigned.",
+      "evidence": "C-002 says: \"Do not mention `COMPASS_MAX_GRAPH_BYTES` until C-004 ships.\" C-004 then says: \"C-002's message updated to advertise it, in the same change or immediately after.\" The plan has no separate change for the \"immediately after\" path, despite its own adversarial review warning: \"If C-004 slips, C-002's message stays permanently incomplete \u2014 track it rather than assuming the follow-up happens.\"",
+      "suggested_fix": "Make the C-002 message update a required part of C-004 itself, including the CLI regression test update, or add a separate dependent change that cannot be skipped."
+    },
+    {
+      "severity": "WARNING",
+      "file": "plan.md",
+      "claim": "The rmcp dependency pin is internally contradictory because Cargo version string `\"3.1.4\"` is not an exact pin.",
+      "evidence": "C-007 done criteria state: \"Workspace pins `rmcp = \\\"3.1.4\\\"` (exact reviewed pin, root `Cargo.toml`, `{name}.workspace = true` in members).\" In Cargo, `\"3.1.4\"` is a compatible semver requirement, not an exact `=3.1.4` requirement.",
+      "suggested_fix": "Use `rmcp = \"=3.1.4\"` if the intent is an exact reviewed pin, or revise the acceptance criterion to say the lockfile pins the resolved version and the manifest allows compatible updates."
+    },
+    {
+      "severity": "WARNING",
+      "file": "plan.md",
+      "claim": "JavaScript/TypeScript verification is missing from the acceptance criteria for the OpenCode TypeScript/npm plugin work.",
+      "evidence": "C-018 includes \"OpenCode TypeScript/npm plugin (thin bridge; no graph logic in TS).\" The project constraint `js-surface-verified` requires: \"JavaScript, viewer, or VS Code changes typecheck and test\" with command `npm ci && npm run typecheck:js && npm run test:js`. C-018 and C-019 acceptance criteria mention platform validators and lifecycle tests but do not require the JS typecheck/test gate.",
+      "suggested_fix": "Add `npm ci && npm run typecheck:js && npm run test:js` or an equivalent JS-surface verification gate to C-018/C-019."
+    }
+  ]
+}

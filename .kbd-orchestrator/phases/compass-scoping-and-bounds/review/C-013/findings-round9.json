@@ -1,0 +1,43 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "claim": "Unknown keys inside a task's `expected` object are silently ignored by both validate_task and verify_expected, so a misspelled or unsupported expectation (e.g. `firstNodeID`, `containsEdgeIds`) passes validation and is never asserted while the run still reports oracleStatus PASS.",
+      "evidence": "validate_task only type-checks the five known keys via `expected.get(\"status\")`, `expected.get(\"containsNodeIds\", [])`, `expected.get(\"minimumEdgeCount\")`, and `expected.get(key)` for first/lastNodeId, and never rejects unrecognized keys; verify_expected likewise only reads those same keys with defaults. The README states 'the runner applies each contract and fails instead of publishing absent or mismatched oracle evidence', and acceptance task 2.3 requires '30 agent tasks with expected evidence' \u2014 a contract field that is silently dropped violates that fail-closed contract for any task document that is not the pinned file.",
+      "suggested_fix": "In validate_task, reject any key in `expected` outside the supported set {status, containsNodeIds, minimumEdgeCount, firstNodeId, lastNodeId} with a clean exit-2 input error, and add a regression test asserting a task with an unknown expectation key fails closed."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "claim": "An empty `tasks` array produces a vacuously passing result: main enforces only the upper bound `len(tasks) > MAX_TASKS`, so a zero-task document yields `oracleStatus: PASS` with zero verified work.",
+      "evidence": "In main: `if len(tasks) > MAX_TASKS: raise LimitExceeded(...)` with no lower bound, after which the payload hardcodes `\"oracleStatus\": \"PASS\"` regardless of how many tasks executed. The project's bounded-work constraint requires that 'a limit error is a distinct outcome from an empty result'; the current-engine runner only catches this downstream because raw_traversal_summary hardcodes exactly 30 results, but the standalone documented invocation (README 'Run the bounded raw denominator') publishes PASS over an empty denominator.",
+      "suggested_fix": "Reject `len(tasks) == 0` as an input failure (exit 2) in main, and add a regression test covering the empty-tasks document."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "claim": "load_graph silently coerces node/edge identity fields with `str(record.get(\"id\", \"\"))` (and the same for name, qualifiedName, source, target, edge id), so non-string JSON values are accepted and stringified instead of failing closed \u2014 inconsistent with the strict type validation applied to task limits and expected fields elsewhere in the same file.",
+      "evidence": "In load_graph: `node_id = str(record.get(\"id\", \"\"))`, `nodes[node_id] = (str(record.get(\"name\", \"\")), str(record.get(\"qualifiedName\", \"\")))`, and `source = str(record.get(\"source\", \"\"))` / `target = str(...)` / `edge_id = str(...)`. A record with `\"id\": 5` becomes the node \"5\" rather than an input error, unlike e.g. validate_declared_limits which rejects booleans masquerading as integers.",
+      "suggested_fix": "Type-check each field (`isinstance(value, str)` and non-empty) and raise ValueError on non-string node ids, names, qualified names, and edge source/target/id."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "claim": "raw_traversal_summary records the raw-denominator command with a hardcoded `\"python3\"` interpreter even though the measurement was executed with `sys.executable`, so the retained command can name a different interpreter than the one actually measured.",
+      "evidence": "In main the raw workload is launched via `raw_command = (sys.executable, str(raw_script_relative), ...)`, but raw_traversal_summary emits `\"command\": [\"python3\", *command[1:]]`, and the retained current-engine-baseline-v1.json therefore records `\"command\": [\"python3\", ...]`. A reproducer invoking the recorded command literally may resolve `python3` to a different interpreter than the sys.executable used for the measurement; only host.python (the runner's own version) pins what actually ran.",
+      "suggested_fix": "Record the raw command with the interpreter actually used (e.g. keep sys.executable resolved to a version string or record `pythonExecutable` alongside the command), or document in the schema that command[0] is a normalized label whose true version is host.python."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

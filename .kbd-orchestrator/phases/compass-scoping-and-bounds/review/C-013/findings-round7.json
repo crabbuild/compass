@@ -1,0 +1,63 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/README.md",
+      "line": 74,
+      "claim": "The documented baseline-promotion procedure instructs replacing the retained, committed measurement artifact in place, conflicting with the blocking immutable-realizations constraint.",
+      "evidence": "README states: 'Promoting a new retained baseline is a separate dated evidence update: review the fresh samples, replace the retained JSON deliberately, regenerate manifest-v1.json'. The constraints file declares immutable-realizations blocking: 'Published historical realizations are immutable \u2014 never rewritten in place, never silently substituted with a different realization/profile'. current-engine-baseline-v1.json is a committed, manifest-pinned historical measurement; the guidance sanctions overwriting it rather than publishing a new versioned artifact.",
+      "suggested_fix": "Document promotion as adding a new dated, versioned artifact (e.g., current-engine-baseline-v2.json) and extending manifest-v1.json, preserving the prior retained baseline."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 345,
+      "claim": "The search workload is the only query workload without explicit --max-nodes/--max-edges bounds in its retained command, so the frozen comparison surface relies on changeable shipped defaults for that class.",
+      "evidence": "In query_commands, callers/callees/impact-depth-3 all append '--max-nodes', '512', '--max-edges', '1024', while 'search' is only (binary, 'search', 'qualification::Node0099999', *common) with no result bound. Acceptance criterion 2.3 requires 'bounded tool/raw traversal routes', and the design promises bounded pagination is observable; the retained search command records no explicit bound, so a future default change would silently alter the measured condition the baseline is meant to pin.",
+      "suggested_fix": "Pass explicit --max-nodes/--max-edges (or the engine's documented search result limit flag) on the search workload so all retained workload commands state their bounds."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/generate_graph.py",
+      "line": 213,
+      "claim": "Graph materialization writes directly to the final destination path with no atomic publication, so an interrupted or crashed generation leaves a partial graph file visible at the canonical output location.",
+      "evidence": "write_graph does 'with path.open(\"wb\") as stream:' and streams nodes/edges straight into args.output, while the change itself added benchmarks/qualification/io.py atomic_write_text precisely to make evidence publication crash-safe, and the ratified gate table in docs/future/qualification-corpora-baselines.md requires 'No partial generation visible'. A truncated 220MB graph.json in target/ is only detected later if the baseline runner's hash check happens to run.",
+      "suggested_fix": "Stream to a temporary file in the destination directory and os.replace() it into place on success (and fsync the directory on POSIX), reusing the same publication discipline as io.py."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 448,
+      "claim": "The per-query warmup loop bypasses the repository's measured-process helper with a raw subprocess.run, a weaker local variant of the bounded-subprocess primitive the rest of the runner uses.",
+      "evidence": "'for command in commands.values(): subprocess.run(command, cwd=repository_root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=args.timeout_seconds)' \u2014 every other subprocess in this file goes through run_measured/ProcessSpec per the safe-primitives-reused constraint; the warmup's timeout and DEVNULL keep it bounded in effect, but it has no output cap, no timeout-error context, and diverges from the single helper the verification claims for runner subprocesses.",
+      "suggested_fix": "Route the warmup through run_measured (or a shared bounded helper) with explicit stdout/stderr paths and caps, matching the metadata and measurement paths."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 49,
+      "claim": "compressed_size buffers the entire release binary (up to the 512 MiB ceiling) plus its compressed form in memory instead of streaming.",
+      "evidence": "'compressor = gzip.compress(source.read(), compresslevel=9, mtime=0)' after checking size against MAX_BINARY_BYTES. It is technically bounded, but the change's own design decision emphasizes streaming/bounded memory ('holds only bounded record templates and digest state'), and a ~150 MiB binary becomes ~300+ MiB of transient allocations.",
+      "suggested_fix": "Stream through gzip.GzipFile(fileobj=..., mode='wb', compresslevel=9, mtime=0) over a length-counting sink in 1 MiB chunks."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 50,
+      "claim": "The 'deterministic gzip-9' size evidence is only deterministic for a fixed CPython version, because gzip.compress(mtime=0) changed implementation across interpreter releases.",
+      "evidence": "gzip.compress(..., mtime=0) is used for the pinned gzip9Bytes value (25,945,073 in current-engine-baseline-v1.json); CPython 3.13 changed gzip.compress to delegate to zlib.compress when mtime=0, producing a different DEFLATE stream (and potentially different size) than 3.12's GzipFile path. The recorded host pins python 3.12.8, so same-runner reproduction holds, but the artifact reads as a version-independent figure.",
+      "suggested_fix": "Either note in the baseline schema/README that gzip9Bytes is interpreter-version-specific, or use an explicit GzipFile construction whose output is stable across supported Python versions."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

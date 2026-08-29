@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 223,
+      "claim": "Authenticated requests with an invalid Host can bypass the configured allowed-host validation when protocol headers are missing or invalid.",
+      "evidence": "The protocol gate returned before the inner rmcp service's host validation, and the host regression covered only otherwise-valid protocol headers.",
+      "suggested_fix": "Enforce the same allowed-host boundary in the outer gate before protocol handling and add combined authenticated invalid-host plus missing/invalid-protocol tests."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 396,
+      "claim": "The claimed streaming-response boundary is not regression-tested.",
+      "evidence": "The response test covered only bodies with exact size hints, never an unknown-length multi-chunk body crossing the limit.",
+      "suggested_fix": "Add an unknown-length chunked body that crosses the limit and assert bounded delivered bytes plus an explicit stream limit error."
+    },
+    {
+      "severity": "MINOR",
+      "file": "crates/compass-mcp/Cargo.toml",
+      "line": 30,
+      "claim": "The packet adds an apparently unrelated sha2 dev-dependency.",
+      "evidence": "The isolated C-008 packet baseline omitted C-007's discovery-golden dependency even though the live change uses it there.",
+      "suggested_fix": "Correct the synthetic review baseline so C-007's sha2 dependency does not appear as C-008 scope."
+    }
+  ],
+  "checked_classes": [
+    "correctness",
+    "security and authentication ordering",
+    "host validation",
+    "bounded request bodies",
+    "bounded known-size responses",
+    "bounded streaming responses",
+    "protocol compatibility",
+    "negative-case coverage",
+    "CLI compatibility",
+    "documentation",
+    "dependency hygiene",
+    "scope contamination"
+  ]
+}

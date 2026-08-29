@@ -1,0 +1,39 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "gpt-5.6-sol",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "harness-native",
+  "cross_model_check": "fresh-context-same-model-family",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-mcp/tests/protocol_conformance.rs",
+      "line": 34,
+      "claim": "The required stdio gate did not explicitly prove MCP 2026-07-28 negotiation.",
+      "evidence": "The client used the default lifecycle and asserted identity and inventory without asserting the negotiated peer protocol.",
+      "suggested_fix": "Request 2026-07-28 explicitly and assert the negotiated peer protocol before the remaining checks."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 319,
+      "claim": "The Codex harness did not validate or emit the exact client version required by the matrix contract.",
+      "evidence": "The receipt contained client, transport, tool, and evidence but no version, discovery outcome, invocation outcome, or explicit pass status.",
+      "suggested_fix": "Validate the binary version and include exact version plus discovery, invocation, and overall status fields."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/fixtures/mcp-conformance-expected-failures.yaml",
+      "line": 12,
+      "claim": "An identifier-only whitespace-header baseline could mask a future header regression.",
+      "evidence": "The upstream expected-failure format matches only the check identifier.",
+      "suggested_fix": "Cause-gate the expected failure or use valid tool arguments, and retain an end-to-end HTTP regression."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-014",
+  "artifactType": "integration",
+  "contentType": "rust:library",
+  "status": "refined",
+  "sourceArtifacts": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "deny.toml",
+    "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md",
+    "crates/compass-graphdb-surreal",
+    "docs/implementation/surreal-graph-projection.md",
+    "scripts/check_surreal_feature_isolation.sh",
+    "scripts/check_product_boundary.sh",
+    "openspec/changes/archive/2026-08-29-surreal-graph-projection",
+    "openspec/changes/archive/2026-08-29-surreal-graph-projection/shared-file-evidence.md"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

@@ -1,0 +1,7 @@
+Cargo.toml
+Cargo.lock
+crates/compass-mcp/src/lib.rs
+crates/compass-mcp/src/transport.rs
+crates/compass-mcp/tests
+CHANGELOG.md
+openspec/changes/rmcp-3-migration

@@ -62,6 +62,68 @@ A user-visible incompatible change requires:
 Versioned formats use Compass-owned identifiers. Consumers should reject
 unknown major versions instead of attempting legacy fallback behavior.
 
+## Agent Skill compatibility
+
+The portable `compass` Agent Skill remains the canonical compatibility entry
+point and is installed unchanged. Compass also installs six additive sibling
+skills: `compass-navigate`, `compass-debug`, `compass-change-impact`,
+`compass-architecture`, `compass-index-maintenance`, and `compass-mcp-setup`.
+Their lower-kebab directory names match their `SKILL.md` names.
+
+Each skill tree has an independent checksum ownership manifest. Equivalent
+reinstall is idempotent, shared platform consumers are retained until the last
+consumer uninstalls, and unowned or modified trees are preserved. Older clients
+that activate only the `compass` umbrella remain compatible and require no
+migration.
+
+The additive `compass agent` namespace does not replace the installer.
+`compass agent install` delegates its remaining argument vector unchanged to
+`compass install`; equivalent invocations retain byte-identical output, exit
+status, and managed files. Inventory, doctor, bundle, and validation machine
+outputs use explicit `compass.agent-list/1`, `compass.agent-doctor/1`,
+`compass.agent-bundle/1`, and `compass.agent-validation/1` identifiers.
+Unknown major versions must be rejected. Portable exports contain only the
+current seven-skill collection and native MCP configuration; cross-harness
+plugin packages are a separate contract.
+
+## MCP transport compatibility
+
+Both stdio and Streamable HTTP require MCP 2026-07-28. Older protocol revisions
+are rejected rather than negotiated. Current clients begin with
+`server/discover`; subsequent requests carry the protocol's per-request
+metadata. HTTP requests additionally carry `Mcp-Protocol-Version`,
+`Mcp-Method`, and applicable parameter headers, and Compass neither issues nor
+requires `Mcp-Session-Id`.
+
+Compass does not ship a legacy MCP-2025 transport mode. `--stateless` remains an
+accepted compatibility spelling for the HTTP default. `--session-timeout`
+remains accepted in 0.4.x, validates its existing numeric grammar, emits a
+deprecation warning, and is ignored because no HTTP session exists. It is
+scheduled for removal in Compass 0.5.0. The warning does not change success,
+usage-error, or runtime-error exit codes.
+
+## MCP structured result compatibility
+
+`search_symbols`, `get_callers`, `get_callees`, and `get_impact` advertise a
+closed output schema and return `compass.code_context.v1`. The envelope carries
+repository and generation identity, evidence-scoped freshness, evidence and
+confidence summaries, truncation state, and warnings. Its `data` field is the
+unchanged `compass.query/1` response. MCP `resultType: "complete"` remains the
+protocol-level discriminator and is not overloaded with a Compass schema name.
+Strict `compass.graph/1` validation requires non-empty `sourceTreeDigest` and
+`generationId` build identities, so a successful envelope always satisfies its
+advertised non-empty identity fields.
+
+This top-level shape is compatibility-sensitive. Consumers must reject an
+unknown `compass.code_context` major version and must not infer freshness when
+the envelope reports `unknown`. Other typed and legacy text tools retain their
+existing result shapes until separately versioned. The text-result tools
+`get_neighbors`, `get_community`, `god_nodes`, `graph_stats`, `shortest_path`,
+`list_prs`, `get_pr_impact`, and `triage_prs`, plus explicit traversal text mode
+on `query_graph`, are deprecated from 0.4.0. They remain callable with unchanged
+names and output; no removal release is scheduled before typed replacements
+ship and receive a separate compatibility review.
+
 The release workflow publishes `compass-release.json` with schema
 `compass.release/1`. `compass upgrade` retrieves that bounded static manifest
 through the GitHub release-download path, requires one exact artifact for each

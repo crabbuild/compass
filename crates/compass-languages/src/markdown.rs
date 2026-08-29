@@ -328,10 +328,13 @@ impl State<'_, '_> {
                 .to_owned(),
             ),
         );
-        extra.insert(
-            "anchor_slug".to_owned(),
-            Value::String(slugify(explicit_id.as_deref().unwrap_or(title))),
-        );
+        let anchor_slug = slugify(explicit_id.as_deref().unwrap_or(title));
+        extra.insert("anchor_slug".to_owned(), Value::String(anchor_slug.clone()));
+        // A fragment URI is the typed marker that this document resource is a
+        // semantic heading rather than an arbitrary repeated block. The v1
+        // identity layer can therefore use its hierarchical qualified name
+        // and remain stable when prose is inserted before the heading.
+        extra.insert("uri".to_owned(), Value::String(format!("#{anchor_slug}")));
         if let Some(explicit_id) = explicit_id.as_deref() {
             extra.insert(
                 "explicit_id".to_owned(),

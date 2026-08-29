@@ -15,6 +15,19 @@ const HTTP_METHODS: &[&str] = &[
     "get", "post", "put", "patch", "delete", "options", "head", "all",
 ];
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ImportAlias {
+    local: String,
+    imported: String,
+    module: String,
+    start_byte: u64,
+    end_byte: u64,
+    start_line: u64,
+    start_column: u64,
+    end_line: u64,
+    end_column: u64,
+}
+
 pub(super) fn detect_express(
     path: &Path,
     source: &[u8],
@@ -29,10 +42,10 @@ pub(super) fn detect_express(
     collect_import_aliases(root, source, &mut imports);
     attach_import_aliases(path, source, root, extraction, &imports);
     let imports_module = |expected: &str| {
-        imports.iter().any(|(_, _, module, _)| {
-            module == expected
-                || (expected.ends_with('/') && module.starts_with(expected))
-                || (expected == "react-router" && module.starts_with("react-router-"))
+        imports.iter().any(|import| {
+            import.module == expected
+                || (expected.ends_with('/') && import.module.starts_with(expected))
+                || (expected == "react-router" && import.module.starts_with("react-router-"))
         })
     };
     let mut facts = Vec::new();
@@ -140,9 +153,9 @@ fn detect_node_router(
     collect_import_aliases(root, source, &mut imports);
     attach_import_aliases(path, source, root, extraction, &imports);
     let module = kind.module();
-    let imported = imports.iter().any(|(_, _, imported_module, _)| {
-        imported_module == module || imported_module.starts_with(&format!("{module}/"))
-    });
+    let imported = imports
+        .iter()
+        .any(|import| import.module == module || import.module.starts_with(&format!("{module}/")));
     let direct = imported || source_has_module_require(root, source, module);
     if !direct {
         return Vec::new();
@@ -160,16 +173,17 @@ fn detect_node_router(
 fn node_router_receivers(
     root: Node<'_>,
     source: &[u8],
-    imports: &[(String, String, String, u64)],
+    imports: &[ImportAlias],
     kind: NodeRouterKind,
 ) -> HashSet<String> {
     let constructors = imports
         .iter()
-        .filter(|(_, imported, module, _)| {
-            (module == kind.module() || module.starts_with(&format!("{}/", kind.module())))
-                && kind.constructor_import(imported)
+        .filter(|import| {
+            (import.module == kind.module()
+                || import.module.starts_with(&format!("{}/", kind.module())))
+                && kind.constructor_import(&import.imported)
         })
-        .map(|(local, _, _, _)| local.clone())
+        .map(|import| import.local.clone())
         .collect::<HashSet<_>>();
     let body = std::str::from_utf8(source).unwrap_or_default();
     let mut receivers = HashSet::new();
@@ -648,10 +662,10 @@ pub(super) fn detect_non_express(
     collect_import_aliases(root, source, &mut imports);
     attach_import_aliases(path, source, root, extraction, &imports);
     let imports_module = |expected: &str| {
-        imports.iter().any(|(_, _, module, _)| {
-            module == expected
-                || (expected.ends_with('/') && module.starts_with(expected))
-                || (expected == "react-router" && module.starts_with("react-router-"))
+        imports.iter().any(|import| {
+            import.module == expected
+                || (expected.ends_with('/') && import.module.starts_with(expected))
+                || (expected == "react-router" && import.module.starts_with("react-router-"))
         })
     };
     let mut facts = Vec::new();
@@ -691,14 +705,25 @@ fn attach_import_aliases(
     source: &[u8],
     root: Node<'_>,
     extraction: &mut Extraction,
-    aliases: &[(String, String, String, u64)],
+    aliases: &[ImportAlias],
 ) {
     attach_default_export_identities(path, source, root, extraction);
     let mut aliases = aliases.to_vec();
     aliases.sort();
     aliases.dedup();
     let source_file = path.to_string_lossy().into_owned();
-    for (local, imported, module, line) in aliases {
+    for alias in aliases {
+        let ImportAlias {
+            local,
+            imported,
+            module,
+            start_byte,
+            end_byte,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        } = alias;
         if extraction.nodes.iter().any(|node| {
             node.attributes.get("local_name").and_then(Value::as_str) == Some(local.as_str())
                 && node.attributes.get("imported_name").and_then(Value::as_str)
@@ -720,9 +745,16 @@ fn attach_import_aliases(
                 ("imported_name".into(), Value::String(imported)),
                 ("module".into(), Value::String(module)),
                 ("source_file".into(), Value::String(source_file.clone())),
-                ("source_location".into(), Value::String(format!("L{line}"))),
-                ("line_start".into(), Value::from(line)),
-                ("line_end".into(), Value::from(line)),
+                (
+                    "source_location".into(),
+                    Value::String(format!("L{start_line}")),
+                ),
+                ("start_byte".into(), Value::from(start_byte)),
+                ("end_byte".into(), Value::from(end_byte)),
+                ("line_start".into(), Value::from(start_line)),
+                ("line_end".into(), Value::from(end_line)),
+                ("column_start".into(), Value::from(start_column)),
+                ("column_end".into(), Value::from(end_column)),
                 ("file_type".into(), Value::String("code".into())),
                 ("language".into(), Value::String("typescript".into())),
                 ("_origin".into(), Value::String("ast".into())),
@@ -791,19 +823,26 @@ fn collect_default_export_identities(
     }
 }
 
-fn collect_import_aliases(
-    node: Node<'_>,
-    source: &[u8],
-    aliases: &mut Vec<(String, String, String, u64)>,
-) {
+fn collect_import_aliases(node: Node<'_>, source: &[u8], aliases: &mut Vec<ImportAlias>) {
     if node.kind() == "import_statement" {
         let text = node_text(node, source);
         if let Some(module) = import_module(text) {
-            let line = u64::try_from(node.start_position().row + 1).unwrap_or(u64::MAX);
+            let start = node.start_position();
+            let end = node.end_position();
             aliases.extend(
                 parse_import_bindings(text)
                     .into_iter()
-                    .map(|(local, imported)| (local, imported, module.clone(), line)),
+                    .map(|(local, imported)| ImportAlias {
+                        local,
+                        imported,
+                        module: module.clone(),
+                        start_byte: u64::try_from(node.start_byte()).unwrap_or(u64::MAX),
+                        end_byte: u64::try_from(node.end_byte()).unwrap_or(u64::MAX),
+                        start_line: u64::try_from(start.row + 1).unwrap_or(u64::MAX),
+                        start_column: u64::try_from(start.column).unwrap_or(u64::MAX),
+                        end_line: u64::try_from(end.row + 1).unwrap_or(u64::MAX),
+                        end_column: u64::try_from(end.column).unwrap_or(u64::MAX),
+                    }),
             );
         }
         return;

@@ -1,0 +1,50 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 268,
+      "claim": "The outer host gate is not exactly equivalent to effective-authority validation.",
+      "disposition": "REJECTED",
+      "evidence": "rmcp 3.1.4 parse_host_header explicitly prefers Host over URI authority, and host_is_allowed explicitly lets a portless allowlist entry match every port. Compass mirrors both rules; focused regressions now document them."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 703,
+      "claim": "An obsolete Mcp-Session-Id must be rejected rather than ignored.",
+      "disposition": "REJECTED",
+      "evidence": "The accepted scenario requires no session creation or restoration, not rejection of an otherwise-current request. The spec now states explicitly that initialize is rejected while an obsolete header is ignored without state."
+    },
+    {
+      "severity": "MINOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 730,
+      "claim": "The host/security ordering matrix lacks malformed, missing, and invalid-auth combinations.",
+      "disposition": "FIXED"
+    },
+    {
+      "severity": "MINOR",
+      "file": "Cargo.toml",
+      "line": 122,
+      "claim": "The channel feature is enabled for production despite test-only use.",
+      "disposition": "FIXED"
+    },
+    {
+      "severity": "MINOR",
+      "file": "CHANGELOG.md",
+      "line": 9,
+      "claim": "The Unreleased changelog contains contradictory HTTP session claims.",
+      "disposition": "FIXED"
+    }
+  ],
+  "checked_classes": [
+    "authentication and host ordering",
+    "rmcp allowed-host equivalence",
+    "bounded HTTP bodies",
+    "stateless session semantics",
+    "raw-wire negative coverage",
+    "dependency hygiene",
+    "release documentation"
+  ]
+}

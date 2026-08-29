@@ -1,14 +1,56 @@
 use std::error::Error;
 use std::fs::{self, OpenOptions};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use compass_core::{BuildOptions, build_local_graph};
+use compass_core::{
+    BuildOptions, CoreError, build_graph_with_layers_and_progress, build_local_graph,
+};
+use compass_files::{DetectOptions, detect};
+use compass_graph::{MAX_CANONICAL_GRAPH_BYTES, SnapshotError};
 use compass_model::code_graph::{CoverageStatus, ExtractionStatus, GraphDocument};
 
 const SOURCE_FILES: usize = 300;
 const OVERSIZED_SOURCE_BYTES: u64 = 8 * 1024 * 1024;
 const COLD_CEILING: Duration = Duration::from_secs(60);
 const WARM_CEILING: Duration = Duration::from_secs(10);
+const PREFLIGHT_FIXTURE_BYTES: u64 = 40 * 1024 * 1024;
+const PREFLIGHT_CEILING: Duration = Duration::from_millis(322);
+
+#[test]
+fn oversized_estimate_fails_before_extraction_progress() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(directory.path().join("estimated_oversized.rs"))?
+        .set_len(PREFLIGHT_FIXTURE_BYTES)?;
+
+    let mut options = BuildOptions::new(directory.path());
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_source_bytes = 64 * 1024 * 1024;
+    options.precomputed_detection = Some(detect(directory.path(), &DetectOptions::default())?);
+    let progressed = AtomicUsize::new(0);
+    let started = Instant::now();
+    let Err(error) = build_graph_with_layers_and_progress(&options, None, &[], &|_| {
+        progressed.fetch_add(1, Ordering::Relaxed);
+    }) else {
+        return Err("calibrated preflight fixture did not exceed the graph bound".into());
+    };
+    let elapsed = started.elapsed();
+
+    assert!(matches!(
+        error,
+        CoreError::Snapshot(SnapshotError::Limit(_))
+    ));
+    assert_eq!(progressed.load(Ordering::Relaxed), 0);
+    assert!(error.to_string().contains("--exclude <pattern>"));
+    assert!(error.to_string().contains(".compassignore"));
+    assert!(elapsed < PREFLIGHT_CEILING);
+    assert_eq!(MAX_CANONICAL_GRAPH_BYTES, 2 * 1024 * 1024 * 1024);
+    Ok(())
+}
 
 #[test]
 fn cold_and_warm_in_process_builds_stay_within_enterprise_ceiling() -> Result<(), Box<dyn Error>> {

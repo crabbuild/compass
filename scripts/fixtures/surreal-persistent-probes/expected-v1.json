@@ -1,0 +1,30 @@
+{
+  "schema": "compass.surreal-persistent-probe-expected/1",
+  "activeBeforeCrash": "g-0001",
+  "activeAfterCrash": "g-0001",
+  "activeAfterActivation": "g-0002",
+  "baseRelationIds": [
+    "edge-parallel-0001",
+    "edge-parallel-0002",
+    "edge-reverse-0001"
+  ],
+  "directedParallelPair": {
+    "count": 2,
+    "from": "node-alpha",
+    "to": "node-beta"
+  },
+  "pageCount": 17,
+  "pageSize": 128,
+  "relationCount": 2051,
+  "expandedRelationsCanonicalization": "UTF-8 compact JSON array, records sorted by id, object keys sorted lexicographically",
+  "expandedRelationsSha256": "749489773e9e0329852a9e025222722af46f68bb1cfb3f4c647e17cdff9b2261",
+  "orderedIdsCanonicalization": "UTF-8 stable relation IDs sorted lexicographically and joined by LF with no trailing LF",
+  "orderedIdsSha256": "8d95d3971f96e27f5e2f1dcfc0a1f1fba900dd958e3bb4fbadff43346bb160d3",
+  "postCrash": {
+    "activeGeneration": "g-0001",
+    "orderedIdsSha256": "8d95d3971f96e27f5e2f1dcfc0a1f1fba900dd958e3bb4fbadff43346bb160d3",
+    "relationCount": 2051
+  },
+  "scaleFirstId": "edge-scale-000000",
+  "scaleLastId": "edge-scale-002047"
+}

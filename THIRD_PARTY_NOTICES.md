@@ -1,5 +1,21 @@
 # Third-party notices
 
+## Optional SurrealDB 3.2.4 integration
+
+The non-default `mem`, `surrealkv`, and `rocksdb` features of
+`compass-graphdb-surreal` resolve SurrealDB 3.2.4 and its core components.
+Those components are licensed under Business Source License 1.1 before
+conversion, with SurrealDB Ltd. as licensor, a Database Service restriction,
+Change Date 2030-01-01, and Apache License 2.0 as the Change License.
+
+Surreal-enabled artifacts must preserve the applicable exact license and
+notices and comply with its redistribution terms. The reviewed tagged license
+is retained at
+`scripts/fixtures/surreal-persistent-probes/SURREALDB-3.2.4-LICENSE.txt`; its
+SHA-256 is
+`98a94ac615f88370865016487b436fa404560910bd329794ed7502277a94b805`.
+The default Compass binary does not link these components.
+
 ## openCypher Technology Compatibility Kit feature files
 
 Compass includes selected unmodified Gherkin feature files from the

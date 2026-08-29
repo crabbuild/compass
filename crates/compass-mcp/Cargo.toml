@@ -13,6 +13,7 @@ categories.workspace = true
 
 [dependencies]
 axum.workspace = true
+http-body-util.workspace = true
 rmcp.workspace = true
 serde_json.workspace = true
 time.workspace = true
@@ -27,7 +28,9 @@ compass-prs = { path = "../compass-prs", version = "0.3.7" }
 compass-query = { path = "../compass-query", version = "0.3.7" }
 
 [dev-dependencies]
+http-body-util = { workspace = true, features = ["channel"] }
 rmcp = { workspace = true, features = ["client"] }
+sha2.workspace = true
 tempfile.workspace = true
 
 [lints]

@@ -1,0 +1,12 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "claim": "Immutable store metadata could still bypass strict graph identity validation and yield schema-invalid envelopes.",
+      "resolution": "FIXED: one shared compass-model identity validator now guards strict graphs, GraphSnapshotReader metadata summaries, and CodeQueryEngine metadata for every backend. A low-level immutable-store regression constructs empty metadata identities and proves the store reader rejects them."
+    }
+  ],
+  "checked_classes": [
+    "shared JSON and immutable-store build identity validation"
+  ]
+}

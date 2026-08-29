@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-019",
+  "blocking": [
+    {
+      "id": "installed-artifact-only",
+      "status": "PASS",
+      "evidence": "Lifecycle qualification exports a package and exercises the installed artifact without reading source templates"
+    },
+    {
+      "id": "named-current-harnesses",
+      "status": "PASS",
+      "evidence": "Codex 0.146.0, Claude Code 2.1.251, and OpenCode 1.18.23 are matched against the exact distribution inventory"
+    },
+    {
+      "id": "complete-lifecycle",
+      "status": "PASS",
+      "evidence": "Isolated discovery, skill loading, MCP configuration, upgrade, and uninstall pass for all three harnesses"
+    },
+    {
+      "id": "ownership-preservation",
+      "status": "PASS",
+      "evidence": "User-owned sentinel instructions and unrelated package state remain byte-identical across install, upgrade, and uninstall"
+    },
+    {
+      "id": "bounded-secret-free-evidence",
+      "status": "PASS",
+      "evidence": "Temporary roots, local credential-free MCP fixtures, bounded logs, redaction checks, and deterministic cleanup prevent external credentials or source-state dependence"
+    },
+    {
+      "id": "ci-and-phase-gates",
+      "status": "PASS",
+      "evidence": "CI runs installed lifecycle and OpenCode integration gates after production implementation; the local lifecycle, npm, workspace integration, formatting, Clippy, viewer, product, and strict OpenSpec gates passed"
+    }
+  ]
+}

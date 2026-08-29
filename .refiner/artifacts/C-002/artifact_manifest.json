@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-002",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "crates/compass-graph/src/lib.rs",
+    "crates/compass-graph/src/snapshot.rs",
+    "crates/compass-cli/tests/snapshot_limit_cli.rs",
+    "CHANGELOG.md",
+    "openspec/changes/actionable-snapshot-limit-error/proposal.md",
+    "openspec/changes/actionable-snapshot-limit-error/design.md",
+    "openspec/changes/actionable-snapshot-limit-error/specs/snapshot-publication-errors/spec.md",
+    "openspec/changes/actionable-snapshot-limit-error/tasks.md",
+    "openspec/changes/actionable-snapshot-limit-error/files.txt",
+    "openspec/changes/actionable-snapshot-limit-error/verification.md"
+  ],
+  "distFiles": [
+    "qa-receipt.md"
+  ],
+  "validatedAt": "2026-08-28T14:48:58Z"
+}

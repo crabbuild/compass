@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-003",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "crates/compass-core/src/pipeline.rs",
+    "crates/compass-core/tests/pipeline_scale.rs",
+    "crates/compass-graph/src/lib.rs",
+    "crates/compass-graph/src/snapshot.rs",
+    "CHANGELOG.md",
+    "openspec/changes/preflight-graph-size-estimate"
+  ],
+  "distFiles": ["qa-receipt.md"],
+  "validatedAt": "2026-08-28T16:20:00Z"
+}

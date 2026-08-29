@@ -1,0 +1,61 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 104,
+      "claim": "On its own timeout path the workspace-patch capture raises RuntimeError, which is not in the except tuple, so the git child is never killed and its stdout pipe is never closed; additionally, if git stalls while producing no output, the blocking stdout.read(1MB) never returns and PATCH_TIMEOUT_SECONDS is never enforced at all.",
+      "evidence": "workspace_patch_metadata: `raise RuntimeError(\"workspace patch capture timed out\")` inside the try, but `except (OSError, subprocess.TimeoutExpired, ValueError)` excludes RuntimeError, skipping the `process.kill()`/`process.wait()` cleanup; the deadline is only checked after `process.stdout.read(1024 * 1024)` returns, which blocks indefinitely on a silent stalled child. Constraint `bounded-work`: 'All work over ... subprocess output remains bounded.'",
+      "suggested_fix": "Include RuntimeError in the cleanup except clause (or use try/finally with kill/close), and enforce the deadline via process.communicate(timeout=...) or select-based non-blocking reads rather than post-hoc checks around a blocking read."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 232,
+      "claim": "Several subprocess invocations capture unbounded output with no timeout \u2014 `git rev-parse HEAD`, `binary --version`, `rustc --version`, and `cargo --version` all use subprocess.check_output without timeout=, unlike the measured workloads that go through the bounded ProcessSpec/run_measured helper.",
+      "evidence": "`version = subprocess.check_output([str(binary), \"--version\"], text=True).strip()`, `git_head = subprocess.check_output([\"git\", \"rev-parse\", \"HEAD\"], ...)`, and the host block's `subprocess.check_output([\"rustc\", \"--version\"], ...)` / `[\"cargo\", \"--version\"]` \u2014 none pass timeout or bound captured output. Constraint `bounded-work` covers 'subprocess output'; constraint `safe-primitives-reused` says existing bounded subprocess helpers are reused 'rather than reimplemented as weaker local variants'.",
+      "suggested_fix": "Pass an explicit timeout (e.g., reuse args.timeout_seconds or a small fixed bound) to every check_output call, or route them through the existing measured/bounded process helper."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/README.md",
+      "line": 48,
+      "claim": "The documented reproduction command cannot reproduce the retained baseline artifact: the README uses `--work-dir target/qualification-c013/run` and `--output target/qualification-c013/current-engine-baseline-v1.json`, but the retained baseline embeds cache paths under `target/qualification-c013/run-fixed/query-cache` and the artifact actually lives at `benchmarks/qualification/current-engine-baseline-v1.json`; the README never documents the real invocation or how to diff a fresh run against the retained file.",
+      "evidence": "README reproduction block: `--work-dir target/qualification-c013/run`; retained current-engine-baseline-v1.json workload commands contain `target/qualification-c013/run-fixed/query-cache`. Acceptance criterion 3.1 requires the baseline to be built and measured 'reproducibly'.",
+      "suggested_fix": "Document the exact invocation used to produce the retained artifact (including the run-fixed work dir and the copy step from target/ into benchmarks/qualification/), or regenerate the retained baseline using the documented command so the two match."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/scale-profile-digests-v1.json",
+      "claim": "No committed regression test regenerates the medium/large metadata-only node/edge digests and compares them to the pinned values, so the 'exact pinned digests' backing criterion 2.1 are enforced only by a one-time manual run recorded in verification.md and can silently drift if the generator or profiles change.",
+      "evidence": "tests/test_generate_graph.py asserts counts, plan determinism, small-profile byte determinism, and invalid-profile failures but never runs `--profile qualification-medium|qualification-large --metadata-only` against scale-profile-digests-v1.json; tests/test_corpora.py only verifies the manifest's checksum of the digest file itself. Verification evidence states: 'Full metadata-only generation for both profiles: exact pinned node/edge counts and SHA-256 digests matched' \u2014 a manual step, not a suite check. Constraint `regression-test-present`: 'Behavior changes require a regression test at the lowest useful layer.'",
+      "suggested_fix": "Add a test that runs generation_metadata(complete=True) for both pinned profiles (or the documented --metadata-only CLI) and asserts equality with scale-profile-digests-v1.json."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/generate_graph.py",
+      "line": 217,
+      "claim": "The emitted compass.graph/1 file record fabricates a constant contentDigest that is identical for every profile while byteSize varies, so the digest is not a digest of any actual content and misrepresents the file identity in the generated graph contract.",
+      "evidence": "In write_graph: `\"byteSize\": file_size` (max(nodes, edges) + 1, differing per profile) paired with `\"contentDigest\": _stable_id(\"qualification\", (\"generated-source\",))` \u2014 a fixed value independent of profile, nodes, or edges.",
+      "suggested_fix": "Derive contentDigest from the profile identity (e.g., include name/nodes/edges in the stable-ID inputs) or rename/annotate the field so consumers know it is a synthetic marker, not a content hash."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/semantic-corpus-v1.json",
+      "claim": "The descriptor's `counts` block (edgeProducers 28, flows 27, negativeCases 24, nodeProducers 45) is asserted by no test, so these claimed corpus dimensions are unverified metadata that can become stale without any failure.",
+      "evidence": "tests/test_corpora.py::test_semantic_sources_match_pinned_digests verifies only the two source SHA-256 values and the presence of 'parallel_multiplicity'/'pagination' in requiredDimensions; nothing checks `counts` against the pinned sources.",
+      "suggested_fix": "Either extend the semantic test to recount producers/flows/negative cases from the pinned sources and compare against `counts`, or drop the unverified counts from the descriptor."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

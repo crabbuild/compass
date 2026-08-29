@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-005",
+  "blocking": [
+    {"id":"storage-neutral-dependencies","status":"PASS","evidence":"cargo tree reaches only serde_json and thiserror; forbidden dependency grep is empty"},
+    {"id":"no-graph-transitive-dependency","status":"PASS","evidence":"cargo tree -p compass-graph contains no compass-partition"},
+    {"id":"byte-compatibility","status":"PASS","evidence":"new golden vectors and unchanged compass-history canonical, diff, and round-trip suites pass"},
+    {"id":"typed-errors","status":"PASS","evidence":"PartitionError is owned by compass-partition and converted through HistoryError::Partition"},
+    {"id":"workspace-member","status":"PASS","evidence":"workspace metadata and dependency-first publication inventory include compass-partition"},
+    {"id":"focused-quality","status":"PASS","evidence":"compass-partition and full compass-history tests plus affected all-target all-feature Clippy pass"},
+    {"id":"workspace-baseline","status":"PASS","evidence":"fmt, workspace Clippy, and workspace lib/bin tests pass under --locked"},
+    {"id":"package-contract","status":"PASS","evidence":"cargo package -p compass-partition --locked --allow-dirty --no-verify succeeds"},
+    {"id":"product-boundary","status":"PASS","evidence":"scripts/check_product_boundary.sh passes"},
+    {"id":"graph-refresh","status":"PASS","evidence":"119876 nodes, 281866 edges, 68 pre-existing omitted edges, zero identity collisions"}
+  ]
+}

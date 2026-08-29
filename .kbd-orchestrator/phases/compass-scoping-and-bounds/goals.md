@@ -39,3 +39,34 @@ than a larger number? Settle this before writing code.
 - Building a scoping feature (already exists).
 - Raising the 2 GiB default. AGENTS.md requires bounded work and states a limit
   error is a distinct outcome from an empty result.
+
+## Expanded scope (2026-08-28, user decision)
+
+The phase scope was expanded by user directive on 2026-08-28 to include
+implementing the `docs/future/` program in this phase. This supersedes the
+notes' own advice to run it as a separate phase; the conflict is recorded in
+`assessment.md` §2.
+
+- **E1** — Migrate `compass-mcp` to MCP 2026-07-28 on `rmcp` 3.1.4: stateless
+  discovery, typed result envelope, deterministic tool ordering, session-flag
+  deprecation, stdio+HTTP conformance, named-harness interop.
+- **E2** — Decision gates before any SurrealDB code merges: BSL 1.1
+  license/release acceptance for the exact artifact profile; persistent
+  SurrealKV + RocksDB throwaway probes (parallel directed relations, stable IDs,
+  provenance, generation-scoped reads, kill-during-write recovery).
+- **E3** — `compass-graphdb-surreal` graph projection adapter: schemafull
+  nodes/relations, generation activation, bounded native reads, dual-engine
+  semantic equivalence.
+- **E4** — `compass-store-surreal` Store adapter (optional, last; only if an
+  independent user problem justifies it).
+- **E5** — Skills split (6 focused skills, umbrella preserved) + `compass agent`
+  CLI namespace (list/install/doctor/export/validate/mcp-config).
+- **E6** — Native harness packages (Codex `.codex-plugin`, Claude
+  `.claude-plugin` + marketplace, OpenCode plugin/npm) generated from one
+  canonical inventory.
+- **E7** — Measurement prerequisites: golden answers, scale fixtures, 30-task
+  suite, baselines; numeric budgets ratified before measurements are visible.
+
+Original non-goals stand: no scoping feature, no raising the 2 GiB default.
+Additional non-goals from the notes: no Prometheus runtime dependency, no
+default-path SurrealDB, no raw write-capable SurrealQL tool by default.

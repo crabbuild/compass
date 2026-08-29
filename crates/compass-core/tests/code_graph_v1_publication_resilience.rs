@@ -306,19 +306,17 @@ fn typescript_type_star_reexport_keeps_barrel_file_exact() -> Result<(), Box<dyn
         .find(|file| file.path == "src/index.ts")
         .ok_or("missing TypeScript barrel input")?;
     assert_eq!(barrel.extraction_status, ExtractionStatus::Extracted);
-    assert_eq!(
-        graph
-            .links
-            .iter()
-            .filter(|edge| {
-                edge.kind.as_str() == "exports"
-                    && edge.relationship_site.as_ref().is_some_and(|site| {
-                        site.file == "src/index.ts" && matches!(site.start_line, 1 | 2)
-                    })
-            })
-            .count(),
-        2
-    );
+    let barrel_exports = graph
+        .links
+        .iter()
+        .filter(|edge| {
+            edge.kind.as_str() == "exports"
+                && edge.relationship_site.as_ref().is_some_and(|site| {
+                    site.file == "src/index.ts" && matches!(site.start_line, 1 | 2)
+                })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(barrel_exports.len(), 2, "{barrel_exports:#?}");
     Ok(())
 }
 

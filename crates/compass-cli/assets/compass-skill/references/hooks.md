@@ -6,6 +6,8 @@ registration.
 ## Install the Compass skill
 
 ```bash
+compass agent list
+compass agent install --platform codex --project
 compass install --platform codex --project
 compass install --platform PLATFORM
 compass PLATFORM install --project
@@ -28,7 +30,9 @@ use the platform name reported by `compass install --help`; do not infer a
 destination directory and copy files by hand.
 
 Direct platform syntax, such as `compass codex install`, and
-`compass install --platform codex` install the same canonical skill but may also
+`compass install --platform codex` install the same canonical skill. The
+`compass agent install --platform codex` namespace delegates to that managed
+installer without changing its arguments or output. Direct platform syntax may also
 wire platform-specific instructions or hooks. `--project` is not supported
 identically by every host, so inspect the command result and report the concrete
 files it names.

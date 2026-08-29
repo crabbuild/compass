@@ -1,0 +1,481 @@
+{
+  "binary": {
+    "buildCommand": "cargo build -p compass-cli --release --locked",
+    "bytes": 146726928,
+    "gzip9Bytes": 25945073,
+    "path": "target/release/compass",
+    "sha256": "b0f5bd6d1e052e702e7ea9bb0d821b64f79deb8759a3360f9228b0f19e432c2a",
+    "version": "compass 0.3.7"
+  },
+  "graph": {
+    "bytes": 220023199,
+    "edges": 250000,
+    "nodes": 100000,
+    "path": "target/qualification-c013/medium/graph.json",
+    "profile": "qualification-medium",
+    "sha256": "aca4e6a1a836780f4baa352c37469787be9815db19f8bf48e858cc87eeb4f054"
+  },
+  "host": {
+    "architecture": "arm64",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "operatingSystem": "macOS-26.7-arm64-arm-64bit",
+    "python": "3.12.8",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "zlib": "1.2.12"
+  },
+  "measurement": {
+    "condition": "separate CLI processes after one unmeasured cache warmup per query; cold-start is --version",
+    "p95Method": "nearest-rank",
+    "pathBound": "the legacy path command has no depth flag; the selected deterministic endpoints have an exact three-hop shortest path, the graph is capped at 100000 nodes/250000 edges/268435456 bytes, and the subprocess has an explicit timeout",
+    "samplesPerWorkload": 5,
+    "workloads": {
+      "callees": {
+        "command": [
+          "target/release/compass",
+          "callees",
+          "qualification::Node0000000",
+          "--graph",
+          "target/qualification-c013/medium/graph.json",
+          "--cache",
+          "target/qualification-c013/run-final11/query-cache",
+          "--engine",
+          "json",
+          "--format",
+          "json",
+          "--max-nodes",
+          "512",
+          "--max-edges",
+          "1024"
+        ],
+        "maximumPeakRssBytes": 897449984,
+        "p95WallMicroseconds": 11374780,
+        "samples": [
+          {
+            "iteration": 1,
+            "peakRssBytes": 897204224,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "386a95d1c6fabdd332173c8cfc9341cf45aff0da92879766372784974a712037",
+            "systemMicroseconds": 3979114,
+            "userMicroseconds": 6877559,
+            "wallMicroseconds": 11374780
+          },
+          {
+            "iteration": 2,
+            "peakRssBytes": 897105920,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "386a95d1c6fabdd332173c8cfc9341cf45aff0da92879766372784974a712037",
+            "systemMicroseconds": 3802237,
+            "userMicroseconds": 6836380,
+            "wallMicroseconds": 10758559
+          },
+          {
+            "iteration": 3,
+            "peakRssBytes": 897073152,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "386a95d1c6fabdd332173c8cfc9341cf45aff0da92879766372784974a712037",
+            "systemMicroseconds": 3893896,
+            "userMicroseconds": 6848335,
+            "wallMicroseconds": 10966376
+          },
+          {
+            "iteration": 4,
+            "peakRssBytes": 897449984,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "386a95d1c6fabdd332173c8cfc9341cf45aff0da92879766372784974a712037",
+            "systemMicroseconds": 3812524,
+            "userMicroseconds": 6794614,
+            "wallMicroseconds": 10779300
+          },
+          {
+            "iteration": 5,
+            "peakRssBytes": 897040384,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "386a95d1c6fabdd332173c8cfc9341cf45aff0da92879766372784974a712037",
+            "systemMicroseconds": 3848105,
+            "userMicroseconds": 6862297,
+            "wallMicroseconds": 10823158
+          }
+        ]
+      },
+      "callers": {
+        "command": [
+          "target/release/compass",
+          "callers",
+          "qualification::Node0099999",
+          "--graph",
+          "target/qualification-c013/medium/graph.json",
+          "--cache",
+          "target/qualification-c013/run-final11/query-cache",
+          "--engine",
+          "json",
+          "--format",
+          "json",
+          "--max-nodes",
+          "512",
+          "--max-edges",
+          "1024"
+        ],
+        "maximumPeakRssBytes": 897433600,
+        "p95WallMicroseconds": 11360993,
+        "samples": [
+          {
+            "iteration": 1,
+            "peakRssBytes": 897400832,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "b06dc3eb69e942fb436734dbd5fffd3ba273cf05197e7b0000de4f3abb9ea4c8",
+            "systemMicroseconds": 3967178,
+            "userMicroseconds": 6905359,
+            "wallMicroseconds": 11360993
+          },
+          {
+            "iteration": 2,
+            "peakRssBytes": 897236992,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "b06dc3eb69e942fb436734dbd5fffd3ba273cf05197e7b0000de4f3abb9ea4c8",
+            "systemMicroseconds": 3893752,
+            "userMicroseconds": 6836360,
+            "wallMicroseconds": 10939130
+          },
+          {
+            "iteration": 3,
+            "peakRssBytes": 897433600,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "b06dc3eb69e942fb436734dbd5fffd3ba273cf05197e7b0000de4f3abb9ea4c8",
+            "systemMicroseconds": 3844462,
+            "userMicroseconds": 6847208,
+            "wallMicroseconds": 10788777
+          },
+          {
+            "iteration": 4,
+            "peakRssBytes": 897302528,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "b06dc3eb69e942fb436734dbd5fffd3ba273cf05197e7b0000de4f3abb9ea4c8",
+            "systemMicroseconds": 3986471,
+            "userMicroseconds": 6900156,
+            "wallMicroseconds": 11129216
+          },
+          {
+            "iteration": 5,
+            "peakRssBytes": 896909312,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "b06dc3eb69e942fb436734dbd5fffd3ba273cf05197e7b0000de4f3abb9ea4c8",
+            "systemMicroseconds": 3942395,
+            "userMicroseconds": 6843136,
+            "wallMicroseconds": 11106294
+          }
+        ]
+      },
+      "cold-start": {
+        "command": [
+          "target/release/compass",
+          "--version"
+        ],
+        "maximumPeakRssBytes": 7897088,
+        "p95WallMicroseconds": 24687,
+        "samples": [
+          {
+            "iteration": 1,
+            "peakRssBytes": 7880704,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "93d259f6847db2c79c9b3ac519e720695f787780addaf603ac1947b3e87e8b8a",
+            "systemMicroseconds": 5441,
+            "userMicroseconds": 4119,
+            "wallMicroseconds": 12864
+          },
+          {
+            "iteration": 2,
+            "peakRssBytes": 7897088,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "93d259f6847db2c79c9b3ac519e720695f787780addaf603ac1947b3e87e8b8a",
+            "systemMicroseconds": 4993,
+            "userMicroseconds": 3929,
+            "wallMicroseconds": 12551
+          },
+          {
+            "iteration": 3,
+            "peakRssBytes": 7880704,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "93d259f6847db2c79c9b3ac519e720695f787780addaf603ac1947b3e87e8b8a",
+            "systemMicroseconds": 5808,
+            "userMicroseconds": 4058,
+            "wallMicroseconds": 12733
+          },
+          {
+            "iteration": 4,
+            "peakRssBytes": 7880704,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "93d259f6847db2c79c9b3ac519e720695f787780addaf603ac1947b3e87e8b8a",
+            "systemMicroseconds": 5298,
+            "userMicroseconds": 4394,
+            "wallMicroseconds": 24687
+          },
+          {
+            "iteration": 5,
+            "peakRssBytes": 7880704,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "93d259f6847db2c79c9b3ac519e720695f787780addaf603ac1947b3e87e8b8a",
+            "systemMicroseconds": 5722,
+            "userMicroseconds": 4106,
+            "wallMicroseconds": 12512
+          }
+        ]
+      },
+      "impact-depth-3": {
+        "command": [
+          "target/release/compass",
+          "impact",
+          "qualification::Node0099999",
+          "--graph",
+          "target/qualification-c013/medium/graph.json",
+          "--cache",
+          "target/qualification-c013/run-final11/query-cache",
+          "--engine",
+          "json",
+          "--format",
+          "json",
+          "--max-depth",
+          "3",
+          "--max-nodes",
+          "512",
+          "--max-edges",
+          "1024"
+        ],
+        "maximumPeakRssBytes": 912834560,
+        "p95WallMicroseconds": 11238889,
+        "samples": [
+          {
+            "iteration": 1,
+            "peakRssBytes": 912556032,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "44d8681bef2b77822534a765c746726721770a75ee301877533433f6bf4d733c",
+            "systemMicroseconds": 3775483,
+            "userMicroseconds": 6871869,
+            "wallMicroseconds": 10820324
+          },
+          {
+            "iteration": 2,
+            "peakRssBytes": 912326656,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "44d8681bef2b77822534a765c746726721770a75ee301877533433f6bf4d733c",
+            "systemMicroseconds": 4085465,
+            "userMicroseconds": 6916774,
+            "wallMicroseconds": 11238889
+          },
+          {
+            "iteration": 3,
+            "peakRssBytes": 912834560,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "44d8681bef2b77822534a765c746726721770a75ee301877533433f6bf4d733c",
+            "systemMicroseconds": 3803499,
+            "userMicroseconds": 6862434,
+            "wallMicroseconds": 10796899
+          },
+          {
+            "iteration": 4,
+            "peakRssBytes": 912310272,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "44d8681bef2b77822534a765c746726721770a75ee301877533433f6bf4d733c",
+            "systemMicroseconds": 3715056,
+            "userMicroseconds": 6814713,
+            "wallMicroseconds": 10551383
+          },
+          {
+            "iteration": 5,
+            "peakRssBytes": 912179200,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "44d8681bef2b77822534a765c746726721770a75ee301877533433f6bf4d733c",
+            "systemMicroseconds": 3823347,
+            "userMicroseconds": 6860237,
+            "wallMicroseconds": 10821145
+          }
+        ]
+      },
+      "path-depth-3": {
+        "command": [
+          "target/release/compass",
+          "path",
+          "qualification::Node0000000",
+          "qualification::Node0000009",
+          "--graph",
+          "target/qualification-c013/medium/graph.json"
+        ],
+        "maximumPeakRssBytes": 1990197248,
+        "p95WallMicroseconds": 3959473,
+        "samples": [
+          {
+            "iteration": 1,
+            "peakRssBytes": 1990197248,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "7032c055af0cac1e830ba4c90931329ac08cfacbbfbd63448dbf8b8be7522c03",
+            "systemMicroseconds": 322885,
+            "userMicroseconds": 3675599,
+            "wallMicroseconds": 3819238
+          },
+          {
+            "iteration": 2,
+            "peakRssBytes": 1989869568,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "7032c055af0cac1e830ba4c90931329ac08cfacbbfbd63448dbf8b8be7522c03",
+            "systemMicroseconds": 388227,
+            "userMicroseconds": 3633393,
+            "wallMicroseconds": 3959473
+          },
+          {
+            "iteration": 3,
+            "peakRssBytes": 1990000640,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "7032c055af0cac1e830ba4c90931329ac08cfacbbfbd63448dbf8b8be7522c03",
+            "systemMicroseconds": 304893,
+            "userMicroseconds": 3658255,
+            "wallMicroseconds": 3826153
+          },
+          {
+            "iteration": 4,
+            "peakRssBytes": 1989984256,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "7032c055af0cac1e830ba4c90931329ac08cfacbbfbd63448dbf8b8be7522c03",
+            "systemMicroseconds": 311894,
+            "userMicroseconds": 3641915,
+            "wallMicroseconds": 3788033
+          },
+          {
+            "iteration": 5,
+            "peakRssBytes": 1989984256,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "7032c055af0cac1e830ba4c90931329ac08cfacbbfbd63448dbf8b8be7522c03",
+            "systemMicroseconds": 333078,
+            "userMicroseconds": 3631688,
+            "wallMicroseconds": 3953292
+          }
+        ]
+      },
+      "search": {
+        "command": [
+          "target/release/compass",
+          "search",
+          "qualification::Node0099999",
+          "--graph",
+          "target/qualification-c013/medium/graph.json",
+          "--cache",
+          "target/qualification-c013/run-final11/query-cache",
+          "--engine",
+          "json",
+          "--format",
+          "json",
+          "--max-candidates",
+          "256"
+        ],
+        "maximumPeakRssBytes": 898514944,
+        "p95WallMicroseconds": 11290305,
+        "samples": [
+          {
+            "iteration": 1,
+            "peakRssBytes": 897794048,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "269d3ab3d4702e10a2f547b49225f9ae0675a5876b88fa14a956107573f4e3d5",
+            "systemMicroseconds": 3782533,
+            "userMicroseconds": 6851435,
+            "wallMicroseconds": 10751384
+          },
+          {
+            "iteration": 2,
+            "peakRssBytes": 898383872,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "269d3ab3d4702e10a2f547b49225f9ae0675a5876b88fa14a956107573f4e3d5",
+            "systemMicroseconds": 3939847,
+            "userMicroseconds": 6877961,
+            "wallMicroseconds": 11144639
+          },
+          {
+            "iteration": 3,
+            "peakRssBytes": 898514944,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "269d3ab3d4702e10a2f547b49225f9ae0675a5876b88fa14a956107573f4e3d5",
+            "systemMicroseconds": 4024556,
+            "userMicroseconds": 6914940,
+            "wallMicroseconds": 11290305
+          },
+          {
+            "iteration": 4,
+            "peakRssBytes": 898498560,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "269d3ab3d4702e10a2f547b49225f9ae0675a5876b88fa14a956107573f4e3d5",
+            "systemMicroseconds": 3913710,
+            "userMicroseconds": 6882770,
+            "wallMicroseconds": 10854602
+          },
+          {
+            "iteration": 5,
+            "peakRssBytes": 897794048,
+            "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stdoutSha256": "269d3ab3d4702e10a2f547b49225f9ae0675a5876b88fa14a956107573f4e3d5",
+            "systemMicroseconds": 3821390,
+            "userMicroseconds": 6870260,
+            "wallMicroseconds": 10780232
+          }
+        ]
+      }
+    }
+  },
+  "rawTraversal": {
+    "command": [
+      "python3",
+      "benchmarks/qualification/raw_traversal.py",
+      "--graph",
+      "target/qualification-c013/medium/graph.json",
+      "--tasks",
+      "benchmarks/qualification/agent-tasks-v1.json",
+      "--max-graph-bytes",
+      "268435456",
+      "--max-nodes",
+      "100000",
+      "--max-edges",
+      "250000",
+      "--max-depth",
+      "32",
+      "--max-results",
+      "10000",
+      "--timeout-seconds",
+      "120.0"
+    ],
+    "commandInterpreter": {
+      "measuredExecutableName": "python3",
+      "recordedLabel": "python3",
+      "versionField": "host.python"
+    },
+    "limits": {
+      "maxDepth": 32,
+      "maxEdges": 250000,
+      "maxGraphBytes": 268435456,
+      "maxNodes": 100000,
+      "maxResults": 10000,
+      "timeoutSeconds": 120.0
+    },
+    "oracleStatus": "PASS",
+    "peakRssBytes": 245694464,
+    "reportedElapsedMicroseconds": 35403471,
+    "schema": "compass.qualification-raw-traversal/1",
+    "taskCount": 30,
+    "taskMaximumMicroseconds": 14424,
+    "taskP95Microseconds": 14376,
+    "taskSuite": "agent-tasks-v1.json",
+    "wallMicroseconds": 35491798
+  },
+  "recordedAt": "2026-08-29T06:59:57.020677+00:00",
+  "schema": "compass.qualification-current-engine-baseline/1",
+  "source": {
+    "gitHead": "5ca57f2441b90a516eb2a4e78e1fb4e2d2d8269a",
+    "workspacePatchScope": ".cargo/config.toml Cargo.toml Cargo.lock rust-toolchain.toml crates vendor/compass-tree-sitter-language-pack vendor/gemm-common; SHA-256 of git diff --binary HEAD -- listed paths",
+    "workspacePatchSha256": "36b7ee3fee86566bcdade8c5ceabc8d6c87777751a388a53b223bf60646d7a42",
+    "workspaceTrackedBytes": 15797633,
+    "workspaceTrackedFiles": 612,
+    "workspaceTrackedSha256": "1aef77cf56564a7204cb40a5565defdf2c14e98fe3035b0254b372d9f66d291f",
+    "workspaceTreeBytes": 15944424,
+    "workspaceTreeFiles": 638,
+    "workspaceTreePolicy": "existing tracked plus non-ignored untracked files in scope",
+    "workspaceTreeSha256": "7ca61bcf300f16476cd09ee95918b5280dca5396d9b36ee64d5afb771a5843d2",
+    "workspaceUntrackedBytes": 146791,
+    "workspaceUntrackedFiles": 26,
+    "workspaceUntrackedSha256": "0c9a47f6eb5a82c7ea67dd6471cf57b0dda615a8b0f8a25a3d18602334530d32"
+  }
+}

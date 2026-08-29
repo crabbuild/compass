@@ -1,7 +1,7 @@
 {
   "name": "Compass",
   "description": "Native local-first knowledge graph engine for source code and project artifacts",
-  "active_phase": "compass-scoping-and-bounds",
+  "activePhase": "compass-scoping-and-bounds",
   "worktreeRoot": "${HOME}/.claude/worktrees",
   "maxChildDepth": 4,
   "ux_profile": "advanced",
@@ -11,8 +11,8 @@
   ],
   "openspec_available": true,
   "constraint_file": ".kbd-orchestrator/constraints.md",
-  "build_health_command": "cargo check --workspace --locked",
-  "test_command": "cargo test --workspace --lib --bins --locked",
+  "build_health_command": "cargo test --workspace --test '*' --locked --no-run",
+  "test_command": "cargo test --workspace --test '*' --locked",
   "lint_command": "cargo clippy --workspace --lib --bins --locked -- -D warnings",
   "dev_command": null,
   "preferred_planning_agent": "claude",
@@ -59,7 +59,12 @@
       "evolver-execute-medium": "medium",
       "evolver-execute-high": "frontier",
       "evolver-reflect": "frontier",
-      "evolver-status": "small"
+      "evolver-status": "small",
+      "creator-specify": "frontier",
+      "creator-plan": "frontier",
+      "creator-execute": "tiered",
+      "creator-reflect": "frontier",
+      "creator-persist": "small"
     },
     "active_environment": "local"
   },
@@ -92,12 +97,12 @@
       ]
     }
   },
-  "focus_project_path": "/Users/gqadonis/Projects/references/compass",
+  "focus_project_path": ".",
   "workspace": {
     "workspace_file": null,
     "folders": [
       {
-        "path": "/Users/gqadonis/Projects/references/compass",
+        "path": ".",
         "role": "focus",
         "purpose": "Active project \u2014 all KBD operations target this directory",
         "write_access": true

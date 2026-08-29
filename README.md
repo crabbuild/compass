@@ -311,13 +311,17 @@ Read the [versioned history guide](docs/guides/versioned-history.md) and
 
 ```bash
 compass install
+compass update .
+compass agent doctor --platform codex
 ```
 
 Inside a Git repository, Compass detects installed coding agents and configures
 them at the repository root. Codex, Gemini CLI, OpenCode, Copilot, and generic
-Agent Skills clients share one portable `.agents/skills/compass` package;
-Claude Code, Kiro, and Cline use their native skill roots. Use repeatable
-`--platform` flags when you want explicit selection:
+Agent Skills clients share the portable `.agents/skills/compass` umbrella plus
+focused sibling skills for navigation, debugging, change impact, architecture,
+index maintenance, and MCP setup. The umbrella remains the canonical fallback.
+Claude Code, Kiro, and Cline use the same collection in their native skill
+roots. Use repeatable `--platform` flags when you want explicit selection:
 
 ```bash
 compass install --platform codex
@@ -326,17 +330,35 @@ compass install --all --dry-run
 compass install --user --format json
 ```
 
+Use `compass agent list` to inspect the full registry, `compass agent export`
+and `compass agent validate` for deterministic, checksum-verified native Codex,
+Claude, and OpenCode packages (or a generic seven-skill bundle), and
+`compass agent mcp-config` to render credential-free native Codex, Claude,
+OpenCode, or generic Agent Skills MCP configuration. The namespaced
+`compass agent install` form delegates to `compass install` unchanged.
+Run a graph build before project-scoped doctor checks; user-scoped checks skip
+graph presence and freshness. Project diagnostics honor `COMPASS_OUT` and the
+current immutable output snapshot. The doctor, export, validation-platform,
+and MCP-config commands support the four platforms with native MCP schemas:
+`agents`, `claude`, `codex`, and `opencode`.
+
+The three native exports are generated from the repository's single
+`distribution.toml` inventory. Codex exports include plugin and local
+marketplace manifests, Claude exports include the required marketplace
+manifest, and OpenCode exports include a thin TypeScript/npm plugin that
+delegates graph behavior to the `compass` binary.
+
 Check `Selected` in the command output. If it lists only `agents`, Compass did
 not detect a host-specific adapter. An explicit `--platform` selection bypasses
 detection. Start a new assistant session after installation. In Codex, review
 and trust the hook under `/hooks`; in Gemini CLI, run `/skills reload`.
 
-The skill teaches assistants to refresh an existing graph when it is stale,
-run a focused Compass query before broad source searches, and open only the
-source files needed to verify an answer. It reads `compass-out/GRAPH_REPORT.md`
-when repository-wide architecture context is useful. Installation does not
-build a graph; on the first architecture, dependency, history, or impact
-question, the assistant can run the local deterministic build and continue.
+The umbrella skill teaches the complete Compass workflow. Six additive focused
+skills let compatible clients activate a smaller task boundary without
+changing explicit `/compass` requests or broad multi-operation fallback.
+Installation does not build a graph; on the first architecture, dependency,
+history, or impact question, the assistant can run the local deterministic
+build and continue.
 
 ```text
 coding question

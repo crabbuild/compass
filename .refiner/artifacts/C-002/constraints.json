@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "source": ".kbd-orchestrator/constraints.md",
+  "artifact": "C-002",
+  "blocking": [
+    {"id": "tests-pass", "status": "PASS", "evidence": "Focused graph unit and binary-level CLI regressions plus cargo test --workspace --lib --bins --locked"},
+    {"id": "clippy-clean", "status": "PASS", "evidence": "All-target/all-feature affected crates and workspace lib/bin Clippy with -D warnings"},
+    {"id": "fmt-clean", "status": "PASS", "evidence": "cargo fmt --all -- --check and git diff --check"},
+    {"id": "no-unsafe-code", "status": "PASS", "evidence": "No unsafe code added; workspace lints remain clean"},
+    {"id": "no-unwrap-expect-panic", "status": "PASS", "evidence": "No unwrap, expect, or panic added; all-target Clippy passes"},
+    {"id": "product-boundary", "status": "PASS", "evidence": "compass_product integration test and scripts/check_product_boundary.sh"},
+    {"id": "local-first-preserved", "status": "PASS", "evidence": "The regression uses only a temporary project and local SQLite store"},
+    {"id": "no-secrets-or-machine-paths", "status": "PASS", "evidence": "No credentials or machine-specific paths in product artifacts"},
+    {"id": "locked-dependencies", "status": "PASS", "evidence": "No dependency manifest or lockfile change remains; all Cargo commands use --locked"},
+    {"id": "regression-test-present", "status": "PASS", "evidence": "Unit classification test and actual compass binary exit/text regression"},
+    {"id": "determinism-preserved", "status": "PASS", "evidence": "No ordering or identity behavior changed; fixture qualification byte equivalence passed"},
+    {"id": "bounded-work", "status": "PASS", "evidence": "Existing MAX_GRAPH_BYTES bound remains authoritative; this change only classifies and renders its failure"},
+    {"id": "immutable-realizations", "status": "PASS", "evidence": "No snapshot schema or historical realization changed"},
+    {"id": "no-real-credentials-in-tests", "status": "PASS", "evidence": "The CLI test uses only a temporary local SQLite database"},
+    {"id": "code-graph-qualification", "status": "PASS", "evidence": "Final-source scripts/qualify_code_graph_v1.sh --fixtures-only, including scale and deterministic-equivalence gates"}
+  ]
+}

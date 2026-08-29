@@ -1,0 +1,36 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-010",
+  "blocking": [
+    {
+      "id": "latest-protocol",
+      "status": "PASS",
+      "evidence": "Official Model Context Protocol documentation identifies 2026-07-28 as the latest published revision; both Compass transports advertise only that revision and do not restore legacy initialize, sessions, resumable SSE, or the independent GET stream"
+    },
+    {
+      "id": "both-transports-conform",
+      "status": "PASS",
+      "evidence": "Native stdio conformance passes with exact ordered tool/resource inventories and the bounded pinned official HTTP qualification reports MCP conformance passed for spec 2026-07-28; fixture-only diagnostic failures remain check-granular expected failures"
+    },
+    {
+      "id": "named-client-evidence",
+      "status": "PASS",
+      "evidence": "Exact Codex CLI 0.150.1, Claude Code 2.1.251, and OpenCode 1.18.25 stdio/HTTP outcomes are recorded; passing cells prove real graph_stats discovery and invocation, and OpenCode HTTP is explicitly incompatible rather than mislabeled as passing"
+    },
+    {
+      "id": "compatibility-documented",
+      "status": "PASS",
+      "evidence": "OpenSpec, the implementation guide, COMPATIBILITY.md, phase plan, execution gate, and decision log consistently retain latest-MCP behavior and reject a legacy HTTP fallback"
+    },
+    {
+      "id": "product-boundary",
+      "status": "PASS",
+      "evidence": "scripts/check_product_boundary.sh passes and no Graphify or runtime fallback dependency was introduced"
+    },
+    {
+      "id": "repository-baseline",
+      "status": "PASS",
+      "evidence": "cargo fmt, workspace lib/bin Clippy with denied warnings, workspace lib/bin tests, portable runner timeout validation, spawned-server liveness, and separately named CI legs pass under the pinned locked toolchain"
+    }
+  ]
+}

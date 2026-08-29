@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-007",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "crates/compass-mcp",
+    "CHANGELOG.md",
+    "openspec/changes/rmcp-3-migration"
+  ],
+  "distFiles": ["qa-receipt.md"],
+  "validatedAt": "2026-08-28T20:35:00Z"
+}

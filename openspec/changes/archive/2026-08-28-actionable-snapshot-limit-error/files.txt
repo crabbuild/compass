@@ -1,0 +1,4 @@
+crates/compass-graph/src/lib.rs
+crates/compass-graph/src/snapshot.rs
+crates/compass-cli/tests/snapshot_limit_cli.rs
+CHANGELOG.md

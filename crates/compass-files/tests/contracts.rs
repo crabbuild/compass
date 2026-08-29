@@ -4,11 +4,11 @@ use std::fs::{self, FileTimes};
 use std::time::{Duration, UNIX_EPOCH};
 
 use compass_files::{
-    AST_CACHE_VERSION, BuildGuard, CACHE_ENCODING_VERSION, Cache, CacheKind, CacheOptions,
-    DetectOptions, FileSlice, Manifest, ManifestKind, StatHashIndex, WatchPathFilter, bisect_slice,
-    body_content, classify_file, file_hash, md5_file, prompt_fingerprint, read_slice_text,
-    read_source_lossy, slice_boundaries, split_file, write_bytes_atomic, write_json_atomic,
-    write_text_atomic,
+    AST_CACHE_VERSION, BuildGuard, BuildScope, CACHE_ENCODING_VERSION, Cache, CacheKind,
+    CacheOptions, DetectOptions, FileSlice, Manifest, ManifestKind, StatHashIndex, WatchPathFilter,
+    bisect_slice, body_content, classify_file, file_hash, md5_file, prompt_fingerprint,
+    read_slice_text, read_source_lossy, slice_boundaries, split_file, write_bytes_atomic,
+    write_json_atomic, write_text_atomic,
 };
 use compass_files::{FileType, IgnorePolicy};
 use serde::Deserialize;
@@ -153,6 +153,69 @@ fn detection_ignores_compass_generated_output() -> Result<(), Box<dyn Error>> {
     let detection = compass_files::detect(root, &DetectOptions::default())?;
     assert_eq!(detection.files["code"].len(), 1);
     assert!(detection.files["code"][0].ends_with("main.rs"));
+    Ok(())
+}
+
+#[test]
+fn vendor_source_remains_in_default_discovery_including_workspace_members()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"vendor/parser-pack\"]\n",
+    )?;
+    let workspace_source = root.join("vendor/parser-pack/src/lib.rs");
+    fs::create_dir_all(workspace_source.parent().ok_or("workspace source parent")?)?;
+    fs::write(
+        root.join("vendor/parser-pack/Cargo.toml"),
+        "[package]\nname = \"parser-pack\"\nversion = \"0.1.0\"\n",
+    )?;
+    fs::write(&workspace_source, "pub fn parser() {}\n")?;
+    let go_source = root.join("vendor/example.test/module/library.go");
+    fs::create_dir_all(go_source.parent().ok_or("Go vendor source parent")?)?;
+    fs::write(&go_source, "package module\n")?;
+
+    let detection = compass_files::detect(root, &DetectOptions::default())?;
+    let code = detection.files["code"].join("\n");
+    assert!(code.contains("vendor/parser-pack/src/lib.rs"));
+    assert!(code.contains("vendor/example.test/module/library.go"));
+
+    let watcher = WatchPathFilter::new(root, &DetectOptions::default())?;
+    assert!(watcher.allows(&workspace_source));
+    assert!(watcher.allows(&go_source));
+
+    fs::write(root.join(".compassignore"), "vendor/**\n")?;
+    let ignored = compass_files::detect(root, &DetectOptions::default())?;
+    assert!(ignored.files["code"].is_empty());
+    let ignored_watcher = WatchPathFilter::new(root, &DetectOptions::default())?;
+    assert!(!ignored_watcher.allows(&workspace_source));
+    assert!(!ignored_watcher.allows(&go_source));
+    fs::remove_file(root.join(".compassignore"))?;
+
+    let excluded_options = DetectOptions {
+        extra_excludes: vec!["vendor/**".to_owned()],
+        ..DetectOptions::default()
+    };
+    let excluded = compass_files::detect(root, &excluded_options)?;
+    assert!(excluded.files["code"].is_empty());
+    let excluded_watcher = WatchPathFilter::new(root, &excluded_options)?;
+    assert!(!excluded_watcher.allows(&workspace_source));
+    assert!(!excluded_watcher.allows(&go_source));
+
+    let scoped_options = DetectOptions {
+        scope: BuildScope {
+            include: Vec::new(),
+            exclude: vec!["vendor/**".to_owned()],
+        }
+        .normalize(root)?,
+        ..DetectOptions::default()
+    };
+    let scoped = compass_files::detect(root, &scoped_options)?;
+    assert!(scoped.files["code"].is_empty());
+    let scoped_watcher = WatchPathFilter::new(root, &scoped_options)?;
+    assert!(!scoped_watcher.allows(&workspace_source));
+    assert!(!scoped_watcher.allows(&go_source));
     Ok(())
 }
 

@@ -1,54 +1,266 @@
 {
-  "schemaVersion": "5",
-  "generatedBy": "claude",
+  "schemaVersion": "2",
+  "generatedBy": "kbd-runtime",
+  "sourceRevision": 300,
+  "derivedRevision": 300,
+  "frontier": {
+    "dcb2293c-3722-4507-af1a-1786476c3817": 300
+  },
+  "conflictCount": 0,
   "phase": "compass-scoping-and-bounds",
-  "last_updated": "2026-08-09T12:27:19Z",
-  "last_updated_by": "claude",
-  "assessment_complete": true,
-  "plan_complete": true,
-  "execution_dispatched": false,
-  "reflection_complete": false,
-  "changes_total": 6,
-  "changes_completed": 0,
-  "implementation_total": 6,
-  "implementation_completed": 0,
+  "phaseId": "compass-scoping-and-bounds",
+  "parentPhase": null,
+  "last_updated": "2026-08-29T19:17:43.033786Z",
+  "last_updated_by": "kbd-runtime",
+  "changes_total": 20,
+  "changes_completed": 18,
+  "implementation_total": 20,
+  "implementation_completed": 18,
   "completion": {
+    "primaryCounter": "implementation",
     "implementation": {
-      "completed": 0,
-      "total": 6
+      "completed": 18,
+      "total": 20,
+      "status": "IN_PROGRESS"
+    },
+    "evidence": {
+      "status": "COMPLETE",
+      "summary": "All accepted changes have integration evidence; C-015 has exact rejection evidence and C-020 has dependency-cancellation evidence.",
+      "blockers": []
+    },
+    "certification": {
+      "status": "COMPLETE",
+      "summary": "Accepted changes passed refinement and review; the two non-adopted changes are certified terminal by the ratified rejection decision.",
+      "blockers": []
+    },
+    "publication": {
+      "status": "COMPLETE",
+      "summary": "All eighteen accepted changes are reflected in source, specifications, archives, documentation, generated knowledge, and canonical KBD state.",
+      "blockers": []
     }
   },
   "changes": [
     {
       "id": "C-001",
       "title": "Stop materializing snapshot payload in read_snapshot",
-      "status": "pending"
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 5,
+      "tasks_done": 5,
+      "last_task_completed": "Run repository baseline and refresh graph",
+      "next_task_pending": null,
+      "blockers": []
     },
     {
       "id": "C-002",
       "title": "Make snapshot limit error actionable",
-      "status": "pending"
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Run verification, QA, review, and archive",
+      "next_task_pending": null,
+      "blockers": []
     },
     {
       "id": "C-003",
       "title": "Pre-flight graph size estimate",
-      "status": "pending"
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Run verification QA review and archive",
+      "next_task_pending": null,
+      "blockers": []
     },
     {
       "id": "C-004",
       "title": "Honor COMPASS_MAX_GRAPH_BYTES on publication path",
-      "status": "pending"
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Verify QA review and archive",
+      "next_task_pending": null,
+      "blockers": []
     },
     {
       "id": "C-005",
       "title": "Extract compass-partition shared crate",
-      "status": "pending"
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Run verification QA review and archive",
+      "next_task_pending": null,
+      "blockers": []
     },
     {
       "id": "C-006",
       "title": "Decide vendor/ default-skip policy",
-      "status": "pending"
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 3,
+      "tasks_done": 3,
+      "last_task_completed": "Run verification QA review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-007",
+      "title": "Upgrade rmcp 2.2.0 to 3.1.4 with stdio parity",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Run verification QA review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-008",
+      "title": "Stateless HTTP transport per MCP 2026-07-28",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Run verification QA review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-009",
+      "title": "Common result envelope and typed navigation results",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Document verify review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-010",
+      "title": "MCP conformance and named-harness interop matrix",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Document verify review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-011",
+      "title": "SurrealDB BSL 1.1 license and release decision",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Apply outcome, verify, refine, review, and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-012",
+      "title": "Persistent SurrealKV and RocksDB throwaway probes",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 6,
+      "tasks_done": 6,
+      "last_task_completed": "Verify refine review and archive probe evidence",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-013",
+      "title": "Measurement corpora baselines and budget ratification",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 7,
+      "tasks_done": 7,
+      "last_task_completed": "Verify refine review ratify and archive qualification evidence",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-014",
+      "title": "compass-graphdb-surreal projection crate",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Documentation and qualification",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-015",
+      "title": "Bounded native reads and dual-engine equivalence",
+      "status": "SKIPPED",
+      "implementation_status": "SKIPPED",
+      "tasks_total": 4,
+      "tasks_done": 3,
+      "last_task_completed": "Dual-engine equivalence and budget qualification",
+      "next_task_pending": "Documentation verification review and archive",
+      "blockers": []
+    },
+    {
+      "id": "C-016",
+      "title": "Focused Agent Skills with umbrella preserved",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Document verify review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-017",
+      "title": "compass agent CLI namespace",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Qualification, refinement, review, and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-018",
+      "title": "Canonical distribution inventory and package generators",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 5,
+      "tasks_done": 5,
+      "last_task_completed": "Phase verification refinement review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-019",
+      "title": "Installed-artifact validation and clean-install tests",
+      "status": "DONE",
+      "implementation_status": "COMPLETE",
+      "tasks_total": 4,
+      "tasks_done": 4,
+      "last_task_completed": "Verification refinement review and archive",
+      "next_task_pending": null,
+      "blockers": []
+    },
+    {
+      "id": "C-020",
+      "title": "Conditional compass-store-surreal Store adapter",
+      "status": "SKIPPED",
+      "implementation_status": "SKIPPED",
+      "tasks_total": 0,
+      "tasks_done": 0,
+      "last_task_completed": null,
+      "next_task_pending": null,
+      "blockers": []
     }
   ],
-  "children": []
+  "children": {},
+  "migrationStatus": null
 }

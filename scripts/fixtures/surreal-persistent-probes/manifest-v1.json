@@ -1,0 +1,25 @@
+{
+  "schema": "compass.surreal-persistent-probe-fixtures/1",
+  "files": [
+    {
+      "path": "SURREALDB-3.2.4-LICENSE.txt",
+      "sha256": "98a94ac615f88370865016487b436fa404560910bd329794ed7502277a94b805"
+    },
+    {
+      "path": "expected-v1.json",
+      "sha256": "8b78764f918bff576bd9395bf0b0e9c1807eb016edc0263101fc57bbbd681b2e"
+    },
+    {
+      "path": "input-v1.json",
+      "sha256": "69eb3ae05bd6bf4966b39fa59775b0f8f2b92b19eb41c4c41af870ef2bb16c43"
+    },
+    {
+      "path": "rocksdb-result-v1.json",
+      "sha256": "6a87740f9a3d9c5698fb3f1a2797a0cb0ec87deaed3d64de1d3c751e07b042c7"
+    },
+    {
+      "path": "surrealkv-result-v1.json",
+      "sha256": "32294e15028645095fd48d3438ffbf8abf82009fd14c0ebaedd10cee104e0cd5"
+    }
+  ]
+}

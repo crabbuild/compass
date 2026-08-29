@@ -1,0 +1,36 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "claim": "A task with an explicit `\"expected\": null` (or no `expected` key) silently bypasses the entire evidence contract, and the run still reports oracleStatus PASS \u2014 a default that masks authoring failure in a harness whose stated purpose is enforcing expected evidence.",
+      "evidence": "In validate_task: `expected = task.get(\"expected\")` followed by `if expected is not None and not isinstance(expected, dict): raise` \u2014 an explicit JSON null passes validation. In verify_expected: `expected = task.get(\"expected\"); if not isinstance(expected, dict): return` \u2014 the check returns with no assertion. The README claims 'The runner also applies each task's expected evidence contract; the run fails instead of publishing an oracle mismatch,' and criterion 2.3 requires the 30 tasks carry expected evidence, but the harness itself accepts a null/absent contract without failing. The versioned corpus is protected by test_corpora.py, but the tool's silent-skip path contradicts the fail-closed posture applied everywhere else (duplicate edge IDs, malformed types, limit exhaustion all exit 2).",
+      "suggested_fix": "In validate_task, reject a present-but-null `expected` (and consider requiring `expected` outright for the versioned suite schema), so a missing evidence contract fails with exit 2 like every other malformed-task case."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "claim": "Final evidence artifacts are written with plain `Path.write_text`, a weaker local variant of the atomic-write practice named in the project's safe-primitives-reused constraint; an interrupted run leaves a truncated JSON artifact on disk.",
+      "evidence": "Constraint `safe-primitives-reused` (warning): 'Existing bounded readers, subprocess helpers, path containment, endpoint checks, and atomic writes are reused rather than reimplemented as weaker local variants.' run_current_baseline.py ends with `args.output.write_text(json.dumps(payload, ...) + \"\\n\", encoding=\"utf-8\")` and raw_traversal.py does the same for `--output`. The runner's output is the schema later promoted to the retained baseline per the README's promotion procedure. The failure mode is loud (JSON parse/checksum failure downstream), hence suggestion rather than warning.",
+      "suggested_fix": "Write to a sibling temporary file and atomically rename (os.replace) for both script outputs, matching the repository's atomic-write practice."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "openspec/changes/qualification-corpora-baselines/proposal.md",
+      "claim": "The proposal's Impact statement that raw run logs remain disposable under 'target/ or /tmp' overstates the baseline runner's actual behavior, which refuses any work directory outside the repository root.",
+      "evidence": "proposal.md: 'Generated medium/large graphs and raw run logs remain disposable under `target/` or `/tmp`.' But run_current_baseline.py enforces `cache_relative = repository_relative(cache, repository_root, label=\"cache\")` (and likewise for binary, graph, raw script, and task suite), so `--work-dir /tmp/...` raises 'cache must be inside repository root'. The README now correctly says 'Reproduction always writes to target/', leaving the proposal as the stale claim. Failure is closed and clearly messaged, so impact is documentation accuracy only.",
+      "suggested_fix": "Align the proposal wording with the runner contract (e.g., 'under target/ for the baseline runner; generator and standalone raw-traversal outputs may also use /tmp')."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

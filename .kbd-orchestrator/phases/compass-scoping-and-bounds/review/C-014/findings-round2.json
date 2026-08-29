@@ -1,0 +1,47 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-graphdb-surreal/src/engine.rs",
+      "line": 226,
+      "claim": "When staging fails and the subsequent transaction.cancel() also fails, the original typed error (Interrupted, LimitExceeded, InvalidPlan, Database write failure) is discarded and replaced with a generic 'cancel_projection' Database error, masking the actionable root cause.",
+      "evidence": "activate_with_interrupt: `Err(error) => match transaction.cancel().await { Ok(_database) => Err(error), Err(cancel_error) => Err(database_error(\"cancel_projection\", cancel_error)) }` \u2014 the `error` binding is dropped on the cancel-failure path. The workspace no-unwrap-expect-panic constraint note requires 'typed errors with actionable context'.",
+      "suggested_fix": "Chain the cancel failure into the returned error, e.g. `Err(ProjectionError::Database { stage: \"cancel_projection\", message: format!(\"{cancel_error} (after staging failure: {error})\") })`, or add a dedicated variant carrying both."
+    },
+    {
+      "severity": "WARNING",
+      "file": "docs/README.md",
+      "line": 99,
+      "claim": "The docs/README.md hunk adds a row linking `implementation/mcp-conformance-and-interop.md`, which is unrelated to the Surreal projection change, is not added anywhere in this diff, is not listed in openspec/changes/surreal-graph-projection/files.txt, and cannot be confirmed to exist in the packet's file tree \u2014 this is unrelated diff noise plus a potentially dangling documentation link.",
+      "evidence": "docs/README.md hunk adds two rows: `| [MCP conformance and interoperability](implementation/mcp-conformance-and-interop.md) | ... |` and the Surreal projection row; files.txt enumerates only the Surreal-related docs. The refinement_log iteration 3 explicitly claims the corrected packet 'isolates exact C-014 additions', and the warning constraint no-unrelated-diff-noise requires the diff to 'contain no unrelated or generated noise'.",
+      "suggested_fix": "Remove the MCP conformance row from this change (it belongs to whichever change introduces that document) or include the linked document in this change."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-graphdb-surreal/tests/projection.rs",
+      "line": 110,
+      "claim": "The spec scenario 'Untrusted identities ... remain data values and cannot alter the selected statement or relation family' is only exercised at plan-construction level; no engine-level test activates a repository, node, or edge identity containing SurrealQL metacharacters through a real Mem database to prove parameter binding end-to-end.",
+      "evidence": "specs/surreal-graph-projection/spec.md scenario 'Untrusted identifiers'; tests/projection.rs uses `let repository = \"repo:'; DELETE code_node; --\";` only in the pure `ProjectionPlan::from_graph` test, while every tests/mem_projection.rs case uses plain identifiers like `\"repository\"`. The ambiguity-and-negative-cases warning constraint asks for negative-case coverage at the layer where the claim is made.",
+      "suggested_fix": "Add a Mem test that activates and reads back a plan built with the injection-shaped repository ID (and/or metacharacter node IDs) and asserts an exact round trip."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "openspec/changes/surreal-graph-projection/files.txt",
+      "line": 1,
+      "claim": "files.txt omits Cargo.toml, Cargo.lock, and CHANGELOG.md even though the same change's artifact_manifest.json lists all three as sourceArtifacts and shared-file-evidence.md documents exact C-014 deltas to them, leaving the change's file inventory internally inconsistent.",
+      "evidence": ".refiner/artifacts/C-014/artifact_manifest.json sourceArtifacts includes `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`; shared-file-evidence.md describes their exact deltas; openspec/changes/surreal-graph-projection/files.txt lists neither.",
+      "suggested_fix": "Add the three shared files to files.txt (with a note that their scoped deltas live in shared-file-evidence.md) or record in files.txt why they are intentionally excluded."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

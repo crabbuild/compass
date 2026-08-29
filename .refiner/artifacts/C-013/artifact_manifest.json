@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-013",
+  "artifactType": "qualification",
+  "contentType": "direct:evidence",
+  "status": "refined",
+  "sourceArtifacts": [
+    "benchmarks/qualification",
+    "docs/future/qualification-corpora-baselines.md",
+    "openspec/changes/archive/2026-08-29-qualification-corpora-baselines"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

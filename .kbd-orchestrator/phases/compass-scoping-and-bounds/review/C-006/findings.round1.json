@@ -1,0 +1,26 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "gpt-5.6-sol-harness",
+  "isolation_mode": "harness-native",
+  "producer_model": "gpt-5.6-sol",
+  "cross_model_check": "same-family-fresh-context",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-files/tests/contracts.rs",
+      "line": 164,
+      "claim": "The fixture did not create a valid Cargo manifest for its declared workspace member.",
+      "evidence": "Only the root members list and member source file were created.",
+      "suggested_fix": "Create a valid member Cargo.toml."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-files/tests/contracts.rs",
+      "line": 159,
+      "claim": "The regression pinned default eligibility but not the specified explicit exclusion surfaces.",
+      "evidence": "No vendor-specific .compassignore, extra exclusion, saved scope, or watcher rejection assertion existed.",
+      "suggested_fix": "Add vendor-specific assertions for every claimed exclusion surface."
+    }
+  ]
+}

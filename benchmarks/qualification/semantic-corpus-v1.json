@@ -1,0 +1,33 @@
+{
+  "schema": "compass.qualification-semantic-corpus/1",
+  "sources": [
+    {
+      "path": "tests/qualification/code-graph-v1-corpus.json",
+      "schema": "compass.code-graph-qualification-corpus/1",
+      "sha256": "d46a0388eb8fcf5be7d0fd6ddde25ac2c8f9129fd4e2f49b466d47d376cd68ca"
+    },
+    {
+      "path": "tests/qualification/code-graph-v1-semantic.json",
+      "schema": "compass.code-graph-qualification/2",
+      "sha256": "d57d16cdd5c236c6af83c775773828bd9041236b92f335ca68040748b7836a6f"
+    }
+  ],
+  "requiredDimensions": [
+    "stable_identity",
+    "direction",
+    "parallel_multiplicity",
+    "confidence",
+    "source_evidence",
+    "ambiguity",
+    "negative_cases",
+    "bounds",
+    "deterministic_ordering",
+    "pagination"
+  ],
+  "counts": {
+    "edgeProducers": 28,
+    "flows": 27,
+    "negativeCases": 24,
+    "nodeProducers": 45
+  }
+}

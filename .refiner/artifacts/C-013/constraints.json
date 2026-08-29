@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-013",
+  "blocking": [
+    {
+      "id": "precommitted-budgets",
+      "status": "PASS",
+      "evidence": "The complete budget table was ratified unchanged with pre-measurement plan and research-section SHA-256 provenance; C-012 measurements were excluded from the decision basis"
+    },
+    {
+      "id": "deterministic-scale-profiles",
+      "status": "PASS",
+      "evidence": "Full metadata-only iteration reproduced pinned node and edge digests for 100000/250000 and 1000000/2500000 profiles"
+    },
+    {
+      "id": "closed-artifact-inventory",
+      "status": "PASS",
+      "evidence": "manifest-v1.json lists every retained qualification file with exact byte count and SHA-256; the test suite rejects omissions or mismatches"
+    },
+    {
+      "id": "bounded-work",
+      "status": "PASS",
+      "evidence": "Generation, graph scanning, task-document bytes/count, declared task limits, traversal depth/results, every metadata, warmup, and measured subprocess, streamed binary compression, source-patch capture, and retained artifact sizes have explicit limits; every task and result has explicit expected/actual status; graph and JSON results publish atomically; exhaustion is exit 2, never an empty result"
+    },
+    {
+      "id": "semantic-and-task-corpora",
+      "status": "PASS",
+      "evidence": "Pinned semantic sources cover identity, direction, multiplicity, evidence, ambiguity, negatives, ordering, and pagination; exactly 30 balanced tasks pass the bounded raw-traversal oracle"
+    },
+    {
+      "id": "skill-compatibility-corpora",
+      "status": "PASS",
+      "evidence": "The shipped 14-case trigger corpus is pinned and partitioned exactly into two umbrella and twelve focused boundary cases with two cases for every focused skill"
+    },
+    {
+      "id": "current-engine-baseline",
+      "status": "PASS",
+      "evidence": "One reproducible runner validates the supplied graph bytes/hash/counts/logical digests, emits the complete retained schema with repository-relative paths plus tracked-patch/explicit tracked/non-ignored-untracked source identities, and records binary/runtime-pinned gzip size, cold start, five explicitly bounded query workloads, nearest-rank p95, peak RSS, host/tool versions, commands, and the measured raw 30-task denominator"
+    },
+    {
+      "id": "product-boundary",
+      "status": "PASS",
+      "evidence": "The change adds developer qualification artifacts only; the product-boundary gate passes and no runtime dependency or public command changes"
+    }
+  ]
+}

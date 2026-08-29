@@ -1,0 +1,46 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "scripts/fixtures/mcp-conformance-expected-failures.yaml",
+      "line": 12,
+      "claim": "Baselining the check `http-header-validation:sep-2243-server-accepts-whitespace-header-value` masks that check by ID, not by failure cause, so a future genuine header-validation regression (the behavior the check actually exists to verify) would be silently accepted by CI.",
+      "evidence": "The baseline entry is justified in the YAML comment and verification.md as 'the runner invokes the first listed tool with `{}`; Compass ... correctly requires `query`' \u2014 i.e., the observed failure cause is unrelated to whitespace header validation. verification.md asserts 'The one baselined header-runner check is the invalid-argument invocation described above, not a header mismatch failure,' but nothing in a check-granular expected-failure mechanism can enforce that distinction; any failure of that check ID, including the header-acceptance defect it names, matches the baseline. design.md simultaneously claims 'transport, wire-schema, routing, or advertised capability failure remains a blocking failure.'",
+      "suggested_fix": "Either remove this entry and make the first listed tool tolerant of `{}` invocation for the header scenario, or verify the runner supports cause/strict matching (fail on unexpected pass or mismatched failure reason) and document that enforcement; otherwise record the header-validation coverage gap explicitly in the spec/verification artifacts."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".kbd-orchestrator/phases/compass-scoping-and-bounds/execution.md",
+      "claim": "The committed PROGRESS LEDGER lists C-010 as '[PENDING]' in the same diff that adds C-010 completion evidence (tasks 1.1\u20133.1 checked, refiner receipt 'Status: PASS'), leaving repository-owned KBD certification evidence internally contradictory.",
+      "evidence": "execution.md PROGRESS LEDGER: '- [PENDING] C-010 \u2014 SELF/OpenSpec, gated by C-008 and C-009' (also '[IN_PROGRESS] C-001'), while openspec/changes/mcp-conformance-interop/tasks.md shows '- [x] 2.1' and '- [x] 3.1', and .refiner/artifacts/C-010/dist/refinement-receipt.md states 'Status: **PASS**'. The constraint `refiner-qa-evidence` requires these tracked artifacts to be deterministic and consistent certification evidence.",
+      "suggested_fix": "Update the execution.md ledger (or annotate it as an execution-start snapshot with a pointer to progress.json as the live projection) before archiving C-010."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "docs/implementation/mcp-conformance-and-interop.md",
+      "line": 90,
+      "claim": "The reproduction section tells the reader to 'reproduce the held Codex HTTP cell,' but the recorded matrix shows the Codex CLI 0.150.1 HTTP cell as PASS \u2014 no Codex cell is held.",
+      "evidence": "The same document's matrix: '| Codex CLI | `0.150.1` | PASS \u2014 `Nodes: 120215` | PASS \u2014 `Nodes: 120215` |' and the text 'Codex 0.146.0 initially failed the HTTP cell, but the isolated official 0.150.1 release passed both cells'; the only incompatible cell is OpenCode 1.18.25 HTTP.",
+      "suggested_fix": "Reword the final line to reference reproducing the recorded Codex HTTP pass (or the OpenCode HTTP incompatibility, if that was the intent)."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_mcp_conformance.sh",
+      "line": 119,
+      "claim": "The final success message 'MCP conformance passed: stdio=native HTTP=reference@...' is printed by a script that exercises only HTTP, implying a stdio result it did not produce \u2014 misleading when the script is run standalone as the docs' reproduction section instructs.",
+      "evidence": "The script's loop runs only `--scenario server-stateless/tools-list/...` against `--url http://127.0.0.1:$PORT/mcp`; stdio coverage is the separate `cargo test -p compass-mcp --test protocol_conformance` CI leg. docs/implementation/mcp-conformance-and-interop.md lists `scripts/qualify_mcp_conformance.sh` alone as a reproduction command.",
+      "suggested_fix": "Change the echo to report only the HTTP leg (e.g., 'MCP HTTP conformance passed: reference@<ref> spec=2026-07-28; stdio leg = cargo test -p compass-mcp --test protocol_conformance')."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

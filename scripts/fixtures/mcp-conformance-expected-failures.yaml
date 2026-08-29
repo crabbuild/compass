@@ -1,0 +1,12 @@
+# The upstream server runner uses named diagnostic tools to exercise these
+# checks. Compass intentionally does not expose fixture-only tools in its
+# production inventory. Keep this baseline check-granular: a whole-scenario
+# entry would hide unrelated protocol regressions.
+server:
+  - server-stateless:sep-2575-server-rejects-undeclared-capability
+  - server-stateless:sep-2575-missing-capability-http-400
+  - server-stateless:sep-2575-http-server-no-independent-requests-on-stream
+  - server-stateless:sep-2575-server-no-log-without-loglevel
+  # The runner invokes the first listed tool with `{}`; Compass preserves its
+  # stable ordering and the first tool correctly requires `query`.
+  - http-header-validation:sep-2243-server-accepts-whitespace-header-value

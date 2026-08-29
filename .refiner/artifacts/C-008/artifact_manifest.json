@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-008",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "crates/compass-mcp",
+    "crates/compass-cli",
+    "COMPATIBILITY.md",
+    "MIGRATION.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "docs/reference",
+    "openspec/changes/mcp-stateless-http"
+  ],
+  "distFiles": ["qa-receipt.md"],
+  "validatedAt": "2026-08-28T17:30:00Z"
+}

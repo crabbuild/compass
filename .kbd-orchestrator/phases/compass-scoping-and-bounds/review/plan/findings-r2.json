@@ -1,0 +1,31 @@
+{
+  "mode": "artifact",
+  "verdict": "PASS",
+  "judge_model": "kbd-judge",
+  "producer_model": "claude-fable-5",
+  "isolation_mode": "rest-gateway:http://localhost:8181/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "plan.md",
+      "claim": "C-018 weakens E6 by making marketplace packaging optional even though the goal requires a Claude marketplace deliverable.",
+      "evidence": "Goals E6 requires: \"Native harness packages (Codex `.codex-plugin`, Claude `.claude-plugin` + marketplace, OpenCode plugin/npm) generated from one canonical inventory.\" Plan C-018 says: \"Claude package (`.claude-plugin/plugin.json`, `.mcp.json`, skills, optional marketplace)\".",
+      "suggested_fix": "Make the Claude marketplace artifact a required C-018 deliverable, or explicitly amend E6 if marketplace generation is no longer in scope."
+    },
+    {
+      "severity": "WARNING",
+      "file": "plan.md",
+      "claim": "C-003's fail-fast acceptance criterion is too vague to enforce G3's recoverability requirement.",
+      "evidence": "G3 says: \"Fail fast: a doomed build should not consume 331s before reporting.\" C-003's acceptance criterion only says: \"Oversized build reports before full extraction completes,\" which still permits most of the 331-second extraction to occur and gives no measurable bound.",
+      "suggested_fix": "Add a measurable acceptance criterion, such as reporting before publication/extraction of file contents begins when the estimate already exceeds the limit, or a deterministic fixture asserting the limit is reported within a bounded phase/time budget."
+    },
+    {
+      "severity": "WARNING",
+      "file": "plan.md",
+      "claim": "C-018 omits the hard dependency on the completed MCP migration despite the plan stating Wave 7 must package the migrated MCP contract.",
+      "evidence": "Ordering rationale says: \"Wave 7 after Waves 3 and 6: packages distribute the migrated MCP contract and the split skills; generating them earlier packages contracts that are about to change.\" But C-018 lists only: \"Depends on: C-016, C-017; benefits from C-007\u2013C-010\".",
+      "suggested_fix": "Change C-018 dependencies to include C-010, or explicitly require C-007 through C-010 to be complete before package generation begins."
+    }
+  ]
+}

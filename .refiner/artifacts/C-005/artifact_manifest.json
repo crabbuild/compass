@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-005",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "CHANGELOG.md",
+    "crates/compass-partition",
+    "crates/compass-history",
+    "openspec/changes/extract-compass-partition"
+  ],
+  "distFiles": ["qa-receipt.md"],
+  "validatedAt": "2026-08-28T15:44:46Z"
+}

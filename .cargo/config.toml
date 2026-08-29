@@ -1,3 +1,19 @@
+[build]
+# Keep final and intermediate artifacts local to this checkout/worktree. Four
+# jobs limit CPU/RAM contention when the single phase verification build runs.
+target-dir = "target"
+jobs = 4
+
+[cache]
+# Cargo 1.88+ garbage-collects stale global registry/git cache entries. This
+# does not delete checkout-local build artifacts.
+auto-clean-frequency = "1 day"
+
+[alias]
+# Cargo's --tests also includes library/binary unit harnesses; --test '*' is
+# the integration-only selector documented by Cargo.
+phase-integration = ["test", "--workspace", "--test", "*", "--locked"]
+
 [env]
 # Every parser is compiled into Compass. Runtime grammar downloads and dynamic
 # libraries are disabled in Cargo.toml, preserving the local-only code path.

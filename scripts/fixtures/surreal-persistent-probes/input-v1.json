@@ -1,0 +1,79 @@
+{
+  "schema": "compass.surreal-persistent-probe-input/1",
+  "database": "probe",
+  "namespace": "compass",
+  "activeGeneration": "g-0001",
+  "candidateGeneration": "g-0002",
+  "pageSize": 128,
+  "scaleEdgeCount": 2048,
+  "scaleRelationRule": {
+    "confidence": "0.500000",
+    "evenIndex": {
+      "from": "node-alpha",
+      "to": "node-gamma"
+    },
+    "idFormat": "edge-scale-{zero-padded-decimal-index:6}",
+    "indexRange": {
+      "endExclusive": 2048,
+      "startInclusive": 0
+    },
+    "oddIndex": {
+      "from": "node-gamma",
+      "to": "node-beta"
+    },
+    "provenance": {
+      "columnFormula": "index % 80",
+      "lineFormula": "index + 1",
+      "path": "src/generated.rs"
+    }
+  },
+  "nodes": [
+    {
+      "id": "node-alpha",
+      "name": "Alpha"
+    },
+    {
+      "id": "node-beta",
+      "name": "Beta"
+    },
+    {
+      "id": "node-gamma",
+      "name": "Gamma"
+    }
+  ],
+  "relations": [
+    {
+      "confidence": "0.875000",
+      "from": "node-alpha",
+      "id": "edge-parallel-0001",
+      "provenance": {
+        "column": 4,
+        "line": 11,
+        "path": "src/alpha.rs"
+      },
+      "to": "node-beta"
+    },
+    {
+      "confidence": "0.625000",
+      "from": "node-alpha",
+      "id": "edge-parallel-0002",
+      "provenance": {
+        "column": 9,
+        "line": 29,
+        "path": "src/alpha.rs"
+      },
+      "to": "node-beta"
+    },
+    {
+      "confidence": "1.000000",
+      "from": "node-beta",
+      "id": "edge-reverse-0001",
+      "provenance": {
+        "column": 2,
+        "line": 7,
+        "path": "src/beta.rs"
+      },
+      "to": "node-alpha"
+    }
+  ]
+}

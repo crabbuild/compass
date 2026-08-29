@@ -212,6 +212,28 @@ fn loaded_graph_learning_overlay_marks_current_missing_and_unfingerprinted_sourc
 }
 
 #[test]
+fn loaded_graph_directed_builds_relationship_query_indexes() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    fs::write(
+        &graph,
+        r#"{"directed":true,"multigraph":true,"graph":{},"nodes":[{"id":"a"},{"id":"b"}],"links":[{"source":"a","target":"b","relation":"calls"}]}"#,
+    )?;
+
+    let loaded = LoadedGraph::load_directed(&graph)?;
+    let source = loaded.graph.node_index("a").ok_or("missing source node")?;
+    assert_eq!(
+        loaded
+            .graph
+            .query_index()
+            .outgoing_with_type(source, "CALLS")
+            .len(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
 fn build_pipeline_reports_missing_and_empty_roots_and_accepts_file_only_sources()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

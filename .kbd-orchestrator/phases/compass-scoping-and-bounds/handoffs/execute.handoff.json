@@ -1,0 +1,12 @@
+{
+  "stage": "execute",
+  "completedAt": "2026-08-28T12:49:45Z",
+  "outputs": [
+    "execution.md",
+    "progress.json"
+  ],
+  "nextStage": "reflect",
+  "summaryForNext": "OpenSpec selected and driven through kbd-apply; all 20 changes are assigned with hard approval gates; C-001 stream-snapshot-read is first pending.",
+  "skipped": false,
+  "skipReason": null
+}

@@ -66,6 +66,54 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
+    pub const ALL: [Self; 45] = [
+        Self::File,
+        Self::Module,
+        Self::Package,
+        Self::Namespace,
+        Self::Class,
+        Self::Struct,
+        Self::Interface,
+        Self::Trait,
+        Self::Protocol,
+        Self::Enum,
+        Self::EnumMember,
+        Self::TypeAlias,
+        Self::Function,
+        Self::Method,
+        Self::Constructor,
+        Self::Property,
+        Self::Field,
+        Self::Variable,
+        Self::Constant,
+        Self::Parameter,
+        Self::Import,
+        Self::Export,
+        Self::Macro,
+        Self::Annotation,
+        Self::Route,
+        Self::Component,
+        Self::Event,
+        Self::Message,
+        Self::Topic,
+        Self::Queue,
+        Self::Job,
+        Self::Resource,
+        Self::Schema,
+        Self::Query,
+        Self::Migration,
+        Self::ConfigKey,
+        Self::Database,
+        Self::DatabaseSchema,
+        Self::DatabaseTable,
+        Self::DatabaseView,
+        Self::DatabaseColumn,
+        Self::DatabaseIndex,
+        Self::DatabaseConstraint,
+        Self::DatabaseProcedure,
+        Self::DatabaseTrigger,
+    ];
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -191,6 +239,43 @@ pub enum NodeRole {
     Generated,
 }
 
+impl NodeRole {
+    pub const ALL: [Self; 13] = [
+        Self::Controller,
+        Self::RouteHandler,
+        Self::Middleware,
+        Self::Service,
+        Self::Resolver,
+        Self::Consumer,
+        Self::Producer,
+        Self::Subscriber,
+        Self::Repository,
+        Self::Model,
+        Self::Test,
+        Self::Fixture,
+        Self::Generated,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Controller => "controller",
+            Self::RouteHandler => "route_handler",
+            Self::Middleware => "middleware",
+            Self::Service => "service",
+            Self::Resolver => "resolver",
+            Self::Consumer => "consumer",
+            Self::Producer => "producer",
+            Self::Subscriber => "subscriber",
+            Self::Repository => "repository",
+            Self::Model => "model",
+            Self::Test => "test",
+            Self::Fixture => "fixture",
+            Self::Generated => "generated",
+        }
+    }
+}
+
 /// The closed relationship vocabulary for `compass.graph/1`.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -227,6 +312,38 @@ pub enum EdgeKind {
 }
 
 impl EdgeKind {
+    pub const ALL: [Self; 29] = [
+        Self::Contains,
+        Self::Embeds,
+        Self::Calls,
+        Self::Imports,
+        Self::Exports,
+        Self::Extends,
+        Self::Implements,
+        Self::References,
+        Self::TypeOf,
+        Self::Returns,
+        Self::Instantiates,
+        Self::Overrides,
+        Self::Decorates,
+        Self::RoutesTo,
+        Self::Reads,
+        Self::Writes,
+        Self::Aliases,
+        Self::Registers,
+        Self::Handles,
+        Self::Publishes,
+        Self::Subscribes,
+        Self::Produces,
+        Self::Consumes,
+        Self::Schedules,
+        Self::Triggers,
+        Self::Tests,
+        Self::DependsOn,
+        Self::Documents,
+        Self::MapsTo,
+    ];
+
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {

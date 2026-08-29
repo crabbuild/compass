@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
 use std::fs;
 
@@ -209,25 +209,25 @@ fn generic_methods_in_distinct_classes_publish_distinct_stable_nodes() -> Result
     let root = directory.path();
     let path = root.join("assets/bundle.js");
     fs::create_dir_all(path.parent().ok_or("missing source parent")?)?;
-    fs::write(
-        &path,
-        r#"
+    let source = r#"
 class First {
     constructor(e, t) { this.value = e + t; }
 }
 class Second {
     constructor(e, t) { this.value = e * t; }
 }
-"#,
-    )?;
+"#;
+    fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
-    let flexible = build_from_extraction(&extraction, true, Some(root));
+    let sources = HashMap::from([(path.to_string_lossy().into_owned(), source.to_owned())]);
+    let resolved = compass_resolve::resolve_with_root(&[extraction], &sources, root);
+    let flexible = build_from_extraction(&resolved, true, Some(root));
     let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
     let methods = graph
         .nodes
         .iter()
-        .filter(|node| node.kind == NodeKind::Method && node.name == ".constructor()")
+        .filter(|node| node.kind == NodeKind::Constructor && node.name == "constructor")
         .collect::<Vec<_>>();
 
     assert_eq!(methods.len(), 2, "nodes={:?}", graph.nodes);
@@ -236,7 +236,7 @@ class Second {
             .iter()
             .map(|node| node.qualified_name.as_str())
             .collect::<BTreeSet<_>>(),
-        ["First::constructor", "Second::constructor"]
+        ["bundle.First.constructor", "bundle.Second.constructor"]
             .into_iter()
             .collect()
     );

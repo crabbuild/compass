@@ -1,0 +1,11 @@
+crates/compass-core/src/pipeline.rs
+crates/compass-graph/src/lib.rs
+crates/compass-graph/src/snapshot.rs
+CHANGELOG.md
+openspec/changes/preflight-graph-size-estimate/.openspec.yaml
+openspec/changes/preflight-graph-size-estimate/proposal.md
+openspec/changes/preflight-graph-size-estimate/design.md
+openspec/changes/preflight-graph-size-estimate/specs/preflight-graph-size-estimate/spec.md
+openspec/changes/preflight-graph-size-estimate/tasks.md
+openspec/changes/preflight-graph-size-estimate/files.txt
+openspec/changes/preflight-graph-size-estimate/evidence/baseline.md

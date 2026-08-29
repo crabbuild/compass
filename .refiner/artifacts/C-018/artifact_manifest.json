@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-018",
+  "artifactType": "distribution",
+  "contentType": "rust-and-typescript:package-generators",
+  "status": "refined",
+  "sourceArtifacts": [
+    "distribution.toml",
+    "crates/compass-cli/src/distribution.rs",
+    "crates/compass-cli/src/agent_commands.rs",
+    "crates/compass-cli/tests/agent_cli.rs",
+    "crates/compass-cli/assets/compass-focused-skills",
+    "packages/compass-opencode",
+    "tools/skillgen/mod.rs",
+    "docs/implementation/agent-distribution.md",
+    "openspec/changes/archive/2026-08-29-distribution-inventory-generators"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

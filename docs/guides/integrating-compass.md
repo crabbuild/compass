@@ -210,6 +210,38 @@ Before placing it behind an editor or network service:
 For a local coding assistant, stdio avoids opening a listening socket. Use HTTP
 only when a multi-process or remote integration actually needs it.
 
+Render a credential-free host-native starting point instead of translating
+schemas by hand:
+
+```bash
+compass agent mcp-config --platform codex --transport stdio
+compass agent mcp-config --platform claude --transport http
+compass agent mcp-config --platform opencode --transport stdio
+```
+
+Codex receives `mcp_servers` TOML, Claude receives an `.mcp.json`
+`mcpServers` object, and OpenCode receives its top-level `mcp` object. The HTTP
+form intentionally uses a loopback URL; add authentication deliberately before
+changing the bind boundary.
+
+The four core navigation tools—`search_symbols`, `get_callers`, `get_callees`,
+and `get_impact`—publish a closed structured output schema and return
+`compass.code_context.v1`. Read the previous `compass.query/1` result from
+`structuredContent.data`. The surrounding envelope adds graph identity,
+evidence-scoped freshness, evidence/confidence summaries, truncation state, and
+warnings. MCP `resultType` is a separate protocol field and is `complete` for
+these synchronous calls.
+
+Treat `freshness.status: "unknown"` as unknown rather than current. When
+`truncation.truncated` is true and `truncation.next` is null, this schema version
+has no continuation token; issue a narrower request or raise an explicit bound.
+
+Discovery marks the remaining text-only tools and explicit `query_graph`
+traversal text mode deprecated from 0.4.0. Their names and current text outputs
+remain available while typed replacements are designed; no removal release is
+scheduled yet. Prefer the four envelope-backed navigation tools for new
+machine consumers.
+
 ## Cross-repository registry
 
 Compass can register graphs in a global index:

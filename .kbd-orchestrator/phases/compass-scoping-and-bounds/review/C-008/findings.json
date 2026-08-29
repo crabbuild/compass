@@ -1,0 +1,28 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "gpt-5.6-sol/fresh-context-subagent",
+  "isolation_mode": "harness-native",
+  "producer_model": "gpt-5.6-sol",
+  "cross_model_check": "same-model-collision",
+  "findings": [],
+  "checked_classes": [
+    "Correctness: the raw-wire test executes independent server/discover and tools/list requests and asserts the 2026-07-28 version plus the unchanged 15-tool inventory.",
+    "Authentication ordering: transport.rs checks API-key or bearer credentials before host and protocol parsing; a wrong bearer token combined with an attacker Host receives 401 rather than a host or protocol diagnostic.",
+    "Host validation: transport.rs mirrors rmcp explicit-Host precedence, normalized host comparison, and portless allowlist semantics; authenticated attacker, missing, malformed, old-protocol, and arbitrary-port cases pin the boundary before protocol dispatch.",
+    "Request bounds: rmcp configuration and RequestBodyLimitLayer both apply the unchanged 16 MiB request cap, leaving no unbounded stateless request path.",
+    "Known response bounds: enforce_response_limit rejects a lower size hint above 64 MiB with HTTP 500 and typed JSON-RPC error -32023 before body transmission.",
+    "Streaming response bounds: every other body is wrapped in http_body_util::Limited; the unknown-length two-chunk regression yields only the first in-bound chunk and then LengthLimitError instead of the overflow chunk.",
+    "Protocol negative matrix: raw-wire cases assert typed codes for missing protocol, missing method, missing and incomplete _meta, header/body method mismatch, and current-version initialize.",
+    "Session semantics: with_legacy_session_mode(false) prevents session creation; initialize is rejected, while an obsolete Mcp-Session-Id is ignored and no response session ID is issued, matching the acceptance scenario.",
+    "CLI compatibility: unit and executable tests pin the exact session-timeout warning while preserving usage exit 2 and runtime exit 1; both option spellings retain numeric validation.",
+    "Dependency scope: http-body-util is inherited for production Limited use, while channel is enabled only in compass-mcp dev-dependencies; C-007 sha2 and earlier partition work are baseline context rather than C-008 additions.",
+    "Documentation: COMPATIBILITY, MIGRATION, SECURITY, command/configuration references, CHANGELOG, and OpenSpec consistently state stateless 2026 HTTP, no legacy mode, ignored obsolete session headers, and the 0.5.0 option-removal schedule.",
+    "Diff contamination: files.txt limits the isolated packet to Cargo metadata, compass-mcp/CLI implementation and tests, public compatibility documents, and the C-008 OpenSpec artifact; no earlier graph-limit or storage implementation hunk is added."
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

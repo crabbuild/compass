@@ -1,0 +1,30 @@
+schema = "compass.distribution/1"
+
+[package]
+name = "compass"
+version = "0.3.7"
+description = "Local-first code intelligence, structural navigation, and bounded MCP tools."
+author = "Compass contributors"
+homepage = "https://github.com/crabbuild/compass"
+repository = "https://github.com/crabbuild/compass"
+license = "MIT OR Apache-2.0"
+keywords = ["agent-skills", "code-intelligence", "mcp", "navigation"]
+
+[harness.codex]
+verified_version = "0.146.0"
+manifest = ".codex-plugin/plugin.json"
+mcp = ".mcp.json"
+marketplace = ".agents/plugins/marketplace.json"
+
+[harness.claude]
+verified_version = "2.1.251"
+manifest = ".claude-plugin/plugin.json"
+mcp = ".mcp.json"
+marketplace = ".claude-plugin/marketplace.json"
+
+[harness.opencode]
+verified_version = "1.18.23"
+manifest = "package.json"
+mcp = "opencode.json"
+npm_name = "@compass/opencode-plugin"
+plugin_api_version = "1.18.25"

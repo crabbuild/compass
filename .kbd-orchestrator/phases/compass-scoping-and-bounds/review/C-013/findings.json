@@ -1,0 +1,47 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 378,
+      "claim": "A deeply nested task document within the 1 MiB cap crashes with an uncaught RecursionError (traceback, exit 1), violating the documented contract that input failures exit 2 with a clean message.",
+      "evidence": "main() parses the task document with `json.loads(task_contents.decode(\"utf-8\"))` after only a byte cap (`MAX_TASK_BYTES = 1024 * 1024`); a ~4 KB payload of 2000 nested arrays exceeds Python's recursion limit, and the __main__ handler catches only `(LimitExceeded, OSError, TypeError, ValueError)` \u2014 RecursionError is a RuntimeError subclass and escapes. README.md states 'Exit status 2 is a limit or input failure', and test_raw_traversal.py asserts 'NotIn Traceback' for malformed inputs but never exercises nesting depth.",
+      "suggested_fix": "Add RecursionError (or RuntimeError) to the caught exception tuple, or pre-validate JSON nesting depth before json.loads, and add a regression test with a deeply nested task document asserting exit 2 and no traceback."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw-traversal-oracle-v1.json",
+      "line": 0,
+      "claim": "The retained timing-free oracle has no documented or scripted reproduction path, so refreshing it after a legitimate task-suite or generator change requires manual editing of a manifest-pinned evidence file.",
+      "evidence": "raw_traversal.py emits schema 'compass.qualification-raw-traversal/1' with per-task elapsedMicroseconds, limits, and oracleStatus, but the retained oracle uses a distinct schema 'compass.qualification-raw-oracle/1' containing only id/result plus graph and taskSuite pins. README.md documents only producing the disposable timing-inclusive output under target/ ('Run the bounded raw denominator'), and no transformer between the two schemas exists anywhere in the packet, while manifest-v1.json pins the oracle's exact bytes and verification.md claims 'the timing-free result set is retained' as reproducible evidence.",
+      "suggested_fix": "Add a small deterministic strip/pin step (e.g. an --oracle-output mode in raw_traversal.py or a documented transform script) that derives the oracle from a raw run, document it in README.md, and list any new script in manifest-v1.json."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 246,
+      "claim": "The impact operation hardcodes status 'complete' and can never emit 'empty', contradicting the README claim that all operations emit an explicit complete-or-empty status and making 'empty' an unsatisfiable expected status for impact tasks.",
+      "evidence": "The impact branch returns `{\"status\": \"complete\", \"nodeIds\": sorted(seen), ...}` unconditionally (seen always contains at least the resolved source), while validate_task accepts `\"status\": \"empty\"` in any task's expected object and README.md states 'All operations emit an explicit `complete` or `empty` status.' An impact task authored with expected status 'empty' can never pass verify_expected.",
+      "suggested_fix": "Either document that impact is always 'complete' by definition (and reject expected status 'empty' for impact in validate_task), or emit 'empty' when the blast radius contains only the source node."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 303,
+      "claim": "Workload and metadata stdout/stderr byte caps are enforced only after process exit, so within its timeout a misbehaving measured process can write unbounded bytes to disk before the size check fires.",
+      "evidence": "In both _measure() and bounded_capture() the sequence is `metrics = run_measured(ProcessSpec(...))` followed by `size = path.stat().st_size; if size > max_output_bytes: raise` \u2014 the cap is a post-hoc inspection of the fully captured file; nothing in the packet shows run_measured itself truncating or capping the stream, while the bounded-work blocking constraint requires that 'subprocess output remains bounded' and verification.md claims explicit stdout/stderr limits on every measured workload.",
+      "suggested_fix": "Confirm run_measured enforces a streaming byte cap (and cite that in verification.md), or pass the byte limit into ProcessSpec so capture is truncated/failed at the limit rather than checked after the fact."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

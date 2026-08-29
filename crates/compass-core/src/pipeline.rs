@@ -17,10 +17,10 @@ use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
     GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
-    InventoryEvidence, PublicationOmissions, SnapshotSelector, SourceDigest,
+    InventoryEvidence, PublicationOmissions, SnapshotError, SnapshotSelector, SourceDigest,
     build_owned_with_tiebreaker as build_document, canonical_edge_kind, canonical_raw_edge_sites,
     cluster, deduped_node_count, extraction_from_v1, garbage_collect_graph_snapshots,
-    graph_insights, graph_snapshot_needs_gc, label_communities_by_hub,
+    graph_insights, graph_snapshot_needs_gc, label_communities_by_hub, max_canonical_graph_bytes,
     normalize_document_v1_with_evidence_best_effort_owned,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned,
     normalize_document_v1_with_inventory_best_effort, remap_communities_to_previous,
@@ -81,6 +81,12 @@ pub const DEFAULT_MAX_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const SEMANTIC_MARKER_FILE: &str = "semantic-marker.json";
 const PIPELINE_RAYON_WORKER_CAP: usize = 12;
 const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
+// Calibrated on the C-003 deterministic fixture: 112,893 source bytes produced
+// 6,843,452 canonical bytes (60.62x). Rounding down avoids claiming precision
+// the measurement does not provide. Sources rejected by max_source_bytes do
+// not use this expansion because Compass publishes inventory-only coverage.
+const PREFLIGHT_GRAPH_BYTES_PER_SOURCE_BYTE: u64 = 60;
+const PREFLIGHT_PARTIAL_FILE_BYTES: u64 = 512;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
 const ROOT_ARTIFACTS: [&str; 6] = [
@@ -2556,6 +2562,13 @@ fn build_graph_inner_unscoped(
         ));
     }
 
+    enforce_preflight_graph_size(
+        &root,
+        &sources,
+        options.max_source_bytes,
+        max_canonical_graph_bytes(),
+    )?;
+
     let output_cache_root = (output_root != root).then_some(output_root.as_path());
     let cache_options = options.cache_root.as_deref().map_or_else(
         || CacheOptions::output_directory(output_cache_root),
@@ -4071,6 +4084,42 @@ fn build_graph_inner_unscoped(
     Ok((result, retained))
 }
 
+/// Estimate canonical payload growth from discovery metadata before any
+/// project-wide extraction begins. The calculation performs one bounded
+/// metadata lookup per admitted source and uses saturating arithmetic so an
+/// adversarial corpus cannot wrap the estimate into a successful result.
+fn enforce_preflight_graph_size(
+    root: &Path,
+    sources: &[PathBuf],
+    max_source_bytes: u64,
+    maximum: u64,
+) -> Result<u64, CoreError> {
+    let estimated = sources.iter().fold(0_u64, |total, source| {
+        let relative = source.strip_prefix(root).unwrap_or(source);
+        let path_bytes = u64::try_from(relative.as_os_str().len()).unwrap_or(u64::MAX);
+        let source_estimate =
+            fs::metadata(source).map_or(PREFLIGHT_PARTIAL_FILE_BYTES, |metadata| {
+                if metadata.is_file() && metadata.len() <= max_source_bytes {
+                    metadata
+                        .len()
+                        .saturating_mul(PREFLIGHT_GRAPH_BYTES_PER_SOURCE_BYTE)
+                        .max(PREFLIGHT_PARTIAL_FILE_BYTES)
+                } else {
+                    PREFLIGHT_PARTIAL_FILE_BYTES
+                }
+            });
+        total
+            .saturating_add(path_bytes)
+            .saturating_add(source_estimate)
+    });
+    if estimated > maximum {
+        return Err(CoreError::Snapshot(
+            SnapshotError::canonical_graph_too_large(maximum),
+        ));
+    }
+    Ok(estimated)
+}
+
 fn oversized_source_extraction(
     path: &Path,
     max_source_bytes: u64,
@@ -4438,6 +4487,17 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
     if previous.directed != current.directed || previous.multigraph != current.multigraph {
         return false;
     }
+    // A valid externally supplied graph is not required to retain Compass's
+    // publication order. The merge walk below is correct only for sorted
+    // records, so fail closed to a full snapshot when either input was
+    // reordered instead of miscounting changes (or tripping debug builds).
+    if !records_are_sorted(&previous.nodes, |node| node.id.as_str())
+        || !records_are_sorted(&current.nodes, |node| node.id.as_str())
+        || !records_are_sorted(&previous.links, |edge| edge.id.as_str())
+        || !records_are_sorted(&current.links, |edge| edge.id.as_str())
+    {
+        return false;
+    }
     // V1 publication sorts both records by stable ID. A merge walk avoids
     // four BTreeMap allocations on every incremental build while preserving
     // the same changed-record count. The snapshot layer repeats its complete
@@ -4460,6 +4520,15 @@ fn graph_delta_candidate(previous: &V1GraphDocument, current: &V1GraphDocument) 
         return false;
     }
     true
+}
+
+fn records_are_sorted<T, F>(records: &[T], key: F) -> bool
+where
+    F: Fn(&T) -> &str,
+{
+    records
+        .windows(2)
+        .all(|pair| key(&pair[0]) <= key(&pair[1]))
 }
 
 fn changed_record_count<T, F>(previous: &[T], current: &[T], key: F) -> usize

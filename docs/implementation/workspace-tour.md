@@ -316,6 +316,13 @@ subprocess calls.
 Implements native Neo4j Bolt and FalkorDB RESP clients and graph-to-operation
 mapping.
 
+### `compass-graphdb-surreal`
+
+Owns the optional SurrealDB projection boundary. Its default feature set builds
+only a deterministic projection plan; explicit `mem`, `surrealkv`, or `rocksdb`
+features add the pinned SDK runtime, schemafull relation tables, and atomic
+generation activation. It contains no CLI or MCP presentation logic.
+
 ### `compass-ingest`
 
 Owns bounded, verified URL and audio acquisition, including the managed

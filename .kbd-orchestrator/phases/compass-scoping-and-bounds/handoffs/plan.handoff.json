@@ -1,0 +1,11 @@
+{
+  "stage": "plan",
+  "completedAt": "2026-08-28T12:39:06Z",
+  "outputs": [
+    "plan.md"
+  ],
+  "nextStage": "execute",
+  "summaryForNext": "Re-plan: 20 changes across 8 waves (6 original preserved verbatim + 14 for the expanded docs/future scope). First change: C-001 stream-snapshot-read with verify-first protocol on the uncommitted diff. Adversarial review r1 BLOCK (settled-architecture section added, C-004 coupling made binding, rmcp pin corrected to =3.1.4, JS gates added) then r2 PASS; r2 WARNINGs fixed in-place (Claude marketplace required, C-003 baseline-first criterion, C-018 hard dep on C-010). Hard gates: Wave 5 blocked on C-011 license decision + C-012 probes + C-013 ratified budgets; C-020 conditional. Mode assumption: fork-local; upstream submission is exit work.",
+  "skipped": false,
+  "skipReason": null
+}

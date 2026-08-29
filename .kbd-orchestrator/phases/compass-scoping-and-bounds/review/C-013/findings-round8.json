@@ -1,0 +1,47 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 176,
+      "claim": "The versioned per-task status contract is only half-implemented: `verify_expected` defaults a missing result status to \"complete\", and only the `path` operation ever emits a status field, so `expected.status: \"empty\"` is unsatisfiable for search/callers/callees/impact while a genuinely empty search result silently verifies as \"complete\".",
+      "evidence": "`actual_status = result.get(\"status\", \"complete\")` in `verify_expected`; in `execute_task`, the search/callers/callees/impact branches return dicts with no \"status\" key, and only the path branch returns `{\"status\": \"empty\", ...}` or `{\"status\": \"complete\", ...}`. Meanwhile `validate_task` explicitly admits `status in {\"complete\", \"empty\"}` for every operation. verification.md claims the oracle output is \"continuously checked against every expected status\", but the frozen status semantics for 4 of 5 operations were never actually produced by the oracle and will mismatch any future engine that reports empty searches as \"empty\".",
+      "suggested_fix": "Either have all operations emit an explicit status (\"empty\" when nodeIds is empty) so the default in verify_expected can be removed, or restrict the admitted status domain per operation in validate_task and drop the unreachable \"empty\" value for non-path operations."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 258,
+      "claim": "The `limits` object versioned inside agent-tasks-v1.json is never consumed: the harness enforces only CLI-arg limits, and no test cross-checks the file's limits against the enforced ones, so the \"explicit limit behavior\" claimed for the versioned task suite is decorative metadata.",
+      "evidence": "agent-tasks-v1.json contains `\"limits\": {\"maxDepth\": 32, \"maxEdges\": 250000, \"maxNodes\": 100000, \"maxResultsPerTask\": 10000, \"timeoutSeconds\": 120}`, but `main()` in raw_traversal.py reads only `tasks_document[\"tasks\"]` and takes every limit from argparse; test_corpora.py and test_raw_traversal.py never reference the limits block. Acceptance criterion 2.2 (\"bounded raw-traversal baseline with explicit limit behavior\") and verification.md (\"has explicit byte/node/edge/depth/result/time limits\") describe the file as the limit contract, yet editing those pinned values changes no enforced behavior.",
+      "suggested_fix": "Validate in raw_traversal.main that the tasks-file limits (when present) equal the effective CLI limits and fail with exit 2 on mismatch, or remove the limits block from the task schema so the single source of truth is the command line."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "line": 252,
+      "claim": "The tasks file is read with an unbounded `read_text` while every other input (graph bytes, node/edge counts, results, time) is explicitly capped, leaving one unbounded input in a harness whose stated purpose is bounded operation.",
+      "evidence": "`tasks_document = json.loads(args.tasks.read_text(encoding=\"utf-8\"))` with no size check; contrast with `load_graph`'s `max_graph_bytes` stat check and the bounded-work constraint (\"All work over source files, graphs ... remains bounded\"). The 120s deadline bounds execution time but not the up-front memory/size of an arbitrarily large --tasks input.",
+      "suggested_fix": "Add a small explicit byte ceiling for the tasks document (e.g., stat check before read, fail with exit 2) mirroring the graph-byte guard."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 399,
+      "claim": "The raw-denominator invocation hardcodes qualification-medium ceilings (--max-nodes 100000, --max-edges 250000, --max-graph-bytes 268435456) regardless of the profile of the graph actually supplied via --graph, so the runner silently cannot be reused for the other pinned profile or a future profile without a code edit.",
+      "evidence": "In `main`, `raw_command` is constructed with literal \"100000\"/\"250000\"/\"268435456\" while `validated_graph_contract` accepts any profile present in scale-profile-digests-v1.json (which includes qualification-large at 1,000,000/2,500,000); running the documented runner against the large profile would fail closed in raw traversal for a reason unrelated to the graph's validity.",
+      "suggested_fix": "Derive the raw-traversal ceilings from the validated profile entry (nodes/edges from `graph_contract`, bytes from the measured graph size) or fail fast with an explicit message that only qualification-medium is supported."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

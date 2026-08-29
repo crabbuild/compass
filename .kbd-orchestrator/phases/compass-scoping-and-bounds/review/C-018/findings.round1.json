@@ -1,0 +1,112 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "Cargo.toml",
+      "claim": "Dependency resolution changes (rmcp 2.2.0\u2192=3.1.4, new surrealdb =3.2.4, http-body-util, compass-partition workspace dep, two new workspace members, sha2 build-dep) ship without a Cargo.lock update in the diff, so all --locked build/test commands will fail.",
+      "evidence": "Constraint locked-dependencies (blocking): 'Build and test commands use --locked; Cargo.lock is updated when dependency resolution changes'. The diff modifies [workspace.dependencies] and members but contains no Cargo.lock hunk, even though files.txt lists Cargo.lock as part of the change. Likewise packages/compass-opencode/package.json adds @opencode-ai/plugin, typescript, and vitest with no package-lock.json hunk, breaking `npm ci` required by js-surface-verified.",
+      "suggested_fix": "Regenerate and commit Cargo.lock and package-lock.json for the new/changed dependencies, or drop the unrelated dependency changes from this phase."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "Cargo.toml",
+      "claim": "rmcp is bumped across a major version (2.2.0 \u2192 =3.1.4) with zero corresponding changes to compass-mcp source, which almost certainly breaks compilation and the MCP conformance surface, and is unrelated to this phase's acceptance criteria.",
+      "evidence": "Cargo.toml hunk: `-rmcp = { version = \"2.2.0\", ... }` \u2192 `+rmcp = { version = \"=3.1.4\", ... }`; the diff touches no files under crates/compass-mcp. Constraints build-passes (blocking) and no-unrelated-diff-noise ('git diff ... contain no unrelated or generated noise'). Nothing in the acceptance criteria (distribution inventory/generators) requires an MCP SDK upgrade.",
+      "suggested_fix": "Revert the rmcp bump in this phase, or include the compass-mcp migration, lockfile update, and MCP conformance gate evidence."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-cli/src/lib.rs",
+      "claim": "The MCP HTTP server default is changed from stateful (stateless=false, 3600s session timeout) to stateless with no integration coverage, no MIGRATION.md note, and no CHANGELOG.md entry for an incompatible user-visible behavior change.",
+      "evidence": "lib.rs hunk: `-let mut stateless = false; -let mut session_timeout = Some(Duration::from_secs(3600));` \u2192 `+let mut stateless = true; +let session_timeout = None;`. Constraint regression-test-present (blocking): 'Behavior changes require full integration coverage at the lowest public boundary'; compatibility-documented (warning): incompatible CLI/env behavior changes require 'regression coverage, updated reference docs, a MIGRATION.md note ... and a CHANGELOG.md entry'. The diff adds no serve/stateless test and no MIGRATION.md/CHANGELOG.md hunks.",
+      "suggested_fix": "Add integration coverage at the compass serve boundary for the new stateless default, document the incompatibility in MIGRATION.md and CHANGELOG.md, or split this change out of the distribution phase."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 330,
+      "claim": "`agent doctor --user` is parsed as requiring a value, so a bare `--user` flag silently consumes the next token (even another flag such as `--format`) as the root path, and it is inconsistent with `agent install --user` being a boolean scope flag in the same CLI.",
+      "evidence": "parse_doctor_options: `\"--user\" | \"--user-root\" => { ... index += 1; root = PathBuf::from(required_value(args, index, args[index - 1].as_str())?); user = true; ... }` \u2014 required_value does not reject flag-like values, and the test file shows `agent install --platform codex --project` using scope flags boolean-style.",
+      "suggested_fix": "Make `--user` a boolean flag and `--user-root <PATH>` the valued form, and reject values beginning with '-' in required_value."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 700,
+      "claim": "Export fails closed on false positives: scan_portability/contains_literal_credential run over every embedded skill document at export time with a much broader absolute-path list (/usr, /tmp, /var, /etc, /bin, ...) and a narrow credential-placeholder whitelist than the skill generator's own validator, so any skill doc legitimately mentioning e.g. `/usr/local/bin` or showing an `api_key` example makes `agent export` fail.",
+      "evidence": "agent_commands.rs contains_absolute_path UNIX_ROOTS list vs tools/skillgen/mod.rs validate_portable_paths which only forbids \"/Users/\", \"/home/\", \"file://\" and Windows drive paths; contains_literal_credential's is_credential_placeholder accepts only your_/your-/env:/${VAR}/<placeholder> forms. export_bundle aborts (`staged agent bundle failed validation`) on any finding. The two validators disagree, so content that passes skillgen can fail export.",
+      "suggested_fix": "Align the export-time portability/credential scan with the skillgen validator (single shared rule set), or scope strict scanning to generated files rather than reviewed, checked-in skill content."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 1005,
+      "claim": "Doctor and export disagree on where the 'agents' platform MCP config lives: export writes `mcp/agents.json` while doctor only looks for `.agents/mcp.json`, so doctor can never validate the config shape the tool itself generates for that platform.",
+      "evidence": "bundle_config_path: `_ => \"mcp/agents.json\"`; locate_mcp_config: `\"agents\" => &[\".agents/mcp.json\"]`.",
+      "suggested_fix": "Unify the canonical config path per platform across bundle_config_path, install_commands, and locate_mcp_config, or have doctor accept the exported location."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/agent_commands.rs",
+      "line": 1040,
+      "claim": "Doctor and bundle validation hard-require the MCP URL to be exactly http://127.0.0.1:8080/mcp, so a fully working user configuration on a custom --host/--port is reported as a failing check (healthy=false, exit 1).",
+      "evidence": "validate_mcp_config_bytes: `let url_is_compass = entry.get(\"url\").and_then(Value::as_str) == Some(MCP_HTTP_URL);` with `MCP_HTTP_URL: &str = \"http://127.0.0.1:8080/mcp\"`, while `compass serve` accepts --host/--port per mcp_help().",
+      "suggested_fix": "Accept any loopback http(s) MCP URL with path /mcp in validation, or record the configured endpoint at install time and validate against it."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/distribution.rs",
+      "line": 305,
+      "claim": "The OpenCode JavaScript artifact is produced by a hand-rolled string-replacement 'TypeScript stripper' guarded only by two sentinel substrings; any other TypeScript-only syntax added to src/index.ts (parameter types, interfaces, enums, `as` casts) would be silently copied into the shipped src/index.js as invalid JavaScript.",
+      "evidence": "opencode_runtime_source() only replaces TYPED_IMPORT\u2192RUNTIME_IMPORT and TYPED_EXPORT\u2192RUNTIME_EXPORT; spec scenario requires 'JavaScript artifact generated from the checked TypeScript plugin source', and constraint safe-primitives-reused warns against reimplementing weaker local variants of existing tooling (the workspace already has tsc via packages/compass-opencode's typecheck script).",
+      "suggested_fix": "Generate src/index.js with the real TypeScript compiler (or esbuild) in a checked build step and have the CLI consume the compiled artifact, failing if it is stale."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/Cargo.toml",
+      "claim": "sha2 is added as a compass-cli build-dependency but the build.rs hunk shows no sha2 usage, while the actual new sha2 consumer is tools/skillgen/mod.rs, whose manifest is not updated in the diff \u2014 either a dead dependency in compass-cli or a missing dependency that breaks the skillgen build.",
+      "evidence": "compass-cli/Cargo.toml hunk adds `[build-dependencies] sha2.workspace = true`; the build.rs hunk only adds \"compass-focused-skills\" to a directory list. tools/skillgen/mod.rs hunk adds `use sha2::{Digest, Sha256};` with no accompanying manifest change.",
+      "suggested_fix": "Move the sha2 dependency to the crate that actually uses it (the skillgen tool's manifest) and remove it from compass-cli build-dependencies unless build.rs uses it."
+    },
+    {
+      "severity": "WARNING",
+      "file": "Cargo.toml",
+      "claim": "The diff carries multiple changes unrelated to the distribution-inventory acceptance criteria: new workspace members compass-graphdb-surreal and compass-partition, new surrealdb/http-body-util workspace dependencies, dev/test/debugging profile reconfiguration, and an unrelated neo4j export --password validation change in compass-cli.",
+      "evidence": "Constraint no-unrelated-diff-noise (warning): 'git diff and git status --short contain no unrelated or generated noise'. Acceptance criteria cover only the inventory, generators, validation, docs, and OpenCode plugin; the lib.rs hunk `+if format == \"neo4j\" && push_uri.is_some() && push_password.is_none()` and the Cargo.toml member/profile additions serve other phases. Adding compass-graphdb-surreal to default workspace members also appears to conflict with scripts/check_surreal_feature_isolation.sh's purpose.",
+      "suggested_fix": "Split the surreal/partition workspace wiring, profile tuning, and neo4j validation into their own changes with their own evidence."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "distribution.toml",
+      "claim": "The inventory hardcodes package version \"0.3.7\" that must byte-match CARGO_PKG_VERSION, so every version bump silently breaks `agent export` until a human edits distribution.toml.",
+      "evidence": "distribution.toml `[package] version = \"0.3.7\"`; distribution.rs load_inventory: `if inventory.package.name != \"compass\" || inventory.package.version != env!(\"CARGO_PKG_VERSION\") { return Err(...) }`.",
+      "suggested_fix": "Generate the version line of distribution.toml from the workspace version in a checked script, or drop the version field from the inventory and always use CARGO_PKG_VERSION."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-cli/src/lib.rs",
+      "claim": "The --session-timeout deprecation warning is only emitted for --transport http; with stdio the flag is validated then silently discarded with no warning.",
+      "evidence": "run_mcp hunk: `if options.session_timeout_used && options.transport == \"http\" { ... SESSION_TIMEOUT_DEPRECATION ... }` while parse_mcp_options sets session_timeout_used for either transport and drops the parsed value (`let _validated = parse_session_timeout(raw)?;`).",
+      "suggested_fix": "Emit the deprecation warning whenever session_timeout_used is true, regardless of transport."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "tools/skillgen/mod.rs",
+      "line": 62,
+      "claim": "CANONICAL_SKILL_SHA256 hard-pins the umbrella skill's digest, so any legitimate edit to compass-skill/SKILL.md fails validation with no documented procedure for updating the constant.",
+      "evidence": "skillgen hunk: `const CANONICAL_SKILL_SHA256: &str = \"c6c097e0...\"` with error text 'canonical umbrella skill changed; focused skills must remain additive' and no accompanying docs update describing how to re-pin.",
+      "suggested_fix": "Document the re-pin procedure next to the constant or in docs/implementation/agent-distribution.md, or derive the check from a checked-in expected-digest file that is updated by an explicit command."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

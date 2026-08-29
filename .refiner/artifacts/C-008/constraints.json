@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-008",
+  "blocking": [
+    {"id":"stateless-http","status":"PASS","evidence":"HTTP service disables legacy sessions and issues no Mcp-Session-Id"},
+    {"id":"protocol-2026","status":"PASS","evidence":"HTTP discovery advertises only 2026-07-28 and the gate requires matching protocol and method headers"},
+    {"id":"request-metadata","status":"PASS","evidence":"raw-wire cases assert typed errors for missing and incomplete metadata, missing and mismatched method headers, and initialize"},
+    {"id":"no-legacy-mode","status":"PASS","evidence":"MCP-2025 and initialize/session HTTP paths are rejected; no legacy flag exists"},
+    {"id":"session-timeout-deprecation","status":"PASS","evidence":"Both spellings validate, warn, are ignored through 0.4.x, and are documented for removal in 0.5.0"},
+    {"id":"exit-taxonomy","status":"PASS","evidence":"Unit and executable tests retain usage code 2 and runtime code 1"},
+    {"id":"security-boundaries","status":"PASS","evidence":"Bearer/API-key auth runs before outer allowed-host enforcement; invalid authenticated hosts cannot reach protocol diagnostics; 16 MiB request and 64 MiB streaming response limits pass"},
+    {"id":"stdio-boundary","status":"PASS","evidence":"Existing stdio discovery and handler compatibility tests remain green"},
+    {"id":"workspace-baseline","status":"PASS","evidence":"fmt, workspace lib/bin Clippy, workspace lib/bin tests, product contract, and product boundary pass"},
+    {"id":"adversarial-repair","status":"PASS","evidence":"all four major findings across two review rounds were repaired; dependency-scope baseline contamination was corrected"},
+    {"id":"final-review","status":"PASS","evidence":"fourth isolated review returned zero findings; strict anti-theater gate passed at score 0.0"},
+    {"id":"graph-refresh","status":"PASS","evidence":"120020 nodes, 282421 edges, 68 pre-existing omitted edges, zero identity collisions"}
+  ]
+}

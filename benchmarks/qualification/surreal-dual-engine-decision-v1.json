@@ -1,0 +1,146 @@
+{
+  "schema": "compass.surreal-dual-engine-decision/1",
+  "recordedAt": "2026-08-29",
+  "decision": "REJECT",
+  "falsifierInvoked": true,
+  "reason": "The pre-ratified query-regression and native-value gates failed on qualification-medium. Thresholds were not changed after results were visible.",
+  "source": {
+    "gitHead": "5ca57f2441b90a516eb2a4e78e1fb4e2d2d8269a",
+    "surrealImplementationScope": "Cargo.toml Cargo.lock crates/compass-graphdb-surreal",
+    "surrealImplementationTreeSha256": "428bf4a3fc51372949e0ec8d092cddf6b8a5da4dc3a0b567439b5a731c1b2b31",
+    "currentEngineBaseline": "benchmarks/qualification/current-engine-baseline-v1.json"
+  },
+  "host": {
+    "architecture": "arm64",
+    "operatingSystem": "macOS 26.7",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "python": "3.12.8"
+  },
+  "graph": {
+    "profile": "qualification-medium",
+    "nodes": 100000,
+    "edges": 250000,
+    "bytes": 220023199,
+    "sha256": "aca4e6a1a836780f4baa352c37469787be9815db19f8bf48e858cc87eeb4f054",
+    "generationId": "sha256:b38e80567ca428440218af3548b7724e83d7f86317cecb77b266cbe16adb51b5"
+  },
+  "engineProfile": {
+    "current": "compass-query JSON engine, in process",
+    "candidate": "compass-graphdb-surreal 0.3.7, SurrealDB 3.2.4, kv-mem",
+    "condition": "Both engines were warm in one integration-test process; one unmeasured caller warmup preceded five nearest-rank samples per workload."
+  },
+  "command": [
+    "/usr/bin/time",
+    "-l",
+    "env",
+    "COMPASS_SURREAL_QUALIFICATION_GRAPH=target/qualification-c015/medium/graph.json",
+    "COMPASS_SURREAL_QUALIFICATION_OUTPUT=target/qualification-c015/surreal-raw-v1.json",
+    "COMPASS_SURREAL_QUALIFICATION_SAMPLES=5",
+    "cargo",
+    "test",
+    "-p",
+    "compass-graphdb-surreal",
+    "--test",
+    "scale_qualification",
+    "--features",
+    "mem",
+    "--locked",
+    "full_medium_dual_engine_measurement_emits_raw_evidence",
+    "--",
+    "--ignored",
+    "--exact",
+    "--nocapture",
+    "--test-threads=1"
+  ],
+  "limits": {
+    "maxDepth": 8,
+    "maxNodes": 128,
+    "maxEdges": 256,
+    "maxPaths": 64,
+    "maxCandidates": 32,
+    "maxSourceBytes": 1024,
+    "maxResponseBytes": 2097152,
+    "projectionWriteBatch": 512
+  },
+  "projection": {
+    "planMicroseconds": 11031898,
+    "activationMicroseconds": 73801538,
+    "testWallMicroseconds": 253180000,
+    "maximumResidentSetBytes": 3646308352,
+    "rawEvidenceSha256": "cba8c5a466d5f1e5e0b1b72f988c2d0348c4228f1b381634563ea4ebe54af616"
+  },
+  "semanticMismatchCount": 0,
+  "workloads": {
+    "callers": {
+      "currentMicroseconds": [152, 192, 145, 145, 148],
+      "surrealMicroseconds": [1956105, 1941921, 1946998, 1952921, 1963415],
+      "currentP95Microseconds": 192,
+      "surrealP95Microseconds": 1963415,
+      "surrealToCurrentP95Ratio": 10226.119792,
+      "responseBytes": 3562
+    },
+    "callees": {
+      "currentMicroseconds": [231, 203, 211, 245, 205],
+      "surrealMicroseconds": [1965892, 1959661, 1953232, 1985443, 1992355],
+      "currentP95Microseconds": 245,
+      "surrealP95Microseconds": 1992355,
+      "surrealToCurrentP95Ratio": 8132.061224,
+      "responseBytes": 5380
+    },
+    "impactDepth3": {
+      "currentMicroseconds": [497, 519, 506, 543, 552],
+      "surrealMicroseconds": [8169621, 8154410, 7955917, 7856388, 7937700],
+      "currentP95Microseconds": 552,
+      "surrealP95Microseconds": 8169621,
+      "surrealToCurrentP95Ratio": 14800.038043,
+      "responseBytes": 14256
+    },
+    "pathDepth3": {
+      "currentMicroseconds": [323, 307, 316, 332, 369],
+      "surrealMicroseconds": [14340535, 14129502, 14201450, 14355470, 14347371],
+      "currentP95Microseconds": 369,
+      "surrealP95Microseconds": 14355470,
+      "surrealToCurrentP95Ratio": 38903.712737,
+      "responseBytes": 5397
+    }
+  },
+  "gates": {
+    "semanticEquivalence": {
+      "threshold": "zero mismatches",
+      "observed": 0,
+      "decision": "PASS"
+    },
+    "queryRegression": {
+      "threshold": "search, callers, and callees p95 no greater than 1.10x current",
+      "observed": "callers 10226.12x and callees 8132.06x in the same warm process",
+      "decision": "FAIL"
+    },
+    "nativeValueLatency": {
+      "threshold": "at least 10% lower p95 on both depth-3-or-greater impact and path",
+      "observed": "impact 14800.04x and path 38903.71x current p95",
+      "decision": "FAIL"
+    },
+    "nativeValueTraffic": {
+      "threshold": "at least 15% fewer query calls or response tokens with no recall or success loss",
+      "observed": "0% canonical response-byte reduction",
+      "decision": "FAIL"
+    },
+    "footprint": {
+      "threshold": "enabled compressed artifact and peak RSS no greater than 2x current baseline",
+      "observed": "debug integration peak RSS 3646308352 bytes; no released Surreal-enabled artifact exists",
+      "decision": "NOT_COMPLETED_AFTER_FALSIFIER"
+    },
+    "mediumRecovery": {
+      "threshold": "last active generation queryable within 30 seconds after a killed writer",
+      "observed": "small persistent recovery probes passed under C-012; exact medium recovery was not run after the decisive query and native-value failures",
+      "decision": "NOT_COMPLETED_AFTER_FALSIFIER"
+    },
+    "agentValue": {
+      "threshold": "task-level improvement on the ratified agent corpus",
+      "observed": "C-015 exposes no CLI or MCP engine-selection route",
+      "decision": "NOT_APPLICABLE"
+    }
+  },
+  "stoppedMeasurements": "The pre-ratified falsifier stops further adoption-oriented qualification after any numeric query or native-value failure. Costly release-artifact and medium-recovery measurements were not used to override the decisive failures."
+}

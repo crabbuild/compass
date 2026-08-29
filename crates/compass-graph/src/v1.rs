@@ -1501,11 +1501,15 @@ fn normalize_trusted_node(value: Value, raw_id: &str) -> Result<NodeRecord, Grap
         )
         && let Some(site) = node.source.as_ref()
     {
-        let positional_name = format!(
-            "{}@{}:{}",
-            node.qualified_name, site.start_byte, site.end_byte
-        );
-        node.id = domain_id(NodeKind::Resource, &site.file, &positional_name);
+        let identity_name = if semantic_document_resource(node.details.as_ref()) {
+            node.qualified_name.clone()
+        } else {
+            format!(
+                "{}@{}:{}",
+                node.qualified_name, site.start_byte, site.end_byte
+            )
+        };
+        node.id = domain_id(NodeKind::Resource, &site.file, &identity_name);
     }
     if node.source.is_none() {
         for evidence in &mut node.evidence {
@@ -4417,6 +4421,9 @@ fn node_identity(
                 }))
             ) =>
         {
+            if semantic_document_resource(details) {
+                return Ok(domain_id(kind, source_path, qualified_name));
+            }
             // Markdown/HTML blocks are occurrences, not global concepts. The
             // source anchor is part of their semantic identity so repeated
             // blocks in one file cannot quarantine one another.
@@ -4491,6 +4498,17 @@ fn node_identity(
         }
     };
     Ok(id)
+}
+
+fn semantic_document_resource(details: Option<&NodeDetails>) -> bool {
+    matches!(
+        details,
+        Some(NodeDetails::Resource(ResourceNodeDetails {
+            resource_kind: ResourceKind::Document,
+            uri: Some(uri),
+            ..
+        })) if uri.starts_with('#')
+    )
 }
 
 fn raw_anchor(

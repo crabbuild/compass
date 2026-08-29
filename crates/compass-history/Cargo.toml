@@ -25,6 +25,7 @@ compass-files = { path = "../compass-files", version = "0.3.7" }
 compass-analysis = { path = "../compass-analysis", version = "0.3.7" }
 compass-ir = { path = "../compass-ir", version = "0.3.7" }
 compass-model = { path = "../compass-model", version = "0.3.7" }
+compass-partition.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 # `replace_atomic` uses MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH), providing the

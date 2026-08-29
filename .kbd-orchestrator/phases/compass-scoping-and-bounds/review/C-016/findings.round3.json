@@ -1,0 +1,39 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "CHANGELOG.md",
+      "line": 5,
+      "claim": "The diff for the focused-agent-skills target contains substantial unrelated content (MCP 2026-07-28 stateless HTTP contract, rmcp 3.1.4 upgrade, compass-partition extraction, COMPASS_MAX_GRAPH_BYTES, chunk-streaming reads), breaching the no-unrelated-diff-noise constraint.",
+      "evidence": "Constraint: 'git diff and git status --short contain no unrelated or generated noise'. The packet target is 'focused-agent-skills', yet the CHANGELOG hunk adds eight entries with no relation to skills, COMPATIBILITY.md gains entire 'MCP HTTP compatibility' and 'MCP structured result compatibility' sections, and docs/reference/commands.md gains a `compass serve` paragraph about `--session-timeout` deprecation. verification.md itself admits prior packets were 'repository-wide cumulative diff'; this packet still carries those cumulative hunks.",
+      "suggested_fix": "Split the MCP, partition, and graph-size doc/changelog hunks into their own changes so this diff contains only focused-agent-skills content."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-cli/src/install_commands.rs",
+      "line": 543,
+      "claim": "Acceptance criterion 3.1 is checked complete and claims 'rollback regressions' were added, but the diff contains no test that injects a mid-install failure and verifies the full seven-skill collection is restored, even though the rollback path was materially changed (conditional restore replaced by unconditional restore_transaction over the new SkillCollectionSnapshot).",
+      "evidence": "tasks.md 3.1: '[x] Add trigger-discrimination, complete-tree, checksum, idempotence, multi-consumer, conflict, and rollback regressions.' The new tests in the diff are the trigger-corpus unit test, install_preflights_unowned_focused_skill_before_mutation (fails before any mutation, so it exercises no rollback), and uninstall_preserves_a_modified_focused_skill. Meanwhile execute_skill_target now calls restore_transaction unconditionally on install_skill_at_scoped failure ('let rollback = restore_transaction(&skill_snapshot, &adapter_snapshots);'), replacing the prior conditional that skipped restore when staging failed before mutation \u2014 exactly the behavior a rollback regression should pin down.",
+      "suggested_fix": "Add a test that forces install_skill_package_at_scoped to fail after at least one sibling has been activated (e.g., via an unwritable focused destination that passes preflight or a fault-injecting hook) and asserts all seven destinations and adapter files are byte-identical to their pre-install state; or uncheck 3.1."
+    },
+    {
+      "severity": "WARNING",
+      "file": "tools/skillgen/mod.rs",
+      "line": 234,
+      "claim": "contains_windows_absolute_path matches URI schemes, so any future 'https://' or 'http://' link in a focused skill will fail the release build misreported as an absolute Windows path.",
+      "evidence": "The check is `window[0].is_ascii_alphabetic() && window[1] == b':' && matches!(window[2], b'\\\\' | b'/')`; in \"https://example.com\" the window ['s', ':', '/'] satisfies all three conditions. validate_portable_paths runs this over every focused SKILL.md body, and compass-mcp-setup is precisely the skill most likely to gain a documentation URL later. The build gate would then fail with 'focused skill contains an absolute Windows path marker', a misleading diagnostic.",
+      "suggested_fix": "Exclude the '://' form (e.g., require the character before the drive letter to be absent or non-alphanumeric, or reject only when window[2] == b'\\\\' or the colon is not followed by '//'), and add a unit case asserting contains_windows_absolute_path(\"https://example.com\") is false."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

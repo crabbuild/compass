@@ -1,0 +1,28 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": null,
+      "claim": "The stateless cutover removes the only explicit 64 MiB HTTP response bound without adding a replacement, violating the stated requirement that response limits remain unchanged and the bounded-work constraint.",
+      "evidence": "The diff deletes MAX_HTTP_RESPONSE_BYTES and the to_bytes overflow path, while the new server configuration adds only a maximum request body size. No response-size limit or distinct response-limit error remains visible in the first-round packet.",
+      "suggested_fix": "Apply an explicit bounded response mechanism to stateless JSON/SSE responses, preserve a distinct limit-exceeded outcome, and add a regression test that forces an oversized response."
+    },
+    {
+      "severity": "MAJOR",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": null,
+      "claim": "The contract's negative protocol scenarios are not covered by the new raw-wire regression, leaving required per-request metadata and the explicit initialize rejection branch unverified.",
+      "evidence": "The first-round positive requests include _meta, but no request omits or incompletely supplies _meta and none mismatches Mcp-Method. The legacy request is rejected by its old protocol version before reaching the initialize rejection branch.",
+      "suggested_fix": "Add raw-wire current-version cases for missing and incomplete _meta, a header/body method mismatch, initialize, and a valid request carrying an obsolete session ID; assert typed JSON-RPC errors and prove no session is created or restored."
+    }
+  ],
+  "checked_classes": [
+    "correctness",
+    "security",
+    "bounded-work",
+    "compatibility",
+    "test-coverage",
+    "documentation"
+  ]
+}

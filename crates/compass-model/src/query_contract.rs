@@ -1,11 +1,24 @@
 use serde::{Deserialize, Serialize};
 
-use crate::code_graph::{EdgeDetails, EdgeKind, NodeDetails, NodeKind, NodeRole};
+use crate::code_graph::{
+    EdgeDetails, EdgeKind, EdgeRecord, NodeDetails, NodeKind, NodeRecord, NodeRole,
+};
 use crate::provenance::{
     EvidenceConfidence, EvidenceOrigin, ResolutionCandidate, ResolutionState, SourceAnchor,
 };
 
 pub const CODE_QUERY_SCHEMA_V1: &str = "compass.query/1";
+pub const STRUCTURAL_QUERY_SCHEMA_V1: &str = "compass.structural-query/1";
+
+/// Normalize an exact structural symbol operand consistently across engines.
+#[must_use]
+pub fn normalize_query_symbol(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches("()")
+        .trim_start_matches('.')
+        .to_lowercase()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -157,6 +170,61 @@ impl CodeQueryResponse {
                 .then_with(|| left.node_id.cmp(&right.node_id))
         });
     }
+
+    /// Project transport-independent structural semantics for differential
+    /// engine qualification.
+    #[must_use]
+    pub fn structural_view(
+        &self,
+        repository_id: impl Into<String>,
+        generation_id: impl Into<String>,
+    ) -> StructuralQueryResponse {
+        let mut response = StructuralQueryResponse {
+            schema: STRUCTURAL_QUERY_SCHEMA_V1.to_owned(),
+            repository_id: repository_id.into(),
+            generation_id: generation_id.into(),
+            operation: self.operation,
+            nodes: self.nodes.clone(),
+            edges: self.edges.clone(),
+            paths: self.paths.clone(),
+            diagnostics: self.diagnostics.clone(),
+            limits: self.limits.clone(),
+            truncated: self.truncated,
+        };
+        response.sort_stable();
+        response
+    }
+}
+
+/// Canonical structural subset used to compare independent query engines.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StructuralQueryResponse {
+    pub schema: String,
+    pub repository_id: String,
+    pub generation_id: String,
+    pub operation: CodeQueryOperation,
+    pub nodes: Vec<QueryNode>,
+    pub edges: Vec<QueryEdge>,
+    pub paths: Vec<QueryPath>,
+    pub diagnostics: Vec<QueryDiagnostic>,
+    pub limits: CodeQueryLimits,
+    pub truncated: bool,
+}
+
+impl StructuralQueryResponse {
+    pub fn sort_stable(&mut self) {
+        self.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+        self.edges.sort_by(|left, right| left.id.cmp(&right.id));
+        self.paths.sort_by(|left, right| left.id.cmp(&right.id));
+        self.diagnostics.sort_by(|left, right| {
+            left.code
+                .cmp(&right.code)
+                .then_with(|| left.message.cmp(&right.message))
+                .then_with(|| left.node_id.cmp(&right.node_id))
+                .then_with(|| left.path.cmp(&right.path))
+        });
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -250,4 +318,92 @@ pub struct QueryEvidence {
     pub resolution: ResolutionState,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<ResolutionCandidate>,
+}
+
+/// Convert one canonical graph node into the shared structural query contract.
+#[must_use]
+pub fn query_node_from_record(node: &NodeRecord) -> QueryNode {
+    QueryNode {
+        id: node.id.clone(),
+        kind: node.kind,
+        roles: node.roles.clone(),
+        name: node.name.clone(),
+        qualified_name: node.qualified_name.clone(),
+        language: node.language.clone(),
+        framework: node.framework.clone(),
+        source: node.source.clone(),
+        details: node.details.clone(),
+        evidence: node.evidence.iter().map(structural_evidence).collect(),
+    }
+}
+
+/// Convert one canonical graph relation into the shared structural query contract.
+#[must_use]
+pub fn query_edge_from_record(edge: &EdgeRecord) -> QueryEdge {
+    QueryEdge {
+        id: edge.id.clone(),
+        source: edge.source.clone(),
+        target: edge.target.clone(),
+        kind: edge.kind,
+        relationship_site: edge.relationship_site.clone(),
+        details: edge.details.clone(),
+        evidence: edge.evidence.iter().map(structural_evidence).collect(),
+    }
+}
+
+/// Build the deterministic path contract from canonical relation evidence.
+#[must_use]
+pub fn query_path_from_records(
+    nodes: &[String],
+    edges: &[String],
+    selected: &[EdgeRecord],
+) -> QueryPath {
+    let weakest_confidence = selected
+        .iter()
+        .flat_map(|edge| &edge.evidence)
+        .map(|evidence| evidence.confidence)
+        .max_by_key(|confidence| match confidence {
+            EvidenceConfidence::Exact => 0,
+            EvidenceConfidence::Inferred => 1,
+            EvidenceConfidence::Ambiguous => 2,
+        })
+        .unwrap_or(EvidenceConfidence::Exact);
+    let weakest_resolution = if weakest_confidence == EvidenceConfidence::Ambiguous {
+        ResolutionState::Ambiguous
+    } else if weakest_confidence == EvidenceConfidence::Inferred {
+        ResolutionState::Unresolved
+    } else {
+        ResolutionState::Exact
+    };
+    QueryPath {
+        id: format!("path:{}", edges.join(":")),
+        node_ids: nodes.to_vec(),
+        edge_ids: edges.to_vec(),
+        weakest_resolution,
+        weakest_confidence,
+    }
+}
+
+fn structural_evidence(evidence: &crate::provenance::Provenance) -> QueryEvidence {
+    QueryEvidence {
+        layer: QueryEvidenceLayer::StructuralGraph,
+        origin: evidence.origin,
+        extractor: evidence.extractor.clone(),
+        confidence: evidence.confidence,
+        anchor: evidence.anchors.first().cloned(),
+        rule: evidence.rule.clone(),
+        wiring_site: evidence.wiring_site.clone(),
+        resolution: if evidence.confidence == EvidenceConfidence::Ambiguous
+            || evidence.candidates.len() > 1
+        {
+            ResolutionState::Ambiguous
+        } else if evidence.confidence == EvidenceConfidence::Inferred
+            && evidence.candidates.is_empty()
+        {
+            ResolutionState::Unresolved
+        } else {
+            ResolutionState::Exact
+        },
+        candidates: evidence.candidates.clone(),
+    }
 }

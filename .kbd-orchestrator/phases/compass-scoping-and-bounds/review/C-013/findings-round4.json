@@ -1,0 +1,47 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/generate_graph.py",
+      "line": 124,
+      "claim": "A profile missing the required 'name', 'nodes', or 'edges' keys crashes with an uncaught KeyError traceback instead of the documented fail-closed exit-2 behavior that the test suite asserts for other invalid profiles.",
+      "evidence": "_profile does `nodes = int(profile[\"nodes\"])`, `edges = int(profile[\"edges\"])`, and `profile[\"name\"]` is read in generation_metadata, but main only catches `(OSError, TypeError, ValueError, json.JSONDecodeError)` \u2014 KeyError is not a subclass of any of these. verification.md claims 'Oversized or invalid profiles fail closed' and test_invalid_or_oversized_profiles_fail_closed asserts `NotIn(\"Traceback\")` and returncode 2, but only for profiles that contain the keys with bad values.",
+      "suggested_fix": "Validate required keys explicitly (e.g., `if not isinstance(profile.get(\"nodes\"), int): raise ValueError(...)`) or add KeyError to the except clause in main."
+    },
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 137,
+      "claim": "The recorded source-state identity (`workspacePatchSha256`) is computed from `git diff --binary HEAD -- <paths>`, which silently excludes untracked files under the scoped paths, so the retained baseline's provenance can fail to represent the actual build inputs of the measured binary.",
+      "evidence": "workspace_patch_metadata runs `(\"git\", \"diff\", \"--binary\", \"HEAD\", \"--\", *paths)`; untracked files never appear in `git diff HEAD`. The scope includes `crates/compass-cli`, `crates/compass-mcp`, `crates/compass-query`, `crates/compass-model`, whose builds are filesystem-based and would incorporate untracked .rs files. Yet docs/future/qualification-corpora-baselines.md and verification.md claim the baseline retains 'computed source-state identity' / 'source provenance' so 'later comparisons cannot silently switch measurement conditions'. Notably this change's own artifacts were untracked at measure time, demonstrating the gap is live, not theoretical.",
+      "suggested_fix": "Complement the patch hash with a `git status --porcelain -- <paths>` (or `git ls-files --others --exclude-standard`) digest recorded alongside workspacePatchSha256, and fail closed when the scoped paths contain untracked or ignored build inputs."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".refiner/artifacts/C-013/refinement_log.md",
+      "line": 0,
+      "claim": "The diff commits a new `.refiner/artifacts/C-013/` local QA-state directory whose justification cites a C-001\u2013C-012 receipt precedent that does not exist in the repository, and the blocking constraint on committed local state grants only the `.prometheus/knowledge/wiki` exception.",
+      "evidence": "Constraint no-secrets-or-machine-paths: 'No ... local .compass/ state, compass-out/, or private repository content committed outside the repository-owned .prometheus/knowledge/wiki transcript exception'. The packet file_tree contains no `.refiner/` entries at all, contradicting refinement_log.md's claim that the receipts are 'consistent with prior C-001\u2013C-012 receipts'. decisions.md 'dispositions' the concern rather than pointing to any constraint coverage for `.refiner/`.",
+      "suggested_fix": "Either add `.refiner/` to .gitignore and keep receipts uncommitted, or amend the constraint configuration to explicitly name `.refiner/artifacts/` as committed QA evidence before archiving."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "line": 158,
+      "claim": "raw_traversal_summary indexes `item[\"elapsedMicroseconds\"]`, `document[\"elapsedMicroseconds\"]`, and `document[\"schema\"]` directly, so a schema-conforming-but-incomplete raw traversal document (possible via the user-supplied --raw-traversal-script argument) raises an uncaught KeyError traceback instead of the runner's clean exit-2 failure.",
+      "evidence": "`elapsed = [int(item[\"elapsedMicroseconds\"]) for item in results]` and main's handler is `except (OSError, RuntimeError, ValueError, subprocess.SubprocessError)` \u2014 KeyError escapes. The sibling tools' tests explicitly assert no Traceback on bad input, establishing the intended contract.",
+      "suggested_fix": "Validate presence of required keys with .get and raise ValueError, or add KeyError to main's except tuple."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

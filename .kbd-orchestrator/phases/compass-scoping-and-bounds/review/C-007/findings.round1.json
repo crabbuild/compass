@@ -1,0 +1,13 @@
+{
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "Cargo.toml",
+      "line": 20,
+      "claim": "The C-007 patch is contaminated with unrelated partition/storage and graph-limit work, violating the stated dependency-and-API-migration-only scope.",
+      "evidence": "The proposal says this change is limited to pinning rmcp 3.1.4, porting its API, compatibility coverage, and dependency-policy review, while the diff also adds `crates/compass-partition` as a workspace member and workspace dependency, changes `compass-history` to depend on it in Cargo.lock, and adds five unrelated CHANGELOG entries for partition extraction, graph-size limits, preflight, oversized-manifest handling, and streaming snapshot reads; this also breaches the `no-unrelated-diff-noise` constraint.",
+      "suggested_fix": "Rebase or regenerate the C-007 packet against the correct baseline so it contains only the rmcp migration hunks and its own changelog/spec/test changes."
+    }
+  ],
+  "checked_classes": []
+}

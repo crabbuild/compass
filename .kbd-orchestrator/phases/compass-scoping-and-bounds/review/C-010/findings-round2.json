@@ -1,0 +1,62 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": ".github/workflows/compass-ci.yml",
+      "line": 101,
+      "claim": "The new CI step invokes `cargo test -p compass-mcp --test protocol_conformance` and `bash scripts/qualify_mcp_conformance.sh`, but neither file appears anywhere in the tracked diff, and the change's own verification receipt states the conformance test, fixtures, script, and interop doc are 'untracked-at-review' \u2014 if the change is archived without committing them, the workflow fails on a nonexistent test target and script.",
+      "evidence": "CI hunk adds `cargo test -p compass-mcp --test protocol_conformance --locked` and `bash scripts/qualify_mcp_conformance.sh`; the diff contains no `crates/compass-mcp/tests/protocol_conformance.rs` and no `scripts/qualify_mcp_conformance.sh` body; the verification document states: 'These untracked-at-review files are named explicitly because Git does not include new files in an unstaged `git diff`.' Acceptance criterion 2.1 ('Add stdio and HTTP conformance coverage and enforce both legs in CI') is therefore only enforceable, not evidenced, by this packet, and constraint `no-unrelated-diff-noise` requires git status to be clean at archive.",
+      "suggested_fix": "Stage and commit protocol_conformance.rs, its fixtures, qualify_mcp_conformance.sh, qualify_codex_mcp_client.py, and docs/implementation/mcp-conformance-and-interop.md as part of this change so the tracked diff satisfies 2.1/3.1 and CI cannot reference missing paths."
+    },
+    {
+      "severity": "CRITICAL",
+      "file": "scripts/qualify_mcp_conformance.sh",
+      "claim": "The proposal mandates CI that 'fails on a conformance regression rather than carrying an unreviewed expected-failure baseline,' yet the verification receipt admits the runner keeps a check-granular baseline of five entries, and the script implementing that baseline is absent from the packet, so the central acceptance claim (task 2.1's enforcement semantics and the 'no unreviewed baseline' requirement) cannot be verified at all.",
+      "evidence": "Proposal: 'Add CI coverage that fails on a conformance regression rather than carrying an unreviewed expected-failure baseline.' Verification: 'Its check-granular baseline contains only four fixture-tool diagnostics and one runner invocation whose real Compass tool receives intentionally invalid arguments.' The baseline's contents, pinning of the upstream runner commit, and network-fetch behavior live only in a file excluded from the diff.",
+      "suggested_fix": "Include qualify_mcp_conformance.sh in the tracked change with the baseline entries enumerated in-line (or in a committed fixture) so reviewers can confirm each baselined failure is one of the five claimed diagnostics and that the runner is fetched at an exact pinned commit."
+    },
+    {
+      "severity": "WARNING",
+      "file": "Cargo.lock",
+      "line": 1892,
+      "claim": "Five packages (errno, rustix, socket2, tempfile, and the windows-sys 0.60.2 consumer) are downgraded from windows-sys 0.61.2 to 0.52.0/0.60.2 in a change whose only dependency intent is rmcp 2.2.0\u21923.1.4; rmcp does not depend on windows-sys, so these downgrades are unrelated lockfile churn with potential Windows-build regression risk and no Windows CI leg to catch it.",
+      "evidence": "Cargo.lock hunks: `windows-sys 0.61.2` \u2192 `windows-sys 0.52.0` in four packages and \u2192 `0.60.2` in one, while the rmcp bump itself only adds base64 0.23.1 and indexmap; constraint `no-unrelated-diff-noise`: 'git diff and git status --short contain no unrelated or generated noise.'",
+      "suggested_fix": "Regenerate Cargo.lock with a minimal `cargo update -p rmcp --precise 3.1.4` (or explain the downgrade), and verify the windows-sys downgrade is intentional; otherwise restore 0.61.2 resolutions."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 158,
+      "claim": "HttpOptions.stateless and HttpOptions.session_timeout are now dead fields: build_http_router hardcodes `.with_legacy_session_mode(false)` and never reads either option, so any caller (including compass-cli's McpOptions mapping) that sets them is silently ignored, and the struct presents configuration surface that does nothing.",
+      "evidence": "transport.rs hunk: `fn build_http_router` configures `StreamableHttpServerConfig::default().with_legacy_session_mode(false).with_stateless_protocol_metadata_required(true)` with no reference to `options.stateless` or `options.session_timeout`, while HttpOptions still declares `stateless: bool` and `session_timeout: Option<Duration>` (default `true`/`None`); the test at line ~807 still sets `options.stateless = true` as if it were meaningful.",
+      "suggested_fix": "Remove both fields from HttpOptions (and the McpOptions.session_timeout plumbing in compass-cli) or document them as inert; do not retain settable options that have no effect."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/lib.rs",
+      "line": 576,
+      "claim": "The shortest_path deprecation text directs users to `get_node` ('use get_node for typed directed evidence'), but no `get_node` tool exists \u2014 the tool list contains exactly 15 tools (search_symbols, get_callers, get_callees, get_impact, explore_code, one further typed tool, query_graph, and the eight deprecated text tools), none named get_node.",
+      "evidence": "lib.rs hunk: `tool(\"shortest_path\", \"DEPRECATED text result: find a shortest path; use get_node for typed directed evidence.\", ...)`; the transport test asserts `payload[\"result\"][\"tools\"].as_array().map(Vec::len) == Some(15)` with no get_node among the specs defined in tool_specs().",
+      "suggested_fix": "Point the deprecation message at an existing typed tool (e.g. get_impact/search_symbols) or omit the referral until the replacement ships."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-mcp/src/lib.rs",
+      "line": 447,
+      "claim": "enforce_structured_response_size bounds only the serialized envelope, but the same call_tool response also carries the full human-readable `result.text` in the content array, so the actual MCP response can exceed limits.max_response_bytes by the size of the duplicated text payload \u2014 the per-query bound is only half-enforced.",
+      "evidence": "lib.rs hunk: `enforce_structured_response_size(&envelope, response.limits.max_response_bytes)?` checks `serde_json::to_vec(value).len()` of the envelope only, while `call_tool` sets `response.content = vec![ContentBlock::text(result.text)]` alongside the structured content; blocking constraint `bounded-work` expects work over responses to remain bounded with a distinct limit outcome.",
+      "suggested_fix": "Include the text content length in the size accounting (or drop the text duplicate when the envelope is emitted) so max_response_bytes bounds the whole tool response."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

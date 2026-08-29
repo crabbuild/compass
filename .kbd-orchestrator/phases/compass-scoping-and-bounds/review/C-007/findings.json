@@ -1,0 +1,16 @@
+{
+  "findings": [],
+  "checked_classes": [
+    "spec violations",
+    "correctness",
+    "regressions",
+    "security",
+    "constraint breaches",
+    "silent failure"
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

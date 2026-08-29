@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-001",
+  "artifactType": "code",
+  "contentType": "direct:code",
+  "status": "validated",
+  "sourceArtifacts": [
+    "crates/compass-store/src/lib.rs",
+    "CHANGELOG.md",
+    "openspec/changes/stream-snapshot-read/proposal.md",
+    "openspec/changes/stream-snapshot-read/design.md",
+    "openspec/changes/stream-snapshot-read/specs/snapshot-streaming/spec.md",
+    "openspec/changes/stream-snapshot-read/tasks.md"
+  ],
+  "distFiles": [
+    "qa-receipt.md"
+  ],
+  "validatedAt": "2026-08-28T13:43:30Z"
+}

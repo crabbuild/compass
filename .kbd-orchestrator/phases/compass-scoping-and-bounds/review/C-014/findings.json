@@ -1,0 +1,63 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "docs/implementation/surreal-graph-projection.md",
+      "line": 38,
+      "claim": "The documented claim that the default ProjectionLimits \"admit the ratified 1,000,000-node/2,500,000-relation qualification graph\" is arithmetically incompatible with the simultaneous 1 GiB max_projected_bytes cap.",
+      "evidence": "Docs and decisions.md state: \"Defaults admit the ratified 1,000,000-node/2,500,000-relation qualification graph and cap serialized projection data at the canonical GraphDocument reader's 1 GiB bound\". projection.rs projected_bytes() counts serde_json-serialized ProjectedNode/ProjectedRelation records, each carrying a 64-hex recordKey, ~71-char generationId, ~120-150 chars of field names, and the full payload_json; even a minimal ~300-byte average per record (far below realistic payloads) makes 3.5M records exceed 1,073,741,824 bytes. Activation of the ratified graph would therefore fail with LimitExceeded on \"projected bytes\" long before the node/relation caps bind, so the two defaults cannot both hold.",
+      "suggested_fix": "Either raise max_projected_bytes to a value that genuinely admits the ratified graph (and document the derivation), or correct the docs/decisions/constraints evidence to state that the byte cap binds first and the node/relation defaults are independent ceilings, not a jointly satisfiable qualification profile."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/check_surreal_feature_isolation.sh",
+      "line": 14,
+      "claim": "The isolation gate regex only matches 3 of the 7 SurrealDB-family crates that deny.toml flags as BUSL-1.1, so a leak of surrealdb-protocol, surrealdb-strand, surrealdb-collections, or surrealdb-types-derive into a default dependency tree would pass the gate.",
+      "evidence": "The script greps cargo tree output with '^(surrealdb|surrealdb-core|surrealdb-types)( |$)', which requires a space or end-of-line immediately after the name and therefore cannot match 'surrealdb-protocol v0.10.2', 'surrealdb-strand v3.2.4', 'surrealdb-collections v3.2.4', or 'surrealdb-types-derive v3.2.4' \u2014 all of which deny.toml explicitly excepts as BUSL-1.1 components the gate is supposed to keep out of default closures.",
+      "suggested_fix": "Match the full SurrealDB package family, e.g. '^surrealdb[A-Za-z0-9-]* ', or enumerate all seven crates from deny.toml in the pattern."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/check_product_boundary.sh",
+      "line": 16,
+      "claim": "The blocking product-boundary gate now unconditionally shells out to a cargo-tree-based check, changing the failure modes and runtime cost of an unrelated blocking constraint, and the --binary mode assumes a Unix 'debug/compass' artifact path.",
+      "evidence": "The hunk adds 'sh scripts/check_surreal_feature_isolation.sh' to check_product_boundary.sh, making the 'product-boundary' blocking constraint (command: 'sh scripts/check_product_boundary.sh') fail on any cargo/lockfile resolution problem rather than only on Graphify-boundary violations; additionally check_surreal_feature_isolation.sh tests '[ -x \"$target_root/debug/compass\" ]', which never matches the Windows 'compass.exe' artifact, conflicting with the platform-portable constraint's 'no Unix-only process behavior without a guarded implementation' rule.",
+      "suggested_fix": "Keep the surreal isolation check as its own gate invoked separately (CI/orchestrator), or at minimum emit its own labeled error before exiting; guard the binary check with a compass.exe fallback or restrict --binary mode to Unix with an explicit note."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".refiner/artifacts/C-014/dist/refinement-receipt.md",
+      "line": 12,
+      "claim": "The PASS receipt is self-issued under a 'fallback state contract' because the canonical refiner controllers were unavailable, yet constraints.json marks every blocking constraint PASS, so the certification evidence does not come from the mandated deterministic gate.",
+      "evidence": "The receipt states: 'The installed artifact-refiner adapter lacks its referenced canonical controllers and schema assets, so this receipt uses the repository's established deterministic fallback state contract.' The refiner-qa-evidence constraint requires per-change manifests and receipts that are deterministic and repository-owned KBD certification evidence; a fallback receipt issued without the canonical controllers weakens every 'status': 'PASS' recorded in constraints.json to a self-attestation.",
+      "suggested_fix": "Re-run certification with a working artifact-refiner controller set, or downgrade constraints.json statuses to reflect fallback attestation until the canonical gate can be executed and its output attached."
+    },
+    {
+      "severity": "WARNING",
+      "file": "openspec/changes/surreal-graph-projection/shared-file-evidence.md",
+      "line": 1,
+      "claim": "Acceptance criterion 1.1 depends on workspace wiring (Cargo.toml member entry, '=3.2.4' workspace dependency, Cargo.lock resolution, CHANGELOG entry, docs/README.md row) that is absent from the diff and asserted only by this prose evidence file, so the packet itself cannot verify the crate is actually a workspace member or that the pin resolves.",
+      "evidence": "The diff contains no Cargo.toml, Cargo.lock, CHANGELOG.md, or docs/README.md hunks; shared-file-evidence.md says these 'represent C-014's exact shared-file deltas here' as quoted snippets. If the working tree diverges from these snippets (e.g., missing '\"crates/compass-graphdb-surreal\"' in workspace members or a missing 'surrealdb = { version = \"=3.2.4\", default-features = false }' entry), crates/compass-graphdb-surreal/Cargo.toml's 'surrealdb = { workspace = true, optional = true }' and every gate command in docs/implementation/surreal-graph-projection.md fail.",
+      "suggested_fix": "Include the exact Cargo.toml/Cargo.lock/CHANGELOG hunks for C-014 lines only (git diff with path filtering or -U0 extraction) in the review packet instead of prose quotations, so reviewers can diff the claims against the real files."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-graphdb-surreal/src/lib.rs",
+      "line": 23,
+      "claim": "A test-only fault-injection hook (InterruptAfter, activate_with_interrupt) is exported in the crate's permanent public API, which sits uneasily with the spec's closed-surface requirement that the adapter expose 'typed projection and activation operations only'.",
+      "evidence": "lib.rs does 'pub use engine::{ActivationOutcome, InterruptAfter, SurrealProjection}' with no cfg gate, and engine.rs documents InterruptAfter as 'Test fault-injection point'; spec.md's 'Typed and bounded adapter surface' requirement restricts the public surface to typed projection/activation operations.",
+      "suggested_fix": "Gate activate_with_interrupt and InterruptAfter behind #[cfg(test)] or a non-default 'testing' cargo feature, or document the hook explicitly in spec.md as part of the sanctioned surface."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

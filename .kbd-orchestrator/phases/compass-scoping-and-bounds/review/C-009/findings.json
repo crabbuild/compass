@@ -1,0 +1,27 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "gpt-5.6-sol/fresh-context-subagent",
+  "isolation_mode": "harness-native",
+  "producer_model": "gpt-5.6-sol",
+  "cross_model_check": "same-model-collision",
+  "findings": [],
+  "checked_classes": [
+    "shared JSON/store build-identity validation",
+    "snapshot metadata rejection regression",
+    "closed exhaustive output schemas",
+    "four envelope and pre-envelope goldens",
+    "parallel-edge multiplicity golden",
+    "final response-byte bounds",
+    "MCP resultType wire metadata",
+    "deterministic discovery ordering",
+    "legacy text-result deprecations",
+    "compatibility and migration documentation",
+    "focused compass-graph and compass-mcp tests"
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

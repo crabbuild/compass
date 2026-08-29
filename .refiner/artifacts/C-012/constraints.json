@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-012",
+  "blocking": [
+    {
+      "id": "persistent-engines",
+      "status": "PASS",
+      "evidence": "Identical workloads completed on persistent SurrealKV and RocksDB; Mem was not substituted"
+    },
+    {
+      "id": "semantic-equivalence",
+      "status": "PASS",
+      "evidence": "Canonical semantic summaries are byte-identical across engines for 2051 directed relations and 17 pages"
+    },
+    {
+      "id": "dirty-shutdown-recovery",
+      "status": "PASS",
+      "evidence": "A killed candidate writer never replaced active generation g-0001 on either engine"
+    },
+    {
+      "id": "deterministic-fixtures",
+      "status": "PASS",
+      "evidence": "Sorted manifest checksums and independent ordered-ID digest verification pass"
+    },
+    {
+      "id": "license-capture",
+      "status": "PASS",
+      "evidence": "Retained v3.2.4 license bytes match upstream SHA-256 98a94ac615f88370865016487b436fa404560910bd329794ed7502277a94b805"
+    },
+    {
+      "id": "disposable-boundary",
+      "status": "PASS",
+      "evidence": "Spike source, targets, databases, and logs were deleted; Compass manifests and Cargo.lock remain unchanged with no SurrealDB package"
+    },
+    {
+      "id": "claims-boundary",
+      "status": "PASS",
+      "evidence": "Measurements are explicitly descriptive and remain gated by C-011 licensing and C-013 budget ratification"
+    }
+  ]
+}

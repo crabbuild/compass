@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-019",
+  "artifactType": "integration",
+  "contentType": "shell-and-typescript:harness-lifecycle",
+  "status": "refined",
+  "sourceArtifacts": [
+    "distribution.toml",
+    "scripts/qualify_harness_packages.sh",
+    "scripts/bounded_redacted_log.mjs",
+    ".github/workflows/compass-ci.yml",
+    "packages/compass-opencode",
+    "docs/implementation/agent-distribution.md",
+    "openspec/changes/archive/2026-08-29-harness-install-validation"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

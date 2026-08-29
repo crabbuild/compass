@@ -1,0 +1,18 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "claim": "Output-schema regressions did not exercise every legal model vocabulary and tagged detail variant.",
+      "resolution": "FIXED: schema enums are derived from model-owned ALL vocabularies, and table-driven tests serialize every NodeKind, NodeRole, EdgeKind, all 12 NodeDetails variants, and all 5 EdgeDetails variants with missing-data, unknown-field, and unknown-tag negatives."
+    },
+    {
+      "severity": "MAJOR",
+      "claim": "Pre-envelope goldens did not exercise relationship multiplicity.",
+      "resolution": "FIXED: a separate checked-in compass.query/1 golden contains two same-kind, same-endpoint call occurrences with distinct IDs, source sites, detail payloads, and evidence; envelope.data must match it exactly in deterministic order."
+    }
+  ],
+  "checked_classes": [
+    "complete graph enum and tagged-detail schema vocabulary",
+    "parallel relationship identity, source site, evidence, and ordering"
+  ]
+}

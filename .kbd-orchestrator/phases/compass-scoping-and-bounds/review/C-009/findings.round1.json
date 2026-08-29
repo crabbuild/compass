@@ -1,0 +1,42 @@
+{
+  "findings": [
+    {
+      "severity": "MAJOR",
+      "claim": "Envelope identity could come from a different graph realization than query data.",
+      "resolution": "FIXED: CodeQueryEngine now returns BuildMetadata from its pinned materialized graph or immutable store selector; MCP uses that exact invocation metadata."
+    },
+    {
+      "severity": "MAJOR",
+      "claim": "Advertised outputSchema left nested query records unconstrained.",
+      "resolution": "FIXED: outputSchema now defines closed nested query records and every golden is recursively validated; malformed node payloads are rejected by the regression validator."
+    },
+    {
+      "severity": "MAJOR",
+      "claim": "Envelope overhead could cross maxResponseBytes after query-layer enforcement.",
+      "resolution": "FIXED: MCP measures final structured-content bytes and fails before publishing an oversized envelope; a regression exercises the inner-pass/outer-fail boundary."
+    },
+    {
+      "severity": "MAJOR",
+      "claim": "Legacy text tools were neither enveloped nor deprecated.",
+      "resolution": "FIXED: discovery descriptions and Compass metadata mark every remaining text-only result, plus query_graph text mode, deprecated from 0.4.0 without removal."
+    },
+    {
+      "severity": "MAJOR",
+      "claim": "No independent pre-envelope golden comparison existed.",
+      "resolution": "FIXED: four separate compass.query/1 fixtures are compared exactly with envelope.data in addition to four full-envelope goldens."
+    },
+    {
+      "severity": "MINOR",
+      "claim": "The design example used confidence fields absent from implementation.",
+      "resolution": "FIXED: the example now uses exact, inferred, and ambiguous."
+    }
+  ],
+  "checked_classes": [
+    "identity coherence",
+    "nested output schemas",
+    "response-byte bounds",
+    "legacy deprecation",
+    "pre-envelope compatibility",
+    "documentation parity"
+  ]
+}

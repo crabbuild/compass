@@ -826,12 +826,11 @@ fn portable_framework_source(path: &Path) -> String {
     {
         return source[index..].to_owned();
     }
-    let components = source
-        .split('/')
-        .filter(|component| !component.is_empty())
-        .collect::<Vec<_>>();
-    let start = components.len().saturating_sub(3);
-    components[start..].join("/")
+    // Outside a recognized route layout, use the same portable identity as
+    // universal evidence. Keeping two different fallbacks manufactured graph
+    // anchors such as `T/.tmp*/module.js` that could not match the published
+    // file inventory (`module.js`) during direct extraction.
+    portable_evidence_source(path)
 }
 
 struct FunctionBody<'tree> {

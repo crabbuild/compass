@@ -1,0 +1,16 @@
+Cargo.toml
+Cargo.lock
+crates/compass-mcp/Cargo.toml
+crates/compass-mcp/src/lib.rs
+crates/compass-mcp/src/transport.rs
+crates/compass-cli/src/lib.rs
+crates/compass-cli/src/help.rs
+crates/compass-cli/tests/mcp_http_cli.rs
+COMPATIBILITY.md
+MIGRATION.md
+SECURITY.md
+CHANGELOG.md
+docs/reference/commands.md
+docs/reference/configuration.md
+docs/reference/compatibility.md
+openspec/changes/mcp-stateless-http

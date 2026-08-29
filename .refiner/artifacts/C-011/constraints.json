@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1",
+  "artifact": "C-011",
+  "blocking": [
+    {
+      "id": "explicit-authority",
+      "status": "PASS",
+      "evidence": "The project user explicitly wrote C-011: ACCEPT in the active Codex task on 2026-08-29; the decision artifact and phase decision log preserve that exact provenance and identify the authority role as user"
+    },
+    {
+      "id": "closed-profile-scope",
+      "status": "PASS",
+      "evidence": "The governing design defines ACCEPT as approval of every named artifact profile under its stated conditions, and the sign-off records exactly that scope without inventing exclusions or waivers"
+    },
+    {
+      "id": "pinned-license-boundary",
+      "status": "PASS",
+      "evidence": "Acceptance applies only to SurrealDB 3.2.4 at the pinned license digest and retains the exact BSL license, notices, Change Date, Change License, redistribution duties, and Database Service restriction"
+    },
+    {
+      "id": "upgrade-fails-closed",
+      "status": "PASS",
+      "evidence": "Every SurrealDB version upgrade requires a fresh license and artifact-profile review; this decision cannot silently authorize a different version"
+    },
+    {
+      "id": "precommitment-immutable",
+      "status": "PASS",
+      "evidence": "The phase plan still has the exact C-013 pinned SHA-256 46e37804d513cf32ce8e7d008816642dffbb9d3b7b60fd3f2e82a482cd398ebf; live gate status is recorded outside that immutable planning snapshot"
+    },
+    {
+      "id": "license-byte-identity",
+      "status": "PASS",
+      "evidence": "A bounded 2026-08-29 fetch of the official raw v3.2.4 LICENSE matched the retained fixture byte-for-byte and both hashed to 98a94ac615f88370865016487b436fa404560910bd329794ed7502277a94b805"
+    },
+    {
+      "id": "downstream-gates",
+      "status": "PASS",
+      "evidence": "C-012 and C-013 have retained completion evidence and C-011 passed mandatory pre-archive review and is published in the dated archive; the C-014/C-015 Wave 5 gate is closed, while C-020 remains conditional on a separately recorded independent user problem"
+    },
+    {
+      "id": "no-runtime-change",
+      "status": "PASS",
+      "evidence": "C-011 records a release decision only and adds no SurrealDB dependency, code, runtime behavior, or shipped artifact"
+    }
+  ]
+}

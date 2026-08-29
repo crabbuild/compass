@@ -86,18 +86,18 @@ all: build test ## Build and run the self-contained test suite
 
 .PHONY: check
 check: ## Fast workspace compile check
-	$(CARGO) check --workspace --locked $(TARGET_ARG) $(BUILD_FLAGS)
+	$(CARGO) test --workspace --test '*' --locked --no-run $(TARGET_ARG) $(BUILD_FLAGS)
 
 .PHONY: check-release
 check-release: ## Fast release-mode workspace compile check
-	$(CARGO) check --workspace --release --locked $(TARGET_ARG) $(BUILD_FLAGS)
+	$(CARGO) test --workspace --test '*' --release --locked --no-run $(TARGET_ARG) $(BUILD_FLAGS)
 
 # ── Test ───────────────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run self-contained workspace tests
-	@printf "$(BOLD)Running native workspace tests...$(RESET)\n"
-	$(CARGO) test --workspace --lib --bins --locked $(TEST_FLAGS)
+test: ## Run the full phase-end workspace integration suite
+	@printf "$(BOLD)Running workspace integration tests...$(RESET)\n"
+	$(CARGO) test --workspace --test '*' --locked
 
 .PHONY: test-js
 test-js: ## Typecheck and test the shared viewer and editor integrations
@@ -114,12 +114,12 @@ test-vscode: ## Build and package-check the Compass VS Code extension
 	npm run smoke:vsix -w editors/vscode
 
 .PHONY: test-all
-test-all: ## Run all tests (requires the documented Python oracle setup)
-	$(CARGO) test --workspace --all-targets --all-features --locked $(TEST_FLAGS)
+test-all: ## Run all feature-enabled integration targets after phase implementation
+	$(CARGO) test --workspace --test '*' --all-features --locked
 
 .PHONY: test-release
-test-release: ## Run self-contained tests in release mode
-	$(CARGO) test --workspace --lib --bins --release --locked $(TEST_FLAGS)
+test-release: ## Run workspace integration targets in release mode
+	$(CARGO) test --workspace --test '*' --release --locked
 
 .PHONY: test-product
 test-product: ## Run the Compass CLI product contract
@@ -145,7 +145,7 @@ fmt-check: ## Check Rust formatting
 
 .PHONY: clippy
 clippy: ## Run Clippy across the complete workspace
-	$(CARGO) clippy --workspace --all-targets --all-features --locked -- -D warnings
+	$(CARGO) clippy --workspace --lib --bins --locked -- -D warnings
 
 .PHONY: lint
 lint: fmt-check clippy ## Run formatting and Clippy checks
@@ -265,9 +265,9 @@ build-windows-arm: ## Build release for ARM64 Windows
 # ── Dev Workflow ───────────────────────────────────────────────────
 
 .PHONY: watch
-watch: ## Recheck and retest on source changes (requires cargo-watch)
-	$(CARGO) watch -x "check --workspace --locked" \
-	  -x "test --workspace --lib --bins --locked"
+watch: ## Disabled: phase-first development forbids incremental compile/test loops
+	@printf "$(BOLD)Cargo watch is disabled by the phase-first development doctrine.$(RESET)\n" >&2
+	@exit 2
 
 .PHONY: run
 run: ## Build and run Compass (override with ARGS="...")

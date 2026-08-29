@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-010",
+  "artifactType": "conformance",
+  "contentType": "direct:evidence",
+  "status": "refined",
+  "sourceArtifacts": [
+    ".github/workflows/compass-ci.yml",
+    "crates/compass-mcp/src/transport.rs",
+    "crates/compass-mcp/tests/protocol_conformance.rs",
+    "scripts/fixtures/mcp-conformance-expected-failures.yaml",
+    "scripts/qualify_mcp_conformance.sh",
+    "scripts/qualify_codex_mcp_client.py",
+    "docs/implementation/mcp-conformance-and-interop.md",
+    "openspec/changes/mcp-conformance-interop",
+    ".kbd-orchestrator/phases/compass-scoping-and-bounds/execution.md"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

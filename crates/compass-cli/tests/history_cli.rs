@@ -392,7 +392,11 @@ fn worker_drains_fifo_after_an_earlier_job_fails() -> Result<(), Box<dyn std::er
     git(directory.path(), &["commit", "--quiet", "-m", "fixture"])?;
 
     let compass = env!("CARGO_BIN_EXE_compass");
-    let enabled = run(compass, directory.path(), &["history", "enable"])?;
+    let enabled = run(
+        compass,
+        directory.path(),
+        &["history", "enable", "--code-only"],
+    )?;
     assert!(enabled.status.success());
     let repository = Repository::discover(directory.path())?;
     let profile = HistoryConfig::load(&repository)?
@@ -453,9 +457,13 @@ fn worker_drains_fifo_after_an_earlier_job_fails() -> Result<(), Box<dyn std::er
         JobState::Failed
     );
     for job_id in invalid_profile_jobs {
+        let job = queue.get(&job_id)?.ok_or("invalid profile job")?;
         assert_eq!(
-            queue.get(&job_id)?.ok_or("invalid profile job")?.state,
-            JobState::Failed
+            job.state,
+            JobState::Failed,
+            "profile {:?} finished with diagnostic {:?}",
+            job.profile.entries().collect::<Vec<_>>(),
+            job.diagnostic
         );
     }
     assert_eq!(

@@ -24,14 +24,16 @@ pub use dedup::{
 };
 pub use quarantine::{MAX_QUARANTINE_EXAMPLES, PublicationOmissions, PublicationOutcome};
 pub use snapshot::{
-    CanonicalGraphDocument, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_LAYOUT_V2,
-    GRAPH_SNAPSHOT_MAX_ITEMS, GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1,
+    CanonicalGraphDocument, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_ACTIVE_KEY,
+    GRAPH_SNAPSHOT_CATALOG_PARTITION, GRAPH_SNAPSHOT_LAYOUT_V2, GRAPH_SNAPSHOT_MAX_ITEMS,
+    GRAPH_SNAPSHOT_MAX_OBJECTS, GRAPH_SNAPSHOT_OBJECT_PARTITION, GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1,
     GraphSnapshotBuilder, GraphSnapshotGcStats, GraphSnapshotManifest, GraphSnapshotMetadata,
-    GraphSnapshotReader, IndexKind, PreparedGraphSnapshot, PreparedGraphSnapshotContent,
-    SnapshotError, SnapshotReadLimits, SnapshotRoot, SnapshotSelector, activate_graph_snapshot,
-    active_graph_snapshot, canonical_graph_document, canonical_graph_document_presorted,
-    canonical_graph_json, encode_graph_index_key, garbage_collect_graph_snapshots,
-    graph_snapshot_needs_gc, prepare_graph_snapshot, write_canonical_graph_json,
+    GraphSnapshotReader, IndexKind, MAX_CANONICAL_GRAPH_BYTES, PreparedGraphSnapshot,
+    PreparedGraphSnapshotContent, SnapshotError, SnapshotReadLimits, SnapshotRoot,
+    SnapshotSelector, activate_graph_snapshot, active_graph_snapshot, canonical_graph_document,
+    canonical_graph_document_presorted, canonical_graph_json, encode_graph_index_key,
+    garbage_collect_graph_snapshots, graph_snapshot_manifest_key, graph_snapshot_needs_gc,
+    max_canonical_graph_bytes, prepare_graph_snapshot, write_canonical_graph_json,
     write_fact_neutral_graph_json_delta, write_fact_neutral_graph_json_delta_prevalidated,
 };
 pub use v1::{
@@ -1071,9 +1073,19 @@ fn normalize_source_file(value: &str, root: Option<&Path>) -> String {
     let path = Path::new(&portable);
     if path.is_absolute()
         && let Some(root) = root
-        && let Ok(relative) = path.strip_prefix(root)
     {
-        return path_text(relative);
+        if let Ok(relative) = path.strip_prefix(root) {
+            return path_text(relative);
+        }
+        // macOS commonly exposes the same temporary/worktree path through
+        // both `/var` and `/private/var`. Resolve those aliases before
+        // deciding that an absolute source is outside the repository root.
+        if let (Ok(canonical_path), Ok(canonical_root)) =
+            (std::fs::canonicalize(path), std::fs::canonicalize(root))
+            && let Ok(relative) = canonical_path.strip_prefix(canonical_root)
+        {
+            return path_text(relative);
+        }
     }
     portable
 }

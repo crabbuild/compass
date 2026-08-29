@@ -1,0 +1,16 @@
+{
+  "findings": [],
+  "checked_classes": [
+    "Spec violations \u2014 the diff records the deliberate default-include policy and adds discovery, publication, watcher, .compassignore, extra-exclude, and saved-scope regression coverage required by the acceptance criteria.",
+    "Correctness \u2014 the test fixtures exercise both a Rust workspace member and Go source beneath vendor/, and assertions check inventory, published source anchors, discovery results, and watcher filtering consistently.",
+    "Regressions \u2014 the packet explicitly defines this as preservation of existing behavior, and the added tests pin both default eligibility and all specified opt-out surfaces without changing production code.",
+    "Security \u2014 the diff adds only local temporary-fixture tests and documentation; it introduces no network, credential, deserialization, subprocess, or path-containment boundary.",
+    "Constraint breaches \u2014 the diff uses deterministic BTreeMap collection, typed Result propagation, temporary directories, locked verification commands, and includes the required lowest-layer plus build-level regression coverage.",
+    "Silent failure \u2014 test setup and graph building propagate errors, while policy outcomes are asserted directly rather than converted to defaults or empty-success states."
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

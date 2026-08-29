@@ -1,0 +1,47 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 160,
+      "claim": "`--session-timeout` is now silently ignored: the diff deletes the only read of `HttpOptions::session_timeout` (the `manager.session_config.keep_alive` wiring) and adds no deprecation-warning code anywhere, while the same diff's COMPATIBILITY.md promises the flag 'emits a deprecation warning, and is ignored'.",
+      "evidence": "transport.rs hunk removes `manager.session_config.keep_alive = ... options.session_timeout.filter(...)` and the new `build_http_router` never references `options.session_timeout`; no compass-cli hunks exist in the diff; COMPATIBILITY.md hunk states '`--session-timeout` remains accepted in 0.4.x, validates its existing numeric grammar, emits a deprecation warning, and is ignored'; plan C-008 done-when requires '`--session-timeout` deprecation path implemented + tested (warning text, exit codes unchanged)'.",
+      "suggested_fix": "Emit the deprecation warning where compass-cli parses `--session-timeout` (with a regression test asserting warning text and unchanged exit codes), or remove the flag and correct COMPATIBILITY.md; do not ship a flag that is silently discarded while docs claim a warning."
+    },
+    {
+      "severity": "WARNING",
+      "file": "COMPATIBILITY.md",
+      "line": 0,
+      "claim": "The diff makes incompatible user-visible HTTP contract changes (session mode removed, `initialize` now returns 404, stateless becomes the only mode, legacy SSE conversion deleted) with no MIGRATION.md note and no CHANGELOG.md entry.",
+      "evidence": "Warning constraint `compatibility-documented`: 'Incompatible user-visible changes include regression coverage, updated reference docs, a MIGRATION.md note when users must act, and a CHANGELOG.md entry when release-visible'; COMPATIBILITY.md hunk: 'Compass does not ship a legacy MCP-2025 HTTP mode'; transport.rs hunk deletes `sse_response_to_json` and rejects `initialize` with 404/-32601; the diff contains no MIGRATION.md or CHANGELOG.md hunks. Plan C-008 done-when also lists 'COMPATIBILITY.md + MIGRATION.md + CHANGELOG.md updated'. Acceptance task 4.1 remains unchecked, so this must be closed before archive.",
+      "suggested_fix": "Add a MIGRATION.md entry covering removal of the session handshake and the stateless-only HTTP contract, and a CHANGELOG.md entry, before the wave is archived."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 262,
+      "claim": "`host_rejection` re-implements rmcp's allowed-hosts / DNS-rebinding enforcement locally instead of reusing the library primitive, so the two copies can drift as rmcp evolves.",
+      "evidence": "transport.rs adds ~70 lines of `host_rejection`/`normalize_host` duplicating authority parsing and allowlist matching, with the comment 'Mirror rmcp's effective-authority policy... rmcp repeats the check inside the service as defense in depth'; warning constraint `safe-primitives-reused`: 'Existing bounded readers, subprocess helpers, path containment, endpoint checks ... are reused rather than reimplemented as weaker local variants.'",
+      "suggested_fix": "Rely on rmcp's `with_allowed_hosts` enforcement as the single implementation, or if a pre-gate rejection is required for layered error semantics, factor the comparison into one shared helper and add a drift-detection test against rmcp's behavior."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 195,
+      "claim": "For streamed (SSE/chunked) bodies, `enforce_response_limit` truncates the body mid-stream via `http_body_util::Limited`, so an over-limit response reaches the client as a malformed partial JSON-RPC stream with a bare connection error rather than the distinct -32023 limit error that fixed-size bodies receive.",
+      "evidence": "`enforce_response_limit` only emits the structured -32023 JSON error when `response.body().size_hint().lower() > limit`; otherwise it wraps the body in `http_body_util::Limited::new(body, limit)`, which fails after status line and headers are already sent. The in-diff test `response_limit_rejects_known_oversized_bodies_and_wraps_other_bodies` codifies that chunked overflow surfaces only as a `LengthLimitError` on a body frame. Blocking constraint `bounded-work`: 'A limit error is a distinct outcome from an empty result' \u2014 a truncated stream is neither a clean limit error nor a valid response.",
+      "suggested_fix": "Since tool results are size-checked pre-encoding by `enforce_structured_response_size`, either document the streaming-truncation behavior as accepted, or buffer/terminate the SSE event stream with an explicit error event when the limit trips so clients can distinguish 'limit exceeded' from 'transport failure'."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

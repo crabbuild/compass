@@ -1,0 +1,6 @@
+crates/compass-cli/assets/compass-skill/references/command-reference.md
+crates/compass-cli/assets/compass-skill/references/hooks.md
+crates/compass-cli/src/agent_commands.rs
+crates/compass-cli/src/help.rs
+crates/compass-cli/tests/agent_cli.rs
+docs/guides/integrating-compass.md

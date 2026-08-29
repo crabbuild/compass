@@ -1,0 +1,64 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "Cargo.toml",
+      "claim": "The diff bundles multiple unrelated product changes (rmcp 2.2.0\u21923.1.4 SDK upgrade, new compass-partition workspace member, compass-mcp dependency changes, MCP/agent/graph-bytes CHANGELOG entries) that are outside this change's declared scope, acceptance criteria, and openspec files.txt, and their corresponding source and regression tests are absent from the diff.",
+      "evidence": "Cargo.toml hunk changes `rmcp = { version = \"2.2.0\"...` to `=3.1.4`, adds `http-body-util` and `compass-partition` workspace deps and a `crates/compass-partition` member; Cargo.lock shows `rmcp 3.1.4`, `compass-partition`, and new `http-body-util`/`sha2` deps on `compass-mcp` and a new `compass-partition` dep on `compass-history`; CHANGELOG.md gains entries for `compass agent list|install|doctor|...`, `compass.code_context.v1`, MCP 2026-07-28 transport requirements, the rmcp upgrade, compass-partition extraction, and COMPASS_MAX_GRAPH_BYTES \u2014 none of which appear in `openspec/changes/surreal-graph-projection/files.txt` or the acceptance criteria, and no compass-mcp/compass-history source or test changes are in the diff. This breaches the `no-unrelated-diff-noise` constraint and leaves behavior changes covered by `regression-test-present` without evidence in the change.",
+      "suggested_fix": "Split the rmcp/MCP-envelope/compass-partition/COMPASS_MAX_GRAPH_BYTES work into their own changes with their manifests, sources, and tests, or include full evidence here; keep this diff to the surreal-graph-projection scope."
+    },
+    {
+      "severity": "WARNING",
+      "file": "docs/implementation/surreal-graph-projection.md",
+      "claim": "The same diff asserts two different canonical graph byte bounds: the projection docs/decisions claim a 1 GiB canonical bound while the CHANGELOG claims the 2 GiB COMPASS_MAX_GRAPH_BYTES default is retained.",
+      "evidence": "docs/implementation/surreal-graph-projection.md: \"cap serialized projection data at the canonical 1 GiB graph bound\" and decisions.md: \"the canonical 1 GiB graph byte bound\"; CHANGELOG.md: \"Honor `COMPASS_MAX_GRAPH_BYTES` ... while retaining the 2 GiB default\". `ProjectionLimits::default()` uses `compass_model::DEFAULT_GRAPH_SIZE_CAP_BYTES`, whose value cannot be both.",
+      "suggested_fix": "Verify `DEFAULT_GRAPH_SIZE_CAP_BYTES` and make the docs, decisions record, and CHANGELOG state one consistent bound."
+    },
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-graphdb-surreal/src/engine.rs",
+      "claim": "The idempotent-reactivation arm of `stage_generation` compares only fingerprint/counts/bytes/complete and never compares `source_tree_digest`, `schema_fingerprint`, or `schema_version`, nor verifies the generation's node/relation records still exist, before moving the active pointer.",
+      "evidence": "In the `if let Some(existing) = ...` branch, the mismatch check is `existing.projection_fingerprint != plan.projection_fingerprint || existing.node_count != ... || existing.relation_count != ... || existing.projected_bytes != projected_bytes || !existing.complete`; `fingerprint()` in projection.rs hashes only schema version, repository/generation IDs, and record keys/payloads \u2014 the two digest fields are neither hashed nor compared \u2014 and the branch then calls `upsert_pointer` without re-running `validate_candidate`. A same-generation plan with different tree/schema digests is silently accepted with the stale manifest retained, and a generation whose records are missing gets reactivated (reads then fail with \"records do not match the manifest\").",
+      "suggested_fix": "Include `source_tree_digest`/`schema_fingerprint` in the fingerprint or compare them explicitly in the existing-manifest check, and re-validate candidate identity sets before re-pointing the repository pointer."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/check_surreal_feature_isolation.sh",
+      "claim": "The `--binary` gate is effectively vacuous: after `cargo build -p compass-graphdb-surreal --features mem`, the second `cargo build -p compass-cli --locked` has an unchanged fingerprint and is a no-op, so `cmp` trivially passes on the untouched binary \u2014 yet constraints.json cites it as proof the default binary is byte-identical after a Mem build.",
+      "evidence": "The script does `cargo build -p compass-cli --locked; cp ... $baseline; cargo build -p compass-graphdb-surreal --features mem --locked; cargo build -p compass-cli --locked; cmp -s $baseline ...`. Nothing in compass-cli's inputs changes between the two builds, so cargo rebuilds nothing and the comparison cannot fail for the reason the gate claims; the real isolation signal comes only from the `cargo tree` checks.",
+      "suggested_fix": "Either drop the binary-comparison mode and rely on the dependency-tree checks, or make it meaningful by building a Surreal-enabled binary that actually links the projection crate and comparing it against the default artifact."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".refiner/artifacts/C-014/dist/refinement-receipt.md",
+      "claim": "The receipt records \"PASS (deterministic gate)\" while stating the artifact-refiner's canonical controllers and schema assets were unavailable and a \"fallback state contract\" was used, so the blocking refiner-qa-evidence gate's PASS is self-attested rather than produced by the required gate.",
+      "evidence": "refinement-receipt.md: \"The installed artifact-refiner adapter lacks its referenced canonical controllers and schema assets, so this receipt uses the repository's established deterministic fallback state contract.\" The `refiner-qa-evidence` blocking constraint requires per-change manifests/constraints/decisions/logs/receipts as KBD certification evidence; a fallback receipt asserting PASS without the canonical gate weakens that certification.",
+      "suggested_fix": "Re-run the canonical refiner gate (or repair the adapter) and regenerate the receipt, or downgrade the recorded status to reflect that the canonical gate did not execute."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-graphdb-surreal/src/engine.rs",
+      "claim": "`InterruptAfter(0)` cannot interrupt before any mutation: the check runs only after `mutations += 1`, so `InterruptAfter(0)` fires after the first mutation rather than immediately.",
+      "evidence": "`interrupt_if_requested` is called only inside the node/relation loops after incrementing `mutations`; with `InterruptAfter(0)` the first evaluation is `1 >= 0` after one mutation has already been staged, which is an off-by-one in the public fault-injection API.",
+      "suggested_fix": "Check the interrupt condition before performing each mutation (or document that `InterruptAfter(n)` always allows at least one mutation when n == 0)."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "crates/compass-graphdb-surreal/src/engine.rs",
+      "claim": "The schema defines no indexes on repositoryId/generationId/compassNodeId/compassEdgeId, so every read and candidate validation performs filtered full-table scans; LIMIT bounds returned rows but not scanned work.",
+      "evidence": "The SCHEMA const contains only DEFINE TABLE/DEFINE FIELD statements; SELECT_NODE_IDS/SELECT_RELATION_IDS/SELECT_NODES/SELECT_RELATIONS all filter `WHERE repositoryId = $repository AND generationId = $generation ORDER BY ...` with no DEFINE INDEX, which matters once one database holds multiple repositories or retained historical generations.",
+      "suggested_fix": "Add composite indexes on (repositoryId, generationId, compassNodeId/compassEdgeId) for code_node and each relation table."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 const PROJECT_PLATFORMS: &[&str] = &[
@@ -56,6 +57,15 @@ const GLOBAL_PLATFORMS: &[&str] = &[
     "agents",
     "devin",
     "gemini",
+];
+
+const FOCUSED_SKILLS: &[&str] = &[
+    "compass-architecture",
+    "compass-change-impact",
+    "compass-debug",
+    "compass-index-maintenance",
+    "compass-mcp-setup",
+    "compass-navigate",
 ];
 
 #[test]
@@ -115,6 +125,7 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(!String::from_utf8_lossy(&output.stdout).contains("hook-check"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("/hooks"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("new coding-agent session"));
+    assert_focused_skill_collection(&fixture.project.join(".agents/skills"), &["codex"])?;
     Ok(())
 }
 
@@ -132,6 +143,10 @@ fn every_project_platform_installs_native_content() -> Result<(), Box<dyn Error>
         assert!(
             !tree_contains_compass_skill(&fixture.project)?,
             "{platform} left a project Compass skill after uninstall"
+        );
+        assert!(
+            !tree_contains_focused_skill(&fixture.project)?,
+            "{platform} left a focused Compass skill after uninstall"
         );
     }
     Ok(())
@@ -163,9 +178,35 @@ fn direct_and_generic_codex_installs_match() -> Result<(), Box<dyn Error>> {
     );
     let mut generic_tree = directory_tree(&generic.project)?;
     let mut direct_tree = directory_tree(&direct.project)?;
-    generic_tree.remove(Path::new(".agents/skills/compass/.compass-install.json"));
-    direct_tree.remove(Path::new(".agents/skills/compass/.compass-install.json"));
+    normalize_manifest_roots(&mut generic_tree, &generic.project)?;
+    normalize_manifest_roots(&mut direct_tree, &direct.project)?;
     assert_eq!(generic_tree, direct_tree);
+    Ok(())
+}
+
+#[test]
+fn agent_install_alias_is_byte_compatible_with_legacy_install() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let legacy = fixture.run(&["install", "--platform", "codex", "--project"])?;
+    assert_success("legacy managed install", &legacy);
+    let legacy_tree = directory_tree(&fixture.project)?;
+
+    fs::remove_dir_all(&fixture.project)?;
+    fs::create_dir_all(&fixture.project)?;
+    fs::create_dir(fixture.project.join(".git"))?;
+
+    let alias = fixture.run(&["agent", "install", "--platform", "codex", "--project"])?;
+    assert_success("agent managed install", &alias);
+    assert_eq!(alias.status.code(), legacy.status.code());
+    assert_eq!(alias.stdout, legacy.stdout);
+    assert_eq!(alias.stderr, legacy.stderr);
+    assert_eq!(directory_tree(&fixture.project)?, legacy_tree);
+
+    let legacy_error = fixture.run(&["install", "--platform"])?;
+    let alias_error = fixture.run(&["agent", "install", "--platform"])?;
+    assert_eq!(alias_error.status.code(), legacy_error.status.code());
+    assert_eq!(alias_error.stdout, legacy_error.stdout);
+    assert_eq!(alias_error.stderr, legacy_error.stderr);
     Ok(())
 }
 
@@ -199,9 +240,20 @@ fn reinstall_is_idempotent_and_parser_errors_do_not_mutate() -> Result<(), Box<d
         &fixture.run(&["install", "--platform", "codex", "--project"])?,
     );
     let first = directory_tree(&fixture.project)?;
-    assert_success(
-        "second install",
-        &fixture.run(&["install", "--platform", "codex", "--project"])?,
+    let second = fixture.run(&[
+        "install",
+        "--platform",
+        "codex",
+        "--project",
+        "--format",
+        "json",
+    ])?;
+    assert_success("second install", &second);
+    let report: serde_json::Value = serde_json::from_slice(&second.stdout)?;
+    assert!(
+        report["results"]
+            .as_array()
+            .is_some_and(|results| { results.iter().any(|result| result["status"] == "current") })
     );
     assert_eq!(directory_tree(&fixture.project)?, first);
 
@@ -225,6 +277,64 @@ fn install_does_not_overwrite_an_unowned_compass_skill() -> Result<(), Box<dyn E
             || String::from_utf8_lossy(&output.stderr).contains("not managed by Compass")
     );
     assert_eq!(fs::read_to_string(skill)?, "user-owned");
+    Ok(())
+}
+
+#[test]
+fn install_preflights_unowned_focused_skill_before_mutation() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let focused = fixture
+        .project
+        .join(".agents/skills/compass-debug/SKILL.md");
+    fs::create_dir_all(focused.parent().ok_or("focused parent")?)?;
+    fs::write(&focused, "user-owned focused skill")?;
+
+    let output = fixture.run(&["install", "--platform", "codex", "--project"])?;
+    assert!(!output.status.success());
+    assert_eq!(fs::read_to_string(&focused)?, "user-owned focused skill");
+    assert!(
+        !fixture
+            .project
+            .join(".agents/skills/compass/SKILL.md")
+            .exists()
+    );
+    assert!(!fixture.project.join(".codex/hooks.json").exists());
+    Ok(())
+}
+
+#[test]
+fn uninstall_preserves_a_modified_focused_skill_even_with_a_rewritten_manifest()
+-> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    assert_success(
+        "initial install",
+        &fixture.run(&["install", "--platform", "codex", "--project"])?,
+    );
+    let focused = fixture
+        .project
+        .join(".agents/skills/compass-debug/SKILL.md");
+    let modified = b"user-modified focused skill";
+    fs::write(&focused, modified)?;
+    let manifest_path = focused
+        .parent()
+        .ok_or("focused parent")?
+        .join(".compass-install.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    manifest["files"]["SKILL.md"] =
+        serde_json::Value::String(format!("{:x}", Sha256::digest(modified)));
+    fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
+
+    assert_success(
+        "safe uninstall",
+        &fixture.run(&["uninstall", "--platform", "codex", "--project"])?,
+    );
+    assert_eq!(fs::read_to_string(&focused)?, "user-modified focused skill");
+    assert!(
+        !fixture
+            .project
+            .join(".agents/skills/compass/SKILL.md")
+            .exists()
+    );
     Ok(())
 }
 
@@ -484,6 +594,13 @@ fn repeated_platforms_share_one_package_and_dry_run_is_read_only() -> Result<(),
             "dry run omitted {expected}: {planned:?}"
         );
     }
+    for name in FOCUSED_SKILLS {
+        let expected = format!(".agents/skills/{name}/SKILL.md");
+        assert!(
+            planned.iter().any(|path| path.ends_with(&expected)),
+            "dry run omitted {expected}: {planned:?}"
+        );
+    }
 
     let output = fixture.run(&[
         "install",
@@ -649,12 +766,16 @@ fn uninstall_removes_one_shared_consumer_without_breaking_another() -> Result<()
     let manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(skill.with_file_name(".compass-install.json"))?)?;
     assert_eq!(manifest["consumers"], serde_json::json!(["gemini"]));
+    assert_focused_skill_collection(&fixture.project.join(".agents/skills"), &["gemini"])?;
 
     assert_success(
         "remove gemini consumer",
         &fixture.run(&["uninstall", "--platform", "gemini", "--project"])?,
     );
     assert!(!skill.exists());
+    for name in FOCUSED_SKILLS {
+        assert!(!fixture.project.join(".agents/skills").join(name).exists());
+    }
     Ok(())
 }
 
@@ -740,12 +861,46 @@ fn assert_native_tree(root: &Path) -> Result<(), Box<dyn Error>> {
         };
         assert_native(&text);
         if path.ends_with("SKILL.md") {
+            let expected_name = path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|name| name.to_str())
+                .ok_or("skill directory name")?;
             assert!(
-                text.starts_with("---\nname: compass\n"),
+                text.starts_with(&format!("---\nname: {expected_name}\n")),
                 "{} is not a Compass skill",
                 path.display()
             );
         }
+    }
+    Ok(())
+}
+
+fn assert_focused_skill_collection(
+    container: &Path,
+    consumers: &[&str],
+) -> Result<(), Box<dyn Error>> {
+    for name in FOCUSED_SKILLS {
+        let directory = container.join(name);
+        let skill = directory.join("SKILL.md");
+        let body = fs::read_to_string(&skill)?;
+        assert!(body.starts_with(&format!("---\nname: {name}\n")));
+        assert!(!body.contains("/Users/"));
+        assert!(!body.contains("/home/"));
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(directory.join(".compass-install.json"))?)?;
+        assert_eq!(manifest["schema"], 1);
+        assert!(manifest["files"]["SKILL.md"].is_string());
+        assert!(manifest["files"][".compass_version"].is_string());
+        assert_eq!(
+            manifest["consumers"],
+            serde_json::Value::Array(
+                consumers
+                    .iter()
+                    .map(|consumer| serde_json::Value::String((*consumer).to_owned()))
+                    .collect()
+            )
+        );
     }
     Ok(())
 }
@@ -767,6 +922,17 @@ fn tree_contains_compass_skill(root: &Path) -> Result<bool, Box<dyn Error>> {
     Ok(directory_tree(root)?.into_iter().any(|(path, bytes)| {
         path.ends_with("SKILL.md")
             && String::from_utf8(bytes).is_ok_and(|text| text.starts_with("---\nname: compass\n"))
+    }))
+}
+
+fn tree_contains_focused_skill(root: &Path) -> Result<bool, Box<dyn Error>> {
+    Ok(directory_tree(root)?.into_iter().any(|(path, bytes)| {
+        path.ends_with("SKILL.md")
+            && String::from_utf8(bytes).is_ok_and(|text| {
+                FOCUSED_SKILLS
+                    .iter()
+                    .any(|name| text.starts_with(&format!("---\nname: {name}\n")))
+            })
     }))
 }
 
@@ -792,4 +958,26 @@ fn directory_tree(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, Box<dyn Err
     let mut output = BTreeMap::new();
     visit(root, root, &mut output)?;
     Ok(output)
+}
+
+fn normalize_manifest_roots(
+    tree: &mut BTreeMap<PathBuf, Vec<u8>>,
+    root: &Path,
+) -> Result<(), Box<dyn Error>> {
+    let canonical_root = fs::canonicalize(root)?;
+    let encoded_root = serde_json::to_string(&canonical_root)?;
+    for (path, bytes) in tree {
+        if path
+            .file_name()
+            .is_some_and(|name| name == ".compass-install.json")
+        {
+            let text = std::str::from_utf8(bytes)?;
+            let normalized = text.replace(&encoded_root, "\"<normalized-root>\"");
+            if normalized == text {
+                return Err(format!("manifest {} did not contain its root", path.display()).into());
+            }
+            *bytes = normalized.into_bytes();
+        }
+    }
+    Ok(())
 }

@@ -1,0 +1,63 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "crates/compass-mcp/src/transport.rs",
+      "line": 282,
+      "claim": "normalize_header leaves whitespace-only or untrimmable header values in place, so a whitespace-only `Mcp-Method` header bypasses the missing-method gate and is forwarded to the rmcp service instead of receiving the documented -32020 rejection.",
+      "evidence": "In `normalize_header`, when the trimmed value is empty or unparseable, `normalized` is `None` and the original header is left untouched (`if let Some(value) = normalized { ... insert ... }` with no else-removal). Downstream, `let method = request.headers().get(\"mcp-method\")...map(str::to_owned); if method.is_none() { ... -32020 ... }` \u2014 a header of `\" \\t \"` yields `Some(\" \\t \")`, so `method.is_none()` is false and the gate passes a value its own contract treats as absent. The protocol-version gate does not have this hole only because `supports_protocol(\" \\t \")` happens to be false.",
+      "suggested_fix": "In normalize_header, remove the header when the trimmed value is empty (request.headers_mut().remove(name)), so whitespace-only values are treated identically to missing values by both gates."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 213,
+      "claim": "In HTTP mode the spawned Compass server process leaks if readiness probing fails, because `wait_for_server(server, port)` is called before the try/finally that terminates the server.",
+      "evidence": "`server = subprocess.Popen([... compass serve ... --transport http ...])` is immediately followed by `wait_for_server(server, port)` and only afterwards by `try: ... finally: if server is not None and server.poll() is None: server.terminate()...`. If wait_for_server raises AppServerError (\"did not become ready\") while the server is still alive (slow bind, blocked on stderr pipe), the exception propagates to main() and the interpreter exits with the Compass process orphaned and still holding the port.",
+      "suggested_fix": "Move the Popen/wait_for_server sequence inside the try block (or wrap wait_for_server so any exception terminates `server` before re-raising)."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 193,
+      "claim": "The spawned Compass HTTP server's stderr is piped but never drained, so the server deadlocks once it writes more than the OS pipe buffer (~64 KiB) of log output.",
+      "evidence": "The HTTP server is started with `stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True` and no thread or call ever reads `server.stderr` (unlike AppServerClient, which spawns `_read_stderr`). A blocked-on-write server stops serving requests, surfacing only as the 15s readiness timeout or a 30s request timeout, and then hits the leak in the prior finding.",
+      "suggested_fix": "Redirect server stderr to a file in the temp directory (as qualify_mcp_conformance.sh does with $SERVER_LOG) or drain it in a daemon thread and include the tail in failure diagnostics."
+    },
+    {
+      "severity": "WARNING",
+      "file": "scripts/fixtures/mcp-conformance-expected-failures.yaml",
+      "line": 6,
+      "claim": "The four fixture-diagnostic baselines are matched by check identifier only, so they cannot distinguish the benign fixture-tool-absence cause from a real protocol regression, contradicting the documented guarantee that advertised-capability failures remain blocking.",
+      "evidence": "verification.md and design.md disclose this exact limitation only for `http-header-validation:sep-2243-...` (\"Its identifier-only baseline could also accept a different failure cause\"), and add a native regression to cover that one gap. The same matching semantics apply to `server-stateless:sep-2575-server-rejects-undeclared-capability`, `sep-2575-missing-capability-http-400`, `sep-2575-http-server-no-independent-requests-on-stream`, and `sep-2575-server-no-log-without-loglevel`: if Compass regressed (e.g., stopped rejecting an undeclared capability), the runner check would still fail, still match the baseline identifier, and CI would stay green despite design.md's claim that \"any transport, wire-schema, routing, or advertised capability failure remains a blocking failure.\"",
+      "suggested_fix": "Add native Rust tests pinning the intended behavior for each of the four baselined checks (undeclared-capability rejection, HTTP 400 on missing capability, no independent server requests on the stream, no log without logLevel), mirroring what was done for header whitespace normalization."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 130,
+      "claim": "free_port() has a TOCTOU race: the probed port can be taken by another process between the probe and Compass binding it, producing a spurious interop failure.",
+      "evidence": "`def free_port(): ... listener.bind((\"127.0.0.1\", 0)); return int(listener.getsockname()[1])` closes the socket before the port is passed to `compass serve --port`.",
+      "suggested_fix": "Retry the serve/wait_for_server sequence on bind failure, or have the harness bind the listener itself and pass the fd/port atomically if the CLI supports it."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "scripts/qualify_codex_mcp_client.py",
+      "line": 41,
+      "claim": "Runtime invariants are enforced with `assert`, which is stripped under `python -O` and turns into a confusing AttributeError instead of a diagnostic.",
+      "evidence": "`assert self._process.stdout is not None`, `assert self._process.stderr is not None`, and `assert self._process.stdin is not None` in AppServerClient.",
+      "suggested_fix": "Replace with explicit `if ... is None: raise AppServerError(...)` checks."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

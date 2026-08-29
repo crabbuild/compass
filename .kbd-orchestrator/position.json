@@ -1,0 +1,220 @@
+{
+  "schemaVersion": "1",
+  "generatedBy": "kbd-runtime",
+  "sourceRevision": 300,
+  "derivedRevision": 300,
+  "frontier": {
+    "dcb2293c-3722-4507-af1a-1786476c3817": 300
+  },
+  "conflictCount": 0,
+  "updatedAt": "2026-08-29T19:17:43.033786Z",
+  "cursor": [
+    "compass-scoping-and-bounds",
+    "execute"
+  ],
+  "root": {
+    "type": "phase",
+    "id": "a5ced554-588e-4e12-a6f7-6580bba975b3",
+    "status": "ready",
+    "progress": {
+      "done": 18,
+      "total": 20
+    },
+    "children": [
+      {
+        "type": "phase",
+        "id": "compass-scoping-and-bounds",
+        "canonicalId": "compass-scoping-and-bounds",
+        "status": "COMPLETE",
+        "progress": {
+          "done": 18,
+          "total": 20
+        },
+        "children": [
+          {
+            "type": "change",
+            "id": "C-001",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 5,
+              "total": 5
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-002",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-003",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-004",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-005",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-006",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 3,
+              "total": 3
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-007",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-008",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-009",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-010",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-011",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-012",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 6,
+              "total": 6
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-013",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 7,
+              "total": 7
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-014",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-015",
+            "status": "SKIPPED",
+            "progress": {
+              "done": 3,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-016",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-017",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-018",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 5,
+              "total": 5
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-019",
+            "status": "COMPLETE",
+            "progress": {
+              "done": 4,
+              "total": 4
+            }
+          },
+          {
+            "type": "change",
+            "id": "C-020",
+            "status": "SKIPPED",
+            "progress": {
+              "done": 0,
+              "total": 0
+            }
+          }
+        ],
+        "annotations": []
+      }
+    ],
+    "annotations": []
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "mode": "diff",
+  "verdict": "BLOCK",
+  "judge_model": "gpt-5.6-sol-harness",
+  "isolation_mode": "harness-native",
+  "producer_model": "gpt-5.6-sol",
+  "cross_model_check": "same-family-fresh-context",
+  "findings": [
+    {
+      "severity": "CRITICAL",
+      "file": "openspec/changes/extract-compass-partition/tasks.md",
+      "line": 15,
+      "claim": "The required verification work is explicitly incomplete, so acceptance criterion 4.1 and the blocking build, test, Clippy, and formatting constraints are not satisfied by this packet.",
+      "evidence": "Acceptance criterion 4.1 is unchecked and the packet contains no completed verification record.",
+      "suggested_fix": "Record the successful gates and mark verification complete before review."
+    },
+    {
+      "severity": "WARNING",
+      "file": "CHANGELOG.md",
+      "line": 7,
+      "claim": "The cumulative diff contains release claims from earlier changes outside the partition extraction target.",
+      "evidence": "The worktree retains the completed, independently reviewed C-001 through C-004 changelog entries alongside C-005.",
+      "suggested_fix": "Document cumulative-diff provenance so earlier accepted changes are not mistaken for C-005 scope."
+    }
+  ]
+}

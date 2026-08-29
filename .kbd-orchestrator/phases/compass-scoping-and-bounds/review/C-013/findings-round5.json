@@ -1,0 +1,43 @@
+{
+  "mode": "diff",
+  "verdict": "PASS",
+  "judge_model": "k3",
+  "producer_model": "gpt-5.6-sol",
+  "isolation_mode": "rest-gateway:http://localhost:4000/v1",
+  "cross_model_check": "verified-distinct",
+  "findings": [
+    {
+      "severity": "WARNING",
+      "file": "benchmarks/qualification/run_current_baseline.py",
+      "claim": "workspaceTreeSha256 silently includes git-ignored files under the scoped paths (e.g. __pycache__ or editor files under crates/ and vendor/), while the separately recorded untracked subset uses git ls-files --others --exclude-standard and therefore excludes them \u2014 so the 'reproducible' source identity varies across machines with different local ignored files and the variance is invisible in the retained metadata.",
+      "evidence": "In workspace_source_metadata, scoped_files is built with `candidate.rglob(\"*\")` over every filesystem entry under DEFAULT_PATCH_PATHS (crates, vendor/...), but the untracked identity uses `(\"git\", \"ls-files\", \"--others\", \"--exclude-standard\", \"-z\", \"--\", *paths)`; anything git-ignored is hashed into workspaceTreeSha256 yet accounted nowhere, contradicting acceptance criterion 3.1 ('build and measure the current engine reproducibly') and the verification claim that source identity is fully explained by the tracked patch plus the 26-file untracked subset.",
+      "suggested_fix": "Build scoped_files from `git ls-files -z --cached --others` (tracked plus all untracked, without --exclude-standard) so the tree digest covers exactly the union of the tracked patch scope and the recorded untracked scope, and assert tree_files == tracked_count + untracked_files in the runner."
+    },
+    {
+      "severity": "WARNING",
+      "file": ".refiner/artifacts/C-013/artifact_manifest.json",
+      "claim": "The QA manifest certifies status \"refined\" with validatedAt \"2026-08-28\", but iteration-5 evidence (the re-measured baseline recordedAt 2026-08-29T05:16:37Z and the 22-test run described in refinement_log iteration 5) postdates that validation timestamp, so the receipt certifies a state older than the evidence it covers.",
+      "evidence": ".refiner/artifacts/C-013/artifact_manifest.json has `\"validatedAt\": \"2026-08-28\"` with `\"status\": \"refined\"`, while benchmarks/qualification/current-engine-baseline-v1.json has `\"recordedAt\": \"2026-08-29T05:16:37.416194+00:00\"` and .refiner/artifacts/C-013/refinement_log.md iteration 5 records expanding the provenance scope and re-running the complete baseline afterward.",
+      "suggested_fix": "Update validatedAt (and the receipt, if dated) to the date of the final iteration-5 baseline/test run, or add an explicit field tying the certification to the retained baseline's recordedAt."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "claim": "verify_expected does not type-check expected members, and `int(minimum_edges)` silently coerces non-integer JSON values such as true (to 1) or numeric strings, weakening the evidence contract that every other input path validates strictly.",
+      "evidence": "validate_task only checks `expected` is a dict; in verify_expected, `minimum_edges = expected.get(\"minimumEdgeCount\")` is used via `len(edge_ids) < int(minimum_edges)` with no bool/int guard, while neighboring fields like maxDepth get explicit `isinstance(value, bool) or not isinstance(value, int)` rejection.",
+      "suggested_fix": "In validate_task, reject non-dict containsNodeIds entries and non-integer (or bool) minimumEdgeCount/status/firstNodeId/lastNodeId values so malformed expectations fail closed instead of being coerced."
+    },
+    {
+      "severity": "SUGGESTION",
+      "file": "benchmarks/qualification/raw_traversal.py",
+      "claim": "load_graph validates node ID uniqueness but accepts duplicate edge IDs silently, so a malformed input graph with colliding edge identities would pass the 'strict' scan undetected.",
+      "evidence": "In load_graph, nodes raise on `node_id in nodes` ('invalid or duplicate node ID'), but the links loop only checks endpoint membership and non-empty edge_id, with no duplicate edge_id tracking.",
+      "suggested_fix": "Track seen edge IDs during the links scan and raise ValueError on duplicates, mirroring the node validation."
+    }
+  ],
+  "sycophancy_screen": {
+    "reject_cap": 2,
+    "cap_overridden": false,
+    "cap_default": 2
+  }
+}

@@ -96,6 +96,9 @@ They are not evidence that an uncompleted design has shipped.
 | Document | Purpose |
 | --- | --- |
 | [Universal evidence implementation](implementation/universal-evidence.md) | Current universal evidence pipeline, resolution order, and failure classes |
+| [MCP conformance and interoperability](implementation/mcp-conformance-and-interop.md) | Pinned transport conformance evidence and the current named-client gate |
+| [Optional Surreal graph projection](implementation/surreal-graph-projection.md) | Feature isolation, generation activation, schema, engine profiles, and license boundary |
+| [Native agent package distribution](implementation/agent-distribution.md) | Canonical inventory, generated Codex/Claude/OpenCode packages, portability, and lifecycle ownership |
 | [Evidence resolution framework technical design](implementation/evidence-resolution-framework-technical-design.md) | Target ownership, components, interfaces, and invariants for rearchitecting the resolver |
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
 

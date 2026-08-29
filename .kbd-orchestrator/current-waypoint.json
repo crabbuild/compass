@@ -1,26 +1,31 @@
 {
   "schemaVersion": "5",
+  "generatedBy": "kbd-runtime",
+  "sourceRevision": 300,
+  "derivedRevision": 300,
+  "frontier": {
+    "dcb2293c-3722-4507-af1a-1786476c3817": 300
+  },
+  "conflictCount": 0,
+  "projectId": "a5ced554-588e-4e12-a6f7-6580bba975b3",
+  "runId": "compass-scoping-and-bounds-20260828T123758Z",
   "path": [
     "compass-scoping-and-bounds"
   ],
+  "phaseIds": [
+    "compass-scoping-and-bounds"
+  ],
+  "activePhaseId": "compass-scoping-and-bounds",
   "phase": "compass-scoping-and-bounds",
-  "previousPhase": null,
-  "change": null,
-  "status": "plan_ready",
-  "currentTask": "Apply C-001 \u2014 read_snapshot API split",
-  "nextPendingChange": "C-001",
-  "sourceTool": "claude",
-  "exactNextCommand": "/opsx:new stream-snapshot-read",
-  "parentPhase": null,
-  "childPhases": [],
   "childPointer": null,
-  "backend": "openspec",
-  "wave": 1,
-  "lastCompletedChange": null,
+  "change": null,
+  "currentTask": null,
+  "status": "ready",
   "completionMetric": "implementation",
-  "implementationCompleted": 0,
-  "implementationTotal": 6,
-  "certificationStatus": "NOT_TRACKED",
-  "publicationStatus": "NOT_TRACKED",
-  "updatedAt": "2026-08-09T12:27:19Z"
+  "implementationCompleted": 18,
+  "implementationTotal": 20,
+  "planRevision": 1,
+  "revision": 300,
+  "exactNextCommand": "/opsx:new stream-snapshot-read",
+  "updatedAt": "2026-08-29T19:17:43.033786Z"
 }

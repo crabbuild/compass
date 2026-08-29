@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1",
+  "artifactName": "C-011",
+  "artifactType": "decision",
+  "contentType": "direct:evidence",
+  "status": "refined",
+  "sourceArtifacts": [
+    "docs/future/surrealdb-license-decision.md",
+    "docs/future/surreal-persistent-probe-results.md",
+    ".kbd-orchestrator/phases/compass-scoping-and-bounds/decision-log.md",
+    ".kbd-orchestrator/phases/compass-scoping-and-bounds/execution.md",
+    ".kbd-orchestrator/phases/compass-scoping-and-bounds/plan.md",
+    "openspec/changes/archive/2026-08-29-surrealdb-license-decision",
+    ".refiner/artifacts/C-012/constraints.json",
+    ".refiner/artifacts/C-012/dist/refinement-receipt.md",
+    ".refiner/artifacts/C-013/constraints.json",
+    ".refiner/artifacts/C-013/dist/refinement-receipt.md",
+    "docs/future/qualification-corpora-baselines.md",
+    "scripts/fixtures/surreal-persistent-probes/manifest-v1.json",
+    "scripts/fixtures/surreal-persistent-probes/SURREALDB-3.2.4-LICENSE.txt"
+  ],
+  "distFiles": [
+    "dist/refinement-receipt.md"
+  ],
+  "validatedAt": "2026-08-29"
+}

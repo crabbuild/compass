@@ -63,6 +63,9 @@ pub enum HistoryError {
     /// A value could not be represented by the canonical encoding.
     #[error("canonical encoding failed: {0}")]
     Canonical(String),
+    /// A storage-neutral partition value could not be encoded.
+    #[error(transparent)]
+    Partition(#[from] compass_partition::PartitionError),
     /// A typed key was malformed.
     #[error("invalid typed key: {0}")]
     InvalidKey(String),
@@ -102,6 +105,7 @@ impl HistoryError {
             | Self::Program(_)
             | Self::Json(_)
             | Self::Canonical(_)
+            | Self::Partition(_)
             | Self::InvalidKey(_)
             | Self::InvalidFingerprint(_)
             | Self::InvalidCommit(_)

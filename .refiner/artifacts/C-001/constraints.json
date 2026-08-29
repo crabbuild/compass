@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1",
+  "source": ".kbd-orchestrator/constraints.md",
+  "artifact": "C-001",
+  "blocking": [
+    {"id": "build-passes", "status": "PASS", "evidence": "cargo check --workspace --locked"},
+    {"id": "tests-pass", "status": "PASS", "evidence": "cargo test --workspace --lib --bins --locked"},
+    {"id": "clippy-clean", "status": "PASS", "evidence": "cargo clippy --workspace --lib --bins --locked -- -D warnings"},
+    {"id": "fmt-clean", "status": "PASS", "evidence": "cargo fmt --all -- --check"},
+    {"id": "no-unsafe-code", "status": "PASS", "evidence": "No forbidden unsafe additions in the C-001 diff; workspace forbids unsafe code"},
+    {"id": "no-unwrap-expect-panic", "status": "PASS", "evidence": "No unwrap, expect, or panic additions in the C-001 diff; Clippy all-target gate passes"},
+    {"id": "product-boundary", "status": "PASS", "evidence": "sh scripts/check_product_boundary.sh"},
+    {"id": "local-first-preserved", "status": "PASS", "evidence": "No network, model, vector, Python, or runtime grammar dependency added"},
+    {"id": "no-secrets-or-machine-paths", "status": "PASS", "evidence": "No credential or private-key pattern in the C-001 diff"},
+    {"id": "locked-dependencies", "status": "PASS", "evidence": "All Cargo commands used --locked; no dependency file changed"},
+    {"id": "regression-test-present", "status": "PASS", "evidence": "22 compass-store tests plus full workspace tests pass"},
+    {"id": "determinism-preserved", "status": "PASS", "evidence": "Chunk order is manifest-index order; no unordered collection added"},
+    {"id": "bounded-work", "status": "PASS", "evidence": "Per-chunk delivery, explicit CHUNK_BYTES guard, saturating aggregate count, existing 2 GiB cap, length and digest validation"},
+    {"id": "immutable-realizations", "status": "PASS", "evidence": "No historical realization or snapshot format mutation"},
+    {"id": "no-real-credentials-in-tests", "status": "PASS", "evidence": "Tests use only temporary local SQLite stores"},
+    {"id": "viewer-assets-generated", "status": "PASS", "evidence": "node scripts/check_viewer_assets.mjs after npm ci"}
+  ]
+}
