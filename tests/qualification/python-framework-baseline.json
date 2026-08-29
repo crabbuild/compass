@@ -4,7 +4,7 @@
   "plannedAt": "dd3bf47bf9d5d04298c26a3832a70f040ed3dbb8",
   "pythonProducer": {
     "id": "compass.python",
-    "version": 13,
+    "version": 1,
     "qualification": "qualifying"
   },
   "productionFrameworkPacks": [

@@ -51,7 +51,7 @@ class PythonFrameworkQualificationTests(unittest.TestCase):
         self.assertEqual(first["schema"], qualification.SCHEMA)
         self.assertEqual(first["status"], "established-unqualified")
         self.assertFalse(first["productionQualified"])
-        self.assertEqual(first["pythonProducer"]["version"], 13)
+        self.assertEqual(first["pythonProducer"]["version"], 1)
         self.assertEqual(first["expectations"], 17)
         self.assertEqual(len(first["expectedGaps"]), 3)
 
