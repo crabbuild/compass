@@ -1,9 +1,10 @@
 # Ruby universal qualification
 
-Plan 019 is implemented through a single Ruby evidence path and is currently
-kept at `Qualifying`. The producer identity is
-`compass.ruby` (producer version 1, evidence schema v2); the complete quality
-audit has not been claimed or used to promote the pipeline to `Qualified`.
+Plan 019 is implemented through a single Ruby evidence path and is promoted
+to `Qualified` by the checked-in universal-evidence release decision. The
+producer identity is `compass.ruby` (producer version 1, evidence schema v2);
+the complete quality-audit results and deterministic performance evidence are
+retained below for review.
 
 ## Production contract
 
@@ -102,9 +103,9 @@ TypeScript fixture failures (`typescript_candidate_resolves_relative_and_default
 and `typescript_workspace_package_exports_follow_nodenext_reexports`); all
 Ruby and Rails tests in that suite pass.
 
-The complete audit gates are now green in the pinned three-corpus report. Ruby
-is still intentionally `Qualifying`; passing qualification does not
-automatically promote a language pipeline.
+The complete audit gates are green in the pinned three-corpus report. The
+release decision promotes Ruby only at the version-1 producer identity shown
+above; passing a future producer or capability change requires a new decision.
 
 The pinned source-oracle run on 2026-08-17 completed deterministically with
 Ruby 4.0.6 / revision `03b6d3f8898a28604fe6cb00eae3226b821168f4`:
@@ -124,8 +125,8 @@ that the full mixed-language graphs passed.
 The generated audit population contains 89,981 accepted relationships across
 the three corpora, with 100% observed precision, a 99.9957% Wilson lower bound,
 98.5567% source-oracle recall, and zero critical violations. Every fixed
-qualification gate passes. Ruby is still intentionally kept at
-`Qualifying`; promotion is a separate product decision.
+qualification gate passes. The release decision records this audited producer
+as `Qualified`.
 
 | Capability | Accepted | Recall | Status |
 | --- | ---: | ---: | --- |
@@ -136,7 +137,7 @@ qualification gate passes. Ruby is still intentionally kept at
 
 The machine-readable result is produced by
 `benchmarks/performance/harness.py audit`; no Graphify facts are used as truth.
-Ruby remains `Qualifying`.
+The release decision records this audited producer as `Qualified`.
 
 The current real-repository captures (cold, no build time) are:
 
@@ -155,8 +156,8 @@ a 249.001 s semantic edit, and a 239.309 s restore with an exact cold hash
 match. The pinned Discourse Ruby-only five-warm-sample run also restores
 byte-for-byte (cold 211.296 s, warm median 3.017 s with samples from 2.996–3.214
 s, fact-neutral 145.529 s, semantic 226.129 s, restore 226.958 s). RSS remains
-non-blocking. Ruby therefore remains
-`Qualifying`.
+non-blocking. Ruby therefore remains `Qualified` under the release decision,
+while the bounded unresolved-dynamic behavior described above stays explicit.
 
 The fact-neutral delta also preserves unchanged files' extraction status,
 parser-recovery diagnostics, and per-file coverage while refreshing the edited

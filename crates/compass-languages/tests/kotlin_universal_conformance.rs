@@ -57,7 +57,7 @@ fn kotlin_emits_modern_universal_evidence_with_exact_anchors()
     assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
         evidence.pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for (kind, qualified) in [
         ("annotation_type", "demo.api.Audit"),

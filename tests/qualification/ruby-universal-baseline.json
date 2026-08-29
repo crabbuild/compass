@@ -104,6 +104,6 @@
   ],
   "limitations": [
     "Discourse and RuboCop graph projections exclude non-Ruby files because their full mixed-language trees exceed the bounded Markdown parser resource envelope.",
-    "The quality audit now passes the fixed precision/recall thresholds, but Ruby remains Qualifying until a separate promotion decision is made."
+    "The quality audit passes the fixed precision/recall thresholds; the release promotion decision records compass.ruby version 1 as Qualified."
   ]
 }

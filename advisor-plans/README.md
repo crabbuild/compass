@@ -40,8 +40,8 @@ independent Ripper oracle and qualification-only producer, adds conservative
 Ruby project/resolution semantics, converts Rails to a universal framework
 pack, performs one atomic hard cut, and then measures optimization and complete
 quality gates. The pinned three-corpus audit now passes (89,981 accepted
-relationships, 100% observed precision, 98.5567% recall); Ruby remains
-`Qualifying` until a separate promotion decision.
+relationships, 100% observed precision, 98.5567% recall); the checked-in
+universal-evidence release decision promotes Ruby version 1 to `Qualified`.
 
 Plan 020 is the Swift, Dart, Scala, and Groovy universal-evidence program. It
 was planned at Compass commit `88abe4c0` on 2026-08-21. All four languages are
@@ -54,9 +54,9 @@ can proceed independently after the shared baseline; Groovy reuses Scala's
 exact-language JVM boundary.
 The production hard cut, deterministic fixture baselines, pinned manifests,
 parser-backed source-oracle providers, audit builder, mixed fixture gate, and
-three-corpus quality audits are implemented. The plan is `DONE`; all four
-registry entries intentionally remain version-1 `Qualifying` until a separate
-promotion decision. The mounted qualification target records the pinned
+three-corpus quality audits are implemented. The plan is `DONE`; the
+universal-evidence release decision promotes all four registry entries as
+version-1 `Qualified`. The mounted qualification target records the pinned
 SwiftSyntax, Dart Analyzer, scala.meta, and Groovy CompilationUnit toolchains
 and the immutable audit results.
 

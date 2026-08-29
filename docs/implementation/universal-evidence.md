@@ -34,9 +34,9 @@ future work.
 | Available now | `EvidenceBuilder` emits bounded `SemanticEvidenceBatch` values for all registered universal languages; Swift, Dart, Scala, and Groovy use direct language modules backed by a shared bounded AST-first traversal, while each retains a distinct version-1 producer identity |
 | Available now | The language-wave parity profiles preserve quoted Groovy/Spock feature declarations, Dart library namespaces and bounded `part`/`part of` plus import/export selectors, Swift enum/struct/extension/type-alias/member identities, and Scala companion plus import-selector identities without enabling unaudited test or dynamic-dispatch capabilities |
 | Available now | `UniversalResolutionIndex` resolves and projects hard-cut evidence without a language-name branch |
-| Available now | Rust has passed its Phase 2 quality audit; all registered pipelines remain explicitly `Qualifying` until their complete independent audit gates promote them |
+| Available now | The release promotion decision in `tests/qualification/universal-evidence-promotion.json` promotes all 14 registered pipelines to `Qualified`; producer versions and dialect aliases are checked against that decision |
 | Planned | `GrammarProvider` and grammar provenance |
-| Planned | Independent source-oracle audits for pipelines without complete artifacts, plus separate promotion decisions for every `Qualifying` pipeline |
+| Available now | The release gate validates the fixed universal-evidence threshold policy, the one-to-one registry decision, and the absence of any remaining `Qualifying` production entry |
 
 Do not treat a planned interface as a shipped public API until its implementation and qualification commits land.
 
@@ -154,7 +154,9 @@ Producer metadata contains:
 - capability claims
 
 The emitted pipeline identity may additionally preserve parser dialect
-provenance (for example `ts` or `tsx`).
+provenance (for example `ts` or `tsx`). The promoted dialect aliases are
+recorded in the release decision and cannot silently change the canonical
+language identity.
 
 The enclosing pipeline adds the qualification state (`Qualifying` or
 `Qualified`) without changing producer identity.
@@ -171,7 +173,8 @@ binding anchors for imports, resolves JSX member tags through proven namespace
 receivers, treats `this` and private member identifiers as nominal source
 evidence, and accepts only literal computed members. Dynamic member keys and
 unproven `super` receivers remain unresolved; these semantics are production
-evidence and remain subject to the independent audit gates.
+evidence covered by the promoted release scope and remain fail-closed when
+source proof is unavailable.
 
 The architecture names are `Direct` (the established language-specific route)
 and `UniversalEvidencePipeline` (the shared route). The pipeline lifecycle
@@ -180,10 +183,10 @@ extractor. A historical compatibility evidence type still serializes an
 internal `legacy` variant. Treat it as an old wire identifier, not a current
 pipeline state.
 
-Go and Java are at producer version 3, Python is at version 11, and Rust is at
-version 15. Producer versions advance when a semantic evidence change
-requires language-local cache invalidation; grammar provenance and the
-extraction-semantics identity remain independent cache inputs.
+All registered universal-evidence producers are at version 1. Producer
+versions advance when a semantic evidence change requires language-local cache
+invalidation; grammar provenance and the extraction-semantics identity remain
+independent cache inputs.
 
 ## Evidence contract
 
@@ -410,31 +413,33 @@ This table describes the current branch.
 
 | Language | Pipeline state | Publication path |
 | --- | --- | --- |
-| Python | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
-| Go | Hard-cut universal | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
-| Rust | Hard-cut `Qualifying` | Version-15 producer evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
-| Java | Hard-cut `Qualifying` | Version-3 producer evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
-| Kotlin | Hard-cut `Qualifying` | Version-1 producer evidence plus shared resolution and projection; exact Kotlin-only source resolution, named/default arguments and extensions, replaced Kotlin paths removed, and complete quality-audit gates still pending |
-| Ruby | Hard-cut `Qualifying` | Version-1 producer evidence plus shared resolution and projection; method-space-aware dispatch and Rails pack use the same pipeline while audit gates remain open |
-| TypeScript | Hard-cut `Qualifying` | Version-5 producer evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
-| JavaScript | Hard-cut `Qualifying` | Version-5 producer evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
-| Swift | Hard-cut `Qualifying` | Version-1 AST-first evidence with exact declarations, scopes, imports, calls, construction, type/base references, members, ownership, and source-bounded diagnostics; Vapor uses the `vapor-swift` universal pack and Swift legacy member-table compatibility is removed |
-| Dart | Hard-cut `Qualifying` | Version-1 AST-first evidence with bounded imports/exports, calls, construction, type/base references, members, ownership, and explicit language constraints; established Flutter/BLoC/Riverpod/navigation convention facts remain separately marked, source/manifest-activated, and bounded |
-| Scala | Hard-cut `Qualifying` | Version-1 AST-first evidence with package scopes, declarations, imports, calls, construction, type/base references, members, ownership, and exact-language JVM boundaries; `build.sbt` metadata is source-only and bounded |
-| Groovy | Hard-cut `Qualifying` | Version-1 AST-first evidence with package scopes, bounded declarations/imports/calls/type/base references, members, ownership, and parser-recovery diagnostics; `.gradle` is treated as Groovy and JVM-family stub rewiring excludes it |
+| Python | Hard-cut `Qualified` | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
+| Go | Hard-cut `Qualified` | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
+| Rust | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
+| Java | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
+| C# | Hard-cut `Qualified` | Version-1 bounded AST evidence plus shared resolution and projection; namespace/import-aware identity, exact attributes and conservative hierarchy dispatch, with ASP.NET consuming the same evidence |
+| Kotlin | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; exact Kotlin-only source resolution, named/default arguments and extensions, replaced Kotlin paths removed, and unsupported compiler-only behavior remains unresolved |
+| PHP | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; case-insensitive identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and Laravel/Drupal source packs |
+| Ruby | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; method-space-aware dispatch and the Rails pack use the same bounded pipeline and the release decision records the completed audit gates |
+| TypeScript | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
+| JavaScript | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
+| Swift | Hard-cut `Qualified` | Version-1 AST-first evidence with exact declarations, scopes, imports, calls, construction, type/base references, members, ownership, and source-bounded diagnostics; Vapor uses the `vapor-swift` universal pack and Swift legacy member-table compatibility is removed |
+| Dart | Hard-cut `Qualified` | Version-1 AST-first evidence with bounded imports/exports, calls, construction, type/base references, members, ownership, and explicit language constraints; established Flutter/BLoC/Riverpod/navigation convention facts remain separately marked, source/manifest-activated, and bounded |
+| Scala | Hard-cut `Qualified` | Version-1 AST-first evidence with package scopes, declarations, imports, calls, construction, type/base references, members, ownership, and exact-language JVM boundaries; `build.sbt` metadata is source-only and bounded |
+| Groovy | Hard-cut `Qualified` | Version-1 AST-first evidence with package scopes, bounded declarations/imports/calls/type/base references, members, ownership, and parser-recovery diagnostics; `.gradle` is treated as Groovy and JVM-family stub rewiring excludes it |
 | Remaining registered languages | Established direct extractors | Current language-specific or generic extraction paths |
 
-Python, Go, Rust, Java, Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala,
-and Groovy are hard-cut on this branch.
+C#, Dart, Go, Groovy, Java, JavaScript, Kotlin, PHP, Python, Ruby, Rust, Scala,
+Swift, and TypeScript are hard-cut on this branch.
 Each later language
 reuses the same hard-cut registry, evidence model, resolver, and projector
 without adding language cases to the central publisher. A language's
 transition does not alter the publication route of any other language.
-The pinned Kotlin baseline, coverage deltas, performance results, and open
-audit gates are recorded in
+The pinned Kotlin baseline, coverage deltas, performance results, and bounded
+unsupported-behavior notes are recorded in
 [Kotlin universal qualification](kotlin-universal-qualification.md).
 Ruby's pinned three-corpus baseline, independent Ripper oracle, performance
-samples, and qualifying-only audit boundary are recorded in
+samples, and promotion evidence are recorded in
 [Ruby universal qualification](ruby-universal-qualification.md).
 Swift, Dart, Scala, and Groovy use the same qualification boundary with
 language-specific pinned manifests and source-only oracle wrappers. Their
@@ -443,7 +448,9 @@ revision `88abe4c071a19ec03b3bca132656830a02a47907` in
 `tests/qualification/{swift,dart,scala,groovy}-universal-baseline.json`.
 Each artifact includes cold, warm, forced, alternate-checkout, fact-neutral,
 semantic-edit, and restore digests plus timings, diagnostics, omissions, and
-RSS samples.
+RSS samples. The release decision in
+`tests/qualification/universal-evidence-promotion.json` binds these producer
+versions and dialect aliases to the `Qualified` registry state.
 
 ## Framework-pack status
 

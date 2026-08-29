@@ -137,6 +137,8 @@ jobs:
           sh -n scripts/package_release.sh
           sh -n scripts/test_release_scripts.sh
           bash -n scripts/qualify_code_graph_v1.sh
+          python scripts/check_universal_evidence_promotion.py
+          python -m unittest scripts.tests.test_universal_evidence_promotion
           sh scripts/test_release_scripts.sh
           bash -n completions/compass.bash
           python -c "import ast,pathlib; ast.parse(pathlib.Path('scripts/measure_process.py').read_text())"

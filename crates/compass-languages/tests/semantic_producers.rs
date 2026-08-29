@@ -197,7 +197,7 @@ fn build(mut graph: Graph) {
         "compass.languages.evidence/2"
     );
     assert_eq!(evidence.pipeline.id, "compass.rust");
-    assert_eq!(evidence.pipeline.version, 15);
+    assert_eq!(evidence.pipeline.version, 1);
 
     let calls = evidence
         .occurrences

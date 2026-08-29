@@ -92,10 +92,16 @@ semantics.
 The current release publishes Ruby through the version-1 universal evidence
 pipeline (`compass.ruby`) and the evidence-backed `rails-ruby` framework pack.
 Ruby graph output is therefore regenerated on the first build after upgrading;
-do not reuse a Ruby cache produced by an older Compass publisher. Ruby is still
-`Qualifying` rather than a complete-quality claim, so retain review of
-ambiguous/dynamic Ruby relationships and do not treat unresolved dynamic
-dispatch as a missing deterministic fact.
+do not reuse a Ruby cache produced by an older Compass publisher. Ruby is
+`Qualified` for the bounded producer capabilities recorded in the release
+decision; retain review of ambiguous/dynamic Ruby relationships and do not
+treat unresolved dynamic dispatch as a missing deterministic fact.
+
+All 14 registered universal evidence pipelines are now marked `Qualified`.
+The release decision at `tests/qualification/universal-evidence-promotion.json`
+binds each producer ID, language, version, and dialect alias to that state.
+Changing a producer version or advertised capability requires a new decision;
+existing cached evidence is regenerated when its pipeline identity changes.
 
 ## Universal evidence schema reset
 
@@ -116,19 +122,19 @@ artifact editing is required.
 
 ## Python project identity and stubs
 
-Python now publishes version-13 `compass.python` evidence. Static
+Python now publishes version-1 `compass.python` evidence. Static
 `pyproject.toml` import roots can remove repository-layout prefixes such as
 `src.` from qualified names, and top-level Python graph IDs are derived from
 the proven module identity instead of the checkout path. `.pyi` files now use
 the Python pipeline: a matching `.py` file remains the declaration owner,
 stub-only declarations carry `source_kind: "stub"`, and mismatches publish a
 `python_stub_source_conflict` diagnostic without merging guessed facts.
-Version 13 also fills existing universal parameter, call-shape, `type_of`,
+The current producer also fills existing universal parameter, call-shape, `type_of`,
 `returns`, and call-result fields for the bounded static subset. Dynamic,
 starred, shadowed, `Any`, and conflicting-return cases remain unresolved.
 
 Run a fresh or forced build after upgrading. Project evidence schema
-`compass.framework-project-evidence/4` and Python producer version 13 invalidate
+`compass.framework-project-evidence/4` and Python producer version 1 invalidate
 the affected cache entries automatically. Published historical realizations
 remain immutable; rebuild a historical revision explicitly if it must use the
 new identities.

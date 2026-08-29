@@ -68,10 +68,10 @@ enum Status {
 
     let evidence = extraction.graph.semantic_evidence.expect("Java evidence");
     validate_evidence(&evidence, EvidenceLimits::default()).expect("valid Java evidence");
-    assert_eq!(evidence.pipeline.version, 3);
+    assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
         evidence.pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     assert!(
         evidence

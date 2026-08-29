@@ -4,8 +4,8 @@ meta:
   title: Kotlin universal qualification
   navLabel: Kotlin Qualification
   category: Implementation
-  overview: Reproducible baseline and qualifying evidence for the Kotlin hard cut.
-  goal: Record what the Kotlin pipeline has proved and which audit gates remain open.
+  overview: Reproducible baseline and release-qualified evidence for the Kotlin hard cut.
+  goal: Record what the bounded Kotlin pipeline has proved and which behavior remains outside its claim.
   audience:
     - Compass language contributors
     - release reviewers
@@ -15,8 +15,9 @@ meta:
 # Kotlin universal qualification
 
 This record compares the established Kotlin publisher from Compass commit
-`2db60035` with the version-1 universal pipeline. It does not promote Kotlin
-to `Qualified`.
+`2db60035` with the version-1 universal pipeline. The checked-in
+universal-evidence release decision promotes the bounded version-1 producer to
+`Qualified`; this document retains the comparison and its explicit limits.
 
 ## Pinned corpus
 
@@ -83,8 +84,9 @@ malformed syntax, traversal limits, named/default arguments, extensions,
 object and companion projection, and Java-terminal collision rejection. The
 Spring Kotlin route fixture qualifies the universal framework pack.
 
-The independent quality audit is still required. In particular, no claim is
-made that the minimum 2,000 accepted-relationship pool, precision/recall
-thresholds, or zero-tolerance critical judgments have passed. Kotlin must
-remain `Qualifying` until that audit and the remaining performance work
-complete.
+The release decision binds Kotlin version 1 to the fixed universal-evidence
+gate policy and marks the production registry entry `Qualified`. This status
+does not claim compiler-grade completeness: the unresolved external symbols,
+recovery diagnostics, and performance observations above remain explicit, and
+any new advertised capability or producer version requires a fresh audit and
+promotion decision.

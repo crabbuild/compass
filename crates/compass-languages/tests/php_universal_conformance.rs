@@ -90,7 +90,7 @@ function top(): \Closure
     assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
         evidence.pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -226,7 +226,7 @@ fn php_pipeline_is_registered_in_sorted_universal_registry() -> Result<(), Box<d
     let pipeline = UniversalEvidenceRegistry::pipeline("php").ok_or("missing PHP pipeline")?;
     assert_eq!(
         pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     Ok(())
 }

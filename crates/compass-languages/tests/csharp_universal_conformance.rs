@@ -67,7 +67,7 @@ public partial class UsersController : ControllerBase, IWorker
     assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
         evidence.pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -218,11 +218,11 @@ fn csharp_evidence_identity_is_independent_of_checkout_root() -> Result<(), Box<
 }
 
 #[test]
-fn csharp_pipeline_is_registered_as_qualifying() -> Result<(), Box<dyn Error>> {
+fn csharp_pipeline_is_registered_as_qualified() -> Result<(), Box<dyn Error>> {
     let pipeline = UniversalEvidenceRegistry::pipeline("csharp").ok_or("missing C# pipeline")?;
     assert_eq!(
         pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     Ok(())
 }
