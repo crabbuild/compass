@@ -24,6 +24,8 @@ jobs:
           versions="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name != "compass-tree-sitter-language-pack") | .version' | sort -u)"
           test "$(printf '%s\n' "$versions" | wc -l | tr -d ' ')" = "1"
           test "$GITHUB_REF_NAME" = "compass-v$versions"
+      - name: Validate universal evidence promotion decision
+        run: python3 scripts/check_universal_evidence_promotion.py
 
   code-graph-qualification:
     needs: metadata

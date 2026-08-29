@@ -72,10 +72,16 @@ semantics.
 The current release publishes Ruby through the version-1 universal evidence
 pipeline (`compass.ruby`) and the evidence-backed `rails-ruby` framework pack.
 Ruby graph output is therefore regenerated on the first build after upgrading;
-do not reuse a Ruby cache produced by an older Compass publisher. Ruby is still
-`Qualifying` rather than a complete-quality claim, so retain review of
-ambiguous/dynamic Ruby relationships and do not treat unresolved dynamic
-dispatch as a missing deterministic fact.
+do not reuse a Ruby cache produced by an older Compass publisher. Ruby is
+`Qualified` for the bounded producer capabilities recorded in the release
+decision; retain review of ambiguous/dynamic Ruby relationships and do not
+treat unresolved dynamic dispatch as a missing deterministic fact.
+
+All 14 registered universal evidence pipelines are now marked `Qualified`.
+The release decision at `tests/qualification/universal-evidence-promotion.json`
+binds each producer ID, language, version, and dialect alias to that state.
+Changing a producer version or advertised capability requires a new decision;
+existing cached evidence is regenerated when its pipeline identity changes.
 
 ## Universal evidence schema reset
 

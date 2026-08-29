@@ -1,0 +1,49 @@
+{
+  "schema": "compass.universal-evidence-promotion/1",
+  "decision": "promote",
+  "decisionId": "universal-evidence-promotion-2026-08-26",
+  "decisionDate": "2026-08-26",
+  "scope": "advertised-bounded-capabilities",
+  "review": {
+    "status": "approved",
+    "method": "source-oracle-audits;deterministic-conformance;registry-parity",
+    "reviewedAt": "2026-08-26"
+  },
+  "evidenceSchema": "compass.languages.evidence/2",
+  "requiredGates": {
+    "minimumAcceptedRelationships": 2000,
+    "minimumAcceptedPerCorpus": 400,
+    "minimumAcceptedPerRelation": 100,
+    "minimumAcceptedPerCapability": 100,
+    "minimumObservedPrecision": 0.995,
+    "minimumWilsonLowerBound": 0.99,
+    "minimumCapabilityPrecision": 0.99,
+    "minimumCapabilityRecall": 0.95,
+    "maximumCriticalViolations": 0
+  },
+  "dialects": {
+    "tsx": "typescript",
+    "jsx": "javascript",
+    "mts": "typescript",
+    "cts": "typescript",
+    "mjs": "javascript",
+    "cjs": "javascript",
+    "gradle": "groovy"
+  },
+  "pipelines": [
+    { "id": "compass.csharp", "language": "csharp", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.dart", "language": "dart", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.go", "language": "go", "producerVersion": 3, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.groovy", "language": "groovy", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.java", "language": "java", "producerVersion": 3, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.javascript", "language": "javascript", "producerVersion": 5, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.kotlin", "language": "kotlin", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.php", "language": "php", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.python", "language": "python", "producerVersion": 13, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.ruby", "language": "ruby", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.rust", "language": "rust", "producerVersion": 15, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.scala", "language": "scala", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.swift", "language": "swift", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.typescript", "language": "typescript", "producerVersion": 5, "decision": "qualified", "evidence": "accepted" }
+  ]
+}

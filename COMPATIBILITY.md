@@ -183,12 +183,19 @@ must use the matching manifest; they must reject an unknown `edgeKind` or
 `nodeRole` instead of filtering it into an older response shape.
 
 Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
-universal evidence pipelines. The four pipelines are intentionally
-`Qualifying`: they use one bounded, source-grounded publication route and may
-change unresolved/ambiguous edges compared with older direct extraction. Normal
-cache fingerprints invalidate affected files; users do not need to delete
-artifacts manually. Equal names across Swift/native or JVM-family languages do
-not by themselves create cross-language targets.
+universal evidence pipelines. The four pipelines are `Qualified` under the
+checked-in universal-evidence promotion decision: they use one bounded,
+source-grounded publication route and may change unresolved/ambiguous edges
+compared with older direct extraction. Normal cache fingerprints invalidate
+affected files; users do not need to delete artifacts manually. Equal names
+across Swift/native or JVM-family languages do not by themselves create
+cross-language targets.
+
+The same decision records all 14 hard-cut universal pipelines as `Qualified`,
+including C#, Go, Java, JavaScript, Kotlin, PHP, Python, Ruby, Rust, and
+TypeScript. The status is scoped to each producer's advertised bounded
+capabilities and evidence schema/version; changing either requires a fresh
+promotion decision and cache regeneration.
 
 Python publishes through version-13 `compass.python` evidence and uses static,
 bounded `pyproject.toml` import-root evidence. The corresponding internal

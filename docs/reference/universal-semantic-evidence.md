@@ -1,15 +1,47 @@
 # Universal semantic evidence
 
 Compass resolves source relationships through a language-neutral evidence
-contract. Every hard-cut language uses the same production route. C#, PHP,
-Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy remain
-`Qualifying` pending their separate promotion decisions; they do not retain a
-second direct graph publisher. Swift, Dart, Scala, and Groovy have complete
-independent audit artifacts captured in the mounted qualification target for
-that decision.
+contract. Every hard-cut language uses the same production route. The release
+promotion decision in
+`tests/qualification/universal-evidence-promotion.json` records all 14
+registered pipelines as `Qualified`; they do not retain a second direct graph
+publisher. Swift, Dart, Scala, and Groovy have complete independent audit
+artifacts captured in the mounted qualification target for that decision.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
+
+## Promotion decision (2026-08-26)
+
+The checked-in decision record is the machine-readable source of truth:
+[`tests/qualification/universal-evidence-promotion.json`](../../tests/qualification/universal-evidence-promotion.json).
+It pins the evidence schema, producer versions, canonical dialect aliases, and
+the release gate policy. The runtime registry and Rust conformance test must
+match it exactly.
+
+| Canonical language | Producer | Version | Status |
+| --- | --- | ---: | --- |
+| C# | `compass.csharp` | 1 | `Qualified` |
+| Dart | `compass.dart` | 1 | `Qualified` |
+| Go | `compass.go` | 3 | `Qualified` |
+| Groovy | `compass.groovy` | 1 | `Qualified` |
+| Java | `compass.java` | 3 | `Qualified` |
+| JavaScript | `compass.javascript` | 5 | `Qualified` |
+| Kotlin | `compass.kotlin` | 1 | `Qualified` |
+| PHP | `compass.php` | 1 | `Qualified` |
+| Python | `compass.python` | 13 | `Qualified` |
+| Ruby | `compass.ruby` | 1 | `Qualified` |
+| Rust | `compass.rust` | 15 | `Qualified` |
+| Scala | `compass.scala` | 1 | `Qualified` |
+| Swift | `compass.swift` | 1 | `Qualified` |
+| TypeScript | `compass.typescript` | 5 | `Qualified` |
+
+`Qualified` applies to the bounded capabilities advertised by each producer.
+Dynamic dispatch, compiler-only semantics, malformed regions, and resource
+limits remain explicit unresolved or diagnostic outcomes; promotion never
+turns those cases into inferred relationships. A producer-version or capability
+change invalidates this decision and must return the affected entry to
+`Qualifying` until a new release decision is reviewed.
 
 ## Evidence contract
 
@@ -708,8 +740,9 @@ A qualification requires:
 
 The checked-in `universal-core.json` is a deliberately small conformance
 fixture. It exercises correct, external, represented-elsewhere, missing,
-ambiguous, invalid, and all three critical judgments. It is not evidence that
-Python or Go has met the production qualification gates.
+ambiguous, invalid, and all three critical judgments. It is not, by itself,
+the production audit population; the release decision records the reviewed
+audits and conformance evidence used for each promoted producer.
 
 Plan 020's four source inventories and reproducibility harnesses are checked in
 under `scripts/qualify_*_universal.py` and
@@ -737,20 +770,22 @@ the quality-audit evaluator. The release-candidate qualification target has
 byte-deterministic `pinned`, `quality-audit`, and `performance` reports for all
 four languages. Performance mode compares cold, warm, and fact-neutral
 timings plus RSS to the checked-in baseline and exercises forced rebuild,
-alternate checkout, delete/restore, and rename/restore graph identity.
-Registry state remains `Qualifying` pending a separate promotion decision.
+alternate checkout, delete/restore, and rename/restore graph identity. The
+promotion decision binds the audited producer versions and aliases to the
+`Qualified` registry state; future producer or capability changes require a
+new decision.
 
 ## Current qualification boundary
 
 Python, Go, Rust, Java, PHP, C#, Kotlin, Ruby, TypeScript, JavaScript, Swift,
-Dart, Scala, and Groovy are hard-cut universal pipelines. C#, PHP, Kotlin,
-Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy remain
-`Qualifying`; TypeScript and JavaScript share a bounded ECMAScript
+Dart, Scala, and Groovy are hard-cut `Qualified` universal pipelines under the
+checked-in promotion decision. TypeScript and JavaScript share a bounded ECMAScript
 producer but retain distinct producer identities. TSX uses the TypeScript
 pipeline. C# and PHP use dedicated bounded AST producers and no longer publish
-or resolve through their replaced raw extraction paths. `Qualifying` means the
-universal route is active while complete capability and corpus audit gates are
-in progress. `spring-java`, `spring-kotlin`,
+or resolve through their replaced raw extraction paths. `Qualified` records
+that the release decision accepted the fixed gates; it does not claim
+compiler-grade completeness. Unsupported dynamic behavior remains unresolved.
+`spring-java`, `spring-kotlin`,
 `rails-ruby`, and `aspnet-csharp` are production universal framework packs. The
 `php-frameworks` pack consumes exact PHP call/import/ownership evidence for
 Laravel routes and Drupal hooks while configuration and template extraction

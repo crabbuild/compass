@@ -39,7 +39,7 @@ fn build() {
     );
     assert_eq!(
         evidence.pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,

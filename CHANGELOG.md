@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Promote all 14 registered universal-evidence pipelines to `Qualified` under
+  the checked-in release decision at
+  `tests/qualification/universal-evidence-promotion.json`. The decision pins
+  producer IDs, versions, evidence schema, and dialect aliases; cached evidence
+  is regenerated when that pipeline identity changes, while unsupported
+  dynamic or compiler-only behavior remains unresolved.
+
+
 - Make community detail graphs easier to scan in both exported HTML and VS
   Code by grouping node kinds into accessible color-and-shape families,
   coloring edges by relationship purpose while retaining confidence strokes,
@@ -21,8 +29,8 @@
   evidence publisher and replace the Rails source detector with the
   evidence-backed `rails-ruby` universal pack. Reopened constants coalesce by
   exact graph identity, instance/singleton method spaces stay distinct,
-  dynamic dispatch/load/eval forms fail closed, and Ruby remains explicitly
-  `Qualifying` pending the independent precision/recall audit.
+  dynamic dispatch/load/eval forms fail closed, and Ruby is `Qualified` for
+  the bounded capabilities covered by the release promotion decision.
 
 - Preserve anonymous PHP functions and arrow functions as typed callable
   `closure` nodes, and publish exact PHP trait composition as `mixes_in`
@@ -51,10 +59,11 @@
   records, and amortize bounded snapshot garbage collection. Exact preflights
   fall back to full publication whenever topology or secondary indexes change.
 
-- Hard-cut Kotlin onto a version-1 qualifying universal pipeline with packages,
-  declarations, extension functions, annotations, generic/nullable types, and
-  named/default argument resolution; convert Spring Kotlin to the universal
-  framework pack and require exact compiler evidence for Java/Kotlin calls.
+- Hard-cut Kotlin onto a version-1 `Qualified` universal pipeline with
+  packages, declarations, extension functions, annotations, generic/nullable
+  types, and named/default argument resolution; convert Spring Kotlin to the
+  universal framework pack and require exact compiler evidence for
+  Java/Kotlin calls.
 
 - Allow `compass review` on `0.3.x` to rebuild comparable realizations from
   any repository profile or preferred realization whose persisted user-option
@@ -112,9 +121,9 @@
   `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`, while keeping credentials
   out of Compass configuration and artifacts.
 
-- Move Swift, Dart, Scala, and Groovy/Gradle onto qualifying universal
-  evidence pipelines and complete their independent precision/recall and
-  fixture performance qualification providers.
+- Promote Swift, Dart, Scala, and Groovy/Gradle version-1 evidence pipelines to
+  `Qualified` after their independent precision/recall and fixture-performance
+  qualification providers completed.
 
 - Turn the VS Code codebase query view into a multi-command Ask, Explain, and
   CompassQL workbench, add direct symbol-based caller/callee graphs, and keep

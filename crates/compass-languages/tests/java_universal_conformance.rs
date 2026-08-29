@@ -71,7 +71,7 @@ enum Status {
     assert_eq!(evidence.pipeline.version, 3);
     assert_eq!(
         evidence.pipeline.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     assert!(
         evidence

@@ -6,7 +6,8 @@ use crate::LanguageCapability;
 pub enum UniversalEvidenceQualification {
     /// The shared evidence route is production-active while its audit runs.
     Qualifying,
-    /// The shared evidence route passed the complete audit gates.
+    /// The release decision accepted the complete gates for the producer's
+    /// advertised, bounded capability surface.
     Qualified,
 }
 
@@ -385,7 +386,7 @@ const DART_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipel
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         capabilities: DART_CAPABILITIES,
     },
-    qualification: UniversalEvidenceQualification::Qualifying,
+    qualification: UniversalEvidenceQualification::Qualified,
 };
 
 const GROOVY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
@@ -396,7 +397,7 @@ const GROOVY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePip
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         capabilities: GROOVY_CAPABILITIES,
     },
-    qualification: UniversalEvidenceQualification::Qualifying,
+    qualification: UniversalEvidenceQualification::Qualified,
 };
 
 const SCALA_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
@@ -407,7 +408,7 @@ const SCALA_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipe
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         capabilities: SCALA_CAPABILITIES,
     },
-    qualification: UniversalEvidenceQualification::Qualifying,
+    qualification: UniversalEvidenceQualification::Qualified,
 };
 
 const SWIFT_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
@@ -418,7 +419,7 @@ const SWIFT_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipe
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         capabilities: SWIFT_CAPABILITIES,
     },
-    qualification: UniversalEvidenceQualification::Qualifying,
+    qualification: UniversalEvidenceQualification::Qualified,
 };
 
 pub(crate) const RUBY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
@@ -429,7 +430,7 @@ pub(crate) const RUBY_EVIDENCE_PIPELINE: UniversalEvidencePipeline = UniversalEv
         evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
         capabilities: RUBY_CAPABILITIES,
     },
-    qualification: UniversalEvidenceQualification::Qualifying,
+    qualification: UniversalEvidenceQualification::Qualified,
 };
 
 const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
@@ -441,7 +442,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: CSHARP_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     DART_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
@@ -452,7 +453,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: GO_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     GROOVY_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
@@ -463,7 +464,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: JAVA_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
@@ -473,7 +474,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: JAVASCRIPT_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
@@ -483,7 +484,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: KOTLIN_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
@@ -493,7 +494,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: PHP_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     UniversalEvidencePipeline {
         producer: UniversalEvidenceProducer {
@@ -503,7 +504,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: PYTHON_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     RUBY_EVIDENCE_PIPELINE,
     UniversalEvidencePipeline {
@@ -514,7 +515,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: RUST_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
     SCALA_EVIDENCE_PIPELINE,
     SWIFT_EVIDENCE_PIPELINE,
@@ -526,6 +527,6 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: TYPESCRIPT_CAPABILITIES,
         },
-        qualification: UniversalEvidenceQualification::Qualifying,
+        qualification: UniversalEvidenceQualification::Qualified,
     },
 ];

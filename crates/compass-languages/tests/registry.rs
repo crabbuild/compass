@@ -114,7 +114,7 @@ fn ids_match_python_unicode_casefold_contract() {
 }
 
 #[test]
-fn rust_pipeline_is_version_fifteen_and_qualifying() {
+fn rust_pipeline_is_version_fifteen_and_qualified() {
     let rust = UniversalEvidenceRegistry::pipeline("rust").expect("Rust universal pipeline");
     assert_eq!(rust.producer.id, "compass.rust");
     assert_eq!(rust.producer.language, "rust");
@@ -122,7 +122,7 @@ fn rust_pipeline_is_version_fifteen_and_qualifying() {
     assert_eq!(rust.producer.version, 15);
     assert_eq!(
         rust.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -152,7 +152,7 @@ fn rust_pipeline_is_version_fifteen_and_qualifying() {
     assert_eq!(typescript.producer.version, 5);
     assert_eq!(
         typescript.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -178,12 +178,12 @@ fn rust_pipeline_is_version_fifteen_and_qualifying() {
     assert_eq!(javascript.producer.version, 5);
     assert_eq!(
         javascript.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
 }
 
 #[test]
-fn java_pipeline_is_version_three_and_qualifying() {
+fn java_pipeline_is_version_three_and_qualified() {
     let java = UniversalEvidenceRegistry::pipeline("java").expect("Java universal pipeline");
     assert_eq!(java.producer.id, "compass.java");
     assert_eq!(java.producer.language, "java");
@@ -191,7 +191,7 @@ fn java_pipeline_is_version_three_and_qualifying() {
     assert_eq!(java.producer.version, 3);
     assert_eq!(
         java.qualification,
-        UniversalEvidenceQualification::Qualifying
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,

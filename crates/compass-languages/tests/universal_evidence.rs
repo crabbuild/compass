@@ -22,6 +22,8 @@ fn range(start: u64, end: u64) -> EvidenceRange {
 }
 
 fn valid_batch() -> SemanticEvidenceBatch {
+    // Synthetic lifecycle fixture: production registry entries are all
+    // Qualified, but validation must continue to accept a candidate batch.
     SemanticEvidenceBatch {
         pipeline: UniversalEvidenceIdentity {
             id: "compass.python".to_owned(),
@@ -521,7 +523,7 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("java")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((3, UniversalEvidenceQualification::Qualifying))
+        Some((3, UniversalEvidenceQualification::Qualified))
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
@@ -530,13 +532,62 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("javascript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((5, UniversalEvidenceQualification::Qualifying))
+        Some((5, UniversalEvidenceQualification::Qualified))
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("typescript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((5, UniversalEvidenceQualification::Qualifying))
+        Some((5, UniversalEvidenceQualification::Qualified))
     );
+}
+
+#[test]
+fn production_registry_matches_the_release_promotion_decision() {
+    let decision: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../tests/qualification/universal-evidence-promotion.json"
+    ))
+    .expect("valid universal-evidence promotion decision");
+    assert_eq!(
+        decision.get("schema").and_then(serde_json::Value::as_str),
+        Some("compass.universal-evidence-promotion/1")
+    );
+    assert_eq!(
+        decision.get("decision").and_then(serde_json::Value::as_str),
+        Some("promote")
+    );
+
+    let entries = decision
+        .get("pipelines")
+        .and_then(serde_json::Value::as_array)
+        .expect("promotion decision pipelines");
+    let pipelines = UniversalEvidenceRegistry::pipelines();
+    assert_eq!(entries.len(), pipelines.len());
+    assert!(
+        pipelines.iter().all(|pipeline| {
+            pipeline.qualification == UniversalEvidenceQualification::Qualified
+        })
+    );
+
+    for (entry, pipeline) in entries.iter().zip(pipelines) {
+        assert_eq!(
+            entry.get("id").and_then(serde_json::Value::as_str),
+            Some(pipeline.producer.id)
+        );
+        assert_eq!(
+            entry.get("language").and_then(serde_json::Value::as_str),
+            Some(pipeline.producer.language)
+        );
+        assert_eq!(
+            entry
+                .get("producerVersion")
+                .and_then(serde_json::Value::as_u64),
+            Some(u64::from(pipeline.producer.version))
+        );
+        assert_eq!(
+            entry.get("decision").and_then(serde_json::Value::as_str),
+            Some("qualified")
+        );
+    }
 }
 
 #[test]
@@ -658,7 +709,7 @@ fn typescript_javascript_pipeline_is_wired_into_production_extraction() {
         assert_eq!(evidence.pipeline.dialect.as_deref(), Some(dialect));
         assert_eq!(
             evidence.pipeline.qualification,
-            UniversalEvidenceQualification::Qualifying
+            UniversalEvidenceQualification::Qualified
         );
         assert_eq!(evidence.pipeline.id, format!("compass.{language}"));
     }

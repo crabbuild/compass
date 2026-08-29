@@ -114,12 +114,13 @@ The vendored tree-sitter language pack supplies deterministic parser
 definitions and queries.
 
 The [language architecture](language-architecture.md) separates this grammar
-substrate from producer-local semantic policy and universal evidence. Python,
-Go, Rust, Java, PHP, Kotlin, Ruby, TypeScript, and JavaScript use the shared
-evidence and resolution path on this branch. Their registry entries are
-`UniversalEvidencePipeline` values with an explicit `Qualifying` or `Qualified`
-audit state. Other registered languages keep their established extraction
-paths until their own independently qualified transitions.
+substrate from producer-local semantic policy and universal evidence. C#,
+Dart, Go, Groovy, Java, JavaScript, Kotlin, PHP, Python, Ruby, Rust, Scala,
+Swift, and TypeScript use the shared evidence and resolution path on this
+branch. Their registry entries are `UniversalEvidencePipeline` values promoted
+to `Qualified` by the checked-in release decision. Other registered languages
+keep their established extraction paths until their own independently
+qualified transitions.
 
 ### `compass-resolve`
 

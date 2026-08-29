@@ -29,14 +29,14 @@ This architecture is transitioning one language at a time. The status labels bel
 | Status | Behavior |
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
-| Available now | Python, Go, Rust, Java, PHP, Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy are registered hard-cut evidence pipelines: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust is a quality-gated, hard-cut version-15 `Qualifying` pipeline; version 15 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
-| Available now | Java is a hard-cut version-3 `Qualifying` pipeline; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
-| Available now | TypeScript and JavaScript are hard-cut `Qualifying` pipelines; TSX uses the TypeScript identity, both share the bounded ECMAScript producer, and their replaced generic publisher is removed |
-| Available now | PHP is a hard-cut version-1 `Qualifying` pipeline with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
-| Available now | Kotlin is a hard-cut version-1 `Qualifying` pipeline with packages, imports, nominal and companion declarations, constructors, functions and extensions, properties, annotations, generic and nullable types, and named/default argument evidence; its complete quality audit remains open |
-| Available now | Ruby is a hard-cut version-1 `Qualifying` pipeline; its dedicated producer, method-space-aware resolver policy, replaced Ruby member publisher, and Rails `rails-ruby` universal pack are active while Plan 019 audit gates remain open |
-| Available now | Swift, Dart, Scala, and Groovy are hard-cut version-1 `Qualifying` pipelines through one bounded AST-first producer; their replaced direct publishers and broad JVM/Swift compatibility paths are inactive, and Vapor uses the evidence-backed `vapor-swift` pack |
+| Available now | Python, Go, Rust, Java, PHP, Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy are registered hard-cut `Qualified` evidence pipelines: they emit semantic evidence and use shared resolution and projection |
+| Available now | Rust is a quality-gated, hard-cut version-15 `Qualified` pipeline; version 15 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
+| Available now | Java is a hard-cut version-3 `Qualified` pipeline; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
+| Available now | TypeScript and JavaScript are hard-cut `Qualified` pipelines; TSX uses the TypeScript identity, both share the bounded ECMAScript producer, and their replaced generic publisher is removed |
+| Available now | PHP is a hard-cut version-1 `Qualified` pipeline with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
+| Available now | Kotlin is a hard-cut version-1 `Qualified` pipeline with packages, imports, nominal and companion declarations, constructors, functions and extensions, properties, annotations, generic and nullable types, and named/default argument evidence; compiler-only behavior remains explicitly unresolved |
+| Available now | Ruby is a hard-cut version-1 `Qualified` pipeline; its dedicated producer, method-space-aware resolver policy, replaced Ruby member publisher, and Rails `rails-ruby` universal pack are active under the release promotion decision |
+| Available now | Swift, Dart, Scala, and Groovy are hard-cut version-1 `Qualified` pipelines through one bounded AST-first producer; their replaced direct publishers and broad JVM/Swift compatibility paths are inactive, and Vapor uses the evidence-backed `vapor-swift` pack |
 | Available now | The remaining production languages keep their established extraction and resolution paths |
 | Planned | Later languages transition independently after language-specific qualification |
 
@@ -102,9 +102,10 @@ The hard-cut route is selected by `UniversalEvidenceRegistry`. Presence in the s
 registry or availability of a grammar does not select it. On the current
 branch, the registry contains C#, Dart, Go, Groovy, Java, JavaScript, Kotlin,
 PHP, Python, Ruby, Rust, Scala, Swift, and TypeScript. Go and Java are at
-producer version 3, Python is at version 11, Rust is at version 15, and the
-four extended-language producers are at version 1. `Qualifying` describes audit maturity;
-it does not re-enable the removed direct route. Producer-version changes
+producer version 3, Python is at version 13, Rust is at version 15, and the
+four extended-language producers are at version 1. `Qualified` records that
+the release promotion gates passed; it does not claim compiler-grade
+completeness or re-enable the removed direct route. Producer-version changes
 invalidate cached evidence for only the changed
 language. Go identities retain the repository-relative directory prefix and
 use the parsed package clause to distinguish external test packages.
@@ -231,8 +232,9 @@ pipeline.
 
 After a language enters its universal transition, its producer emits evidence
 only. The shared projector creates graph nodes and edges for both single-file
-and collection builds. `Qualifying` means this route is active while the audit
-continues; it is not permission to retain the replaced direct publisher.
+and collection builds. `Qualified` means the release decision accepted the
+bounded evidence contract; it is not permission to retain the replaced direct
+publisher or to infer unsupported dynamic behavior.
 
 ## Universal evidence
 
@@ -352,7 +354,7 @@ Pipeline states describe qualification maturity, not a second implementation.
 | --- | --- |
 | `Direct` | The established language-specific extractor publishes its current graph and unresolved-call records |
 | `Qualifying` | The hard-cut `UniversalEvidencePipeline` publishes universal evidence while capability and corpus audits run |
-| `Qualified` | The same pipeline has passed the complete capability and conformance gates |
+| `Qualified` | The release decision accepted the complete capability and conformance gates for the producer's advertised bounded surface |
 
 Documentation uses **established** or `Direct` for the active non-universal
 route. A historical internal enum variant still uses the name `Legacy`; that
@@ -362,9 +364,11 @@ supported pipelines.
 ## Language-by-language transitions
 
 An established language keeps its direct implementation until its universal
-pipeline proves the transition is safe. C#, TypeScript, and JavaScript have
-completed the route switch and remain `Qualifying` while their completion
-gates run.
+pipeline proves the transition is safe. C#, Dart, Go, Groovy, Java, JavaScript,
+Kotlin, PHP, Python, Ruby, Rust, Scala, Swift, and TypeScript have completed
+the route switch and are `Qualified` under the checked-in universal-evidence
+promotion decision. Future languages still follow the same gate sequence
+independently.
 
 ```text
 established extraction baseline
@@ -443,7 +447,9 @@ Required properties include:
 - ownership-based corpus merge
 - separate parse, evidence, resolution, projection, and persistence timings
 
-Rust and Java qualification requires Compass to remain faster than Graphify for comparable cold and warm workloads. Peak resident set size (RSS) remains measured but non-blocking during their qualifying audits.
+Rust and Java promotion includes the recorded comparable cold and warm
+workload evidence; peak resident set size (RSS) remains measured but
+non-blocking. Any future producer or capability expansion reopens this gate.
 
 ## Related pages
 

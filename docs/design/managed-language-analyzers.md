@@ -60,7 +60,8 @@ decides whether exact structural evidence supports projection.
 
 ### Hard-cut universal languages
 
-Python, Go, Rust, and Java are hard-cut universal evidence pipelines. They emit
+Python, Go, Rust, and Java are hard-cut `Qualified` universal evidence
+pipelines under the checked-in promotion decision. They emit
 `SemanticEvidenceBatch` facts and use shared resolution and projection. Their
 replaced direct graph paths are not available as fallbacks.
 
@@ -81,8 +82,9 @@ TypeScript, TSX, JavaScript, and JSX now use the registered universal evidence
 pipeline. TypeScript and JavaScript retain distinct producer identities while
 sharing one bounded source-grounded ECMAScript emitter; TSX is the TypeScript
 parser dialect. Their replaced direct graph publisher is not a fallback.
-`Qualifying` means the universal route is active while the complete
-qualification matrix and any compiler-backed enrichment remain future work.
+The checked-in universal-evidence promotion decision records these pipelines
+as `Qualified`; compiler-backed enrichment remains optional and does not widen
+the native structural contract.
 
 Compiler enrichment must not create a permanent third graph route beside the
 evidence pipeline. Until a compiler provider is independently bounded and
@@ -957,7 +959,7 @@ unrealizable. Published realizations remain immutable.
 | Milestone | Python | Rust | Go | TypeScript | JavaScript | Java |
 | --- | --- | --- | --- | --- | --- | --- |
 | Native structural path | Available | Available | Available | Evidence pipeline | Evidence pipeline | Available |
-| Universal hard cut | Available | Available | Available | Qualifying; audit ongoing | Qualifying; audit ongoing | Available |
+| Universal hard cut | Qualified | Qualified | Qualified | Qualified | Qualified | Qualified |
 
 | Offline SCIP ingestion | Generic | Generic | Generic | Generic | Generic | Calls projected |
 | Managed artifact runner | Planned | Planned | Not selected | Planned | Planned | Planned |
@@ -966,8 +968,8 @@ unrealizable. Published realizations remain immutable.
 | Exact graph projection | Planned | Planned | Planned | After cutover | After cutover | Local calls available |
 | Dispatch qualification | Planned | Planned | Planned | Planned | Limited/planned | Planned |
 
-Swift, Dart, Scala, and Groovy are also hard-cut version-1 `Qualifying`
-pipelines. Their structural evidence is emitted by the bounded AST-first
+Swift, Dart, Scala, and Groovy are also hard-cut version-1 `Qualified`
+pipelines under the universal-evidence promotion decision. Their structural evidence is emitted by the bounded AST-first
 producer; Swift Vapor routing uses `vapor-swift`, while Dart framework
 conventions remain separately marked and source-bounded.
 
