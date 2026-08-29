@@ -1259,7 +1259,7 @@ class Service {
         .ok_or("missing Java universal evidence")?;
     validate_evidence(evidence, EvidenceLimits::default())?;
     assert_eq!(evidence.pipeline.id, "compass.java");
-    assert_eq!(evidence.pipeline.version, 3);
+    assert_eq!(evidence.pipeline.version, 1);
 
     let declaration_id = |qualified_name: &str| {
         evidence

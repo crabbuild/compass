@@ -29,7 +29,7 @@ new App();
     let batch = universal_evidence("src/app.ts", source);
     validate_evidence(&batch, EvidenceLimits::default()).expect("valid evidence");
     assert_eq!(batch.pipeline.language, "typescript");
-    assert_eq!(batch.pipeline.version, 5);
+    assert_eq!(batch.pipeline.version, 1);
     assert_eq!(batch.pipeline.dialect.as_deref(), Some("ts"));
     assert!(
         batch
@@ -176,7 +176,7 @@ export async function load() { return import("./lazy.js"); }
 "#;
     let batch = universal_evidence("src/render.jsx", source);
     assert_eq!(batch.pipeline.language, "javascript");
-    assert_eq!(batch.pipeline.version, 5);
+    assert_eq!(batch.pipeline.version, 1);
     assert_eq!(batch.pipeline.dialect.as_deref(), Some("jsx"));
     assert!(
         batch

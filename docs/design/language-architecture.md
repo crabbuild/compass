@@ -30,8 +30,8 @@ This architecture is transitioning one language at a time. The status labels bel
 | --- | --- |
 | Available now | The vendored package supplies 37 pinned static Tree-sitter grammars |
 | Available now | Python, Go, Rust, Java, PHP, Kotlin, Ruby, TypeScript, JavaScript, Swift, Dart, Scala, and Groovy are registered hard-cut `Qualified` evidence pipelines: they emit semantic evidence and use shared resolution and projection |
-| Available now | Rust is a quality-gated, hard-cut version-15 `Qualified` pipeline; version 15 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
-| Available now | Java is a hard-cut version-3 `Qualified` pipeline; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
+| Available now | Rust is a quality-gated, hard-cut version-1 `Qualified` pipeline; version 1 preserves bounded multi-stage method-result chains across files while retaining source-proven fallbacks when project-wide result evidence is absent, alongside the earlier associated-type, generic-parameter, re-export, and lexical-call safeguards; replaced publisher and collection resolution branches remain removed |
+| Available now | Java is a hard-cut version-1 `Qualified` pipeline; its replaced publisher and Java member resolver are removed, and post-cutover pinned-corpus qualification is complete |
 | Available now | TypeScript and JavaScript are hard-cut `Qualified` pipelines; TSX uses the TypeScript identity, both share the bounded ECMAScript producer, and their replaced generic publisher is removed |
 | Available now | PHP is a hard-cut version-1 `Qualified` pipeline with explicit case-insensitive type/function/method identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and universal Laravel/Drupal source packs; Drupal configuration and Blade template extraction remain available |
 | Available now | Kotlin is a hard-cut version-1 `Qualified` pipeline with packages, imports, nominal and companion declarations, constructors, functions and extensions, properties, annotations, generic and nullable types, and named/default argument evidence; compiler-only behavior remains explicitly unresolved |
@@ -101,9 +101,8 @@ Framework packs consume normalized declarations and exact occurrences after lang
 The hard-cut route is selected by `UniversalEvidenceRegistry`. Presence in the source
 registry or availability of a grammar does not select it. On the current
 branch, the registry contains C#, Dart, Go, Groovy, Java, JavaScript, Kotlin,
-PHP, Python, Ruby, Rust, Scala, Swift, and TypeScript. Go and Java are at
-producer version 3, Python is at version 13, Rust is at version 15, and the
-four extended-language producers are at version 1. `Qualified` records that
+PHP, Python, Ruby, Rust, Scala, Swift, and TypeScript. All registered universal
+evidence producers are at version 1. `Qualified` records that
 the release promotion gates passed; it does not claim compiler-grade
 completeness or re-enable the removed direct route. Producer-version changes
 invalidate cached evidence for only the changed

@@ -131,7 +131,7 @@ registration calls do not publish `registers`: the current pack contract
 would require the unrelated bean-container capability, so readers must not
 infer those edges from missing output.
 
-Python structural evidence now uses producer version 13. The evidence schema
+Python structural evidence now uses producer version 1. The evidence schema
 is unchanged, but previously empty universal callable/type fields can contain
 source-proven parameter shapes, literal call types, `type_of`, `returns`, and
 call-result bindings. Starred call arguments suppress exact arity; `Any`,
@@ -212,7 +212,7 @@ TypeScript. The status is scoped to each producer's advertised bounded
 capabilities and evidence schema/version; changing either requires a fresh
 promotion decision and cache regeneration.
 
-Python publishes through version-13 `compass.python` evidence and uses static,
+Python publishes through version-1 `compass.python` evidence and uses static,
 bounded `pyproject.toml` import-root evidence. The corresponding internal
 project-evidence identity is `compass.framework-project-evidence/4`. A uniquely
 proven `src/` or configured package layout may therefore change qualified names

@@ -23,25 +23,25 @@ SCOPE = "advertised-bounded-capabilities"
 REVIEW = {
     "status": "approved",
     "method": "source-oracle-audits;deterministic-conformance;registry-parity",
-    "reviewedAt": "2026-08-26",
+    "reviewedAt": "2026-08-28",
 }
 MAX_MANIFEST_BYTES = 1024 * 1024
 
 EXPECTED_PIPELINES = (
     ("compass.csharp", "csharp", 1),
     ("compass.dart", "dart", 1),
-    ("compass.go", "go", 3),
+    ("compass.go", "go", 1),
     ("compass.groovy", "groovy", 1),
-    ("compass.java", "java", 3),
-    ("compass.javascript", "javascript", 5),
+    ("compass.java", "java", 1),
+    ("compass.javascript", "javascript", 1),
     ("compass.kotlin", "kotlin", 1),
     ("compass.php", "php", 1),
-    ("compass.python", "python", 13),
+    ("compass.python", "python", 1),
     ("compass.ruby", "ruby", 1),
-    ("compass.rust", "rust", 15),
+    ("compass.rust", "rust", 1),
     ("compass.scala", "scala", 1),
     ("compass.swift", "swift", 1),
-    ("compass.typescript", "typescript", 5),
+    ("compass.typescript", "typescript", 1),
 )
 
 REQUIRED_GATES = {

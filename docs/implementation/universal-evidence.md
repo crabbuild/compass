@@ -183,10 +183,10 @@ extractor. A historical compatibility evidence type still serializes an
 internal `legacy` variant. Treat it as an old wire identifier, not a current
 pipeline state.
 
-Go and Java are at producer version 3, Python is at version 13, and Rust is at
-version 15. Producer versions advance when a semantic evidence change
-requires language-local cache invalidation; grammar provenance and the
-extraction-semantics identity remain independent cache inputs.
+All registered universal-evidence producers are at version 1. Producer
+versions advance when a semantic evidence change requires language-local cache
+invalidation; grammar provenance and the extraction-semantics identity remain
+independent cache inputs.
 
 ## Evidence contract
 
@@ -415,14 +415,14 @@ This table describes the current branch.
 | --- | --- | --- |
 | Python | Hard-cut `Qualified` | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced collection resolver |
 | Go | Hard-cut `Qualified` | `SemanticEvidenceBatch` plus shared resolution and projection; no replaced Go collection resolver |
-| Rust | Hard-cut `Qualified` | Version-15 producer evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
-| Java | Hard-cut `Qualified` | Version-3 producer evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
+| Rust | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; bounded method-result chains, impl-scoped associated types, exact `Self::Type` returns, scoped generic parameters, and nested lexical calls are preserved, Phase 2 is qualified, and replaced Rust paths are removed |
+| Java | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; exact callable ownership, proven conversions, replaced Java paths removed, and post-cutover corpus qualification complete |
 | C# | Hard-cut `Qualified` | Version-1 bounded AST evidence plus shared resolution and projection; namespace/import-aware identity, exact attributes and conservative hierarchy dispatch, with ASP.NET consuming the same evidence |
 | Kotlin | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; exact Kotlin-only source resolution, named/default arguments and extensions, replaced Kotlin paths removed, and unsupported compiler-only behavior remains unresolved |
 | PHP | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; case-insensitive identity, bounded Composer PSR-4 evidence, conservative trait/inheritance dispatch, and Laravel/Drupal source packs |
 | Ruby | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; method-space-aware dispatch and the Rails pack use the same bounded pipeline and the release decision records the completed audit gates |
-| TypeScript | Hard-cut `Qualified` | Version-5 producer evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
-| JavaScript | Hard-cut `Qualified` | Version-5 producer evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
+| TypeScript | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; TSX aliases this identity and the replaced generic publisher is removed |
+| JavaScript | Hard-cut `Qualified` | Version-1 producer evidence plus shared resolution and projection; CJS/ESM and package decisions retain source and provenance bounds |
 | Swift | Hard-cut `Qualified` | Version-1 AST-first evidence with exact declarations, scopes, imports, calls, construction, type/base references, members, ownership, and source-bounded diagnostics; Vapor uses the `vapor-swift` universal pack and Swift legacy member-table compatibility is removed |
 | Dart | Hard-cut `Qualified` | Version-1 AST-first evidence with bounded imports/exports, calls, construction, type/base references, members, ownership, and explicit language constraints; established Flutter/BLoC/Riverpod/navigation convention facts remain separately marked, source/manifest-activated, and bounded |
 | Scala | Hard-cut `Qualified` | Version-1 AST-first evidence with package scopes, declarations, imports, calls, construction, type/base references, members, ownership, and exact-language JVM boundaries; `build.sbt` metadata is source-only and bounded |

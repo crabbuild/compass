@@ -46,7 +46,7 @@ dependencies, or executes Maven or Gradle merely because Java files exist.
 
 ### Available now
 
-Java is a version-3 `Qualified` universal evidence pipeline under the checked-in
+Java is a version-1 `Qualified` universal evidence pipeline under the checked-in
 promotion decision. Its Tree-sitter
 producer emits
 source-backed declarations, scopes, packages, imports, annotations,

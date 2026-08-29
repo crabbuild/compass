@@ -503,7 +503,7 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     }));
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("go").map(|pipeline| pipeline.producer.version),
-        Some(3)
+        Some(1)
     );
     assert_eq!(
         pipelines
@@ -523,21 +523,21 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("java")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((3, UniversalEvidenceQualification::Qualified))
+        Some((1, UniversalEvidenceQualification::Qualified))
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
-        Some(15)
+        Some(1)
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("javascript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((5, UniversalEvidenceQualification::Qualified))
+        Some((1, UniversalEvidenceQualification::Qualified))
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("typescript")
             .map(|pipeline| (pipeline.producer.version, pipeline.qualification)),
-        Some((5, UniversalEvidenceQualification::Qualified))
+        Some((1, UniversalEvidenceQualification::Qualified))
     );
 }
 

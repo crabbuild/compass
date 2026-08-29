@@ -32,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.pipeline.id, "compass.rust");
-    assert_eq!(evidence.pipeline.version, 15);
+    assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
         evidence.pipeline.evidence_schema,
         "compass.languages.evidence/2"

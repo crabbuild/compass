@@ -2,12 +2,11 @@
 
 ## Unreleased
 
-- Promote all 14 registered universal-evidence pipelines to `Qualified` under
-  the checked-in release decision at
-  `tests/qualification/universal-evidence-promotion.json`. The decision pins
-  producer IDs, versions, evidence schema, and dialect aliases; cached evidence
-  is regenerated when that pipeline identity changes, while unsupported
-  dynamic or compiler-only behavior remains unresolved.
+- Reset all 14 registered universal-evidence producer versions to v1 and keep
+  them `Qualified` under the refreshed release decision at
+  `tests/qualification/universal-evidence-promotion.json`. Cached evidence
+  from prior producer identities is regenerated, while unsupported dynamic or
+  compiler-only behavior remains unresolved.
 
 ## 0.3.23 - 2026-08-28
 

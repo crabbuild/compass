@@ -449,7 +449,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.go",
             language: "go",
-            version: 3,
+            version: 1,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: GO_CAPABILITIES,
         },
@@ -460,7 +460,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.java",
             language: "java",
-            version: 3,
+            version: 1,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: JAVA_CAPABILITIES,
         },
@@ -470,7 +470,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.javascript",
             language: "javascript",
-            version: 5,
+            version: 1,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: JAVASCRIPT_CAPABILITIES,
         },
@@ -500,7 +500,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.python",
             language: "python",
-            version: 13,
+            version: 1,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: PYTHON_CAPABILITIES,
         },
@@ -511,7 +511,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.rust",
             language: "rust",
-            version: 15,
+            version: 1,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: RUST_CAPABILITIES,
         },
@@ -523,7 +523,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.typescript",
             language: "typescript",
-            version: 5,
+            version: 1,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: TYPESCRIPT_CAPABILITIES,
         },

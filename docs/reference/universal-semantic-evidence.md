@@ -11,7 +11,7 @@ artifacts captured in the mounted qualification target for that decision.
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
 
-## Promotion decision (2026-08-26)
+## Promotion decision (2026-08-28)
 
 The checked-in decision record is the machine-readable source of truth:
 [`tests/qualification/universal-evidence-promotion.json`](../../tests/qualification/universal-evidence-promotion.json).
@@ -23,18 +23,18 @@ match it exactly.
 | --- | --- | ---: | --- |
 | C# | `compass.csharp` | 1 | `Qualified` |
 | Dart | `compass.dart` | 1 | `Qualified` |
-| Go | `compass.go` | 3 | `Qualified` |
+| Go | `compass.go` | 1 | `Qualified` |
 | Groovy | `compass.groovy` | 1 | `Qualified` |
-| Java | `compass.java` | 3 | `Qualified` |
-| JavaScript | `compass.javascript` | 5 | `Qualified` |
+| Java | `compass.java` | 1 | `Qualified` |
+| JavaScript | `compass.javascript` | 1 | `Qualified` |
 | Kotlin | `compass.kotlin` | 1 | `Qualified` |
 | PHP | `compass.php` | 1 | `Qualified` |
-| Python | `compass.python` | 13 | `Qualified` |
+| Python | `compass.python` | 1 | `Qualified` |
 | Ruby | `compass.ruby` | 1 | `Qualified` |
-| Rust | `compass.rust` | 15 | `Qualified` |
+| Rust | `compass.rust` | 1 | `Qualified` |
 | Scala | `compass.scala` | 1 | `Qualified` |
 | Swift | `compass.swift` | 1 | `Qualified` |
-| TypeScript | `compass.typescript` | 5 | `Qualified` |
+| TypeScript | `compass.typescript` | 1 | `Qualified` |
 
 `Qualified` applies to the bounded capabilities advertised by each producer.
 Dynamic dispatch, compiler-only semantics, malformed regions, and resource
