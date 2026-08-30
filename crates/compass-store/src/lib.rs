@@ -48,6 +48,38 @@ pub const MAX_IMMUTABLE_BATCH_BYTES: usize = 16 * 1024 * 1024;
 /// `publish_snapshot`/`read_snapshot` path because that API materializes the
 /// canonical payload in one allocation.
 pub const MAX_GRAPH_BYTES: usize = 2 * 1024 * 1024 * 1024;
+
+/// Effective opt-in graph byte bound used by snapshot publication and reads.
+/// Invalid, zero, overflowing, or unrepresentable values fail closed to the
+/// 2 GiB default. Accepted forms match Compass graph readers: raw bytes, `MB`,
+/// and `GB`, with optional underscores in the numeric component.
+#[must_use]
+pub fn max_graph_bytes() -> usize {
+    let raw = std::env::var("COMPASS_MAX_GRAPH_BYTES").ok();
+    parse_max_graph_bytes(raw.as_deref())
+}
+
+fn parse_max_graph_bytes(raw: Option<&str>) -> usize {
+    let Some(raw) = raw else {
+        return MAX_GRAPH_BYTES;
+    };
+    let upper = raw.trim().to_ascii_uppercase();
+    let (number, multiplier) = if let Some(number) = upper.strip_suffix("GB") {
+        (number.trim(), 1024_u128 * 1024 * 1024)
+    } else if let Some(number) = upper.strip_suffix("MB") {
+        (number.trim(), 1024_u128 * 1024)
+    } else {
+        (upper.as_str(), 1)
+    };
+    number
+        .replace('_', "")
+        .parse::<u128>()
+        .ok()
+        .filter(|value| *value > 0)
+        .and_then(|value| value.checked_mul(multiplier))
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or(MAX_GRAPH_BYTES)
+}
 const GRAPH_NAMESPACE: &[u8] = b"compass.current.graph.v1";
 const CATALOG_PARTITION: &[u8] = b"catalog";
 const OBJECT_PARTITION: &[u8] = b"object";

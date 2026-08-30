@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use compass_files::{BuildGuard, write_atomic_with_digest, write_json_atomic, write_text_atomic};
 use compass_graph::{
     ClusterOptions, Communities, GodNode, blind_spot_report, cluster, community_member_signatures,
-    god_nodes, label_communities_by_hub, remap_communities_to_previous, score_communities,
-    suggest_questions, surprising_connections, write_canonical_graph_json,
+    god_nodes, label_communities_by_hub, max_canonical_graph_bytes, remap_communities_to_previous,
+    score_communities, suggest_questions, surprising_connections,
+    write_canonical_graph_json_bounded,
 };
 use compass_model::GraphDocument;
 use compass_model::GraphError;
@@ -280,12 +281,12 @@ where
     let graph_path = staging.join("graph.json");
     let graph_identity = if let Some(typed) = typed_document {
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
-            write_canonical_graph_json(&typed, writer).map_err(|source| {
-                compass_files::FileError::Io {
+            write_canonical_graph_json_bounded(&typed, writer, max_canonical_graph_bytes()).map_err(
+                |source| compass_files::FileError::Io {
                     path: graph_path.clone(),
                     source,
-                }
-            })
+                },
+            )
         })?;
         format!("sha256:{}", receipt.sha256)
     } else {
