@@ -1,12 +1,61 @@
-export function buildNaturalQueryArgs(options: {
-  query: string;
+type GraphSelection = {
   graph?: string | undefined;
   revision?: string | undefined;
-}): string[] {
+};
+
+function graphSelection(options: GraphSelection): string[] {
+  return options.revision
+    ? ["--at", options.revision]
+    : options.graph
+      ? ["--graph", options.graph]
+      : [];
+}
+
+export function buildAskArgs(options: {
+  query: string;
+} & GraphSelection): string[] {
   return [
-    "query",
+    "ask",
     options.query,
-    ...(options.revision ? ["--at", options.revision] : options.graph ? ["--graph", options.graph] : [])
+    ...graphSelection(options),
+    "--format",
+    "json"
+  ];
+}
+
+export function buildExplainArgs(options: {
+  query: string;
+} & GraphSelection): string[] {
+  return [
+    "explain",
+    options.query,
+    ...graphSelection(options)
+  ];
+}
+
+export function buildCompletionArgs(options: {
+  term: string;
+} & GraphSelection): string[] {
+  return [
+    "search",
+    options.term,
+    "--max-depth",
+    "1",
+    "--max-nodes",
+    "8",
+    "--max-edges",
+    "1",
+    "--max-paths",
+    "1",
+    "--max-candidates",
+    "8",
+    "--max-source-bytes",
+    "1",
+    "--max-response-bytes",
+    "1048576",
+    ...graphSelection(options),
+    "--format",
+    "json"
   ];
 }
 
@@ -15,9 +64,7 @@ export function buildCqlArgs(options: {
   params: Record<string, string>;
   timeoutMs: number;
   maxRows: number;
-  graph?: string | undefined;
-  revision?: string | undefined;
-}): string[] {
+} & GraphSelection): string[] {
   return [
     "query",
     "--cql",
@@ -29,7 +76,7 @@ export function buildCqlArgs(options: {
     String(options.timeoutMs),
     "--max-rows",
     String(options.maxRows),
-    ...(options.revision ? ["--at", options.revision] : options.graph ? ["--graph", options.graph] : []),
+    ...graphSelection(options),
     "--format",
     "json"
   ];

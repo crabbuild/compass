@@ -22,6 +22,18 @@ deterministic synthetic merge without changing the checkout, materializes
 comparable graph history when needed, and rejects profile mismatch. Local mode
 never fetches missing objects.
 
+If the checkout has no existing history profile and contains non-code files,
+select the local structural profile explicitly before the first review:
+
+```bash
+compass history build "$BASE_SHA" --code-only
+```
+
+This keeps the review fully local and does not install hooks. A semantic review
+must use a configured semantic history profile instead; missing credentials are
+never silently downgraded. The reusable GitHub Action performs the explicit
+code-only preparation automatically.
+
 To bind a frozen GitHub event without a second API read:
 
 ```bash

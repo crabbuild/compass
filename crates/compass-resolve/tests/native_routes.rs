@@ -105,7 +105,11 @@ func routes() {
                 }
                 RawFrameworkFact::Route(_)
                 | RawFrameworkFact::Domain(_)
-                | RawFrameworkFact::Annotation(_) => None,
+                | RawFrameworkFact::Annotation(_)
+                | RawFrameworkFact::Role(_)
+                | RawFrameworkFact::Relation(_)
+                | RawFrameworkFact::Configuration(_)
+                | RawFrameworkFact::FileSet(_) => None,
             })
             .ok_or("missing Echo/Fiber route")?;
         assert_eq!(route.handler_reference, "show");
@@ -174,12 +178,15 @@ fn multiline() {}
 #[test]
 fn aspnet_composes_controller_and_action_templates() -> Result<(), Box<dyn Error>> {
     let routes = resolved("csharp/AspNetController.cs")?;
-    assert!(routes.iter().any(|route| {
-        route.route.operation == "GET"
-            && route.route.normalized_path == "/api/Users/{id}"
-            && route.route.handler_reference == "UsersController.Show"
-            && route.state == ResolutionState::Exact
-    }));
+    assert!(
+        routes.iter().any(|route| {
+            route.route.operation == "GET"
+                && route.route.normalized_path == "/api/Users/{id}"
+                && route.route.handler_reference == "UsersController.Show"
+                && route.state == ResolutionState::Exact
+        }),
+        "routes={routes:#?}"
+    );
     assert!(routes.iter().any(|route| {
         route.route.operation == "POST"
             && route.route.normalized_path == "/api/Users"
@@ -207,6 +214,10 @@ var api = app.MapGroup("/api");
 var users = api.MapGroup("/users");
 users.MapGet("/{id:int}", UserHandlers.Show);
 app.MapPost("/users", (User user) => Results.Created($"/users/{user.Id}", user));
+users.MapMethods(
+    "/search",
+    new[] { "GET", "HEAD" },
+    (string query, int limit) => Results.Ok(new { query, limit }));
 app.Run();
 "#,
     )?;
@@ -217,7 +228,11 @@ app.Run();
             RawFrameworkFact::Route(route) if route.framework == "aspnet" => Some(route),
             RawFrameworkFact::Route(_)
             | RawFrameworkFact::Domain(_)
-            | RawFrameworkFact::Annotation(_) => None,
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     let exact = minimal_routes
@@ -231,15 +246,21 @@ app.Run();
         .find(|route| route.normalized_path == "/users")
         .ok_or("missing ASP.NET Minimal API inline route")?;
     assert_eq!(inline.operation, "POST");
-    assert!(
-        inline
-            .handler_reference
-            .starts_with("opaque_minimal_handler_at_")
-    );
+    assert!(inline.handler_reference.starts_with("lambda_handler_at_"));
     assert_eq!(
-        inline.detail.get("opaque_handler"),
-        Some(&serde_json::Value::Bool(true))
+        inline.detail.get("handler_kind"),
+        Some(&serde_json::Value::String("lambda".to_owned()))
     );
+    for operation in ["GET", "HEAD"] {
+        assert!(
+            minimal_routes.iter().any(|route| {
+                route.operation == operation
+                    && route.normalized_path == "/api/users/search"
+                    && route.handler_reference.starts_with("lambda_handler_at_")
+            }),
+            "missing {operation} MapMethods route: {minimal_routes:#?}"
+        );
+    }
 
     let near_match = Engine::default().extract_source(
         Path::new("Program.cs"),
@@ -250,6 +271,37 @@ var app = builder.Build();
 "#,
     )?;
     assert!(near_match.framework_facts.is_empty());
+    Ok(())
+}
+
+#[test]
+fn aspnet_universal_pack_handles_aliases_verbs_absolute_routes_and_non_actions()
+-> Result<(), Box<dyn Error>> {
+    let raw = extract("csharp/AdvancedController.cs")?;
+    assert!(raw.framework_facts.iter().any(|fact| {
+        matches!(fact, RawFrameworkFact::Annotation(annotation) if annotation.owner_qualified_name.ends_with("::List"))
+    }), "raw facts={:#?} evidence={:#?}", raw.framework_facts, raw.semantic_evidence);
+    let routes = resolved("csharp/AdvancedController.cs")?;
+    for (operation, path, handler) in [
+        ("GET", "/v2/Plain/List", "PlainController.List"),
+        ("GET", "/v2/Plain/multi", "PlainController.Multi"),
+        ("POST", "/v2/Plain/multi", "PlainController.Multi"),
+        ("GET", "/ready", "PlainController.Ready"),
+    ] {
+        assert!(
+            routes.iter().any(|route| {
+                route.route.operation == operation
+                    && route.route.normalized_path == path
+                    && route.route.handler_reference == handler
+                    && route.state == ResolutionState::Exact
+            }),
+            "missing {operation} {path}: routes={routes:#?}"
+        );
+    }
+    assert!(routes.iter().all(|route| {
+        route.route.handler_reference != "PlainController.Hidden"
+            && route.route.normalized_path != "/v2/Plain/hidden"
+    }));
     Ok(())
 }
 
@@ -303,7 +355,12 @@ func configure(r *mux.Router) {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 1);
@@ -333,7 +390,12 @@ fn router() -> Router {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(
@@ -377,7 +439,12 @@ func configure(r *gin.Engine) {
         .iter()
         .find_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .ok_or("missing multiline Go route")?;
     assert_eq!(go_route.normalized_path, "/users");
@@ -401,7 +468,12 @@ func configure(r chi.Router) {
         .iter()
         .find_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .ok_or("missing chi closure route")?;
     assert_eq!(chi_route.framework, "chi");
@@ -422,7 +494,12 @@ func configure(r *mux.Router) {
         .iter()
         .find_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .ok_or("missing gorilla subrouter route")?;
     assert_eq!(gorilla_route.framework, "gorilla");
@@ -448,7 +525,12 @@ fn configure() -> App {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(actix_routes.iter().any(|route| {
@@ -741,7 +823,12 @@ func routes(_ app: Application) throws {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert!(routes.iter().any(|route| route.normalized_path == "/"));

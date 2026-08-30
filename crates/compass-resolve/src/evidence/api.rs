@@ -82,6 +82,8 @@ pub enum ResolutionRule {
     MemberBinding,
     DeferredReceiver,
     WildcardBinding,
+    PhpGlobalFunctionFallback,
+    KotlinNamedDefaultArguments,
     UniqueModuleOrPackage,
     ExactHierarchyBase,
     DirectReceiverSuccessorDispatch,

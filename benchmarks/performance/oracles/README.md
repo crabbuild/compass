@@ -101,7 +101,7 @@ candidate observations, automatic checker outcomes, and capability strata. It
 does not contain manual judgments. A reviewed scorecard must add explicit
 `accepted` and `source_oracle` pools, `judgmentSource: "manual"`, and a review
 reason for every non-correct label under
-`compass.typescript-target-scorecard/1`, then run:
+`compass.typescript-target-scorecard/2`, then run:
 
 ```bash
 python3 benchmarks/performance/harness.py typescript-scorecard \

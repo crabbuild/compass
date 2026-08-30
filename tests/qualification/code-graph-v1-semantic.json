@@ -19,7 +19,7 @@
       "handlerLanguage": "python",
       "resolution": "exact",
       "origins": [
-        "config"
+        "ast"
       ],
       "producer": "compass.frameworks.django",
       "rules": [
@@ -32,7 +32,7 @@
       "id": "flow-flask",
       "framework": "flask",
       "routeFramework": "flask",
-      "operation": "ANY",
+      "operation": "GET",
       "path": "/health",
       "routeSource": "fixtures/code-graph/routes/python/flask_app.py",
       "handler": {
@@ -77,7 +77,7 @@
       ],
       "producer": "compass.frameworks.fastapi",
       "rules": [
-        "python-mounted-router|stage:handler:1"
+        "python-receiver-mount|stage:handler:1"
       ],
       "allowHeuristic": false,
       "candidates": []
@@ -171,7 +171,7 @@
       "path": "/users",
       "routeSource": "fixtures/code-graph/routes/php/laravel.php",
       "handler": {
-        "qualifiedName": "UserController::index"
+        "qualifiedName": "usercontroller::index"
       },
       "handlerSource": "fixtures/code-graph/routes/php/laravel.php",
       "relationship": "routes_to",
@@ -198,7 +198,7 @@
       "path": "/examples/{example}",
       "routeSource": "fixtures/code-graph/routes/php/drupal.routing.yml",
       "handler": {
-        "qualifiedName": "ExampleController::view"
+        "qualifiedName": "examplecontroller::view"
       },
       "handlerSource": "fixtures/code-graph/routes/php/drupal.module",
       "relationship": "routes_to",
@@ -225,7 +225,7 @@
       "path": "/users/:id",
       "routeSource": "fixtures/code-graph/routes/ruby/rails.rb",
       "handler": {
-        "qualifiedName": "UsersController::show"
+        "qualifiedName": "UsersController#show"
       },
       "handlerSource": "fixtures/code-graph/routes/ruby/rails.rb",
       "relationship": "routes_to",
@@ -294,6 +294,33 @@
       "producer": "compass.frameworks.play",
       "rules": [
         "play-conf-routes|stage:handler:0"
+      ],
+      "allowHeuristic": false,
+      "candidates": []
+    },
+    {
+      "id": "flow-spring-kotlin",
+      "framework": "spring",
+      "routeFramework": "spring",
+      "operation": "GET",
+      "path": "/kotlin/users/{id}",
+      "routeSource": "fixtures/code-graph/routes/jvm/SpringController.kt",
+      "handler": {
+        "qualifiedName": "example.kotlin.SpringKotlinController::show"
+      },
+      "handlerSource": "fixtures/code-graph/routes/jvm/SpringController.kt",
+      "relationship": "routes_to",
+      "stage": "handler",
+      "position": 0,
+      "handlerKind": "method",
+      "handlerLanguage": "kotlin",
+      "resolution": "exact",
+      "origins": [
+        "ast"
+      ],
+      "producer": "compass.frameworks.spring",
+      "rules": [
+        "spring-request-mapping|stage:handler:0"
       ],
       "allowHeuristic": false,
       "candidates": []
@@ -549,7 +576,7 @@
       "path": "/api/Users/{id}",
       "routeSource": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "handler": {
-        "qualifiedName": "UsersController::Show(string)@129"
+        "qualifiedName": "UsersController::Show"
       },
       "handlerSource": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "relationship": "routes_to",
@@ -882,7 +909,7 @@
       "id": "node-file",
       "kind": "file",
       "source": "fixtures/code-graph/qualification/MissingReference.csproj",
-      "qualifiedName": "MissingReference.csproj",
+      "qualifiedName": "fixtures/code-graph/qualification/MissingReference.csproj",
       "producer": "compass.languages.project-xml",
       "origins": [
         "ast"
@@ -894,7 +921,7 @@
       "kind": "module",
       "source": "fixtures/code-graph/routes/swift/VaporRoutes.swift",
       "qualifiedName": "Vapor",
-      "producer": "compass.languages.swift",
+      "producer": "compass.languages.swift.universal",
       "origins": [
         "ast"
       ],
@@ -916,7 +943,7 @@
       "kind": "namespace",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "Qualification",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -926,8 +953,8 @@
       "id": "node-class",
       "kind": "class",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "BaseService@84",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.BaseService",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -948,8 +975,8 @@
       "id": "node-interface",
       "kind": "interface",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "IService@26",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.IService",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1025,8 +1052,8 @@
       "id": "node-method",
       "kind": "method",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "BaseService::Run(int)@115",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.BaseService::Run",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1036,8 +1063,8 @@
       "id": "node-constructor",
       "kind": "constructor",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service::Service(int)@327",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::Service",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1047,8 +1074,8 @@
       "id": "node-property",
       "kind": "property",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service@176::Count@291",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::Count",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1058,8 +1085,8 @@
       "id": "node-field",
       "kind": "field",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service@176::count@280",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::count",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1080,8 +1107,8 @@
       "id": "node-constant",
       "kind": "constant",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "Service@176::Limit@244",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.Service::Limit",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1091,8 +1118,8 @@
       "id": "node-parameter",
       "kind": "parameter",
       "source": "fixtures/code-graph/qualification/Rich.cs",
-      "qualifiedName": "BaseService::Run(int)@115::value@141",
-      "producer": "compass.languages.csharp",
+      "qualifiedName": "Qualification.BaseService::Run::value",
+      "producer": "compass.languages.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1363,6 +1390,17 @@
       "detailType": "database"
     },
     {
+      "id": "node-closure",
+      "kind": "closure",
+      "source": "fixtures/code-graph/qualification/rich.php",
+      "qualifiedName": "*",
+      "producer": "compass.languages.php.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "symbol"
+    },
+    {
       "id": "node-database_trigger",
       "kind": "database_trigger",
       "source": "fixtures/code-graph/domain/database.sql",
@@ -1380,7 +1418,7 @@
       "kind": "contains",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1413,7 +1451,7 @@
       "kind": "exports",
       "source": "fixtures/code-graph/qualification/export.dart",
       "qualifiedName": "*",
-      "producer": "compass.languages.dart",
+      "producer": "compass.resolve.dart.universal",
       "origins": [
         "ast"
       ],
@@ -1424,7 +1462,7 @@
       "kind": "extends",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1435,7 +1473,18 @@
       "kind": "implements",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": null
+    },
+    {
+      "id": "edge-mixes-in",
+      "kind": "mixes_in",
+      "source": "fixtures/code-graph/qualification/rich.php",
+      "qualifiedName": "*",
+      "producer": "compass.resolve.php.universal",
       "origins": [
         "ast"
       ],
@@ -1444,9 +1493,9 @@
     {
       "id": "edge-references",
       "kind": "references",
-      "source": "fixtures/code-graph/qualification/Rich.cs",
+      "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1457,7 +1506,7 @@
       "kind": "type_of",
       "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1468,7 +1517,7 @@
       "kind": "returns",
       "source": "fixtures/code-graph/routes/csharp/AspNetController.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1490,7 +1539,7 @@
       "kind": "overrides",
       "source": "fixtures/code-graph/qualification/Rich.cs",
       "qualifiedName": "*",
-      "producer": "compass.languages.csharp",
+      "producer": "compass.resolve.csharp.universal",
       "origins": [
         "ast"
       ],
@@ -1517,6 +1566,17 @@
         "ast"
       ],
       "detailType": "route"
+    },
+    {
+      "id": "edge-renders",
+      "kind": "renders",
+      "source": "fixtures/code-graph/routes/typescript/react-router.tsx",
+      "qualifiedName": "*",
+      "producer": "compass.resolve.typescript.universal",
+      "origins": [
+        "ast"
+      ],
+      "detailType": "render"
     },
     {
       "id": "edge-reads",
@@ -1686,7 +1746,7 @@
   ],
   "languages": {
     "source": "corpus",
-    "producerVersion": "compass-languages/0.3.12"
+    "producerVersion": "compass-languages/0.3.23"
   },
   "occurrences": [
     {
@@ -1695,6 +1755,14 @@
       "source": "fixtures/code-graph/qualification/rich.rs",
       "sourceQualifiedName": "<crate::rich::Widget as crate::rich::Renderable>::render",
       "targetQualifiedName": "crate::rich::target",
+      "minimum": 2
+    },
+    {
+      "id": "repeated-groovy-call",
+      "kind": "calls",
+      "source": "fixtures/code-graph/routes/groovy/SpockSpec.groovy",
+      "sourceQualifiedName": "routes.UserService.run",
+      "targetQualifiedName": "routes.UserService.load",
       "minimum": 2
     }
   ],
@@ -1716,6 +1784,16 @@
       "id": "missing-reference-diagnostic",
       "source": "fixtures/code-graph/qualification/MissingReference.csproj",
       "diagnosticCode": "unresolved_external_reference"
+    },
+    {
+      "id": "scala-universal-extracted",
+      "source": "fixtures/code-graph/routes/scala/Universal.scala",
+      "extractionStatus": "extracted"
+    },
+    {
+      "id": "groovy-universal-recovery",
+      "source": "fixtures/code-graph/routes/groovy/SpockSpec.groovy",
+      "extractionStatus": "partial"
     }
   ],
   "limits": {

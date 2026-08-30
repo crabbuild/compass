@@ -4,8 +4,8 @@ meta:
   title: Structural document processing
   navLabel: Document Processing
   category: Design
-  overview: How Compass turns Markdown and HTML bytes into bounded, deterministic graph evidence.
-  goal: Define the ownership, provenance, and cache rules for local text documents.
+  overview: How Compass turns text, PDF, and Office bytes into bounded native and OCR evidence.
+  goal: Define ownership, provenance, cache, OCR, and graph rules for local documents.
   audience:
     - Compass contributors
     - technical evaluators
@@ -20,9 +20,10 @@ meta:
 # Structural document processing
 
 Compass treats a document as an ordered source artifact, not as a bag of
-extracted strings. The current structural implementation is Markdown-first:
-the same bounded bytes read by the build pipeline are parsed into a document
-root, structural blocks, and provenance-preserving relationships.
+extracted strings. Markdown and HTML retain exact source ranges. PDF, DOCX,
+PPTX, and XLSX use the versioned `compass.document/1` intermediate artifact,
+typed logical locators, and one shared projection into graph blocks and
+semantic slices.
 
 ## Ownership and data flow
 
@@ -32,7 +33,7 @@ bounded source bytes
         v
 compass-languages::Engine
         |
-        +--> pinned Markdown block/inline grammars
+        +--> pinned Markdown block/inline + YAML grammars
         +--> pinned HTML grammar and shared renderer
         +--> bounded frontmatter/entity/URL decoders
         |
@@ -53,11 +54,13 @@ source ranges. The standalone compatibility path still accepts a `Path` and
 reads it once.
 
 The Markdown grammars are statically linked through the pinned `tree-sitter-md`
-crate and HTML uses the exact pinned `tree-sitter-html` crate. The vendored
-language pack remains the owner for the general language registry; the direct
-HTML binding is deliberately parser-only because this release's pack build
-does not expose an HTML static loader. Neither path downloads a grammar at
-runtime, invokes Python, calls a model, or follows a URL.
+crate, YAML frontmatter source anchoring uses the pinned statically linked YAML
+grammar in the vendored language pack, and HTML uses the exact pinned
+`tree-sitter-html` crate. The vendored language pack remains the owner for the
+general language registry; the direct HTML binding is deliberately parser-only
+because this release's pack build does not expose an HTML static loader. None
+of these paths downloads a grammar at runtime, invokes Python, calls a model,
+or follows a URL.
 
 ## Markdown projection
 
@@ -65,7 +68,8 @@ Every file has one root node with:
 
 - `document_format: "markdown"` and `document_kind: "document"`;
 - the source file and exact whole-document byte/line range;
-- deterministic `document_metadata` when bounded frontmatter is valid.
+- deterministic nested `document_metadata` when bounded frontmatter is valid;
+- source-anchored `config_key` nodes and containment for frontmatter paths.
 
 The structural projection emits ordered nodes for headings, paragraphs, lists
 and list items, block quotes, thematic breaks, fenced and indented code,
@@ -88,11 +92,21 @@ published as blocks.
 
 Frontmatter is recognized only when the source begins with a whole-line `---`
 (an optional UTF-8 BOM is accepted) and a whole-line closing delimiter appears
-within 64 KiB. It is parsed with the workspace YAML implementation and only
-JSON-compatible scalars and bounded scalar arrays are published. Mappings,
-aliases, tags, oversized values, and arrays containing non-scalars produce a
-bounded diagnostic and do not become graph attributes. Keys are deterministic
-and capped at 256 entries; individual strings and arrays are bounded.
+within 64 KiB. The workspace YAML implementation validates and normalizes
+JSON-compatible scalars, nested mappings, and arrays. A second, statically
+linked YAML syntax pass must source-anchor the same canonical paths before any
+metadata is accepted. Disagreement, duplicate paths, invalid UTF-8, non-string
+keys, aliases, tags, oversized values, or exceeded key/item/depth/node budgets
+produce a bounded diagnostic and publish no partial metadata graph.
+
+The raw root retains the bounded nested `document_metadata` map. Graph-v1
+publication expresses that structure with the existing `ConfigKey` contract:
+canonical JSON Pointer key paths, `yaml_frontmatter` format, Config provenance,
+stable source-file/path identity, exact pair/item ranges, and nested `contains`
+edges. Only an allowlist of semantic content fields receives a value summary in
+the node display name; generic and credential-shaped values are never copied
+into the public graph. This is producer logic inside `compass.graph/1`, not a
+new graph wire field.
 
 Frontmatter is metadata, not visible Markdown body text. Body node ranges still
 point into the original bytes, including CRLF and non-UTF-8 input (labels use a
@@ -175,16 +189,64 @@ partial response cannot replace a deterministic structural realization.
 
 ## Other document formats
 
-File discovery recognizes several document extensions, but recognition is not
-the same as structural extraction. DOCX and XLSX retain their bounded media
-conversion surfaces; PPTX and RTF remain future format adapters. See the
-[document format reference](../reference/document-formats.md) for the current
-matrix. Markdown and HTML links may point at those formats, but Compass does
-not fetch or execute a linked resource during extraction.
+PDF and OOXML packages are decoded in pure Rust under centralized raw-byte,
+archive-member, expansion-ratio, XML-depth, block, link, row, cell, page, and
+raster limits. DOCX body order, PPTX relationship slide order, and sparse XLSX
+coordinates are preserved. Spreadsheet formulas are evidence and are never
+executed. External OOXML relationships remain inert.
+
+OCR is an optional derived layer and is off by default. `auto` selects PDF
+pages with little native text and eligible embedded Office images; `always`
+selects every bounded candidate. Native text remains authoritative and OCR
+observations retain the owning page/image locator, polygon, confidence, exact
+engine version, profile, model digests, and preprocessing version. OCR never
+replaces or silently deduplicates native blocks.
+
+Preprocessing version 2 applies declared EXIF orientation exactly once,
+composites alpha onto white, resizes with the fixed triangle filter, and tiles
+rasters above the 2,048-pixel engine side with 128 pixels of overlap. Tile
+regions are mapped back to the normalized source raster and equal overlapping
+regions are deduplicated deterministically. Decoding, PDF page rendering,
+candidate iteration, and inference boundaries honor cancellation; the document
+deadline is 600 seconds. The in-process runtime uses one inter-op and one
+intra-op thread.
+
+`compass-core` prepares each rich document once. Complete artifacts are cached
+atomically by source SHA-256 plus document schema, normalizer, renderer, OCR
+policy, profile manifest, preprocessing version, and language hints. Corrupt
+or incompatible entries fail explicitly; partial OCR is never finalized as a
+complete cache entry. The same prepared artifact feeds structural publication
+and gap-free Unicode-safe semantic slices. The semantic layer does not load an
+OCR engine or maintain a second document cache.
+
+On supported targets, the PP-OCRv6 runtime is compiled with Compass. Users
+install no Python, Tesseract, office suite, Poppler, Java, or system ONNX
+package. Intel (`x86_64`) macOS is excluded because the pinned ONNX Runtime has
+no self-contained distribution for that target; native document processing
+continues to work, while model installation and OCR-enabled processing fail
+before downloading. Model weights are deliberately separate: `compass models
+install pp-ocrv6-small` is the only download path on supported targets and
+validates a fixed allowlisted HTTPS source, declared size, SHA-256, and atomic
+verified marker. Inspection and extraction never download or prompt.
+
+The production engine identity is OAR-OCR 0.9.2 with its in-process ONNX
+backend. The model source is the immutable GreatV/OAR-OCR `v0.7.0` GitHub
+release: the small profile is 31,114,837 bytes and the medium profile is
+138,662,763 bytes across detector, recognizer, and shared dictionary. Each
+artifact has a compiled SHA-256. Hayro 0.7.1 is the sole PDF renderer and is
+fingerprinted as `hayro/0.7.1@300dpi`. Neither boundary invokes a system tool.
+
+The checked installed-model smoke gate currently establishes only clean,
+synthetic English recognition and runtime availability; it recorded 0 CER for
+`COMPASS OCR 2026` on the development aarch64 macOS host. This is not a broad
+multilingual, photographed-document, handwriting, or comparative quality
+claim. Release promotion for additional input classes and architectures must
+come from the corpus and gates in the qualification guide.
 
 ## Related pages
 
 - [Document format reference](../reference/document-formats.md)
 - [Language architecture](language-architecture.md)
 - [Extraction pipeline](../implementation/extraction-pipeline.md)
+- [Document OCR qualification](../implementation/document-ocr-qualification.md)
 - [Graph model](../concepts/graph-model.md)

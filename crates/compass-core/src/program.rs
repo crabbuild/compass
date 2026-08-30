@@ -11,7 +11,7 @@ use compass_languages::{Registry, TREE_SITTER_PROGRAM_PROVIDER_VERSION, TreeSitt
 use compass_program::{
     ArtifactInput, ArtifactProvider, DecodedScipArtifact, DecodedScipDocument, EvidenceBatch,
     OfficialScipProvider, SyntaxProvider, compiler_projection, merge_evidence,
-    parse_artifact_manifest,
+    parse_artifact_manifest, source_inventory_digest,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -182,6 +182,7 @@ pub(crate) fn build_program(
     let mut artifact_documents_reused = 0;
     for artifact in artifacts {
         let manifest = load_manifest(&artifact.path, &artifact.digest)?;
+        let project_digest = artifact_source_inventory_digest(manifest.as_ref(), &source_digests)?;
         let logical_name = artifact
             .path
             .file_name()
@@ -192,6 +193,7 @@ pub(crate) fn build_program(
             input_digest: &artifact.digest,
             byte_len: artifact.byte_len,
             manifest: manifest.as_ref(),
+            project_digest: &project_digest,
             source_digests: &source_digests,
             source_texts: &source_texts,
             limits: options.program_artifact_limits,
@@ -360,6 +362,7 @@ pub(crate) fn load_current_program(
     let artifacts = discover_artifacts(root, options)?;
     for artifact in &artifacts {
         let manifest = load_manifest(&artifact.path, &artifact.digest)?;
+        let project_digest = artifact_source_inventory_digest(manifest.as_ref(), &source_digests)?;
         providers.push(
             OfficialScipProvider.descriptor(&ArtifactInput {
                 logical_name: artifact
@@ -370,6 +373,7 @@ pub(crate) fn load_current_program(
                 input_digest: &artifact.digest,
                 byte_len: artifact.byte_len,
                 manifest: manifest.as_ref(),
+                project_digest: &project_digest,
                 source_digests: &source_digests,
                 source_texts: &source_texts,
                 limits: options.program_artifact_limits,
@@ -434,6 +438,7 @@ pub(crate) fn current_provider_manifest(
         .collect::<Vec<_>>();
     for artifact in discover_artifacts(root, options)? {
         let manifest = load_manifest(&artifact.path, &artifact.digest)?;
+        let project_digest = artifact_source_inventory_digest(manifest.as_ref(), &source_digests)?;
         providers.push(
             OfficialScipProvider.descriptor(&ArtifactInput {
                 logical_name: artifact
@@ -444,6 +449,7 @@ pub(crate) fn current_provider_manifest(
                 input_digest: &artifact.digest,
                 byte_len: artifact.byte_len,
                 manifest: manifest.as_ref(),
+                project_digest: &project_digest,
                 source_digests: &source_digests,
                 source_texts: &source_texts,
                 limits: options.program_artifact_limits,
@@ -603,7 +609,7 @@ fn discover_artifacts(root: &Path, options: &BuildOptions) -> Result<Vec<Artifac
         }
         candidates.push(path);
     }
-    let mut by_digest = BTreeMap::new();
+    let mut by_digest = BTreeMap::<String, ArtifactFile>::new();
     for path in candidates {
         let canonical = fs::canonicalize(&path).map_err(|source| FileError::Io {
             path: path.clone(),
@@ -617,11 +623,24 @@ fn discover_artifacts(root: &Path, options: &BuildOptions) -> Result<Vec<Artifac
             ));
         }
         let (digest, byte_len) = hash_file(&canonical)?;
-        by_digest.entry(digest.clone()).or_insert(ArtifactFile {
-            path: canonical,
-            digest,
-            byte_len,
-        });
+        if let Some(existing) = by_digest.get(&digest) {
+            let existing_manifest = load_manifest(&existing.path, &digest)?;
+            let candidate_manifest = load_manifest(&canonical, &digest)?;
+            if existing_manifest != candidate_manifest {
+                return Err(CoreError::InvalidProgramInput(format!(
+                    "conflicting companion manifests for identical program artifact digest {digest}"
+                )));
+            }
+            continue;
+        }
+        by_digest.insert(
+            digest.clone(),
+            ArtifactFile {
+                path: canonical,
+                digest,
+                byte_len,
+            },
+        );
     }
     Ok(by_digest.into_values().collect())
 }
@@ -657,7 +676,7 @@ fn hash_file(path: &Path) -> Result<(String, u64), CoreError> {
         }
         digest.update(&buffer[..count]);
     }
-    Ok((hex_sha256_bytes(digest.finalize().as_slice()), byte_len))
+    Ok((hex_sha256_bytes(digest.finalize().as_ref()), byte_len))
 }
 
 fn hex_sha256_bytes(bytes: &[u8]) -> String {
@@ -698,6 +717,28 @@ fn load_manifest(
     }
     let bytes = fs::read(&path).map_err(|source| FileError::Io { path, source })?;
     Ok(Some(parse_artifact_manifest(&bytes, digest)?))
+}
+
+fn artifact_source_inventory_digest(
+    manifest: Option<&compass_program::ArtifactManifest>,
+    source_digests: &BTreeMap<String, String>,
+) -> Result<String, CoreError> {
+    let Some(manifest) = manifest.filter(|manifest| manifest.managed_analyzer.is_some()) else {
+        return Ok(source_inventory_digest(source_digests)?);
+    };
+    let current = manifest
+        .documents
+        .keys()
+        .map(|path| {
+            let normalized = compass_program::normalize_source_path(path)?;
+            let digest = source_digests
+                .get(&normalized)
+                .cloned()
+                .unwrap_or_else(|| "0".repeat(64));
+            Ok((normalized, digest))
+        })
+        .collect::<Result<BTreeMap<_, _>, compass_program::ProviderError>>()?;
+    Ok(source_inventory_digest(&current)?)
 }
 
 fn decode_artifact_file(
@@ -744,6 +785,27 @@ fn assemble_decoded_artifact(
     decoded: Option<&DecodedScipArtifact>,
     stats: &mut DocumentCacheStats,
 ) -> Result<Option<EvidenceBatch>, CoreError> {
+    if let Some(manifest) = input
+        .manifest
+        .filter(|manifest| manifest.managed_analyzer.is_some())
+    {
+        let expected = manifest
+            .documents
+            .keys()
+            .map(|path| compass_program::normalize_source_path(path))
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        let actual = header
+            .documents
+            .iter()
+            .map(|path| compass_program::normalize_source_path(path))
+            .collect::<Result<BTreeSet<_>, _>>()?;
+        if expected != actual {
+            return Err(CoreError::InvalidProgramInput(
+                "managed scip-python cached document inventory does not match its manifest"
+                    .to_owned(),
+            ));
+        }
+    }
     let descriptor = OfficialScipProvider.descriptor(&input);
     let mut batch = OfficialScipProvider.normalize_decoded(
         input,
@@ -821,6 +883,7 @@ fn normalized_document_key(
     document: &str,
     input: ArtifactInput<'_>,
 ) -> Result<String, CoreError> {
+    let descriptor = OfficialScipProvider.descriptor(&input);
     let expected = input.manifest.and_then(|manifest| {
         manifest.documents.iter().find_map(|(path, digest)| {
             compass_program::normalize_source_path(path)
@@ -830,12 +893,27 @@ fn normalized_document_key(
         })
     });
     let actual = expected.and_then(|_| input.source_digests.get(document).map(String::as_str));
-    let digest = hex_sha256(&canonical_json_bytes(&(
-        artifact_digest,
-        document,
-        expected,
-        actual,
-    ))?);
+    let digest = if input
+        .manifest
+        .and_then(|manifest| manifest.managed_analyzer.as_ref())
+        .is_some()
+    {
+        hex_sha256(&canonical_json_bytes(&(
+            artifact_digest,
+            document,
+            expected,
+            actual,
+            input.project_digest,
+            descriptor.configuration_digest,
+        ))?)
+    } else {
+        hex_sha256(&canonical_json_bytes(&(
+            artifact_digest,
+            document,
+            expected,
+            actual,
+        ))?)
+    };
     Ok(format!("{artifact_digest}:normalized:{digest}"))
 }
 

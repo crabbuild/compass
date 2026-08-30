@@ -3,6 +3,25 @@
 These recipes help map a subsystem, request flow, data flow, or boundary in an
 unfamiliar repository.
 
+## Start with the architecture projection
+
+```bash
+compass export callflow-html --output compass-out/architecture.html
+```
+
+Begin in Production with the Architecture lens. Treat owner cards as bounded
+navigation, then drill into leaf subsystems. Switch to Execution for exact call
+flow, Dependency for import/use coupling, Type for implementation structure,
+or Structure for containment. The header reports architecture quality
+separately from extraction completion. If the overview is bounded, use Browse
+all groups or search; omitted groups are retained and are never represented by
+a synthetic `Other` subsystem.
+
+Before relying on a boundary, inspect its name provenance, source-scope counts,
+relationship evidence, and any quality diagnostic. All code is an audit scope:
+it restores tests, generated sources, vendor code, documentation, and unknown-source records
+without allowing them to reshape the Production projection.
+
 ## Recipe 1: map one subsystem
 
 ### Problem

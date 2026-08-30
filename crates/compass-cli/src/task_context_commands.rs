@@ -2,11 +2,11 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use compass_core::{
-    TaskContext, TaskContextIntent, TaskContextLimits, TaskContextRequest, TaskContextTarget,
-    build_task_context,
+    AgentGraphContext, TaskContext, TaskContextIntent, TaskContextLimits, TaskContextRequest,
+    TaskContextTarget, attach_agent_knowledge, build_task_context,
 };
 use compass_model::query_contract::CodeQueryLimits;
-use compass_query::{EngineSelection, open_with_engine};
+use compass_query::{EngineSelection, open_with_engine, open_with_verified_document};
 
 use crate::Outcome;
 
@@ -85,8 +85,6 @@ fn execute(args: &[String]) -> Result<TaskContext, String> {
             ));
         }
     };
-    let engine = open_with_engine(&graph, program.as_deref(), &cache, engine_selection)
-        .map_err(|error| error.to_string())?;
     let repository_root = option(args, "--root")
         .map(str::to_owned)
         .unwrap_or_else(|| {
@@ -117,17 +115,102 @@ fn execute(args: &[String]) -> Result<TaskContext, String> {
         max_knowledge_items: number(args, "--max-knowledge-items", 20_u32)?,
         max_response_bytes,
     };
-    build_task_context(
-        &engine,
-        &TaskContextRequest {
-            intent,
-            target,
-            repository_root,
-            limits,
-        },
-        &compass_reflect::load_memory_docs(&memory_dir),
-    )
-    .map_err(|error| error.to_string())
+    let request = TaskContextRequest {
+        intent,
+        target,
+        repository_root: repository_root.clone(),
+        limits,
+    };
+    let memory = compass_reflect::load_memory_docs(&memory_dir);
+    match (
+        option(args, "--agent-overlay"),
+        option(args, "--agent-revision"),
+    ) {
+        (None, None) => {
+            let engine = open_with_engine(&graph, program.as_deref(), &cache, engine_selection)
+                .map_err(|error| error.to_string())?;
+            build_task_context(&engine, &request, &memory).map_err(|error| error.to_string())
+        }
+        (Some(overlay), Some(revision)) => {
+            if engine_selection == EngineSelection::Store {
+                return Err(
+                    "--engine store cannot be combined with an in-memory Effective Graph"
+                        .to_owned(),
+                );
+            }
+            let overlay = compass_agent_graph::OverlayId::parse(overlay.to_owned())
+                .map_err(|error| error.to_string())?;
+            let revision = compass_agent_graph::OverlayRevisionId(
+                compass_agent_graph::Digest::parse(revision.to_owned())
+                    .map_err(|error| error.to_string())?,
+            );
+            let profile = match option(args, "--agent-profile").unwrap_or("augment") {
+                "augment" => compass_agent_graph::CompositionProfile::Augment,
+                "curated" => compass_agent_graph::CompositionProfile::Curated,
+                value => {
+                    return Err(format!(
+                        "--agent-profile must be augment or curated (found {value})"
+                    ));
+                }
+            };
+            let context = AgentGraphContext::open_current(
+                &PathBuf::from(&repository_root),
+                &graph,
+                option(args, "--agent-state-root").map(std::path::Path::new),
+            )
+            .map_err(|error| error.to_string())?;
+            let effective = match context
+                .read(compass_agent_graph::ReadRequest::EffectiveGraph {
+                    overlay: overlay.clone(),
+                    revision: revision.clone(),
+                    profile,
+                })
+                .map_err(|error| error.to_string())?
+            {
+                compass_agent_graph::ReadResult::EffectiveGraph(effective) => effective,
+                _ => {
+                    return Err(
+                        "Agent Graph effective read returned the wrong result type".to_owned()
+                    );
+                }
+            };
+            let state = match context
+                .read(compass_agent_graph::ReadRequest::Overlay {
+                    overlay,
+                    revision: Some(revision.clone()),
+                })
+                .map_err(|error| error.to_string())?
+            {
+                compass_agent_graph::ReadResult::Overlay { state, .. } => state,
+                _ => {
+                    return Err(
+                        "Agent Graph overlay read returned the wrong result type".to_owned()
+                    );
+                }
+            };
+            let engine = open_with_verified_document(
+                effective.graph.clone(),
+                effective.effective_identity.as_str().to_owned(),
+                &graph,
+                program.as_deref(),
+                &cache,
+            )
+            .map_err(|error| error.to_string())?;
+            let mut result = build_task_context(&engine, &request, &memory)
+                .map_err(|error| error.to_string())?;
+            attach_agent_knowledge(
+                &mut result,
+                &effective,
+                &revision,
+                &state,
+                usize::try_from(request.limits.max_knowledge_items).unwrap_or(usize::MAX),
+                request.limits.max_response_bytes,
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(result)
+        }
+        _ => Err("--agent-overlay and --agent-revision must be supplied together".to_owned()),
+    }
 }
 
 fn render_text(context: &TaskContext) -> String {
@@ -138,6 +221,31 @@ fn render_text(context: &TaskContext) -> String {
         context.intent, context.target
     );
     let _ = writeln!(output, "Graph: {}", context.graph_identity);
+    if let Some(framework) = &context.framework {
+        let _ = writeln!(
+            output,
+            "Framework context: {} packs, {} routes, {} renders, {} config dependencies{}",
+            framework.packs.len(),
+            framework.routes.len(),
+            framework.rendered_by.len() + framework.renders.len(),
+            framework.config_dependencies.len(),
+            if framework.truncated {
+                " (truncated)"
+            } else {
+                ""
+            }
+        );
+    }
+    if let Some(agent) = &context.agent_knowledge {
+        let _ = writeln!(
+            output,
+            "Agent knowledge: {} GROUNDED assertions, {} GROUNDED challenges, {:?} profile{}",
+            agent.assertions.len(),
+            agent.challenges.len(),
+            agent.composition_profile,
+            if agent.truncated { " (truncated)" } else { "" }
+        );
+    }
     for section in &context.sections {
         let _ = writeln!(
             output,
@@ -238,6 +346,10 @@ fn positional(args: &[String]) -> Vec<String> {
         "--max-source-bytes",
         "--max-response-bytes",
         "--max-knowledge-items",
+        "--agent-overlay",
+        "--agent-revision",
+        "--agent-profile",
+        "--agent-state-root",
     ];
     let mut values = Vec::new();
     let mut skip = false;
@@ -270,6 +382,10 @@ fn validate_options(args: &[String]) -> Result<(), String> {
         "--max-source-bytes",
         "--max-response-bytes",
         "--max-knowledge-items",
+        "--agent-overlay",
+        "--agent-revision",
+        "--agent-profile",
+        "--agent-state-root",
     ];
     let mut index = 0;
     while index < args.len() {

@@ -161,6 +161,17 @@ compass history status HEAD
 compass history list HEAD
 ```
 
+Compare structural blind spots across the retained preferred realizations:
+
+```bash
+compass history blind-spots --rev HEAD --limit 200
+compass history blind-spots --rev HEAD --format json
+```
+
+The command tracks stable typed gap/component IDs, separates active findings
+from resolved findings, and counts historical realizations that predate the
+graph-insights sidecar instead of treating them as empty graphs.
+
 For automation:
 
 ```bash
@@ -354,6 +365,17 @@ compass history build NEW_REV --profile-from OLD_REV_OR_REALIZATION
 There is no profile-mismatch override: unlike profiles do not produce a
 semantic or exact report. Compass checks graph-engine compatibility explicitly
 before comparing the complete build profiles.
+
+`compass review` handles a preferred realization or repository history profile
+with noncurrent engine fields automatically when its persisted user-option
+shape remains reconstructable. This includes comparisons where both revisions
+already have preferred realizations. Compass replaces engine-owned fields with
+the running contract, validates the complete reconstructed profile, and rebuilds
+a current pair only when both sides retain identical user-selected options. It
+does not parse, order, or allowlist the persisted Compass release number, and it
+leaves historical realizations intact. A malformed or unsupported profile shape
+or genuinely different user options remains an explicit compatibility error.
+Profile-shape changes use a hard cutover instead of release-specific migrations.
 
 ## 7. Export a realization
 

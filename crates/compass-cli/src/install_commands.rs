@@ -4180,6 +4180,16 @@ fn validate_skill_destination(destination: &Path, default_root: &Path) -> Result
             destination.display()
         ));
     };
+    let canonical_boundary = match fs::canonicalize(&boundary) {
+        Ok(path) => Some(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "error: could not resolve skill destination boundary {}: {error}",
+                boundary.display()
+            ));
+        }
+    };
 
     let mut current = destination.parent();
     while let Some(path) = current {
@@ -4188,11 +4198,23 @@ fn validate_skill_destination(destination: &Path, default_root: &Path) -> Result
         }
         match fs::symlink_metadata(path) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(format!(
-                    "error: skill destination {} traverses symbolic link {}",
-                    destination.display(),
-                    path.display()
-                ));
+                let resolved = fs::canonicalize(path).map_err(|error| {
+                    format!(
+                        "error: could not resolve symbolic link {} while validating skill destination {}: {error}",
+                        path.display(),
+                        destination.display()
+                    )
+                })?;
+                if canonical_boundary
+                    .as_ref()
+                    .is_some_and(|boundary| !resolved.starts_with(boundary))
+                {
+                    return Err(format!(
+                        "error: skill destination {} resolves outside the selected scope through symbolic link {}",
+                        destination.display(),
+                        path.display()
+                    ));
+                }
             }
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

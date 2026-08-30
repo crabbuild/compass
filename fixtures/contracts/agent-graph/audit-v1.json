@@ -1,0 +1,13 @@
+{
+  "adapter": "cli",
+  "modelId": "local-agent",
+  "mutationDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "outcome": "publication_prepared",
+  "overlay": "overlay:review",
+  "principal": "principal:local",
+  "repository": "repository:test",
+  "requestDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "revision": "4444444444444444444444444444444444444444444444444444444444444444",
+  "schema": "compass.agent-graph.audit/1",
+  "sessionDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}

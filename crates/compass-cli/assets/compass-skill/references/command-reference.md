@@ -20,6 +20,11 @@ whether a Compass capability is covered by the installed skill. Run
 - `compass node`: show an attributable evidence trail between two symbols.
 - `compass context`: compose a bounded, digest-verified evidence packet for an
   explain, modify, debug, or test task after exact target resolution.
+- `compass agent-graph`: prepare, inspect, apply, query, diff, and export an exact
+  GROUNDED agent-authored overlay. Writes require explicit local enablement;
+  select either the current Base Graph or an exact `--realization`, and always
+  name an exact Overlay Revision for Effective Graph reads. Base Graph facts
+  and historical realizations remain immutable.
 - `compass call-graph`: trace bounded callers, callees, or both from a source
   position or structural symbol, with optional Program IR enrichment.
 - `compass query`: budgeted, deterministic pages of natural-language graph
@@ -58,6 +63,10 @@ though the query itself does not edit the working tree.
 - `compass update`: deterministic structural refresh.
 - `compass extract`: structural plus optional semantic, Cargo, PostgreSQL, or
   Google Workspace layers.
+- `compass document`: inspect PDF, DOCX, PPTX, or XLSX content locally, with
+  optional managed OCR and typed JSON evidence.
+- `compass models`: list, install, or verify the pinned OCR model profiles in
+  the Compass cache; no system OCR package is required.
 - `compass watch`: long-running deterministic refresh and semantic-staleness
   detection.
 - `compass cluster-only`: recompute communities and visual/report artifacts from

@@ -2,7 +2,7 @@ use std::error::Error;
 
 use compass_languages::{
     BindingKind, CandidateRelation, Engine, HierarchyConstraint, LanguageCapability, SemanticRole,
-    UniversalAdapterProfile,
+    UniversalEvidenceQualification,
 };
 
 #[test]
@@ -31,15 +31,15 @@ fn build() {
         .as_ref()
         .ok_or("missing Rust semantic evidence")?;
 
-    assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 15);
+    assert_eq!(evidence.pipeline.id, "compass.rust");
+    assert_eq!(evidence.pipeline.version, 1);
     assert_eq!(
-        evidence.adapter.evidence_schema,
-        "compass.languages.evidence/1"
+        evidence.pipeline.evidence_schema,
+        "compass.languages.evidence/2"
     );
     assert_eq!(
-        evidence.adapter.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        evidence.pipeline.qualification,
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -51,7 +51,7 @@ fn build() {
         LanguageCapability::HierarchyDispatch,
         LanguageCapability::ExternalReferences,
     ] {
-        assert!(evidence.adapter.capabilities.contains(&capability));
+        assert!(evidence.pipeline.capabilities.contains(&capability));
     }
     assert!(extraction.nodes.is_empty());
     assert!(extraction.edges.is_empty());

@@ -1,183 +1,319 @@
-use std::path::Path;
-
-use regex::Regex;
 use serde_json::Map;
 use tree_sitter::Node;
 
-use super::evidence::{EvidenceKind, EvidenceSet};
-use super::text::{join_route_path, line_anchor, literal, normalize_route_path, text};
-use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
+use crate::SemanticRole;
 
-pub(super) fn detect(path: &Path, source: &[u8], _root: Node<'_>) -> Vec<RawFrameworkFact> {
-    let body = text(source);
-    let evidence = EvidenceSet::new()
-        .direct_if(
-            body.contains(".routes.draw do"),
-            "rails",
-            EvidenceKind::Receiver,
-            "Rails.application.routes",
-        )
-        .supporting_if(
-            is_rails_routes_path(path),
-            "rails",
-            EvidenceKind::Convention,
-            "config/routes.rb",
-        );
-    if !evidence.activates("rails") {
+use super::text::{join_route_path, literal, normalize_route_path};
+use super::{
+    RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    UniversalDetectionContext,
+};
+
+/// Universal Rails routing detector.  It consumes only AST calls that have a
+/// matching Ruby universal occurrence; source text is used for literal
+/// argument values and never as a line-oriented semantic authority.
+pub(super) fn detect_universal(
+    context: &UniversalDetectionContext<'_, '_>,
+) -> Vec<RawFrameworkFact> {
+    if context.evidence.pipeline.language != "ruby" {
         return Vec::new();
     }
-    let Ok(scope) = Regex::new(
-        r#"^\s*(?:scope\s+((?:'[^']*')|(?:"[^"]*"))|namespace\s+:([A-Za-z_][A-Za-z0-9_]*))\s+do\b"#,
-    ) else {
+    let source_file = context
+        .evidence
+        .declarations
+        .iter()
+        .find(|declaration| declaration.kind == "file")
+        .map(|declaration| declaration.range.source_file.clone())
+        .unwrap_or_default();
+    if source_file.is_empty() {
         return Vec::new();
-    };
-
-    let mut facts = Vec::new();
-    let mut prefixes = Vec::<String>::new();
-    let mut namespaces = Vec::<String>::new();
-    let mut scope_frames = Vec::<usize>::new();
-    let mut in_draw = false;
-    let mut block_depth = 0_usize;
-    let mut offset = 0_usize;
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if !in_draw {
-            if line.contains(".routes.draw do") {
-                in_draw = true;
-                block_depth = 1;
-            }
-            offset = offset.saturating_add(line.len());
-            continue;
-        }
-        if trimmed == "end" {
-            if scope_frames
-                .last()
-                .is_some_and(|depth| *depth == block_depth)
-            {
-                scope_frames.pop();
-                prefixes.pop();
-                namespaces.pop();
-            }
-            if block_depth == 1 {
-                in_draw = false;
-                block_depth = 0;
-                offset = offset.saturating_add(line.len());
-                continue;
-            }
-            block_depth = block_depth.saturating_sub(1);
-            offset = offset.saturating_add(line.len());
-            continue;
-        }
-        if let Some(capture) = scope.captures(line) {
-            let prefix = capture
-                .get(1)
-                .and_then(|value| literal(value.as_str()))
-                .or_else(|| capture.get(2).map(|value| value.as_str().to_owned()));
-            if let Some(prefix) = prefix {
-                prefixes.push(prefix);
-                namespaces.push(
-                    capture
-                        .get(2)
-                        .map(|value| camelize(value.as_str()))
-                        .unwrap_or_default(),
-                );
-                scope_frames.push(block_depth.saturating_add(1));
-            }
-            block_depth = block_depth.saturating_add(1);
-            offset = offset.saturating_add(line.len());
-            continue;
-        }
-        let Some((operation, raw_path, handler, suffix)) = parse_route_line(line) else {
-            offset = offset.saturating_add(line.len());
+    }
+    let call_occurrences = context
+        .evidence
+        .occurrences
+        .iter()
+        .filter(|occurrence| occurrence.role == SemanticRole::Call)
+        .map(|occurrence| (occurrence.range.start_byte, occurrence.spelling.as_str()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut calls = Vec::new();
+    collect_call_nodes(context.root, &mut calls);
+    let mut routes = Vec::new();
+    for call in calls {
+        let Some(method_node) = call.child_by_field_name("method") else {
             continue;
         };
-        let handler = rails_handler(&handler, &namespaces);
-        let prefix = prefixes.join("/");
+        if method_name(call, context.source).as_deref() != Some("draw")
+            || !call_occurrences.contains(&(method_node.start_byte() as u64, "draw"))
+            || receiver_text(call, context.source).as_deref() != Some("Rails.application.routes")
+        {
+            continue;
+        }
+        let Some(block) = call.child_by_field_name("block") else {
+            continue;
+        };
+        collect_routes(
+            block,
+            context,
+            &source_file,
+            String::new(),
+            Vec::new(),
+            &call_occurrences,
+            &mut routes,
+        );
+    }
+    routes.sort_by_key(route_key);
+    routes
+}
+
+fn collect_call_nodes<'tree>(node: Node<'tree>, calls: &mut Vec<Node<'tree>>) {
+    if node.kind() == "call" {
+        calls.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_call_nodes(child, calls);
+    }
+}
+
+fn collect_routes(
+    block: Node<'_>,
+    context: &UniversalDetectionContext<'_, '_>,
+    source_file: &str,
+    prefix: String,
+    namespaces: Vec<String>,
+    call_occurrences: &std::collections::BTreeSet<(u64, &str)>,
+    routes: &mut Vec<RawFrameworkFact>,
+) {
+    let nested_calls = direct_body_calls(block);
+    for call in nested_calls {
+        let Some(method_node) = call.child_by_field_name("method") else {
+            continue;
+        };
+        let Some(method) = method_name(call, context.source) else {
+            continue;
+        };
+        if !call_occurrences.contains(&(method_node.start_byte() as u64, method.as_str())) {
+            continue;
+        }
+        if matches!(method.as_str(), "namespace" | "scope")
+            && let Some(nested_block) = call.child_by_field_name("block")
+            && let Some((nested_prefix, nested_namespaces)) =
+                route_scope_arguments(call, context.source, &method, &prefix, &namespaces)
+        {
+            collect_routes(
+                nested_block,
+                context,
+                source_file,
+                nested_prefix,
+                nested_namespaces,
+                call_occurrences,
+                routes,
+            );
+            continue;
+        }
+        if !matches!(
+            method.as_str(),
+            "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "match"
+        ) {
+            continue;
+        }
+        let Some((raw_path, handler, operations)) = route_arguments(call, context.source, &method)
+        else {
+            continue;
+        };
         let normalized_path = if prefix.is_empty() {
             normalize_route_path(&raw_path)
         } else {
             join_route_path(&prefix, &raw_path)
         };
-        let operations = if operation == "match" {
-            Some(rails_via(suffix))
-                .filter(|methods| !methods.is_empty())
-                .unwrap_or_else(|| vec!["ANY".to_owned()])
-        } else {
-            vec![operation.to_ascii_uppercase()]
+        let handler_reference = rails_handler(&handler, &namespaces);
+        let occurrence = context.evidence.occurrences.iter().find(|occurrence| {
+            occurrence.role == SemanticRole::Call
+                && occurrence.range.start_byte == method_node.start_byte() as u64
+                && occurrence.spelling == method
+        });
+        let Some(occurrence) = occurrence else {
+            continue;
         };
+        let anchor = evidence_anchor(&occurrence.range);
         for operation in operations {
-            facts.push(RawFrameworkFact::Route(RawRouteFact {
+            routes.push(RawFrameworkFact::Route(RawRouteFact {
                 framework: "rails".to_owned(),
                 operation,
                 raw_path: raw_path.clone(),
                 normalized_path: normalized_path.clone(),
-                declaring_scope: path.to_string_lossy().replace('\\', "/"),
-                anchor: line_anchor(path, source, offset, line),
-                handler_reference: handler.clone(),
+                declaring_scope: source_file.to_owned(),
+                anchor: anchor.clone(),
+                handler_reference: handler_reference.clone(),
                 middleware_references: Vec::new(),
+                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("rails-routes-dsl".to_owned()),
-                detail: Map::new(),
+                detail: Map::from_iter([(
+                    "frameworkPack".to_owned(),
+                    serde_json::Value::String("rails-ruby".to_owned()),
+                )]),
             }));
         }
-        let do_count = line.matches(" do").count();
-        block_depth = block_depth.saturating_add(do_count);
-        offset = offset.saturating_add(line.len());
     }
-    facts
 }
 
-fn parse_route_line(line: &str) -> Option<(&str, String, String, &str)> {
-    let line = line.trim();
-    let split = line.find(char::is_whitespace)?;
-    let operation = &line[..split];
-    if !matches!(
-        operation,
-        "get" | "post" | "put" | "patch" | "delete" | "options" | "head" | "match"
-    ) {
-        return None;
-    }
-    let (raw_path, rest) = quoted_prefix(line[split..].trim_start())?;
-    let rest = rest.trim_start();
-    let rest = if let Some(rest) = rest.strip_prefix(',') {
-        rest.trim_start().strip_prefix("to:")?.trim_start()
-    } else {
-        rest.strip_prefix("=>")?.trim_start()
-    };
-    let (handler, suffix) = quoted_prefix(rest)?;
-    Some((operation, raw_path, handler, suffix))
-}
-
-fn quoted_prefix(value: &str) -> Option<(String, &str)> {
-    let quote = value.as_bytes().first().copied()?;
-    if !matches!(quote, b'\'' | b'"') {
-        return None;
-    }
-    let end = value.as_bytes()[1..]
-        .iter()
-        .position(|byte| *byte == quote)?
-        + 1;
-    Some((value[1..end].to_owned(), &value[end + 1..]))
-}
-
-fn rails_via(suffix: &str) -> Vec<String> {
-    let Some((_, value)) = suffix.split_once("via:") else {
+fn direct_body_calls<'tree>(block: Node<'tree>) -> Vec<Node<'tree>> {
+    let Some(body) = block.child_by_field_name("body") else {
         return Vec::new();
     };
-    value
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .split(',')
-        .map(|method| {
-            method
-                .trim()
-                .trim_start_matches(':')
-                .trim_matches(['\'', '"'])
-                .to_ascii_uppercase()
-        })
-        .filter(|method| !method.is_empty())
+    let mut cursor = body.walk();
+    body.children(&mut cursor)
+        .filter(Node::is_named)
+        .filter(|node| node.kind() == "call")
         .collect()
+}
+
+fn route_scope_arguments(
+    call: Node<'_>,
+    source: &[u8],
+    method: &str,
+    prefix: &str,
+    namespaces: &[String],
+) -> Option<(String, Vec<String>)> {
+    let argument = first_positional_argument(call)?;
+    let value = literal_node(argument, source)?;
+    let mut next_prefix = prefix.to_owned();
+    let mut next_namespaces = namespaces.to_vec();
+    if !next_prefix.is_empty() {
+        next_prefix.push('/');
+    }
+    if method == "namespace" {
+        next_prefix.push_str(&value);
+        next_namespaces.push(camelize(&value));
+    } else {
+        next_prefix.push_str(value.trim_matches('/'));
+    }
+    Some((next_prefix, next_namespaces))
+}
+
+fn route_arguments(
+    call: Node<'_>,
+    source: &[u8],
+    method: &str,
+) -> Option<(String, String, Vec<String>)> {
+    let arguments = call.child_by_field_name("arguments")?;
+    let mut cursor = arguments.walk();
+    let values = arguments
+        .children(&mut cursor)
+        .filter(Node::is_named)
+        .collect::<Vec<_>>();
+    let path = values
+        .iter()
+        .find(|node| node.kind() != "pair")
+        .and_then(|node| literal_node(*node, source))?;
+    let handler = values
+        .iter()
+        .find_map(|node| {
+            (*node).child_by_field_name("key").and_then(|key| {
+                (key_text(key, source).as_deref() == Some("to"))
+                    .then(|| (*node).child_by_field_name("value"))
+                    .flatten()
+                    .and_then(|value| literal_node(value, source))
+            })
+        })
+        .or_else(|| {
+            values
+                .iter()
+                .filter(|node| node.kind() != "pair")
+                .nth(1)
+                .and_then(|node| literal_node(*node, source))
+        })?;
+    let operations = if method == "match" {
+        values
+            .iter()
+            .find_map(|node| {
+                (*node).child_by_field_name("key").and_then(|key| {
+                    (key_text(key, source).as_deref() == Some("via"))
+                        .then(|| (*node).child_by_field_name("value"))
+                        .flatten()
+                })
+            })
+            .map(|node| literal_array(node, source))
+            .filter(|operations| !operations.is_empty())
+            .unwrap_or_else(|| vec!["ANY".to_owned()])
+    } else {
+        vec![method.to_ascii_uppercase()]
+    };
+    Some((path, handler, operations))
+}
+
+fn first_positional_argument(call: Node<'_>) -> Option<Node<'_>> {
+    let arguments = call.child_by_field_name("arguments")?;
+    let mut cursor = arguments.walk();
+    arguments
+        .children(&mut cursor)
+        .filter(Node::is_named)
+        .find(|node| node.kind() != "pair")
+}
+
+fn literal_node(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let raw = source.get(node.start_byte()..node.end_byte())?;
+    let raw = std::str::from_utf8(raw).ok()?.trim();
+    if node.kind() == "simple_symbol" {
+        return raw.strip_prefix(':').map(str::to_owned);
+    }
+    literal(raw)
+}
+
+fn literal_array(node: Node<'_>, source: &[u8]) -> Vec<String> {
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(Node::is_named)
+        .filter_map(|child| literal_node(child, source))
+        .map(|value| value.to_ascii_uppercase())
+        .collect()
+}
+
+fn key_text(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let raw = source.get(node.start_byte()..node.end_byte())?;
+    let raw = std::str::from_utf8(raw).ok()?.trim();
+    Some(
+        raw.trim_start_matches(':')
+            .trim_matches(['"', '\''])
+            .to_owned(),
+    )
+}
+
+fn method_name(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let method = node.child_by_field_name("method")?;
+    let value = source.get(method.start_byte()..method.end_byte())?;
+    std::str::from_utf8(value).ok().map(str::to_owned)
+}
+
+fn receiver_text(node: Node<'_>, source: &[u8]) -> Option<String> {
+    let receiver = node.child_by_field_name("receiver")?;
+    let value = source.get(receiver.start_byte()..receiver.end_byte())?;
+    std::str::from_utf8(value).ok().map(str::to_owned)
+}
+
+fn evidence_anchor(range: &crate::EvidenceRange) -> RawFrameworkAnchor {
+    RawFrameworkAnchor {
+        source_file: range.source_file.clone(),
+        start_byte: range.start_byte,
+        end_byte: range.end_byte,
+        start_line: range.start_line,
+        start_column: range.start_column,
+        end_line: range.end_line,
+        end_column: range.end_column,
+    }
+}
+
+fn route_key(fact: &RawFrameworkFact) -> (String, String, u64, String) {
+    let RawFrameworkFact::Route(route) = fact else {
+        return (String::new(), String::new(), 0, String::new());
+    };
+    (
+        route.anchor.source_file.clone(),
+        route.normalized_path.clone(),
+        route.anchor.start_byte,
+        route.operation.clone(),
+    )
 }
 
 fn rails_handler(value: &str, namespaces: &[String]) -> String {
@@ -218,13 +354,4 @@ fn camelize(value: &str) -> String {
             })
         })
         .collect()
-}
-
-fn is_rails_routes_path(path: &Path) -> bool {
-    path.components()
-        .rev()
-        .take(2)
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        == ["routes.rb", "config"]
 }

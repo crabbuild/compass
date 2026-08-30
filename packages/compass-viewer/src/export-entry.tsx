@@ -5,7 +5,12 @@ import {
 } from "./contracts/graph";
 import { WorkbenchModelSchema } from "./contracts/workbench";
 import { CompassGraph } from "./graph/CompassGraph";
-import { VisualizationWorkbench, dispatchOpenSource } from "./workbench/VisualizationWorkbench";
+import { VisualizationWorkbench } from "./workbench/VisualizationWorkbench";
+import {
+  openExportSource,
+  SourceNavigationSchema,
+  type SourceNavigation
+} from "./sourceLinks";
 import "./theme.css";
 
 function mount() {
@@ -15,13 +20,18 @@ function mount() {
     throw new Error("Compass viewer root or model is missing");
   }
   const untrusted = JSON.parse(modelElement.textContent ?? "");
+  const sourceNavigation = parseSourceNavigation();
   const root = createRoot(rootElement);
   const workbench = WorkbenchModelSchema.safeParse(untrusted);
   if (workbench.success) {
     root.render(
       <VisualizationWorkbench
         workbench={workbench.data}
-        host={{ openSource: dispatchOpenSource }}
+        host={{
+          openSource(source, revision) {
+            openStandaloneSource(sourceNavigation, source, revision);
+          }
+        }}
       />
     );
     return;
@@ -45,10 +55,8 @@ function mount() {
           render();
         } : undefined}
         host={{
-          openSource(source) {
-            window.dispatchEvent(new CustomEvent("compass:open-source", {
-              detail: source
-            }));
+          openSource(source, revision) {
+            openStandaloneSource(sourceNavigation, source, revision);
           },
           openCommunity(communityId) {
             if (communityLoading !== null) return;
@@ -87,6 +95,37 @@ function mount() {
     );
   };
   render();
+}
+
+function parseSourceNavigation(): SourceNavigation | undefined {
+  const element = document.getElementById("compass-source-navigation");
+  if (!element?.textContent) return undefined;
+  const parsed = SourceNavigationSchema.safeParse(JSON.parse(element.textContent));
+  return parsed.success ? parsed.data : undefined;
+}
+
+function openStandaloneSource(
+  navigation: SourceNavigation | undefined,
+  source: Parameters<typeof openExportSource>[1],
+  revision?: string
+): void {
+  const result = openExportSource(navigation, source, revision);
+  if (result.kind === "unavailable") showSourceUnavailable(source.file);
+}
+
+function showSourceUnavailable(file: string): void {
+  const existing = document.getElementById("compass-source-notice");
+  const notice = existing ?? document.createElement("div");
+  notice.id = "compass-source-notice";
+  notice.className = "compass-source-notice";
+  notice.setAttribute("role", "status");
+  notice.setAttribute("aria-live", "polite");
+  notice.textContent = [
+    "Source link unavailable.",
+    `The exported revision for ${file} is not published by the configured remote.`,
+    "Open this graph in VS Code to navigate to the local source."
+  ].join(" ");
+  if (!existing) document.body.append(notice);
 }
 
 if (document.readyState === "loading") {

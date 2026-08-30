@@ -689,6 +689,9 @@ pub(crate) fn node_values(
         );
         output.insert("end_byte".into(), end_byte.map_or(Value::Null, Value::from));
         output.insert("signature".into(), Value::String(signature.clone()));
+        if let Some(document) = document_value(node) {
+            output.insert("document".into(), document);
+        }
         if let Some(counts) = options.member_counts {
             output.insert("is_community".into(), Value::Bool(true));
             output.insert(
@@ -736,6 +739,171 @@ fn source_anchor_unsigned(node: &NodeRecord, legacy_key: &str, v1_key: &str) -> 
             })
             .and_then(|value| value.as_u64())
     })
+}
+
+fn document_value(node: &NodeRecord) -> Option<Value> {
+    const DOCUMENT_VIEWER_TEXT_LIMIT: usize = 4_096;
+    let is_document = node
+        .property("file_type")
+        .and_then(|value| value.as_str().map(|value| value == "document"))
+        .unwrap_or(false)
+        || node.document_role().is_some();
+    if !is_document {
+        return None;
+    }
+    let direct_string = |key: &str| {
+        node.property(key)
+            .and_then(|value| value.as_str().map(str::to_owned))
+    };
+    let kind = node
+        .document_role()
+        .map(str::to_owned)
+        .unwrap_or_else(|| node.string("symbol_kind"));
+    let role = if kind == "document" { "root" } else { "block" };
+    let mut document = Map::new();
+    document.insert("role".into(), Value::String(role.to_owned()));
+    if !kind.is_empty() {
+        document.insert("kind".into(), Value::String(kind));
+    }
+    if let Some(value) = direct_string("document_format").map(Value::String) {
+        document.insert("format".to_owned(), value);
+    }
+    for (target, source) in [
+        ("visualCoverage", "document_visual_coverage"),
+        ("ocrMode", "document_ocr_mode"),
+    ] {
+        if let Some(value) = node
+            .property(source)
+            .and_then(|value| bounded_document_json(&value, 0))
+        {
+            document.insert(target.to_owned(), value);
+        }
+    }
+    if let Some(text) = direct_string("document_text").or_else(|| direct_string("document_content"))
+    {
+        document.insert(
+            "text".to_owned(),
+            Value::String(sanitize_metadata(&text, DOCUMENT_VIEWER_TEXT_LIMIT)),
+        );
+    }
+    if let Some(value) = node
+        .property("document_complete")
+        .and_then(|value| bounded_document_json(&value, 0))
+    {
+        document.insert("complete".into(), value);
+    }
+    if let Some(value) = node
+        .property("block_index")
+        .and_then(|value| bounded_document_json(&value, 0))
+    {
+        document.insert("ordinal".into(), value);
+    }
+    for (target, source) in [
+        ("origin", "document_origin"),
+        ("locator", "document_locator"),
+        ("ocrProfile", "document_ocr_profile"),
+    ] {
+        if let Some(value) = node
+            .property(source)
+            .and_then(|value| bounded_document_json(&value, 0))
+        {
+            document.insert(target.to_owned(), value);
+        }
+    }
+    if let Some(value) = node
+        .property("document_previews")
+        .and_then(|value| bounded_document_previews(&value))
+    {
+        document.insert("previews".to_owned(), value);
+    }
+    Some(Value::Object(document))
+}
+
+fn bounded_document_previews(value: &Value) -> Option<Value> {
+    const MAX_PREVIEWS: usize = 256;
+    const MAX_PREVIEW_BYTES: usize = 8 * 1024 * 1024;
+    let bounded = match value {
+        Value::Array(values) => Value::Array(
+            values
+                .iter()
+                .take(MAX_PREVIEWS)
+                .filter_map(|value| bounded_document_preview(value, 0))
+                .collect(),
+        ),
+        _ => return None,
+    };
+    let encoded = serde_json::to_vec(&bounded).ok()?;
+    (encoded.len() <= MAX_PREVIEW_BYTES).then_some(bounded)
+}
+
+fn bounded_document_preview(value: &Value, depth: usize) -> Option<Value> {
+    const MAX_DEPTH: usize = 6;
+    const MAX_OBJECT_ENTRIES: usize = 32;
+    const MAX_ARRAY_ENTRIES: usize = 256;
+    const MAX_STRING_CHARS: usize = 512 * 1024;
+
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match value {
+        Value::Null => None,
+        Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::String(value) => Some(Value::String(sanitize_metadata(value, MAX_STRING_CHARS))),
+        Value::Array(values) => Some(Value::Array(
+            values
+                .iter()
+                .take(MAX_ARRAY_ENTRIES)
+                .filter_map(|value| bounded_document_preview(value, depth + 1))
+                .collect(),
+        )),
+        Value::Object(values) => Some(Value::Object(
+            values
+                .iter()
+                .take(MAX_OBJECT_ENTRIES)
+                .filter_map(|(key, value)| {
+                    Some((
+                        sanitize_metadata(key, 128),
+                        bounded_document_preview(value, depth + 1)?,
+                    ))
+                })
+                .collect(),
+        )),
+    }
+}
+
+fn bounded_document_json(value: &Value, depth: usize) -> Option<Value> {
+    const MAX_DEPTH: usize = 5;
+    const MAX_OBJECT_ENTRIES: usize = 128;
+    const MAX_ARRAY_ENTRIES: usize = 512;
+    const MAX_STRING_CHARS: usize = 16_384;
+
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    match value {
+        Value::Null => None,
+        Value::Bool(_) | Value::Number(_) => Some(value.clone()),
+        Value::String(value) => Some(Value::String(sanitize_metadata(value, MAX_STRING_CHARS))),
+        Value::Array(values) => Some(Value::Array(
+            values
+                .iter()
+                .take(MAX_ARRAY_ENTRIES)
+                .filter_map(|value| bounded_document_json(value, depth + 1))
+                .collect(),
+        )),
+        Value::Object(values) => Some(Value::Object(
+            values
+                .iter()
+                .take(MAX_OBJECT_ENTRIES)
+                .filter_map(|(key, value)| {
+                    Some((
+                        sanitize_metadata(key, 128),
+                        bounded_document_json(value, depth + 1)?,
+                    ))
+                })
+                .collect(),
+        )),
+    }
 }
 
 #[allow(dead_code)]
@@ -1075,7 +1243,22 @@ fn degrees(document: &GraphDocument) -> HashMap<&str, usize> {
         .iter()
         .map(|node| (node.id.as_str(), 0))
         .collect::<HashMap<_, _>>();
+    let positions = document
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<HashMap<_, _>>();
     for edge in &document.links {
+        if edge.relation() == "contains"
+            && (positions
+                .get(edge.source.as_str())
+                .is_some_and(|node| node.is_table_navigation_node())
+                || positions
+                    .get(edge.target.as_str())
+                    .is_some_and(|node| node.is_table_navigation_node()))
+        {
+            continue;
+        }
         *degrees.entry(edge.source.as_str()).or_default() += 1;
         *degrees.entry(edge.target.as_str()).or_default() += 1;
     }
@@ -2533,6 +2716,29 @@ mod tests {
         ] {
             assert!(rendered.html.contains(marker), "missing {marker}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn document_value_recovers_markdown_role_from_graph_v1_identity() -> Result<(), Box<dyn Error>>
+    {
+        let cell: NodeRecord = serde_json::from_value(json!({
+            "id": "cell",
+            "kind": "resource",
+            "name": "Area: Graph",
+            "qualifiedName": "Guide::pipe_table#1::pipe_table_row#graph-1::pipe_table_cell#1",
+            "details": {
+                "type": "resource",
+                "data": {
+                    "resourceKind": "document",
+                    "uri": "docs/guide.md#L4C1-L4C8",
+                    "mediaType": "text/markdown"
+                }
+            }
+        }))?;
+        let value = document_value(&cell).ok_or("graph-v1 document omitted")?;
+        assert_eq!(value["role"], json!("block"));
+        assert_eq!(value["kind"], json!("pipe_table_cell"));
         Ok(())
     }
 

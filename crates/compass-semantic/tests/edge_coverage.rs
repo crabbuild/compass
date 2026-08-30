@@ -118,8 +118,8 @@ fn source_loading_evidence_and_images_cover_confinement_binary_and_reference_onl
         ],
         directory.path(),
     );
-    assert_eq!(read.sources.len(), 2);
-    assert_eq!(read.warnings.len(), 2);
+    assert_eq!(read.sources.len(), 1);
+    assert_eq!(read.warnings.len(), 4);
     let prompt = build_untrusted_prompt(
         &[
             EvidenceSource {

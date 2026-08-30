@@ -7,6 +7,7 @@ yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2024-0436", reason = "Candle's GEMM stack uses paste only as a compile-time proc macro; it contributes no runtime code, and Compass will remove this exception when Candle migrates to pastey" },
   { id = "RUSTSEC-2021-0127", reason = "prolly-map 0.5.0 uses serde_cbor only to persist the versioned history map; this is an unmaintained advisory with no safe upgrade, and Compass will remove the exception when prolly-map migrates to a maintained CBOR implementation" },
+  { id = "RUSTSEC-2026-0192", reason = "oar-ocr 0.9.2 enables imageproc's text feature, which transitively uses unmaintained ttf-parser; no safe upgrade exists, Compass does not parse fonts through its OCR API, and this exception will be removed when OAR disables that feature or imageproc migrates" },
 ]
 
 [licenses]
@@ -26,9 +27,11 @@ allow = [
   "Zlib",
 ]
 # prolly-map 0.5.0 uses this exact xxhash implementation for content-addressed
-# history nodes. BSL-1.0 is OSI-approved; keep the exception crate/version scoped
-# instead of allowing the license for every future dependency.
+# history nodes, while oar-ocr-core uses clipper2-rust for text-region geometry.
+# BSL-1.0 is OSI-approved; keep both exceptions crate/version scoped instead of
+# allowing the license for every future dependency.
 exceptions = [
+  { allow = ["BSL-1.0"], crate = "clipper2-rust@1.1.0" },
   { allow = ["BSL-1.0"], crate = "xxhash-rust@0.8.18" },
   # C-011 accepted the exact SurrealDB 3.2.4 artifact profiles under the
   # retained tagged BUSL-1.1 license and notice conditions. Keep every

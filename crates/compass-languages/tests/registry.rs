@@ -5,8 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use compass_languages::{
-    AdapterRegistry, LanguageCapability, Registry, UNIVERSAL_EVIDENCE_SCHEMA,
-    UniversalAdapterProfile, file_stem, make_id, normalize_id,
+    LanguageCapability, Registry, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidenceQualification,
+    UniversalEvidenceRegistry, file_stem, make_id, normalize_id,
 };
 
 #[test]
@@ -114,13 +114,16 @@ fn ids_match_python_unicode_casefold_contract() {
 }
 
 #[test]
-fn rust_is_a_version_fifteen_hard_cut_candidate_descriptor() {
-    let rust = AdapterRegistry::universal_profile("rust").expect("Rust universal profile");
-    assert_eq!(rust.id, "compass.rust");
-    assert_eq!(rust.language, "rust");
-    assert_eq!(rust.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
-    assert_eq!(rust.version, 15);
-    assert_eq!(rust.profile, UniversalAdapterProfile::UniversalCandidate);
+fn rust_pipeline_is_version_one_and_qualified() {
+    let rust = UniversalEvidenceRegistry::pipeline("rust").expect("Rust universal pipeline");
+    assert_eq!(rust.producer.id, "compass.rust");
+    assert_eq!(rust.producer.language, "rust");
+    assert_eq!(rust.producer.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
+    assert_eq!(rust.producer.version, 1);
+    assert_eq!(
+        rust.qualification,
+        UniversalEvidenceQualification::Qualified
+    );
     for capability in [
         LanguageCapability::Namespaces,
         LanguageCapability::Traits,
@@ -133,20 +136,23 @@ fn rust_is_a_version_fifteen_hard_cut_candidate_descriptor() {
         LanguageCapability::ExternalReferences,
     ] {
         assert!(
-            rust.capabilities.contains(&capability),
+            rust.producer.capabilities.contains(&capability),
             "missing {capability:?}: {rust:?}"
         );
     }
 
     let typescript =
-        AdapterRegistry::universal_profile("typescript").expect("TypeScript universal profile");
-    assert_eq!(typescript.id, "compass.typescript.candidate");
-    assert_eq!(typescript.language, "typescript");
-    assert_eq!(typescript.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
-    assert_eq!(typescript.version, 5);
+        UniversalEvidenceRegistry::pipeline("typescript").expect("TypeScript universal pipeline");
+    assert_eq!(typescript.producer.id, "compass.typescript");
+    assert_eq!(typescript.producer.language, "typescript");
     assert_eq!(
-        typescript.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        typescript.producer.evidence_schema,
+        UNIVERSAL_EVIDENCE_SCHEMA
+    );
+    assert_eq!(typescript.producer.version, 1);
+    assert_eq!(
+        typescript.qualification,
+        UniversalEvidenceQualification::Qualified
     );
     for capability in [
         LanguageCapability::Namespaces,
@@ -160,30 +166,33 @@ fn rust_is_a_version_fifteen_hard_cut_candidate_descriptor() {
         LanguageCapability::ExternalReferences,
     ] {
         assert!(
-            typescript.capabilities.contains(&capability),
+            typescript.producer.capabilities.contains(&capability),
             "missing {capability:?}: {typescript:?}"
         );
     }
 
     let javascript =
-        AdapterRegistry::universal_profile("javascript").expect("JavaScript universal profile");
-    assert_eq!(javascript.id, "compass.javascript.candidate");
-    assert_eq!(javascript.language, "javascript");
-    assert_eq!(javascript.version, 5);
+        UniversalEvidenceRegistry::pipeline("javascript").expect("JavaScript universal pipeline");
+    assert_eq!(javascript.producer.id, "compass.javascript");
+    assert_eq!(javascript.producer.language, "javascript");
+    assert_eq!(javascript.producer.version, 1);
     assert_eq!(
-        javascript.profile,
-        UniversalAdapterProfile::UniversalCandidate
+        javascript.qualification,
+        UniversalEvidenceQualification::Qualified
     );
 }
 
 #[test]
-fn java_is_a_version_three_hard_cut_candidate_descriptor() {
-    let java = AdapterRegistry::universal_profile("java").expect("Java universal profile");
-    assert_eq!(java.id, "compass.java");
-    assert_eq!(java.language, "java");
-    assert_eq!(java.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
-    assert_eq!(java.version, 3);
-    assert_eq!(java.profile, UniversalAdapterProfile::UniversalCandidate);
+fn java_pipeline_is_version_one_and_qualified() {
+    let java = UniversalEvidenceRegistry::pipeline("java").expect("Java universal pipeline");
+    assert_eq!(java.producer.id, "compass.java");
+    assert_eq!(java.producer.language, "java");
+    assert_eq!(java.producer.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
+    assert_eq!(java.producer.version, 1);
+    assert_eq!(
+        java.qualification,
+        UniversalEvidenceQualification::Qualified
+    );
     for capability in [
         LanguageCapability::Namespaces,
         LanguageCapability::Imports,
@@ -196,56 +205,77 @@ fn java_is_a_version_three_hard_cut_candidate_descriptor() {
         LanguageCapability::ExternalReferences,
     ] {
         assert!(
-            java.capabilities.contains(&capability),
+            java.producer.capabilities.contains(&capability),
             "missing {capability:?}: {java:?}"
         );
     }
 }
 
 #[test]
-fn only_hard_cut_languages_expose_universal_profiles() {
+fn only_hard_cut_languages_expose_pipelines() {
     let python = Registry::resolve(Path::new("src/example.py")).expect("python spec");
     let go = Registry::resolve(Path::new("src/example.go")).expect("go spec");
     let java = Registry::resolve(Path::new("src/Example.java")).expect("java spec");
+    let kotlin = Registry::resolve(Path::new("src/Example.kt")).expect("kotlin spec");
+    let ruby = Registry::resolve(Path::new("src/example.rb")).expect("ruby spec");
     let rust = Registry::resolve(Path::new("src/example.rs")).expect("rust spec");
     let typescript = Registry::resolve(Path::new("src/example.ts")).expect("typescript spec");
     let tsx = Registry::resolve(Path::new("src/example.tsx")).expect("tsx spec");
     let javascript = Registry::resolve(Path::new("src/example.js")).expect("javascript spec");
 
     assert_eq!(
-        Registry::universal_profile_for_spec(python).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(python)
+            .map(|pipeline| pipeline.producer.language),
         Some("python")
     );
     assert_eq!(
-        Registry::universal_profile_for_spec(go).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(go)
+            .map(|pipeline| pipeline.producer.language),
         Some("go")
     );
     assert_eq!(
-        Registry::universal_profile_for_spec(java).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(java)
+            .map(|pipeline| pipeline.producer.language),
         Some("java")
     );
     assert_eq!(
-        Registry::universal_profile_for_spec(rust).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(kotlin)
+            .map(|pipeline| pipeline.producer.language),
+        Some("kotlin")
+    );
+    assert_eq!(
+        Registry::universal_evidence_pipeline_for_spec(ruby)
+            .map(|pipeline| pipeline.producer.language),
+        Some("ruby")
+    );
+    assert_eq!(
+        Registry::universal_evidence_pipeline_for_spec(rust)
+            .map(|pipeline| pipeline.producer.language),
         Some("rust")
     );
     assert_eq!(
-        Registry::universal_profile_for_spec(typescript).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(typescript)
+            .map(|pipeline| pipeline.producer.language),
         Some("typescript")
     );
     assert_eq!(
-        Registry::universal_profile_for_spec(tsx).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(tsx)
+            .map(|pipeline| pipeline.producer.language),
         Some("typescript")
     );
     assert_eq!(
-        Registry::universal_profile_for_spec(javascript).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline_for_spec(javascript)
+            .map(|pipeline| pipeline.producer.language),
         Some("javascript")
     );
     assert_eq!(
-        Registry::universal_adapter(Path::new("src/example.py")).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline(Path::new("src/example.py"))
+            .map(|pipeline| pipeline.producer.language),
         Some("python")
     );
     assert_eq!(
-        Registry::universal_adapter(Path::new("src/example.tsx")).map(|profile| profile.language),
+        Registry::universal_evidence_pipeline(Path::new("src/example.tsx"))
+            .map(|pipeline| pipeline.producer.language),
         Some("typescript")
     );
 }

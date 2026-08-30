@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Buffer } from "node:buffer";
 import * as vscode from "vscode";
-import { CallflowViewModelSchema } from "@compass/viewer/contracts/callflow";
-import type { ArchitectureEvidence, ArchitectureScope } from "@compass/viewer/contracts/architecture";
+import { ArchitectureViewModelSchema } from "@compass/viewer/contracts/architecture";
+import type {
+  ArchitectureEvidence,
+  ArchitectureLens,
+  ArchitectureScope
+} from "@compass/viewer/contracts/architecture";
 import type { RepositorySession } from "../workspace/repositorySession";
 import { ArchitectureToHostMessageSchema } from "../transport/architectureMessages";
 import { ArchitectureIndex } from "./architectureIndex";
@@ -36,6 +40,7 @@ export class ArchitecturePanelController {
   private index: ArchitectureIndex | undefined;
   private scope: ArchitectureScope = "production";
   private evidence: ArchitectureEvidence = "all";
+  private lens: ArchitectureLens = "architecture";
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -72,23 +77,25 @@ export class ArchitecturePanelController {
     if (message.type === "setArchitectureFilters") {
       this.scope = message.scope;
       this.evidence = message.evidence;
+      this.lens = message.lens;
       await this.postOverview(message.requestId);
       return;
     }
     if (!this.index || message.generation !== this.generation) return;
     try {
-      if (message.type === "requestSection") {
-        const model = this.index.sectionPage({
-          sectionId: message.sectionId,
+      if (message.type === "requestGroup") {
+        const model = this.index.groupPage({
+          groupId: message.groupId,
           kind: message.kind,
           page: message.page,
           pageSize: message.pageSize,
           query: message.query,
           scope: message.scope,
-          evidence: message.evidence
+          evidence: message.evidence,
+          lens: message.lens
         });
         await this.panel.webview.postMessage({
-          type: "architectureSectionPage",
+          type: "architectureGroupPage",
           requestId: message.requestId,
           repositoryId: this.session.id,
           generation: this.generation,
@@ -101,7 +108,8 @@ export class ArchitecturePanelController {
           pageSize: message.pageSize,
           query: message.query,
           scope: message.scope,
-          evidence: message.evidence
+          evidence: message.evidence,
+          lens: message.lens
         });
         await this.panel.webview.postMessage({
           type: "architectureRoutePage",
@@ -116,7 +124,8 @@ export class ArchitecturePanelController {
           page: message.page,
           pageSize: message.pageSize,
           scope: message.scope,
-          evidence: message.evidence
+          evidence: message.evidence,
+          lens: message.lens
         });
         await this.panel.webview.postMessage({
           type: "architectureSearchResults",
@@ -147,6 +156,7 @@ export class ArchitecturePanelController {
     this.index = undefined;
     this.scope = "production";
     this.evidence = "all";
+    this.lens = "architecture";
     const started = Date.now();
     try {
       await this.postLoading("exporting", "Deriving complete architecture evidence");
@@ -162,18 +172,18 @@ export class ArchitecturePanelController {
       }
       const payloadBytes = Buffer.byteLength(result.stdout, "utf8");
       await this.postLoading("validating", `Validating ${formatBytes(payloadBytes)} export`);
-      const model = CallflowViewModelSchema.parse(JSON.parse(result.stdout));
+      const model = ArchitectureViewModelSchema.parse(JSON.parse(result.stdout));
       if (!this.isCurrent(generation, controller)) return;
       await this.postLoading(
         "indexing",
-        `Indexing ${model.statistics.edges.toLocaleString()} calls locally`
+        `Indexing ${model.statistics.relationships.toLocaleString()} typed relationships locally`
       );
       this.index = new ArchitectureIndex(model);
       await this.postLoading("mapping", "Laying out subsystem routes");
       await this.postOverview(randomUUID());
       this.output.appendLine(
         `[architecture] Loaded ${sessionLabel(this.session.root)}: `
-        + `${model.statistics.nodes} symbols, ${model.statistics.edges} calls, `
+        + `${model.statistics.nodes} symbols, ${model.statistics.relationships} relationships, `
         + `${formatBytes(payloadBytes)} in ${Date.now() - started} ms`
       );
     } catch (error) {
@@ -192,7 +202,7 @@ export class ArchitecturePanelController {
       requestId,
       repositoryId: this.session.id,
       generation: this.generation,
-      model: this.index.overview(this.scope, this.evidence)
+      model: this.index.overview(this.scope, this.evidence, this.lens)
     });
   }
 

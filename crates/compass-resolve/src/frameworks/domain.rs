@@ -1,4 +1,7 @@
+use std::path::{Path, PathBuf};
+
 use ahash::AHashSet as HashSet;
+use compass_files::FileSetMatcher;
 
 use compass_languages::{
     Extraction, FrameworkLimitError, FrameworkLimits, RawDomainFact, RawEdgeRecord,
@@ -39,17 +42,145 @@ pub(super) fn resolve_domains_with_targets(
             RawFrameworkFact::Domain(fact)
                 if !matches!(fact.kind.as_str(), "router_mount" | "router_middleware") =>
             {
-                Some(fact)
+                Some(fact.clone())
             }
-            RawFrameworkFact::Route(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Role(role) => Some(role_as_domain(role)),
+            RawFrameworkFact::Route(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Relation(_) => None,
+            RawFrameworkFact::Configuration(configuration) => {
+                Some(configuration_as_domain(configuration))
+            }
+            RawFrameworkFact::FileSet(file_set) => Some(file_set_as_domain(file_set)),
             RawFrameworkFact::Domain(_) => None,
         })
         .collect::<Vec<_>>();
     limits.check_facts(facts.len())?;
+    let role_count = extraction
+        .framework_facts
+        .iter()
+        .filter(|fact| matches!(fact, RawFrameworkFact::Role(_)))
+        .count();
+    limits.check_role_facts(role_count)?;
     facts
         .into_iter()
-        .map(|fact| resolve_one(fact, targets, limits))
+        .map(|fact| resolve_one(&fact, targets, limits))
         .collect()
+}
+
+fn role_as_domain(role: &compass_languages::RawFrameworkRoleFact) -> RawDomainFact {
+    let mut detail = role.detail.clone();
+    if let Some(reference) = role.subject_reference.as_deref() {
+        detail.insert(
+            "source_reference".to_owned(),
+            Value::String(reference.to_owned()),
+        );
+    }
+    detail.insert("role".to_owned(), Value::String(role.role.clone()));
+    detail.insert("pack_id".to_owned(), Value::String(role.pack_id.clone()));
+    RawDomainFact {
+        framework: role.framework.clone(),
+        kind: "framework_role".to_owned(),
+        name: role.subject_reference.clone().unwrap_or_default(),
+        declaring_scope: role.context.clone().unwrap_or_default(),
+        anchor: role.anchor.clone(),
+        origin: role.origin,
+        detail,
+    }
+}
+
+fn configuration_as_domain(
+    configuration: &compass_languages::RawFrameworkConfigurationFact,
+) -> RawDomainFact {
+    let mut detail = configuration.detail.clone();
+    detail.insert(
+        "pack_id".to_owned(),
+        Value::String(configuration.pack_id.clone()),
+    );
+    detail.insert(
+        "config_id".to_owned(),
+        Value::String(configuration.config_id.clone()),
+    );
+    detail.insert(
+        "field".to_owned(),
+        Value::String(configuration.field.clone()),
+    );
+    detail.insert(
+        "ordinal".to_owned(),
+        Value::Number(configuration.ordinal.into()),
+    );
+    detail.insert("complete".to_owned(), Value::Bool(configuration.complete));
+    if let Some(value) = configuration.value.clone() {
+        detail.insert("value".to_owned(), value);
+    }
+    detail.insert(
+        "config_parent_name".to_owned(),
+        Value::String(configuration.config_id.clone()),
+    );
+    RawDomainFact {
+        framework: configuration.framework.clone(),
+        kind: "framework_configuration_field".to_owned(),
+        name: format!(
+            "{}::{}::{}",
+            configuration.config_id, configuration.ordinal, configuration.field
+        ),
+        declaring_scope: configuration.config_id.clone(),
+        anchor: configuration.anchor.clone(),
+        origin: configuration.origin,
+        detail,
+    }
+}
+
+fn file_set_as_domain(file_set: &compass_languages::RawFrameworkFileSetFact) -> RawDomainFact {
+    let mut detail = file_set.detail.clone();
+    detail.insert(
+        "pack_id".to_owned(),
+        Value::String(file_set.pack_id.clone()),
+    );
+    detail.insert(
+        "owner_reference".to_owned(),
+        Value::String(file_set.owner_reference.clone()),
+    );
+    detail.insert(
+        "patterns".to_owned(),
+        Value::Array(
+            file_set
+                .patterns
+                .iter()
+                .cloned()
+                .map(Value::String)
+                .collect(),
+        ),
+    );
+    if !file_set.negative_patterns.is_empty() {
+        detail.insert(
+            "negative_patterns".to_owned(),
+            Value::Array(
+                file_set
+                    .negative_patterns
+                    .iter()
+                    .cloned()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    detail.insert("eager".to_owned(), Value::Bool(file_set.eager));
+    detail.insert("lazy".to_owned(), Value::Bool(file_set.lazy));
+    detail.insert("import_mode".to_owned(), Value::Bool(file_set.import_mode));
+    detail.insert("query_mode".to_owned(), Value::Bool(file_set.query_mode));
+    if let Some(scope) = file_set.package_scope.clone() {
+        detail.insert("package_scope".to_owned(), Value::String(scope));
+    }
+    RawDomainFact {
+        framework: file_set.framework.clone(),
+        kind: "framework_file_set".to_owned(),
+        name: file_set.owner_reference.clone(),
+        declaring_scope: file_set.anchor.source_file.clone(),
+        anchor: file_set.anchor.clone(),
+        origin: file_set.origin,
+        detail,
+    }
 }
 
 pub fn resolve_and_publish_framework_domains(
@@ -62,6 +193,19 @@ pub fn resolve_and_publish_framework_domains(
 }
 
 pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[ResolvedDomainFact]) {
+    publish_resolved_domains_with_root(extraction, resolved, Path::new("."));
+}
+
+/// Publish resolved framework domains while retaining the corpus root used by
+/// source inventories. File-set resources use this root to turn portable
+/// source identities into the absolute candidates required by the bounded
+/// matcher. Keeping the root explicit prevents nested projects from being
+/// matched as if their project root were the repository root.
+pub fn publish_resolved_domains_with_root(
+    extraction: &mut Extraction,
+    resolved: &[ResolvedDomainFact],
+    root: &Path,
+) {
     if resolved.is_empty() {
         return;
     }
@@ -82,9 +226,60 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
         })
         .collect::<HashSet<_>>();
     let mut diagnostics = Vec::new();
+    let mut deferred_edges = Vec::<(String, String, String, RawDomainFact, ResolutionState)>::new();
 
     for resolved in resolved {
         let fact = &resolved.fact;
+        if matches!(fact.kind.as_str(), "ui_role" | "framework_role") {
+            let role = fact.detail.get("role").and_then(Value::as_str);
+            let valid_role = role.is_some_and(|role| {
+                if fact.kind == "ui_role" {
+                    is_ui_role(role)
+                } else {
+                    is_framework_role(role)
+                }
+            });
+            if resolved.state == ResolutionState::Exact
+                && valid_role
+                && let [candidate] = resolved.source_candidates.as_slice()
+                && let Some(node) = extraction
+                    .nodes
+                    .iter_mut()
+                    .find(|node| node.id == candidate.node_id)
+            {
+                let roles = node
+                    .attributes
+                    .entry("roles".to_owned())
+                    .or_insert_with(|| Value::Array(Vec::new()));
+                if let Some(roles) = roles.as_array_mut() {
+                    if !roles.iter().any(|value| value.as_str() == role) {
+                        roles.push(Value::String(role.unwrap_or_default().to_owned()));
+                    }
+                    roles.sort_by(|left, right| {
+                        left.as_str()
+                            .unwrap_or_default()
+                            .cmp(right.as_str().unwrap_or_default())
+                    });
+                    roles.dedup();
+                }
+            } else {
+                diagnostics.push(json!({
+                    "kind": if valid_role {
+                        if fact.kind == "ui_role" { "unresolved_ui_role" } else { "unresolved_framework_role" }
+                    } else {
+                        if fact.kind == "ui_role" { "invalid_ui_role" } else { "invalid_framework_role" }
+                    },
+                    "framework": fact.framework,
+                    "role": role,
+                    "source": fact.detail.get("source_reference"),
+                    "sourceFile": fact.anchor.source_file,
+                    "line": fact.anchor.start_line,
+                    "resolution": resolution_name(resolved.state),
+                    "candidates": resolved.source_candidates,
+                }));
+            }
+            continue;
+        }
         if fact.kind == "orm_mapping" {
             if resolved.state == ResolutionState::Exact
                 && let ([model], [table]) = (
@@ -228,6 +423,40 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
                 attributes: domain_attributes(fact, symbol_kind, resolved.state),
             });
         }
+        if fact.kind == "framework_configuration_field" {
+            deferred_edges.push((
+                configuration_parent_id(&fact.framework, &fact.declaring_scope),
+                domain_id.clone(),
+                "contains".to_owned(),
+                fact.clone(),
+                resolved.state,
+            ));
+        } else if fact.kind == "framework_file_set"
+            && let Some(source_id) = extraction.nodes.iter().find_map(|node| {
+                (node.attributes.get("symbol_kind").and_then(Value::as_str) == Some("file")
+                    && node.attributes.get("source_file").and_then(Value::as_str)
+                        == Some(fact.anchor.source_file.as_str()))
+                .then(|| node.id.clone())
+            })
+        {
+            push_edge(
+                extraction,
+                &mut edges,
+                &source_id,
+                &domain_id,
+                "contains",
+                fact,
+                resolved.state,
+            );
+            publish_file_set_imports(
+                extraction,
+                &mut edges,
+                &source_id,
+                fact,
+                root,
+                &mut diagnostics,
+            );
+        }
         if resolved.state != ResolutionState::Exact {
             diagnostics.push(json!({
                 "kind": "unresolved_domain_handler",
@@ -281,6 +510,14 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
         }
     }
 
+    for (source, target, relation, fact, state) in deferred_edges {
+        if nodes.contains(&source) && nodes.contains(&target) {
+            push_edge(
+                extraction, &mut edges, &source, &target, &relation, &fact, state,
+            );
+        }
+    }
+
     if !diagnostics.is_empty()
         && let Some(values) = extraction
             .extensions
@@ -292,6 +529,320 @@ pub fn publish_resolved_domains(extraction: &mut Extraction, resolved: &[Resolve
     }
 }
 
+/// Project a statically declared Vite file set onto the already discovered
+/// source inventory.  Matching is deliberately collection-scoped: this
+/// function never walks the filesystem and therefore cannot escape the
+/// discovery/ignore policy owned by `compass-files`.
+fn publish_file_set_imports(
+    extraction: &mut Extraction,
+    edges: &mut HashSet<(String, String, String)>,
+    owner_id: &str,
+    fact: &RawDomainFact,
+    root: &Path,
+    diagnostics: &mut Vec<Value>,
+) {
+    let Some(package_scope) = fact.detail.get("package_scope").and_then(Value::as_str) else {
+        diagnostics.push(json!({
+            "kind": "file_set_scope_missing",
+            "severity": "warning",
+            "framework": fact.framework,
+            "source": fact.anchor.source_file,
+        }));
+        return;
+    };
+    let raw_patterns = string_values(fact.detail.get("patterns"));
+    let raw_negative_patterns = string_values(fact.detail.get("negative_patterns"));
+    let (patterns, negative_patterns) = if fact.framework == "vite" {
+        normalize_vite_file_set_patterns(
+            fact,
+            root,
+            Path::new(package_scope),
+            &raw_patterns,
+            &raw_negative_patterns,
+            diagnostics,
+        )
+    } else {
+        (raw_patterns, raw_negative_patterns)
+    };
+    if patterns.is_empty() {
+        diagnostics.push(json!({
+            "kind": "file_set_patterns_empty",
+            "severity": "warning",
+            "framework": fact.framework,
+            "source": fact.anchor.source_file,
+        }));
+        return;
+    }
+    let matcher = match FileSetMatcher::new(
+        Path::new(package_scope),
+        &patterns,
+        &negative_patterns,
+        FrameworkLimits::DEFAULT.max_glob_patterns,
+    ) {
+        Ok(matcher) => matcher,
+        Err(error) => {
+            diagnostics.push(json!({
+                "kind": "file_set_match_error",
+                "severity": "error",
+                "framework": fact.framework,
+                "source": fact.anchor.source_file,
+                "message": error.to_string(),
+            }));
+            return;
+        }
+    };
+    let candidates = extraction
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            (node.attributes.get("symbol_kind").and_then(Value::as_str) == Some("file"))
+                .then(|| {
+                    node.attributes
+                        .get("source_file")
+                        .and_then(Value::as_str)
+                        .map(|source_file| {
+                            let path = Path::new(source_file);
+                            let absolute = if path.is_absolute() {
+                                path.to_path_buf()
+                            } else {
+                                root.join(path)
+                            };
+                            (node.id.clone(), absolute)
+                        })
+                })
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    let matched = match matcher.match_paths(
+        candidates.iter().map(|(_, path)| path.as_path()),
+        FrameworkLimits::DEFAULT.max_glob_matches_per_pattern,
+        FrameworkLimits::DEFAULT.max_file_set_edges,
+    ) {
+        Ok(matched) => matched,
+        Err(error) => {
+            diagnostics.push(json!({
+                "kind": "file_set_match_error",
+                "severity": "error",
+                "framework": fact.framework,
+                "source": fact.anchor.source_file,
+                "message": error.to_string(),
+            }));
+            return;
+        }
+    };
+    for target_path in matched {
+        let Some((target_id, _)) = candidates.iter().find(|(_, path)| path == &target_path) else {
+            continue;
+        };
+        push_file_set_edge(extraction, edges, owner_id, target_id, fact);
+    }
+}
+
+/// Convert Vite's importer-relative/root-relative/alias glob syntax into the
+/// package-root-relative patterns accepted by [`FileSetMatcher`]. Vite's
+/// `import.meta.glob` is evaluated from the importing module directory;
+/// applying the raw pattern to the repository root silently fans out into
+/// unrelated workspaces. This normalizer is lexical (it never walks the
+/// filesystem), bounded by the already discovered candidate inventory, and
+/// rejects escapes from the declared project scope.
+fn normalize_vite_file_set_patterns(
+    fact: &RawDomainFact,
+    root: &Path,
+    scope: &Path,
+    includes: &[String],
+    excludes: &[String],
+    diagnostics: &mut Vec<Value>,
+) -> (Vec<String>, Vec<String>) {
+    let source = Path::new(&fact.anchor.source_file);
+    let source = if source.is_absolute() {
+        source.to_path_buf()
+    } else {
+        root.join(source)
+    };
+    let base = source.parent().unwrap_or(root);
+    let aliases = fact
+        .detail
+        .get("aliases_ordered")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|rule| {
+                    let rule = rule.as_object()?;
+                    if rule.get("kind").and_then(Value::as_str) != Some("string") {
+                        return None;
+                    }
+                    Some((
+                        rule.get("find").and_then(Value::as_str)?,
+                        rule.get("replacement").and_then(Value::as_str)?,
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    if fact
+        .detail
+        .get("aliases_ordered")
+        .and_then(Value::as_array)
+        .is_some_and(|rules| {
+            rules
+                .iter()
+                .any(|rule| rule.get("kind").and_then(Value::as_str) == Some("regex"))
+        })
+    {
+        diagnostics.push(json!({
+            "kind": "file_set_alias_rule_unsupported",
+            "severity": "warning",
+            "framework": fact.framework,
+            "source": fact.anchor.source_file,
+            "aliasKind": "regex",
+        }));
+    }
+
+    let normalize = |pattern: &str| normalize_one_vite_pattern(pattern, base, scope, &aliases);
+    let mut normalized_includes = Vec::with_capacity(includes.len());
+    let mut normalized_excludes = Vec::with_capacity(excludes.len());
+    for (kind, patterns, output) in [
+        ("include", includes, &mut normalized_includes),
+        ("exclude", excludes, &mut normalized_excludes),
+    ] {
+        for pattern in patterns {
+            match normalize(pattern) {
+                Some(value) => output.push(value),
+                None => diagnostics.push(json!({
+                    "kind": "file_set_pattern_unresolved",
+                    "severity": "warning",
+                    "framework": fact.framework,
+                    "source": fact.anchor.source_file,
+                    "pattern": pattern,
+                    "patternKind": kind,
+                })),
+            }
+        }
+    }
+    normalized_includes.sort();
+    normalized_includes.dedup();
+    normalized_excludes.sort();
+    normalized_excludes.dedup();
+    (normalized_includes, normalized_excludes)
+}
+
+fn normalize_one_vite_pattern(
+    pattern: &str,
+    base: &Path,
+    scope: &Path,
+    aliases: &[(&str, &str)],
+) -> Option<String> {
+    let pattern = pattern.trim().replace('\\', "/");
+    if pattern.is_empty() {
+        return None;
+    }
+    let (pattern_base, suffix) = if let Some(pattern) = pattern.strip_prefix('/') {
+        (scope.to_path_buf(), pattern.to_owned())
+    } else if let Some((target, suffix)) = aliases.iter().find_map(|(alias, target)| {
+        let alias = alias.trim_end_matches("/*");
+        pattern
+            .strip_prefix(alias)
+            .filter(|suffix| suffix.is_empty() || suffix.starts_with('/'))
+            .map(|suffix| (*target, suffix))
+    }) {
+        let target = target.trim().replace('\\', "/");
+        let target = target
+            .trim_start_matches("./")
+            .trim_end_matches("/*")
+            .trim_end_matches('/');
+        let suffix = suffix.trim_start_matches('/');
+        (scope.to_path_buf().join(target), suffix.to_owned())
+    } else if pattern.starts_with('.') {
+        (base.to_path_buf(), pattern)
+    } else {
+        // Vite accepts bare project-relative globs in addition to its
+        // documented `./` form. Treat them as project-root-relative rather
+        // than importer-relative so the behavior remains conservative.
+        (scope.to_path_buf(), pattern)
+    };
+    let candidate = lexical_join(&pattern_base, &suffix)?;
+    let relative = candidate.strip_prefix(scope).ok()?;
+    let relative = relative.to_string_lossy().replace('\\', "/");
+    (!relative.is_empty() && !relative.split('/').any(|part| part == "..")).then_some(relative)
+}
+
+fn lexical_join(base: &Path, suffix: &str) -> Option<PathBuf> {
+    let mut result = PathBuf::new();
+    for component in base.components().chain(Path::new(suffix).components()) {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !result.pop() {
+                    return None;
+                }
+            }
+            component => result.push(component.as_os_str()),
+        }
+    }
+    Some(result)
+}
+
+fn push_file_set_edge(
+    extraction: &mut Extraction,
+    edges: &mut HashSet<(String, String, String)>,
+    source: &str,
+    target: &str,
+    fact: &RawDomainFact,
+) {
+    if !edges.insert((source.to_owned(), target.to_owned(), "imports".to_owned())) {
+        return;
+    }
+    let mut attributes = Map::from_iter([
+        ("relation".into(), Value::String("imports".to_owned())),
+        (
+            "source_file".into(),
+            Value::String(fact.anchor.source_file.clone()),
+        ),
+        (
+            "source_location".into(),
+            Value::String(format!("L{}", fact.anchor.start_line)),
+        ),
+        (
+            "source_anchor".into(),
+            serde_json::to_value(source_anchor(fact)).unwrap_or(Value::Null),
+        ),
+        (
+            "_origin".into(),
+            Value::String(fact.origin.as_str().to_owned()),
+        ),
+        (
+            "extractor".into(),
+            Value::String(format!("compass.frameworks.{}.file-set", fact.framework)),
+        ),
+        ("confidence".into(), Value::String("EXTRACTED".to_owned())),
+        ("weight".into(), Value::from(1.0)),
+    ]);
+    attributes.insert("file_set_owner".into(), Value::String(fact.name.clone()));
+    if let Some(value) = fact.detail.get("eager") {
+        attributes.insert("file_set_eager".into(), value.clone());
+    }
+    if let Some(value) = fact.detail.get("lazy") {
+        attributes.insert("file_set_lazy".into(), value.clone());
+    }
+    extraction.edges.push(RawEdgeRecord {
+        source: source.to_owned(),
+        target: target.to_owned(),
+        attributes,
+    });
+}
+
+fn string_values(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
 fn resolve_one(
     fact: &RawDomainFact,
     targets: &FrameworkTargetIndex<'_>,
@@ -299,7 +850,10 @@ fn resolve_one(
 ) -> Result<ResolvedDomainFact, FrameworkResolutionError> {
     if matches!(
         fact.kind.as_str(),
-        "framework_configuration" | "framework_plugin"
+        "framework_configuration"
+            | "framework_plugin"
+            | "framework_configuration_field"
+            | "framework_file_set"
     ) {
         return Ok(ResolvedDomainFact {
             fact: fact.clone(),
@@ -313,6 +867,38 @@ fn resolve_one(
             fact: fact.clone(),
             state: ResolutionState::Exact,
             source_candidates: Vec::new(),
+            target_candidates: Vec::new(),
+        });
+    }
+    if matches!(fact.kind.as_str(), "ui_role" | "framework_role") {
+        let reference = fact
+            .detail
+            .get("source_reference")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let (nodes, truncated) = targets.exact_node(reference, limits.max_candidates);
+        if truncated {
+            return Err(FrameworkLimitError {
+                limit: "max_candidates",
+                maximum: limits.max_candidates,
+                observed: limits.max_candidates.saturating_add(1),
+            }
+            .into());
+        }
+        let candidates = nodes
+            .into_iter()
+            .map(|node| ResolutionCandidate {
+                node_id: node.id.clone(),
+                reason: "exact framework role declaration identity".to_owned(),
+                confidence: compass_model::provenance::EvidenceConfidence::Exact,
+                score: Some(1.0),
+                anchor: node_anchor(node),
+            })
+            .collect::<Vec<_>>();
+        return Ok(ResolvedDomainFact {
+            fact: fact.clone(),
+            state: single_state(&candidates),
+            source_candidates: candidates,
             target_candidates: Vec::new(),
         });
     }
@@ -532,8 +1118,49 @@ fn domain_node_kind(kind: &str) -> Option<&'static str> {
         "bean_definition" => Some("component"),
         "framework_configuration" => Some("config_key"),
         "framework_plugin" => Some("component"),
+        "framework_configuration_field" => Some("config_key"),
+        "framework_file_set" => Some("resource"),
         _ => None,
     }
+}
+
+fn is_ui_role(role: &str) -> bool {
+    matches!(
+        role,
+        "ui_component"
+            | "hook"
+            | "client_boundary"
+            | "client_component"
+            | "server_component"
+            | "server_function"
+            | "data_loader"
+    )
+}
+
+fn is_framework_role(role: &str) -> bool {
+    matches!(
+        role,
+        "controller"
+            | "route_handler"
+            | "middleware"
+            | "service"
+            | "resolver"
+            | "consumer"
+            | "producer"
+            | "subscriber"
+            | "repository"
+            | "model"
+            | "test"
+            | "fixture"
+            | "generated"
+            | "ui_component"
+            | "hook"
+            | "client_boundary"
+            | "client_component"
+            | "server_component"
+            | "server_function"
+            | "data_loader"
+    )
 }
 
 fn domain_id(fact: &RawDomainFact) -> String {
@@ -656,16 +1283,60 @@ fn domain_attributes(
     ]);
     if matches!(
         fact.kind.as_str(),
-        "framework_configuration" | "framework_plugin"
+        "framework_configuration"
+            | "framework_plugin"
+            | "framework_configuration_field"
+            | "framework_file_set"
     ) {
-        attributes.insert("file_type".into(), Value::String("config".to_owned()));
+        attributes.insert("file_type".into(), Value::String("code".to_owned()));
         attributes.insert("component_type".into(), Value::String(fact.kind.clone()));
-        for key in ["configuration_keys", "aliases", "plugins", "route_roots"] {
+        for key in [
+            "configuration_keys",
+            "aliases",
+            "aliases_ordered",
+            "plugins",
+            "route_roots",
+            "config_id",
+            "field",
+            "ordinal",
+            "complete",
+            "value",
+            "pack_id",
+            "owner_reference",
+            "patterns",
+            "negative_patterns",
+            "eager",
+            "lazy",
+            "import_mode",
+            "query_mode",
+            "package_scope",
+            "options",
+            "callee",
+        ] {
             if let Some(value) = fact.detail.get(key).cloned() {
                 attributes.insert(key.to_owned(), value);
             }
         }
+        if symbol_kind == "config_key" {
+            attributes.insert("format".to_owned(), Value::String("framework".to_owned()));
+            attributes.insert("key_path".to_owned(), Value::String(fact.name.clone()));
+        }
+        if fact.kind == "framework_file_set" {
+            attributes.insert(
+                "resource_kind".to_owned(),
+                Value::String("framework_file_set".to_owned()),
+            );
+        }
         return attributes;
+    }
+    if symbol_kind == "component" {
+        attributes.insert(
+            "component_type".into(),
+            fact.detail
+                .get("bean_kind")
+                .cloned()
+                .unwrap_or_else(|| Value::String(fact.kind.clone())),
+        );
     }
     if symbol_kind == "job" {
         for key in ["schedule", "queue"] {
@@ -690,6 +1361,17 @@ fn domain_attributes(
         );
     }
     attributes
+}
+
+fn configuration_parent_id(framework: &str, config_id: &str) -> String {
+    make_id(&[
+        "framework-domain",
+        framework,
+        "framework_configuration",
+        "",
+        config_id,
+        config_id,
+    ])
 }
 
 fn push_edge(
@@ -813,5 +1495,113 @@ fn resolution_name(state: ResolutionState) -> &'static str {
         ResolutionState::Exact => "exact",
         ResolutionState::Ambiguous => "ambiguous",
         ResolutionState::Unresolved => "unresolved",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compass_languages::{RawFrameworkAnchor, RawFrameworkOrigin};
+
+    fn vite_file_set_fact(source_file: &str) -> RawDomainFact {
+        RawDomainFact {
+            framework: "vite".to_owned(),
+            kind: "framework_file_set".to_owned(),
+            name: "import.meta.glob".to_owned(),
+            declaring_scope: source_file.to_owned(),
+            anchor: RawFrameworkAnchor {
+                source_file: source_file.to_owned(),
+                start_byte: 10,
+                end_byte: 28,
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 19,
+            },
+            origin: RawFrameworkOrigin::Ast,
+            detail: Map::new(),
+        }
+    }
+
+    #[test]
+    fn vite_file_set_patterns_are_importer_relative_and_scope_bounded() {
+        let root = Path::new("/workspace/repository");
+        let scope = root.join("packages/app");
+        let fact = vite_file_set_fact("packages/app/src/config/vite.config.ts");
+        let mut diagnostics = Vec::new();
+
+        let (includes, excludes) = normalize_vite_file_set_patterns(
+            &fact,
+            root,
+            &scope,
+            &[
+                "./fixtures/*.tsx".to_owned(),
+                "../shared/*.ts".to_owned(),
+                "/public/*.svg".to_owned(),
+                "../../../outside/*.ts".to_owned(),
+            ],
+            &["./fixtures/ignored.tsx".to_owned()],
+            &mut diagnostics,
+        );
+
+        assert_eq!(
+            includes,
+            vec![
+                "public/*.svg".to_owned(),
+                "src/config/fixtures/*.tsx".to_owned(),
+                "src/shared/*.ts".to_owned(),
+            ]
+        );
+        assert_eq!(excludes, vec!["src/config/fixtures/ignored.tsx".to_owned()]);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].get("pattern").and_then(Value::as_str),
+            Some("../../../outside/*.ts")
+        );
+        assert_eq!(
+            diagnostics[0].get("kind").and_then(Value::as_str),
+            Some("file_set_pattern_unresolved")
+        );
+    }
+
+    #[test]
+    fn vite_file_set_aliases_preserve_declared_order_and_scope_bounds() {
+        let root = Path::new("/workspace/repository");
+        let scope = root.join("packages/app");
+        let mut fact = vite_file_set_fact("packages/app/src/config/vite.config.ts");
+        fact.detail.insert(
+            "aliases_ordered".to_owned(),
+            json!([
+                {"find":"@app", "replacement":"./first", "kind":"string"},
+                {"find":"@app/components", "replacement":"./second", "kind":"string"},
+                {"find":"^~(.+)", "replacement":"./vendor", "kind":"regex"}
+            ]),
+        );
+        let mut diagnostics = Vec::new();
+
+        let (includes, _) = normalize_vite_file_set_patterns(
+            &fact,
+            root,
+            &scope,
+            &[
+                "@app/components/**/*.tsx".to_owned(),
+                "@app/utils/**/*.ts".to_owned(),
+            ],
+            &[],
+            &mut diagnostics,
+        );
+
+        assert_eq!(
+            includes,
+            vec![
+                "first/components/**/*.tsx".to_owned(),
+                "first/utils/**/*.ts".to_owned(),
+            ]
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].get("kind").and_then(Value::as_str),
+            Some("file_set_alias_rule_unsupported")
+        );
     }
 }

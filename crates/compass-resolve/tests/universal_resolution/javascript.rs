@@ -549,8 +549,8 @@ spread.isNumber(1);
         .iter()
         .map(|(relative, source)| {
             Engine::default()
-                .extract_source_universal_candidate_evidence(&root.join(relative), relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&root.join(relative), relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let utils_number = batches[0]
@@ -731,8 +731,8 @@ functionSpread.callable(1);
         .iter()
         .map(|(relative, source)| {
             Engine::default()
-                .extract_source_universal_candidate_evidence(&root.join(relative), relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&root.join(relative), relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let ambiguous_call = batches[7]
@@ -861,8 +861,8 @@ api.run();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let run = batches[0]
@@ -969,8 +969,8 @@ api.conflict();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let base = batches[0]
@@ -1088,8 +1088,8 @@ nonObject.missing();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let calls = batches[5]
@@ -1172,8 +1172,8 @@ api.cjsPrivate();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let esm_published = batches[0]
@@ -1291,8 +1291,8 @@ unknown.direct();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let base_inherited = batches[0]
@@ -1408,8 +1408,8 @@ api.unknown();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let run = batches[1]
@@ -1504,8 +1504,8 @@ api.inherited();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let inherited = batches[0]
@@ -1568,12 +1568,12 @@ fn();
         fs::write(path, source)?;
     }
     let batches = [
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             &provider,
             "lib/callable.cjs",
             provider_source,
         )?,
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             &consumer,
             "app/consumer.js",
             consumer_source,
@@ -1602,5 +1602,62 @@ fn();
         compass_resolve::evidence::ResolutionDecision::Resolved { ref declaration_id, .. }
             if declaration_id == &run.id
     ));
+    Ok(())
+}
+
+#[test]
+fn javascript_default_reexport_resolves_project_render_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let detector = root.join("lib/detector.js");
+    let client_detector = root.join("lib/client-detector.js");
+    let page = root.join("app/page.js");
+    let detector_source = br#"export default function Detector() { return null; }
+"#;
+    let client_detector_source = br#"'use client'
+export { default } from './detector'
+"#;
+    let page_source = br#"import ClientDetector from '../lib/client-detector'
+export default function Page() { return <ClientDetector />; }
+"#;
+    for (path, source) in [
+        (&detector, detector_source.as_slice()),
+        (&client_detector, client_detector_source.as_slice()),
+        (&page, page_source.as_slice()),
+    ] {
+        fs::create_dir_all(path.parent().ok_or("fixture path has no parent")?)?;
+        fs::write(path, source)?;
+    }
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (path, relative, source) in [
+        (&detector, "lib/detector.js", detector_source.as_slice()),
+        (
+            &client_detector,
+            "lib/client-detector.js",
+            client_detector_source.as_slice(),
+        ),
+        (&page, "app/page.js", page_source.as_slice()),
+    ] {
+        let mut extraction = extract(path.to_str().ok_or("non-UTF-8 fixture path")?, source);
+        extraction.semantic_evidence = Some(
+            Engine::default().extract_source_universal_evidence(path, relative, source)?,
+        );
+        sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
+        extractions.push(extraction);
+    }
+    let resolved = compass_resolve::resolve_with_root(&extractions, &sources, root);
+    assert_eq!(resolved.error, None);
+    let render = resolved
+        .edges
+        .iter()
+        .find(|edge| {
+            edge.string("relation") == "references"
+                && source_matches(&edge.string("source_file"), &page)
+        })
+        .ok_or("missing JSX reference edge")?;
+    assert!(target_source_matches(&resolved, &render.target, &detector));
+    assert_eq!(render.string("resolution_rule"), "project-module-binding");
     Ok(())
 }

@@ -331,6 +331,23 @@ Classify before retrying:
 Never publish an empty application result merely because Compass returned
 nonzero.
 
+## Agent Graph integration
+
+Use `inspect_agent_graph` for reads and `apply_agent_graph` for the closed
+change-batch or rebase-commit contracts. Configure a canonical project
+allowlist on the server. The write tool is absent unless writes are explicitly
+enabled, and mask authority is an additional server-side capability.
+Principals, scopes, permissions, limits, and expiry come from trusted server
+configuration rather than tool arguments.
+
+For HTTP, configure both the normal read API key and a distinct write API key.
+Only `apply_agent_graph` requires the write key; ordinary graph reads retain
+the normal authentication boundary. Cache an Effective Graph only by its
+effective identity, which includes Base Generation, Overlay Revision,
+composition profile, and composition version. Handle `revision_conflict`,
+`idempotency_conflict`, `rebase_unresolved`, `limit_exceeded`, and
+authorization failures without retrying unchanged input.
+
 ## Security checklist
 
 - [ ] No credentials in query parameters, command history, checked-in files, or
@@ -347,6 +364,7 @@ nonzero.
 
 - [CompassQL concepts](../concepts/compassql.md)
 - [Output reference](../reference/outputs.md)
+- [Enhance a graph with an agent](enhancing-a-graph-with-an-agent.md)
 - [CI and automation cookbook](../cookbook/ci-and-automation.md)
 - [Operations guide](operations.md)
 

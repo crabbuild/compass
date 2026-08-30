@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.19
+
 - Keep code graphs static and selectable by default, run force layout only on
   explicit request, and keep every completed relayout paused. Simplify the
   layout picker and group Settings and Filters together with distinct icons.
@@ -54,7 +56,7 @@
   directional subsystem map and complete paged cross-subsystem call evidence.
 - Arrange subsystem maps into low-noise call-flow lanes with bundled routes,
   persistent drag positioning, focus highlighting, and collapsible details.
-- Use the complete `compass.viewer.callflow/1` contract exclusively for
+- Use the complete `compass.viewer.architecture/1` contract exclusively for
   negotiation, export validation, production scoping, and complete call evidence.
 - Load architecture exports up to 128 MiB while keeping ordinary Compass
   commands at the 8 MiB safety ceiling.

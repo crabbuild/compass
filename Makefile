@@ -133,6 +133,11 @@ test-release-scripts: ## Test packaging and download installer scripts
 qualify-code-graph-v1: ## Run the complete Compass code graph v1 fixture release gate
 	./scripts/qualify_code_graph_v1.sh --fixtures-only
 
+
+.PHONY: qualify-universal-evidence
+qualify-universal-evidence: ## Verify the universal-evidence promotion decision
+	python3 scripts/check_universal_evidence_promotion.py
+
 # ── Lint & Format ──────────────────────────────────────────────────
 
 .PHONY: fmt

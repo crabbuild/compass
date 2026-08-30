@@ -13,9 +13,9 @@ use sha2::{Digest, Sha256};
 use crate::{FileError, StatHashIndex, file_hash, io_error, write_bytes_atomic, write_json_atomic};
 
 /// Changes whenever cached extraction semantics change, even if the wire encoding does not.
-pub const AST_CACHE_VERSION: &str = "6";
+pub const AST_CACHE_VERSION: &str = "2";
 /// Portable cache encoding version used in the on-disk namespace.
-pub const CACHE_ENCODING_VERSION: u32 = 8;
+pub const CACHE_ENCODING_VERSION: u32 = 1;
 const MESSAGEPACK_EXTENSION: &str = "msgpack";
 const COMPRESSED_MESSAGEPACK_MAGIC: &[u8; 5] = b"CMPZ1";
 const COMPRESSED_MESSAGEPACK_HEADER_BYTES: usize = COMPRESSED_MESSAGEPACK_MAGIC.len() + 8;

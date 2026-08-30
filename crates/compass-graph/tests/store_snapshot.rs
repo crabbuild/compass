@@ -8,7 +8,8 @@ use compass_graph::{
 };
 use compass_model::code_graph::{
     BuildMetadata, CommunityMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileNodeDetails,
-    FileRecord, GraphDocument, NodeDetails, NodeKind, NodeRecord,
+    FileRecord, GraphDocument, NodeDetails, NodeKind, NodeRecord, ResourceKind,
+    ResourceNodeDetails,
 };
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{
@@ -359,6 +360,51 @@ fn nodes_for_terms_matches_diacritic_normalized_queries() -> Result<(), Box<dyn 
 }
 
 #[test]
+fn immutable_snapshot_indexes_semantic_markdown_table_nodes() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut document = graph();
+    let mut table = node("table");
+    table.kind = NodeKind::Resource;
+    table.name = "Owners — Owner | Status".to_owned();
+    table.qualified_name = "Operations::pipe_table#1".to_owned();
+    table.language = Some("markdown".to_owned());
+    table.details = Some(NodeDetails::Resource(ResourceNodeDetails {
+        resource_kind: ResourceKind::Document,
+        uri: Some("#owners".to_owned()),
+        media_type: Some("text/markdown".to_owned()),
+    }));
+
+    let mut row = node("table-row");
+    row.kind = NodeKind::Resource;
+    row.name = "Owner=platform-team · Status=deploy".to_owned();
+    row.qualified_name = "Operations::pipe_table#1::pipe_table_row#platform-team-1".to_owned();
+    row.language = Some("markdown".to_owned());
+    row.details = Some(NodeDetails::Resource(ResourceNodeDetails {
+        resource_kind: ResourceKind::Document,
+        uri: None,
+        media_type: Some("text/markdown".to_owned()),
+    }));
+    document.nodes.extend([table, row]);
+
+    let prepared = builder.prepare(&store, &document)?;
+    builder.activate(&store, &prepared)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+
+    for term in ["owner", "platform", "deploy"] {
+        let (nodes, truncated) = reader.nodes_for_terms(&[term.to_owned()], limits(128))?;
+        assert!(!truncated, "{term}");
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.id == "table" || node.id == "table-row"),
+            "term {term} was not indexed in the immutable snapshot"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn identifier_subword_capability_is_found_in_a_multilevel_terms_tree() -> Result<(), Box<dyn Error>>
 {
     let store = MemoryStore::default();
@@ -672,6 +718,11 @@ fn file_node_delta_reuses_unaffected_index_trees() -> Result<(), Box<dyn Error>>
         byte_size: 2,
         generated: false,
     }));
+    file_node
+        .source
+        .as_mut()
+        .ok_or("file node source anchor missing")?
+        .end_byte = 2;
 
     let content = builder.prepare_file_node_delta(&store, &previous, &current)?;
     let graph_bytes = canonical_graph_json(&current)?;
@@ -805,6 +856,66 @@ fn graph_delta_rebuilds_relationship_indexes_without_rewriting_nodes() -> Result
     assert_eq!(reader.get_edge(&replacement.id)?, Some(replacement));
     assert_eq!(reader.outgoing("b", limits(4))?.len(), 1);
     assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+
+    Ok(())
+}
+
+#[test]
+fn graph_delta_point_updates_value_only_node_changes() -> Result<(), Box<dyn Error>> {
+    let store = MemoryStore::default();
+    let builder = GraphSnapshotBuilder::new();
+    let mut previous = graph();
+    previous
+        .nodes
+        .extend((0..300).map(|index| node(&format!("node-{index:03}"))));
+    previous.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let first = builder.prepare(&store, &previous)?;
+    builder.activate(&store, &first)?;
+
+    let mut current = previous.clone();
+    current.graph.build.generation_id = "next-generation".to_owned();
+    let changed = current
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "node-150")
+        .ok_or("node-150 missing")?;
+    let provenance = changed
+        .evidence
+        .first_mut()
+        .ok_or("node evidence missing")?;
+    provenance.score = Some(0.75);
+
+    let changed_ids = BTreeSet::from(["node-150".to_owned()]);
+    let content = builder.prepare_node_value_delta(&store, &previous, &current, &changed_ids)?;
+    let graph_bytes = canonical_graph_json(&current)?;
+    let graph_digest = format!("{:x}", sha2::Sha256::digest(&graph_bytes));
+    let delta = builder.finish_content(&store, content, graph_digest, graph_bytes.len() as u64)?;
+    assert!(
+        delta.new_objects <= 6,
+        "point update wrote {} immutable objects",
+        delta.new_objects
+    );
+
+    builder.activate(&store, &delta)?;
+    let reader = GraphSnapshotReader::open_active(&store)?.ok_or("active snapshot missing")?;
+    assert_eq!(reader.export_graph()?, graph_sorted_with(&current));
+
+    let mut invalid = current.clone();
+    invalid
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "node-150")
+        .ok_or("node-150 missing")?
+        .name = "renamed".to_owned();
+    assert!(
+        builder
+            .prepare_node_value_delta(&store, &current, &invalid, &changed_ids)
+            .is_err()
+    );
+
+    let mut metadata_only = current.clone();
+    metadata_only.graph.build.generation_id = "metadata-only".to_owned();
+    builder.prepare_node_value_delta(&store, &current, &metadata_only, &BTreeSet::new())?;
     Ok(())
 }
 

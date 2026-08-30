@@ -967,7 +967,7 @@ export const value = api;
 }
 
 #[test]
-fn typescript_candidate_preserves_dynamic_member_as_unresolved() {
+fn typescript_universal_evidence_preserves_dynamic_member_as_unresolved() {
     let source = br#"class Known { run() {} }
 const value = getValue();
 value.run();
@@ -976,12 +976,12 @@ function exact(value: string) {}
 exact();
 "#;
     let batch = Engine::default()
-        .extract_source_universal_candidate_evidence(
+        .extract_source_universal_evidence(
             Path::new("src/dynamic.ts"),
             "src/dynamic.ts",
             source,
         )
-        .expect("candidate evidence");
+        .expect("universal evidence");
     let dynamic_id = batch
         .candidates
         .iter()
@@ -1031,7 +1031,7 @@ exact();
 }
 
 #[test]
-fn typescript_candidate_resolves_typeof_import_query_as_module_dependency()
+fn typescript_universal_evidence_resolves_typeof_import_query_as_module_dependency()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1046,12 +1046,12 @@ type Plain = import("../lib/items").Item;
 "#;
     fs::write(&items_path, items_source)?;
     fs::write(&consumer_path, consumer_source)?;
-    let items_batch = Engine::default().extract_source_universal_candidate_evidence(
+    let items_batch = Engine::default().extract_source_universal_evidence(
         &items_path,
         "lib/items.ts",
         items_source,
     )?;
-    let consumer_batch = Engine::default().extract_source_universal_candidate_evidence(
+    let consumer_batch = Engine::default().extract_source_universal_evidence(
         &consumer_path,
         "src/types.ts",
         consumer_source,
@@ -1098,7 +1098,7 @@ type Plain = import("../lib/items").Item;
 }
 
 #[test]
-fn typescript_candidate_resolves_relative_and_default_imports_across_files()
+fn typescript_universal_evidence_resolves_relative_and_default_imports_across_files()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1138,8 +1138,8 @@ new DefaultWidget().run();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let widget = batches[0]
@@ -1314,8 +1314,8 @@ cycleValue();
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let run = batches[0]
@@ -1426,8 +1426,8 @@ object.run(3);
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let run = batches[0]
@@ -1523,8 +1523,8 @@ tags.sql`select ${42}`;
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let sql = batches[0]
@@ -1610,8 +1610,8 @@ class Admin {}
         .map(|(relative, source)| {
             let path = root.join(relative);
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)
-                .map_err(|error| format!("candidate extraction failed for {relative}: {error}"))
+                .extract_source_universal_evidence(&path, relative, source)
+                .map_err(|error| format!("universal evidence extraction failed for {relative}: {error}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let controller = batches[0]
@@ -1665,7 +1665,7 @@ class Admin {}
 }
 
 #[test]
-fn typescript_candidate_does_not_use_terminal_name_for_relative_imports()
+fn typescript_universal_evidence_does_not_use_terminal_name_for_relative_imports()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1697,7 +1697,7 @@ new Widget();
         fs::write(&path, source)?;
         batches.push(
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+                .extract_source_universal_evidence(&path, relative, source)?,
         );
     }
     let app_widget = batches[0]
@@ -1731,7 +1731,7 @@ new Widget();
 }
 
 #[test]
-fn typescript_candidate_resolves_exact_javascript_interop() -> Result<(), Box<dyn std::error::Error>>
+fn typescript_universal_evidence_resolves_exact_javascript_interop() -> Result<(), Box<dyn std::error::Error>>
 {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1757,7 +1757,7 @@ new Runtime().run();
         fs::write(&path, source)?;
         batches.push(
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+                .extract_source_universal_evidence(&path, relative, source)?,
         );
     }
     let runtime = batches[0]
@@ -1803,7 +1803,7 @@ new Runtime().run();
 }
 
 #[test]
-fn typescript_candidate_follows_cross_file_reexport_aliases()
+fn typescript_universal_evidence_follows_cross_file_reexport_aliases()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1835,7 +1835,7 @@ new PublicWidget().run();
         fs::write(&path, source)?;
         batches.push(
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+                .extract_source_universal_evidence(&path, relative, source)?,
         );
     }
     let widget = batches[0]
@@ -1880,7 +1880,7 @@ new PublicWidget().run();
 }
 
 #[test]
-fn typescript_candidate_keeps_duplicate_module_realizations_ambiguous()
+fn typescript_universal_evidence_keeps_duplicate_module_realizations_ambiguous()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1912,7 +1912,7 @@ new Widget();
         fs::write(&path, source)?;
         batches.push(
             Engine::default()
-                .extract_source_universal_candidate_evidence(&path, relative, source)?,
+                .extract_source_universal_evidence(&path, relative, source)?,
         );
     }
     let construct = batches[2]
@@ -1934,7 +1934,7 @@ new Widget();
 }
 
 #[test]
-fn typescript_candidate_consumes_project_path_targets_in_shared_resolution()
+fn typescript_universal_evidence_consumes_project_path_targets_in_shared_resolution()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -1974,7 +1974,7 @@ new Widget().run();
         let mut extraction = extract(relative, source);
         if relative.ends_with(".ts") {
             extraction.semantic_evidence = Some(
-                Engine::default().extract_source_universal_candidate_evidence(
+                Engine::default().extract_source_universal_evidence(
                     Path::new(relative),
                     relative,
                     source,
@@ -2026,7 +2026,7 @@ new Widget().run();
 }
 
 #[test]
-fn typescript_candidate_merges_imported_interface_members_across_declarations()
+fn typescript_universal_evidence_merges_imported_interface_members_across_declarations()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2055,7 +2055,7 @@ export function use(config: Config) { config.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2089,7 +2089,7 @@ export function use(config: Config) { config.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_leaves_duplicate_merged_interface_members_ambiguous()
+fn typescript_universal_evidence_leaves_duplicate_merged_interface_members_ambiguous()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2118,7 +2118,7 @@ export function use(config: Config) { config.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2139,7 +2139,7 @@ export function use(config: Config) { config.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_generic_member_chain()
+fn typescript_universal_evidence_resolves_imported_generic_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2174,7 +2174,7 @@ export function use(box: Box<Item>) { box.item.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2203,7 +2203,7 @@ export function use(box: Box<Item>) { box.item.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_nested_imported_generic_member_chain()
+fn typescript_universal_evidence_resolves_nested_imported_generic_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2239,7 +2239,7 @@ export function use(box: Box<Wrapper<Item>>) { box.item.value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2287,7 +2287,7 @@ export function use(box: Box<Wrapper<Item>>) { box.item.value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_keeps_nested_generic_member_ambiguity_unresolved()
+fn typescript_universal_evidence_keeps_nested_generic_member_ambiguity_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2324,7 +2324,7 @@ export function use(box: Box<Wrapper<Item>>) { box.item.value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2345,7 +2345,7 @@ export function use(box: Box<Wrapper<Item>>) { box.item.value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_does_not_invent_nested_generic_primitive_members()
+fn typescript_universal_evidence_does_not_invent_nested_generic_primitive_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2373,7 +2373,7 @@ export function use(box: Box<string>) { box.item.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2396,7 +2396,7 @@ export function use(box: Box<string>) { box.item.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_generic_object_type_alias_members()
+fn typescript_universal_evidence_resolves_imported_generic_object_type_alias_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2431,7 +2431,7 @@ export function use(box: Boxed<Item>) { box.value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2460,7 +2460,7 @@ export function use(box: Boxed<Item>) { box.value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_nominal_generic_type_alias_members()
+fn typescript_universal_evidence_resolves_imported_nominal_generic_type_alias_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2502,7 +2502,7 @@ export function use(box: Alias<Item>) { box.value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2531,7 +2531,7 @@ export function use(box: Alias<Item>) { box.value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_homomorphic_mapped_alias_members()
+fn typescript_universal_evidence_resolves_imported_homomorphic_mapped_alias_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2566,7 +2566,7 @@ export function use(value: Copy<Item>) { value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2595,7 +2595,7 @@ export function use(value: Copy<Item>) { value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_publishes_local_conditional_branch_members()
+fn typescript_universal_evidence_publishes_local_conditional_branch_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let source = br#"class Item { inspect(): void {} }
 class Other { other(): void {} }
@@ -2609,7 +2609,7 @@ function object(value: ChooseObject<Item>) { value.inspect(); }
 "#;
     let mut extraction = extract("src/conditional.ts", source);
     extraction.semantic_evidence = Some(
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             Path::new("src/conditional.ts"),
             "src/conditional.ts",
             source,
@@ -2649,7 +2649,7 @@ function object(value: ChooseObject<Item>) { value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_publishes_literal_indexed_alias_member_calls()
+fn typescript_universal_evidence_publishes_literal_indexed_alias_member_calls()
 -> Result<(), Box<dyn std::error::Error>> {
     let source = br#"interface Nested { inspect(): void }
 interface Item { nested: Nested }
@@ -2659,7 +2659,7 @@ export function use(value: NestedAlias) { value.inspect(); }
     let relative = "src/indexed-alias.ts";
     let mut extraction = extract(relative, source);
     extraction.semantic_evidence = Some(
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             Path::new(relative),
             relative,
             source,
@@ -2697,7 +2697,7 @@ export function use(value: NestedAlias) { value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_generic_indexed_alias_member_calls()
+fn typescript_universal_evidence_resolves_imported_generic_indexed_alias_member_calls()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2733,7 +2733,7 @@ export function use(value: NestedOf<Item>) { value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2766,7 +2766,7 @@ export function use(value: NestedOf<Item>) { value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_keyof_identity_alias_members()
+fn typescript_universal_evidence_resolves_imported_keyof_identity_alias_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2803,7 +2803,7 @@ export function rejected(value: Empty<Item>) { value.inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2836,7 +2836,7 @@ export function rejected(value: Empty<Item>) { value.inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_literal_utility_projection_members()
+fn typescript_universal_evidence_resolves_imported_literal_utility_projection_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2880,7 +2880,7 @@ export function use(picked: Picked, omitted: Omitted) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -2928,7 +2928,7 @@ export function use(picked: Picked, omitted: Omitted) {
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_array_and_tuple_member_chains()
+fn typescript_universal_evidence_resolves_imported_array_and_tuple_member_chains()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -2976,7 +2976,7 @@ export function use(values: Item[], box: Box<Item>) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3018,7 +3018,7 @@ export function use(values: Item[], box: Box<Item>) {
 }
 
 #[test]
-fn typescript_candidate_resolves_generic_callable_return_member_chain()
+fn typescript_universal_evidence_resolves_generic_callable_return_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3032,7 +3032,7 @@ export function use() { identity(new Item()).inspect(); }
     fs::write(&path, source)?;
     let mut extraction = extract(relative, source);
     extraction.semantic_evidence = Some(
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             Path::new(relative),
             relative,
             source,
@@ -3069,7 +3069,7 @@ export function use() { identity(new Item()).inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_callable_return_member_chains()
+fn typescript_universal_evidence_resolves_imported_callable_return_member_chains()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3114,7 +3114,7 @@ export function use(value: Item) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3152,7 +3152,7 @@ export function use(value: Item) {
 }
 
 #[test]
-fn typescript_candidate_keeps_imported_callable_return_ambiguity_unresolved()
+fn typescript_universal_evidence_keeps_imported_callable_return_ambiguity_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3189,7 +3189,7 @@ export function use(value: Item) { make(value).inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3212,7 +3212,7 @@ export function use(value: Item) { make(value).inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_callable_member_returns_and_explicit_generics()
+fn typescript_universal_evidence_resolves_imported_callable_member_returns_and_explicit_generics()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3256,7 +3256,7 @@ export function use(value: Item) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3294,7 +3294,7 @@ export function use(value: Item) {
 }
 
 #[test]
-fn typescript_candidate_keeps_ambiguous_imported_callable_member_returns_unresolved()
+fn typescript_universal_evidence_keeps_ambiguous_imported_callable_member_returns_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3335,7 +3335,7 @@ export function use(value: Item) { Factory.make(value).inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3358,7 +3358,7 @@ export function use(value: Item) { Factory.make(value).inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_callable_properties_and_typed_objects()
+fn typescript_universal_evidence_resolves_imported_callable_properties_and_typed_objects()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3403,7 +3403,7 @@ export function use(value: Item) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3454,7 +3454,7 @@ export function use(value: Item) {
 }
 
 #[test]
-fn typescript_candidate_keeps_duplicate_imported_callable_properties_unresolved()
+fn typescript_universal_evidence_keeps_duplicate_imported_callable_properties_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3493,7 +3493,7 @@ export function use(value: Item) { api.make(value).inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3516,7 +3516,7 @@ export function use(value: Item) { api.make(value).inspect(); }
 }
 
 #[test]
-fn typescript_candidate_selects_unique_imported_overload_by_argument_type()
+fn typescript_universal_evidence_selects_unique_imported_overload_by_argument_type()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3570,7 +3570,7 @@ export function use(value: Item) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3627,7 +3627,7 @@ export function use(value: Item) {
 }
 
 #[test]
-fn typescript_candidate_keeps_imported_overload_ambiguity_and_mismatch_unresolved()
+fn typescript_universal_evidence_keeps_imported_overload_ambiguity_and_mismatch_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3678,7 +3678,7 @@ export function use(value: Item) {
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3701,7 +3701,7 @@ export function use(value: Item) {
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_index_signature_member_chain()
+fn typescript_universal_evidence_resolves_imported_index_signature_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3736,7 +3736,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3765,7 +3765,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_structural_index_signature_alias_member_chain()
+fn typescript_universal_evidence_resolves_imported_structural_index_signature_alias_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3800,7 +3800,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3829,7 +3829,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_inline_structural_index_signature_member_chain()
+fn typescript_universal_evidence_resolves_inline_structural_index_signature_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3868,7 +3868,7 @@ export function rejectedAmbiguous(shape: { [key: string]: Item | string }, key: 
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3898,7 +3898,7 @@ export function rejectedAmbiguous(shape: { [key: string]: Item | string }, key: 
 }
 
 #[test]
-fn typescript_candidate_resolves_imported_generic_index_signature_member_chain()
+fn typescript_universal_evidence_resolves_imported_generic_index_signature_member_chain()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3933,7 +3933,7 @@ export function use(shape: Shape<Item>, key: string) { shape[key].inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -3962,7 +3962,7 @@ export function use(shape: Shape<Item>, key: string) { shape[key].inspect(); }
 }
 
 #[test]
-fn typescript_candidate_keeps_imported_index_signature_ambiguity_unresolved()
+fn typescript_universal_evidence_keeps_imported_index_signature_ambiguity_unresolved()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -3998,7 +3998,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -4021,7 +4021,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
 }
 
 #[test]
-fn typescript_candidate_does_not_invent_imported_index_signature_primitive_members()
+fn typescript_universal_evidence_does_not_invent_imported_index_signature_primitive_members()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -4049,7 +4049,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
         sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
         let mut extraction = extract(relative, source);
         extraction.semantic_evidence = Some(
-            Engine::default().extract_source_universal_candidate_evidence(
+            Engine::default().extract_source_universal_evidence(
                 Path::new(relative),
                 relative,
                 source,
@@ -4072,7 +4072,7 @@ export function use(shape: Shape, key: string) { shape[key].inspect(); }
 }
 
 #[test]
-fn typescript_candidate_resolves_straight_line_reassignment_to_latest_member()
+fn typescript_universal_evidence_resolves_straight_line_reassignment_to_latest_member()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let root = directory.path();
@@ -4092,7 +4092,7 @@ export function use() {
     sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
     let mut extraction = extract(relative, source);
     extraction.semantic_evidence = Some(
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             Path::new(relative),
             relative,
             source,
@@ -4158,7 +4158,7 @@ consume(handlers[0]);
     sources.insert(relative.to_owned(), String::from_utf8(source.to_vec())?);
     let mut extraction = extract(relative, source);
     extraction.semantic_evidence = Some(
-        Engine::default().extract_source_universal_candidate_evidence(
+        Engine::default().extract_source_universal_evidence(
             Path::new(relative),
             relative,
             source,

@@ -1,6 +1,6 @@
 # Compass enhancement advisor plans
 
-Generated from deep product/code audits on 2026-07-23 and 2026-08-01.
+Generated from deep product/code audits between 2026-07-23 and 2026-08-25.
 
 Upstream snapshots:
 
@@ -31,6 +31,71 @@ Plan 014 ships a typed pull-request risk review report and a reusable GitHub
 Action. It consumes immutable history and semantic diff evidence while keeping
 advisory risk separate from deterministic merge gates.
 
+Plans 015–018 are self-contained notebook, PHP framework, execution-flow, and
+MCP workflow programs planned at Compass commit `6680842c` on 2026-08-10.
+
+Plan 019 is the Ruby universal-evidence program. It was planned at Compass
+commit `b53c3ea2` on 2026-08-16. It freezes established Ruby evidence, builds an
+independent Ripper oracle and qualification-only producer, adds conservative
+Ruby project/resolution semantics, converts Rails to a universal framework
+pack, performs one atomic hard cut, and then measures optimization and complete
+quality gates. The pinned three-corpus audit now passes (89,981 accepted
+relationships, 100% observed precision, 98.5567% recall); the checked-in
+universal-evidence release decision promotes Ruby version 1 to `Qualified`.
+
+Plan 020 is the Swift, Dart, Scala, and Groovy universal-evidence program. It
+was planned at Compass commit `88abe4c0` on 2026-08-21. All four languages are
+already recognized and have established extraction, so the program freezes
+that behavior, builds independent source oracles and qualification-only
+candidates, performs one atomic hard cut per language, preserves existing
+Vapor/Dart/Play/Spock/Gradle behavior through evidence-backed boundaries, and
+finishes with a mixed-language release gate. Swift, Dart, and Scala candidates
+can proceed independently after the shared baseline; Groovy reuses Scala's
+exact-language JVM boundary.
+The production hard cut, deterministic fixture baselines, pinned manifests,
+parser-backed source-oracle providers, audit builder, mixed fixture gate, and
+three-corpus quality audits are implemented. The plan is `DONE`; the
+universal-evidence release decision promotes all four registry entries as
+version-1 `Qualified`. The mounted qualification target records the pinned
+SwiftSyntax, Dart Analyzer, scala.meta, and Groovy CompilationUnit toolchains
+and the immutable audit results.
+
+Plan 021 hardens the React frontend framework graph after Plan 013's
+TypeScript/JavaScript production hard cut. It adds occurrence-preserving render
+evidence, conservative component and runtime-boundary roles, deep Next.js and
+TanStack route semantics, parsed Vite configuration, and agent-facing context
+and impact workflows. The current pinned release qualification covers all
+seven stable families, checked-in capability-floor fixtures, independent
+source-oracle matching, worker/interruption lifecycle evidence, and the
+approved high-water performance envelope without widening the 1.10× budget.
+TanStack Start remains explicitly pre-stable and is not promoted by aggregate
+results.
+
+Plan 022 extends the native document program with selective, local OCR for
+scanned PDF pages and images embedded in DOCX, PPTX, and XLSX. Native package
+and PDF text remains authoritative. OCR is off by default, model/profile and
+geometry provenance are explicit, model installation is separate from
+extraction, and the recommended engine must beat a pinned baseline on a
+Compass-owned corpus before support or quality claims ship.
+
+Plan 023 is the Python framework graph-intelligence program. It first freezes
+the unqualified Python baseline, adds source-root and stub-aware module
+identity, and qualifies conservative typed bindings. It then replaces the
+legacy combined `python-web` scanner and Python enterprise regexes with
+independently versioned universal packs for Django/DRF,
+FastAPI/Starlette/Pydantic, Flask, SQLAlchemy, and Celery. The program keeps
+normal builds native and Python-runtime-free, preserves unresolved dynamic
+behavior, and requires independent pinned-corpus precision, recall,
+determinism, lifecycle, and performance evidence before promoting any pack
+claim. Python language promotion remains a separate complete-capability
+decision.
+
+Plan 024 deepens Plan 009's parser-backed Markdown support without changing the
+`compass.graph/1` wire contract. It retains table, header, row, and cell nodes,
+adds semantic identities and labels, resolves cell-owned references before the
+normalization facts are projected back to graph-v1 resources, keeps table
+navigation out of architecture topology, and adds an independent quality gate.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -49,6 +114,16 @@ advisory risk separate from deterministic merge gates.
 | 012 | Qualify document graphs across formats, limits, and determinism | P1 | M | 009, 010, 011 | TODO |
 | 013 | Make TypeScript and JavaScript code graphs best in class | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
 | 014 | Ship typed pull-request risk review and a reusable GitHub Action | P1 | L | Immutable history and semantic diff; coordinate with Compass Guard | DONE |
+| 015 | Add bounded Jupyter and Databricks notebook extraction | P1 | L | — | TODO |
+| 016 | Complete Composer, Blade, and Eloquent framework resolution | P1 | L | — | TODO |
+| 017 | Derive bounded, ranked execution flows from entry points | P2 | L | Existing universal call graph | TODO |
+| 018 | Expose five native MCP workflow prompts | P2 | M | — | TODO |
+| 019 | Hard-cut Ruby to a qualifying universal evidence pipeline | P1 | XL | —; final gate should consume 005 or equivalent | IN PROGRESS |
+| 020 | Hard-cut Swift, Dart, Scala, and Groovy to universal evidence | P1 | XXL | —; final gate should consume 005 or equivalent | DONE |
+| 021 | Make React frontend framework graphs enterprise-ready | P1 | XXL | 013 production hard cut; final gate should consume 005 or equivalent | DONE |
+| 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
+| 023 | Make Python framework graphs source-proven and production-qualified | P1 | XXL | —; final gate should consume 005 or equivalent | BLOCKED |
+| 024 | Harden Markdown graph-v1 intelligence | P1 | XL | 009; coordinate with 012 | IN PROGRESS |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -74,13 +149,51 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 - Plan 012 complements plan 005 rather than depending on it: plan 005 owns the
   broad production release gate; plan 012 owns document-specific evidence.
 - Plan 013 is deliberately staged: independent truth and project semantics land
-  before a test-only universal adapter, production changes in one hard cut, and
+  before a test-only universal evidence pipeline, production changes in one hard cut, and
   compiler/framework enhancements follow only after the native graph qualifies.
   Its final public claim should consume plan 005's exact-production-evidence
   model or an equivalent release-candidate gate.
 - Plan 014 consumes immutable history and semantic diff evidence, preserves the
   boundary between advisory risk and deterministic gates, and ships the
   reusable GitHub review Action.
+- Plans 015 and 016 are independent language/framework enrichments. Plan 017
+  can consume their facts later but does not depend on them. Plan 018 is an
+  independent MCP/DX addition.
+- Plan 019 is deliberately staged: established behavior and independent truth
+  are frozen first; identity precedes extraction; the emitter, resolver, and
+  Rails pack stay qualification-only until one atomic production hard cut;
+  optimization follows semantic parity; and complete promotion remains gated
+  by the 2,000-record quality audit.
+- Plan 020 is one program with four independent language tracks. Phase 0
+  freezes shared baselines and independent truth. Swift, Dart, and Scala
+  candidates may then proceed in parallel; Groovy may also proceed but must
+  reuse the exact-language JVM boundary established for Scala. Each language
+  has a separate candidate and atomic hard-cut phase, and the mixed-language
+  release gate runs only after all four cuts.
+- Plan 021 builds on Plan 013's hard-cut TypeScript/JavaScript evidence rather
+  than creating another parser path. It lands the public graph vocabulary and
+  universal framework substrate first, then qualifies React, Next.js,
+  TanStack, React Router/Remix, and Vite independently. Its final claim should
+consume Plan 005's exact-production-evidence model or an equivalent gate.
+
+- Plan 022 starts only after the document safety, artifact, slicing/fusion, and
+  OOXML plans. It adds a separate OCR qualification gate rather than weakening
+  Plan 012's credential-free native document gate. Plan 012 and Plan 022 may
+  reuse fixture-manifest infrastructure, but neither may make OCR models or
+helper runtimes prerequisites for native document support.
+- Plan 023 is deliberately staged: characterization and independent truth land
+  before project/module identity; project identity lands before typed binding;
+  typed binding and generic framework roles land before framework expansion.
+  Django/FastAPI/Flask replace `python-web` in one atomic production cut, while
+  SQLAlchemy/Celery replace only the Python branch of the enterprise adapter in
+  a later atomic cut. Optional `scip-python` enrichment follows, rather than
+  gates, the native structural qualification. The final public claim should
+  consume Plan 005's exact-production-evidence model or an equivalent release
+  gate.
+- Plan 024 keeps graph-v1 publication strict. Rich typed document facts are an
+  internal normalization representation only; the publisher resolves their
+  evidence and downgrades them to established resource details before strict
+  validation. Table navigation nodes remain public and searchable.
 
 ## Direction options not promoted to implementation plans
 
@@ -98,14 +211,17 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
   stability, latency, and memory measurements.
 - **Linux and Windows release artifacts:** clear distribution gap; deferred
   only to keep this first plan set at five items.
-- **Image OCR and slide-layout understanding:** valuable for scanned PDFs and
-  diagram-heavy decks, but require a separate bounded media/provenance design;
-  these plans deliberately cover native text and package evidence first.
+- **Generative slide-layout, chart, and formula understanding:** Plan 022 now
+  owns bounded text OCR and geometry for scanned pages and embedded images.
+  Generative VLM interpretation remains deferred because it needs separate
+  inferred-evidence, hallucination, cost, and qualification contracts.
 - **Legacy binary Office formats (`.doc`, `.xls`, `.ppt`):** require a safe
   parser/conversion boundary distinct from OOXML and are not implied by plan
   010.
 - **ODT/ODS/ODP and EPUB:** architecturally fit the document artifact after the
   core formats are qualified, but have their own package and semantic rules.
+- **HTML and Office table convergence in Plan 024:** deferred to Plan 012 or a
+  focused follow-up; this change is limited to Markdown extraction semantics.
 
 ## Findings considered and rejected
 

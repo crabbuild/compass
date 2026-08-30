@@ -1,0 +1,66 @@
+{
+  "negativeExamples": [
+    {
+      "code": "unsupported_schema",
+      "id": "unknown-major",
+      "input": {
+        "schema": "compass.agent-graph.batch/2"
+      }
+    },
+    {
+      "code": "invalid_input",
+      "id": "caller-grounded",
+      "input": {
+        "status": "GROUNDED"
+      }
+    },
+    {
+      "code": "invalid_identifier",
+      "id": "fuzzy-target",
+      "input": {
+        "target": "the auth service"
+      }
+    },
+    {
+      "code": "grounding_failed",
+      "id": "absent-source-span",
+      "input": {
+        "evidence": []
+      }
+    },
+    {
+      "code": "invalid_citation",
+      "id": "stale-digest",
+      "input": {
+        "recordDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "code": "missing_endpoint",
+      "id": "dangling-edge",
+      "input": {
+        "assertion": "assertion:missing"
+      }
+    },
+    {
+      "code": "duplicate_operation",
+      "id": "duplicate-target",
+      "input": {
+        "targets": [
+          "assertion:same",
+          "assertion:same"
+        ]
+      }
+    },
+    {
+      "code": "limit_exceeded",
+      "id": "transport-truncation",
+      "input": {
+        "limitBytes": 1048576,
+        "omittedBytes": 1,
+        "requiredBytes": 1048577
+      }
+    }
+  ],
+  "schema": "compass.agent-graph.errors/1"
+}

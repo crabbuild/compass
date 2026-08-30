@@ -93,6 +93,306 @@
   snapshots. Production validation and reference generation now verify chunks
   without retaining the canonical payload in one allocation, while the public
   full-read API and store formats remain compatible.
+- Reset all 14 registered universal-evidence producer versions to v1 and keep
+  them `Qualified` under the refreshed release decision at
+  `tests/qualification/universal-evidence-promotion.json`. Cached evidence
+  from prior producer identities is regenerated, while unsupported dynamic or
+  compiler-only behavior remains unresolved.
+
+## 0.3.23 - 2026-08-28
+
+- Make bounded JSON and SQLite adjacency queries retain the same canonical
+  edge-ID prefix before heuristic filtering. New store snapshots advertise the
+  edge-ordered adjacency capability; older sidecars remain valid recovery
+  inputs but directional store queries fail with an explicit rebuild
+  instruction instead of returning a backend-dependent truncated subset.
+
+- Refactor universal language metadata around `UniversalEvidenceProducer` and
+  `UniversalEvidencePipeline`. `UniversalCandidate`/`UniversalComplete` are
+  now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized
+  evidence envelope moves from `adapter` to `pipeline`, replaces `profile`
+  with `qualification`, and replaces the producer string with `emitter`.
+  Universal evidence schema is now `/2` and extraction semantics is `/4`, so
+  pre-refactor caches and evidence artifacts are intentionally rebuilt.
+  Qualification manifests, candidate exports, and TypeScript scorecards now
+  use version-2 schemas and call their language identity `producer`.
+
+- Hard-cut Ruby extraction to the version-1 `compass.ruby` universal
+  evidence publisher and replace the Rails source detector with the
+  evidence-backed `rails-ruby` universal pack. Reopened constants coalesce by
+  exact graph identity, instance/singleton method spaces stay distinct,
+  dynamic dispatch/load/eval forms fail closed, and Ruby is `Qualified` for
+  the bounded capabilities covered by the release promotion decision.
+
+- Preserve anonymous PHP functions and arrow functions as typed callable
+  `closure` nodes, and publish exact PHP trait composition as `mixes_in`
+  instead of collapsing it into `implements`. These additions eliminate
+  closure-induced partial graphs while retaining exact UTF-8 occurrence
+  anchors, deterministic identities, and strict endpoint validation. Also
+  canonicalize file-node names from their portable source paths before
+  coalescing, preventing empty ECMAScript module evidence from colliding with
+  the same detected file identity.
+
+- Publish bounded, typed blind-spot evidence in `analysis.json`,
+  `orientation.json` (`compass.orientation/2`), and MCP
+  `compass://graph-insights`, including stable IDs, witnesses, multiplicity,
+  exact omissions, and explicit limits. Preserve the existing graph edges;
+  structural gaps remain investigative projections rather than inferred
+  relationships.
+
+- Add `compass history blind-spots` to compare persisted graph-insights
+  observations across immutable realizations and report active/resolved
+  structural gaps and disconnected components without treating missing older
+  sidecars as empty graphs.
+
+- Make `compass update` use the fact-neutral incremental path for metadata-only
+  source edits, refresh full-file source envelopes without moving exact symbol
+  anchors, point-update immutable node values, reuse unchanged graph JSON
+  records, and amortize bounded snapshot garbage collection. Exact preflights
+  fall back to full publication whenever topology or secondary indexes change.
+
+- Hard-cut Kotlin onto a version-1 `Qualified` universal pipeline with
+  packages, declarations, extension functions, annotations, generic/nullable
+  types, and named/default argument resolution; convert Spring Kotlin to the
+  universal framework pack and require exact compiler evidence for
+  Java/Kotlin calls.
+
+- Allow `compass review` on `0.3.x` to rebuild comparable realizations from
+  any repository profile or preferred realization whose persisted user-option
+  shape remains reconstructable, including when both compared revisions are
+  already materialized. Rebuilding does not order or allowlist Compass release
+  numbers: it preserves matching user-selected options, replaces engine-owned
+  fingerprint fields, and keeps original historical realizations immutable.
+
+## 0.3.22 - 2026-08-27
+
+- Harden Markdown intelligence within `compass.graph/1`. Pipe tables retain
+  table, header, row, and cell nodes while gaining stable semantic identities,
+  header-qualified labels, exact cell-owned references, bounded per-table
+  extraction, and topology-aware containment handling. Nested YAML frontmatter
+  now publishes exact source-backed config-key hierarchies with stable escaped
+  paths, conservative semantic labels, bounded parsing, and fail-closed unsafe
+  syntax handling. Published document nodes remain graph-v1 resources; no graph
+  schema migration is required.
+
+- Improve exported HTML and VS Code graph inspectors with deterministic incoming
+  and outgoing relationship groups, relationship summaries, direction counts,
+  neighbor focus controls, and clearer icon-backed Callers, Callees, and Impact
+  actions while preserving accessible labels and stable ordering.
+
+- Ensure multiple Markdown tables under one heading receive section-scoped
+  structural identities, preventing graph publication collisions when their
+  headers differ.
+
+## 0.3.21 - 2026-08-25
+
+- Add source-proven Python graph intelligence with artifact-only SCIP
+  enrichment, exact module and stub identities, and independently versioned
+  SQLAlchemy, Celery, Django/DRF, FastAPI/Starlette/Pydantic, and Flask packs.
+
+- Preserve exact framework roles and route dependency/security stages while
+  failing closed on dynamic, ambiguous, stale, conflicting, or inexact
+  evidence.
+
+- Add bounded local DOCX, PPTX, and XLSX preview artifacts with digest-
+  validated SVG/image evidence and OCR overlays; make managed OCR model
+  installation phase-aware, cancellable, and retryable.
+
+- Keep community detail graphs responsive by pausing physics once the view
+  settles.
+
+## 0.3.20 - 2026-08-24
+
+- Keep large generated Go/OpenAPI sources within bounded framework extraction
+  budgets, preserving zero-error qualification for complete enterprise graphs.
+
+- Add Grounded Agent Graph overlays with citation-backed node, edge, Challenge,
+  and Retraction operations, immutable CAS-activated revisions, exact rebase,
+  historical composition, bounded audit, and read-only ingestion preparation.
+  Continuous enrichment is now documented in the bundled coding-agent skill.
+
+- Add versioned `compass.task-context/2` framework evidence for React and
+  frontend workflows, including route stages, render direction, runtime
+  boundaries, configuration dependencies, provenance, and qualification state.
+
+- Harden React frontend graph extraction with exact JSX `renders` edges,
+  component/hook/client/server role evidence, typed Next.js, React
+  Router/Remix, TanStack Router, and Vite semantics, bounded configuration
+  precedence, and strict viewer/query contracts.
+
+- Replace the flat call-flow model with the native
+  `compass.viewer.architecture/1` projection, including production-first
+  scoping, explicit relationship classes, source-grounded group names, exact
+  overflow metadata, bounded drill-down, and shared HTML/VS Code semantics.
+
+- Add bounded native PDF, DOCX, PPTX, and XLSX artifacts with pure-Rust
+  rasterization, optional managed PP-OCRv6, pinned model management, document
+  inspection, OCR evidence views, and explicit Intel-macOS limitations.
+
+- Make semantic provider and model selection explicit with `--backend`,
+  `--model`, `COMPASS_BACKEND`, and `COMPASS_MODEL`, while keeping credentials
+  out of Compass configuration and artifacts.
+
+- Promote Swift, Dart, Scala, and Groovy/Gradle version-1 evidence pipelines to
+  `Qualified` after their independent precision/recall and fixture-performance
+  qualification providers completed.
+
+- Turn the VS Code codebase query view into a multi-command Ask, Explain, and
+  CompassQL workbench, add direct symbol-based caller/callee graphs, and keep
+  historical views strict about unsupported artifact layouts.
+
+## 0.3.19 - 2026-08-21
+
+- Make `compass explain` resolve the exact qualified names returned by typed
+  graph search, preserving ambiguity instead of selecting a duplicate. In the
+  VS Code Explain composer, Enter now accepts and explains the highlighted
+  graph suggestion rather than submitting the incomplete token.
+
+- Turn the VS Code codebase query view into a multi-command workbench with
+  separate Ask, Explain, and CompassQL composers and durable result tabs.
+  Typed Ask diagnostics, symbol relationships, source links, and CompassQL rows
+  now render as readable UI instead of raw JSON. Active commands use a visible
+  top indicator, inputs offer bounded completions from the active code graph,
+  Enter runs the active command, and Shift+Enter inserts a new line. Historical
+  panels complete against their selected immutable revision. Typed `compass
+  ask` also accepts `--at REV` for immutable revision graphs.
+
+- Let VS Code users open a call graph by entering a function name, qualified
+  name, or stable symbol ID in the Call Graph pane, with callers, callees, or
+  both selectable before tracing. The symbol field now completes callable
+  functions, methods, constructors, and properties from the selected
+  repository's active code graph, with keyboard navigation and bounded error
+  recovery. The existing cursor workflow remains available in the same pane.
+
+- Keep Codebase Evolution strict when a stored revision uses an unsupported
+  artifact layout, and offer to rebuild the affected revision with the current
+  Compass version instead of mapping legacy history records.
+
+## 0.3.18 - 2026-08-19
+
+- Keep standalone HTML source navigation usable and exact for local-only graph
+  commits. Exports use the recorded commit when it is published, or a
+  published common ancestor only after proving every rendered source path has
+  identical Git content; otherwise the viewer explains why no safe link is
+  available instead of silently ignoring the action.
+
+## 0.3.17 - 2026-08-19
+
+- Stabilize code-graph interactions in exported HTML and VS Code so rendered
+  nodes remain stationary and explicit layouts pause immediately when users
+  hover, focus, click, or drag.
+
+- Improve community-detail graph readability with semantic node families,
+  purpose-colored edges, confidence-preserving strokes, and an accessible
+  theme-aware legend shared by the embedded viewer and minimap.
+
+- Harden source navigation by refusing forge permalinks for local-only graph
+  commits that cannot be proven reachable from the repository's origin.
+
+## 0.3.16 - 2026-08-18
+
+- Refactor universal evidence around explicit producer and pipeline lifecycles,
+  with typed `Qualifying`/`Qualified` states, renamed envelope fields, and
+  versioned schema/extraction semantics that rebuild pre-refactor caches safely.
+
+- Hard-cut Ruby production extraction onto the version-1 universal evidence
+  pipeline with a Rails universal pack, exact ownership and member resolution,
+  bounded qualification, and fail-closed handling for dynamic dispatch, load,
+  and eval forms.
+
+- Publish bounded, typed graph blind-spot evidence in reports, orientation,
+  MCP, and history comparisons, retaining witnesses, multiplicity, omission
+  counts, and explicit limits instead of inferring missing relationships.
+
+- Preserve PHP closures and arrow functions as callable nodes, publish exact
+  trait composition as `mixes_in`, and canonicalize portable file identities
+  before graph coalescing so sparse evidence cannot collide.
+
+- Harden CLI help and export contracts and improve pull-request review
+  readability with clearer bounded reports and contract coverage.
+
+## 0.3.15 - 2026-08-15
+
+- Hard-cut Kotlin onto the version-1 universal evidence adapter with bounded
+  packages, declarations, extension functions, annotations, generic and
+  nullable types, and named/default argument resolution. Spring Kotlin now
+  uses the universal framework pack and Java/Kotlin calls require exact
+  compiler evidence.
+
+- Make metadata-only incremental graph updates fact-neutral and bounded while
+  refreshing source envelopes without moving symbol anchors, point-updating
+  immutable node values, reusing unchanged graph records, and amortizing
+  snapshot garbage collection. Topology or secondary-index changes still fall
+  back to full publication.
+
+- Allow in-scope symlinked skill destinations during Compass installation.
+
+## 0.3.14 - 2026-08-14
+
+- Allow `compass review` to reconcile either compared revision from any
+  reconstructable repository profile or preferred realization. Review now
+  replaces engine-owned fingerprint fields with the running contract, keeps
+  user-selected options aligned, and leaves historical realizations immutable;
+  persisted Compass release numbers are provenance rather than a compatibility
+  allowlist.
+
+- Filter unshadowed JavaScript, TypeScript, Python, Go, Rust, Java, and Swift
+  built-in globals from call-target publication so constructors, coercion
+  helpers, language preludes, and common global methods do not become noisy
+  graph hubs. Source-proven local and imported declarations retain precedence,
+  and extraction semantics advance to v2 so cached graphs rebuild correctly.
+
+## 0.3.13 - 2026-08-14
+
+- Make `compass review` recover automatically when one compared revision still
+  prefers a realization from an older compatible `0.3.x` patch release. Compass
+  now preserves user-selected build options, advances engine-owned fingerprint
+  fields, and publishes a new current-version comparable pair without rewriting
+  the historical realization. Materialization also verifies the requested
+  profile before reusing a preferred realization.
+
+- Hard-cut PHP production extraction to the version-1 universal evidence pipeline with
+  modern declarations, namespaces, grouped and aliased imports, traits,
+  attributes, enum cases, promoted properties, calls, construction, typed
+  receivers, and source-backed ownership. Resolve PHP type and callable names
+  with explicit case-insensitive rules, namespace-to-global function fallback,
+  conservative class/trait/parent precedence, and ambiguity preservation.
+  Add bounded, repository-contained Composer PSR-4 project evidence. Convert
+  Laravel routes and Drupal hooks to universal source evidence while retaining
+  Drupal routing configuration and Blade template extraction.
+
+- Hard-cut C# production extraction to the version-1 universal evidence pipeline with
+  bounded AST-backed declarations, namespaces, imports and aliases, overload
+  signatures, typed members and parameters, construction and call evidence,
+  base types, ownership, and explicit overrides. Remove the replaced C# raw
+  graph, namespace canonicalizer, and member type-table paths. Convert ASP.NET
+  MVC routing to the universal `aspnet-csharp` pack with evidence-backed
+  attributes, aliases, `AcceptVerbs`, controller/action token composition,
+  absolute templates, overload-safe handler resolution, and `[NonAction]`.
+  Extend universal evidence with typed override roles and relationships, and
+  move XAML code-behind lookup onto the same exact C# ownership facts. Keep
+  sourceless external import identities scoped to their exact wiring sites so
+  imports in different files cannot merge their provenance. Recover malformed
+  zero-width parser evidence without dropping whole files; resolve C# bases
+  and typed receivers through namespace imports, interfaces, constrained
+  generics, fields, properties, and inherited members without crossing
+  languages. Extend Minimal API coverage to bounded multiline lambdas and
+  `MapMethods`, and keep reviewed Kestrel request-processing and middleware
+  anchors ahead of generic role-name matches in natural query ranking. Natural
+  search now removes question stop words and canonicalizes inflections before
+  bounded recall, while persistent discovery caps speculative accelerator
+  hydration before general recall. Since these contracts are still
+  pre-compatibility, hard-reset active extraction, cache, publication, store
+  index, query index/ranker, overview, qualification, and semantic-diff
+  identities to v1 instead of carrying forward provisional version numbers.
+
+- Improve source navigation and canvas space in exported graph workbenches.
+  VS Code continues to open and select local source ranges, while standalone
+  HTML opens commit-pinned GitHub, GitLab, or Bitbucket line links when the Git
+  origin and graph source commit are known. The navigation and inspector rails
+  now collapse independently, repository identity is consolidated in the left
+  header, and the inspector begins directly with search and node details.
+
 ## 0.3.12 - 2026-08-13
 
 - Remove the 2 GiB aggregate canonical-payload limit from current SQLite
@@ -165,6 +465,12 @@
   genuine ambiguity. Tighten performance-harness timing parsing and diagnostics
   for these qualification runs.
 
+- Exclude unshadowed JavaScript, TypeScript, Python, Go, Rust, Java, and Swift
+  built-in globals from call-target publication so constructors, coercion
+  functions, prelude and `java.lang` types, and common global methods do not
+  become noisy graph hubs. Source-proven same-file, same-package, and imported
+  declarations retain precedence. Advance extraction semantics to v2 so
+  cached graphs rebuild with the denser call topology.
 - Stop Markdown pipe-table containers from overwhelming community names and
   `GRAPH_REPORT.md`. Mixed communities now prefer meaningful headings or
   symbols over higher-degree table parser nodes; table-only communities use
@@ -204,7 +510,10 @@
   labels. Add bounded 1–4-hop selection isolation with incoming/outgoing edge
   filtering, layout spacing, a navigable minimap, and discoverable keyboard
   shortcuts. Resuming a settled nested community graph now reheats its layout
-  so pause/resume produces visible physics movement. Consolidate workbench
+  so pause/resume produces visible physics movement. Freeze the force layout
+  before the canvas becomes interactive and automatically pause it when a user
+  hovers a node or starts dragging, keeping click targets stable in both HTML
+  exports and VS Code. Consolidate workbench
   filters into the top graph-control rail, allow neighborhood settings to be
   prepared before selection, keep filters scoped to the visible overview or
   community detail, fit newly isolated neighborhoods, and scale layout reheating

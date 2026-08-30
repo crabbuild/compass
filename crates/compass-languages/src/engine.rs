@@ -130,14 +130,16 @@ impl Engine {
         Ok(extraction)
     }
 
-    /// Extract TypeScript/JavaScript universal evidence directly from source.
+    /// Extract qualification-only universal evidence directly from source.
+    /// The same source-backed emitters are used by the production registry so
+    /// qualification cannot drift from published output.
     ///
-    /// This hidden API remains useful for qualification fixtures, but it now
-    /// calls the same registered candidate emitter used by normal Compass
+    /// This hidden API remains useful for qualification fixtures, but it calls
+    /// the same registered evidence pipeline used by normal Compass
     /// extraction. Keeping both paths on one implementation prevents a
     /// qualification-only graph from diverging from production output.
     #[doc(hidden)]
-    pub fn extract_source_universal_candidate_evidence(
+    pub fn extract_source_universal_evidence(
         &mut self,
         path: &Path,
         source_file: &str,
@@ -145,18 +147,18 @@ impl Engine {
     ) -> Result<crate::SemanticEvidenceBatch, ExtractError> {
         let spec =
             Registry::resolve(path).ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
-        if !matches!(spec.name, "typescript" | "tsx" | "javascript") {
-            return Err(ExtractError::Unsupported(path.to_path_buf()));
-        }
+        let pipeline = Registry::universal_evidence_pipeline_for_spec(spec)
+            .ok_or_else(|| ExtractError::Unsupported(path.to_path_buf()))?;
         let tree = self.parse(path, spec, source)?;
-        crate::evidence::extract_candidate_tree_evidence(
+        let evidence = crate::evidence::extract_tree_evidence(
             path,
             source_file,
             source,
             tree.root_node(),
-            spec.name,
-        )
-        .map_err(|error| ExtractError::InvalidProgramEvidence {
+            pipeline,
+            self.project_evidence(path),
+        );
+        evidence.map_err(|error| ExtractError::InvalidProgramEvidence {
             path: path.to_path_buf(),
             detail: error.to_string(),
         })
@@ -213,7 +215,11 @@ impl Engine {
                 program: None,
             });
         }
-        if spec.kind == ExtractorKind::Generic && matches!(spec.name, "go" | "java") {
+        let pipeline = Registry::universal_evidence_pipeline_for_spec(spec);
+        if spec.kind == ExtractorKind::Generic
+            && pipeline.is_some()
+            && !crate::program::supports_language(spec.name)
+        {
             let tree = self.parse(path, spec, source)?;
             let mut graph = self.extract_generic_from_tree(
                 path,
@@ -230,12 +236,7 @@ impl Engine {
                 program: None,
             });
         }
-        if spec.kind != ExtractorKind::Generic
-            || !matches!(
-                spec.name,
-                "python" | "rust" | "typescript" | "tsx" | "javascript"
-            )
-        {
+        if spec.kind != ExtractorKind::Generic || !crate::program::supports_language(spec.name) {
             return self
                 .extract_source(path, source)
                 .map(|graph| CombinedExtraction {
@@ -312,11 +313,6 @@ impl Engine {
         spec: LanguageSpec,
         source: &[u8],
     ) -> Result<Extraction, ExtractError> {
-        if spec.name == "groovy" {
-            let mut extraction = crate::groovy::extract(path, source);
-            attach_basic_symbol_metadata(&mut extraction, source, spec.name);
-            return Ok(extraction);
-        }
         // These extractors are intentionally source-driven and do not consume a
         // tree-sitter root. Avoid initializing and touching their large static
         // grammar tables only to discard the tree; this materially lowers cold
@@ -328,7 +324,6 @@ impl Engine {
             "r" => Some(crate::r::extract(path, source)),
             "pascal" => Some(crate::pascal::extract(path, source)),
             "apex" => Some(crate::apex::extract(path, source)),
-            "dart" => Some(crate::dart::extract(path, source)),
             _ => None,
         };
         if let Some(mut extraction) = source_driven {
@@ -365,17 +360,15 @@ impl Engine {
         root: Node<'_>,
     ) -> Extraction {
         let config = generic_config(spec);
-        let universal_profile = Registry::universal_profile_for_spec(spec);
-        let mut extraction = if universal_profile.is_some() {
+        let pipeline = Registry::universal_evidence_pipeline_for_spec(spec);
+        let mut extraction = if pipeline.is_some() {
             Extraction::default()
         } else {
             match spec.name {
                 "go" => crate::go::extract(path, source, root),
                 "bash" => crate::bash::extract(path, source, root),
-                "csharp" => crate::csharp::extract(path, source, root),
                 "cpp" => crate::cpp::extract(path, source, root),
                 "php" => crate::php::extract(path, source, root),
-                "swift" => crate::swift::extract(path, source, root),
                 "objc" => crate::objc::extract(path, source, root),
                 "powershell" => crate::powershell::extract(path, source, root),
                 "elixir" => crate::elixir::extract(path, source, root),
@@ -387,17 +380,18 @@ impl Engine {
         if spec.name == "python" {
             add_python_rationale(path, source, root, &mut extraction);
         }
-        if universal_profile.is_none() {
+        if pipeline.is_none() {
             attach_definition_metadata(&mut extraction, source, root, &config, spec.name);
             crate::semantic::enrich(path, source, root, spec.name, &mut extraction);
         }
-        if let Some(profile) = universal_profile {
+        if let Some(pipeline) = pipeline {
             match crate::evidence::extract_tree_evidence(
                 path,
                 evidence_source_file,
                 source,
                 root,
-                profile,
+                pipeline,
+                self.project_evidence(path),
             ) {
                 Ok(evidence) => {
                     extraction.semantic_evidence = Some(evidence);
@@ -415,7 +409,7 @@ impl Engine {
         // (for example `src/routes/**`, `app/routes/**`, and `src/app/**`) to
         // classify a file. Pipeline callers supply that authoritative identity;
         // direct extraction derives a bounded portable fallback from the path.
-        let framework_source = universal_profile.map(|_| {
+        let framework_source = pipeline.map(|_| {
             if evidence_source_is_explicit
                 && !evidence_source_file.is_empty()
                 && Path::new(evidence_source_file).is_relative()
@@ -425,7 +419,16 @@ impl Engine {
                 portable_framework_source(path)
             }
         });
-        let framework_path = framework_source.as_deref().map(Path::new).unwrap_or(path);
+        // Dart's convention bridge retains the resolved filesystem path for
+        // relative export targets.  Other universal framework packs use the
+        // portable source identity so route classification remains checkout
+        // independent.  Source-supplied callers still own their explicit
+        // repository-relative identity above.
+        let framework_path = if spec.name == "dart" && !evidence_source_is_explicit {
+            path
+        } else {
+            framework_source.as_deref().map(Path::new).unwrap_or(path)
+        };
         crate::frameworks::detect(
             framework_path,
             source,
@@ -434,7 +437,7 @@ impl Engine {
             self.project_evidence(path),
             &mut extraction,
         );
-        if universal_profile.is_some() && extraction.semantic_evidence.is_some() {
+        if pipeline.is_some() && extraction.semantic_evidence.is_some() {
             extraction.raw_calls = None;
         }
         if root.has_error() {
@@ -1609,7 +1612,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
         parent_declaration: Option<(&str, &str, bool, bool)>,
     ) {
         let kind = node.kind();
-        if self.config.import_types.contains(&kind) && !matches!(self.language, "kotlin" | "lua") {
+        if self.config.import_types.contains(&kind) && self.language != "lua" {
             self.add_import(node);
         }
 
@@ -1659,12 +1662,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             if self.language == "python" {
                 self.add_python_parent_edges(node, &id);
                 self.add_python_decorators(node, &id);
-            } else if self.language == "ruby" {
-                self.add_ruby_parent_edge(node, &id);
-            } else if self.language == "kotlin" {
-                self.add_kotlin_parent_edges(node, &id);
-            } else if self.language == "scala" {
-                self.add_scala_class_references(node, &id);
             }
             if matches!(self.language, "javascript" | "typescript" | "tsx") {
                 self.add_js_parent_edges(node, &id);
@@ -1736,10 +1733,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                 self.add_python_decorators(node, &id);
             } else if self.language == "c" {
                 self.add_c_function_references(node, &id);
-            } else if self.language == "kotlin" {
-                self.add_kotlin_function_references(node, &id);
-            } else if self.language == "scala" {
-                self.add_scala_function_references(node, &id);
             }
             self.callables.entry(name).or_default().push(id.clone());
             self.functions.push(FunctionBody {
@@ -1774,33 +1767,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
             && kind == "assignment_expression"
         {
             self.add_js_commonjs_export(node);
-        }
-
-        if self.language == "kotlin" && kind == "enum_entry" {
-            if let Some((class_id, _, _, _)) = parent_declaration
-                && let Some(name_node) = first_descendant(node, "simple_identifier")
-                    .or_else(|| first_descendant(node, "identifier"))
-                && let Some(name) = self.node_text(name_node).map(clean_name)
-            {
-                let id = make_id(&[class_id, &name]);
-                self.add_node(&id, &name, line(node), false, None);
-                self.add_edge(class_id, &id, "case_of", line(node), None);
-            }
-            return;
-        }
-
-        if self.language == "kotlin" && kind == "property_declaration" {
-            if let Some((class_id, _, _, _)) = parent_declaration {
-                self.add_kotlin_property_reference(node, class_id);
-            }
-            return;
-        }
-
-        if self.language == "scala"
-            && matches!(kind, "val_definition" | "var_definition")
-            && let Some((class_id, _, _, _)) = parent_declaration
-        {
-            self.add_scala_field_reference(node, class_id);
         }
 
         if matches!(self.language, "javascript" | "typescript" | "tsx")
@@ -2218,7 +2184,7 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                     source_file: self.source_file.clone(),
                     source_location: format!("L{}", line(node)),
                     receiver: Some(call.receiver),
-                    receiver_type: (self.language == "ruby" && call.member).then_some(None),
+                    receiver_type: None,
                     lang: None,
                     extensions,
                 });
@@ -2321,22 +2287,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn declaration_name(&self, node: Node<'tree>) -> Option<String> {
-        if self.language == "kotlin"
-            && self.config.class_types.contains(&node.kind())
-            && let Some(text) = self.node_text(node)
-        {
-            for marker in ["class ", "interface ", "object "] {
-                if let Some(offset) = text.rfind(marker)
-                    && let Some(name) = text[offset + marker.len()..]
-                        .split_whitespace()
-                        .next()
-                        .map(|name| clean_name(name.to_owned()))
-                        .filter(|name| !name.is_empty())
-                {
-                    return Some(name);
-                }
-            }
-        }
         node.child_by_field_name("name")
             .and_then(|name| self.node_text(name))
             .or_else(|| {
@@ -2372,21 +2322,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     }
 
     fn call_name(&self, node: Node<'tree>) -> Option<CallName> {
-        if self.language == "ruby" {
-            let name = node
-                .child_by_field_name("method")
-                .and_then(|method| self.node_text(method))
-                .map(clean_name)?;
-            let receiver = node
-                .child_by_field_name("receiver")
-                .and_then(|receiver| self.node_text(receiver))
-                .map(|receiver| receiver.rsplit("::").next().unwrap_or_default().to_owned());
-            return Some(CallName {
-                name,
-                member: receiver.is_some(),
-                receiver,
-            });
-        }
         let function = if self.config.call_function_field.is_empty() {
             None
         } else {
@@ -2429,30 +2364,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
     fn add_import(&mut self, node: Node<'tree>) {
         if self.language == "python" {
             self.add_python_import(node);
-            return;
-        }
-        if self.language == "scala" {
-            let mut cursor = node.walk();
-            if let Some(target_node) = node
-                .children(&mut cursor)
-                .find(|child| matches!(child.kind(), "stable_id" | "identifier"))
-            {
-                let raw = self.node_text(target_node).unwrap_or_default();
-                let target = raw
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or_default()
-                    .trim_matches(['{', '}', ' ']);
-                if !target.is_empty() && target != "_" {
-                    self.add_edge(
-                        &self.file_id.clone(),
-                        &make_id(&[target]),
-                        "imports",
-                        line(node),
-                        Some("import"),
-                    );
-                }
-            }
             return;
         }
         let text = self.node_text(node).unwrap_or_default();
@@ -3243,243 +3154,6 @@ impl<'source, 'tree> ExtractState<'source, 'tree> {
                         .insert("target_qualified_name".to_owned(), Value::String(qualified));
                 }
                 crate::facts::stamp_node_range(&mut edge.attributes, decorator);
-            }
-        }
-    }
-
-    fn add_ruby_parent_edge(&mut self, node: Node<'tree>, class_id: &str) {
-        let Some(superclass) = node.child_by_field_name("superclass") else {
-            return;
-        };
-        let Some(name_node) = first_descendant(superclass, "constant") else {
-            return;
-        };
-        let Some(name) = self.node_text(name_node).map(clean_name) else {
-            return;
-        };
-        let target = self.ensure_type_node(&name, true);
-        self.add_edge(class_id, &target, "inherits", line(node), None);
-    }
-
-    fn add_kotlin_parent_edges(&mut self, node: Node<'tree>, class_id: &str) {
-        let mut specifiers = Vec::new();
-        collect_nodes_of_kind(node, "delegation_specifier", &mut specifiers);
-        for specifier in specifiers {
-            let relation = if first_descendant(specifier, "constructor_invocation").is_some() {
-                "inherits"
-            } else {
-                "implements"
-            };
-            let Some(user_type) = first_descendant(specifier, "user_type") else {
-                continue;
-            };
-            let Some(name_node) = first_descendant(user_type, "type_identifier")
-                .or_else(|| first_descendant(user_type, "simple_identifier"))
-                .or_else(|| first_descendant(user_type, "identifier"))
-            else {
-                continue;
-            };
-            let Some(name) = self.node_text(name_node).map(clean_name) else {
-                continue;
-            };
-            let target = self.ensure_type_node(&name, true);
-            self.add_edge(class_id, &target, relation, line(node), None);
-
-            let mut arguments = Vec::new();
-            collect_nodes_of_kind(user_type, "type_projection", &mut arguments);
-            for argument in arguments {
-                let mut refs = Vec::new();
-                collect_kotlin_type_refs(argument, self.source, true, &mut refs);
-                self.add_kotlin_type_references(class_id, &refs, "generic_arg", line(node));
-            }
-        }
-    }
-
-    fn add_kotlin_property_reference(&mut self, node: Node<'tree>, class_id: &str) {
-        let Some(type_node) = first_descendant(node, "user_type")
-            .or_else(|| first_descendant(node, "nullable_type"))
-            .or_else(|| first_descendant(node, "type_reference"))
-        else {
-            return;
-        };
-        let mut refs = Vec::new();
-        collect_kotlin_type_refs(type_node, self.source, false, &mut refs);
-        for (name, generic) in refs {
-            let target = self.ensure_type_node(&name, true);
-            if target != class_id {
-                self.add_edge(
-                    class_id,
-                    &target,
-                    "references",
-                    line(node),
-                    Some(if generic { "generic_arg" } else { "field" }),
-                );
-            }
-        }
-    }
-
-    fn add_kotlin_function_references(&mut self, node: Node<'tree>, function_id: &str) {
-        if let Some(parameters) = first_descendant(node, "function_value_parameters") {
-            let mut cursor = parameters.walk();
-            for parameter in parameters
-                .children(&mut cursor)
-                .filter(|child| child.kind() == "parameter")
-            {
-                let Some(type_node) = first_descendant(parameter, "user_type")
-                    .or_else(|| first_descendant(parameter, "nullable_type"))
-                    .or_else(|| first_descendant(parameter, "type_reference"))
-                else {
-                    continue;
-                };
-                let mut refs = Vec::new();
-                collect_kotlin_type_refs(type_node, self.source, false, &mut refs);
-                self.add_kotlin_type_references(function_id, &refs, "parameter_type", line(node));
-            }
-        }
-
-        let mut saw_parameters = false;
-        let mut saw_colon = false;
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "function_value_parameters" {
-                saw_parameters = true;
-                continue;
-            }
-            if saw_parameters && child.kind() == ":" {
-                saw_colon = true;
-                continue;
-            }
-            if saw_colon && child.is_named() {
-                let mut refs = Vec::new();
-                collect_kotlin_type_refs(child, self.source, false, &mut refs);
-                self.add_kotlin_type_references(function_id, &refs, "return_type", line(node));
-                break;
-            }
-        }
-    }
-
-    fn add_kotlin_type_references(
-        &mut self,
-        source: &str,
-        refs: &[(String, bool)],
-        context: &str,
-        at: usize,
-    ) {
-        for (name, generic) in refs {
-            let target = self.ensure_type_node(name, true);
-            if target != source {
-                self.add_edge(
-                    source,
-                    &target,
-                    "references",
-                    at,
-                    Some(if *generic { "generic_arg" } else { context }),
-                );
-            }
-        }
-    }
-
-    fn add_scala_class_references(&mut self, node: Node<'tree>, class_id: &str) {
-        let extends = node
-            .child_by_field_name("extend")
-            .or_else(|| first_descendant(node, "extends_clause"));
-        if let Some(extends) = extends {
-            let mut bases = Vec::new();
-            let mut cursor = extends.walk();
-            for child in extends.children(&mut cursor) {
-                let name_node = if child.kind() == "type_identifier" {
-                    Some(child)
-                } else if child.kind() == "generic_type" {
-                    child
-                        .child_by_field_name("type")
-                        .or_else(|| first_descendant(child, "type_identifier"))
-                } else {
-                    None
-                };
-                if let Some(name) = name_node
-                    .and_then(|name| self.node_text(name))
-                    .map(clean_name)
-                {
-                    bases.push((name, line(child)));
-                }
-            }
-            for (index, (name, at)) in bases.into_iter().enumerate() {
-                let target = self.ensure_type_node(&name, true);
-                if target != class_id {
-                    self.add_edge(
-                        class_id,
-                        &target,
-                        if index == 0 { "inherits" } else { "mixes_in" },
-                        at,
-                        None,
-                    );
-                }
-            }
-        }
-
-        let mut parameters = Vec::new();
-        collect_nodes_of_kind(node, "class_parameter", &mut parameters);
-        for parameter in parameters {
-            if let Some(type_node) = parameter.child_by_field_name("type") {
-                let mut refs = Vec::new();
-                collect_scala_type_refs(type_node, self.source, false, &mut refs);
-                self.add_scala_type_references(class_id, &refs, "field", line(parameter));
-            }
-        }
-    }
-
-    fn add_scala_field_reference(&mut self, node: Node<'tree>, class_id: &str) {
-        let Some(type_node) = node.child_by_field_name("type") else {
-            return;
-        };
-        let mut refs = Vec::new();
-        collect_scala_type_refs(type_node, self.source, false, &mut refs);
-        self.add_scala_type_references(class_id, &refs, "field", line(node));
-    }
-
-    fn add_scala_function_references(&mut self, node: Node<'tree>, function_id: &str) {
-        if let Some(parameters) = first_descendant(node, "parameters") {
-            let mut cursor = parameters.walk();
-            for parameter in parameters
-                .children(&mut cursor)
-                .filter(|child| child.kind() == "parameter")
-            {
-                if let Some(type_node) = parameter.child_by_field_name("type") {
-                    let mut refs = Vec::new();
-                    collect_scala_type_refs(type_node, self.source, false, &mut refs);
-                    self.add_scala_type_references(
-                        function_id,
-                        &refs,
-                        "parameter_type",
-                        line(node),
-                    );
-                }
-            }
-        }
-        if let Some(return_type) = node.child_by_field_name("return_type") {
-            let mut refs = Vec::new();
-            collect_scala_type_refs(return_type, self.source, false, &mut refs);
-            self.add_scala_type_references(function_id, &refs, "return_type", line(node));
-        }
-    }
-
-    fn add_scala_type_references(
-        &mut self,
-        source: &str,
-        refs: &[(String, bool)],
-        context: &str,
-        at: usize,
-    ) {
-        for (name, generic) in refs {
-            let target = self.ensure_type_node(name, true);
-            if target != source {
-                self.add_edge(
-                    source,
-                    &target,
-                    "references",
-                    at,
-                    Some(if *generic { "generic_arg" } else { context }),
-                );
             }
         }
     }
@@ -4407,124 +4081,6 @@ fn collect_c_type_names(node: Node<'_>, source: &[u8], output: &mut Vec<String>)
     }
 }
 
-fn collect_kotlin_type_refs(
-    node: Node<'_>,
-    source: &[u8],
-    generic: bool,
-    output: &mut Vec<(String, bool)>,
-) {
-    if matches!(node.kind(), "integral_literal" | "boolean_literal") {
-        return;
-    }
-    if node.kind() == "user_type" {
-        if let Some(name_node) = first_descendant(node, "type_identifier")
-            .or_else(|| first_descendant(node, "simple_identifier"))
-            .or_else(|| first_descendant(node, "identifier"))
-            && let Ok(name) = name_node.utf8_text(source)
-            && !kotlin_builtin_type(name)
-        {
-            output.push((name.to_owned(), generic));
-        }
-        let mut arguments = Vec::new();
-        collect_nodes_of_kind(node, "type_projection", &mut arguments);
-        for argument in arguments {
-            let mut cursor = argument.walk();
-            for child in argument
-                .children(&mut cursor)
-                .filter(|child| child.is_named())
-            {
-                collect_kotlin_type_refs(child, source, true, output);
-            }
-        }
-        return;
-    }
-    if matches!(node.kind(), "identifier" | "type_identifier") {
-        if let Ok(name) = node.utf8_text(source)
-            && !kotlin_builtin_type(name)
-        {
-            output.push((name.to_owned(), generic));
-        }
-        return;
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_kotlin_type_refs(child, source, generic, output);
-    }
-}
-
-fn kotlin_builtin_type(name: &str) -> bool {
-    matches!(
-        name,
-        "String"
-            | "Int"
-            | "Long"
-            | "Short"
-            | "Byte"
-            | "Boolean"
-            | "Char"
-            | "Float"
-            | "Double"
-            | "Unit"
-            | "Any"
-            | "Nothing"
-    )
-}
-
-fn collect_scala_type_refs(
-    node: Node<'_>,
-    source: &[u8],
-    generic: bool,
-    output: &mut Vec<(String, bool)>,
-) {
-    if node.kind() == "type_identifier" {
-        if let Ok(name) = node.utf8_text(source)
-            && !name.is_empty()
-        {
-            output.push((name.to_owned(), generic));
-        }
-        return;
-    }
-    if node.kind() == "generic_type" {
-        let base = node
-            .child_by_field_name("type")
-            .or_else(|| first_descendant(node, "type_identifier"));
-        if let Some(base) = base
-            && let Ok(name) = base.utf8_text(source)
-            && !name.is_empty()
-        {
-            output.push((name.to_owned(), generic));
-        }
-        let mut cursor = node.walk();
-        for arguments in node
-            .children(&mut cursor)
-            .filter(|child| child.kind() == "type_arguments")
-        {
-            let mut argument_cursor = arguments.walk();
-            for argument in arguments
-                .children(&mut argument_cursor)
-                .filter(|child| child.is_named())
-            {
-                collect_scala_type_refs(argument, source, true, output);
-            }
-        }
-        return;
-    }
-    if matches!(
-        node.kind(),
-        "compound_type"
-            | "infix_type"
-            | "function_type"
-            | "tuple_type"
-            | "annotated_type"
-            | "projected_type"
-    ) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-            collect_scala_type_refs(child, source, generic, output);
-        }
-    }
-}
-
 fn collect_nodes_of_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
@@ -4641,8 +4197,57 @@ export class OrdersConsumer {
                 crate::RawFrameworkFact::Route(route) => &route.anchor,
                 crate::RawFrameworkFact::Domain(domain) => &domain.anchor,
                 crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
+                crate::RawFrameworkFact::Role(role) => &role.anchor,
+                crate::RawFrameworkFact::Relation(relation) => &relation.anchor,
+                crate::RawFrameworkFact::Configuration(configuration) => &configuration.anchor,
+                crate::RawFrameworkFact::FileSet(file_set) => &file_set.anchor,
             };
             anchor.source_file == "src/orders.ts"
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_source_identity_controls_csharp_universal_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("Controllers/OrdersController.cs");
+        let source = br#"using Microsoft.AspNetCore.Mvc;
+namespace Store.Controllers;
+[ApiController]
+[Route("api/[controller]")]
+public class OrdersController : ControllerBase {
+    [HttpGet("{id:int}")]
+    public string Get(int id) => id.ToString();
+}
+"#;
+
+        let extraction = Engine::default().extract_source_graph_only(
+            &path,
+            "Controllers/OrdersController.cs",
+            source,
+        )?;
+        let evidence = extraction
+            .semantic_evidence
+            .ok_or("C# universal evidence was not emitted")?;
+
+        assert!(
+            evidence
+                .declarations
+                .iter()
+                .all(|fact| { fact.range.source_file == "Controllers/OrdersController.cs" })
+        );
+        assert!(extraction.framework_facts.iter().all(|fact| {
+            let anchor = match fact {
+                crate::RawFrameworkFact::Route(route) => &route.anchor,
+                crate::RawFrameworkFact::Domain(domain) => &domain.anchor,
+                crate::RawFrameworkFact::Annotation(annotation) => &annotation.anchor,
+                crate::RawFrameworkFact::Role(role) => &role.anchor,
+                crate::RawFrameworkFact::Relation(relation) => &relation.anchor,
+                crate::RawFrameworkFact::Configuration(configuration) => &configuration.anchor,
+                crate::RawFrameworkFact::FileSet(file_set) => &file_set.anchor,
+            };
+            anchor.source_file == "Controllers/OrdersController.cs"
         }));
         Ok(())
     }
@@ -4758,7 +4363,7 @@ export class OrdersConsumer {
             })
             .ok_or("missing prototype method")?;
         assert_eq!(method.kind, "property");
-        let direct = Engine::default().extract_source_universal_candidate_evidence(
+        let direct = Engine::default().extract_source_universal_evidence(
             &source,
             "widget.js",
             &source_bytes,

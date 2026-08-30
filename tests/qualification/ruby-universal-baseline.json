@@ -1,0 +1,109 @@
+{
+  "schema": "compass.ruby-universal-baseline/1",
+  "capturedAt": "2026-08-17",
+  "producer": "compass.ruby",
+  "producerVersion": 1,
+  "evidenceSchema": "compass.languages.evidence/2",
+  "buildTimeExcluded": true,
+  "rssBlocking": false,
+  "corpora": [
+    {
+      "name": "rails",
+      "commit": "cc7d47f4419ba983fc9d06bffece57778fa671c5",
+      "rubySourceFiles": 3486,
+      "rubyParsedFiles": 3486,
+      "rubyInventorySha256": "2edb8b395bcc18014bf8fcd33c4cb3bc23c6a57b140ee8becbc647684fc76dad",
+      "projection": "mixed",
+      "graphSha256": "e41bf1976f9b6af01d1e1064bfe9295bb2cf5233dbfb700d729f0ac05d2535a8",
+      "files": 4967,
+      "nodes": 95462,
+      "edges": 158272,
+      "coldSeconds": 222.7
+    },
+    {
+      "name": "discourse",
+      "commit": "699ad46536f619396e73720c7652dbfc7a1f86c0",
+      "rubySourceFiles": 10921,
+      "rubyParsedFiles": 10921,
+      "rubyInventorySha256": "b556ae34d65b7cfdfd374a7a86f6a253aecdfd216366176d9bc8e6b61e724020",
+      "projection": "ruby-only",
+      "graphSha256": "69b5a7de8246913158f3e5270f2a7002d88d43b1e51de2d09ab5c0b217e71914",
+      "files": 11199,
+      "nodes": 104033,
+      "edges": 187412,
+      "coldSeconds": 247.2
+    },
+    {
+      "name": "rubocop",
+      "commit": "c034d8b6804788856321d78c480f9f007bd85a8d",
+      "rubySourceFiles": 1759,
+      "rubyParsedFiles": 1759,
+      "rubyInventorySha256": "6ce27ad3a6785409d2e551046db6719800648d1d8a6e2e5ff5a283702f63d6e0",
+      "projection": "ruby-only",
+      "graphSha256": "67eb76eb3eb7c96c5b25ce0e8d1c5855c3634e9c1acc40d0599e67ba9a712a68",
+      "files": 1759,
+      "nodes": 22030,
+      "edges": 32972,
+      "coldSeconds": 43.8
+    }
+  ],
+  "incremental": {
+    "corpus": "rails-ruby-subtree",
+    "files": 305,
+    "unchangedSecondsRange": [0.195878, 0.204463],
+    "factNeutralEditSeconds": 9.238669,
+    "changedFiles": 1,
+    "reusedFiles": 304
+  },
+  "performance": [
+    {
+      "corpus": "rails",
+      "projection": "mixed",
+      "samples": 5,
+      "coldSeconds": 267.941025,
+      "warmSeconds": [2.966368, 2.950501, 2.966947, 2.954732, 2.961640],
+      "warmMedianSeconds": 2.961640,
+      "factNeutralSeconds": 165.412041,
+      "semanticSeconds": 249.000887,
+      "restoreSeconds": 239.309139,
+      "changedFiles": 1,
+      "reusedFiles": 3488,
+      "graphSha256": "38bee4db30f76b7b5ffdb1fb0f46f94dadd90d52368a991e03ac035167d8d8ad",
+      "restoreGraphSha256": "38bee4db30f76b7b5ffdb1fb0f46f94dadd90d52368a991e03ac035167d8d8ad"
+    },
+    {
+      "corpus": "rubocop",
+      "projection": "ruby-only",
+      "samples": 5,
+      "coldSeconds": 36.024826,
+      "warmSeconds": [0.548235, 0.546150, 0.558307, 0.556586, 0.551958],
+      "warmMedianSeconds": 0.551958,
+      "factNeutralSeconds": 28.980814,
+      "semanticSeconds": 40.901903,
+      "restoreSeconds": 42.695557,
+      "changedFiles": 1,
+      "reusedFiles": 1758,
+      "graphSha256": "42840b1bacd00704960e6dc198048ca1e37413e5bc840d0be4fbfe0c53f8563d",
+      "restoreGraphSha256": "42840b1bacd00704960e6dc198048ca1e37413e5bc840d0be4fbfe0c53f8563d"
+    },
+    {
+      "corpus": "discourse",
+      "projection": "ruby-only",
+      "samples": 5,
+      "coldSeconds": 211.296212,
+      "warmSeconds": [3.047000, 2.996497, 3.214150, 3.014156, 3.017186],
+      "warmMedianSeconds": 3.017186,
+      "factNeutralSeconds": 145.529095,
+      "semanticSeconds": 226.129381,
+      "restoreSeconds": 226.958164,
+      "changedFiles": 1,
+      "reusedFiles": 10922,
+      "graphSha256": "d4aec2370cf4bb78b30c312a7422873f64499849e45ff1695652f1d50bb72f98",
+      "restoreGraphSha256": "d4aec2370cf4bb78b30c312a7422873f64499849e45ff1695652f1d50bb72f98"
+    }
+  ],
+  "limitations": [
+    "Discourse and RuboCop graph projections exclude non-Ruby files because their full mixed-language trees exceed the bounded Markdown parser resource envelope.",
+    "The quality audit passes the fixed precision/recall thresholds; the release promotion decision records compass.ruby version 1 as Qualified."
+  ]
+}

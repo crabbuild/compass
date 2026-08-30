@@ -75,6 +75,8 @@ const GROUPS: &[Group] = &[
             "init",
             "update",
             "extract",
+            "document",
+            "models",
             "watch",
             "cluster-only",
             "label",
@@ -88,6 +90,7 @@ const GROUPS: &[Group] = &[
     Group {
         title: "Explore",
         commands: &[
+            "agent-graph",
             "ask",
             "search",
             "callers",
@@ -146,16 +149,34 @@ const GROUPS: &[Group] = &[
 
 const PAGES: &[Page] = &[
     page!(
+        "agent-graph",
+        "Manage grounded agent-authored graph overlays",
+        [
+            "compass agent-graph status [OPTIONS]",
+            "compass agent-graph prepare --source-span FILE:START_BYTE:END_BYTE [OPTIONS]",
+            "compass agent-graph apply --request FILE --enable-writes [OPTIONS]",
+            "compass agent-graph show ASSERTION_ID [OPTIONS]",
+            "compass agent-graph history [OPTIONS]",
+            "compass agent-graph audit --revision REVISION [OPTIONS]",
+            "compass agent-graph diff OLD NEW [OPTIONS]",
+            "compass agent-graph rebase-plan --revision SOURCE_REVISION [OPTIONS]",
+            "compass agent-graph rebase-commit --request FILE --enable-writes [OPTIONS]",
+            "compass agent-graph query --revision REV [--profile augment|curated] --cql QUERY",
+            "compass agent-graph export --revision REV --output FILE [OPTIONS]"
+        ],
+        "Options:\n  --graph <PATH>          Exact current Base Graph [default: compass-out/graph.json]\n  --realization <ID>      Exact immutable history realization instead of --graph\n  --root <PATH>           Repository root [default: current directory]\n  --state-root <PATH>     Required explicit state root outside Git\n  --overlay <ID>          Overlay ID [default: overlay:default]\n  --revision <DIGEST>     Exact Overlay Revision\n  --profile <PROFILE>     augment or curated [default: augment]\n  --format <text|json>    Output format [default: text]\n  --base-node <ID>        Prepare an exact Base node reference (repeatable)\n  --base-edge <ID>        Prepare an exact Base edge reference (repeatable)\n  --source-span <SPEC>    Prepare FILE:START_BYTE:END_BYTE evidence (repeatable)\n  --enable-writes         Explicitly enable this local apply invocation\n  --allow-masks           Permit stronger curated-mask operations (requires writes)\n  --principal <ID>        Local owner principal [default: principal:local]\n\nNotes:\n  Prepare is read-only and returns compass.agent-graph.ingestion-preparation/1 with verifier-owned Base record and source digests. Apply accepts one compass.agent-graph.batch/1 JSON value. --realization cannot be combined with --graph or --state-root. Base Graph artifacts and historical realizations are never mutated. Query remains read-only CompassQL. GROUNDED means citation integrity was deterministically verified; it is not structural confidence or proof of semantic truth."
+    ),
+    page!(
         "context",
         "Compose bounded, verified evidence for a coding task",
         ["compass context <explain|modify|debug|test> <TARGET> [OPTIONS]"],
-        "Arguments:\n  <INTENT>                 Task intent: explain, modify, debug, or test\n  <TARGET>                 Exact symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>           Graph JSON [default: compass-out/graph.json]\n  --program <PATH>         Optional Program IR bundle\n  --root <PATH>            Repository root for digest-verified source [default: current directory]\n  --memory <PATH>          Reflection memory directory [default: GRAPH_DIR/memory]\n  --engine <default|json|store> Query backend [default: default]\n  --format <text|json>     Output format [default: text]\n  --max-depth <N>          Maximum impact depth\n  --max-nodes <N>          Maximum nodes per evidence query\n  --max-edges <N>          Maximum edges per evidence query\n  --max-paths <N>          Maximum paths per evidence query\n  --max-candidates <N>     Maximum target candidates\n  --max-source-bytes <N>   Maximum verified source bytes\n  --max-knowledge-items <N> Maximum linked memory records\n  --max-response-bytes <N> Maximum composed response bytes\n\nExamples:\n  compass context explain crate::Parser::parse\n  compass context modify symbol-id --format json\n\nNotes:\n  Fuzzy candidates are suggestions only. Compass composes structural evidence only after one exact identity resolves; ambiguity is never resolved by first match."
+        "Arguments:\n  <INTENT>                 Task intent: explain, modify, debug, or test\n  <TARGET>                 Exact symbol ID, name, or qualified name\n\nOptions:\n  --graph <PATH>           Graph JSON [default: compass-out/graph.json]\n  --program <PATH>         Optional Program IR bundle\n  --root <PATH>            Repository root for digest-verified source [default: current directory]\n  --memory <PATH>          Reflection memory directory [default: GRAPH_DIR/memory]\n  --engine <default|json|store> Query backend [default: default]\n  --format <text|json>     Output format [default: text]\n  --agent-overlay <ID>     Exact Agent Graph overlay; requires --agent-revision\n  --agent-revision <DIGEST> Exact immutable Overlay Revision\n  --agent-profile <PROFILE> augment or curated [default: augment]\n  --agent-state-root <PATH> Explicit Agent Graph state root outside Git\n  --max-depth <N>          Maximum impact depth\n  --max-nodes <N>          Maximum nodes per evidence query\n  --max-edges <N>          Maximum edges per evidence query\n  --max-paths <N>          Maximum paths per evidence query\n  --max-candidates <N>     Maximum target candidates\n  --max-source-bytes <N>   Maximum verified source bytes\n  --max-knowledge-items <N> Maximum linked memory/Agent records\n  --max-response-bytes <N> Maximum composed response bytes\n\nExamples:\n  compass context explain crate::Parser::parse\n  compass context modify symbol-id --format json\n\nNotes:\n  Fuzzy candidates are suggestions only. Compass composes structural evidence only after one exact identity resolves; ambiguity is never resolved by first match. Agent knowledge requires both exact overlay selectors and remains separate from Base provenance."
     ),
     page!(
         "ask",
         "Route a natural-language question to a typed code-graph query",
         ["compass ask <QUESTION> [OPTIONS]"],
-        "Arguments:\n  <QUESTION>                    Natural-language code-graph question\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-depth <N>               Traversal radius\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --max-paths <N>               Path bound\n  --max-candidates <N>          Candidate bound\n  --include-heuristic           Include heuristic evidence\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass ask \"who calls PaymentService.charge?\"\n  compass ask \"what does CheckoutController.create call?\" --format json\n  compass ask \"path from CheckoutController.create to PaymentGateway.charge\"\n\nNotes:\n  High-confidence callers, callees, impact, and path questions route to the matching typed operation. Contradictory or low-confidence input falls back to bounded symbol search. The response uses compass.query/1."
+        "Arguments:\n  <QUESTION>                    Natural-language code-graph question\n\nOptions:\n  --graph <PATH>                Typed graph [default: compass-out/graph.json]\n  --at <REV>                    Use an immutable trusted revision graph\n  --program <PATH>              Optional Program IR enrichment\n  --cache <DIR>                 Query-index cache directory\n  --engine <default|json|store> Graph storage engine [default: default]\n  --max-depth <N>               Traversal radius\n  --max-nodes <N>               Node bound\n  --max-edges <N>               Edge bound\n  --max-paths <N>               Path bound\n  --max-candidates <N>          Candidate bound\n  --include-heuristic           Include heuristic evidence\n  --format <text|json>          Output format [default: text]\n\nExamples:\n  compass ask \"who calls PaymentService.charge?\"\n  compass ask \"what does CheckoutController.create call?\" --format json\n  compass ask \"path from CheckoutController.create to PaymentGateway.charge\"\n  compass ask \"who calls PaymentService.charge?\" --at HEAD~2 --format json\n\nNotes:\n  High-confidence callers, callees, impact, and path questions route to the matching typed operation. Contradictory or low-confidence input falls back to bounded symbol search. --at is mutually exclusive with --graph, --program, --cache, and --engine. The response uses compass.query/1."
     ),
     page!(
         "call-graph",
@@ -193,13 +214,59 @@ const PAGES: &[Page] = &[
         "Options:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n  --output DIR             New backup directory\n  --from DIR               Backup directory to restore\n  --into DIR               New output directory for a restore\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store status --format json\n  compass store validate compass-out\n  compass store backup compass-out --output /safe/backups/project\n  compass store restore --from /safe/backups/project --into restored-out\n\nNotes:\n  Backup and restore are SQLite local operations. Stop writers before backup; restore only into a new or empty output directory. A stale or corrupt sidecar remains rebuildable with `compass update --force --store sqlite`. The optional redb adapter is library-only and is not selected by this command."
     ),
     page!(
+        "store status",
+        "Inspect graph and SQLite sidecar status",
+        ["compass store status [PATH] [OPTIONS]"],
+        "Arguments:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store status\n  compass store status compass-out --format json"
+    ),
+    page!(
+        "store validate",
+        "Validate graph and SQLite sidecar integrity",
+        ["compass store validate [PATH] [OPTIONS]"],
+        "Arguments:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store validate compass-out\n  compass store validate --format json"
+    ),
+    page!(
+        "store backup",
+        "Create a validated local graph-store backup",
+        ["compass store backup [PATH] --output DIR [OPTIONS]"],
+        "Arguments:\n  [PATH]                   Project or compass-out directory [default: compass-out]\n  --output DIR             New backup directory\n\nOptions:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store backup compass-out --output /safe/backups/project\n  compass store backup --output ./backup --format json\n\nNotes:\n  Stop graph writers before taking a backup."
+    ),
+    page!(
+        "store restore",
+        "Restore a validated graph-store backup into a new directory",
+        ["compass store restore --from DIR --into DIR [OPTIONS]"],
+        "Options:\n  --from DIR               Backup directory to restore\n  --into DIR               New or empty output directory\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass store restore --from /safe/backups/project --into restored-out\n  compass store restore --from ./backup --into ./restored --format json\n\nNotes:\n  Restore never overwrites an existing output directory."
+    ),
+    page!(
         "extract",
         "Build a graph with optional semantic sources and model enrichment",
         [
             "compass extract [PATH] [OPTIONS]",
             "compass extract --postgres <DSN> [OPTIONS]"
         ],
-        "Arguments:\n  [PATH]                       Project directory to scan\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --code-only                  Extract structural code without semantic sources\n  --cargo                      Include Cargo metadata\n  --google-workspace           Include Google Workspace shortcuts\n  --postgres <DSN>             Extract PostgreSQL schema objects\n  --backend <NAME>             Semantic provider name\n  --model <MODEL>              Override the provider's default model\n  --mode <deep>                Use deep semantic extraction\n  --token-budget <N>           Maximum semantic token budget\n  --max-concurrency <N>        Maximum concurrent provider requests\n  --max-workers <N>            Maximum local extraction workers\n  --api-timeout <SECONDS>      Provider request timeout\n  --allow-partial              Publish results when semantic chunks fail\n  --dedup-llm                  Use the model to review likely duplicates\n  --timing                     Print stage timings\n  --global                     Merge the completed graph into the global graph\n  --as <TAG>                   Repository tag used with --global\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Output directory\n  --force                      Rebuild unchanged inputs\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree clustering hubs\n\nExamples:\n  compass extract ./project --code-only\n  compass extract ./project --program --code-only\n  compass extract ./project --no-program --code-only\n  compass extract ./project --program-artifact index.scip --code-only\n  compass extract ./project --code-only --inference-level max\n  compass extract ./project --code-only --store sqlite\n  compass extract --postgres \"postgresql://localhost/app\" --code-only\n\nNotes:\n  Low is the evidence-first default and publishes exact relationships only. Medium adds source-backed inference; high adds explicitly qualified external relationships; max retains all inferred relationships, including deferred receivers. Semantic extraction may require credentials for the selected provider."
+        "Arguments:\n  [PATH]                       Project directory to scan\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --code-only                  Extract structural code without semantic sources\n  --cargo                      Include Cargo metadata\n  --google-workspace           Include Google Workspace shortcuts\n  --postgres <DSN>             Extract PostgreSQL schema objects\n  --backend <NAME>             Semantic provider name\n  --model <MODEL>              Override the provider's default model\n  --mode <deep>                Use deep semantic extraction\n  --ocr <off|auto|always>      Local document OCR policy [default: off]\n  --ocr-profile <NAME>         pp-ocrv6-small or pp-ocrv6-medium\n  --ocr-language <BCP47>       OCR language hint; repeatable\n  --token-budget <N>           Maximum semantic token budget\n  --max-concurrency <N>        Maximum concurrent provider requests\n  --max-workers <N>            Maximum local extraction workers\n  --api-timeout <SECONDS>      Provider request timeout\n  --allow-partial              Publish results when semantic or OCR candidates fail\n  --dedup-llm                  Use the model to review likely duplicates\n  --timing                     Print stage timings\n  --global                     Merge the completed graph into the global graph\n  --as <TAG>                   Repository tag used with --global\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Output directory\n  --force                      Rebuild unchanged inputs\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree clustering hubs\n\nExamples:\n  compass extract ./project --code-only\n  compass extract ./documents --ocr auto\n  compass extract ./project --program --code-only\n  compass extract ./project --program-artifact index.scip --code-only\n  compass extract ./project --code-only --inference-level max\n  compass extract ./project --code-only --store sqlite\n  compass extract --postgres \"postgresql://localhost/app\" --code-only\n\nNotes:\n  OCR is local and never downloads during extraction. Install a pinned profile once with `compass models install pp-ocrv6-small`; no Python, Tesseract, office suite, or system PDF tool is required.\n  Low publishes exact relationships only. Medium adds source-backed inference; high adds explicitly qualified external relationships; max retains all inferred relationships, including deferred receivers. Semantic extraction may require credentials for the selected provider."
+    ),
+    page!(
+        "document",
+        "Inspect PDF and Office documents with optional local OCR",
+        ["compass document inspect <FILE> [OPTIONS]"],
+        "Commands:\n  inspect <FILE>             Decode and inspect one PDF, DOCX, XLSX, or PPTX file\n\nExamples:\n  compass document inspect report.pdf\n  compass document inspect scan.pdf --ocr auto\n  compass document inspect deck.pptx --ocr auto --format json\n\nNotes:\n  Native text remains authoritative. OCR is local derived evidence and requires a verified Compass-managed profile. Run `compass models install pp-ocrv6-small` once; no Python, Tesseract, office suite, or system PDF tool is required."
+    ),
+    page!(
+        "document inspect",
+        "Decode one document and show typed structure, locators, and OCR evidence",
+        ["compass document inspect <FILE> [OPTIONS]"],
+        "Arguments:\n  <FILE>                     PDF, DOCX, XLSX, or PPTX document\n\nOptions:\n  --format <text|json>       Human output or compass.document.inspect/1 [default: text]\n  --ocr <off|auto|always>    Selective local OCR policy [default: off]\n  --ocr-profile <NAME>       pp-ocrv6-small or pp-ocrv6-medium [default: pp-ocrv6-small]\n  --ocr-language <TAG>       Language hint; repeatable\n  --allow-partial            Retain exact successful OCR evidence if one candidate fails\n\nExamples:\n  compass document inspect contract.docx\n  compass document inspect scanned.pdf --ocr auto\n  compass document inspect workbook.xlsx --ocr always --format json"
+    ),
+    page!(
+        "models",
+        "Manage verified local OCR model profiles",
+        [
+            "compass models list [--format text|json]",
+            "compass models install <PROFILE>",
+            "compass models verify <PROFILE>"
+        ],
+        "Commands:\n  list                       Show installation and verification status\n  install <PROFILE>          Download a pinned profile and verify size plus SHA-256\n  verify <PROFILE>           Verify an installed profile without network access\n\nProfiles:\n  pp-ocrv6-small             Default 30 MiB model profile\n  pp-ocrv6-medium            Larger 132 MiB model profile\n\nExamples:\n  compass models list\n  compass models install pp-ocrv6-small\n  compass models verify pp-ocrv6-small\n\nNotes:\n  Compass manages the inference runtime and model files. Document extraction never silently downloads a model."
     ),
     page!(
         "watch",
@@ -301,6 +368,54 @@ const PAGES: &[Page] = &[
         "Commands:\n  summary                    Show artifact and evidence counts\n  coverage                   Aggregate capability coverage and reasons\n  functions                  List functions and filter by file, language, or name\n  show <SYMBOL>              Show a function, summary, coverage, and callers\n  callers <SYMBOL>           List resolved callers\n  explain-call <FILE:BYTE>   Explain calls containing a source byte\n  call-graph                 Build a bounded caller/callee graph from --symbol or --at\n  query <COMPASSQL>          Query the Program IR graph projection\n\nCommon options:\n  --program <PATH>           Program artifact [default: compass-out/program.json]\n  --format <text|json>       Inspection output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program functions --language rust --format json\n  compass program show 0123abcd\n  compass program explain-call src/lib.rs:240\n  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json\n  compass program query \"MATCH (f) WHERE f.kind = 'program_function' RETURN f LIMIT 10\"\n\nNotes:\n  Program inspection is offline and read-only. Conclusions must be gated by capability coverage."
     ),
     page!(
+        "program summary",
+        "Show Program IR artifact and evidence counts",
+        ["compass program summary [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program summary\n  compass program summary --format json"
+    ),
+    page!(
+        "program coverage",
+        "Show Program IR capability coverage and reasons",
+        ["compass program coverage [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program coverage\n  compass program coverage --format json"
+    ),
+    page!(
+        "program functions",
+        "List functions from the canonical Program IR",
+        ["compass program functions [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --file <PATH>             Filter by source file\n  --language <LANG>         Filter by language\n  --name <NAME>             Filter by function name\n  --limit <N>               Maximum functions\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program functions\n  compass program functions --language rust --name build --format json"
+    ),
+    page!(
+        "program show",
+        "Show one Program IR function and its evidence",
+        ["compass program show <SYMBOL> [OPTIONS]"],
+        "Arguments:\n  <SYMBOL>                  Function symbol or stable identifier\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program show 0123abcd\n  compass program show 0123abcd --format json"
+    ),
+    page!(
+        "program callers",
+        "List resolved Program IR callers",
+        ["compass program callers <SYMBOL> [OPTIONS]"],
+        "Arguments:\n  <SYMBOL>                  Function symbol or stable identifier\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program callers 0123abcd\n  compass program callers 0123abcd --format json"
+    ),
+    page!(
+        "program explain-call",
+        "Explain Program IR calls at an exact source byte",
+        ["compass program explain-call <FILE:BYTE> [OPTIONS]"],
+        "Arguments:\n  <FILE:BYTE>               Repository-relative file and byte offset\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --format <text|json>      Output format [default: text]\n\nExamples:\n  compass program explain-call src/lib.rs:240\n  compass program explain-call src/lib.rs:240 --format json"
+    ),
+    page!(
+        "program call-graph",
+        "Build a bounded Program IR caller/callee graph",
+        ["compass program call-graph [OPTIONS]"],
+        "Options:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --graph <PATH>            Optional structural graph for enrichment\n  --symbol <SYMBOL>         Start from a function symbol\n  --at <FILE:BYTE>          Start from an exact source byte\n  --direction <callers|callees|both> Traversal direction [default: both]\n  --depth <N>               Traversal depth [default: 2]\n  --max-nodes <N>           Maximum returned nodes [default: 250]\n  --max-edges <N>           Maximum returned edges [default: 500]\n  --format json             Required machine-readable output\n\nExamples:\n  compass program call-graph --symbol 0123abcd --format json\n  compass program call-graph --at src/lib.rs:240 --direction both --depth 2 --format json"
+    ),
+    page!(
+        "program query",
+        "Query the read-only Program IR graph projection",
+        ["compass program query <COMPASSQL> [OPTIONS]"],
+        "Arguments:\n  <COMPASSQL>               CompassQL query\n\nOptions:\n  --program <PATH>          Program artifact [default: compass-out/program.json]\n  --file <PATH>             Read CompassQL from a file\n  --stdin                   Read CompassQL from standard input\n  --param <NAME=VALUE>      Bind a parameter; repeatable\n  --params-file <PATH>      Read parameters from JSON\n  --format <table|json|jsonl> Result format [default: table]\n  --output <PATH>           Write results to a file\n  --timeout-ms <N>          Query timeout\n  --max-rows <N>            Row limit [default: 10000]\n  --max-path-depth <N>      Path-depth limit [default: 32]\n  --max-expanded-relationships <N> Relationship expansion limit\n  --max-memory-bytes <N>   Query memory limit [default: 268435456]\n\nExamples:\n  compass program query \"MATCH (f) RETURN f LIMIT 10\"\n  compass program query \"MATCH (f) RETURN f LIMIT 10\" --format json\n\nNotes:\n  Program queries are offline and read-only. --graph, --at, and --repl are not supported."
+    ),
+    page!(
         "path",
         "Find the shortest relationship path between two graph nodes",
         ["compass path <SOURCE> <TARGET> [OPTIONS]"],
@@ -310,7 +425,7 @@ const PAGES: &[Page] = &[
         "explain",
         "Explain a node and its important relationships",
         ["compass explain <NODE> [OPTIONS]"],
-        "Arguments:\n  <NODE>                  Node name, label, or identifier\n\nOptions:\n  --budget <N>            Approximate tokens per page [default: 2000]\n  --page <N>              Connection or ambiguity page, starting at 1 [default: 1]\n  --graph <PATH>          Read a graph JSON file\n  --at <REV>              Use an immutable Git revision; conflicts with --graph\n\nExamples:\n  compass explain PaymentService\n  compass explain PaymentService --budget 8000\n  compass explain PaymentService --page 2\n  compass explain auth --at HEAD~5"
+        "Arguments:\n  <NODE>                  Node ID, name, label, or qualified name\n\nOptions:\n  --budget <N>            Approximate tokens per page [default: 2000]\n  --page <N>              Connection or ambiguity page, starting at 1 [default: 1]\n  --graph <PATH>          Read a graph JSON file\n  --at <REV>              Use an immutable Git revision; conflicts with --graph\n\nExamples:\n  compass explain PaymentService\n  compass explain PaymentService --budget 8000\n  compass explain PaymentService --page 2\n  compass explain auth --at HEAD~5"
     ),
     page!(
         "affected",
@@ -415,6 +530,24 @@ const PAGES: &[Page] = &[
         "Options:\n  --prune-non-preferred    Include alternate realizations in the plan\n  --yes                    Apply non-preferred pruning; requires --prune-non-preferred\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history gc\n  compass history gc --prune-non-preferred\n  compass history gc --prune-non-preferred --yes\n\nNotes:\n  Non-preferred pruning is a dry run until repeated with --yes."
     ),
     page!(
+        "history cache",
+        "Inspect or reclaim derived history cache artifacts",
+        ["compass history cache <status|gc> [OPTIONS]"],
+        "Commands:\n  status                    Show cache file and byte counts\n  gc                        Inspect or apply bounded cache cleanup\n\nExamples:\n  compass history cache status\n  compass history cache status --format json\n  compass history cache gc --max-bytes 100000000\n\nNotes:\n  Cache cleanup never changes immutable history realizations."
+    ),
+    page!(
+        "history cache status",
+        "Show derived history cache file and byte counts",
+        ["compass history cache status [OPTIONS]"],
+        "Options:\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history cache status\n  compass history cache status --format json"
+    ),
+    page!(
+        "history cache gc",
+        "Inspect or reclaim derived history cache artifacts",
+        ["compass history cache gc [OPTIONS]"],
+        "Options:\n  --max-bytes <N>          Retain at most this many bytes\n  --max-age-days <N>       Remove entries older than this age\n  --yes                    Apply the cleanup plan\n  --format <text|json>     Output format [default: text]\n\nExamples:\n  compass history cache gc\n  compass history cache gc --max-bytes 100000000 --yes\n\nNotes:\n  Without --yes, cleanup is a dry run."
+    ),
+    page!(
         "diff",
         "Review semantic changes between two Git revisions",
         ["compass diff <OLD> <NEW> [OPTIONS]"],
@@ -439,16 +572,40 @@ const PAGES: &[Page] = &[
         "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum overview or detail nodes [default: 5000]\n  --community <ID>        Export one complete community detail\n\nExamples:\n  compass export json\n  compass export json --community 7\n\nNotes:\n  The payload schema is compass.viewer.graph/1. viewer-json remains a deprecated compatibility alias."
     ),
     page!(
+        "export viewer-json",
+        "Export the graph presentation model using the compatibility alias",
+        ["compass export viewer-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum overview or detail nodes [default: 5000]\n  --community <ID>        Export one complete community detail\n\nExamples:\n  compass export viewer-json\n  compass export viewer-json --community 7\n\nNotes:\n  `viewer-json` is a deprecated compatibility alias for `export json`."
+    ),
+    page!(
+        "export workbench-json",
+        "Export the multi-view graph workbench contract",
+        ["compass export workbench-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum nodes rendered [default: 5000]\n  --view <SPEC>           Repeatable workbench view specification\n  --direction <callers|callees|both> Call-view direction\n  --depth <N>              View traversal depth\n  --max-nodes <N>          View node bound\n  --max-edges <N>          View edge bound\n  --relation <RELATION>    Repeatable affected-view relation\n  --include-heuristic     Include heuristic impact evidence\n  --program <PATH>         Program IR enrichment for call views\n\nExamples:\n  compass export workbench-json\n  compass export workbench-json --view code --view architecture\n\nNotes:\n  Views are emitted in request order as compass.viewer.workbench/1."
+    ),
+    page!(
+        "export orientation-json",
+        "Export the atomically published Agent Orientation",
+        ["compass export orientation-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n\nExamples:\n  compass export orientation-json\n  compass export orientation-json --graph compass-out/graph.json\n\nNotes:\n  The orientation is accepted only when its generation, graph digest, and publication metadata match the selected graph."
+    ),
+    page!(
         "export html",
         "Generate the interactive graph HTML report",
         ["compass export html [OPTIONS]"],
-        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum nodes rendered [default: 5000]\n  --no-viz                Skip visualization output\n\nExamples:\n  compass export html\n  compass export html --node-limit 2000\n\nNotes:\n  Large exports embed a bounded set of complete community details; use VS Code or export json --community ID for an omitted detail. Interactive terminals ask before opening the generated HTML; scripts and --no-viz never prompt or open a browser."
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --labels <PATH>         Community-label JSON\n  --node-limit <N>        Maximum nodes rendered [default: 5000]\n  --no-viz                Skip visualization output\n\nExamples:\n  compass export html\n  compass export html --node-limit 2000\n\nNotes:\n  Large exports embed a bounded set of complete community details; use VS Code or export json --community ID for an omitted detail. Source actions open immutable links for recognized GitHub, GitLab, and Bitbucket origins. Compass uses the graph commit when published, or a published ancestor only when every represented source file is byte-identical; otherwise the viewer explains that local navigation requires VS Code. Interactive terminals ask before opening the generated HTML; scripts and --no-viz never prompt or open a browser."
     ),
     page!(
         "export callflow-html",
         "Generate a sectioned call-flow report",
         ["compass export callflow-html [GRAPH_OR_DIR] [OPTIONS]"],
-        "Arguments:\n  [GRAPH_OR_DIR]               Graph JSON or project/output directory\n\nOptions:\n  --graph <PATH>               Graph JSON\n  --labels <PATH>              Community-label JSON\n  --report <PATH>              GRAPH_REPORT.md path\n  --sections <PATH>            JSON section definitions\n  --output <HTML>              Output page\n  --lang <LANG>                Report language [default: auto]\n  --max-sections <N>           Maximum derived sections [default: 15]\n  --diagram-scale <NUMBER>     Mermaid scale [default: 1.0]\n  --max-diagram-nodes <N>      Nodes per diagram [default: 18]\n  --max-diagram-edges <N>      Edges per diagram [default: 24]\n\nExamples:\n  compass export callflow-html\n  compass export callflow-html ./compass-out --lang en --max-sections 10\n\nNotes:\n  Interactive terminals ask before opening the generated HTML; scripts never prompt or open a browser."
+        "Arguments:\n  [GRAPH_OR_DIR]               Graph JSON or project/output directory\n\nOptions:\n  --graph <PATH>               Graph JSON\n  --labels <PATH>              Community-label JSON\n  --architecture-overlay <PATH> Versioned JSON/TOML architecture overlay\n  --sections <PATH>            Deprecated overlay/legacy-section alias\n  --output <HTML>              Output page\n  --max-sections <N>           Maximum overview groups [default: 15]\n\nExamples:\n  compass export callflow-html\n  compass export callflow-html ./compass-out --max-sections 10\n\nNotes:\n  Produces the typed compass.viewer.architecture/1 workbench. Production is scoped before grouping, and omitted groups remain searchable rather than becoming Other. Interactive terminals ask before opening the generated HTML; scripts never prompt or open a browser."
+    ),
+    page!(
+        "export callflow-json",
+        "Export the structured call-flow report",
+        ["compass export callflow-json [GRAPH_OR_DIR] [OPTIONS]"],
+        "Arguments:\n  [GRAPH_OR_DIR]               Graph JSON or project/output directory\n\nOptions:\n  --graph <PATH>               Graph JSON\n  --labels <PATH>              Community-label JSON\n  --architecture-overlay <PATH> Versioned JSON/TOML architecture overlay\n  --sections <PATH>            Deprecated overlay/legacy-section alias\n  --output <PATH>              Atomically write the JSON document\n  --max-sections <N>           Maximum overview groups [default: 15]\n\nExamples:\n  compass export callflow-json\n  compass export callflow-json --graph compass-out/graph.json --output architecture.json\n\nNotes:\n  Emits compass.viewer.architecture/1 with typed source scopes, relationship classes, hierarchy, omissions, and quality diagnostics."
     ),
     page!(
         "export obsidian",
@@ -635,9 +792,9 @@ const PAGES: &[Page] = &[
     ),
     page!(
         "provider",
-        "Manage custom semantic model providers",
+        "Choose built-in or custom semantic model providers",
         ["compass provider <COMMAND>"],
-        "Examples:\n  compass provider list\n  compass provider show local\n\nTips:\n  Run `compass help provider add` for endpoint and credential configuration."
+        "Examples:\n  compass provider list\n  compass provider show local\n  COMPASS_BACKEND=gemini GEMINI_API_KEY=… compass extract ./docs\n\nBuilt-in providers include claude, kimi, ollama, gemini, openai, deepseek, azure, bedrock, and claude-cli. Use `--backend <NAME>` (or `COMPASS_BACKEND`) when more than one credential is available.\n\nTips:\n  Run `compass help provider add` for custom OpenAI-compatible endpoints and credential configuration. Keys are read from environment variables only; they are not stored in `.compass/config.toml`, provider registries, history profiles, or graph artifacts."
     ),
     page!(
         "provider add",
@@ -651,7 +808,7 @@ const PAGES: &[Page] = &[
         "provider list",
         "List registered custom providers",
         ["compass provider list"],
-        "Examples:\n  compass provider list"
+        "Examples:\n  compass provider list\n\nNotes:\n  This lists custom providers registered in `~/.compass/providers.json`. Built-in providers are selected with `--backend` or `COMPASS_BACKEND`; see `compass help extract` for the supported credential variables."
     ),
     page!(
         "provider show",
@@ -812,7 +969,11 @@ pub(crate) fn append_usage_hint(
     command: &str,
     arguments: &[String],
 ) -> Outcome {
-    if outcome.code != 2 || outcome.stderr.is_empty() || outcome.stderr.contains("--help") {
+    if outcome.code != 2
+        || outcome.stderr.is_empty()
+        || outcome.stderr.contains("--help")
+        || serde_json::from_str::<serde_json::Value>(&outcome.stderr).is_ok()
+    {
         return outcome;
     }
     let mut tokens = vec![command];
@@ -1182,7 +1343,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 49);
+        assert_eq!(roots.len(), 52);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");

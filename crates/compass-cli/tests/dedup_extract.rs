@@ -23,6 +23,8 @@ const BACKEND_ENVIRONMENT: &[&str] = &[
     "AWS_DEFAULT_REGION",
     "AWS_ACCESS_KEY_ID",
     "OLLAMA_BASE_URL",
+    "COMPASS_BACKEND",
+    "COMPASS_MODEL",
 ];
 
 #[test]
@@ -49,7 +51,7 @@ fn dedup_llm_without_backend_has_actionable_diagnostic() -> Result<(), Box<dyn E
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8(output.stderr)?;
     assert!(stderr.starts_with(
-        "error: no LLM API key found (--dedup-llm was passed). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key.\n"
+        "error: no LLM API key found (--dedup-llm was passed). Choose a provider with --backend <NAME> or COMPASS_BACKEND and set its credential: GEMINI_API_KEY/GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), AZURE_OPENAI_API_KEY plus AZURE_OPENAI_ENDPOINT (azure), AWS credentials (bedrock), OLLAMA_BASE_URL for local Ollama, or the env key registered with `compass provider add`. A code-only corpus needs no key.\n"
     ));
     assert!(stderr.contains("Compass extract failed after "));
     Ok(())

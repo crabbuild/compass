@@ -1,11 +1,13 @@
 //! Command implementation for the native Compass CLI.
 
 mod agent_commands;
+mod agent_graph_commands;
 mod call_graph_commands;
 mod capability_commands;
 mod code_query_commands;
 mod dedup_commands;
 mod distribution;
+mod document_commands;
 mod help;
 mod history_batch;
 mod history_build;
@@ -17,6 +19,7 @@ mod init_commands;
 mod install_commands;
 mod integration_commands;
 mod label_commands;
+mod models_commands;
 mod program_commands;
 mod provider_commands;
 mod prs_commands;
@@ -30,7 +33,7 @@ mod store_commands;
 mod task_context_commands;
 mod upgrade_commands;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{BufRead, Write};
@@ -46,15 +49,16 @@ use compass_analysis::{
 };
 use compass_core::{
     BuildFileProgress, BuildOptions, BuildPurpose, BuildResult, BuildTimings,
-    ClusterExistingOptions, ExportInputs, GraphStorage, InferenceLevel, LoadedGraph, SemanticLayer,
-    WatchBackend, WatchBuildReason, WatchOptions, WatchStatus, build_graph_with_layers,
-    build_graph_with_layers_and_progress, build_graph_with_layers_and_tiebreaker,
-    cluster_existing_graph, default_graph_path, diagnose_graph_file, diagnose_graph_quality,
-    format_diagnostic_json, format_diagnostic_report, format_quality_json, format_quality_report,
-    merge_graphs, watch_local_graph,
+    ClusterExistingOptions, CoreDocumentProcessingOptions, ExportInputs, GraphStorage,
+    InferenceLevel, LoadedGraph, SemanticLayer, WatchBackend, WatchBuildReason, WatchOptions,
+    WatchStatus, build_graph_with_layers, build_graph_with_layers_and_progress,
+    build_graph_with_layers_and_tiebreaker, cluster_existing_graph, default_graph_path,
+    diagnose_graph_file, diagnose_graph_quality, format_diagnostic_json, format_diagnostic_report,
+    format_quality_json, format_quality_report, merge_graphs, watch_local_graph,
 };
 use compass_files::{
     BuildScope, DetectOptions, Detection, Manifest, ManifestKind, ProjectConfig, detect,
+    write_text_atomic,
 };
 use compass_global::{GlobalPaths, global_add};
 use compass_graph::god_nodes;
@@ -65,15 +69,18 @@ use compass_model::query_contract::{
     DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ImpactRequest,
 };
 use compass_output::{
-    AffectedLensOptions, AgentOrientation, ArtifactLens, CallflowOptions, CallflowSection,
-    CanvasOptions, HtmlOptions, ObsidianOptions, SvgOptions, TreeOptions, WikiOptions,
-    WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
-    WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model, callflow_view_model,
+    AffectedLensOptions, AgentOrientation, ArchitectureOverlay, ArchitectureOverlayGroup,
+    ArchitectureProjectionInput, ArchitectureProjectionOptions, ArtifactLens, CallflowOptions,
+    CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SourceNavigation, SvgOptions,
+    TreeOptions, WikiOptions, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel,
+    WorkbenchView, WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model,
     export_obsidian, export_wiki, graph_artifact_identity, graph_community_view_model_document,
     graph_view_model_bundle_document, graph_view_model_document, node_filenames,
-    render_orientation_json, validate_orientation_graph_identity, write_callflow_html,
-    write_canvas, write_cypher, write_graphml, write_svg, write_tree_html, write_workbench_html,
+    project_architecture, render_orientation_json, validate_orientation_graph_identity,
+    write_callflow_html, write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
+    write_workbench_html_with_source_navigation,
 };
+use compass_prs::{ProcessRunner, SystemRunner};
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions,
     TextPageOptions, TraversalMode, discovery_request_digest, format_affected, format_benchmark,
@@ -81,9 +88,9 @@ use compass_query::{
     render_discovery_text_page, render_explanation_page, render_shortest_path, run_benchmark,
 };
 use compass_semantic::{
-    CachedCorpusExtractionOptions, CorpusExtractionOptions, detect_backend_with_custom,
-    extract_builtin_corpus_cached, extract_custom_corpus_cached, load_custom_providers,
-    resolve_builtin_backend, resolve_custom_backend,
+    CachedCorpusExtractionOptions, CorpusExtractionOptions, PreparedDocumentInputs,
+    detect_backend_with_custom, extract_builtin_corpus_cached, extract_custom_corpus_cached,
+    load_custom_providers, resolve_builtin_backend, resolve_custom_backend,
 };
 
 pub use help::HelpStyle;
@@ -365,6 +372,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
     let outcome = match command.as_str() {
         "agent" => agent_commands::command(frontend, &args),
         "history" => history_commands::command(frontend, &args),
+        "agent-graph" => agent_graph_commands::command(&args),
         "call-graph" => call_graph_commands::command(frontend, &args),
         "capabilities" => capability_commands::command(frontend, &args),
         "ask" => code_query_commands::command("ask", &args),
@@ -377,6 +385,8 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "context" => task_context_commands::command(&args),
         "history-worker" => history_commands::command_worker(frontend, &args),
         "diff" => semantic_diff_commands::command(frontend, &args),
+        "document" => document_commands::command(&args),
+        "models" => models_commands::command(&args),
         "query" => query_commands::command_query(frontend, &args),
         "program" => program_commands::command(frontend, &args),
         "path" => command_path(frontend, &args),
@@ -549,13 +559,18 @@ pub fn run_mcp(arguments: &[OsString], stdout: &mut impl Write, stderr: &mut imp
             host: options.host,
             port: options.port,
             api_key: options.api_key,
+            write_api_key: options.write_api_key,
+            agent_graph: options.agent_graph,
             path: options.path,
             json_response: options.json_response,
             stateless: options.stateless,
             session_timeout: options.session_timeout,
         }))
     } else {
-        runtime.block_on(compass_mcp::serve_stdio(options.graph_path))
+        runtime.block_on(compass_mcp::serve_stdio_configured(
+            options.graph_path,
+            options.agent_graph,
+        ))
     };
     match result {
         Ok(()) => 0,
@@ -573,6 +588,8 @@ struct McpOptions {
     host: String,
     port: u16,
     api_key: Option<String>,
+    write_api_key: Option<String>,
+    agent_graph: Option<compass_mcp::AgentGraphMcpConfig>,
     path: String,
     json_response: bool,
     stateless: bool,
@@ -593,6 +610,12 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
     let mut host = "127.0.0.1".to_owned();
     let mut port = 8080_u16;
     let mut api_key = std::env::var("COMPASS_API_KEY").ok();
+    let mut write_api_key = std::env::var("COMPASS_WRITE_API_KEY").ok();
+    let mut agent_projects = std::collections::BTreeSet::new();
+    let mut agent_writes = false;
+    let mut agent_masks = false;
+    let mut agent_principal = "principal:mcp".to_owned();
+    let mut agent_state_root = None;
     let mut path = "/mcp".to_owned();
     let mut json_response = false;
     let mut stateless = true;
@@ -619,6 +642,28 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
                     .map_err(|_| format!("error: argument --port: invalid int value: '{raw}'"))?;
             }
             "--api-key" => api_key = Some(mcp_value(args, &mut index, "--api-key")?.to_owned()),
+            "--write-api-key" => {
+                write_api_key = Some(mcp_value(args, &mut index, "--write-api-key")?.to_owned())
+            }
+            "--agent-graph-project" => {
+                agent_projects.insert(PathBuf::from(mcp_value(
+                    args,
+                    &mut index,
+                    "--agent-graph-project",
+                )?));
+            }
+            "--agent-graph-writes" => agent_writes = true,
+            "--agent-graph-masks" => agent_masks = true,
+            "--agent-graph-principal" => {
+                agent_principal = mcp_value(args, &mut index, "--agent-graph-principal")?.to_owned()
+            }
+            "--agent-graph-state-root" => {
+                agent_state_root = Some(PathBuf::from(mcp_value(
+                    args,
+                    &mut index,
+                    "--agent-graph-state-root",
+                )?))
+            }
             "--path" => path = mcp_value(args, &mut index, "--path")?.to_owned(),
             "--json-response" => json_response = true,
             "--stateless" => stateless = true,
@@ -646,6 +691,18 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
                     .map_err(|_| format!("error: argument --port: invalid int value: '{raw}'"))?;
             }
             _ if value.starts_with("--api-key=") => api_key = Some(value[10..].to_owned()),
+            _ if value.starts_with("--write-api-key=") => {
+                write_api_key = Some(value[16..].to_owned())
+            }
+            _ if value.starts_with("--agent-graph-project=") => {
+                agent_projects.insert(PathBuf::from(&value[22..]));
+            }
+            _ if value.starts_with("--agent-graph-principal=") => {
+                agent_principal = value[24..].to_owned()
+            }
+            _ if value.starts_with("--agent-graph-state-root=") => {
+                agent_state_root = Some(PathBuf::from(&value[25..]))
+            }
             _ if value.starts_with("--path=") => path = value[7..].to_owned(),
             _ if value.starts_with("--session-timeout=") => {
                 let raw = &value[18..];
@@ -667,12 +724,36 @@ fn parse_mcp_options(args: &[String]) -> Result<Option<McpOptions>, String> {
             PathBuf::from(std::env::var("COMPASS_OUT").unwrap_or_else(|_| "compass-out".to_owned()))
                 .join("graph.json")
         });
+    let agent_graph = if agent_projects.is_empty() {
+        if agent_writes || agent_masks || agent_state_root.is_some() {
+            return Err(
+                "error: Agent Graph MCP options require --agent-graph-project PATH".to_owned(),
+            );
+        }
+        None
+    } else {
+        let principal = compass_agent_graph::PrincipalId::parse(agent_principal)
+            .map_err(|error| format!("error: invalid --agent-graph-principal: {error}"))?;
+        Some(
+            compass_mcp::AgentGraphMcpConfig {
+                writes_enabled: agent_writes,
+                masks_enabled: agent_masks,
+                principal,
+                allowed_projects: agent_projects,
+                non_git_state_root: agent_state_root,
+            }
+            .validate()
+            .map_err(|error| format!("error: {error}"))?,
+        )
+    };
     Ok(Some(McpOptions {
         graph_path,
         transport,
         host,
         port,
         api_key,
+        write_api_key,
+        agent_graph,
         path,
         json_response,
         stateless,
@@ -704,7 +785,7 @@ fn parse_session_timeout(raw: &str) -> Result<Option<Duration>, String> {
 }
 
 fn mcp_help() -> String {
-    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]\n\nHTTP uses stateless MCP 2026-07-28. --stateless is retained as a compatibility spelling. --session-timeout is deprecated, ignored, and will be removed in Compass 0.5.0.".to_owned()
+    "Usage: compass serve [GRAPH_PATH] [--graph PATH] [--transport stdio|http] [--host HOST] [--port PORT] [--api-key KEY] [--write-api-key KEY] [--agent-graph-project PATH] [--agent-graph-writes] [--agent-graph-masks] [--agent-graph-principal ID] [--agent-graph-state-root PATH] [--path PATH] [--json-response] [--stateless] [--session-timeout SECONDS]\n\nHTTP uses stateless MCP 2026-07-28. --stateless is retained as a compatibility spelling. --session-timeout is deprecated, ignored, and will be removed in Compass 0.5.0.".to_owned()
 }
 
 /// Run Compass's long-lived native watcher, streaming status as changes arrive.
@@ -1591,10 +1672,11 @@ fn command_benchmark(args: &[String]) -> Outcome {
         .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
         .and_then(|value| value.get("total_words").and_then(serde_json::Value::as_u64))
         .and_then(|value| usize::try_from(value).ok());
-    Outcome::success(format_benchmark(
-        &run_benchmark(&document, corpus_words, None),
-        true,
-    ))
+    let result = run_benchmark(&document, corpus_words, None);
+    if result.error.is_some() {
+        return Outcome::failure(format_benchmark(&result, true));
+    }
+    Outcome::success(format_benchmark(&result, true))
 }
 
 fn command_build(frontend: Frontend, args: &[String], operation: BuildOperation) -> Outcome {
@@ -1700,6 +1782,9 @@ fn command_build_with_validation_inner(
     let mut max_source_bytes = None;
     let mut api_timeout = None;
     let mut allow_partial = false;
+    let mut document_ocr_mode = compass_ocr::OcrMode::Off;
+    let mut document_ocr_profile = compass_ocr::ModelProfile::PpOcrV6Small;
+    let mut document_ocr_languages = Vec::new();
     let mut timing = false;
     let mut dedup_llm = false;
     let mut excludes = Vec::new();
@@ -1735,6 +1820,53 @@ fn command_build_with_validation_inner(
                 postgres_dsn = Some(value[11..].to_owned());
             }
             "--allow-partial" if extract => allow_partial = true,
+            "--ocr" if extract && index + 1 < args.len() => {
+                document_ocr_mode = match args[index + 1].parse::<compass_ocr::OcrMode>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--ocr=") => {
+                document_ocr_mode = match value[6..].parse::<compass_ocr::OcrMode>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+            }
+            "--ocr-profile" if extract && index + 1 < args.len() => {
+                document_ocr_profile = match args[index + 1].parse::<compass_ocr::ModelProfile>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+                index += 1;
+            }
+            value if extract && value.starts_with("--ocr-profile=") => {
+                document_ocr_profile = match value[14..].parse::<compass_ocr::ModelProfile>() {
+                    Ok(value) => value,
+                    Err(error) => return extract_parse_failure(frontend, error.to_string()),
+                };
+            }
+            "--ocr-language" if extract && index + 1 < args.len() => {
+                let language = &args[index + 1];
+                if language.is_empty() || language.len() > 64 {
+                    return extract_parse_failure(
+                        frontend,
+                        "OCR language tag is empty or too long".to_owned(),
+                    );
+                }
+                document_ocr_languages.push(language.clone());
+                index += 1;
+            }
+            value if extract && value.starts_with("--ocr-language=") => {
+                let language = &value[15..];
+                if language.is_empty() || language.len() > 64 {
+                    return extract_parse_failure(
+                        frontend,
+                        "OCR language tag is empty or too long".to_owned(),
+                    );
+                }
+                document_ocr_languages.push(language.to_owned());
+            }
             "--backend" if extract && index + 1 < args.len() => {
                 backend = Some(args[index + 1].clone());
                 index += 1;
@@ -1908,14 +2040,14 @@ fn command_build_with_validation_inner(
                 }
                 exclude_hubs = Some(parsed);
             }
-            "--max-workers" if extract && index + 1 < args.len() => {
+            "--max-workers" if index + 1 < args.len() => {
                 max_workers = match parse_positive_usize(&args[index + 1], "--max-workers") {
                     Ok(value) => Some(value),
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
                 index += 1;
             }
-            value if extract && value.starts_with("--max-workers=") => {
+            value if value.starts_with("--max-workers=") => {
                 max_workers = match parse_positive_usize(&value[14..], "--max-workers") {
                     Ok(value) => Some(value),
                     Err(error) => return extract_parse_failure(frontend, error),
@@ -1946,7 +2078,7 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--max-workers N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
                 });
             }
             value if value.starts_with('-') => {
@@ -1976,6 +2108,13 @@ fn command_build_with_validation_inner(
         return Outcome::failure(
             "error: must specify a path to scan or a --postgres DSN".to_owned(),
         );
+    }
+    if extract {
+        // Explicit flags win over environment configuration. The generic
+        // selector is intentionally non-secret: provider transports still
+        // read only their documented provider-specific credential variable.
+        let environment = std::env::vars().collect::<HashMap<_, _>>();
+        apply_provider_environment_defaults(&mut backend, &mut model, &environment);
     }
     let root = if extract && !has_explicit_root {
         PathBuf::from(".")
@@ -2129,6 +2268,13 @@ fn command_build_with_validation_inner(
             max_concurrency,
             api_timeout,
             allow_partial,
+            CoreDocumentProcessingOptions {
+                ocr_mode: document_ocr_mode,
+                ocr_profile: document_ocr_profile,
+                language_hints: document_ocr_languages,
+                allow_partial,
+                cache_directory: Some(output_container.join("cache").join("documents")),
+            },
             &auxiliary_fragments,
             dedup_tiebreaker
                 .as_mut()
@@ -2246,7 +2392,17 @@ fn command_build_with_validation_inner(
             }
             outcome
         }
-        Err(error) => Outcome::failure(format!("error: {error}")),
+        Err(error) => {
+            let mut message = format!("error: {error}");
+            if document_ocr_mode != compass_ocr::OcrMode::Off
+                && error.contains("compass models install pp-ocrv6-")
+            {
+                message.push_str(
+                    "\nhelp: Compass manages the OCR runtime; no system OCR package is required",
+                );
+            }
+            Outcome::failure(message)
+        }
     }
 }
 
@@ -2371,9 +2527,30 @@ fn no_llm_api_key_message(semantic_count: usize, dedup_llm: bool) -> String {
         ""
     };
     format!(
-        "no LLM API key found ({}). Set GEMINI_API_KEY or GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), or pass --backend. A code-only corpus needs no key.{hint}",
+        "no LLM API key found ({}). Choose a provider with --backend <NAME> or COMPASS_BACKEND and set its credential: GEMINI_API_KEY/GOOGLE_API_KEY (gemini), MOONSHOT_API_KEY (kimi), ANTHROPIC_API_KEY (claude), OPENAI_API_KEY (openai), DEEPSEEK_API_KEY (deepseek), AZURE_OPENAI_API_KEY plus AZURE_OPENAI_ENDPOINT (azure), AWS credentials (bedrock), OLLAMA_BASE_URL for local Ollama, or the env key registered with `compass provider add`. A code-only corpus needs no key.{hint}",
         reasons.join("; ")
     )
+}
+
+fn apply_provider_environment_defaults(
+    backend: &mut Option<String>,
+    model: &mut Option<String>,
+    environment: &HashMap<String, String>,
+) {
+    if backend.is_none() {
+        *backend = environment_value(environment, "COMPASS_BACKEND");
+    }
+    if model.is_none() {
+        *model = environment_value(environment, "COMPASS_MODEL");
+    }
+}
+
+fn environment_value(environment: &HashMap<String, String>, key: &str) -> Option<String> {
+    environment
+        .get(key)
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn command_hook_refresh(frontend: Frontend, args: &[String]) -> Outcome {
@@ -2430,6 +2607,7 @@ fn build_semantic_graph(
     max_concurrency: Option<usize>,
     api_timeout: Option<f64>,
     allow_partial: bool,
+    document_processing: CoreDocumentProcessingOptions,
     auxiliary_fragments: &[serde_json::Value],
     tiebreaker: Option<&mut dyn compass_graph::EntityTiebreaker>,
 ) -> Result<(BuildResult, Vec<String>, Duration), String> {
@@ -2460,7 +2638,10 @@ fn build_semantic_graph(
     )
     .map_err(|error| error.to_string())?;
     let live_semantic = semantic_files(&incremental.detection.files);
-    let semantic_files = if options.force || deep_mode {
+    let semantic_files = if options.force
+        || deep_mode
+        || document_processing.ocr_mode != compass_ocr::OcrMode::Off
+    {
         live_semantic.clone()
     } else {
         semantic_files(&incremental.new_files)
@@ -2484,8 +2665,19 @@ fn build_semantic_graph(
     if let Some(max_concurrency) = max_concurrency {
         extraction_options.max_concurrency = max_concurrency;
     }
+    let prepared_documents =
+        compass_core::prepare_document_set(&semantic_files, &document_processing)?;
+    let prepared_inputs = PreparedDocumentInputs {
+        documents: prepared_documents
+            .documents
+            .iter()
+            .map(|(path, prepared)| (path.clone(), prepared.semantic_text.clone()))
+            .collect(),
+        cache_identity: prepared_documents.cache_identity.clone(),
+    };
     let cached_options = CachedCorpusExtractionOptions {
         extraction: extraction_options,
+        prepared_documents: prepared_inputs,
         deep_mode,
         force: options.force,
         cache_enabled: true,
@@ -2662,8 +2854,10 @@ fn build_semantic_graph(
         allow_partial,
     };
     let semantic_elapsed = semantic_started.elapsed();
+    let mut graph_options = options.clone();
+    graph_options.prepared_documents = prepared_documents;
     let result = build_graph_with_optional_tiebreaker(
-        options,
+        &graph_options,
         Some(&layer),
         auxiliary_fragments,
         tiebreaker,
@@ -2848,7 +3042,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--ocr off|auto|always] [--ocr-profile NAME] [--ocr-language BCP47] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]\nProvider selection: --backend/--model override COMPASS_BACKEND/COMPASS_MODEL. Built-ins: claude, kimi, ollama, gemini, openai, deepseek, azure, bedrock, claude-cli. Set the selected provider's documented credential variable; custom providers use `compass provider add`. Credentials are never written to Compass artifacts.".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {
@@ -2994,6 +3188,7 @@ fn validate_export_options(
             "--labels",
             "--report",
             "--sections",
+            "--architecture-overlay",
             "--output",
             "--lang",
             "--max-sections",
@@ -3006,6 +3201,8 @@ fn validate_export_options(
             "--labels",
             "--report",
             "--sections",
+            "--architecture-overlay",
+            "--output",
             "--lang",
             "--max-sections",
             "--diagram-scale",
@@ -3177,10 +3374,12 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 report_explicit = true;
                 index += 2;
             }
-            "--sections" => {
-                seen_options.insert("--sections");
+            "--sections" | "--architecture-overlay" => {
+                seen_options.insert("--architecture-overlay");
                 let Some(value) = next() else {
-                    return Outcome::failure("error: --sections requires a path".to_owned());
+                    return Outcome::failure(
+                        "error: --architecture-overlay requires a path".to_owned(),
+                    );
                 };
                 sections_path = Some(PathBuf::from(value));
                 index += 2;
@@ -3561,6 +3760,9 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     if let Err(error) = validate_export_options(format, &seen_options, &view_requests) {
         return Outcome::failure(format!("error: {error}"));
     }
+    if sections_path.is_none() && matches!(format, "callflow-html" | "callflow-json") {
+        sections_path = discover_architecture_overlay(&graph_path);
+    }
     graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&graph_path) {
         Ok(path) => path,
         Err(error) => {
@@ -3636,7 +3838,10 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                         program_path: program_path.as_deref(),
                     },
                 )
-                .and_then(|model| export_workbench_html(&model, path))
+                .and_then(|model| {
+                    let source_navigation = export_source_navigation(&inputs, &graph_path);
+                    export_workbench_html(&model, source_navigation.as_ref(), path)
+                })
             }
         }
         "json" | "viewer-json" => {
@@ -3731,7 +3936,17 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             max_diagram_nodes,
             max_diagram_edges,
         )
-        .map(ExportOutput::text),
+        .and_then(|json| {
+            if let Some(path) = output_path.clone() {
+                write_text_atomic(&path, &json)
+                    .map_err(|error| error.to_string())
+                    .map(|()| {
+                        ExportOutput::text(format!("Architecture JSON written: {}", path.display()))
+                    })
+            } else {
+                Ok(ExportOutput::text(json))
+            }
+        }),
         "svg" => write_svg(
             &inputs.document,
             &inputs.communities,
@@ -3869,7 +4084,7 @@ fn build_export_workbench(
                 let model = architecture_view_model(inputs, graph_path, &title)?;
                 let coverage = WorkbenchCoverage::bounded(
                     model.statistics.nodes,
-                    model.statistics.edges,
+                    model.statistics.relationships,
                     false,
                 );
                 (
@@ -3877,7 +4092,7 @@ fn build_export_workbench(
                     WorkbenchView {
                         id: String::new(),
                         title: "Architecture".to_owned(),
-                        description: "Subsystems, scopes, and cross-section calls".to_owned(),
+                        description: "Source-scoped subsystems and typed relationships".to_owned(),
                         coverage,
                         content: WorkbenchViewContent::Architecture { model },
                     },
@@ -4046,8 +4261,8 @@ fn build_export_workbench(
                         content: WorkbenchViewContent::History {
                             base_revision,
                             target_revision,
-                            before,
-                            after,
+                            before: Box::new(before),
+                            after: Box::new(after),
                         },
                     },
                 )
@@ -4120,16 +4335,19 @@ fn architecture_view_model(
     inputs: &ExportInputs,
     graph_path: &Path,
     title: &str,
-) -> Result<compass_output::CallflowViewModel, String> {
-    callflow_view_model(
-        &inputs.document,
-        &inputs.communities,
-        &CallflowOptions {
+) -> Result<compass_output::ArchitectureViewModel, String> {
+    let overlay = load_architecture_overlay(None, graph_path)?;
+    project_architecture(
+        ArchitectureProjectionInput {
+            document: &inputs.document,
+            communities: &inputs.communities,
             community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            report: &inputs.report,
+            overlay: overlay.as_ref(),
             project_name: title,
-            ..CallflowOptions::default()
+            built_at_commit: graph_source_commit(&inputs.document),
+            generated_at: None,
         },
+        &ArchitectureProjectionOptions::default(),
     )
     .map_err(|error| {
         format!(
@@ -4139,8 +4357,13 @@ fn architecture_view_model(
     })
 }
 
-fn export_workbench_html(model: &WorkbenchModel, path: PathBuf) -> Result<ExportOutput, String> {
-    write_workbench_html(model, &path).map_err(|error| error.to_string())?;
+fn export_workbench_html(
+    model: &WorkbenchModel,
+    source_navigation: Option<&SourceNavigation>,
+    path: PathBuf,
+) -> Result<ExportOutput, String> {
+    write_workbench_html_with_source_navigation(model, source_navigation, &path)
+        .map_err(|error| error.to_string())?;
     Ok(ExportOutput::html(
         format!(
             "{} written - open in any browser, no server needed",
@@ -4148,6 +4371,267 @@ fn export_workbench_html(model: &WorkbenchModel, path: PathBuf) -> Result<Export
         ),
         path,
     ))
+}
+
+fn export_source_navigation(inputs: &ExportInputs, graph_path: &Path) -> Option<SourceNavigation> {
+    const GIT_SOURCE_LINK_TIMEOUT: Duration = Duration::from_secs(2);
+    let revision = inputs
+        .document
+        .graph
+        .get("build")
+        .and_then(serde_json::Value::as_object)
+        .and_then(|build| build.get("sourceCommit"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            inputs
+                .document
+                .extras
+                .get("built_at_commit")
+                .and_then(serde_json::Value::as_str)
+        })?;
+    let directory = graph_path.parent()?.to_str()?;
+    if !matches!(revision.len(), 40 | 64) || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let root = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                directory.to_owned(),
+                "rev-parse".to_owned(),
+                "--show-toplevel".to_owned(),
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if root.code != 0 {
+        return None;
+    }
+    let root = root.stdout.trim();
+    if root.is_empty()
+        || root
+            .chars()
+            .any(|character| matches!(character, '\0' | '\n' | '\r'))
+    {
+        return None;
+    }
+    let commit_object = format!("{revision}^{{commit}}");
+    let commit = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                root.to_owned(),
+                "cat-file".to_owned(),
+                "-e".to_owned(),
+                commit_object,
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if commit.code != 0 {
+        return None;
+    }
+    let remote = SystemRunner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                root.to_owned(),
+                "remote".to_owned(),
+                "get-url".to_owned(),
+                "origin".to_owned(),
+            ],
+            GIT_SOURCE_LINK_TIMEOUT,
+        )
+        .ok()?;
+    if remote.code != 0 {
+        return None;
+    }
+    let remote_revision = published_source_revision(
+        &SystemRunner,
+        root,
+        revision,
+        &inputs.document,
+        GIT_SOURCE_LINK_TIMEOUT,
+    )?;
+    SourceNavigation::from_git_remote(remote.stdout.trim(), &remote_revision)
+}
+
+fn published_source_revision(
+    runner: &dyn ProcessRunner,
+    root: &str,
+    revision: &str,
+    document: &compass_model::GraphDocument,
+    timeout: Duration,
+) -> Option<String> {
+    let remote_reachability = runner
+        .run(
+            "git",
+            &[
+                "-C".to_owned(),
+                root.to_owned(),
+                "for-each-ref".to_owned(),
+                "--count=1".to_owned(),
+                "--format=%(refname)".to_owned(),
+                format!("--contains={revision}"),
+                "refs/remotes/origin".to_owned(),
+            ],
+            timeout,
+        )
+        .ok()?;
+    if remote_reachability.code == 0 && !remote_reachability.stdout.trim().is_empty() {
+        return Some(revision.to_ascii_lowercase());
+    }
+
+    let source_files = rendered_source_files(document)?;
+    for remote_ref in [
+        "refs/remotes/origin/HEAD",
+        "refs/remotes/origin/main",
+        "refs/remotes/origin/master",
+    ] {
+        let merge_base = runner
+            .run(
+                "git",
+                &[
+                    "-C".to_owned(),
+                    root.to_owned(),
+                    "merge-base".to_owned(),
+                    revision.to_owned(),
+                    remote_ref.to_owned(),
+                ],
+                timeout,
+            )
+            .ok()?;
+        if merge_base.code != 0 {
+            continue;
+        }
+        let candidate = merge_base.stdout.trim();
+        if !is_full_git_revision(candidate)
+            || !rendered_sources_match(runner, root, revision, candidate, &source_files, timeout)
+        {
+            continue;
+        }
+        return Some(candidate.to_ascii_lowercase());
+    }
+    None
+}
+
+fn rendered_source_files(document: &compass_model::GraphDocument) -> Option<Vec<String>> {
+    const MAX_RENDERED_SOURCE_FILES: usize = 4_096;
+    const MAX_SOURCE_METADATA_VALUES: usize = 1_000_000;
+    let mut files = BTreeSet::new();
+    let mut remaining_values = MAX_SOURCE_METADATA_VALUES;
+    for node in &document.nodes {
+        insert_rendered_source_file(&mut files, node.source_file(), MAX_RENDERED_SOURCE_FILES)?;
+        insert_rendered_source_file(
+            &mut files,
+            Some(&node.string("wiring_file")),
+            MAX_RENDERED_SOURCE_FILES,
+        )?;
+        collect_nested_source_files(
+            &node.attributes,
+            &mut files,
+            &mut remaining_values,
+            MAX_RENDERED_SOURCE_FILES,
+        )?;
+    }
+    for edge in &document.links {
+        insert_rendered_source_file(&mut files, edge.source_file(), MAX_RENDERED_SOURCE_FILES)?;
+        collect_nested_source_files(
+            &edge.attributes,
+            &mut files,
+            &mut remaining_values,
+            MAX_RENDERED_SOURCE_FILES,
+        )?;
+    }
+    (!files.is_empty()).then(|| files.into_iter().collect())
+}
+
+fn collect_nested_source_files(
+    value: &serde_json::Map<String, serde_json::Value>,
+    files: &mut BTreeSet<String>,
+    remaining_values: &mut usize,
+    max_source_files: usize,
+) -> Option<()> {
+    let mut pending = value.values().collect::<Vec<_>>();
+    while let Some(value) = pending.pop() {
+        *remaining_values = remaining_values.checked_sub(1)?;
+        match value {
+            serde_json::Value::Object(object) => {
+                for (key, value) in object {
+                    if key == "file" {
+                        insert_rendered_source_file(files, value.as_str(), max_source_files)?;
+                    }
+                    pending.push(value);
+                }
+            }
+            serde_json::Value::Array(values) => pending.extend(values),
+            _ => {}
+        }
+    }
+    Some(())
+}
+
+fn insert_rendered_source_file(
+    files: &mut BTreeSet<String>,
+    source_file: Option<&str>,
+    max_source_files: usize,
+) -> Option<()> {
+    let Some(source_file) = source_file.filter(|value| !value.is_empty()) else {
+        return Some(());
+    };
+    if source_file.len() > 4_096
+        || source_file.starts_with('/')
+        || source_file.starts_with('\\')
+        || source_file.contains('\0')
+    {
+        return None;
+    }
+    let normalized = source_file.replace('\\', "/");
+    if normalized
+        .split('/')
+        .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
+    {
+        return None;
+    }
+    if !files.contains(&normalized) && files.len() >= max_source_files {
+        return None;
+    }
+    files.insert(normalized);
+    Some(())
+}
+
+fn rendered_sources_match(
+    runner: &dyn ProcessRunner,
+    root: &str,
+    revision: &str,
+    candidate: &str,
+    source_files: &[String],
+    timeout: Duration,
+) -> bool {
+    const SOURCE_PATHS_PER_GIT_DIFF: usize = 128;
+    source_files.chunks(SOURCE_PATHS_PER_GIT_DIFF).all(|paths| {
+        let mut arguments = vec![
+            "-C".to_owned(),
+            root.to_owned(),
+            "diff".to_owned(),
+            "--quiet".to_owned(),
+            candidate.to_owned(),
+            revision.to_owned(),
+            "--".to_owned(),
+        ];
+        arguments.extend(paths.iter().map(|path| format!(":(literal){path}")));
+        runner
+            .run("git", &arguments, timeout)
+            .is_ok_and(|output| output.code == 0)
+    })
+}
+
+fn is_full_git_revision(value: &str) -> bool {
+    matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4161,7 +4645,7 @@ fn export_callflow_json(
     max_diagram_nodes: usize,
     max_diagram_edges: usize,
 ) -> Result<String, String> {
-    let sections = sections_path.map(load_sections).transpose()?;
+    let overlay = load_architecture_overlay(sections_path, graph_path)?;
     let project = inputs
         .document
         .graph
@@ -4177,21 +4661,31 @@ fn export_callflow_json(
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| "Project".to_owned());
-    let model = callflow_view_model(
-        &inputs.document,
-        &inputs.communities,
-        &CallflowOptions {
-            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            sections: sections.as_deref(),
-            report: &inputs.report,
-            project_name: &project,
-            language,
-            max_sections,
-            diagram_scale,
-            max_diagram_nodes,
-            max_diagram_edges,
-            ..CallflowOptions::default()
+    let defaults = ArchitectureProjectionOptions::default();
+    let options = ArchitectureProjectionOptions {
+        limits: compass_output::ArchitectureProjectionLimits {
+            max_overview_groups: max_sections.max(2),
+            ..defaults.limits
         },
+        ..defaults
+    };
+    let _presentation_options = (
+        language,
+        diagram_scale,
+        max_diagram_nodes,
+        max_diagram_edges,
+    );
+    let model = project_architecture(
+        ArchitectureProjectionInput {
+            document: &inputs.document,
+            communities: &inputs.communities,
+            community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
+            overlay: overlay.as_ref(),
+            project_name: &project,
+            built_at_commit: graph_source_commit(&inputs.document),
+            generated_at: None,
+        },
+        &options,
     )
     .map_err(|error| error.to_string())?;
     serde_json::to_string(&model).map_err(|error| error.to_string())
@@ -4292,7 +4786,7 @@ fn export_callflow(
     max_diagram_nodes: usize,
     max_diagram_edges: usize,
 ) -> Result<ExportOutput, String> {
-    let sections = sections_path.map(load_sections).transpose()?;
+    let overlay = load_architecture_overlay(sections_path, graph_path)?;
     let project = inputs
         .document
         .graph
@@ -4320,9 +4814,11 @@ fn export_callflow(
         &path,
         &CallflowOptions {
             community_labels: (!inputs.labels.is_empty()).then_some(&inputs.labels),
-            sections: sections.as_deref(),
+            sections: None,
+            overlay: overlay.as_ref(),
             report: &inputs.report,
             project_name: &project,
+            built_at_commit: graph_source_commit(&inputs.document),
             language,
             max_sections,
             diagram_scale,
@@ -4334,15 +4830,14 @@ fn export_callflow(
     .map_err(|error| error.to_string())?;
     Ok(ExportOutput::html(
         format!(
-            "Loaded: {} nodes, {} edges, {} sections\nGraph: {}\nCall-flow HTML written: {}\n  Sections: {}  |  Mermaid diagrams: {}  |  Call tables: {}\n  Diagrams use Mermaid init directives plus interactive zoom/pan controls.\ncallflow HTML written - open in any browser: {}",
+            "Loaded: {} nodes and {} relationships\nGraph: {}\nArchitecture HTML written: {}\n  Groups: {} total, {} in overview  |  Overview routes: {}\n  The export includes source scopes, relation classes, quality diagnostics, and exact omission metadata.\nArchitecture HTML written - open in any browser: {}",
             inputs.document.nodes.len(),
             inputs.document.links.len(),
-            result.loaded_sections,
             graph_path.display(),
             path.display(),
-            result.rendered_sections,
-            result.mermaid_diagrams,
-            result.call_tables,
+            result.groups,
+            result.overview_groups,
+            result.overview_routes,
             path.display(),
         ),
         path,
@@ -4444,18 +4939,114 @@ fn load_usize_string_map(path: &Path) -> Result<std::collections::BTreeMap<usize
         .collect())
 }
 
-fn load_sections(path: &Path) -> Result<Vec<CallflowSection>, String> {
+const ARCHITECTURE_OVERLAY_MAX_BYTES: u64 = 1024 * 1024;
+
+fn discover_architecture_overlay(graph_path: &Path) -> Option<PathBuf> {
+    let output_root = graph_path.parent()?;
+    if output_root.file_name().and_then(|value| value.to_str()) != Some("compass-out") {
+        return None;
+    }
+    let candidate = output_root
+        .parent()?
+        .join(".compass")
+        .join("architecture.toml");
+    candidate.is_file().then_some(candidate)
+}
+
+fn load_architecture_overlay(
+    explicit_path: Option<&Path>,
+    _graph_path: &Path,
+) -> Result<Option<ArchitectureOverlay>, String> {
+    // Discovery, when allowed, happens before immutable artifacts are resolved
+    // and only for the canonical project/compass-out/graph.json location.
+    // Explicit historical graph paths therefore never observe live config.
+    let path = explicit_path.map(Path::to_path_buf);
+    path.map(|path| parse_architecture_overlay(&path))
+        .transpose()
+}
+
+fn parse_architecture_overlay(path: &Path) -> Result<ArchitectureOverlay, String> {
+    let size = fs::metadata(path)
+        .map_err(|error| format!("error reading {}: {error}", path.display()))?
+        .len();
+    if size > ARCHITECTURE_OVERLAY_MAX_BYTES {
+        return Err(format!(
+            "architecture overlay {} is {size} bytes; limit is {ARCHITECTURE_OVERLAY_MAX_BYTES}",
+            path.display()
+        ));
+    }
     let bytes =
         fs::read(path).map_err(|error| format!("error reading {}: {error}", path.display()))?;
+    if path.extension().and_then(|value| value.to_str()) == Some("toml") {
+        let text = std::str::from_utf8(&bytes).map_err(|error| {
+            format!(
+                "architecture overlay {} is not UTF-8: {error}",
+                path.display()
+            )
+        })?;
+        return toml::from_str(text)
+            .map_err(|error| format!("invalid architecture overlay {}: {error}", path.display()));
+    }
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid JSON at {}: {error}", path.display()))?;
-    let value = value.get("sections").cloned().unwrap_or(value);
-    serde_json::from_value(value).map_err(|_| {
+    if value.get("schema").is_some() {
+        return serde_json::from_value(value)
+            .map_err(|error| format!("invalid architecture overlay {}: {error}", path.display()));
+    }
+    let sections: Vec<CallflowSection> = serde_json::from_value(
+        value.get("sections").cloned().unwrap_or(value),
+    )
+    .map_err(|error| {
         format!(
-            "ERROR: sections file must contain a JSON array: {}",
+            "architecture overlay {} is neither compass.architecture-overlay/1 nor legacy sections JSON: {error}",
             path.display()
         )
+    })?;
+    let groups = sections
+        .into_iter()
+        .filter(|section| section.id != "overview")
+        .map(|section| {
+            let communities = section
+                .communities
+                .iter()
+                .map(|community| {
+                    community.parse::<usize>().map_err(|error| {
+                        format!(
+                            "legacy section {} has invalid community {}: {error}",
+                            section.id, community
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ArchitectureOverlayGroup {
+                id: section.id,
+                name: section.name,
+                path_prefixes: Vec::new(),
+                communities,
+                pin: false,
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(ArchitectureOverlay {
+        schema: compass_output::ARCHITECTURE_OVERLAY_SCHEMA.to_owned(),
+        source_rules: Vec::new(),
+        groups,
     })
+}
+
+fn graph_source_commit(document: &compass_model::GraphDocument) -> Option<&str> {
+    document
+        .graph
+        .get("built_at_commit")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            document
+                .graph
+                .get("build")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|build| build.get("sourceCommit"))
+                .and_then(serde_json::Value::as_str)
+        })
 }
 
 fn parse_usize(value: Option<String>, _name: &str) -> Option<usize> {
@@ -4491,7 +5082,7 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--report PATH] [--sections PATH]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
+    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output JSON]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
 }
 
 fn export_workbench_help(format: &str) -> String {
@@ -4579,7 +5170,7 @@ fn export_json_help() -> String {
 }
 
 fn callflow_help() -> String {
-    "Usage: compass export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --report PATH          path to GRAPH_REPORT.md\n  --sections PATH        JSON section definitions\n  --output HTML          output path (default compass-out/<project>-callflow.html)\n  --lang LANG            auto, zh-CN, en, etc. (default auto)\n  --max-sections N       maximum auto-derived sections (default 15)\n  --diagram-scale N      Mermaid diagram scale (default 1.0)\n  --max-diagram-nodes N  representative nodes per section (default 18)\n  --max-diagram-edges N  representative edges per section (default 24)".to_owned()
+    "Usage: compass export callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH]\n  --architecture-overlay PATH  versioned JSON/TOML architecture overlay\n  --sections PATH              deprecated alias; legacy section JSON is adapted\n  --output HTML                output path (default compass-out/<project>-callflow.html)\n  --max-sections N             maximum groups in the bounded overview (default 15)\n  --lang LANG                  accepted for CLI compatibility; the shared viewer localizes UI\n  --diagram-scale N            deprecated compatibility option\n  --max-diagram-nodes N        deprecated compatibility option\n  --max-diagram-edges N        deprecated compatibility option\n\nThe export uses compass.viewer.architecture/1 for both HTML and JSON. Production scope is classified before grouping; omitted groups remain searchable and are never merged into Other.".to_owned()
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -5881,11 +6472,6 @@ mod mcp_option_tests {
         assert!(load_usize_string_map(&map_path).is_err());
         assert!(load_usize_string_map(&directory.path().join("missing")).is_err());
 
-        let sections = directory.path().join("sections.json");
-        fs::write(&sections, r#"{"sections":[]}"#)?;
-        assert!(load_sections(&sections)?.is_empty());
-        fs::write(&sections, "{}")?;
-        assert!(load_sections(&sections).is_err());
         Ok(())
     }
 
@@ -5955,6 +6541,52 @@ mod mcp_option_tests {
     }
 
     #[test]
+    fn architecture_overlay_loader_accepts_versioned_toml_and_legacy_json()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let toml_path = directory.path().join("architecture.toml");
+        fs::write(
+            &toml_path,
+            "schema = \"compass.architecture-overlay/1\"\n\
+             [[sourceRules]]\npathPrefix = \"generated/client\"\nscope = \"generated\"\n\
+             [[groups]]\nid = \"billing\"\nname = \"Billing Ledger\"\npathPrefixes = [\"crates/billing\"]\npin = true\n",
+        )?;
+        let overlay = parse_architecture_overlay(&toml_path)?;
+        assert_eq!(overlay.source_rules.len(), 1);
+        assert_eq!(overlay.groups.len(), 1);
+
+        let legacy_path = directory.path().join("sections.json");
+        fs::write(
+            &legacy_path,
+            r#"{"sections":[{"id":"billing","name":"Billing Ledger","communities":["7"]}]}"#,
+        )?;
+        let legacy = parse_architecture_overlay(&legacy_path)?;
+        assert_eq!(legacy.groups[0].communities, vec![7]);
+        Ok(())
+    }
+
+    #[test]
+    fn architecture_overlay_discovery_is_limited_to_the_canonical_project_output()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let project = directory.path();
+        let configuration = project.join(".compass/architecture.toml");
+        fs::create_dir_all(configuration.parent().ok_or("configuration parent")?)?;
+        fs::write(
+            &configuration,
+            "schema = \"compass.architecture-overlay/1\"\n",
+        )?;
+        let canonical = project.join("compass-out/graph.json");
+        let historical = project.join("archive/graph.json");
+        assert_eq!(
+            discover_architecture_overlay(&canonical),
+            Some(configuration)
+        );
+        assert_eq!(discover_architecture_overlay(&historical), None);
+        Ok(())
+    }
+
+    #[test]
     fn absent_worker_override_preserves_host_sized_default() {
         let mut options = BuildOptions::new(".");
         assert_eq!(options.max_workers, None);
@@ -5990,5 +6622,25 @@ mod mcp_option_tests {
         assert!(watch_help().contains("--inference-level low|medium|high|max"));
         assert!(extract_help().contains("--inference-level low|medium|high|max"));
         Ok(())
+    }
+
+    #[test]
+    fn provider_environment_defaults_are_non_secret_and_flags_win() {
+        let environment = HashMap::from([
+            ("COMPASS_BACKEND".to_owned(), "  gemini  ".to_owned()),
+            ("COMPASS_MODEL".to_owned(), "  gemini-test  ".to_owned()),
+        ]);
+        let mut backend = None;
+        let mut model = None;
+        apply_provider_environment_defaults(&mut backend, &mut model, &environment);
+        assert_eq!(backend.as_deref(), Some("gemini"));
+        assert_eq!(model.as_deref(), Some("gemini-test"));
+
+        let mut backend = Some("openai".to_owned());
+        let mut model = Some("gpt-test".to_owned());
+        apply_provider_environment_defaults(&mut backend, &mut model, &environment);
+        assert_eq!(backend.as_deref(), Some("openai"));
+        assert_eq!(model.as_deref(), Some("gpt-test"));
+        assert!(extract_help().contains("COMPASS_BACKEND/COMPASS_MODEL"));
     }
 }

@@ -19,17 +19,30 @@ struct MappingSpec {
 }
 
 pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolutionError> {
+    expand_pack(extraction, "spring-java", "java")
+}
+
+pub(super) fn expand_kotlin(extraction: &mut Extraction) -> Result<(), FrameworkResolutionError> {
+    expand_pack(extraction, "spring-kotlin", "kotlin")
+}
+
+fn expand_pack(
+    extraction: &mut Extraction,
+    pack_id: &str,
+    language: &str,
+) -> Result<(), FrameworkResolutionError> {
     let mut annotations = extraction
         .framework_facts
         .iter()
         .filter_map(|fact| match fact {
-            RawFrameworkFact::Annotation(annotation) if annotation.pack_id == PACK_ID => {
+            RawFrameworkFact::Annotation(annotation) if annotation.pack_id == pack_id => {
                 Some(annotation.clone())
             }
             _ => None,
         })
         .collect::<Vec<_>>();
-    let repository_beans = derive_repository_beans(extraction);
+    let mut repository_beans = derive_repository_beans(extraction, language);
+    rewrite_fact_packs(&mut repository_beans, pack_id);
     if annotations.is_empty() {
         extraction.framework_facts.extend(repository_beans);
         return Ok(());
@@ -38,13 +51,15 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
         .framework_facts
         .iter()
         .filter_map(|fact| match fact {
-            RawFrameworkFact::Domain(fact) if fact.kind == "_spring_constructor" => {
+            RawFrameworkFact::Domain(fact)
+                if fact.kind == "_spring_constructor" && fact_pack(fact) == Some(pack_id) =>
+            {
                 Some(fact.clone())
             }
             _ => None,
         })
         .collect::<Vec<_>>();
-    let constants = spring_constants(extraction);
+    let constants = spring_constants(extraction, pack_id);
     resolve_annotation_arguments(&mut annotations, &constants);
 
     let by_owner = annotations.iter().fold(
@@ -162,6 +177,7 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
                         anchor: annotation.anchor.clone(),
                         handler_reference: annotation.owner_graph_node_id.clone(),
                         middleware_references: Vec::new(),
+                        stages: Vec::new(),
                         origin: RawFrameworkOrigin::Ast,
                         rule: Some(mapping.rule.to_owned()),
                         detail,
@@ -180,16 +196,47 @@ pub(super) fn expand(extraction: &mut Extraction) -> Result<(), FrameworkResolut
     );
 
     derive_beans_and_domains(&annotations, &by_owner, &constructors, &mut derived);
+    rewrite_fact_packs(&mut derived, pack_id);
     extraction.framework_facts.retain(|fact| {
-        !matches!(fact, RawFrameworkFact::Annotation(annotation) if annotation.pack_id == PACK_ID)
-            && !matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "_spring_constructor")
-            && !matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "_spring_constant")
+        !matches!(fact, RawFrameworkFact::Annotation(annotation) if annotation.pack_id == pack_id)
+            && !matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "_spring_constructor" && fact_pack(domain) == Some(pack_id))
+            && !matches!(fact, RawFrameworkFact::Domain(domain) if domain.kind == "_spring_constant" && fact_pack(domain) == Some(pack_id))
     });
     extraction.framework_facts.extend(derived);
     Ok(())
 }
 
-fn derive_repository_beans(extraction: &Extraction) -> Vec<RawFrameworkFact> {
+fn rewrite_fact_packs(facts: &mut [RawFrameworkFact], pack_id: &str) {
+    for fact in facts {
+        match fact {
+            RawFrameworkFact::Annotation(annotation) => annotation.pack_id = pack_id.to_owned(),
+            RawFrameworkFact::Route(route) => {
+                route.detail.insert(
+                    "frameworkPack".to_owned(),
+                    Value::String(pack_id.to_owned()),
+                );
+            }
+            RawFrameworkFact::Domain(domain) => {
+                domain.detail.insert(
+                    "frameworkPack".to_owned(),
+                    Value::String(pack_id.to_owned()),
+                );
+            }
+            RawFrameworkFact::Role(role) => role.pack_id = pack_id.to_owned(),
+            RawFrameworkFact::Relation(relation) => relation.pack_id = pack_id.to_owned(),
+            RawFrameworkFact::Configuration(configuration) => {
+                configuration.pack_id = pack_id.to_owned();
+            }
+            RawFrameworkFact::FileSet(file_set) => file_set.pack_id = pack_id.to_owned(),
+        }
+    }
+}
+
+fn fact_pack(fact: &RawDomainFact) -> Option<&str> {
+    fact.detail.get("frameworkPack").and_then(Value::as_str)
+}
+
+fn derive_repository_beans(extraction: &Extraction, language: &str) -> Vec<RawFrameworkFact> {
     let nodes = extraction
         .nodes
         .iter()
@@ -208,6 +255,9 @@ fn derive_repository_beans(extraction: &Extraction) -> Vec<RawFrameworkFact> {
         .filter_map(|edge| {
             let source = nodes.get(edge.source.as_str())?;
             let target = nodes.get(edge.target.as_str())?;
+            if source.string("language") != language {
+                return None;
+            }
             let target_qualified = target.string("qualified_name");
             if !target_qualified.starts_with("org.springframework.data.")
                 || !target_qualified.ends_with("Repository")
@@ -294,13 +344,13 @@ struct SpringConstants {
     by_terminal: BTreeMap<String, Vec<String>>,
 }
 
-fn spring_constants(extraction: &Extraction) -> SpringConstants {
+fn spring_constants(extraction: &Extraction, pack_id: &str) -> SpringConstants {
     let mut constants = SpringConstants::default();
     for fact in &extraction.framework_facts {
         let RawFrameworkFact::Domain(fact) = fact else {
             continue;
         };
-        if fact.kind != "_spring_constant" {
+        if fact.kind != "_spring_constant" || fact_pack(fact) != Some(pack_id) {
             continue;
         }
         let Some(expression) = fact.detail.get("expression").and_then(Value::as_str) else {
@@ -649,6 +699,7 @@ fn derive_inherited_method_routes(
                                 anchor: annotation.anchor.clone(),
                                 handler_reference: method.id.clone(),
                                 middleware_references: Vec::new(),
+                                stages: Vec::new(),
                                 origin: RawFrameworkOrigin::Ast,
                                 rule: Some("spring-inherited-request-mapping".to_owned()),
                                 detail: Map::from_iter([

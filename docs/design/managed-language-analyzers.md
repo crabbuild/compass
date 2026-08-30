@@ -60,7 +60,8 @@ decides whether exact structural evidence supports projection.
 
 ### Hard-cut universal languages
 
-Python, Go, Rust, and Java are version-1 hard-cut universal adapters. They emit
+Python, Go, Rust, and Java are hard-cut `Qualified` universal evidence
+pipelines under the checked-in promotion decision. They emit
 `SemanticEvidenceBatch` facts and use shared resolution and projection. Their
 replaced direct graph paths are not available as fallbacks.
 
@@ -71,21 +72,22 @@ replaced direct graph paths are not available as fallbacks.
 | Rust | namespaces, traits, impl ownership, macros, re-exports | trait selection, autoderef, associated items, macro hygiene, `cfg` |
 | Java | packages, overload signatures, receiver spelling, inheritance | compiler attribution, generics, overload selection, virtual dispatch |
 
-Candidate or hard-cut status does not mean compiler-grade completeness. It
-states which publication architecture is active and which qualification has
+Qualifying or qualified status does not mean compiler-grade completeness. It
+states which evidence pipeline is active and which qualification gates have
 been completed.
 
-### TypeScript and JavaScript universal candidates
+### TypeScript and JavaScript universal evidence pipelines
 
-TypeScript, TSX, JavaScript, and JSX now use the registered universal candidate
-route. TypeScript and JavaScript retain distinct adapter identities while
+TypeScript, TSX, JavaScript, and JSX now use the registered universal evidence
+pipeline. TypeScript and JavaScript retain distinct producer identities while
 sharing one bounded source-grounded ECMAScript emitter; TSX is the TypeScript
 parser dialect. Their replaced direct graph publisher is not a fallback.
-Candidate status means the universal route is active while the complete
-qualification matrix and any compiler-backed enrichment remain future work.
+The checked-in universal-evidence promotion decision records these pipelines
+as `Qualified`; compiler-backed enrichment remains optional and does not widen
+the native structural contract.
 
 Compiler enrichment must not create a permanent third graph route beside the
-candidate path. Until a compiler provider is independently bounded and
+evidence pipeline. Until a compiler provider is independently bounded and
 qualified, compiler facts remain Program-only.
 
 ### Program and SCIP support
@@ -95,9 +97,24 @@ official SCIP artifact decoder. Offline SCIP facts enter Program evidence with
 provider descriptors, capability coverage, source freshness, resource limits,
 and conflict-preserving merge behavior.
 
-The graph projection is intentionally narrower: current compiler projection
-only strengthens exact Java calls. This design generalizes the fact boundary
-while retaining language-specific projection policies.
+The graph projection is intentionally narrower: compiler projection strengthens
+exact Java calls and verified managed `scip-python` calls. Python projection is
+artifact-only; Compass does not run, install, download, or discover an analyzer
+environment. A Python artifact is admitted only when its companion manifest has
+the `compass.managed-analyzer-profile/1` profile, identifies `scip-python`,
+matches the SCIP producer version, reports a complete offline run, and freezes
+the Python version, platform, source/import roots, project configuration,
+typeshed, stubs, namespace policy, and library-code policy. The profile and
+artifact digests form the provider identity and cache fingerprint.
+
+Managed Python calls are projected only where the SCIP definition and call
+anchors exactly match current Python AST evidence, both endpoints are local,
+and the same admitted provider proves both endpoints. Generic Python SCIP,
+stale sources, incomplete/timeout/cancelled/permission-denied results,
+conflicting targets, conflicting companions, unsupported profile versions, and
+inexact anchors remain Program evidence or fail closed without changing native
+relationships. This artifact seam does not implement the planned analyzer
+lifecycle or grant permission to execute project code.
 
 ### Qualification gap
 
@@ -593,10 +610,10 @@ under the same process and network bounds as the Go toolchain.
 
 ### TypeScript
 
-TypeScript and TSX use version-1 universal candidate evidence and have their
-replaced publication/resolution branches removed. Promotion to a complete
-adapter still requires the conformance and corpus gates below; analyzer facts
-remain Program-only until a separate provider is qualified.
+TypeScript and TSX use the registered universal evidence pipeline and have
+their replaced publication/resolution branches removed. A `Qualified` status
+still requires the conformance and corpus gates below; analyzer facts remain
+Program-only until a separate provider is qualified.
 
 Use verified `scip-typescript` first. Build a pinned TypeScript Compiler API
 bridge for controlled batch analysis and BuilderProgram incrementality.
@@ -625,8 +642,9 @@ callbacks, properties, JSX, and external declarations.
 
 ### JavaScript
 
-JavaScript/JSX/MJS/CJS use the version-1 JavaScript universal candidate and
-share the TypeScript emitter with distinct language policy and identity.
+JavaScript/JSX/MJS/CJS use the JavaScript universal evidence pipeline and
+share the TypeScript emitter with distinct language policy and producer
+identity.
 Analyzer graph projection remains disabled until a provider is separately
 qualified.
 
@@ -940,14 +958,20 @@ unrealizable. Published realizations remain immutable.
 
 | Milestone | Python | Rust | Go | TypeScript | JavaScript | Java |
 | --- | --- | --- | --- | --- | --- | --- |
-| Native structural path | Available | Available | Available | Universal candidate | Universal candidate | Available |
-| Universal hard cut | Available | Available | Available | Candidate route; qualification ongoing | Candidate route; qualification ongoing | Available |
+| Native structural path | Available | Available | Available | Evidence pipeline | Evidence pipeline | Available |
+| Universal hard cut | Qualified | Qualified | Qualified | Qualified | Qualified | Qualified |
+
 | Offline SCIP ingestion | Generic | Generic | Generic | Generic | Generic | Calls projected |
 | Managed artifact runner | Planned | Planned | Not selected | Planned | Planned | Planned |
 | Native batch analyzer | Optional | Optional | Go types | Compiler API | Compiler API | JDT Core |
 | Interactive analyzer | Pyright | rust-analyzer | gopls | tsserver | tsserver | JDT LS |
 | Exact graph projection | Planned | Planned | Planned | After cutover | After cutover | Local calls available |
 | Dispatch qualification | Planned | Planned | Planned | Planned | Limited/planned | Planned |
+
+Swift, Dart, Scala, and Groovy are also hard-cut version-1 `Qualified`
+pipelines under the universal-evidence promotion decision. Their structural evidence is emitted by the bounded AST-first
+producer; Swift Vapor routing uses `vapor-swift`, while Dart framework
+conventions remain separately marked and source-bounded.
 
 This matrix describes architecture status, not release scheduling.
 
@@ -959,7 +983,7 @@ This matrix describes architecture status, not release scheduling.
    focused crates behind one trait.
 3. Which tool distributions Compass may redistribute versus only discover.
 4. Which SCIP modes can run without repository build execution.
-5. How universal profiles divide TS/TSX/JS/JSX/MJS/CJS mixed projects.
+5. How producer identities divide TS/TSX/JS/JSX/MJS/CJS mixed projects.
 6. Which Program facts or graph relations require new schema majors.
 7. Which external dependency identities belong in the graph versus Program.
 8. Which metadata commands are safe enough for default use.

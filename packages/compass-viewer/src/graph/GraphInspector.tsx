@@ -1,9 +1,14 @@
 import { useMemo, useState, type KeyboardEvent } from "react";
 import {
+  ArrowDownToLineIcon,
+  ArrowUpFromLineIcon,
+  BoxIcon,
+  ChevronRightIcon,
   CompassIcon,
   ExternalLinkIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
+  RadarIcon,
   SearchIcon
 } from "lucide-react";
 import type {
@@ -16,9 +21,148 @@ import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { ChangeEvidence, type GraphSourceRevisions } from "./ChangeEvidence";
 import { ChangedSymbolList } from "./ChangedSymbolList";
 import { CodeEvidence } from "./CodeEvidence";
+import {
+  documentContextForNode,
+  DocumentOcrPanel
+} from "./DocumentOcrPanel";
 import { navigableSource } from "./sourceNavigation";
 
 export const COMMUNITY_CONTROL_LIMIT = 200;
+
+export type DirectionalNodeGroup = {
+  node: GraphNode;
+  edges: GraphEdge[];
+};
+
+export type DirectionalRelationships = {
+  incoming: DirectionalNodeGroup[];
+  outgoing: DirectionalNodeGroup[];
+};
+
+export function groupDirectionalRelationships(
+  selectedId: string,
+  connectedEdges: GraphEdge[],
+  nodes: ReadonlyMap<string, GraphNode>
+): DirectionalRelationships {
+  const incoming = new Map<string, DirectionalNodeGroup>();
+  const outgoing = new Map<string, DirectionalNodeGroup>();
+
+  const add = (
+    groups: Map<string, DirectionalNodeGroup>,
+    nodeId: string,
+    edge: GraphEdge
+  ) => {
+    const node = nodes.get(nodeId);
+    if (!node) return;
+    const existing = groups.get(nodeId);
+    if (existing) {
+      existing.edges.push(edge);
+    } else {
+      groups.set(nodeId, { node, edges: [edge] });
+    }
+  };
+
+  for (const edge of connectedEdges) {
+    if (edge.target === selectedId) add(incoming, edge.source, edge);
+    if (edge.source === selectedId) add(outgoing, edge.target, edge);
+  }
+
+  const sorted = (groups: Map<string, DirectionalNodeGroup>) => [...groups.values()]
+    .map((group) => ({
+      ...group,
+      edges: group.edges.sort((left, right) => left.relation.localeCompare(right.relation)
+        || left.id.localeCompare(right.id))
+    }))
+    .sort((left, right) => left.node.label.localeCompare(right.node.label)
+      || left.node.id.localeCompare(right.node.id));
+
+  return {
+    incoming: sorted(incoming),
+    outgoing: sorted(outgoing)
+  };
+}
+
+function relationshipSummary(edges: GraphEdge[]): string {
+  const counts = new Map<string, number>();
+  for (const edge of edges) {
+    const relation = edge.relation || "related";
+    counts.set(relation, (counts.get(relation) ?? 0) + (edge.weight ?? 1));
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([relation, count]) => count > 1 ? `${relation} ×${count}` : relation)
+    .join(" · ");
+}
+
+function DirectionalRelationshipGroup({
+  direction,
+  groups,
+  communityColors,
+  onFocus
+}: {
+  direction: "incoming" | "outgoing";
+  groups: DirectionalNodeGroup[];
+  communityColors: ReadonlyMap<number, string>;
+  onFocus(nodeId: string): void;
+}) {
+  const incoming = direction === "incoming";
+  const edgeCount = groups.reduce((count, group) => count + group.edges.length, 0);
+  const title = incoming ? "Incoming" : "Outgoing";
+  const description = incoming
+    ? "Nodes that point to this node"
+    : "Nodes this node points to";
+  const DirectionIcon = incoming ? ArrowDownToLineIcon : ArrowUpFromLineIcon;
+
+  return (
+    <section className="compass-direction-group" data-direction={direction}>
+      <div className="compass-direction-heading">
+        <span className="compass-direction-icon" aria-hidden="true">
+          <DirectionIcon />
+        </span>
+        <span className="compass-direction-copy">
+          <strong>{title}</strong>
+          <small>{description}</small>
+        </span>
+        <span className="compass-direction-count">
+          <strong>{groups.length}</strong>
+          <small>{edgeCount} {edgeCount === 1 ? "edge" : "edges"}</small>
+        </span>
+      </div>
+      <div className="compass-direction-list">
+        {groups.length ? groups.map((group) => {
+          const summary = relationshipSummary(group.edges);
+          return (
+            <button
+              key={group.node.id}
+              type="button"
+              className="compass-direction-link"
+              title={`Focus ${group.node.label}`}
+              aria-label={`Focus ${group.node.label}; ${title.toLocaleLowerCase()}; ${summary}`}
+              onClick={() => onFocus(group.node.id)}
+            >
+              <span
+                className="compass-neighbor-dot"
+                aria-hidden="true"
+                style={{ background: group.node.color?.background
+                  ?? communityColors.get(group.node.community)
+                  ?? "var(--border)" }}
+              />
+              <span className="compass-direction-node">
+                <strong>{group.node.label}</strong>
+                <small>{summary}</small>
+              </span>
+              <ChevronRightIcon aria-hidden="true" />
+            </button>
+          );
+        }) : (
+          <span className="compass-direction-empty">
+            {incoming ? "No incoming relationships" : "No outgoing relationships"}
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export function visibleCommunityControls(
   communities: GraphViewModel["communities"],
@@ -93,6 +237,7 @@ export function GraphInspector({
   sourceRevisions,
   queryResult,
   renderedEdgeCount,
+  showHeader,
   onQueryChange,
   onFocus,
   onOpenSource,
@@ -114,6 +259,7 @@ export function GraphInspector({
   sourceRevisions?: GraphSourceRevisions | undefined;
   queryResult?: CodeQueryResponse | undefined;
   renderedEdgeCount: number;
+  showHeader: boolean;
   onQueryChange(query: string): void;
   onFocus(nodeId: string): void;
   onOpenSource(source: SourceLocation, revision?: string): void;
@@ -143,9 +289,20 @@ export function GraphInspector({
     () => new Map(model.nodes.map((node) => [node.id, node])),
     [model.nodes]
   );
+  const communityColors = useMemo(
+    () => new Map(model.communities.map((community) => [community.id, community.color])),
+    [model.communities]
+  );
+  const relationshipGroups = useMemo(
+    () => selected
+      ? groupDirectionalRelationships(selected.id, connectedEdges, nodeLookup)
+      : { incoming: [], outgoing: [] },
+    [connectedEdges, nodeLookup, selected?.id]
+  );
   const selectedQueryNode = selected
     ? queryResult?.nodes.find((node) => node.id === selected.id)
     : undefined;
+  const documentContext = selected ? documentContextForNode(model, selected) : undefined;
   const selectedCodeEvidence = selectedQueryNode?.evidence ?? selected?.codeEvidence ?? [];
   const relationshipCodeEvidence = selected
     ? (queryResult
@@ -199,46 +356,60 @@ export function GraphInspector({
 
   return (
     <aside className="compass-graph-inspector" aria-label="Graph inspector">
-      <header className="compass-inspector-header">
-        <span className="compass-product-mark" aria-hidden="true"><CompassIcon /></span>
-        <span className="compass-inspector-title">
-          <strong>Compass</strong>
-          <small>{model.title}</small>
-        </span>
-        <button
-          className="compass-inspector-disclosure"
-          type="button"
-          aria-label="Collapse graph inspector"
-          title="Collapse graph inspector"
-          onClick={onToggleCollapsed}
-        >
-          <PanelRightCloseIcon aria-hidden="true" />
-        </button>
-      </header>
-
+      {showHeader && (
+        <header className="compass-inspector-header">
+          <span className="compass-product-mark" aria-hidden="true"><CompassIcon /></span>
+          <span className="compass-inspector-title">
+            <strong>Compass</strong>
+            <small>{model.title}</small>
+          </span>
+          <button
+            className="compass-inspector-disclosure"
+            type="button"
+            aria-label="Collapse graph inspector"
+            title="Collapse graph inspector"
+            onClick={onToggleCollapsed}
+          >
+            <PanelRightCloseIcon aria-hidden="true" />
+          </button>
+        </header>
+      )}
       <div className="compass-inspector-search" role="search">
         <label className="sr-only" htmlFor="compass-node-search">Search graph nodes</label>
-        <div className="compass-search-field">
-          <SearchIcon aria-hidden="true" />
-          <input
-            id="compass-node-search"
-            type="search"
-            role="combobox"
-            value={query}
-            placeholder="Search nodes and files"
-            autoComplete="off"
-            aria-controls="compass-search-results"
-            aria-autocomplete="list"
-            aria-expanded={matches.length > 0}
-            aria-activedescendant={matches[activeResult]
-              ? `compass-search-result-${activeResult}`
-              : undefined}
-            onChange={(event) => {
-              onQueryChange(event.target.value);
-              setActiveResult(0);
-            }}
-            onKeyDown={onSearchKeyDown}
-          />
+        <div className="compass-inspector-search-row">
+          <div className="compass-search-field">
+            <SearchIcon aria-hidden="true" />
+            <input
+              id="compass-node-search"
+              type="search"
+              role="combobox"
+              value={query}
+              placeholder="Search nodes and files"
+              autoComplete="off"
+              aria-controls="compass-search-results"
+              aria-autocomplete="list"
+              aria-expanded={matches.length > 0}
+              aria-activedescendant={matches[activeResult]
+                ? `compass-search-result-${activeResult}`
+                : undefined}
+              onChange={(event) => {
+                onQueryChange(event.target.value);
+                setActiveResult(0);
+              }}
+              onKeyDown={onSearchKeyDown}
+            />
+          </div>
+          {!showHeader && (
+            <button
+              className="compass-inspector-disclosure compass-inspector-search-disclosure"
+              type="button"
+              aria-label="Collapse graph inspector"
+              title="Collapse graph inspector"
+              onClick={onToggleCollapsed}
+            >
+              <PanelRightCloseIcon aria-hidden="true" />
+            </button>
+          )}
         </div>
         {matches.length > 0 && (
           <div
@@ -279,7 +450,7 @@ export function GraphInspector({
                 aria-hidden="true"
                 style={{ background: changeColor(selected.change)
                   ?? selected.color?.background
-                  ?? model.communities.find((item) => item.id === selected.community)?.color }}
+                  ?? communityColors.get(selected.community) }}
               />
               <span>
                 <strong>{selected.label}</strong>
@@ -301,6 +472,14 @@ export function GraphInspector({
               <div>
                 <dt>Degree</dt>
                 <dd>{selected.degree ?? neighbors.length}</dd>
+              </div>
+              <div>
+                <dt>Incoming</dt>
+                <dd>{relationshipGroups.incoming.length}</dd>
+              </div>
+              <div>
+                <dt>Outgoing</dt>
+                <dd>{relationshipGroups.outgoing.length}</dd>
               </div>
               {selected.language && <div><dt>Language</dt><dd>{selected.language}</dd></div>}
               {range && <div><dt>Lines</dt><dd>{range}</dd></div>}
@@ -352,18 +531,46 @@ export function GraphInspector({
             {selected.signature && (
               <code className="compass-signature-block">{selected.signature}</code>
             )}
+            {documentContext && (
+              <DocumentOcrPanel
+                context={documentContext}
+                selectedId={selected.id}
+                onFocus={onFocus}
+              />
+            )}
             {onQueryNode && (
-              <div className="compass-code-query-actions" aria-label="Code graph queries">
-                <button type="button" onClick={() => onQueryNode("callers", selected.id)}>
-                  Callers
-                </button>
-                <button type="button" onClick={() => onQueryNode("callees", selected.id)}>
-                  Callees
-                </button>
-                <button type="button" onClick={() => onQueryNode("impact", selected.id)}>
-                  Impact
-                </button>
-              </div>
+              <section className="compass-node-actions" aria-labelledby="compass-node-actions-title">
+                <div className="compass-inspector-subheading">
+                  <h3 id="compass-node-actions-title">Actions</h3>
+                  <span>3 available</span>
+                </div>
+                <div className="compass-code-query-actions" aria-label="Code graph queries">
+                  <button
+                    type="button"
+                    title="Find code that calls this node"
+                    onClick={() => onQueryNode("callers", selected.id)}
+                  >
+                    <ArrowDownToLineIcon aria-hidden="true" />
+                    <span>Callers</span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Find code called by this node"
+                    onClick={() => onQueryNode("callees", selected.id)}
+                  >
+                    <ArrowUpFromLineIcon aria-hidden="true" />
+                    <span>Callees</span>
+                  </button>
+                  <button
+                    type="button"
+                    title="Trace code affected by this node"
+                    onClick={() => onQueryNode("impact", selected.id)}
+                  >
+                    <RadarIcon aria-hidden="true" />
+                    <span>Impact</span>
+                  </button>
+                </div>
+              </section>
             )}
             <CodeEvidence
               evidence={selectedCodeEvidence}
@@ -386,11 +593,17 @@ export function GraphInspector({
                   type="button"
                   onClick={() => onOpenCommunity(selected.community)}
                 >
-                  {comparisonMode ? "Inspect changes" : "Open community"}
-                  <span>
-                    {selected.memberCount.toLocaleString()}{" "}
-                    {comparisonMode ? "current symbols" : "members"}
+                  <span className="compass-inspector-action-icon" aria-hidden="true">
+                    <BoxIcon />
                   </span>
+                  <span className="compass-inspector-action-copy">
+                    <strong>{comparisonMode ? "Inspect changes" : "Open community"}</strong>
+                    <small>
+                      {selected.memberCount.toLocaleString()}{" "}
+                      {comparisonMode ? "current symbols" : "members"}
+                    </small>
+                  </span>
+                  <ChevronRightIcon aria-hidden="true" />
                 </button>
               )}
             {model.stats.aggregated
@@ -411,32 +624,26 @@ export function GraphInspector({
                 onOpenSource={onOpenSource}
               />
             ) : (
-              <>
-                <div className="compass-neighbors-heading">
-                  <span>Connected nodes</span>
-                  <strong>{neighbors.length}</strong>
+              <section className="compass-relationships" aria-labelledby="compass-relationships-title">
+                <div className="compass-inspector-subheading">
+                  <h3 id="compass-relationships-title">Relationships</h3>
+                  <span>{connectedEdges.length} {connectedEdges.length === 1 ? "edge" : "edges"}</span>
                 </div>
-                <div className="compass-neighbors-list">
-                  {neighbors.length ? neighbors.map((neighbor) => (
-                    <button
-                      key={neighbor.id}
-                      type="button"
-                      className="compass-neighbor-link"
-                      title={neighbor.label}
-                      onClick={() => onFocus(neighbor.id)}
-                    >
-                      <span
-                        className="compass-neighbor-dot"
-                        aria-hidden="true"
-                        style={{ background: neighbor.color?.background
-                          ?? model.communities.find((item) => item.id === neighbor.community)?.color
-                          ?? "var(--border)" }}
-                      />
-                      <span className="compass-neighbor-label">{neighbor.label}</span>
-                    </button>
-                  )) : <span className="compass-empty">No connected nodes</span>}
+                <div className="compass-relationship-directions">
+                  <DirectionalRelationshipGroup
+                    direction="incoming"
+                    groups={relationshipGroups.incoming}
+                    communityColors={communityColors}
+                    onFocus={onFocus}
+                  />
+                  <DirectionalRelationshipGroup
+                    direction="outgoing"
+                    groups={relationshipGroups.outgoing}
+                    communityColors={communityColors}
+                    onFocus={onFocus}
+                  />
                 </div>
-              </>
+              </section>
             )}
           </div>
         ) : (
@@ -451,6 +658,62 @@ export function GraphInspector({
           selectedId={selected?.id}
           onFocus={onFocus}
         />
+      )}
+
+      {model.effectiveGraph && (
+        <section className="compass-info-panel" aria-labelledby="compass-agent-overlay-title">
+          <div className="compass-section-heading">
+            <h2 id="compass-agent-overlay-title">Agent overlay</h2>
+            <span>Exact revision</span>
+          </div>
+          <dl className="compass-metadata-grid">
+            <div>
+              <dt>Pinned profile</dt>
+              <dd>{model.effectiveGraph.compositionProfile}</dd>
+            </div>
+            <div>
+              <dt>Retractions</dt>
+              <dd>{model.effectiveGraph.retractions.total.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Omissions</dt>
+              <dd>{model.effectiveGraph.omissions.total.toLocaleString()}</dd>
+            </div>
+            <div className="compass-metadata-wide">
+              <dt>Overlay revision</dt>
+              <dd title={model.effectiveGraph.overlayRevision}>
+                <code>{model.effectiveGraph.overlayRevision.slice(0, 12)}</code>
+              </dd>
+            </div>
+          </dl>
+          {model.effectiveGraph.retractions.examples.length > 0 && (
+            <details>
+              <summary>
+                Retraction history
+                <span>{model.effectiveGraph.retractions.examples.length}</span>
+              </summary>
+              <ul>
+                {model.effectiveGraph.retractions.examples.map((retraction) => (
+                  <li key={`${retraction.kind}:${retraction.id}`}>
+                    <strong>{retraction.kind}</strong>{" "}
+                    <code>{retraction.id}</code>{" — "}
+                    {retraction.reasonCode}: {retraction.explanation}
+                  </li>
+                ))}
+              </ul>
+              {model.effectiveGraph.retractions.omittedExamples > 0 && (
+                <p className="compass-empty">
+                  {model.effectiveGraph.retractions.omittedExamples.toLocaleString()} additional
+                  Retractions omitted by the response bound.
+                </p>
+              )}
+            </details>
+          )}
+          <p className="compass-empty">
+            Changing augment or curated profile requires a new exact Effective Graph read;
+            this viewer never relabels one identity as another.
+          </p>
+        </section>
       )}
 
       <section

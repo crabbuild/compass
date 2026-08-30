@@ -16,7 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::{CompassMcp, SUPPORTED_PROTOCOL_VERSION, supports_protocol};
+use crate::{AgentGraphMcpConfig, CompassMcp, SUPPORTED_PROTOCOL_VERSION, supports_protocol};
 
 const MAX_HTTP_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const MAX_HTTP_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
@@ -29,6 +29,9 @@ pub struct HttpOptions {
     pub host: String,
     pub port: u16,
     pub api_key: Option<String>,
+    /// Independent authenticated capability required for Agent Graph writes.
+    pub write_api_key: Option<String>,
+    pub agent_graph: Option<AgentGraphMcpConfig>,
     pub path: String,
     pub json_response: bool,
     pub stateless: bool,
@@ -43,6 +46,8 @@ impl HttpOptions {
             host: "127.0.0.1".to_owned(),
             port: 8080,
             api_key: None,
+            write_api_key: None,
+            agent_graph: None,
             path: "/mcp".to_owned(),
             json_response: false,
             stateless: true,
@@ -55,10 +60,21 @@ impl HttpOptions {
 struct HttpGate {
     api_key: Option<Arc<[u8]>>,
     allowed_hosts: Arc<[String]>,
+    write_api_key: Option<Arc<[u8]>>,
+    convert_stateful_sse_to_json: bool,
 }
 
 /// Serve MCP over stdio while tolerating blank lines sent by desktop clients.
 pub async fn serve_stdio(graph_path: PathBuf) -> Result<(), String> {
+    serve_stdio_configured(graph_path, None).await
+}
+
+/// Serve MCP over stdio with an explicit Agent Graph policy. Writes remain absent when the
+/// configuration is `None` or has `writes_enabled == false`.
+pub async fn serve_stdio_configured(
+    graph_path: PathBuf,
+    agent_graph: Option<AgentGraphMcpConfig>,
+) -> Result<(), String> {
     let (mut relay_write, relay_read) = tokio::io::duplex(64 * 1024);
     let relay = tokio::spawn(async move {
         let mut input = BufReader::new(tokio::io::stdin());
@@ -87,7 +103,11 @@ pub async fn serve_stdio(graph_path: PathBuf) -> Result<(), String> {
         }
         Ok::<(), String>(())
     });
-    let running = CompassMcp::new(graph_path)
+    let server = match agent_graph {
+        Some(config) => CompassMcp::new(graph_path).with_agent_graph(config)?,
+        None => CompassMcp::new(graph_path),
+    };
+    let running = server
         .serve((relay_read, tokio::io::stdout()))
         .await
         .map_err(|error| error.to_string())?;
@@ -108,9 +128,28 @@ pub async fn serve_http(mut options: HttpOptions) -> Result<(), String> {
         .take()
         .map(|key| key.trim().to_owned())
         .filter(|key| !key.is_empty());
+    options.write_api_key = options
+        .write_api_key
+        .take()
+        .map(|key| key.trim().to_owned())
+        .filter(|key| !key.is_empty());
+    if options
+        .agent_graph
+        .as_ref()
+        .is_some_and(|config| config.writes_enabled)
+    {
+        if options.api_key.is_none() || options.write_api_key.is_none() {
+            return Err("HTTP Agent Graph writes require both a read API key and a separate write capability key".to_owned());
+        }
+        if options.api_key == options.write_api_key {
+            return Err(
+                "HTTP Agent Graph read and write capability keys must be distinct".to_owned(),
+            );
+        }
+    }
 
     let cancellation = CancellationToken::new();
-    let router = build_http_router(&options, &cancellation);
+    let router = build_http_router(&options, &cancellation)?;
 
     let bind_host = if options.host.is_empty() {
         "0.0.0.0"
@@ -154,9 +193,15 @@ pub async fn serve_http(mut options: HttpOptions) -> Result<(), String> {
     result.map_err(|error| error.to_string())
 }
 
-fn build_http_router(options: &HttpOptions, cancellation: &CancellationToken) -> Router {
+fn build_http_router(
+    options: &HttpOptions,
+    cancellation: &CancellationToken,
+) -> Result<Router, String> {
     let manager = Arc::new(LocalSessionManager::default());
-    let factory_graph = CompassMcp::new_http(options.graph_path.clone());
+    let factory_graph = match options.agent_graph.clone() {
+        Some(config) => CompassMcp::new_http(options.graph_path.clone()).with_agent_graph(config),
+        None => Ok(CompassMcp::new_http(options.graph_path.clone())),
+    }?;
     let allowed_hosts = if is_wildcard_host(&options.host) {
         Vec::new()
     } else {
@@ -180,12 +225,19 @@ fn build_http_router(options: &HttpOptions, cancellation: &CancellationToken) ->
             .as_ref()
             .map(|key| Arc::<[u8]>::from(key.as_bytes())),
         allowed_hosts: allowed_hosts.into(),
+        write_api_key: options
+            .write_api_key
+            .as_ref()
+            .map(|key| Arc::<[u8]>::from(key.as_bytes())),
+        // rmcp 2.2 emits SSE for stateful responses even when json_response is
+        // requested. The Python SDK returns plain JSON, so adapt that response.
+        convert_stateful_sse_to_json: false,
     };
-    Router::new()
+    Ok(Router::new()
         .route_service(&options.path, service)
         .layer(RequestBodyLimitLayer::new(MAX_HTTP_REQUEST_BYTES))
         .layer(middleware::from_fn(bound_http_response))
-        .layer(middleware::from_fn_with_state(gate, http_gate))
+        .layer(middleware::from_fn_with_state(gate, http_gate)))
 }
 
 async fn bound_http_response(request: Request, next: Next) -> Response {
@@ -282,7 +334,48 @@ async fn http_gate(State(gate): State<HttpGate>, mut request: Request, next: Nex
             .await;
         }
     }
-    next.run(request).await
+    let method = request.method().clone();
+    if method == Method::POST && gate.write_api_key.is_some() {
+        let provided = request
+            .headers()
+            .get("x-compass-write-key")
+            .map(|value| value.as_bytes().to_vec());
+        let (parts, body) = request.into_parts();
+        let bytes = match axum::body::to_bytes(body, MAX_HTTP_REQUEST_BYTES).await {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    "{\"error\": \"request_too_large\"}",
+                )
+                    .into_response();
+            }
+        };
+        let is_write = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .ok()
+            .is_some_and(|value| contains_agent_graph_write(&value));
+        if is_write
+            && !provided.as_deref().is_some_and(|value| {
+                gate.write_api_key
+                    .as_ref()
+                    .is_some_and(|expected| constant_time_eq(value, expected))
+            })
+        {
+            return (
+                StatusCode::FORBIDDEN,
+                [(header::CONTENT_TYPE, "application/json")],
+                "{\"error\": \"write_capability_required\"}",
+            )
+                .into_response();
+        }
+        request = Request::from_parts(parts, Body::from(bytes));
+    }
+    let response = next.run(request).await;
+    if gate.convert_stateful_sse_to_json && method == Method::POST {
+        return sse_response_to_json(response).await;
+    }
+    response
 }
 
 fn normalize_header(request: &mut Request, name: &'static str) {
@@ -396,6 +489,22 @@ async fn protocol_gate_error(
         .into_response()
 }
 
+fn contains_agent_graph_write(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(values) => values.iter().any(contains_agent_graph_write),
+        serde_json::Value::Object(object) => {
+            object.get("method").and_then(serde_json::Value::as_str) == Some("tools/call")
+                && object
+                    .get("params")
+                    .and_then(serde_json::Value::as_object)
+                    .and_then(|params| params.get("name"))
+                    .and_then(serde_json::Value::as_str)
+                    == Some("apply_agent_graph")
+        }
+        _ => false,
+    }
+}
+
 fn bearer_token(value: Option<&HeaderValue>) -> Option<&[u8]> {
     let value = value?.as_bytes();
     let separator = value.iter().position(|byte| *byte == b' ')?;
@@ -417,6 +526,49 @@ fn constant_time_eq(provided: &[u8], expected: &[u8]) -> bool {
             ^ usize::from(expected.get(index).copied().unwrap_or_default());
     }
     difference == 0
+}
+
+async fn sse_response_to_json(response: Response) -> Response {
+    let is_sse = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"));
+    if !is_sse {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, MAX_HTTP_RESPONSE_BYTES).await else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "MCP response exceeded the server limit",
+        )
+            .into_response();
+    };
+    let payload = bytes
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| line.strip_prefix(b"data:"))
+        .map(trim_ascii)
+        .find(|line| serde_json::from_slice::<serde_json::Value>(line).is_ok());
+    let Some(payload) = payload else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    parts.headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(payload.to_vec()))
+}
+
+fn trim_ascii(mut value: &[u8]) -> &[u8] {
+    while value.first().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[1..];
+    }
+    while value.last().is_some_and(u8::is_ascii_whitespace) {
+        value = &value[..value.len().saturating_sub(1)];
+    }
+    value
 }
 
 fn is_wildcard_host(host: &str) -> bool {
@@ -499,6 +651,49 @@ mod tests {
         assert!(trim_ascii(b" \t\r\n").is_empty());
     }
 
+    #[test]
+    fn only_the_closed_agent_mutation_tool_requires_write_capability() {
+        assert!(contains_agent_graph_write(&serde_json::json!({
+            "jsonrpc":"2.0",
+            "id":1,
+            "method":"tools/call",
+            "params":{"name":"apply_agent_graph","arguments":{}}
+        })));
+        assert!(!contains_agent_graph_write(&serde_json::json!({
+            "jsonrpc":"2.0",
+            "id":2,
+            "method":"tools/call",
+            "params":{"name":"inspect_agent_graph","arguments":{}}
+        })));
+    }
+
+    #[tokio::test]
+    async fn http_agent_writes_require_distinct_read_and_write_credentials()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let project = tempfile::tempdir()?;
+        let mut options = HttpOptions::new(project.path().join("missing.json"));
+        options.agent_graph = Some(crate::AgentGraphMcpConfig {
+            writes_enabled: true,
+            masks_enabled: false,
+            principal: compass_agent_graph::PrincipalId::parse("principal:http-test")?,
+            allowed_projects: std::collections::BTreeSet::from([project.path().canonicalize()?]),
+            non_git_state_root: Some(project.path().join("agent-state")),
+        });
+        let error = serve_http(options.clone())
+            .await
+            .err()
+            .ok_or("missing auth accepted")?;
+        assert!(error.contains("both a read API key and a separate write capability key"));
+        options.api_key = Some("same".to_owned());
+        options.write_api_key = Some("same".to_owned());
+        let error = serve_http(options)
+            .await
+            .err()
+            .ok_or("shared auth accepted")?;
+        assert!(error.contains("must be distinct"));
+        Ok(())
+    }
+
     #[tokio::test]
     async fn sse_conversion_preserves_non_sse_and_recovers_json_payloads()
     -> Result<(), Box<dyn std::error::Error>> {
@@ -559,7 +754,7 @@ mod tests {
         options.json_response = true;
         options.session_timeout = Some(Duration::ZERO);
         let cancellation = CancellationToken::new();
-        let _router = build_http_router(&options, &cancellation);
+        assert!(build_http_router(&options, &cancellation).is_ok());
     }
 
     #[tokio::test]
@@ -575,7 +770,7 @@ mod tests {
         options.api_key = Some("s3cret".to_owned());
         options.json_response = true;
         let cancellation = CancellationToken::new();
-        let router = build_http_router(&options, &cancellation);
+        let router = build_http_router(&options, &cancellation)?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let server_cancel = cancellation.clone();
@@ -627,6 +822,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn http_gate_requires_write_capability_only_for_agent_mutation()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let project = temp.path().canonicalize()?;
+        let mut options = HttpOptions::new(project.join("missing.json"));
+        options.api_key = Some("read-secret".to_owned());
+        options.write_api_key = Some("write-secret".to_owned());
+        options.json_response = true;
+        options.agent_graph = Some(crate::AgentGraphMcpConfig {
+            writes_enabled: true,
+            masks_enabled: false,
+            principal: compass_agent_graph::PrincipalId::parse("principal:http-gate")?,
+            allowed_projects: std::collections::BTreeSet::from([project.clone()]),
+            non_git_state_root: Some(project.join("agent-state")),
+        });
+        let cancellation = CancellationToken::new();
+        let router = build_http_router(&options, &cancellation)?;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+        let address = listener.local_addr()?;
+        let server_cancel = cancellation.clone();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(server_cancel.cancelled_owned())
+                .await
+        });
+        let initialized = request(
+            address,
+            "127.0.0.1",
+            Some("Bearer read-secret"),
+            None,
+            INITIALIZE,
+        )
+        .await?;
+        let session = header_value(&initialized, "mcp-session-id").ok_or("missing session id")?;
+        let write = r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"apply_agent_graph","arguments":{}}}"#;
+        let denied = request(
+            address,
+            "127.0.0.1",
+            Some("Bearer read-secret"),
+            Some(&session),
+            write,
+        )
+        .await?;
+        assert!(denied.starts_with("HTTP/1.1 403 Forbidden"));
+        assert!(denied.ends_with("{\"error\": \"write_capability_required\"}"));
+
+        let admitted = request_with_write_key(
+            address,
+            "127.0.0.1",
+            Some("Bearer read-secret"),
+            Some("write-secret"),
+            Some(&session),
+            write,
+        )
+        .await?;
+        assert!(!admitted.starts_with("HTTP/1.1 403 Forbidden"));
+        cancellation.cancel();
+        server.await??;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn local_http_transport_rejects_untrusted_host() -> Result<(), Box<dyn std::error::Error>>
     {
         let temp = tempfile::tempdir()?;
@@ -636,7 +893,7 @@ mod tests {
         options.json_response = true;
         options.stateless = true;
         let cancellation = CancellationToken::new();
-        let router = build_http_router(&options, &cancellation);
+        let router = build_http_router(&options, &cancellation)?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let server_cancel = cancellation.clone();
@@ -659,15 +916,29 @@ mod tests {
         session: Option<&str>,
         body: &str,
     ) -> Result<String, Box<dyn std::error::Error>> {
+        request_with_write_key(address, host, authorization, None, session, body).await
+    }
+
+    async fn request_with_write_key(
+        address: SocketAddr,
+        host: &str,
+        authorization: Option<&str>,
+        write_key: Option<&str>,
+        session: Option<&str>,
+        body: &str,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let mut stream = tokio::net::TcpStream::connect(address).await?;
         let authorization = authorization
             .map(|value| format!("Authorization: {value}\r\n"))
+            .unwrap_or_default();
+        let write_key = write_key
+            .map(|value| format!("x-compass-write-key: {value}\r\n"))
             .unwrap_or_default();
         let session = session
             .map(|value| format!("Mcp-Session-Id: {value}\r\n"))
             .unwrap_or_default();
         let wire = format!(
-            "POST /mcp HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\n{authorization}{session}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "POST /mcp HTTP/1.1\r\nHost: {host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\n{authorization}{write_key}{session}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         stream.write_all(wire.as_bytes()).await?;

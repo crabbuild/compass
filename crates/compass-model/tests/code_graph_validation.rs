@@ -122,6 +122,30 @@ fn whole_document_validation_accepts_the_supported_route_shape() {
 }
 
 #[test]
+fn route_validation_accepts_role_promoted_javascript_alias_targets() {
+    let mut graph = document();
+    graph.nodes[1].kind = NodeKind::Variable;
+    graph.nodes[1].roles = vec![NodeRole::RouteHandler];
+    assert!(validate_code_graph(&graph).is_ok());
+
+    graph.nodes[1].roles.clear();
+    assert!(validate_code_graph(&graph).is_err());
+}
+
+#[test]
+fn route_validation_accepts_role_promoted_dependency_instance_targets() {
+    for role in [NodeRole::Service, NodeRole::Middleware] {
+        let mut graph = document();
+        graph.nodes[1].kind = NodeKind::Variable;
+        graph.nodes[1].roles = vec![role];
+        assert!(
+            validate_code_graph(&graph).is_ok(),
+            "role-promoted {role:?} variable was rejected"
+        );
+    }
+}
+
+#[test]
 fn structured_validation_classifies_document_node_and_edge_failures() -> Result<(), Box<dyn Error>>
 {
     let mut graph = document();
@@ -421,6 +445,10 @@ fn language_specific_declarations_use_supported_endpoint_shapes() {
         (EdgeKind::TypeOf, NodeKind::Field, NodeKind::Parameter),
         (EdgeKind::Returns, NodeKind::Function, NodeKind::Parameter),
         (EdgeKind::Implements, NodeKind::Parameter, NodeKind::Trait),
+        (EdgeKind::MixesIn, NodeKind::Class, NodeKind::Trait),
+        (EdgeKind::Calls, NodeKind::Closure, NodeKind::Function),
+        (EdgeKind::Contains, NodeKind::Function, NodeKind::Closure),
+        (EdgeKind::Contains, NodeKind::Closure, NodeKind::Parameter),
         (EdgeKind::Imports, NodeKind::File, NodeKind::Annotation),
         (EdgeKind::Imports, NodeKind::File, NodeKind::Field),
         (EdgeKind::Contains, NodeKind::EnumMember, NodeKind::Method),
@@ -524,6 +552,8 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
         ),
         (EdgeKind::Extends, NodeKind::Class, NodeKind::Function),
         (EdgeKind::Implements, NodeKind::Class, NodeKind::Class),
+        (EdgeKind::MixesIn, NodeKind::Function, NodeKind::Trait),
+        (EdgeKind::MixesIn, NodeKind::Class, NodeKind::Function),
         (EdgeKind::TypeOf, NodeKind::Variable, NodeKind::Function),
         (EdgeKind::Reads, NodeKind::Route, NodeKind::Class),
         (EdgeKind::Handles, NodeKind::Variable, NodeKind::Event),
@@ -540,6 +570,8 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
             NodeKind::Function,
             NodeKind::DatabaseTable,
         ),
+        (EdgeKind::Renders, NodeKind::Route, NodeKind::Function),
+        (EdgeKind::Renders, NodeKind::Function, NodeKind::Route),
     ] {
         let mut graph = document();
         graph.nodes[0].kind = source_kind;
@@ -553,6 +585,25 @@ fn endpoint_matrix_rejects_invalid_pairs_across_relationship_families() {
             "{kind:?} accepted {source_kind:?} -> {target_kind:?}"
         );
     }
+}
+
+#[test]
+fn dependency_edges_accept_source_backed_callable_instance_variables() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Function;
+    graph.nodes[1].kind = NodeKind::Variable;
+    graph.links[0].kind = EdgeKind::DependsOn;
+    let id = edge_id(
+        "route",
+        EdgeKind::DependsOn,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+
+    assert!(validate_code_graph(&graph).is_ok());
 }
 
 #[test]
@@ -638,6 +689,7 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
         (EdgeKind::Contains, NodeKind::ConfigKey, NodeKind::ConfigKey),
         (EdgeKind::Calls, NodeKind::Class, NodeKind::Method),
         (EdgeKind::Calls, NodeKind::Variable, NodeKind::Function),
+        (EdgeKind::Renders, NodeKind::Variable, NodeKind::Function),
         (EdgeKind::Calls, NodeKind::Struct, NodeKind::Method),
         (EdgeKind::Calls, NodeKind::TypeAlias, NodeKind::Function),
         (EdgeKind::Calls, NodeKind::Enum, NodeKind::Function),
@@ -683,6 +735,34 @@ fn endpoint_matrix_accepts_nested_dynamic_and_database_producer_shapes() {
             "{kind:?} rejected producer shape {source_kind:?} -> {target_kind:?}"
         );
     }
+}
+
+#[test]
+fn dart_implicit_interfaces_and_parts_have_valid_graph_endpoints() {
+    let mut graph = document();
+    graph.nodes[0].kind = NodeKind::Class;
+    graph.nodes[0].language = Some("dart".to_owned());
+    graph.nodes[1].kind = NodeKind::Class;
+    graph.nodes[1].language = Some("dart".to_owned());
+    graph.links[0].kind = EdgeKind::Implements;
+    let id = edge_id(
+        "route",
+        EdgeKind::Implements,
+        "handler",
+        Some(&anchor()),
+        None,
+    );
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(validate_code_graph(&graph).is_ok());
+
+    graph.nodes[0].kind = NodeKind::File;
+    graph.nodes[1].kind = NodeKind::File;
+    graph.links[0].kind = EdgeKind::Embeds;
+    let id = edge_id("route", EdgeKind::Embeds, "handler", Some(&anchor()), None);
+    graph.links[0].id.clone_from(&id);
+    graph.links[0].key = id;
+    assert!(validate_code_graph(&graph).is_ok());
 }
 
 #[test]

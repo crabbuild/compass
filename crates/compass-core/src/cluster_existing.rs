@@ -5,18 +5,18 @@ use std::time::{Duration, Instant};
 
 use compass_files::{BuildGuard, write_atomic_with_digest, write_json_atomic, write_text_atomic};
 use compass_graph::{
-    ClusterOptions, Communities, GodNode, cluster, community_member_signatures, god_nodes,
-    label_communities_by_hub, remap_communities_to_previous, score_communities, suggest_questions,
-    surprising_connections, write_canonical_graph_json,
+    ClusterOptions, Communities, GodNode, blind_spot_report, cluster, community_member_signatures,
+    god_nodes, label_communities_by_hub, remap_communities_to_previous, score_communities,
+    suggest_questions, surprising_connections, write_canonical_graph_json,
 };
 use compass_model::GraphDocument;
 use compass_model::GraphError;
 use compass_model::code_graph::{CommunityMetadata, GraphDocument as V1GraphDocument};
 use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, HtmlOptions, JsonExportOptions,
-    OrientationHealth, ReportOptions, TokenCost, agent_orientation, backup_if_protected_to,
-    graph_artifact_identity, render_agent_report_markdown, render_orientation_json, write_html,
-    write_json,
+    OrientationHealth, ReportOptions, TokenCost, agent_orientation_with_blind_spots,
+    backup_if_protected_to, graph_artifact_identity, render_agent_report_markdown,
+    render_orientation_json, write_html, write_json,
 };
 use serde_json::{Value, json};
 
@@ -229,6 +229,7 @@ where
     let gods = god_nodes(published_document, 10);
     let surprises = surprising_connections(published_document, &communities, 5);
     let questions = suggest_questions(published_document, &communities, &labels, 10);
+    let blind_spots = blind_spot_report(published_document, &communities, &labels);
     let commit_root = std::env::current_dir().unwrap_or_else(|_| options.root.clone());
     let commit = git_commit(&commit_root);
     let report_root = options.root.to_string_lossy();
@@ -242,7 +243,7 @@ where
         report_commit.as_deref(),
     );
     let learning = load_learning_for_report(&options.output_dir.join("graph.json"));
-    let mut orientation = agent_orientation(
+    let mut orientation = agent_orientation_with_blind_spots(
         published_document,
         &communities,
         &cohesion,
@@ -255,6 +256,7 @@ where
         },
         selection.token_cost,
         Some(&questions),
+        Some(&blind_spots),
         learning.as_ref(),
         &report_options,
     );
@@ -271,6 +273,7 @@ where
             "gods": gods,
             "surprises": surprises,
             "questions": questions,
+            "blindSpots": blind_spots,
         }),
         true,
     )?;

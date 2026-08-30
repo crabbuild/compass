@@ -261,6 +261,7 @@ pub fn materialize_history_with_observer(
     let (existing, corrupt) = observe_preferred(store, &request.commit, &activity)?;
     if !request.rebuild
         && let Some(existing) = existing
+        && existing.version.build_profile == request.profile
     {
         return Ok(existing);
     }

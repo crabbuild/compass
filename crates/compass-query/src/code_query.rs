@@ -50,6 +50,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::Exports,
     EdgeKind::Extends,
     EdgeKind::Implements,
+    EdgeKind::MixesIn,
     EdgeKind::References,
     EdgeKind::TypeOf,
     EdgeKind::Returns,
@@ -72,6 +73,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::DependsOn,
     EdgeKind::Documents,
     EdgeKind::MapsTo,
+    EdgeKind::Renders,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -272,6 +274,7 @@ const IMPACT_KINDS: &[EdgeKind] = &[
     EdgeKind::Schedules,
     EdgeKind::Triggers,
     EdgeKind::MapsTo,
+    EdgeKind::Renders,
 ];
 
 pub struct CodeQueryEngine {
@@ -1024,13 +1027,17 @@ impl PinnedDiscoveryBackend<'_> {
             }
             Self::Store(reader) => {
                 let (mut edges, truncated) = reader
-                    .directional_adjacency(node, inbound, snapshot_limits(limit.saturating_add(1))?)
+                    .adjacency_by_kinds(
+                        node,
+                        inbound,
+                        kinds,
+                        snapshot_limits(limit.saturating_add(1))?,
+                    )
                     .map_err(snapshot_error)?;
                 edges.sort_by(|left, right| left.id.cmp(&right.id));
                 let truncated = truncated || edges.len() > limit;
                 edges.truncate(limit);
                 let examined = edges.len().saturating_add(usize::from(truncated));
-                edges.retain(|edge| kinds.contains(&edge.kind));
                 if !include_heuristic {
                     edges.retain(|edge| !is_heuristic(edge));
                 }
@@ -1793,7 +1800,30 @@ impl CodeQueryEngine {
             }
         }
 
-        let terms = search_query_terms(query)?;
+        // Validate the public lexical bound against the original query before
+        // stop-word removal so many tiny tokens cannot bypass it.
+        let literal_terms = search_query_terms(query)?;
+        let terms = if query.chars().any(char::is_whitespace) {
+            query_recall_terms(query)
+                .into_iter()
+                .filter(|term| {
+                    !matches!(
+                        term.to_ascii_uppercase().as_str(),
+                        "AND" | "OR" | "NOT" | "NEAR"
+                    )
+                })
+                .map(canonical_query_token)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        } else {
+            // A single symbol-shaped token may carry qualification and a
+            // typo (`UserService.lits`). Preserve its literal pieces for the
+            // bounded fuzzy resolver; natural-language phrases use canonical
+            // stop-word and inflection handling above.
+            literal_terms
+        };
+        validate_search_term_count(&terms)?;
         let prepared = PreparedSearchQuery {
             fts_query: fts_query_from_terms(&terms),
             ranking_terms: terms.clone(),

@@ -4,15 +4,21 @@ use std::fmt::Write as _;
 use rayon::prelude::*;
 use serde_json::Value;
 
+use crate::code_graph::DocumentReferenceResolution;
 use crate::code_graph::{
-    BuildMetadata, CODE_GRAPH_SCHEMA_V1, EdgeKind, GraphDocument as CodeGraphDocument, NodeDetails,
-    NodeKind, NodeRole,
+    BuildMetadata, CODE_GRAPH_SCHEMA_V1, DocumentRole, DocumentSignificance, EdgeKind,
+    GraphDocument as CodeGraphDocument, NodeDetails, NodeKind, NodeRole, TableCellState,
 };
 use crate::identity::{edge_id, file_id};
 use crate::provenance::{Provenance, SourceAnchor};
 
 const VALID_FILE_TYPES: [&str; 6] = ["code", "concept", "document", "image", "paper", "rationale"];
 const VALID_CONFIDENCES: [&str; 3] = ["AMBIGUOUS", "EXTRACTED", "INFERRED"];
+const MAX_DOCUMENT_TABLE_COLUMNS: usize = 128;
+const MAX_DOCUMENT_TABLE_ROWS: usize = 10_000;
+const MAX_DOCUMENT_TABLE_CELLS: usize = 100_000;
+const MAX_DOCUMENT_TEXT_BYTES: usize = 4 * 1024;
+const MAX_DOCUMENT_REFERENCES: usize = 128;
 
 // CPython's set iteration order with the compatibility harness' PYTHONHASHSEED=0.
 const REQUIRED_NODE_FIELDS: [&str; 4] = ["file_type", "id", "source_file", "label"];
@@ -299,6 +305,33 @@ pub fn validate_code_graph_records(document: &CodeGraphDocument) -> CodeGraphVal
                 node.kind.as_str()
             ));
         }
+        if let Some(NodeDetails::Document(details)) = node.details.as_ref() {
+            validate_document_details(&node.id, details, node.source.as_ref(), &files, &mut errors);
+            for reference in &details.references {
+                if let Some(target) = reference.target.as_ref()
+                    && !nodes.contains_key(target.as_str())
+                {
+                    errors.push(format!(
+                        "node {} document reference target {} is not a published node",
+                        node.id, target
+                    ));
+                }
+                for candidate in &reference.candidates {
+                    if !nodes.contains_key(candidate.node_id.as_str()) {
+                        errors.push(format!(
+                            "node {} document reference candidate {} is not a published node",
+                            node.id, candidate.node_id
+                        ));
+                    }
+                }
+            }
+        }
+        if matches!(node.details.as_ref(), Some(NodeDetails::Document(_))) {
+            errors.push(format!(
+                "node {} carries normalization-only document details in compass.graph/1",
+                node.id
+            ));
+        }
         if !errors.is_empty() {
             Some(RecordValidationErrors {
                 id: node.id.clone(),
@@ -561,6 +594,7 @@ fn details_match_kind(kind: NodeKind, details: Option<&NodeDetails>) -> bool {
                 | NodeKind::EnumMember
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -577,6 +611,7 @@ fn details_match_kind(kind: NodeKind, details: Option<&NodeDetails>) -> bool {
         }
         Some(NodeDetails::Route(_)) => kind == NodeKind::Route,
         Some(NodeDetails::Component(_)) => kind == NodeKind::Component,
+        Some(NodeDetails::Document(_)) => kind == NodeKind::Resource,
         Some(NodeDetails::Resource(_)) => kind == NodeKind::Resource,
         Some(NodeDetails::Messaging(_)) => matches!(
             kind,
@@ -601,6 +636,307 @@ fn details_match_kind(kind: NodeKind, details: Option<&NodeDetails>) -> bool {
     }
 }
 
+fn validate_document_details(
+    owner: &str,
+    details: &crate::code_graph::DocumentNodeDetails,
+    node_source: Option<&SourceAnchor>,
+    files: &HashMap<&str, u64>,
+    errors: &mut Vec<String>,
+) {
+    let expected_significance = match details.role {
+        DocumentRole::List | DocumentRole::Quote | DocumentRole::Table => {
+            DocumentSignificance::Container
+        }
+        DocumentRole::LinkDefinition | DocumentRole::FootnoteDefinition => {
+            DocumentSignificance::Scaffolding
+        }
+        _ => DocumentSignificance::Content,
+    };
+    if details.significance != expected_significance {
+        errors.push(format!(
+            "{owner}: document significance {:?} does not match role {:?}",
+            details.significance, details.role
+        ));
+    }
+
+    match details.role {
+        DocumentRole::Table => {
+            if details.table.is_none() || details.table_row.is_some() {
+                errors.push(format!(
+                    "{owner}: table document details require table payload only"
+                ));
+            }
+        }
+        DocumentRole::TableRow => {
+            if details.table_row.is_none() || details.table.is_some() {
+                errors.push(format!(
+                    "{owner}: table row document details require table_row payload only"
+                ));
+            }
+        }
+        _ => {
+            if details.table.is_some() || details.table_row.is_some() {
+                errors.push(format!(
+                    "{owner}: non-table document role carries table payload"
+                ));
+            }
+        }
+    }
+
+    if let Some(table) = &details.table {
+        if table.columns.len() > MAX_DOCUMENT_TABLE_COLUMNS {
+            errors.push(format!(
+                "{owner}: table has {} columns, maximum is {MAX_DOCUMENT_TABLE_COLUMNS}",
+                table.columns.len()
+            ));
+        }
+        if table.body_row_count > MAX_DOCUMENT_TABLE_ROWS as u32 {
+            errors.push(format!(
+                "{owner}: table has {} retained rows, maximum is {MAX_DOCUMENT_TABLE_ROWS}",
+                table.body_row_count
+            ));
+        }
+        if table.omitted_row_count > MAX_DOCUMENT_TABLE_ROWS as u32 {
+            errors.push(format!(
+                "{owner}: table omitted row count exceeds {MAX_DOCUMENT_TABLE_ROWS}"
+            ));
+        }
+        if table.omitted_column_count > MAX_DOCUMENT_TABLE_COLUMNS as u32 {
+            errors.push(format!(
+                "{owner}: table omitted column count exceeds {MAX_DOCUMENT_TABLE_COLUMNS}"
+            ));
+        }
+        if !table.truncated && (table.omitted_row_count != 0 || table.omitted_column_count != 0) {
+            errors.push(format!(
+                "{owner}: table omission counts require truncated=true"
+            ));
+        }
+        for (index, column) in table.columns.iter().enumerate() {
+            if column.index != index as u32 {
+                errors.push(format!(
+                    "{owner}: table column index {} is not contiguous at position {index}",
+                    column.index
+                ));
+            }
+            if column.header.len() > MAX_DOCUMENT_TEXT_BYTES {
+                errors.push(format!(
+                    "{owner}: table column {index} header exceeds {MAX_DOCUMENT_TEXT_BYTES} bytes"
+                ));
+            }
+            if let Some(anchor) = &column.source {
+                validate_document_anchor(owner, anchor, node_source, files, errors);
+            }
+        }
+    }
+
+    if let Some(row) = &details.table_row {
+        if row.cells.len() > MAX_DOCUMENT_TABLE_COLUMNS
+            || row.cells.len() > MAX_DOCUMENT_TABLE_CELLS
+        {
+            errors.push(format!(
+                "{owner}: table row carries too many cells ({}), maximum is {MAX_DOCUMENT_TABLE_COLUMNS}",
+                row.cells.len()
+            ));
+        }
+        let mut previous_index = None;
+        for cell in &row.cells {
+            if cell.column_index >= MAX_DOCUMENT_TABLE_COLUMNS as u32 {
+                errors.push(format!(
+                    "{owner}: table cell column index {} exceeds the maximum",
+                    cell.column_index
+                ));
+            }
+            if previous_index.is_some_and(|previous| previous >= cell.column_index) {
+                errors.push(format!(
+                    "{owner}: table cell column indexes are not strictly increasing"
+                ));
+            }
+            previous_index = Some(cell.column_index);
+            if cell.text.len() > MAX_DOCUMENT_TEXT_BYTES {
+                errors.push(format!(
+                    "{owner}: table cell {} exceeds {MAX_DOCUMENT_TEXT_BYTES} bytes",
+                    cell.column_index
+                ));
+            }
+            match cell.state {
+                TableCellState::Present if cell.text.is_empty() => errors.push(format!(
+                    "{owner}: present table cell {} has empty text",
+                    cell.column_index
+                )),
+                TableCellState::Empty | TableCellState::Missing | TableCellState::Limited
+                    if !cell.text.is_empty() =>
+                {
+                    errors.push(format!(
+                        "{owner}: non-present table cell {} carries text",
+                        cell.column_index
+                    ))
+                }
+                _ => {}
+            }
+            if let Some(anchor) = &cell.source {
+                validate_document_anchor(owner, anchor, node_source, files, errors);
+            }
+        }
+        if row
+            .identity_cell_index
+            .is_some_and(|index| index >= MAX_DOCUMENT_TABLE_COLUMNS as u32)
+        {
+            errors.push(format!(
+                "{owner}: table identity cell index exceeds the maximum"
+            ));
+        }
+        if let Some(identity_index) = row.identity_cell_index {
+            let identity_cell = row
+                .cells
+                .iter()
+                .find(|cell| cell.column_index == identity_index);
+            let identity_is_present = identity_cell
+                .is_some_and(|cell| cell.state == TableCellState::Present && !cell.text.is_empty());
+            if !identity_is_present && !row.truncated {
+                errors.push(format!(
+                    "{owner}: table identity cell must reference a present non-empty cell"
+                ));
+            }
+        }
+    }
+
+    if details
+        .section
+        .as_ref()
+        .is_some_and(|section| section.len() > MAX_DOCUMENT_TEXT_BYTES)
+    {
+        errors.push(format!(
+            "{owner}: document section exceeds {MAX_DOCUMENT_TEXT_BYTES} bytes"
+        ));
+    }
+    if details
+        .uri
+        .as_ref()
+        .is_some_and(|uri| uri.len() > MAX_DOCUMENT_TEXT_BYTES)
+    {
+        errors.push(format!(
+            "{owner}: document URI exceeds {MAX_DOCUMENT_TEXT_BYTES} bytes"
+        ));
+    }
+
+    if details.references.len() > MAX_DOCUMENT_REFERENCES {
+        errors.push(format!(
+            "{owner}: document references exceed {MAX_DOCUMENT_REFERENCES}"
+        ));
+    }
+    for reference in &details.references {
+        if reference.spelling.len() > MAX_DOCUMENT_TEXT_BYTES {
+            errors.push(format!(
+                "{owner}: document reference spelling exceeds {MAX_DOCUMENT_TEXT_BYTES} bytes"
+            ));
+        }
+        if reference.kind.len() > MAX_DOCUMENT_TEXT_BYTES {
+            errors.push(format!(
+                "{owner}: document reference kind exceeds {MAX_DOCUMENT_TEXT_BYTES} bytes"
+            ));
+        }
+        if reference
+            .target
+            .as_ref()
+            .is_some_and(|target| target.is_empty())
+        {
+            errors.push(format!(
+                "{owner}: document reference target must not be empty"
+            ));
+        }
+        if reference.target.is_some() && !reference.candidates.is_empty() {
+            errors.push(format!(
+                "{owner}: document reference cannot carry both target and candidates"
+            ));
+        }
+        match reference.resolution {
+            DocumentReferenceResolution::Exact
+                if reference.target.is_none() || !reference.candidates.is_empty() =>
+            {
+                errors.push(format!(
+                    "{owner}: exact document reference requires only a target"
+                ))
+            }
+            DocumentReferenceResolution::Ambiguous
+                if reference.target.is_some() || reference.candidates.is_empty() =>
+            {
+                errors.push(format!(
+                    "{owner}: ambiguous document reference requires candidates and no target"
+                ))
+            }
+            DocumentReferenceResolution::Unresolved
+                if reference.target.is_some() || !reference.candidates.is_empty() =>
+            {
+                errors.push(format!(
+                    "{owner}: unresolved document reference cannot carry target candidates"
+                ));
+            }
+            DocumentReferenceResolution::Limited
+                if reference.target.is_some() || !reference.candidates.is_empty() =>
+            {
+                errors.push(format!(
+                    "{owner}: limited document reference cannot carry target candidates"
+                ));
+            }
+            _ => {}
+        }
+        let candidate_keys = reference
+            .candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    candidate.node_id.as_str(),
+                    candidate.reason.as_str(),
+                    candidate.confidence.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        if candidate_keys.windows(2).any(|pair| pair[0] >= pair[1]) {
+            errors.push(format!(
+                "{owner}: document reference candidates must be sorted and unique"
+            ));
+        }
+        for candidate in &reference.candidates {
+            if candidate.node_id.is_empty() || candidate.reason.len() > MAX_DOCUMENT_TEXT_BYTES {
+                errors.push(format!(
+                    "{owner}: document reference candidate is empty or exceeds the bounded limit"
+                ));
+            }
+        }
+        validate_document_anchor(owner, &reference.site, node_source, files, errors);
+        for candidate in &reference.candidates {
+            if let Some(anchor) = &candidate.anchor {
+                validate_document_anchor(owner, anchor, node_source, files, errors);
+            }
+        }
+    }
+}
+
+fn validate_document_anchor(
+    owner: &str,
+    anchor: &SourceAnchor,
+    node_source: Option<&SourceAnchor>,
+    files: &HashMap<&str, u64>,
+    errors: &mut Vec<String>,
+) {
+    validate_anchor(owner, anchor, files, errors);
+    if let Some(node_source) = node_source
+        && !source_anchor_contains(node_source, anchor)
+    {
+        errors.push(format!(
+            "{owner}: nested document source anchor is outside the node source"
+        ));
+    }
+}
+
+fn source_anchor_contains(outer: &SourceAnchor, inner: &SourceAnchor) -> bool {
+    outer.file == inner.file
+        && outer.start_byte <= inner.start_byte
+        && inner.end_byte <= outer.end_byte
+        && (outer.start_line, outer.start_column) <= (inner.start_line, inner.start_column)
+        && (inner.end_line, inner.end_column) <= (outer.end_line, outer.end_column)
+}
+
 fn endpoint_kinds_are_valid(
     source: &crate::code_graph::NodeRecord,
     kind: EdgeKind,
@@ -608,7 +944,13 @@ fn endpoint_kinds_are_valid(
 ) -> bool {
     match kind {
         EdgeKind::Contains => contains_endpoint_pair(source.kind, target.kind),
-        EdgeKind::Embeds => source.kind.is_type() && target.kind.is_type(),
+        EdgeKind::Embeds => {
+            (source.kind.is_type() && target.kind.is_type())
+                || (source.kind == NodeKind::File
+                    && target.kind == NodeKind::File
+                    && source.language.as_deref() == Some("dart")
+                    && target.language.as_deref() == Some("dart"))
+        }
         EdgeKind::Calls => {
             is_call_source(source.kind)
                 && (target.kind.is_callable()
@@ -642,7 +984,7 @@ fn endpoint_kinds_are_valid(
             (source.kind.is_type()
                 || (source.kind == NodeKind::Parameter
                     && source.language.as_deref() == Some("rust")))
-                && matches!(
+                && (matches!(
                     target.kind,
                     NodeKind::Interface
                         | NodeKind::Trait
@@ -651,8 +993,11 @@ fn endpoint_kinds_are_valid(
                         // structural object type declared through a type
                         // alias.
                         | NodeKind::TypeAlias
-                )
+                ) || (source.language.as_deref() == Some("dart")
+                    && target.language.as_deref() == Some("dart")
+                    && target.kind == NodeKind::Class))
         }
+        EdgeKind::MixesIn => source.kind.is_type() && target.kind.is_type(),
         EdgeKind::TypeOf => {
             is_typed_value(source.kind)
                 && (target.kind.is_type() || target.kind == NodeKind::Parameter)
@@ -661,6 +1006,8 @@ fn endpoint_kinds_are_valid(
         EdgeKind::Instantiates => {
             is_call_source(source.kind)
                 && (target.kind.is_constructible()
+                    || (target.kind == NodeKind::Interface
+                        && target.language.as_deref() == Some("kotlin"))
                     || (target.kind == NodeKind::EnumMember
                         && target.language.as_deref() == Some("rust")))
         }
@@ -679,6 +1026,20 @@ fn endpoint_kinds_are_valid(
                         | NodeKind::Class
                         | NodeKind::Component
                 )
+                // Frameworks commonly expose a route handler, dependency, or
+                // security component through a source-backed variable. Keep
+                // the structural `variable` kind while accepting it only
+                // after the route resolver has explicitly promoted the node
+                // to the corresponding typed role; arbitrary variables must
+                // remain invalid route targets.
+                || (source.kind == NodeKind::Route
+                    && target.kind == NodeKind::Variable
+                    && target.roles.iter().any(|role| {
+                        matches!(
+                            role,
+                            NodeRole::RouteHandler | NodeRole::Service | NodeRole::Middleware
+                        )
+                    }))
         }
         EdgeKind::MapsTo => {
             matches!(
@@ -726,6 +1087,7 @@ fn endpoint_kinds_are_valid(
             matches!(
                 source.kind,
                 NodeKind::Function
+                    | NodeKind::Closure
                     | NodeKind::Method
                     | NodeKind::Component
                     | NodeKind::Job
@@ -740,6 +1102,7 @@ fn endpoint_kinds_are_valid(
                 && matches!(
                     target.kind,
                     NodeKind::Function
+                        | NodeKind::Closure
                         | NodeKind::Method
                         | NodeKind::Job
                         | NodeKind::Event
@@ -752,7 +1115,11 @@ fn endpoint_kinds_are_valid(
         EdgeKind::Tests => {
             matches!(
                 source.kind,
-                NodeKind::File | NodeKind::Function | NodeKind::Method | NodeKind::Class
+                NodeKind::File
+                    | NodeKind::Function
+                    | NodeKind::Closure
+                    | NodeKind::Method
+                    | NodeKind::Class
             ) && source.roles.contains(&NodeRole::Test)
                 && is_test_target(target.kind)
         }
@@ -761,6 +1128,28 @@ fn endpoint_kinds_are_valid(
         }
         EdgeKind::References => {
             is_reference_source(source.kind) && is_reference_target(target.kind)
+        }
+        EdgeKind::Renders => {
+            matches!(
+                source.kind,
+                NodeKind::File
+                    | NodeKind::Module
+                    | NodeKind::Function
+                    | NodeKind::Closure
+                    | NodeKind::Method
+                    | NodeKind::Class
+                    | NodeKind::Component
+                    | NodeKind::Variable
+            ) && matches!(
+                target.kind,
+                NodeKind::Function
+                    | NodeKind::Closure
+                    | NodeKind::Method
+                    | NodeKind::Class
+                    | NodeKind::Variable
+                    | NodeKind::Property
+                    | NodeKind::Component
+            )
         }
         EdgeKind::DependsOn => {
             is_dependency_endpoint(source.kind) && is_dependency_endpoint(target.kind)
@@ -771,7 +1160,9 @@ fn endpoint_kinds_are_valid(
 const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
     if matches!(
         (source, target),
-        (NodeKind::Enum, NodeKind::EnumMember) | (NodeKind::Schema, NodeKind::ConfigKey)
+        (NodeKind::Enum, NodeKind::EnumMember)
+            | (NodeKind::Schema, NodeKind::ConfigKey)
+            | (NodeKind::Route, NodeKind::Route)
     ) {
         return true;
     }
@@ -795,6 +1186,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -833,6 +1225,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -863,6 +1256,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Trait
                 | NodeKind::Protocol
                 | NodeKind::Enum
+                | NodeKind::Annotation
                 | NodeKind::Component
                 | NodeKind::Schema,
             NodeKind::Class
@@ -873,6 +1267,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -884,7 +1279,11 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Annotation
                 | NodeKind::Component
         ) | (
-            NodeKind::Function | NodeKind::Method | NodeKind::Constructor | NodeKind::TypeAlias,
+            NodeKind::Function
+                | NodeKind::Closure
+                | NodeKind::Method
+                | NodeKind::Constructor
+                | NodeKind::TypeAlias,
             NodeKind::Class
                 | NodeKind::Struct
                 | NodeKind::Interface
@@ -893,6 +1292,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
                 | NodeKind::Enum
                 | NodeKind::TypeAlias
                 | NodeKind::Function
+                | NodeKind::Closure
                 | NodeKind::Method
                 | NodeKind::Constructor
                 | NodeKind::Property
@@ -906,6 +1306,7 @@ const fn contains_endpoint_pair(source: NodeKind, target: NodeKind) -> bool {
             NodeKind::File | NodeKind::Resource | NodeKind::ConfigKey
         ) | (NodeKind::Schema, NodeKind::ConfigKey)
             | (NodeKind::ConfigKey, NodeKind::ConfigKey)
+            | (NodeKind::Variable, NodeKind::Property)
     ) || database_contains(source, target)
 }
 
@@ -1030,6 +1431,7 @@ const fn is_import_target(kind: NodeKind) -> bool {
             NodeKind::Import
                 | NodeKind::Export
                 | NodeKind::TypeAlias
+                | NodeKind::Property
                 | NodeKind::Variable
                 | NodeKind::Field
                 | NodeKind::Constant
@@ -1051,6 +1453,7 @@ const fn is_export_target(kind: NodeKind) -> bool {
                 | NodeKind::Export
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
+                | NodeKind::Property
                 | NodeKind::Constant
                 | NodeKind::Macro
         )
@@ -1079,6 +1482,7 @@ const fn is_alias_target(kind: NodeKind) -> bool {
                 | NodeKind::Export
                 | NodeKind::TypeAlias
                 | NodeKind::Variable
+                | NodeKind::Property
                 | NodeKind::Constant
         )
 }
@@ -1171,6 +1575,10 @@ const fn is_dependency_endpoint(kind: NodeKind) -> bool {
             NodeKind::File
                 | NodeKind::Import
                 | NodeKind::Export
+                // A dependency-injection marker can name a source-backed
+                // callable instance directly. The variable remains the
+                // truthful graph identity of that configured instance.
+                | NodeKind::Variable
                 | NodeKind::TypeAlias
                 | NodeKind::Resource
                 | NodeKind::Schema
@@ -1333,6 +1741,28 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn kotlin_annotation_classes_and_top_level_properties_have_valid_endpoints() {
+        assert!(NodeKind::Annotation.is_constructible());
+        assert!(contains_endpoint_pair(
+            NodeKind::Annotation,
+            NodeKind::Constructor
+        ));
+        assert!(contains_endpoint_pair(
+            NodeKind::Annotation,
+            NodeKind::Property
+        ));
+        assert!(is_import_target(NodeKind::Property));
+    }
+
+    #[test]
+    fn object_variables_can_contain_properties() {
+        assert!(contains_endpoint_pair(
+            NodeKind::Variable,
+            NodeKind::Property
+        ));
+    }
 
     #[test]
     fn accepts_links_and_python_numeric_id_equality() {

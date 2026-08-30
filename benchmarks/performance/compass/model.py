@@ -195,6 +195,8 @@ class AuditCorpus:
     path: str
     graph: str
     graph_sha256: str
+    source_globs: tuple[str, ...] = ()
+    exclude_globs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -216,11 +218,14 @@ class AuditGraphFact:
     source: str
     target: str
     relation: str
+    edge_id: str | None = None
+    extractor: str | None = None
+    rule: str | None = None
 
 
 @dataclass(frozen=True)
 class AuditCapabilityIdentity:
-    adapter: str
+    producer: str
     capability: str
     framework_pack: str | None = None
 
@@ -228,11 +233,12 @@ class AuditCapabilityIdentity:
 @dataclass(frozen=True)
 class AuditSourceOracle:
     corpus: str
-    adapter: str
+    producer: str
     provider: str
     scanned_files: int
     parsed_files: int
     inventory_sha256: str
+    rejected_files: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -240,7 +246,7 @@ class AuditRecord:
     record_id: str
     corpus: str
     pool: str
-    adapter: str
+    producer: str
     framework_pack: str | None
     capability: str
     language: str

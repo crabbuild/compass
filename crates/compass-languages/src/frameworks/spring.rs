@@ -14,7 +14,31 @@ const FRAMEWORK: &str = "spring";
 const SPRING_PREFIX: &str = "org.springframework.";
 
 pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
-    if context.evidence.adapter.language != "java" {
+    detect_language(
+        context,
+        "java",
+        super::pack::SPRING_JAVA_DESCRIPTOR.dependency_markers,
+    )
+}
+
+pub(super) fn detect_kotlin(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    let mut facts = detect_language(
+        context,
+        "kotlin",
+        super::pack::SPRING_KOTLIN_DESCRIPTOR.dependency_markers,
+    );
+    for fact in &mut facts {
+        set_fact_pack(fact, "spring-kotlin");
+    }
+    facts
+}
+
+fn detect_language(
+    context: &UniversalDetectionContext<'_, '_>,
+    language: &str,
+    dependency_markers: &[&str],
+) -> Vec<RawFrameworkFact> {
+    if context.evidence.pipeline.language != language {
         return Vec::new();
     }
     let declarations = context
@@ -34,13 +58,14 @@ pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFram
                 .map(|occurrence| (occurrence, candidate))
         })
         .collect::<HashMap<_, _>>();
-    let activated = context.project.is_some_and(|project| {
-        project.has_any_dependency(super::pack::SPRING_JAVA_DESCRIPTOR.dependency_markers)
-    }) || context
-        .evidence
-        .bindings
-        .iter()
-        .any(|binding| is_framework_qualified_name(&binding.qualified_target))
+    let activated = context
+        .project
+        .is_some_and(|project| project.has_any_dependency(dependency_markers))
+        || context
+            .evidence
+            .bindings
+            .iter()
+            .any(|binding| is_framework_qualified_name(&binding.qualified_target))
         || candidates.values().any(|candidate| {
             candidate
                 .constraints
@@ -113,6 +138,30 @@ pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFram
     facts.extend(repository_facts(context, &declarations));
     facts.sort_by(|left, right| annotation_fact_key(left).cmp(&annotation_fact_key(right)));
     facts
+}
+
+fn set_fact_pack(fact: &mut RawFrameworkFact, pack_id: &str) {
+    match fact {
+        RawFrameworkFact::Annotation(annotation) => annotation.pack_id = pack_id.to_owned(),
+        RawFrameworkFact::Route(route) => {
+            route.detail.insert(
+                "frameworkPack".to_owned(),
+                Value::String(pack_id.to_owned()),
+            );
+        }
+        RawFrameworkFact::Domain(domain) => {
+            domain.detail.insert(
+                "frameworkPack".to_owned(),
+                Value::String(pack_id.to_owned()),
+            );
+        }
+        RawFrameworkFact::Role(role) => role.pack_id = pack_id.to_owned(),
+        RawFrameworkFact::Relation(relation) => relation.pack_id = pack_id.to_owned(),
+        RawFrameworkFact::Configuration(configuration) => {
+            configuration.pack_id = pack_id.to_owned()
+        }
+        RawFrameworkFact::FileSet(file_set) => file_set.pack_id = pack_id.to_owned(),
+    }
 }
 
 fn repository_facts(
@@ -215,6 +264,43 @@ fn unique_binding_map(context: &UniversalDetectionContext<'_, '_>) -> Map<String
 }
 
 fn constant_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    if context.evidence.pipeline.language == "kotlin" {
+        let mut values = BTreeMap::new();
+        collect_kotlin_constant_values(context.root, context.source, &mut values);
+        return context
+            .evidence
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "constant")
+            .filter_map(|declaration| {
+                let expression = values.get(&declaration.range.start_byte)?;
+                Some(RawFrameworkFact::Domain(crate::RawDomainFact {
+                    framework: FRAMEWORK.to_owned(),
+                    kind: "_spring_constant".to_owned(),
+                    name: declaration.qualified_name.clone(),
+                    declaring_scope: declaration
+                        .qualified_name
+                        .rsplit_once("::")
+                        .map(|(owner, _)| owner)
+                        .unwrap_or(declaration.qualified_name.as_str())
+                        .to_owned(),
+                    anchor: anchor(&declaration.range),
+                    origin: crate::RawFrameworkOrigin::Ast,
+                    detail: Map::from_iter([
+                        (
+                            "frameworkPack".to_owned(),
+                            Value::String(PACK_ID.to_owned()),
+                        ),
+                        ("expression".to_owned(), Value::String(expression.clone())),
+                        (
+                            "handler_reference".to_owned(),
+                            Value::String(declaration.graph_node_id.clone()),
+                        ),
+                    ]),
+                }))
+            })
+            .collect();
+    }
     let mut declarations = BTreeMap::new();
     for declaration in &context.evidence.declarations {
         if matches!(declaration.kind.as_str(), "field" | "constant") {
@@ -249,6 +335,10 @@ fn constant_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFramewo
                     origin: crate::RawFrameworkOrigin::Ast,
                     detail: Map::from_iter([
                         (
+                            "frameworkPack".to_owned(),
+                            Value::String(PACK_ID.to_owned()),
+                        ),
+                        (
                             "expression".to_owned(),
                             Value::String(expression.to_owned()),
                         ),
@@ -261,6 +351,55 @@ fn constant_facts(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFramewo
             })
         })
         .collect()
+}
+
+fn collect_kotlin_constant_values(
+    node: Node<'_>,
+    source: &[u8],
+    output: &mut BTreeMap<u64, String>,
+) {
+    if node.kind() == "property_declaration" {
+        let text = source
+            .get(node.start_byte()..node.end_byte())
+            .and_then(|value| std::str::from_utf8(value).ok())
+            .unwrap_or_default();
+        if text.split_whitespace().any(|part| part == "const") {
+            let mut variables = Vec::new();
+            collect_named_kind(node, "variable_declaration", &mut variables);
+            if let Some(variable) = variables.first().copied()
+                && let Some(name) = first_kotlin_identifier(variable)
+                && let Some(expression) = split_assignment(text).map(|(_, value)| value.trim())
+                && let Ok(start) = u64::try_from(name.start_byte())
+            {
+                output.insert(start, expression.to_owned());
+            }
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_kotlin_constant_values(child, source, output);
+    }
+}
+
+fn collect_named_kind<'tree>(node: Node<'tree>, kind: &str, output: &mut Vec<Node<'tree>>) {
+    if node.kind() == kind {
+        output.push(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_named_kind(child, kind, output);
+    }
+}
+
+fn first_kotlin_identifier(node: Node<'_>) -> Option<Node<'_>> {
+    if matches!(node.kind(), "simple_identifier" | "type_identifier") {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find_map(first_kotlin_identifier)
 }
 
 fn collect_constant_nodes<'tree>(node: Node<'tree>, source: &[u8], output: &mut Vec<Node<'tree>>) {
@@ -322,7 +461,11 @@ fn producer_facts(
     candidates: &HashMap<&str, &crate::RelationshipCandidate>,
 ) -> Vec<RawFrameworkFact> {
     let mut call_nodes = BTreeMap::new();
-    collect_named_nodes(context.root, "method_invocation", "name", &mut call_nodes);
+    if context.evidence.pipeline.language == "kotlin" {
+        collect_kotlin_call_nodes(context.root, &mut call_nodes);
+    } else {
+        collect_named_nodes(context.root, "method_invocation", "name", &mut call_nodes);
+    }
     context
         .evidence
         .occurrences
@@ -333,9 +476,22 @@ fn producer_facts(
             if candidate.relation != CandidateRelation::Calls {
                 return None;
             }
-            let qualified = candidate.constraints.qualified_name.as_deref()?;
+            let qualified = candidate.constraints.qualified_name.clone().or_else(|| {
+                if let crate::HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name,
+                    ..
+                } = candidate.constraints.hierarchy.as_ref()?
+                {
+                    Some(format!(
+                        "{receiver_qualified_name}::{}",
+                        candidate.target_spelling
+                    ))
+                } else {
+                    None
+                }
+            })?;
             let (kind, transport, relationship, mut argument_index) =
-                producer_signature(qualified)?;
+                producer_signature(&qualified)?;
             if qualified.ends_with("RabbitTemplate::convertAndSend") {
                 argument_index =
                     usize::from(candidate.constraints.argument_count.unwrap_or(0) >= 3);
@@ -344,7 +500,12 @@ fn producer_facts(
             let call = call_nodes
                 .get(&usize::try_from(occurrence.range.start_byte).ok()?)
                 .copied()?;
-            let subject = call_argument(call, argument_index, context.source)?;
+            let subject = call_argument(
+                call,
+                argument_index,
+                context.source,
+                context.evidence.pipeline.language.as_str(),
+            )?;
             let mut detail = Map::new();
             detail.insert(
                 "handler_reference".to_owned(),
@@ -386,8 +547,12 @@ fn producer_signature(
     }
 }
 
-fn call_argument(node: Node<'_>, index: usize, source: &[u8]) -> Option<String> {
-    let arguments = node.child_by_field_name("arguments")?;
+fn call_argument(node: Node<'_>, index: usize, source: &[u8], language: &str) -> Option<String> {
+    let arguments = if language == "kotlin" {
+        first_named_descendant(node, "value_arguments")?
+    } else {
+        node.child_by_field_name("arguments")?
+    };
     let mut cursor = arguments.walk();
     let argument = arguments
         .named_children(&mut cursor)
@@ -401,11 +566,47 @@ fn call_argument(node: Node<'_>, index: usize, source: &[u8]) -> Option<String> 
                 None
             }
         })?;
+    let argument = if language == "kotlin" && argument.kind() == "value_argument" {
+        let mut cursor = argument.walk();
+        argument
+            .named_children(&mut cursor)
+            .last()
+            .unwrap_or(argument)
+    } else {
+        argument
+    };
     source
         .get(argument.start_byte()..argument.end_byte())
         .and_then(|value| std::str::from_utf8(value).ok())
         .map(canonical_argument)
         .filter(|value| !value.is_empty())
+}
+
+fn collect_kotlin_call_nodes<'tree>(node: Node<'tree>, output: &mut BTreeMap<usize, Node<'tree>>) {
+    if node.kind() == "call_expression"
+        && let Some(callee) = node.named_child(0)
+        && let Some(name) = if callee.kind() == "navigation_expression" {
+            first_named_descendant(callee, "navigation_suffix").and_then(first_kotlin_identifier)
+        } else {
+            first_kotlin_identifier(callee)
+        }
+    {
+        output.insert(name.start_byte(), node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_kotlin_call_nodes(child, output);
+    }
+}
+
+fn first_named_descendant<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find_map(|child| first_named_descendant(child, kind))
 }
 
 fn collect_named_nodes<'tree>(
@@ -439,7 +640,9 @@ fn injection_targets(
                 && occurrence.role == SemanticRole::TypeReference
                 && matches!(
                     occurrence.context.as_deref(),
-                    Some("type" | "parameter_type")
+                    Some(
+                        "type" | "parameter_type" | "property_type" | "constructor_parameter_type"
+                    )
                 )
         })
         .filter_map(|occurrence| {
@@ -464,9 +667,26 @@ fn constructor_facts(
         .iter()
         .filter(|declaration| declaration.kind == "constructor")
         .filter_map(|declaration| {
-            let targets = injection_targets(context, declaration.id.as_str(), candidates);
+            let mut targets = injection_targets(context, declaration.id.as_str(), candidates);
+            if targets.is_empty()
+                && context.evidence.pipeline.language == "kotlin"
+                && let Some(owner) = declaration
+                    .qualified_name
+                    .rsplit_once("::")
+                    .map(|(owner, _)| owner)
+                && let Some(owner) = context.evidence.declarations.iter().find(|candidate| {
+                    candidate.qualified_name == owner
+                        && matches!(candidate.kind.as_str(), "class" | "annotation_type")
+                })
+            {
+                targets = injection_targets(context, owner.id.as_str(), candidates);
+            }
             (!targets.is_empty()).then(|| {
                 let mut detail = Map::new();
+                detail.insert(
+                    "frameworkPack".to_owned(),
+                    Value::String(PACK_ID.to_owned()),
+                );
                 detail.insert(
                     "handler_reference".to_owned(),
                     Value::String(declaration.graph_node_id.clone()),
@@ -555,6 +775,30 @@ fn annotation_fact_key(fact: &RawFrameworkFact) -> (&str, u64, &str, &str) {
             fact.anchor.start_byte,
             fact.declaring_scope.as_str(),
             fact.kind.as_str(),
+        ),
+        RawFrameworkFact::Role(fact) => (
+            fact.anchor.source_file.as_str(),
+            fact.anchor.start_byte,
+            fact.subject_reference.as_deref().unwrap_or_default(),
+            fact.role.as_str(),
+        ),
+        RawFrameworkFact::Relation(fact) => (
+            fact.anchor.source_file.as_str(),
+            fact.anchor.start_byte,
+            fact.source_reference.as_deref().unwrap_or_default(),
+            fact.relation.as_str(),
+        ),
+        RawFrameworkFact::Configuration(fact) => (
+            fact.anchor.source_file.as_str(),
+            fact.anchor.start_byte,
+            fact.config_id.as_str(),
+            fact.field.as_str(),
+        ),
+        RawFrameworkFact::FileSet(fact) => (
+            fact.anchor.source_file.as_str(),
+            fact.anchor.start_byte,
+            fact.owner_reference.as_str(),
+            fact.framework.as_str(),
         ),
     }
 }

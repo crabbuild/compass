@@ -36,6 +36,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::Exports,
     EdgeKind::Extends,
     EdgeKind::Implements,
+    EdgeKind::MixesIn,
     EdgeKind::References,
     EdgeKind::TypeOf,
     EdgeKind::Returns,
@@ -58,6 +59,7 @@ const ALL_EDGE_KINDS: &[EdgeKind] = &[
     EdgeKind::DependsOn,
     EdgeKind::Documents,
     EdgeKind::MapsTo,
+    EdgeKind::Renders,
 ];
 
 const MAX_SCOPE_AMBIGUITY_CANDIDATES: usize = 8;
@@ -425,7 +427,9 @@ impl CodeQueryEngine {
             .any(|term| is_explicit_operation_predicate(term))
             && let Some(read) = backend.operation_role_candidates(
                 &operation_role_recall_terms(&prepared.ranking_terms),
-                candidate_read_limit.saturating_sub(nodes_read),
+                candidate_read_limit
+                    .saturating_sub(nodes_read)
+                    .min(candidate_limit),
             )?
         {
             probes = probes
@@ -489,7 +493,9 @@ impl CodeQueryEngine {
         // non-type, finish before hydrating broad generic term postings.
         if let Some(read) = backend.declaration_candidates(
             &prepared.ranking_terms,
-            candidate_read_limit.saturating_sub(nodes_read),
+            candidate_read_limit
+                .saturating_sub(nodes_read)
+                .min(candidate_limit),
         )? {
             probes = probes
                 .saturating_add(1)
@@ -598,7 +604,15 @@ impl CodeQueryEngine {
                 break;
             }
             probes += 1;
-            let remaining = lexical_read_limit.saturating_sub(nodes_read).min(64);
+            let remaining = lexical_read_limit.saturating_sub(nodes_read);
+            let exact_predicate = matched.len() == 1
+                && matched.first().is_some_and(|term| term == &name)
+                && is_explicit_operation_predicate(&name);
+            let remaining = if exact_predicate {
+                remaining.min(candidate_limit)
+            } else {
+                remaining.min(64)
+            };
             let (nodes, name_truncated) =
                 backend.nodes_by_normalized_name(&name, remaining.max(1))?;
             nodes_read = nodes_read.saturating_add(nodes.len());
@@ -1444,14 +1458,18 @@ fn operation_role_intersection_terms(concepts: &[String]) -> Vec<Vec<String>> {
 fn operation_role_recall_terms(concepts: &[String]) -> Vec<String> {
     let mut terms = concepts.iter().cloned().collect::<BTreeSet<_>>();
     for concept in concepts {
-        match crate::ranking::canonical_predicate_token(concept) {
-            Some("configure") => {
+        let Some(predicate) = crate::ranking::canonical_predicate_token(concept) else {
+            continue;
+        };
+        terms.insert(concept.clone());
+        match predicate {
+            "configure" => {
                 terms.extend(["change", "configure", "set"].map(str::to_owned));
             }
-            Some("execute") => {
+            "execute" => {
                 terms.extend(["execute", "run", "schedule"].map(str::to_owned));
             }
-            Some("persist") => {
+            "persist" => {
                 terms.extend(
                     ["persist", "record", "save", "store", "write", "written"].map(str::to_owned),
                 );
@@ -1494,6 +1512,11 @@ fn operation_role_name_variants(concepts: &[String]) -> Vec<(String, Vec<String>
         .iter()
         .find(|concept| is_explicit_operation_predicate(concept))
     {
+        // Exact predicate names are the most compact language-neutral recall
+        // channel for methods such as C# `Invoke`, Java `execute`, or Python
+        // `handle`. Rank the bounded set as a whole before admitting generic
+        // subject aliases; canonical ID ordering must not choose the winner.
+        variants.push((action.clone(), vec![action.clone()]));
         for role in OPERATION_ROLE_TOKENS {
             variants.push((format!("{action}{role}"), vec![action.clone()]));
         }
@@ -1846,13 +1869,15 @@ fn discovery_seeds(
                 .filter(|other| {
                     other.node.id != candidate.node.id
                         && other.channel_rank == candidate.channel_rank
-                        && other.operation_root == candidate.operation_root
                         && other.relation_evidence == candidate.relation_evidence
-                        && (other.score.total_cmp(&candidate.score).is_eq()
-                            || calibrated_low_margin(candidate.score, other.score)
-                            || (candidate.source == DiscoverySeedSource::ExactName
-                                && other.source == DiscoverySeedSource::ExactName
-                                && source_backed_name_collision(candidate, other)))
+                        && ((other.operation_root == candidate.operation_root
+                            && (other.score.total_cmp(&candidate.score).is_eq()
+                                || calibrated_low_margin(candidate.score, other.score)
+                                || (candidate.source == DiscoverySeedSource::ExactName
+                                    && other.source == DiscoverySeedSource::ExactName
+                                    && source_backed_name_collision(candidate, other))))
+                            || (other.score.total_cmp(&candidate.score).is_eq()
+                                && source_backed_callable_name_collision(candidate, other)))
                 })
                 .map(|other| DiscoveryAlternative {
                     node_id: other.node.id.clone(),
@@ -1900,6 +1925,15 @@ fn source_backed_name_collision(
         && other.node.source.is_some()
         && canonical_declaration_name(&candidate.node.name)
             == canonical_declaration_name(&other.node.name)
+}
+
+fn source_backed_callable_name_collision(
+    candidate: &RankedDiscoveryCandidate,
+    other: &RankedDiscoveryCandidate,
+) -> bool {
+    candidate.node.kind.is_callable()
+        && other.node.kind.is_callable()
+        && source_backed_name_collision(candidate, other)
 }
 
 fn canonical_declaration_name(value: &str) -> String {
@@ -2150,7 +2184,10 @@ mod tests {
     use crate::recall::{CandidateSource, RecallBudget, SearchCandidatePool};
     use crate::{CodeQueryEngine, QueryEngineKind};
 
-    use super::{operation_role_intersection_terms, selective_intersection_terms};
+    use super::{
+        operation_role_intersection_terms, operation_role_name_variants,
+        operation_role_recall_terms, selective_intersection_terms,
+    };
 
     fn node(id: &str, name: &str) -> NodeRecord {
         NodeRecord {
@@ -2790,7 +2827,7 @@ mod tests {
 
         assert!(response.truncated);
         assert_eq!(response.stats.candidates_admitted, 188);
-        assert_eq!(response.stats.candidate_probes, 149);
+        assert_eq!(response.stats.candidate_probes, 150);
         Ok(())
     }
 
@@ -2937,6 +2974,39 @@ mod tests {
         assert!(
             operation_role_intersection_terms(&["represent".to_owned(), "state".to_owned(),])
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn operation_role_recall_includes_subjects_and_predicate_synonyms() {
+        assert_eq!(
+            operation_role_recall_terms(&["invoke".to_owned(), "middleware".to_owned()]),
+            vec!["invoke".to_owned(), "middleware".to_owned()]
+        );
+        assert_eq!(
+            operation_role_recall_terms(&["persist".to_owned(), "checkpoint".to_owned()]),
+            [
+                "checkpoint",
+                "persist",
+                "record",
+                "save",
+                "store",
+                "write",
+                "written",
+            ]
+            .map(str::to_owned)
+            .to_vec()
+        );
+    }
+
+    #[test]
+    fn operation_role_name_recall_starts_with_the_exact_predicate() {
+        let variants =
+            operation_role_name_variants(&["invoke".to_owned(), "middleware".to_owned()]);
+
+        assert_eq!(
+            variants.first(),
+            Some(&("invoke".to_owned(), vec!["invoke".to_owned()]))
         );
     }
 

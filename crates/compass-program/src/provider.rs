@@ -18,6 +18,73 @@ pub struct ArtifactManifest {
     pub schema: String,
     pub index_sha256: String,
     pub documents: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_analyzer: Option<ManagedAnalyzerProfile>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedAnalyzerProfile {
+    pub schema: String,
+    pub language: String,
+    pub provider: String,
+    pub provider_version: String,
+    pub protocol_version: String,
+    pub state: ManagedAnalyzerState,
+    pub source_inventory_digest: String,
+    pub environment: ManagedPythonEnvironment,
+    pub permissions: ManagedAnalyzerPermissions,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedPythonEnvironment {
+    pub implementation: String,
+    pub python_version: String,
+    pub platform: String,
+    pub source_roots: Vec<String>,
+    pub import_roots: Vec<String>,
+    pub editable_packages: Vec<ManagedPythonPackage>,
+    pub environment_digest: String,
+    pub project_configuration_digest: String,
+    pub typeshed_digest: String,
+    pub stubs_digest: String,
+    pub namespace_policy: PythonNamespacePolicy,
+    pub use_library_code_for_types: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedPythonPackage {
+    pub name: String,
+    pub root: String,
+    pub digest: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedAnalyzerPermissions {
+    pub allow_dependency_network: bool,
+    pub allow_package_install: bool,
+    pub allow_project_execution: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedAnalyzerState {
+    Complete,
+    Partial,
+    TimedOut,
+    Cancelled,
+    PermissionDenied,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PythonNamespacePolicy {
+    Pep420,
+    PackageMarkers,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -45,6 +112,7 @@ pub struct ArtifactInput<'a> {
     pub input_digest: &'a str,
     pub byte_len: u64,
     pub manifest: Option<&'a ArtifactManifest>,
+    pub project_digest: &'a str,
     pub source_digests: &'a BTreeMap<String, String>,
     pub source_texts: &'a BTreeMap<String, Vec<u8>>,
     pub limits: ArtifactLimits,
@@ -106,6 +174,16 @@ pub enum ProviderError {
     MalformedArtifact(String),
     #[error("unsupported provider artifact: {0}")]
     UnsupportedArtifact(String),
+    #[error("managed analyzer timed out")]
+    AnalyzerTimedOut,
+    #[error("managed analyzer was cancelled")]
+    AnalyzerCancelled,
+    #[error("managed analyzer permission denied: {0}")]
+    AnalyzerPermissionDenied(String),
+    #[error("managed analyzer result is incomplete: {0}")]
+    AnalyzerIncomplete(String),
+    #[error("managed analyzer profile is stale: {0}")]
+    StaleAnalyzerProfile(String),
     #[error("provider I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error(transparent)]

@@ -14,6 +14,7 @@ import type { CodeQueryResponse } from "../contracts/codeQuery";
 import { GraphInspector } from "./GraphInspector";
 import { GraphTransitionScreen } from "./GraphTransitionScreen";
 import { GraphToolbar } from "./GraphToolbar";
+import { GraphSemanticLegend } from "./GraphSemanticLegend";
 import { InspectorResizeHandle } from "./InspectorResizeHandle";
 import {
   normalizeInspectorLayout,
@@ -102,6 +103,7 @@ export type CompassGraphProps = {
   toolbarLeadingOpen?: boolean | undefined;
   onToolbarLeadingClose?: (() => void) | undefined;
   stageOverlay?: ReactNode;
+  showInspectorHeader?: boolean | undefined;
 };
 
 export function CompassGraph({
@@ -120,7 +122,8 @@ export function CompassGraph({
   toolbarLeadingPanel,
   toolbarLeadingOpen,
   onToolbarLeadingClose,
-  stageOverlay
+  stageOverlay,
+  showInspectorHeader = true
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -152,6 +155,7 @@ export function CompassGraph({
       toolbarLeadingOpen={toolbarLeadingOpen}
       onToolbarLeadingClose={onToolbarLeadingClose}
       stageOverlay={stageOverlay}
+      showInspectorHeader={showInspectorHeader}
     />
   );
 }
@@ -173,7 +177,8 @@ function CompassGraphView({
   toolbarLeadingPanel,
   toolbarLeadingOpen,
   onToolbarLeadingClose,
-  stageOverlay
+  stageOverlay,
+  showInspectorHeader
 }: {
   model: GraphViewModel;
   host: GraphHost;
@@ -192,6 +197,7 @@ function CompassGraphView({
   toolbarLeadingOpen?: boolean | undefined;
   onToolbarLeadingClose?: (() => void) | undefined;
   stageOverlay?: ReactNode;
+  showInspectorHeader: boolean;
 }) {
   const [state, dispatch] = useReducer(
     graphReducer,
@@ -310,6 +316,11 @@ function CompassGraphView({
     setEdgeHover(null);
     dispatch({ type: "focus", nodeId });
   }, []);
+  const pauseForInteraction = useCallback(() => {
+    if (state.physicsRunning) {
+      dispatch({ type: "setPhysics", running: false });
+    }
+  }, [state.physicsRunning]);
   const clear = useCallback(() => {
     setHover(null);
     setEdgeHover(null);
@@ -465,11 +476,13 @@ function CompassGraphView({
               : undefined}
             layoutSpacing={state.layoutSpacing}
             showMinimap={state.showMinimap}
+            semanticDetail={detailCommunityId !== undefined && !comparisonMode}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
             onOpenSource={activateNode}
             onOpenRelationshipSource={activateRelationship}
+            onInteractionStart={pauseForInteraction}
             onHover={setHover}
             onHoverEdge={setEdgeHover}
             onClear={clear}
@@ -572,6 +585,9 @@ function CompassGraphView({
                 })}
             </div>
           )}
+          {detailCommunityId !== undefined && !comparisonMode ? (
+            <GraphSemanticLegend model={model} />
+          ) : null}
           {communityError && (
             <div
               className="absolute bottom-4 left-4 z-20 max-w-md rounded-md border border-destructive/50 bg-background/95 px-3 py-2 text-sm text-destructive shadow-lg"
@@ -627,6 +643,7 @@ function CompassGraphView({
           sourceRevisions={sourceRevisions}
           queryResult={queryResult}
           renderedEdgeCount={renderedEdgeCount}
+          showHeader={showInspectorHeader}
           onQueryChange={(query) => dispatch({ type: "search", query })}
           onFocus={focus}
           onOpenSource={host.openSource}

@@ -25,7 +25,7 @@ describe("loadPreparedGraphOverview", () => {
   async function fixture({
     sourceGraphBytes = 12,
     nodeLimit = 5000,
-    schema = "compass.graph-overview/2"
+    schema = "compass.graph-overview/1"
   }: {
     sourceGraphBytes?: number;
     nodeLimit?: number;
@@ -66,8 +66,8 @@ describe("loadPreparedGraphOverview", () => {
     await expect(loadPreparedGraphOverview(graphPath, 5000)).resolves.toBeUndefined();
   });
 
-  it("rejects an overview from the renderer without relationship anchors", async () => {
-    const graphPath = await fixture({ schema: "compass.graph-overview/1" });
+  it("rejects an overview with an unknown schema version", async () => {
+    const graphPath = await fixture({ schema: "compass.graph-overview/2" });
 
     await expect(loadPreparedGraphOverview(graphPath, 5000)).resolves.toBeUndefined();
   });

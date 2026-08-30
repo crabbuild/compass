@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -582,6 +582,84 @@ pub trait Store {
             .into_iter()
             .next()
             .ok_or_else(|| StoreError::Corrupt("immutable batch omitted its result".to_owned()))
+    }
+}
+
+impl<S> Store for Arc<S>
+where
+    S: Store + ?Sized,
+{
+    fn capabilities(&self) -> StoreCapabilities {
+        (**self).capabilities()
+    }
+
+    fn get(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+    ) -> Result<Option<Entry>, StoreError> {
+        (**self).get(namespace, partition, key)
+    }
+
+    fn scan(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<ScanPage, StoreError> {
+        (**self).scan(namespace, partition, range, limits, cursor)
+    }
+
+    fn scan_keys(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        range: &KeyRange,
+        limits: ScanLimits,
+        cursor: Option<&ScanCursor>,
+    ) -> Result<KeyPage, StoreError> {
+        (**self).scan_keys(namespace, partition, range, limits, cursor)
+    }
+
+    fn put(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+        value: &[u8],
+        condition: WriteCondition,
+    ) -> Result<Entry, StoreError> {
+        (**self).put(namespace, partition, key, value, condition)
+    }
+
+    fn delete(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        key: &Key,
+        condition: WriteCondition,
+    ) -> Result<bool, StoreError> {
+        (**self).delete(namespace, partition, key, condition)
+    }
+
+    fn delete_batch(
+        &self,
+        namespace: &NamespaceId,
+        partition: &PartitionKey,
+        keys: &[Key],
+    ) -> Result<u64, StoreError> {
+        (**self).delete_batch(namespace, partition, keys)
+    }
+
+    fn put_immutable_batch(
+        &self,
+        namespace: &NamespaceId,
+        writes: &[ImmutableWrite],
+    ) -> Result<ImmutableBatchOutcome, StoreError> {
+        (**self).put_immutable_batch(namespace, writes)
     }
 }
 

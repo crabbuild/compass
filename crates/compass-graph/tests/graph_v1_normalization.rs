@@ -12,7 +12,7 @@ use compass_graph::{
 use compass_languages::{Extraction, RawEdgeRecord, RawNodeRecord};
 use compass_model::code_graph::{
     BuildMetadata, CoverageRecord, CoverageStatus, DiagnosticSeverity, EdgeKind, ExtractionStatus,
-    FileRecord, GraphDiagnostic, NodeKind,
+    FileRecord, GraphDiagnostic, NodeDetails, NodeKind, ResourceKind,
 };
 use compass_model::identity::edge_id;
 use compass_model::provenance::{
@@ -113,6 +113,76 @@ fn raw_file_node(root: &Path, id: &str, relative: &str) -> RawNodeRecord {
             ("source_anchor".to_owned(), anchor_in(root, relative, 0)),
         ]),
     }
+}
+
+#[test]
+fn file_nodes_canonicalize_extension_preserving_identity_before_coalescing()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let detected = raw_file_node(root, "raw:detected", "src/lib.rs");
+    let mut universal = raw_file_node(root, "raw:universal", "src/lib.rs");
+    universal
+        .attributes
+        .insert("label".to_owned(), json!("lib"));
+    universal
+        .attributes
+        .insert("qualified_name".to_owned(), json!("lib"));
+
+    let outcome = normalize_v1_best_effort(
+        Extraction {
+            nodes: vec![detected, universal],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(outcome.omissions.identity_collisions, 0);
+    assert_eq!(outcome.omissions.nodes, 0);
+    assert_eq!(outcome.document.nodes.len(), 1);
+    assert_eq!(outcome.document.nodes[0].kind, NodeKind::File);
+    assert_eq!(outcome.document.nodes[0].name, "lib.rs");
+    assert_eq!(outcome.document.nodes[0].qualified_name, "src/lib.rs");
+    Ok(())
+}
+
+#[test]
+fn framework_file_set_resources_do_not_fall_back_to_document_details()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut file_set = raw_node(root, "raw:file-set", "import.meta.glob", 10);
+    file_set
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("resource"));
+    file_set
+        .attributes
+        .insert("qualified_name".to_owned(), json!("framework_file_set"));
+    file_set
+        .attributes
+        .insert("resource_kind".to_owned(), json!("framework_file_set"));
+    file_set
+        .attributes
+        .insert("component_type".to_owned(), json!("framework_file_set"));
+    file_set
+        .attributes
+        .insert("framework".to_owned(), json!("vite"));
+
+    let outcome = normalize_v1(
+        Extraction {
+            nodes: vec![file_set],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(outcome.nodes.len(), 1);
+    assert!(matches!(
+        &outcome.nodes[0].details,
+        Some(NodeDetails::Resource(details))
+            if details.resource_kind == ResourceKind::Concept
+    ));
+    Ok(())
 }
 
 #[test]
@@ -1361,6 +1431,16 @@ fn normalization_rejects_unknown_aliases_and_missing_wiring_sites() {
     missing_site.edges[0].attributes.remove("source_anchor");
     let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
     assert!(normalize_v1(missing_site, evidence).is_err());
+
+    let mut unknown_render = extraction(root);
+    unknown_render.edges[0]
+        .attributes
+        .insert("relation".to_owned(), json!("renders"));
+    unknown_render.edges[0]
+        .attributes
+        .insert("render_kind".to_owned(), json!("future_kind"));
+    let evidence = build_evidence(root).unwrap_or_else(|_| std::process::abort());
+    assert!(normalize_v1(unknown_render, evidence).is_err());
 }
 
 #[test]
@@ -1806,6 +1886,51 @@ fn normalization_maps_declared_raw_aliases_without_publishing_them()
 }
 
 #[test]
+fn normalization_maps_dart_navigation_to_anchored_reference()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut target = raw_node(root, "route", "Route /users", 20);
+    target
+        .attributes
+        .insert("file_type".to_owned(), json!("concept"));
+    let mut source = raw_node(root, "navigate", "navigate", 10);
+    source
+        .attributes
+        .insert("language".to_owned(), json!("dart"));
+    let graph = Extraction {
+        nodes: vec![source, target],
+        edges: vec![RawEdgeRecord {
+            source: "navigate".to_owned(),
+            target: "route".to_owned(),
+            attributes: Map::from_iter([
+                ("relation".to_owned(), json!("navigates")),
+                ("source_file".to_owned(), json!(root.join("src/lib.rs"))),
+                ("source_anchor".to_owned(), anchor(root, 10)),
+                ("context".to_owned(), json!("route_path")),
+                ("_origin".to_owned(), json!("convention")),
+                ("rule".to_owned(), json!("dart-route-path")),
+                ("extractor".to_owned(), json!("test.dart.framework")),
+            ]),
+        }],
+        ..Extraction::default()
+    };
+    let document = normalize_v1(graph, build_evidence(root)?)?;
+    let edge = document
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::References)
+        .ok_or("missing navigation edge")?;
+    assert_eq!(edge.kind, EdgeKind::References);
+    assert!(
+        edge.evidence
+            .iter()
+            .any(|evidence| { evidence.rule.as_deref() == Some("dart-route-path") })
+    );
+    Ok(())
+}
+
+#[test]
 fn normalization_treats_blank_external_source_paths_as_unanchored()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -2047,6 +2172,90 @@ fn sourceless_placeholder_identity_never_merges_same_name_across_source_files()
 }
 
 #[test]
+fn sourceless_import_placeholder_identity_never_merges_across_source_files()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let external_name = "Microsoft.AspNetCore.Mvc";
+    let mut external = raw_external_node("raw:mvc", external_name);
+    external.attributes.extend(Map::from_iter([
+        ("symbol_kind".to_owned(), json!("import")),
+        ("language".to_owned(), json!("csharp")),
+        (
+            "extractor".to_owned(),
+            json!("compass.resolve.csharp.universal"),
+        ),
+        ("_origin".to_owned(), json!("ast")),
+        ("confidence".to_owned(), json!("EXTRACTED")),
+        ("_canonical_external_symbol".to_owned(), json!(true)),
+    ]));
+    let graph = Extraction {
+        nodes: vec![
+            raw_file_node(root, "raw:first", "src/FirstController.cs"),
+            raw_file_node(root, "raw:second", "src/SecondController.cs"),
+            external,
+        ],
+        edges: vec![
+            raw_php_edge(
+                root,
+                "src/FirstController.cs",
+                "raw:first",
+                "raw:mvc",
+                "imports_from",
+                0,
+            ),
+            raw_php_edge(
+                root,
+                "src/SecondController.cs",
+                "raw:second",
+                "raw:mvc",
+                "imports_from",
+                0,
+            ),
+        ],
+        ..Extraction::default()
+    };
+    let mut evidence = build_evidence(root)?;
+    add_inventory_file(
+        root,
+        &mut evidence,
+        "src/FirstController.cs",
+        "csharp",
+        b'f',
+    )?;
+    add_inventory_file(
+        root,
+        &mut evidence,
+        "src/SecondController.cs",
+        "csharp",
+        b's',
+    )?;
+
+    let document = normalize_v1(graph, evidence)?;
+    let external = document
+        .nodes
+        .iter()
+        .filter(|node| node.qualified_name == external_name)
+        .collect::<Vec<_>>();
+    assert_eq!(external.len(), 2, "nodes={:#?}", document.nodes);
+    assert!(external.iter().all(|node| {
+        node.evidence
+            .iter()
+            .filter(|evidence| evidence.rule.as_deref() == Some("external-symbol-placeholder"))
+            .count()
+            == 1
+    }));
+    let targets = document
+        .links
+        .iter()
+        .map(|edge| edge.target.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(targets.len(), 2);
+    assert!(document.links.iter().all(|edge| edge.deferred));
+    Ok(())
+}
+
+#[test]
 fn sourceless_implemented_placeholder_infers_a_deferred_interface()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -2177,6 +2386,11 @@ fn canonical_external_exact_binding_is_published_as_inferred_placeholder()
         .iter()
         .find(|node| node.qualified_name == "flask.Blueprint")
         .ok_or("missing canonical external placeholder")?;
+    assert!(
+        matches!(external.details.as_ref(), Some(NodeDetails::Symbol(_))),
+        "unexpected placeholder details: {:?}",
+        external.details
+    );
     assert!(external.evidence.iter().any(|evidence| {
         evidence.extractor == "compass.graph.external-placeholder"
             && evidence.origin == EvidenceOrigin::Heuristic
@@ -2395,6 +2609,31 @@ fn normalization_drops_non_recursive_self_loops_and_invalid_inheritance_targets(
             .iter()
             .any(|diagnostic| diagnostic.code == "dropped_invalid_inheritance_target")
     );
+    Ok(())
+}
+
+#[test]
+fn raw_extensions_publish_as_class_shaped_owners() -> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut extension = raw_node(root, "extension", "Box", 10);
+    extension
+        .attributes
+        .insert("symbol_kind".to_owned(), json!("extension"));
+    extension
+        .attributes
+        .insert("language".to_owned(), json!("swift"));
+    let graph = normalize_v1(
+        Extraction {
+            nodes: vec![extension],
+            ..Extraction::default()
+        },
+        build_evidence(root)?,
+    )?;
+
+    assert_eq!(graph.nodes.len(), 1);
+    assert_eq!(graph.nodes[0].kind, NodeKind::Class);
+    validate_code_graph(&graph)?;
     Ok(())
 }
 

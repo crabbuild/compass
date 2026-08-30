@@ -24,6 +24,50 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Markdown graph-v1 quality qualification
+
+Markdown tables intentionally retain their table, header, row, and cell nodes.
+The implementation bounds each table independently to 20,000 structural nodes,
+16,384 cells, and 512 KiB of retained table text, in addition to the extractor's
+global limits. Exhausting a table budget emits explicit limit evidence and does
+not consume the budget needed to discover later headings. The graph-v1 fixture
+gate runs an independent source oracle for hierarchy, semantic labels, exact
+anchors, reference ownership, and published-schema integrity. The same oracle
+checks frontmatter Config nodes, nested containment, stable canonical paths,
+Config provenance, value-independent identity, and the absence of unapproved
+generic values from graph labels. Frontmatter is capped at 64 KiB and its YAML
+syntax pass is linear in that bounded input.
+
+## Incremental code-graph qualification
+
+Fact-neutral updates may bypass project-wide resolution only after the changed
+files reproduce the prior normalized extraction-fact digests. The publisher
+then refreshes inventory and full-file envelopes, validates the complete graph,
+proves that node IDs, relationships, file keys, names, search terms, and
+communities are unchanged, and point-updates only graph metadata and changed
+node values. Any failed proof uses the complete graph publisher. Immutable-store
+garbage collection remains bounded but is amortized across eight manifests so
+ordinary one-file edits do not perform a full mark-and-sweep.
+
+The 2026-08-15 release-build qualification used copied, read-only-derived
+corpora from real repositories with SQLite storage, maximum inference, and
+clustering/visualization disabled. Each observation appended or removed one
+language comment and reported zero graph-assembly time:
+
+| Language / corpus | Indexed files | Nodes / edges | Observed incremental wall | Extracted / cached |
+| --- | ---: | ---: | ---: | ---: |
+| Kotlin / Spring Framework Kotlin corpus | 388 | 10,708 / 15,650 | 1.01 s | 1 / 387 |
+| Rust / ripgrep | 142 | 12,185 / 32,040 | 2.50 s | 1 / 141 |
+| Go / go-git | 709 | 21,578 / 67,522 | 3.31 s | 1 / 708 |
+| TypeScript / NestJS | 2,017 | 75,298 / 116,515 | 10.33 s | 25 / 1,992 |
+| Python / FastAPI production package | 56 | 1,707 / 6,622 | 1.17 s | 1 / 55 |
+| C# / ASP.NET Core Http.Extensions source | 35 | 1,130 / 1,291 | 0.61 s | 1 / 34 |
+
+These are single observations, not medians. NestJS still exposes a separate
+large-repository cost: 24 successful empty/unsupported inputs are not portable
+AST cache entries and are rechecked with the edited file. The fact-neutral
+proof nevertheless avoids resolution and complete index reconstruction.
+
 Real-repository natural-query qualification materializes one SQLite-backed
 query artifact per repository. Fresh latency/RSS is one direct `compass query`
 process per observation; warm latency is measured inside one persistent MCP
@@ -319,6 +363,70 @@ current Django code-only graph kept deterministic result digests and met the
 These cross-tool observations are diagnostic evidence rather than a promoted
 Compass baseline. The remaining build gap is primarily the richer graph size
 and durable publication contract, not an unresolved duplicate atomic flush.
+
+### Plan 021 React/frontend release qualification
+
+Plan 021 uses the pinned seven-corpus manifest and a source-only TypeScript
+5.9.3 oracle. The manifest digest is
+`fa6980eb743c9365528a6f63fcb917ece269362d5458f38fcabe70073a53b39a` and the
+reviewed expectation ledger is recorded in
+[`tests/qualification/react-frontend-expectation-policy.json`](tests/qualification/react-frontend-expectation-policy.json)
+(`ledgerDigest=8b91aed7a79641e4ccb894525ddbb7e697f80dddf3f35b0f6fc5c696974de392`).
+The policy is reviewed, source-derived, and augmented by seven checksum-bound
+checked-in fixture trees. Every advertised capability has at least 100
+reviewed exact, unresolved, or ambiguous records; the runner rejects a lower
+count rather than silently treating aggregate evidence as promotion evidence.
+The checked-in performance baseline is
+[`tests/qualification/react-frontend-performance-baseline.json`](tests/qualification/react-frontend-performance-baseline.json).
+It is a post-origin/main high-water envelope over the approved fixture-backed
+release observations plus the prior approved external-volume envelope; its
+provenance retains every result digest because the shared external volume has
+materially variable wall time while peak RSS remains stable. The regression
+budget itself remains 1.10× for both duration and peak RSS.
+
+The historical pre-fixture release result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-evidence/react-frontend-pinned-result-final.json`
+(`sha256=ab7eb4c5961ac9f8cae0c7aae9fb155404e864873bde0da2519ef6d32d515082`).
+It uses release binary
+`sha256=68df549361b32f2b78fce49b45937d88bfc32609a1c174f930f268e17fe2e44e`,
+reports 100% precision and recall for every advertised capability, zero
+fabricated targets, stable one/default/max-worker graph digests, a clean
+SIGINT/resume publication, and `performanceComparison.status=compared` with
+all 42 rows within budget. Its recorded Compass revision predates the current
+frontend branch, so it is not a release claim for the current checkout. Any
+future baseline refresh must preserve the same manifest, release profile,
+independent oracle, exact source revision, and explicit
+aggregation/provenance rather than weakening the threshold.
+
+A current-revision release result is retained outside the checkout at
+`/Volumes/Workspace/crabbuild-target/compass-021-react-frontend/qualification/plan021-final-release/react-frontend-pinned-result.json`.
+The artifact records the exact Compass revision and release-binary digest used
+for this change. Its seven scorecards contain 232,446 independent oracle
+records and 17,986 scored facts, all 17,986 matched (precision and recall 1.0;
+Wilson lower bound 0.9997864651), with zero fabricated targets, zero unsafe
+paths, stable worker/lifecycle digests, a clean SIGINT/resume publication, and
+all 42 duration/RSS rows within the approved envelope. This is the current
+release evidence; the earlier Vite-warm failure remains historical diagnostic
+context and did not cause a threshold increase.
+
+The isolated Graphify comparison for this frontend fixture is diagnostic only:
+Graphify 0.9.48 at `b2cd36267456c166788c95be6e68574064a92a42` emitted 40 nodes
+and 44 undirected links, including dangling `ref_*` link targets, while the
+source-grounded Compass graph preserves typed directed relationships and the
+independent oracle contains 63 anchored facts. The source oracle is the truth
+for correctness; Graphify is a hypothesis generator and is not a Compass
+runtime, dependency, fallback, or promotion gate.
+
+The qualification-only comparator
+`scripts/compare_react_frontend_graphify.py` makes the “surpass Graphify” claim
+repeatable without executing or linking Graphify. It checks strict node/link
+coverage, source anchors, typed directed multigraph output, zero dangling
+Compass targets, and (when supplied) the independent oracle. For the retained
+fixture artifacts it reports 113 Compass nodes / 133 links versus 40 / 44
+Graphify nodes / links, 97 / 133 anchored Compass nodes / links versus 40 / 44,
+zero Compass dangling targets, and a passing independent scorecard. Re-run it
+after each corpus or extractor change; its result is evidence, not a runtime
+promotion dependency.
 
 ### Delta-rs low-inference diagnostic
 
@@ -1148,3 +1256,37 @@ builds, first/repeated semantic diff, first/repeated viewer projection, peak
 RSS, and deterministic output digests. Existing sealed realizations and cached
 diff/view projections are expected to be constant- or bounded-read paths;
 explicit `history verify` remains the full integrity scan.
+
+## Python framework source qualification
+
+The version-2 Flask and version-1 SQLAlchemy/Celery universal packs add only
+bounded native syntax/evidence traversal; they do not import or execute Python.
+The checked-in fixture gate records deterministic source inventories and
+contract digests but is explicitly not a latency, RSS, or production-quality
+claim. Cold/warm/edit/worker/RSS measurements and pinned-corpus thresholds
+remain part of the separately reviewed production qualification phase; budgets
+must not be widened from fixture-only results.
+
+## Document and OCR qualification
+
+Document decoding and OCR are governed by correctness and resource gates, not
+an unmeasured speed claim. Qualification records per-format wall time, peak RSS,
+page/image count, aggregate pixels, cache hit/miss behavior, and deterministic
+artifact digests. A warm complete document cache must perform zero OCR
+inference calls. Partial or corrupt entries are not warm hits.
+
+Run the focused deterministic gate with:
+
+```bash
+scripts/qualify_document_ocr_v1.sh --fixtures-only
+```
+
+Native format fixtures run without a model. The optional model-backed corpus
+runs only when its exact verified profile is already installed; ordinary CI
+does not download model weights.
+
+On 2026-08-23, the installed `pp-ocrv6-small` acceptance test on the local
+aarch64 macOS host initialized the statically linked runtime and processed its
+blank plus clean synthetic-English rasters in 1.77 seconds under a debug test
+build. The clean sample had 0 CER. This single smoke result is not a production
+latency, memory, degraded-input, cross-architecture, or multilingual claim.

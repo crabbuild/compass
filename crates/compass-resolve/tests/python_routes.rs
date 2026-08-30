@@ -62,7 +62,7 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
     let flask = extract(Path::new("app.py"), "flask_app.py")?;
     let flask_routes = routes(&flask);
     assert!(flask_routes.iter().any(|route| {
-        route.framework == "flask" && route.operation == "ANY" && route.normalized_path == "/health"
+        route.framework == "flask" && route.operation == "GET" && route.normalized_path == "/health"
     }));
     let methods = flask_routes
         .iter()
@@ -78,7 +78,10 @@ fn django_flask_and_fastapi_shapes_emit_framework_specific_route_facts()
         .find(|route| route.normalized_path == "/api/v1/users")
         .ok_or("missing FastAPI router route")?;
     assert_eq!(create.operation, "POST");
-    assert_eq!(create.middleware_references, vec!["authenticate"]);
+    assert!(create.stages.iter().any(|stage| {
+        stage.role == compass_languages::RawRouteStageRole::Dependency
+            && stage.reference.ends_with("authenticate")
+    }));
     Ok(())
 }
 
@@ -159,7 +162,7 @@ fn python_routes_resolve_handlers_and_dependencies_but_not_near_matches()
             .iter()
             .map(|stage| stage.role)
             .collect::<Vec<_>>(),
-        vec![RouteStageRole::Middleware, RouteStageRole::Handler]
+        vec![RouteStageRole::Dependency, RouteStageRole::Handler]
     );
     assert!(
         fastapi
@@ -199,17 +202,250 @@ urlpatterns = [path("users/<int:user_id>/", detail)]
             String::from_utf8(child_source.to_vec())?,
         ),
     ]);
-    let merged = resolve(&[root, child], &sources);
+    let mut merged = resolve(&[root, child], &sources);
     let resolved = resolve_routes(&merged, FrameworkLimits::default())?;
-    assert!(resolved.iter().any(|route| {
-        route.route.normalized_path == "/api/users/{user_id}"
-            && route.state == ResolutionState::Exact
-            && route.route.detail.contains_key("include_anchor")
-    }));
+    let route = resolved
+        .iter()
+        .find(|route| route.route.normalized_path == "/api/users/{user_id}")
+        .ok_or("missing expanded Django include route")?;
+    assert_eq!(route.state, ResolutionState::Exact);
+    assert!(route.route.detail.contains_key("include_anchor"));
+    let handler = route
+        .stages
+        .iter()
+        .find(|stage| stage.role == RouteStageRole::Handler)
+        .ok_or("missing expanded Django handler stage")?;
+    let include_source = b"path(\"api/\", include(\"project.users.urls\"))";
+    let include_start = root_source
+        .windows(include_source.len())
+        .position(|candidate| candidate == include_source)
+        .ok_or("missing include source range")?;
+    assert_eq!(handler.anchor.source_file, "project/urls.py");
+    assert_eq!(handler.anchor.start_byte, u64::try_from(include_start)?);
+    assert_eq!(
+        handler.anchor.end_byte,
+        u64::try_from(include_start.saturating_add(include_source.len()))?
+    );
     assert!(
         !resolved
             .iter()
             .any(|route| route.route.normalized_path == "/users/{user_id}")
+    );
+    resolve_and_publish_framework_routes(&mut merged, FrameworkLimits::default())?;
+    let edge = merged
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "routes_to")
+        .ok_or("missing published Django include edge")?;
+    assert_eq!(edge.string("source_file"), "project/urls.py");
+    assert_eq!(edge.string("extractor"), "compass.frameworks.django");
+    assert_eq!(edge.string("_origin"), "ast");
+    let published_anchor = edge
+        .attributes
+        .get("source_anchor")
+        .and_then(serde_json::Value::as_object)
+        .ok_or("missing published include source anchor")?;
+    assert_eq!(
+        published_anchor
+            .get("startByte")
+            .and_then(serde_json::Value::as_u64),
+        Some(u64::try_from(include_start)?)
+    );
+    assert_eq!(
+        published_anchor
+            .get("endByte")
+            .and_then(serde_json::Value::as_u64),
+        Some(u64::try_from(
+            include_start.saturating_add(include_source.len())
+        )?)
+    );
+    Ok(())
+}
+
+#[test]
+fn django_included_class_view_with_arguments_resolves_only_exact_dotted_receiver()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root_source = br#"
+from django.urls import include, path
+urlpatterns = [path("admin/doc/", include("django.contrib.admindocs.urls"))]
+"#;
+    let child_source = br#"
+from django.contrib.admindocs import views
+from django.urls import path
+urlpatterns = [
+    path("", views.BaseAdminDocsView.as_view(template_name="admin_doc/index.html")),
+    path("near/", views.BaseAdminDocsView.as_views(template_name="admin_doc/index.html")),
+    path("dynamic/", factory().as_view(template_name="admin_doc/index.html")),
+]
+"#;
+    let views_source = br#"
+class BaseAdminDocsView:
+    pass
+"#;
+    let mut engine = Engine::default();
+    let root = engine.extract_source(Path::new("project/urls.py"), root_source)?;
+    let child =
+        engine.extract_source(Path::new("django/contrib/admindocs/urls.py"), child_source)?;
+    let views =
+        engine.extract_source(Path::new("django/contrib/admindocs/views.py"), views_source)?;
+    let sources = HashMap::from([
+        (
+            "project/urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+        (
+            "django/contrib/admindocs/urls.py".to_owned(),
+            String::from_utf8(child_source.to_vec())?,
+        ),
+        (
+            "django/contrib/admindocs/views.py".to_owned(),
+            String::from_utf8(views_source.to_vec())?,
+        ),
+    ]);
+    let extraction = resolve(&[root, child, views], &sources);
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    let exact = routes
+        .iter()
+        .find(|route| route.route.normalized_path == "/admin/doc")
+        .ok_or("missing exact class-based route")?;
+    assert_eq!(exact.state, ResolutionState::Exact, "{exact:#?}");
+    assert_eq!(exact.candidates.len(), 1, "{exact:#?}");
+    let include_source = b"path(\"admin/doc/\", include(\"django.contrib.admindocs.urls\"))";
+    let include_start = root_source
+        .windows(include_source.len())
+        .position(|candidate| candidate == include_source)
+        .ok_or("missing include source range")?;
+    let handler = exact
+        .stages
+        .iter()
+        .find(|stage| stage.role == RouteStageRole::Handler)
+        .ok_or("missing exact handler stage")?;
+    assert_eq!(handler.anchor.source_file, "project/urls.py");
+    assert_eq!(handler.anchor.start_byte, u64::try_from(include_start)?);
+    assert_eq!(
+        handler.anchor.end_byte,
+        u64::try_from(include_start.saturating_add(include_source.len()))?
+    );
+    for path in ["/admin/doc/near", "/admin/doc/dynamic"] {
+        let unresolved = routes
+            .iter()
+            .find(|route| route.route.normalized_path == path)
+            .ok_or("missing unresolved near-match route")?;
+        assert_eq!(
+            unresolved.state,
+            ResolutionState::Unresolved,
+            "{unresolved:#?}"
+        );
+        assert!(unresolved.candidates.is_empty(), "{unresolved:#?}");
+    }
+    Ok(())
+}
+
+#[test]
+fn django_ambiguous_module_and_urls_include_remains_unresolved()
+-> Result<(), Box<dyn std::error::Error>> {
+    let root_source = br#"from django.urls import include, path
+urlpatterns = [path("mount/", include("pkg.feature"))]
+"#;
+    let flat_source = br#"from django.urls import path
+def flat(request): return None
+urlpatterns = [path("flat/", flat)]
+"#;
+    let nested_source = br#"from django.urls import path
+def nested(request): return None
+urlpatterns = [path("nested/", nested)]
+"#;
+    let mut engine = Engine::default();
+    let root = engine.extract_source(Path::new("pkg/urls.py"), root_source)?;
+    let flat = engine.extract_source(Path::new("pkg/feature.py"), flat_source)?;
+    let nested = engine.extract_source(Path::new("pkg/feature/urls.py"), nested_source)?;
+    let sources = HashMap::from([
+        (
+            "pkg/urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+        (
+            "pkg/feature.py".to_owned(),
+            String::from_utf8(flat_source.to_vec())?,
+        ),
+        (
+            "pkg/feature/urls.py".to_owned(),
+            String::from_utf8(nested_source.to_vec())?,
+        ),
+    ]);
+    let extraction = resolve(&[root, flat, nested], &sources);
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    assert_eq!(routes.len(), 1, "routes={routes:#?}");
+    assert_eq!(routes[0].route.normalized_path, "/mount");
+    assert_eq!(routes[0].state, ResolutionState::Unresolved);
+    assert_eq!(routes[0].route.handler_reference, "@include:pkg.feature");
+    Ok(())
+}
+
+#[test]
+fn django_static_local_and_imported_pattern_collections_compose_exactly()
+-> Result<(), Box<dyn std::error::Error>> {
+    let local_source = br#"from django.conf.urls.i18n import i18n_patterns
+from django.urls import include, path
+
+def health(request): return None
+def item(request, item_id): return None
+def localized(request): return None
+
+api_patterns = [path("items/<int:item_id>/", item)]
+base_patterns = [path("health/", health)]
+urlpatterns = base_patterns + i18n_patterns(path("localized/", localized)) + [
+    path("v1/", include((api_patterns, "api"), namespace="v1")),
+]
+"#;
+    let child_source = br#"from django.urls import path
+def child(request): return None
+child_patterns = [path("child/", child)]
+urlpatterns = child_patterns
+"#;
+    let root_source = br#"from django.urls import include, path
+from .child_urls import urlpatterns as child_patterns
+urlpatterns = child_patterns + [path("nested/", include(child_patterns))]
+"#;
+    let mut engine = Engine::default();
+    let local = engine.extract_source(Path::new("pkg/local_urls.py"), local_source)?;
+    let child = engine.extract_source(Path::new("pkg/child_urls.py"), child_source)?;
+    let root = engine.extract_source(Path::new("pkg/root_urls.py"), root_source)?;
+    let sources = HashMap::from([
+        (
+            "pkg/local_urls.py".to_owned(),
+            String::from_utf8(local_source.to_vec())?,
+        ),
+        (
+            "pkg/child_urls.py".to_owned(),
+            String::from_utf8(child_source.to_vec())?,
+        ),
+        (
+            "pkg/root_urls.py".to_owned(),
+            String::from_utf8(root_source.to_vec())?,
+        ),
+    ]);
+    let extraction = resolve(&[local, child, root], &sources);
+    let routes = resolve_routes(&extraction, FrameworkLimits::default())?;
+    let shapes = routes
+        .iter()
+        .filter(|route| route.route.framework == "django")
+        .map(|route| route.route.normalized_path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shapes,
+        [
+            "/child",
+            "/nested/child",
+            "/health",
+            "/localized",
+            "/v1/items/{item_id}",
+        ]
+    );
+    assert!(
+        routes
+            .iter()
+            .all(|route| route.state == ResolutionState::Exact)
     );
     Ok(())
 }
@@ -467,7 +703,12 @@ fn routes(extraction: &Extraction) -> Vec<&compass_languages::RawRouteFact> {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect()
 }

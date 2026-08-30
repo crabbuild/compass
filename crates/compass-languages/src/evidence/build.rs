@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 use tree_sitter::Node;
 
-use crate::{AdapterProfile, EXTRACTION_SEMANTICS_VERSION, file_stem, make_id};
+use crate::{EXTRACTION_SEMANTICS_VERSION, UniversalEvidencePipeline, file_stem, make_id};
 
 use super::model::{
-    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact,
-    EvidenceDiagnostic, EvidenceRange, HierarchyConstraint, OccurrenceFact,
-    ReceiverDispatchStrategy, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceDiagnostic,
+    EvidenceRange, HierarchyConstraint, OccurrenceFact, ReceiverDispatchStrategy,
+    RelationshipCandidate, ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, SemanticRole,
+    SymbolNamespace, UniversalEvidenceIdentity,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
@@ -21,7 +21,7 @@ use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate
 // unresolved method.
 const GO_TYPE_INFERENCE_DEPTH_LIMIT: usize = 16;
 
-/// Bounded direct-construction API shared by hard-cut language adapters.
+/// Bounded direct-construction API shared by hard-cut language producers.
 pub struct EvidenceBuilder {
     batch: SemanticEvidenceBatch,
     source_file: String,
@@ -43,33 +43,33 @@ struct DeclarationMetadata {
 impl EvidenceBuilder {
     #[must_use]
     pub fn new(
-        profile: &'static AdapterProfile,
-        producer: impl Into<String>,
+        pipeline: &'static UniversalEvidencePipeline,
+        emitter: impl Into<String>,
         source_file: impl Into<String>,
         limits: EvidenceLimits,
     ) -> Self {
-        Self::new_with_dialect(profile, producer, source_file, limits, None)
+        Self::new_with_dialect(pipeline, emitter, source_file, limits, None)
     }
 
     #[must_use]
     pub fn new_with_dialect(
-        profile: &'static AdapterProfile,
-        producer: impl Into<String>,
+        pipeline: &'static UniversalEvidencePipeline,
+        emitter: impl Into<String>,
         source_file: impl Into<String>,
         limits: EvidenceLimits,
         dialect: Option<&str>,
     ) -> Self {
         Self {
             batch: SemanticEvidenceBatch {
-                adapter: AdapterIdentity {
-                    id: profile.id.to_owned(),
-                    language: profile.language.to_owned(),
+                pipeline: UniversalEvidenceIdentity {
+                    id: pipeline.producer.id.to_owned(),
+                    language: pipeline.producer.language.to_owned(),
                     dialect: dialect.map(str::to_owned),
-                    version: profile.version,
-                    evidence_schema: profile.evidence_schema.to_owned(),
-                    profile: profile.profile,
-                    producer: producer.into(),
-                    capabilities: profile.capabilities.to_vec(),
+                    version: pipeline.producer.version,
+                    evidence_schema: pipeline.producer.evidence_schema.to_owned(),
+                    qualification: pipeline.qualification,
+                    emitter: emitter.into(),
+                    capabilities: pipeline.producer.capabilities.to_vec(),
                 },
                 declarations: Vec::new(),
                 scopes: Vec::new(),
@@ -134,10 +134,10 @@ impl EvidenceBuilder {
 
     /// Add a declaration with a bounded source-level signature fragment.
     ///
-    /// Candidate adapters use this for type-shape facts that the shared
+    /// Qualifying producers use this for type-shape facts that the shared
     /// resolver can consume without inventing a target from a terminal name.
     /// Keeping the entry point crate-private avoids expanding the public
-    /// builder surface while allowing adapters implemented in sibling
+    /// builder surface while allowing producers implemented in sibling
     /// modules to publish the existing, versioned `signature` field.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn declare_with_signature(
@@ -154,6 +154,87 @@ impl EvidenceBuilder {
     ) -> Result<String, EvidenceError> {
         let metadata = DeclarationMetadata {
             signature: signature.map(str::to_owned),
+            ..DeclarationMetadata::default()
+        };
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            metadata,
+        )
+    }
+
+    /// Add a callable declaration with the source-proven signature shape used
+    /// by deterministic overload selection.
+    ///
+    /// Language producers retain responsibility for canonicalizing their own
+    /// parameter spellings. The builder only publishes the bounded, typed
+    /// fields already present in the universal evidence schema.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_callable(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        parameter_types: Vec<String>,
+        variadic: bool,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        let metadata = DeclarationMetadata {
+            signature: signature.map(str::to_owned),
+            parameter_count: Some(u32::try_from(parameter_types.len()).map_err(|_| {
+                EvidenceError::new(
+                    EvidenceErrorCode::ResourceLimit,
+                    "callable parameter count exceeds the evidence schema limit",
+                )
+            })?),
+            parameter_types,
+            variadic,
+            ..DeclarationMetadata::default()
+        };
+        self.declare_with_metadata_and_namespace(
+            kind,
+            graph_node_id,
+            name,
+            qualified_name,
+            module_or_package,
+            scope_id,
+            range,
+            namespace,
+            metadata,
+        )
+    }
+
+    /// Add a nominal type declaration and state whether its complete direct
+    /// base list was parsed. This is shared resolver input, not a claim that
+    /// every base target is locally resolvable.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn declare_type(
+        &mut self,
+        kind: &str,
+        graph_node_id: &str,
+        name: &str,
+        qualified_name: &str,
+        module_or_package: Option<&str>,
+        scope_id: Option<&str>,
+        namespace: Option<SymbolNamespace>,
+        signature: Option<&str>,
+        direct_bases_complete: bool,
+        range: EvidenceRange,
+    ) -> Result<String, EvidenceError> {
+        let metadata = DeclarationMetadata {
+            signature: signature.map(str::to_owned),
+            direct_bases_complete,
             ..DeclarationMetadata::default()
         };
         self.declare_with_metadata_and_namespace(
@@ -229,7 +310,7 @@ impl EvidenceBuilder {
         let id = self.stable_id("declaration", &identity);
         self.batch.declarations.push(DeclarationFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             graph_node_id: graph_node_id.to_owned(),
             kind: kind.to_owned(),
             name: name.to_owned(),
@@ -271,7 +352,7 @@ impl EvidenceBuilder {
         );
         self.batch.scopes.push(ScopeFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             kind: kind.to_owned(),
             owner_declaration_id: owner_declaration_id.map(str::to_owned),
             parent_scope_id: parent_scope_id.map(str::to_owned),
@@ -429,7 +510,7 @@ impl EvidenceBuilder {
         let id = self.stable_id("binding", &identity);
         self.batch.bindings.push(BindingFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             kind,
             spelling: spelling.to_owned(),
             qualified_target: qualified_target.to_owned(),
@@ -498,7 +579,7 @@ impl EvidenceBuilder {
         );
         self.batch.occurrences.push(OccurrenceFact {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             role,
             owner_declaration_id: owner_declaration_id.to_owned(),
             spelling: spelling.to_owned(),
@@ -594,7 +675,7 @@ impl EvidenceBuilder {
         let id = self.stable_id("candidate", &identity);
         self.batch.candidates.push(RelationshipCandidate {
             id: id.clone(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             relation,
             source_declaration_id: source_declaration_id.to_owned(),
             occurrence_id: occurrence_id.map(str::to_owned),
@@ -628,7 +709,7 @@ impl EvidenceBuilder {
         }
         self.batch.diagnostics.push(EvidenceDiagnostic {
             code: code.to_owned(),
-            language: self.batch.adapter.language.clone(),
+            language: self.batch.pipeline.language.clone(),
             fact_id: fact_id.map(str::to_owned),
             range,
             message: message.to_owned(),
@@ -637,8 +718,8 @@ impl EvidenceBuilder {
     }
 
     pub fn finish(mut self) -> Result<SemanticEvidenceBatch, EvidenceError> {
-        self.batch.adapter.capabilities.sort_unstable();
-        self.batch.adapter.capabilities.dedup();
+        self.batch.pipeline.capabilities.sort_unstable();
+        self.batch.pipeline.capabilities.dedup();
         self.batch
             .declarations
             .sort_unstable_by(|left, right| left.id.cmp(&right.id));
@@ -674,8 +755,8 @@ impl EvidenceBuilder {
         let mut digest = Sha256::new();
         for part in [
             EXTRACTION_SEMANTICS_VERSION,
-            self.batch.adapter.language.as_str(),
-            self.batch.adapter.producer.as_str(),
+            self.batch.pipeline.language.as_str(),
+            self.batch.pipeline.emitter.as_str(),
             self.source_file.as_str(),
             category,
         ]
@@ -742,35 +823,90 @@ pub(crate) fn extract_tree_evidence(
     source_file: &str,
     source: &[u8],
     root: Node<'_>,
-    profile: &'static AdapterProfile,
+    pipeline: &'static UniversalEvidencePipeline,
+    project_evidence: Option<&crate::ProjectEvidence>,
 ) -> Result<SemanticEvidenceBatch, EvidenceError> {
-    if matches!(profile.language, "javascript" | "typescript") {
-        return super::typescript::extract_candidate_tree_evidence(
+    if pipeline.producer.language == "csharp" {
+        return super::csharp::emit_tree_evidence(path, source_file, source, root);
+    }
+    if pipeline.producer.language == "php" {
+        return super::php::emit_tree_evidence(path, source_file, source, root);
+    }
+    if pipeline.producer.language == "kotlin" {
+        return super::kotlin::emit_tree_evidence(path, source_file, source, root);
+    }
+    if pipeline.producer.language == "ruby" {
+        return super::ruby::emit_tree_evidence(path, source_file, source, root);
+    }
+    if matches!(pipeline.producer.language, "javascript" | "typescript") {
+        return super::typescript::emit_tree_evidence(
             path,
             source_file,
             source,
             root,
-            profile.language,
+            pipeline.producer.language,
         );
     }
-    let mut state = DirectAdapterState::new(path, source_file, source, root, profile);
+    match pipeline.producer.language {
+        "dart" => {
+            return super::dart::emit_tree_evidence(path, source_file, source, root);
+        }
+        "groovy" => {
+            return super::groovy::emit_tree_evidence(path, source_file, source, root);
+        }
+        "scala" => {
+            return super::scala::emit_tree_evidence(path, source_file, source, root);
+        }
+        "swift" => {
+            return super::swift::emit_tree_evidence(path, source_file, source, root);
+        }
+        _ => {}
+    }
+    let python_module_keys = if pipeline.producer.language == "python" {
+        project_evidence
+            .map(|evidence| evidence.python_module_keys(source_file))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let unique_python_module =
+        (python_module_keys.len() == 1).then(|| python_module_keys[0].clone());
+    let mut state = DirectEvidenceState::new(
+        path,
+        source_file,
+        source,
+        root,
+        pipeline,
+        unique_python_module.as_deref(),
+    );
+    if python_module_keys.len() > 1 {
+        state.builder.diagnose(
+            "python_module_identity_ambiguous",
+            None,
+            Some(range_for_file(source_file, source)),
+            &format!(
+                "source has multiple admissible Python module identities: {}",
+                python_module_keys.join(", ")
+            ),
+        )?;
+    }
     state.add_file(root)?;
     if root.end_byte() == root.start_byte() {
-        let DirectAdapterState { builder, .. } = state;
+        let DirectEvidenceState { builder, .. } = state;
         return builder.finish();
     }
     state.capture_parser_errors(root);
-    match profile.language {
+    match pipeline.producer.language {
         "python" => state.extract_python(root)?,
         "go" => state.extract_go(root)?,
         "java" => state.extract_java(root)?,
         "rust" => state.extract_rust(root)?,
         _ => {
             return Err(EvidenceError::new(
-                EvidenceErrorCode::InvalidAdapter,
+                EvidenceErrorCode::InvalidPipeline,
                 format!(
                     "language {:?} has no direct universal extractor",
-                    profile.language
+                    pipeline.producer.language
                 ),
             ));
         }
@@ -783,7 +919,7 @@ pub(crate) fn extract_tree_evidence(
             "parser recovered from malformed source; emitted evidence remains source-bounded",
         )?;
     }
-    let DirectAdapterState { builder, .. } = state;
+    let DirectEvidenceState { builder, .. } = state;
     builder.finish()
 }
 
@@ -810,6 +946,21 @@ struct PythonTypeBases {
     qualified_names: Vec<String>,
 }
 
+#[derive(Clone, Copy)]
+struct PythonParameter<'tree> {
+    syntax: Node<'tree>,
+    name: Node<'tree>,
+    annotation: Option<Node<'tree>>,
+    defaulted: bool,
+    list_splat: bool,
+    dictionary_splat: bool,
+}
+
+struct PythonCanonicalAnnotation {
+    canonical: String,
+    runtime_targets: Vec<String>,
+}
+
 #[derive(Clone)]
 struct RustImplContext {
     scope_id: String,
@@ -831,7 +982,7 @@ enum RustPlatformCfg {
     Windows,
 }
 
-struct DirectAdapterState<'source> {
+struct DirectEvidenceState<'source> {
     path: &'source Path,
     source_file: &'source str,
     source: &'source [u8],
@@ -851,6 +1002,10 @@ struct DirectAdapterState<'source> {
     python_local_bound_names: HashMap<String, HashSet<String>>,
     python_global_names: HashMap<String, HashSet<String>>,
     python_type_bases: HashMap<String, PythonTypeBases>,
+    python_parameters: HashMap<usize, DeclarationContext>,
+    python_callable_return_types: HashMap<String, String>,
+    python_ambiguous_callable_returns: HashSet<String>,
+    python_call_result_binding_ids: HashMap<(String, String, usize), String>,
     rust_containers: HashMap<usize, DeclarationContext>,
     rust_impls: HashMap<usize, RustImplContext>,
     rust_types_by_qualified_name: HashMap<String, DeclarationContext>,
@@ -887,22 +1042,25 @@ struct DirectAdapterState<'source> {
     builder: EvidenceBuilder,
 }
 
-impl<'source> DirectAdapterState<'source> {
+impl<'source> DirectEvidenceState<'source> {
     fn new(
         path: &'source Path,
         source_file: &'source str,
         source: &'source [u8],
         root: Node<'_>,
-        profile: &'static AdapterProfile,
+        pipeline: &'static UniversalEvidencePipeline,
+        python_module: Option<&str>,
     ) -> Self {
         let stem = file_stem(path);
-        let module_or_package = if profile.language == "python" {
-            python_module_identity(path, source_file)
-        } else if profile.language == "go" {
+        let module_or_package = if pipeline.producer.language == "python" {
+            python_module
+                .map(str::to_owned)
+                .unwrap_or_else(|| python_module_identity(path, source_file))
+        } else if pipeline.producer.language == "go" {
             go_package_identity(path, source_file, source, root)
-        } else if profile.language == "java" {
+        } else if pipeline.producer.language == "java" {
             java_package_identity(source).unwrap_or_else(|| "<default>".to_owned())
-        } else if profile.language == "rust" {
+        } else if pipeline.producer.language == "rust" {
             rust_module_identity(path, source_file)
         } else {
             path.parent()
@@ -915,9 +1073,9 @@ impl<'source> DirectAdapterState<'source> {
             path,
             source_file,
             source,
-            language: profile.language,
+            language: pipeline.producer.language,
             module_or_package,
-            rust_namespace_aliases: if profile.language == "rust" {
+            rust_namespace_aliases: if pipeline.producer.language == "rust" {
                 rust_manifest_dependency_aliases(path)
             } else {
                 HashMap::new()
@@ -935,6 +1093,10 @@ impl<'source> DirectAdapterState<'source> {
             python_local_bound_names: HashMap::new(),
             python_global_names: HashMap::new(),
             python_type_bases: HashMap::new(),
+            python_parameters: HashMap::new(),
+            python_callable_return_types: HashMap::new(),
+            python_ambiguous_callable_returns: HashSet::new(),
+            python_call_result_binding_ids: HashMap::new(),
             rust_containers: HashMap::new(),
             rust_impls: HashMap::new(),
             rust_types_by_qualified_name: HashMap::new(),
@@ -969,8 +1131,8 @@ impl<'source> DirectAdapterState<'source> {
             graph_ids: HashSet::new(),
             parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
-                profile,
-                format!("compass.languages.{}.universal", profile.language),
+                pipeline,
+                format!("compass.languages.{}.universal", pipeline.producer.language),
                 source_file,
                 EvidenceLimits::default(),
             ),
@@ -1174,7 +1336,8 @@ impl<'source> DirectAdapterState<'source> {
 
             let alias = self.text(alias_node);
             let qualified_name = format!("{}.{}", self.module_or_package, alias);
-            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &alias]), assignment);
+            let graph_node_id =
+                self.unique_graph_id(make_id(&[&self.module_or_package, &alias]), assignment);
             let fact_id = self.builder.declare(
                 "function",
                 &graph_node_id,
@@ -1301,7 +1464,8 @@ impl<'source> DirectAdapterState<'source> {
             }
 
             let qualified_name = format!("{}.{}", self.module_or_package, name);
-            let graph_node_id = self.unique_graph_id(make_id(&[&self.stem, &name]), assignment);
+            let graph_node_id =
+                self.unique_graph_id(make_id(&[&self.module_or_package, &name]), assignment);
             let fact_id = self.builder.declare(
                 "variable",
                 &graph_node_id,
@@ -1472,7 +1636,7 @@ impl<'source> DirectAdapterState<'source> {
             };
             let graph_node_id = if owner.kind == "file" {
                 make_id(&[
-                    &self.stem,
+                    &self.module_or_package,
                     qualified_name.rsplit('.').next().unwrap_or(&name),
                 ])
             } else {
@@ -1486,7 +1650,29 @@ impl<'source> DirectAdapterState<'source> {
             } else {
                 "function"
             };
-            let metadata = self.declaration_metadata(node);
+            let mut metadata = self.declaration_metadata(node);
+            if !is_class {
+                let parameters = python_parameter_nodes(node);
+                let implicit_receiver = kind == "method"
+                    && !python_has_decorator(node, self.source, "staticmethod")
+                    && !parameters.is_empty();
+                let callable_parameters = parameters.iter().skip(usize::from(implicit_receiver));
+                metadata.parameter_count = (!callable_parameters
+                    .clone()
+                    .any(|parameter| parameter.defaulted || parameter.dictionary_splat))
+                .then(|| {
+                    u32::try_from(callable_parameters.clone().count()).map_err(|_| {
+                        EvidenceError::new(
+                            EvidenceErrorCode::ResourceLimit,
+                            "Python callable parameter count exceeds the evidence schema limit",
+                        )
+                    })
+                })
+                .transpose()?;
+                metadata.variadic = callable_parameters
+                    .clone()
+                    .any(|parameter| parameter.list_splat || parameter.dictionary_splat);
+            }
             let fact_id = self.builder.declare_with_metadata(
                 kind,
                 &graph_node_id,
@@ -1520,6 +1706,9 @@ impl<'source> DirectAdapterState<'source> {
             };
             self.add_ownership(owner, &context)?;
             self.declarations.insert(node.id(), context.clone());
+            if !is_class {
+                self.add_python_parameter_declarations(node, &context)?;
+            }
             let body = node.child_by_field_name("body").unwrap_or(node);
             let mut cursor = body.walk();
             for child in body.children(&mut cursor).filter(|child| child.is_named()) {
@@ -1527,9 +1716,99 @@ impl<'source> DirectAdapterState<'source> {
             }
             return Ok(());
         }
+        if node.kind() == "assignment"
+            && node.child_by_field_name("type").is_some()
+            && !self.overlaps_parser_error(node)
+            && let Some(name_node) = node
+                .child_by_field_name("left")
+                .filter(|left| left.kind() == "identifier")
+        {
+            let name = self.text(name_node);
+            if valid_python_identifier(&name) {
+                let kind = if owner.kind == "class" {
+                    "field"
+                } else {
+                    "variable"
+                };
+                let qualified_name = if owner.kind == "file" {
+                    format!("{}.{}", self.module_or_package, name)
+                } else {
+                    format!("{}::{name}", owner.qualified_name)
+                };
+                let graph_node_id =
+                    self.unique_graph_id(make_id(&[&owner.graph_node_id, kind, &name]), node);
+                let mut metadata = self.declaration_metadata(node);
+                metadata.signature = node.child_by_field_name("type").map(|kind| self.text(kind));
+                let fact_id = self.builder.declare_with_metadata(
+                    kind,
+                    &graph_node_id,
+                    &name,
+                    &qualified_name,
+                    Some(&self.module_or_package),
+                    Some(&owner.scope_id),
+                    range_for_node(self.source_file, name_node),
+                    metadata,
+                )?;
+                let context = DeclarationContext {
+                    fact_id,
+                    scope_id: owner.scope_id.clone(),
+                    graph_node_id,
+                    name,
+                    qualified_name,
+                    kind: kind.to_owned(),
+                    enclosing_type_qualified_name: owner.enclosing_type_qualified_name.clone(),
+                };
+                self.add_ownership(owner, &context)?;
+                self.declarations.insert(node.id(), context);
+            }
+            return Ok(());
+        }
         let mut cursor = node.walk();
         for child in node.children(&mut cursor).filter(|child| child.is_named()) {
             self.collect_python_declarations(child, owner)?;
+        }
+        Ok(())
+    }
+
+    fn add_python_parameter_declarations(
+        &mut self,
+        declaration: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        for parameter in python_parameter_nodes(declaration) {
+            let name = self.text(parameter.name);
+            if name.is_empty() {
+                continue;
+            }
+            let qualified_name = format!("{}::parameter:{name}", owner.qualified_name);
+            let graph_node_id = self.unique_graph_id(
+                make_id(&[&owner.graph_node_id, "parameter", &name]),
+                parameter.syntax,
+            );
+            let mut metadata = self.declaration_metadata(parameter.syntax);
+            metadata.signature = parameter.annotation.map(|annotation| self.text(annotation));
+            let fact_id = self.builder.declare_with_metadata(
+                "parameter",
+                &graph_node_id,
+                &name,
+                &qualified_name,
+                Some(&self.module_or_package),
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, parameter.name),
+                metadata,
+            )?;
+            let context = DeclarationContext {
+                fact_id,
+                scope_id: owner.scope_id.clone(),
+                graph_node_id,
+                name,
+                qualified_name,
+                kind: "parameter".to_owned(),
+                enclosing_type_qualified_name: owner.enclosing_type_qualified_name.clone(),
+            };
+            self.add_ownership(owner, &context)?;
+            self.python_parameters
+                .insert(parameter.syntax.id(), context);
         }
         Ok(())
     }
@@ -1568,6 +1847,20 @@ impl<'source> DirectAdapterState<'source> {
         match node.kind() {
             "import_statement" | "import_from_statement" => return Ok(()),
             "call" => self.add_call(node, &active, "call")?,
+            "assignment" => {
+                if let (Some(variable), Some(annotation)) = (
+                    self.declarations.get(&node.id()).cloned(),
+                    node.child_by_field_name("type"),
+                ) && let Some(canonical) = self.python_canonical_annotation(&active, annotation)
+                {
+                    self.add_python_exact_annotation_relationship(
+                        &variable,
+                        annotation,
+                        CandidateRelation::TypeOf,
+                        &canonical,
+                    )?;
+                }
+            }
             _ => {}
         }
         let mut cursor = node.walk();
@@ -1836,7 +2129,10 @@ impl<'source> DirectAdapterState<'source> {
             resolve_python_module(
                 &self.module_or_package,
                 &self.text(module),
-                self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py"),
+                matches!(
+                    self.path.file_name().and_then(|name| name.to_str()),
+                    Some("__init__.py" | "__init__.pyi")
+                ),
             )
         });
         let named_import = module.is_some();
@@ -1943,7 +2239,10 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let is_reexport = owner.kind == "file"
-            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+            && matches!(
+                self.path.file_name().and_then(|name| name.to_str()),
+                Some("__init__.py" | "__init__.pyi")
+            );
         let kind = if is_reexport {
             BindingKind::Reexport
         } else {
@@ -2020,7 +2319,10 @@ impl<'source> DirectAdapterState<'source> {
         named_import: bool,
     ) -> Result<(), EvidenceError> {
         let is_reexport = owner.kind == "file"
-            && self.path.file_name().and_then(|name| name.to_str()) == Some("__init__.py");
+            && matches!(
+                self.path.file_name().and_then(|name| name.to_str()),
+                Some("__init__.py" | "__init__.pyi")
+            );
         let kind = if is_reexport {
             BindingKind::Reexport
         } else if local == binding_target.rsplit('.').next().unwrap_or_default() {
@@ -2209,6 +2511,86 @@ impl<'source> DirectAdapterState<'source> {
         declaration: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
+        let parameters = python_parameter_nodes(declaration);
+        let implicit_receiver = owner.kind == "method"
+            && !python_has_decorator(declaration, self.source, "staticmethod")
+            && !parameters.is_empty();
+        let mut canonical_parameter_types = Vec::new();
+        let mut complete_parameter_types = true;
+        for parameter in &parameters {
+            let parameter_owner = self.python_parameters.get(&parameter.syntax.id()).cloned();
+            let canonical = parameter
+                .annotation
+                .and_then(|annotation| self.python_canonical_annotation(owner, annotation));
+            if let (Some(parameter_owner), Some(annotation), Some(canonical)) =
+                (parameter_owner, parameter.annotation, canonical.as_ref())
+            {
+                self.add_python_exact_annotation_relationship(
+                    &parameter_owner,
+                    annotation,
+                    CandidateRelation::TypeOf,
+                    canonical,
+                )?;
+            }
+            if !implicit_receiver || parameter.syntax.id() != parameters[0].syntax.id() {
+                if let Some(canonical) = canonical {
+                    canonical_parameter_types.push(canonical.canonical);
+                } else {
+                    complete_parameter_types = false;
+                }
+            }
+        }
+        if declaration.kind() == "function_definition" {
+            if let Some(callable) = self
+                .builder
+                .batch
+                .declarations
+                .iter_mut()
+                .find(|callable| callable.id == owner.fact_id)
+            {
+                let canonical_count = u32::try_from(canonical_parameter_types.len()).ok();
+                callable.parameter_types =
+                    if complete_parameter_types && callable.parameter_count == canonical_count {
+                        canonical_parameter_types
+                    } else {
+                        Vec::new()
+                    };
+            }
+            if let Some(return_type) = declaration.child_by_field_name("return_type")
+                && let Some(canonical) = self.python_canonical_annotation(owner, return_type)
+            {
+                self.add_python_exact_annotation_relationship(
+                    owner,
+                    return_type,
+                    CandidateRelation::Returns,
+                    &canonical,
+                )?;
+                if let [returned] = canonical.runtime_targets.as_slice()
+                    && returned != "builtins.NoneType"
+                {
+                    if self
+                        .python_ambiguous_callable_returns
+                        .contains(&owner.qualified_name)
+                    {
+                        // A same-named source overload already disagreed. Keep
+                        // call-result inference fail closed.
+                    } else if self
+                        .python_callable_return_types
+                        .get(&owner.qualified_name)
+                        .is_some_and(|existing| existing != returned)
+                    {
+                        self.python_callable_return_types
+                            .remove(&owner.qualified_name);
+                        self.python_ambiguous_callable_returns
+                            .insert(owner.qualified_name.clone());
+                    } else {
+                        self.python_callable_return_types
+                            .insert(owner.qualified_name.clone(), returned.clone());
+                    }
+                }
+            }
+        }
+
         let mut annotation_roots = Vec::new();
         if let Some(return_type) = declaration.child_by_field_name("return_type") {
             annotation_roots.push(return_type);
@@ -2241,6 +2623,220 @@ impl<'source> DirectAdapterState<'source> {
             }
         }
         Ok(())
+    }
+
+    fn add_python_exact_annotation_relationship(
+        &mut self,
+        owner: &DeclarationContext,
+        annotation: Node<'_>,
+        relation: CandidateRelation,
+        canonical: &PythonCanonicalAnnotation,
+    ) -> Result<(), EvidenceError> {
+        for qualified_name in &canonical.runtime_targets {
+            let spelling = qualified_name
+                .rsplit(['.', ':'])
+                .find(|part| !part.is_empty())
+                .unwrap_or(qualified_name);
+            let local_target = self
+                .builder
+                .batch
+                .declarations
+                .iter()
+                .filter(|declaration| {
+                    declaration.language == "python"
+                        && declaration.qualified_name == *qualified_name
+                        && matches!(
+                            declaration.kind.as_str(),
+                            "class" | "type_alias" | "parameter"
+                        )
+                })
+                .map(|declaration| declaration.id.clone())
+                .collect::<Vec<_>>();
+            let exact_target_declaration_id = match local_target.as_slice() {
+                [target] => Some(target.clone()),
+                _ => None,
+            };
+            let occurrence_id = self.builder.occur_with_context(
+                SemanticRole::TypeReference,
+                &owner.fact_id,
+                spelling,
+                None,
+                Some(&owner.scope_id),
+                Some("exact_python_annotation"),
+                range_for_node(self.source_file, annotation),
+            )?;
+            self.builder.relate(
+                relation,
+                &owner.fact_id,
+                Some(&occurrence_id),
+                None,
+                spelling,
+                ResolutionConstraint {
+                    exact_target_declaration_id: exact_target_declaration_id.clone(),
+                    exact_language: Some(self.language.to_owned()),
+                    module_or_package: qualified_name
+                        .rsplit_once('.')
+                        .map(|(module, _)| module.to_owned()),
+                    scope_id: Some(owner.scope_id.clone()),
+                    qualified_name: Some(qualified_name.clone()),
+                    argument_count: None,
+                    argument_types: Vec::new(),
+                    allowed_target_kinds: target_kinds_for_relation(relation),
+                    hierarchy: None,
+                    allow_external: exact_target_declaration_id.is_none(),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn python_canonical_annotation(
+        &self,
+        owner: &DeclarationContext,
+        annotation: Node<'_>,
+    ) -> Option<PythonCanonicalAnnotation> {
+        let raw = self.text(annotation);
+        (raw.len() <= 1_024)
+            .then(|| self.python_canonical_annotation_raw(owner, &raw, annotation.start_byte(), 0))
+            .flatten()
+    }
+
+    fn python_canonical_annotation_raw(
+        &self,
+        owner: &DeclarationContext,
+        raw: &str,
+        use_start: usize,
+        depth: usize,
+    ) -> Option<PythonCanonicalAnnotation> {
+        if depth >= 16 {
+            return None;
+        }
+        let raw = raw.trim();
+        if raw.len() >= 2
+            && ((raw.starts_with('"') && raw.ends_with('"'))
+                || (raw.starts_with('\'') && raw.ends_with('\'')))
+        {
+            let inner = raw.get(1..raw.len().saturating_sub(1))?;
+            if inner.contains(['\\', '\n', '\r']) {
+                return None;
+            }
+            return self.python_canonical_annotation_raw(owner, inner, use_start, depth + 1);
+        }
+        let union = split_python_annotation_top_level(raw, '|')?;
+        if union.len() > 1 {
+            let mut canonical = Vec::new();
+            let mut runtime_targets = Vec::new();
+            for member in union {
+                let member =
+                    self.python_canonical_annotation_raw(owner, member, use_start, depth + 1)?;
+                canonical.push(member.canonical);
+                runtime_targets.extend(member.runtime_targets);
+            }
+            canonical.sort_unstable();
+            canonical.dedup();
+            runtime_targets.sort_unstable();
+            runtime_targets.dedup();
+            return Some(PythonCanonicalAnnotation {
+                canonical: canonical.join(" | "),
+                runtime_targets,
+            });
+        }
+        if let Some(open) = python_annotation_generic_open(raw) {
+            let base_raw = raw.get(..open)?.trim();
+            let arguments_raw = raw.get(open + 1..raw.len().saturating_sub(1))?;
+            let base = self.python_nominal_annotation(owner, base_raw, use_start)?;
+            let arguments = split_python_annotation_top_level(arguments_raw, ',')?;
+            if base == "typing.Annotated" {
+                let first = arguments.first()?;
+                return self.python_canonical_annotation_raw(owner, first, use_start, depth + 1);
+            }
+            if base == "typing.Optional" {
+                let [argument] = arguments.as_slice() else {
+                    return None;
+                };
+                let mut inner =
+                    self.python_canonical_annotation_raw(owner, argument, use_start, depth + 1)?;
+                inner.canonical = format!("{} | builtins.NoneType", inner.canonical);
+                return Some(inner);
+            }
+            if base == "typing.Union" {
+                let joined = arguments.join(" | ");
+                return self.python_canonical_annotation_raw(owner, &joined, use_start, depth + 1);
+            }
+            if base == "typing.Literal" || arguments.is_empty() {
+                return None;
+            }
+            let mut canonical_arguments = Vec::new();
+            for argument in arguments {
+                canonical_arguments.push(
+                    self.python_canonical_annotation_raw(owner, argument, use_start, depth + 1)?
+                        .canonical,
+                );
+            }
+            return Some(PythonCanonicalAnnotation {
+                canonical: format!("{base}[{}]", canonical_arguments.join(", ")),
+                runtime_targets: vec![base],
+            });
+        }
+        let canonical = self.python_nominal_annotation(owner, raw, use_start)?;
+        let runtime_targets = if canonical == "builtins.NoneType" {
+            Vec::new()
+        } else {
+            vec![canonical.clone()]
+        };
+        Some(PythonCanonicalAnnotation {
+            canonical,
+            runtime_targets,
+        })
+    }
+
+    fn python_nominal_annotation(
+        &self,
+        owner: &DeclarationContext,
+        raw: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        let raw = raw.trim();
+        if matches!(raw, "Any" | "typing.Any") {
+            return None;
+        }
+        if let Some(builtin) = python_builtin_annotation(raw) {
+            return Some(builtin.to_owned());
+        }
+        let (head, suffix) = split_qualified_head(raw);
+        if let Some(imported) = self.imported_target_for_occurrence(owner, head, use_start, false) {
+            let target =
+                suffix.map_or_else(|| imported.clone(), |suffix| format!("{imported}.{suffix}"));
+            if target == "typing.Any" {
+                return None;
+            }
+            return Some(python_normalize_typing_alias(&target));
+        }
+        if head == "builtins" {
+            return suffix
+                .and_then(python_builtin_annotation)
+                .map(str::to_owned);
+        }
+        let local = self
+            .builder
+            .batch
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.language == "python"
+                    && declaration.name == raw
+                    && declaration.range.start_byte < u64::try_from(use_start).unwrap_or(u64::MAX)
+                    && matches!(
+                        declaration.kind.as_str(),
+                        "class" | "type_alias" | "parameter"
+                    )
+            })
+            .map(|declaration| declaration.qualified_name.clone())
+            .collect::<BTreeSet<_>>();
+        match local.len() {
+            1 => local.into_iter().next(),
+            _ => None,
+        }
     }
 
     fn extract_java(&mut self, root: Node<'_>) -> Result<(), EvidenceError> {
@@ -3195,7 +3791,7 @@ impl<'source> DirectAdapterState<'source> {
         self.imported_target_for_occurrence(owner, spelling, use_start, true)
             .cloned()
             .or_else(|| self.local_target_for(owner, spelling).cloned())
-            .or_else(|| java_lang_type(spelling).map(str::to_owned))
+            .or_else(|| java_lang_type(spelling))
             .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
     }
 
@@ -6527,24 +7123,23 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let local_python_receiver = if super_dispatch.is_none() && self.language == "python" {
-            qualifier.and_then(|qualifier| {
-                self.python_local_class_receiver(owner, qualifier, function.start_byte(), call)
-                    .or_else(|| {
-                        self.python_local_initializer_receiver(
-                            owner,
-                            qualifier,
-                            function.start_byte(),
-                            call,
-                        )
-                    })
-                    .or_else(|| {
-                        self.python_module_singleton_receiver(
-                            owner,
-                            qualifier,
-                            function.start_byte(),
-                        )
-                    })
-            })
+            if let Some(qualifier) = qualifier {
+                let mut receiver =
+                    self.python_local_class_receiver(owner, qualifier, function.start_byte(), call);
+                if receiver.is_none() {
+                    receiver = self.python_local_initializer_receiver(
+                        owner,
+                        qualifier,
+                        function.start_byte(),
+                        call,
+                    )?;
+                }
+                receiver.or_else(|| {
+                    self.python_module_singleton_receiver(owner, qualifier, function.start_byte())
+                })
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -6594,10 +7189,17 @@ impl<'source> DirectAdapterState<'source> {
             return Ok(());
         }
         let (role, relation) = (SemanticRole::Call, CandidateRelation::Calls);
-        let argument_count = (self.language == "go")
-            .then(|| call.child_by_field_name("arguments"))
-            .flatten()
-            .and_then(|arguments| u32::try_from(arguments.named_child_count()).ok());
+        let (argument_count, argument_types) = if self.language == "go" {
+            (
+                call.child_by_field_name("arguments")
+                    .and_then(|arguments| u32::try_from(arguments.named_child_count()).ok()),
+                Vec::new(),
+            )
+        } else if self.language == "python" {
+            python_call_argument_shape(call)
+        } else {
+            (None, Vec::new())
+        };
         let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
         let call_result_binding = if self.language == "go" {
             qualifier
@@ -6687,7 +7289,7 @@ impl<'source> DirectAdapterState<'source> {
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name: qualified_name.clone(),
                 argument_count,
-                argument_types: Vec::new(),
+                argument_types,
                 allowed_target_kinds: if self.language == "python" {
                     vec![
                         "function".to_owned(),
@@ -6772,80 +7374,104 @@ impl<'source> DirectAdapterState<'source> {
     }
 
     fn python_local_initializer_receiver(
-        &self,
+        &mut self,
         owner: &DeclarationContext,
         receiver: &str,
         use_start: usize,
         call: Node<'_>,
-    ) -> Option<String> {
-        if !valid_python_identifier(receiver) || matches!(receiver, "self" | "cls") {
-            return None;
-        }
-        let mut scope_id = Some(owner.scope_id.as_str());
-        for _ in 0..64 {
-            let Some(current) = scope_id else {
-                break;
-            };
-            if self
-                .python_global_names
-                .get(current)
-                .is_some_and(|names| names.contains(receiver))
-            {
+    ) -> Result<Option<String>, EvidenceError> {
+        let inferred = (|| {
+            if !valid_python_identifier(receiver) || matches!(receiver, "self" | "cls") {
                 return None;
             }
-            scope_id = self.scope_parents.get(current).map(String::as_str);
-        }
-
-        let mut syntax_scope = Some(call);
-        let function = loop {
-            let node = syntax_scope?;
-            if node.kind() == "function_definition"
-                && self
-                    .declarations
-                    .get(&node.id())
-                    .is_some_and(|context| context.fact_id == owner.fact_id)
-            {
-                break node;
+            let mut scope_id = Some(owner.scope_id.as_str());
+            for _ in 0..64 {
+                let Some(current) = scope_id else {
+                    break;
+                };
+                if self
+                    .python_global_names
+                    .get(current)
+                    .is_some_and(|names| names.contains(receiver))
+                {
+                    return None;
+                }
+                scope_id = self.scope_parents.get(current).map(String::as_str);
             }
-            syntax_scope = node.parent();
-        };
-        let body = function.child_by_field_name("body")?;
-        let mut cursor = body.walk();
-        let mut bindings = body
-            .named_children(&mut cursor)
-            .filter(|statement| statement.start_byte() < use_start)
-            .filter(|statement| {
-                crate::engine::python_bound_names(*statement, self.source, true).contains(receiver)
-            });
-        let assignment = bindings.next()?;
-        if bindings.next().is_some() || assignment.kind() != "assignment" {
-            return None;
-        }
-        let left = assignment
-            .child_by_field_name("left")
-            .filter(|node| node.kind() == "identifier")?;
-        if self.text(left) != receiver {
-            return None;
-        }
-        let initializer = assignment
-            .child_by_field_name("right")
-            .filter(|node| node.kind() == "call")?;
-        let called = initializer.child_by_field_name("function")?;
-        let raw = self.text(called);
-        let (qualifier, spelling) = split_qualified(&raw);
-        if spelling.is_empty() {
-            return None;
-        }
-        qualifier
-            .and_then(|qualifier| {
-                self.imported_qualified_target_for(owner, qualifier, called.start_byte(), true)
-                    .map(|target| format!("{target}.{spelling}"))
-            })
-            .or_else(|| {
-                qualifier.is_none().then(|| {
-                    self.local_target_for(owner, spelling)
-                        .cloned()
-                        .or_else(|| {
+
+            let mut syntax_scope = Some(call);
+            let function = loop {
+                let node = syntax_scope?;
+                if node.kind() == "function_definition"
+                    && self
+                        .declarations
+                        .get(&node.id())
+                        .is_some_and(|context| context.fact_id == owner.fact_id)
+                {
+                    break node;
+                }
+                syntax_scope = node.parent();
+            };
+            let body = function.child_by_field_name("body")?;
+            let mut cursor = body.walk();
+            let mut bindings = body
+                .named_children(&mut cursor)
+                .filter(|statement| statement.start_byte() < use_start)
+                .filter(|statement| {
+                    crate::engine::python_bound_names(*statement, self.source, true)
+                        .contains(receiver)
+                });
+            let assignment = bindings.next()?;
+            if bindings.next().is_some() || assignment.kind() != "assignment" {
+                return None;
+            }
+            let left = assignment
+                .child_by_field_name("left")
+                .filter(|node| node.kind() == "identifier")?;
+            if self.text(left) != receiver {
+                return None;
+            }
+            let initializer = assignment
+                .child_by_field_name("right")
+                .filter(|node| node.kind() == "call")?;
+            let called = initializer.child_by_field_name("function")?;
+            let raw = self.text(called);
+            let (qualifier, spelling) = split_qualified(&raw);
+            if spelling.is_empty() {
+                return None;
+            }
+            if qualifier.is_none() && self.python_name_is_statically_local(owner, spelling) {
+                return None;
+            }
+            let local_declaration = qualifier
+                .is_none()
+                .then(|| {
+                    self.python_unique_visible_declaration(
+                        owner,
+                        spelling,
+                        called.start_byte(),
+                        &["class", "function"],
+                    )
+                })
+                .flatten();
+            let local_target = qualifier
+                .is_none()
+                .then(|| {
+                    self.local_target_for(owner, spelling).cloned().or_else(|| {
+                        local_declaration
+                            .as_ref()
+                            .map(|declaration| declaration.qualified_name.clone())
+                    })
+                })
+                .flatten();
+            let initializer_target = qualifier
+                .and_then(|qualifier| {
+                    self.imported_qualified_target_for(owner, qualifier, called.start_byte(), true)
+                        .map(|target| format!("{target}.{spelling}"))
+                })
+                .or_else(|| {
+                    qualifier.is_none().then(|| {
+                        local_target.or_else(|| {
                             self.imported_target_for_occurrence(
                                 owner,
                                 spelling,
@@ -6854,9 +7480,89 @@ impl<'source> DirectAdapterState<'source> {
                             )
                             .cloned()
                         })
-                        .unwrap_or_else(|| format!("{}.{}", self.module_or_package, spelling))
-                })
+                    })?
+                });
+            let receiver_type = initializer_target.and_then(|target| {
+                if let Some(returned) = self.python_callable_return_types.get(&target) {
+                    Some(returned.clone())
+                } else if local_declaration
+                    .as_ref()
+                    .is_some_and(|declaration| declaration.kind != "class")
+                {
+                    None
+                } else {
+                    Some(target)
+                }
+            })?;
+            Some((receiver_type, left, assignment.id()))
+        })();
+        let Some((receiver_type, left, assignment_id)) = inferred else {
+            return Ok(None);
+        };
+        let binding_key = (owner.scope_id.clone(), receiver.to_owned(), assignment_id);
+        if !self
+            .python_call_result_binding_ids
+            .contains_key(&binding_key)
+        {
+            let binding_id = self.builder.bind(
+                BindingKind::CallResult,
+                receiver,
+                &receiver_type,
+                None,
+                Some(&owner.scope_id),
+                range_for_node(self.source_file, left),
+            )?;
+            self.python_call_result_binding_ids
+                .insert(binding_key, binding_id);
+        }
+        Ok(Some(receiver_type))
+    }
+
+    fn python_unique_visible_declaration(
+        &self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        kinds: &[&str],
+    ) -> Option<DeclarationContext> {
+        let mut visible_scopes = HashSet::new();
+        let mut scope_id = Some(owner.scope_id.as_str());
+        for _ in 0..64 {
+            let Some(current) = scope_id else {
+                break;
+            };
+            visible_scopes.insert(current.to_owned());
+            scope_id = self.scope_parents.get(current).map(String::as_str);
+        }
+        let allow_later = matches!(owner.kind.as_str(), "function" | "method");
+        let candidates = self
+            .builder
+            .batch
+            .declarations
+            .iter()
+            .filter(|declaration| {
+                declaration.language == "python"
+                    && declaration.name == name
+                    && kinds.contains(&declaration.kind.as_str())
+                    && declaration
+                        .scope_id
+                        .as_ref()
+                        .is_some_and(|scope| visible_scopes.contains(scope))
+                    && (allow_later
+                        || declaration.range.start_byte
+                            < u64::try_from(use_start).unwrap_or(u64::MAX))
             })
+            .filter_map(|declaration| {
+                self.declarations
+                    .values()
+                    .find(|context| context.fact_id == declaration.id)
+                    .cloned()
+            })
+            .collect::<Vec<_>>();
+        match candidates.as_slice() {
+            [candidate] => Some(candidate.clone()),
+            _ => None,
+        }
     }
 
     fn python_module_singleton_receiver(
@@ -8154,6 +8860,58 @@ fn java_argument_count(node: Node<'_>) -> u32 {
     .unwrap_or(u32::MAX)
 }
 
+fn python_call_argument_shape(call: Node<'_>) -> (Option<u32>, Vec<Option<String>>) {
+    let Some(arguments) = call.child_by_field_name("arguments") else {
+        return (Some(0), Vec::new());
+    };
+    let mut cursor = arguments.walk();
+    let arguments = arguments
+        .children(&mut cursor)
+        // Tree-sitter exposes comments inside an argument list as named
+        // children. They are source trivia, not callable arguments. Counting
+        // one makes an otherwise exact call fail signature selection, as in
+        // `call(  # explanation\n keyword=value)`.
+        .filter(|child| child.is_named() && child.kind() != "comment")
+        .collect::<Vec<_>>();
+    if arguments
+        .iter()
+        .any(|argument| matches!(argument.kind(), "list_splat" | "dictionary_splat"))
+    {
+        return (None, Vec::new());
+    }
+    let Some(argument_count) = u32::try_from(arguments.len()).ok() else {
+        return (None, Vec::new());
+    };
+    let has_keywords = arguments
+        .iter()
+        .any(|argument| argument.kind() == "keyword_argument");
+    let argument_types = if has_keywords {
+        vec![None; arguments.len()]
+    } else {
+        arguments
+            .into_iter()
+            .map(python_literal_type)
+            .collect::<Vec<_>>()
+    };
+    (Some(argument_count), argument_types)
+}
+
+fn python_literal_type(expression: Node<'_>) -> Option<String> {
+    let qualified = match expression.kind() {
+        "string" | "concatenated_string" => "builtins.str",
+        "integer" => "builtins.int",
+        "float" => "builtins.float",
+        "true" | "false" => "builtins.bool",
+        "none" => "builtins.NoneType",
+        "list" | "list_comprehension" => "builtins.list",
+        "dictionary" | "dictionary_comprehension" => "builtins.dict",
+        "set" | "set_comprehension" => "builtins.set",
+        "tuple" => "builtins.tuple",
+        _ => return None,
+    };
+    Some(qualified.to_owned())
+}
+
 fn java_primitive_type(name: &str) -> bool {
     matches!(
         name,
@@ -8170,28 +8928,8 @@ fn java_primitive_type(name: &str) -> bool {
     )
 }
 
-fn java_lang_type(name: &str) -> Option<&'static str> {
-    match name {
-        "String" => Some("java.lang.String"),
-        "Object" => Some("java.lang.Object"),
-        "Class" => Some("java.lang.Class"),
-        "Integer" => Some("java.lang.Integer"),
-        "Long" => Some("java.lang.Long"),
-        "Double" => Some("java.lang.Double"),
-        "Float" => Some("java.lang.Float"),
-        "Boolean" => Some("java.lang.Boolean"),
-        "Byte" => Some("java.lang.Byte"),
-        "Short" => Some("java.lang.Short"),
-        "Character" => Some("java.lang.Character"),
-        "Number" => Some("java.lang.Number"),
-        "Appendable" => Some("java.lang.Appendable"),
-        "Throwable" => Some("java.lang.Throwable"),
-        "Exception" => Some("java.lang.Exception"),
-        "RuntimeException" => Some("java.lang.RuntimeException"),
-        "Enum" => Some("java.lang.Enum"),
-        "Record" => Some("java.lang.Record"),
-        _ => None,
-    }
+fn java_lang_type(name: &str) -> Option<String> {
+    crate::builtins::is_language_builtin_global("java", name).then(|| format!("java.lang.{name}"))
 }
 
 fn rust_container_kind(kind: &str) -> Option<&'static str> {
@@ -8601,7 +9339,7 @@ fn rust_qualify_local_path(module: &str, raw: &str) -> String {
 }
 
 fn rust_qualify_imported_path(
-    state: &DirectAdapterState<'_>,
+    state: &DirectEvidenceState<'_>,
     owner: &DeclarationContext,
     raw: &str,
     use_start: usize,
@@ -8623,7 +9361,7 @@ fn rust_qualify_imported_path(
 }
 
 fn rust_qualify_evidence_path(
-    state: &DirectAdapterState<'_>,
+    state: &DirectEvidenceState<'_>,
     owner: &DeclarationContext,
     raw: &str,
     use_start: usize,
@@ -9009,40 +9747,7 @@ fn rust_primitive_type(raw: &str) -> bool {
 }
 
 fn rust_prelude_symbol(raw: &str) -> bool {
-    matches!(
-        raw,
-        "Box"
-            | "Clone"
-            | "Copy"
-            | "Default"
-            | "DoubleEndedIterator"
-            | "Drop"
-            | "Eq"
-            | "Err"
-            | "ExactSizeIterator"
-            | "Extend"
-            | "Fn"
-            | "FnMut"
-            | "FnOnce"
-            | "From"
-            | "Into"
-            | "Iterator"
-            | "None"
-            | "Ok"
-            | "Option"
-            | "Ord"
-            | "PartialEq"
-            | "PartialOrd"
-            | "Result"
-            | "Send"
-            | "Sized"
-            | "Some"
-            | "String"
-            | "Sync"
-            | "ToOwned"
-            | "ToString"
-            | "Vec"
-    )
+    crate::builtins::is_language_builtin_global("rust", raw)
 }
 
 fn rust_deferred_owner(raw: &str) -> bool {
@@ -9169,11 +9874,188 @@ fn python_has_decorator(definition: Node<'_>, source: &[u8], expected: &str) -> 
         .any(|decorator| decorator == expected || decorator.ends_with(&format!(".{expected}")))
 }
 
+fn python_parameter_nodes(declaration: Node<'_>) -> Vec<PythonParameter<'_>> {
+    let Some(parameters) = declaration.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let mut cursor = parameters.walk();
+    parameters
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+        .filter_map(python_parameter)
+        .collect()
+}
+
+fn python_parameter(parameter: Node<'_>) -> Option<PythonParameter<'_>> {
+    let defaulted = matches!(
+        parameter.kind(),
+        "default_parameter" | "typed_default_parameter"
+    ) || has_descendant(parameter, "default_parameter")
+        || has_descendant(parameter, "typed_default_parameter");
+    let annotation = python_parameter_annotation(parameter);
+    let binding = parameter.child_by_field_name("name").unwrap_or(parameter);
+    let binding = if matches!(
+        binding.kind(),
+        "typed_parameter" | "typed_default_parameter"
+    ) {
+        binding.child_by_field_name("name").unwrap_or(binding)
+    } else {
+        binding
+    };
+    let list_splat =
+        binding.kind() == "list_splat_pattern" || has_descendant(binding, "list_splat_pattern");
+    let dictionary_splat = binding.kind() == "dictionary_splat_pattern"
+        || has_descendant(binding, "dictionary_splat_pattern");
+    let name = if binding.kind() == "identifier" {
+        binding
+    } else {
+        python_first_descendant(binding, "identifier")?
+    };
+    Some(PythonParameter {
+        syntax: parameter,
+        name,
+        annotation,
+        defaulted,
+        list_splat,
+        dictionary_splat,
+    })
+}
+
+fn python_parameter_annotation(parameter: Node<'_>) -> Option<Node<'_>> {
+    if let Some(annotation) = parameter.child_by_field_name("type") {
+        return Some(annotation);
+    }
+    let mut cursor = parameter.walk();
+    parameter
+        .children(&mut cursor)
+        .filter(|child| child.is_named())
+        .find_map(python_parameter_annotation)
+}
+
+fn python_first_descendant<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        if child.kind() == kind {
+            return Some(child);
+        }
+        if let Some(found) = python_first_descendant(child, kind) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn split_python_annotation_top_level(raw: &str, delimiter: char) -> Option<Vec<&str>> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut brackets = 0_u16;
+    let mut parentheses = 0_u16;
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, character) in raw.char_indices() {
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '[' => brackets = brackets.checked_add(1)?,
+            ']' => brackets = brackets.checked_sub(1)?,
+            '(' => parentheses = parentheses.checked_add(1)?,
+            ')' => parentheses = parentheses.checked_sub(1)?,
+            character if character == delimiter && brackets == 0 && parentheses == 0 => {
+                let part = raw.get(start..offset)?.trim();
+                if part.is_empty() {
+                    return None;
+                }
+                parts.push(part);
+                start = offset.saturating_add(character.len_utf8());
+            }
+            _ => {}
+        }
+    }
+    if quote.is_some() || brackets != 0 || parentheses != 0 {
+        return None;
+    }
+    let tail = raw.get(start..)?.trim();
+    if tail.is_empty() {
+        return None;
+    }
+    parts.push(tail);
+    Some(parts)
+}
+
+fn python_annotation_generic_open(raw: &str) -> Option<usize> {
+    if !raw.ends_with(']') {
+        return None;
+    }
+    let mut quote = None;
+    let mut escaped = false;
+    for (offset, character) in raw.char_indices() {
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '[' => return Some(offset),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn python_builtin_annotation(raw: &str) -> Option<&'static str> {
+    match raw {
+        "None" | "NoneType" => Some("builtins.NoneType"),
+        "str" => Some("builtins.str"),
+        "int" => Some("builtins.int"),
+        "float" => Some("builtins.float"),
+        "bool" => Some("builtins.bool"),
+        "bytes" => Some("builtins.bytes"),
+        "bytearray" => Some("builtins.bytearray"),
+        "complex" => Some("builtins.complex"),
+        "object" => Some("builtins.object"),
+        "type" => Some("builtins.type"),
+        "list" => Some("builtins.list"),
+        "dict" => Some("builtins.dict"),
+        "set" => Some("builtins.set"),
+        "frozenset" => Some("builtins.frozenset"),
+        "tuple" => Some("builtins.tuple"),
+        _ => None,
+    }
+}
+
+fn python_normalize_typing_alias(target: &str) -> String {
+    match target {
+        "typing.List" => "builtins.list",
+        "typing.Dict" => "builtins.dict",
+        "typing.Set" => "builtins.set",
+        "typing.FrozenSet" => "builtins.frozenset",
+        "typing.Tuple" => "builtins.tuple",
+        "typing.Type" => "builtins.type",
+        _ => target,
+    }
+    .to_owned()
+}
+
 fn python_super_call_is_builtin(
     receiver: Node<'_>,
     call: Node<'_>,
     owner: &DeclarationContext,
-    state: &DirectAdapterState<'_>,
+    state: &DirectEvidenceState<'_>,
 ) -> bool {
     if owner.kind != "method" || owner.enclosing_type_qualified_name.is_none() {
         return false;
@@ -9254,17 +10136,22 @@ fn resolve_python_module(current: &str, imported: &str, current_is_package: bool
 fn python_module_identity(path: &Path, source_file: &str) -> String {
     if source_file.contains('/') {
         return source_file
-            .trim_end_matches(".py")
+            .strip_suffix(".pyi")
+            .or_else(|| source_file.strip_suffix(".py"))
+            .unwrap_or(source_file)
             .trim_end_matches("/__init__")
             .replace('/', ".");
     }
-    let stem = source_file.trim_end_matches(".py");
+    let stem = source_file
+        .strip_suffix(".pyi")
+        .or_else(|| source_file.strip_suffix(".py"))
+        .unwrap_or(source_file);
     let parent = path
         .parent()
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if source_file == "__init__.py" {
+    if matches!(source_file, "__init__.py" | "__init__.pyi") {
         return if parent.is_empty() { stem } else { parent }.to_owned();
     }
     if !parent.is_empty()
@@ -10232,7 +11119,10 @@ fn rust_is_lexical_scope_node(kind: &str) -> bool {
 
 fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
     match relation {
-        CandidateRelation::Calls | CandidateRelation::IndirectCalls | CandidateRelation::Tests => {
+        CandidateRelation::Calls
+        | CandidateRelation::IndirectCalls
+        | CandidateRelation::Overrides
+        | CandidateRelation::Tests => {
             vec!["function".to_owned(), "method".to_owned()]
         }
         CandidateRelation::Constructs => {
@@ -10246,6 +11136,7 @@ fn target_kinds_for_relation(relation: CandidateRelation) -> Vec<String> {
         CandidateRelation::Annotates
         | CandidateRelation::Extends
         | CandidateRelation::Implements
+        | CandidateRelation::UsesTrait
         | CandidateRelation::Embeds => vec![
             "class".to_owned(),
             "struct".to_owned(),
@@ -10413,6 +11304,7 @@ const fn semantic_role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Decorator => "decorator",
         SemanticRole::Annotation => "annotation",
         SemanticRole::BaseType => "base_type",
+        SemanticRole::Override => "override",
         SemanticRole::TypeReference => "type_reference",
         SemanticRole::MemberAccess => "member_access",
         SemanticRole::Ownership => "ownership",
@@ -10432,6 +11324,8 @@ const fn candidate_relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Annotates => "annotates",
         CandidateRelation::Extends => "extends",
         CandidateRelation::Implements => "implements",
+        CandidateRelation::UsesTrait => "uses_trait",
+        CandidateRelation::Overrides => "overrides",
         CandidateRelation::References => "references",
         CandidateRelation::TypeOf => "type_of",
         CandidateRelation::Returns => "returns",

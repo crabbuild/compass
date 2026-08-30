@@ -31,6 +31,106 @@ fn write(root: &Path, relative: &str, source: &str) -> Result<(), Box<dyn Error>
 }
 
 #[test]
+fn php_closures_and_trait_uses_publish_without_quarantine() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    write(
+        directory.path(),
+        "src/Worker.php",
+        r#"<?php
+namespace App;
+
+trait Logs
+{
+    public function write(string $message): void {}
+}
+
+class Worker
+{
+    use Logs;
+
+    public function run(array $values): array
+    {
+        $normalize = function (string $value): string {
+            $this->write($value);
+            return trim($value);
+        };
+        return array_map(fn (string $value): string => $normalize($value), $values);
+    }
+}
+"#,
+    )?;
+
+    let mut options = BuildOptions::new(directory.path());
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    let result = build_local_graph(&options)?;
+    assert!(!result.partial_graph, "result={result:#?}");
+    assert_eq!(result.omitted_nodes, 0);
+    assert_eq!(result.omitted_edges, 0);
+
+    let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+    validate_code_graph(&graph)?;
+    assert_eq!(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.kind.as_str() == "closure")
+            .count(),
+        2,
+        "nodes={:#?}",
+        graph.nodes
+    );
+    assert!(graph.links.iter().any(|edge| {
+        edge.kind.as_str() == "mixes_in"
+            && graph.nodes.iter().any(|node| {
+                node.id == edge.source && node.qualified_name.eq_ignore_ascii_case("app\\worker")
+            })
+            && graph.nodes.iter().any(|node| {
+                node.id == edge.target && node.qualified_name.eq_ignore_ascii_case("app\\logs")
+            })
+    }));
+    assert!(graph.graph.diagnostics.iter().all(|diagnostic| {
+        !matches!(
+            diagnostic.code.as_str(),
+            "publication_omitted_node"
+                | "publication_omitted_edge"
+                | "publication_omission_summary"
+        )
+    }));
+    Ok(())
+}
+
+#[test]
+fn empty_javascript_file_has_one_canonical_file_identity() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    write(directory.path(), "src/random.js", "")?;
+
+    let mut options = BuildOptions::new(directory.path());
+    options.no_cluster = true;
+    options.no_viz = true;
+    options.max_workers = Some(2);
+    let result = build_local_graph(&options)?;
+    assert!(!result.partial_graph, "result={result:#?}");
+    assert_eq!(result.identity_collisions, 0);
+    assert_eq!(result.omitted_nodes, 0);
+    assert_eq!(result.omitted_edges, 0);
+
+    let graph = GraphDocument::load(&result.output_dir.join("graph.json"))?;
+    validate_code_graph(&graph)?;
+    let file_nodes = graph
+        .nodes
+        .iter()
+        .filter(|node| node.source_file() == Some("src/random.js"))
+        .collect::<Vec<_>>();
+    assert_eq!(file_nodes.len(), 1, "nodes={:#?}", graph.nodes);
+    assert_eq!(file_nodes[0].kind, NodeKind::File);
+    assert_eq!(file_nodes[0].name, "random.js");
+    assert_eq!(file_nodes[0].qualified_name, "src/random.js");
+    Ok(())
+}
+
+#[test]
 fn invalid_topology_is_quarantined_and_the_valid_graph_is_published() -> Result<(), Box<dyn Error>>
 {
     let directory = tempfile::tempdir()?;
@@ -565,7 +665,10 @@ fn real_framework_limit_failure_isolated_from_healthy_file() -> Result<(), Box<d
         "src/healthy.rs",
         "pub fn target() {}\npub fn healthy() { target(); }\n",
     )?;
-    let overflow = "GET /overflow controllers.Example.view()\n".repeat(100_001);
+    // Keep the fixture below the pack's byte budget so the fact budget is the
+    // first and explicit limit reached. This distinguishes fact truncation
+    // from the independent config-byte guard.
+    let overflow = "GET /a x\n".repeat(100_001);
     write(directory.path(), "conf/routes", &overflow)?;
 
     let graph = build(directory.path())?;

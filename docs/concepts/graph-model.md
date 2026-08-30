@@ -116,6 +116,11 @@ Relation names depend on the extractor and input type. Common families include:
 Do not assume every relation implies runtime execution. `imports_from` and
 `references` express different kinds of dependency from `calls`.
 
+In the canonical `compass.graph/1` vocabulary, anonymous functions are typed
+callable `closure` nodes. Trait or mixin composition is `mixes_in`; interface
+contract satisfaction remains `implements`. Both retain their exact source
+occurrence rather than being inferred from terminal-name similarity.
+
 Configuration keys preserve their source hierarchy: root keys are contained by
 the file or schema node, and nested keys are contained by their immediate
 parent key. Nested keys may also retain a `references` edge with
@@ -280,8 +285,11 @@ LeafParser --USES--> Token     AppContext
 
 A god node is highly connected relative to the graph. It can reveal a critical
 hub or a design smell, but it can also be a legitimate shared abstraction.
-Compass's report filters some common built-in noise; it does not make a final
-architectural judgment.
+Compass excludes known, unshadowed language globals from call-target
+publication and filters additional common noise from reports. A source-proven
+declaration or explicit binding with the same spelling still takes precedence;
+Compass does not make a final architectural judgment about the hubs that
+remain.
 
 ## Hyperedges
 
@@ -377,10 +385,25 @@ When Compass returns an edge, ask:
 
 Those seven questions prevent most over-interpretation.
 
+## Agent-authored overlays
+
+The Base Graph remains the immutable source-derived graph. An Agent Graph
+Overlay is a separate append-only sequence of agent-owned Assertions,
+Retractions, and Challenges. Compass composes one exact Base Generation and
+one exact Overlay Revision into an Effective Graph under either the `augment`
+or `curated` profile.
+
+`GROUNDED` means Compass verified the assertion's citations and issued a
+certificate. It describes verification, not authorship, structural extraction
+confidence, runtime truth, or semantic correctness. Agent facts therefore
+retain both `groundingStatus: "GROUNDED"` and the separate conservative
+structural confidence used by graph traversal.
+
 ## Related pages
 
 - [How Compass works](how-it-works.md)
 - [Provenance and confidence](provenance.md)
+- [Agent Graph overlays](agent-graph-overlays.md)
 - [CompassQL concepts](compassql.md)
 - [Output reference](../reference/outputs.md)
 

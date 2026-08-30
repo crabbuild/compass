@@ -5,6 +5,167 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Rebuild SQLite adjacency sidecars
+
+Store snapshots now declare edge-ID-ordered directional adjacency so bounded
+JSON and SQLite queries retain the same canonical edge prefix. Existing
+`graph.json` artifacts remain compatible. A SQLite sidecar created before this
+capability can still be validated, backed up, and used to recover canonical
+JSON, but directional store queries reject it with
+`edge_id_ordered_adjacency_unavailable`.
+
+Preserve `graph.json`, then rebuild the disposable sidecar with:
+
+```bash
+compass update --force --store sqlite
+compass store validate compass-out --format json
+```
+
+Use `--engine json` until the rebuild completes. Do not edit or copy SQLite
+tables to add the capability marker; the directional index key order must be
+rebuilt from the validated graph.
+
+## Frontend graph vocabulary
+
+Recent pre-release builds can add React-oriented `renders` edges and UI/server
+roles to `compass.graph/1`. Consumers with strict enum validation must upgrade
+their graph reader before opening a graph produced by a frontend-enabled
+build; the old reader must reject the new values rather than treating them as
+unknown calls or silently omitting them. Rebuild cached graph and query
+artifacts after upgrading so the frontend extraction semantics and framework
+pack digest are applied consistently. The matching `compass.query/1` manifest
+and fingerprint must be deployed with the reader as well.
+
+## Framework task context
+
+Frontend-enabled builds emit `compass.task-context/2` (the previous
+`compass.task-context/1` packet is intentionally rejected). Upgrade CLI, MCP,
+and agent readers together, then rebuild cached context artifacts. The new
+typed `framework` section carries pack/version and qualification state, route
+stages, render direction, runtime boundaries, configuration dependencies, and
+explicit ambiguity or truncation; unknown pack IDs and qualification states
+must fail closed.
+
+Route-stage readers must also add the `dependency` and `security` variants to
+their closed enum. Update the `compass.query/1` manifest fingerprint and viewer
+assets with the reader. Do not map these stages to `middleware`:
+`middlewareCount` continues to count HTTP middleware only. An older strict
+reader should reject a packet containing either new value, then be upgraded;
+cached graph, query, or task-context packets may be rebuilt after deployment.
+
+Python framework readers must replace the combined `python-web` pack ID with
+`django-python`, `django-rest-framework-python`, `fastapi-python`,
+`flask-python`, `pydantic-python`, `sqlalchemy-python`, `celery-python`, and
+`starlette-python`. `django-python`, `fastapi-python`, and `flask-python` are
+now semantics version 2, and the framework-pack cache identity is
+`compass.framework-packs/6`, so run a fresh
+or forced build after upgrading. A Flask `@app.route` without a `methods`
+argument now records
+the declared `GET` operation instead of `ANY`. Exact Django URL calls and
+Python receiver mount identities can also remove older name-shaped false
+positives; unresolved ambiguous or dynamic registrations are intentionally not
+restored through a legacy fallback.
+
+Python SQLAlchemy and Celery facts no longer come from
+`enterprise-domain-facts`. Exact SQLAlchemy 2 declarations, mapped fields,
+relationships, and literal table mappings are owned by `sqlalchemy-python`;
+exact Celery task decorators, task invocations, canvas signatures, literal
+queues, retries, and beat schedules are owned by `celery-python`. Dynamic or
+ambiguous forms now remain unresolved instead of retaining regex-derived
+facts. Non-Python `enterprise-domain-facts` behavior is unchanged.
+
+FastAPI `Depends` values previously exposed as legacy middleware references
+now use the additive `dependency` route stage; `Security` uses the distinct
+`security` stage. Consumers must retain these values rather than coercing them
+to HTTP middleware. Pydantic schema dependencies reuse `depends_on` and
+existing class/field nodes, so no new public node or edge kind is introduced.
+DRF router routes likewise reuse `routes_to`; serializer, security, model,
+field-relationship, manager, and signal-sender wiring use the existing
+`depends_on` and `subscribes` relationships. Strict framework-context readers
+must accept `django-rest-framework-python`. No settings, middleware, or admin
+registration edge is synthesized: the current descriptor vocabulary cannot
+advertise those registrations without incorrectly claiming bean-container
+semantics.
+
+## Ruby universal evidence rebuild
+
+The current release publishes Ruby through the version-1 universal evidence
+pipeline (`compass.ruby`) and the evidence-backed `rails-ruby` framework pack.
+Ruby graph output is therefore regenerated on the first build after upgrading;
+do not reuse a Ruby cache produced by an older Compass publisher. Ruby is
+`Qualified` for the bounded producer capabilities recorded in the release
+decision; retain review of ambiguous/dynamic Ruby relationships and do not
+treat unresolved dynamic dispatch as a missing deterministic fact.
+
+All 14 registered universal evidence pipelines are now marked `Qualified`.
+The release decision at `tests/qualification/universal-evidence-promotion.json`
+binds each producer ID, language, version, and dialect alias to that state.
+Changing a producer version or advertised capability requires a new decision;
+existing cached evidence is regenerated when its pipeline identity changes.
+
+## Universal evidence schema reset
+
+The universal evidence envelope is now `compass.languages.evidence/2` and the
+extraction semantics identity is `compass.languages.extraction/4`. The envelope
+field is `pipeline` (with `qualification` and `emitter` metadata), replacing
+the provisional `adapter`/`profile`/`producer` shape. Compass intentionally
+does not translate or reuse pre-refactor universal evidence; run a forced
+update to regenerate one coherent artifact set. Qualification manifests,
+candidate exports, and TypeScript scorecards likewise require their `/2`
+schemas and use `producer` for the language evidence identity; regenerate
+those audit inputs rather than trying to load the old field names.
+
+Version 4 also invalidates pre-enhancement Markdown caches so nested
+frontmatter can be republished as exact graph-v1 config nodes. Normal builds
+re-extract affected files automatically; no graph schema migration or manual
+artifact editing is required.
+
+## Python project identity and stubs
+
+Python now publishes version-1 `compass.python` evidence. Static
+`pyproject.toml` import roots can remove repository-layout prefixes such as
+`src.` from qualified names, and top-level Python graph IDs are derived from
+the proven module identity instead of the checkout path. `.pyi` files now use
+the Python pipeline: a matching `.py` file remains the declaration owner,
+stub-only declarations carry `source_kind: "stub"`, and mismatches publish a
+`python_stub_source_conflict` diagnostic without merging guessed facts.
+The current producer also fills existing universal parameter, call-shape, `type_of`,
+`returns`, and call-result fields for the bounded static subset. Dynamic,
+starred, shadowed, `Any`, and conflicting-return cases remain unresolved.
+
+Run a fresh or forced build after upgrading. Project evidence schema
+`compass.framework-project-evidence/4` and Python producer version 1 invalidate
+the affected cache entries automatically. Published historical realizations
+remain immutable; rebuild a historical revision explicitly if it must use the
+new identities.
+
+## Architecture viewer contract
+
+`compass export callflow-json` now emits
+`compass.viewer.architecture/1`, replacing `compass.viewer.callflow/1`. Update
+direct consumers as follows:
+
+- negotiate `contracts.architecture_viewer` instead of `callflow_viewer`;
+- read `relationships` and `relationClass` instead of treating every edge as a
+  call;
+- select `projections[].scope` (`production` or `all_code`) and join
+  `memberships`, `groups`, and `routes` rather than reading flat `sections`;
+- resolve each membership's `nodeIndex` against top-level `nodes` and
+  `groupIndex` against that projection's `groups` array;
+- use `overviewGroupIds`, `overviewRouteIds`, and `omissions` instead of an
+  `Other` overflow section; and
+- surface `quality` independently from extraction status.
+
+Production excludes Documentation as well as Test, Generated, Vendor, and
+Unknown. Select All-code when documentation architecture is intentionally in
+scope.
+
+The old major is rejected rather than silently translated. The CLI command
+names remain compatible. Rename project section files to a versioned
+`compass.architecture-overlay/1` JSON/TOML overlay and pass
+`--architecture-overlay PATH`; `--sections` is temporarily retained as a
+deprecated adapter.
+
 ## Install Compass
 
 Install the latest macOS release:
@@ -69,6 +230,21 @@ cache payloads remain Compass contracts: do not copy `graphify-out/cache/` or
 `graphify-out/manifest.json` into `compass-out/`. Compass rebuilds them from
 source while retaining its own internal snapshot and store protocols.
 
+### Rebuild provisional Compass artifacts after the v1 identity reset
+
+Compass currently makes no backward-compatibility promise for pre-release
+internal artifacts. Extraction, cache, publication, store-index, query-index
+and ranker, overview, qualification, and semantic-diff identities have been
+reset to v1. Artifacts carrying provisional higher version numbers are not
+migrated. Run a forced update with the current binary to publish one coherent
+v1 artifact set:
+
+```bash
+compass update . --force
+```
+
+Disposable query indexes rebuild automatically on their next use.
+
 ## Update natural-query automation
 
 Plain `compass query "<question>"` now returns structured discovery text by
@@ -94,6 +270,11 @@ Run `compass update .` once after upgrading to publish `orientation.json` with
 the exact `graph.json` digest. Agent-facing orientation/report exports fail
 explicitly for older, missing, detached, or stale sidecars instead of pairing
 evidence by filename alone.
+
+The orientation contract is now `compass.orientation/2`. Consumers that parse
+`orientation.json` must accept the new schema and may read its optional typed
+`blindSpots` projection; older orientation files should be regenerated with
+`compass update .` rather than edited in place.
 
 ## Select inference breadth explicitly when upgrading
 
@@ -154,9 +335,9 @@ compass update .
 
 The history realization schema and SQLite store format remain at v1. Compass
 does not rewrite immutable realizations or map former hidden artifact paths.
-Use `compass history build` to recreate any revision that must materialize with
-the current visible artifact layout; archive the existing history database
-first only when it is needed for audit or rollback.
+Use `compass history rebuild` to recreate any revision that must materialize
+with the current visible artifact layout; archive the existing history
+database first only when it is needed for audit or rollback.
 
 ## Compass Store sidecar upgrades
 
@@ -214,7 +395,7 @@ queries use JSON by default; use `--engine store` to select a retained sidecar.
 
 Downgrades must validate the output with the target binary. Do not reuse a
 newer physical SQLite/redb file merely because its filename matches. Rebuild
-when the target binary reports an unsupported major or adapter.
+when the target binary reports an unsupported major or storage provider.
 
 ## Update node-trail direction handling
 
@@ -252,6 +433,22 @@ Current VSIX builds require Compass CLI 0.3.0 or newer. If **Select Compass
 CLI** labels an installation unsupported, upgrade that CLI or select another
 detected installation. Releases below 0.3.0 and 0.3.0 prereleases cannot be
 activated, even if they advertise some current capabilities.
+
+## Optional document OCR
+
+No migration is required for existing projects because OCR defaults to off.
+PDF and Office files now produce native structural blocks, so run `compass
+update --force` once if an existing output predates `compass.document/1`.
+To opt into local OCR, install one profile explicitly and rebuild under its new
+fingerprint:
+
+```bash
+compass models install pp-ocrv6-small
+compass extract . --ocr auto --force
+```
+
+Do not copy or rename old flattened document caches; incompatible schema,
+normalizer, renderer, OCR, and model identities are intentionally not migrated.
 
 ## Replace commands
 

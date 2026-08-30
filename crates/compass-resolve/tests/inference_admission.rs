@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
 use compass_languages::{
-    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceRange,
-    Extraction, LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint,
-    ScopeFact, SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA,
-    UniversalAdapterProfile,
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceRange, Extraction,
+    LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
+    SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidenceIdentity,
+    UniversalEvidenceQualification,
 };
 use compass_resolve::{ResolutionAdmission, resolve_prevalidated_owned_with_root_at_inference};
 
@@ -22,14 +22,14 @@ fn range(start: u64, end: u64) -> EvidenceRange {
 
 fn external_call_batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
-        adapter: AdapterIdentity {
+        pipeline: UniversalEvidenceIdentity {
             id: "compass.python.inference-admission-test".to_owned(),
             language: "python".to_owned(),
             dialect: None,
             version: 1,
             evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-            profile: UniversalAdapterProfile::UniversalCandidate,
-            producer: "inference-admission-test".to_owned(),
+            qualification: UniversalEvidenceQualification::Qualifying,
+            emitter: "inference-admission-test".to_owned(),
             capabilities: vec![
                 LanguageCapability::Declarations,
                 LanguageCapability::LexicalScopes,
@@ -105,7 +105,7 @@ fn external_call_batch() -> SemanticEvidenceBatch {
 
 fn bound_external_import_batch() -> SemanticEvidenceBatch {
     let mut batch = external_call_batch();
-    batch.adapter.capabilities = vec![
+    batch.pipeline.capabilities = vec![
         LanguageCapability::Declarations,
         LanguageCapability::LexicalScopes,
         LanguageCapability::Imports,

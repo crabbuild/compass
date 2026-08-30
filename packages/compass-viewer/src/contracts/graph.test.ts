@@ -105,4 +105,113 @@ describe("GraphViewModelSchema", () => {
       endLine: 42
     });
   });
+
+  it("validates exact Agent Graph context, challenges, and bounded Retractions", () => {
+    const digest = "a".repeat(64);
+    const parsed = GraphViewModelSchema.parse({
+      schema: "compass.viewer.graph/1",
+      title: "Grounded overlay",
+      stats: { nodes: 1, edges: 0, communities: 1, aggregated: false },
+      nodes: [{
+        id: "base-node",
+        label: "Base node",
+        community: 0,
+        challenged: true,
+        challenge: {
+          challenge: "challenge:review",
+          targetId: "base-node",
+          effect: "flag",
+          masked: false,
+          certificateDigest: digest,
+          summary: "The exact source contradicts this fact."
+        }
+      }],
+      edges: [],
+      communities: [{ id: 0, label: "Core", color: "#4E79A7" }],
+      effectiveGraph: {
+        effectiveIdentity: digest,
+        baseGeneration: { generationId: "generation-1", graphDigest: digest },
+        overlayRevision: digest,
+        compositionProfile: "augment",
+        retractions: {
+          total: 1,
+          examples: [{
+            kind: "assertion",
+            id: "assertion:old",
+            reasonCode: "superseded",
+            explanation: "Replaced with stronger evidence.",
+            sequence: 2
+          }],
+          omittedExamples: 0
+        },
+        omissions: {
+          total: 0,
+          direct: 0,
+          cascaded: 0,
+          examples: [],
+          omittedExamples: 0
+        }
+      }
+    });
+
+    expect(parsed.nodes[0]?.challenge?.summary).toContain("contradicts");
+    expect(parsed.effectiveGraph?.retractions.examples).toHaveLength(1);
+  });
+
+  it("accepts bounded document OCR provenance and geometry", () => {
+    const parsed = GraphViewModelSchema.parse({
+      schema: "compass.viewer.graph/1",
+      title: "Documents",
+      stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+      nodes: [
+        {
+          id: "report",
+          label: "report.pdf",
+          community: 0,
+          document: {
+            role: "root",
+            format: "pdf",
+            visualCoverage: "partial",
+            ocrMode: "auto",
+            complete: false,
+            ocrProfile: { profile: "pp-ocrv6-small" }
+          }
+        },
+        {
+          id: "region",
+          label: "Invoice total",
+          community: 0,
+          document: {
+            role: "block",
+            kind: "paragraph",
+            text: "Invoice total",
+            origin: {
+              kind: "ocr",
+              profile: { profile: "pp-ocrv6-small" },
+              confidence_bps: 9234
+            },
+            locator: {
+              kind: "ocr",
+              owner: { kind: "pdf", page: 4, item: 1 },
+              candidate_id: "page-4",
+              width: 1000,
+              height: 800,
+              polygon: [{ x: 80, y: 100 }, { x: 390, y: 100 }, { x: 390, y: 160 }]
+            }
+          }
+        }
+      ],
+      edges: [],
+      communities: [{ id: 0, label: "Documents", color: "#4E79A7" }]
+    });
+
+    expect(parsed.nodes[1]?.document?.origin).toMatchObject({
+      kind: "ocr",
+      confidence_bps: 9234
+    });
+    expect(parsed.nodes[1]?.document?.locator).toMatchObject({
+      kind: "ocr",
+      owner: { kind: "pdf", page: 4 }
+    });
+  });
 });

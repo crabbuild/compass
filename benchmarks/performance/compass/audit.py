@@ -44,8 +44,8 @@ from .occurrences import (
 )
 
 
-AUDIT_SCHEMA = "compass.quality-audit"
-AUDIT_RESULT_SCHEMA = "compass.quality-audit-result"
+AUDIT_SCHEMA = "compass.quality-audit/2"
+AUDIT_RESULT_SCHEMA = "compass.quality-audit-result/2"
 QUALIFICATION_MINIMUM = 2_000
 CORPUS_MINIMUM = 400
 RELATION_MINIMUM = 100
@@ -128,7 +128,9 @@ def _source_line_range(root: Path, source_file: str, location: str) -> tuple[int
     return start, end, hashlib.sha256(normalized).hexdigest()
 
 
-def _capability_for_relation(relation: str) -> str:
+def _capability_for_relation(relation: str, producer: str | None = None) -> str:
+    if producer == "ruby" and relation == "implements":
+        return "traits"
     return {
         "accesses": "members",
         "calls": "calls",
@@ -236,7 +238,7 @@ def _compass_accepted_candidates(
     corpus: str,
     corpus_commit: str,
     graph_sha256: str,
-    adapter: str,
+    producer: str,
     compass_nodes: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Export every exact source-bounded Compass relationship for precision audit."""
@@ -293,8 +295,8 @@ def _compass_accepted_candidates(
                 "id": candidate_id,
                 "candidateSource": "compass_graph",
                 "suggestedPool": "accepted",
-                "adapter": adapter,
-                "capability": _capability_for_relation(relation),
+                "producer": producer,
+                "capability": _capability_for_relation(relation, producer),
                 "language": source_node.language,
                 "relation": relation,
                 "confidence": confidence,
@@ -333,8 +335,10 @@ def _source_oracle_candidates(
     corpus_root: Path,
     corpus: str,
     corpus_commit: str,
-    adapter: str,
+    producer: str,
     compass_nodes: dict[str, Any],
+    include_globs: tuple[str, ...] = (),
+    exclude_globs: tuple[str, ...] = (),
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Export independently parsed source constructs for recall adjudication."""
 
@@ -344,7 +348,12 @@ def _source_oracle_candidates(
         if node.qualified_name:
             owners[node.qualified_name.casefold()].append(identifier)
 
-    inventory = independent_source_inventory(corpus_root, adapter)
+    inventory = independent_source_inventory(
+        corpus_root,
+        producer,
+        include_globs=include_globs,
+        exclude_globs=exclude_globs,
+    )
     candidates: list[dict[str, Any]] = []
     for construct in inventory.constructs:
         bounded = source_index.exact_range(
@@ -359,7 +368,7 @@ def _source_oracle_candidates(
             "source_oracle",
             corpus,
             corpus_commit,
-            adapter,
+            producer,
             construct.source_file,
             construct.relation,
             construct.owner_qualified_name,
@@ -373,7 +382,7 @@ def _source_oracle_candidates(
         ).hexdigest()[:24]
         source: dict[str, Any] = {
             "qualifiedName": construct.owner_qualified_name,
-            "language": adapter,
+            "language": producer,
         }
         exact_owners = owners.get(construct.owner_qualified_name.casefold(), ())
         if len(exact_owners) == 1:
@@ -383,9 +392,9 @@ def _source_oracle_candidates(
                 "id": candidate_id,
                 "candidateSource": "independent_source",
                 "suggestedPool": "source_oracle",
-                "adapter": adapter,
+                "producer": producer,
                 "capability": construct.capability,
-                "language": adapter,
+                "language": producer,
                 "relation": construct.relation,
                 "confidence": "source_ast",
                 "targetCluster": _target_cluster(
@@ -396,7 +405,7 @@ def _source_oracle_candidates(
                 "target": {
                     "spelling": construct.target_spelling,
                     "qualifier": construct.qualifier,
-                    "language": adapter,
+                    "language": producer,
                 },
                 "occurrence": {
                     "file": construct.source_file,
@@ -416,8 +425,8 @@ def _source_oracle_candidates(
             }
         )
     coverage = {
-        "provider": independent_source_provider_identity(adapter),
-        "providerAvailable": has_independent_source_provider(adapter),
+        "provider": independent_source_provider_identity(producer),
+        "providerAvailable": has_independent_source_provider(producer),
         "scannedFiles": inventory.scanned_files,
         "parsedFiles": inventory.parsed_files,
         "rejectedFiles": list(inventory.rejected_files),
@@ -426,9 +435,9 @@ def _source_oracle_candidates(
             if inventory.provider_metadata
             else {}
         ),
-        "inventorySha256": source_construct_inventory_sha256(adapter, inventory),
+        "inventorySha256": source_construct_inventory_sha256(producer, inventory),
         "complete": (
-            has_independent_source_provider(adapter)
+            has_independent_source_provider(producer)
             and inventory.scanned_files == inventory.parsed_files
             and not inventory.rejected_files
         ),
@@ -441,13 +450,13 @@ def export_comparison_candidates(
     graph_path: Path,
     corpus_root: Path,
     corpus: str,
-    adapter: str,
+    producer: str,
     destination: Path,
 ) -> Path:
     """Export deterministic, unjudged source-bounded comparison hypotheses."""
 
     corpus = _text(corpus, "corpus", identity=True)
-    adapter = _text(adapter, "adapter", identity=True)
+    producer = _text(producer, "producer", identity=True)
     if not database_path.is_file():
         raise AuditError(f"comparison database does not exist: {database_path}")
     if not graph_path.is_file():
@@ -484,14 +493,14 @@ def export_comparison_candidates(
         corpus,
         corpus_commit,
         graph_sha256,
-        adapter,
+        producer,
         compass_nodes,
     )
     source_oracle_candidates, source_oracle_coverage = _source_oracle_candidates(
         corpus_root,
         corpus,
         corpus_commit,
-        adapter,
+        producer,
         compass_nodes,
     )
     comparison_candidates: list[dict[str, Any]] = []
@@ -531,7 +540,7 @@ def export_comparison_candidates(
             corpus,
             corpus_commit,
             graph_sha256,
-            adapter,
+            producer,
             graphify.relation,
             source_id,
             target_id,
@@ -548,7 +557,7 @@ def export_comparison_candidates(
                 "id": candidate_id,
                 "candidateSource": "graphify_comparison",
                 "suggestedPool": "graphify_hypothesis",
-                "adapter": adapter,
+                "producer": producer,
                 "capability": _capability_for_relation(graphify.relation),
                 "language": language,
                 "relation": graphify.relation,
@@ -582,7 +591,7 @@ def export_comparison_candidates(
     candidates = accepted_candidates + source_oracle_candidates + comparison_candidates
     candidates.sort(key=lambda candidate: candidate["id"])
     payload = {
-        "schema": "compass.quality-audit-candidates",
+        "schema": "compass.quality-audit-candidates/2",
         "corpus": {
             "name": corpus,
             "commit": corpus_commit,
@@ -592,7 +601,7 @@ def export_comparison_candidates(
             "graphNodes": graph_nodes,
             "graphEdges": graph_edges,
         },
-        "adapter": adapter,
+        "producer": producer,
         "recordsAreUnjudged": True,
         "populations": {
             "compassAccepted": len(accepted_candidates),
@@ -715,11 +724,38 @@ def _occurrence(value: object, context: str) -> AuditOccurrence:
 
 def _graph_fact(value: object, context: str) -> AuditGraphFact:
     item = _expect_object(value, context)
-    _keys(item, required=("source", "target", "relation"), context=context)
+    _keys(
+        item,
+        required=("source", "target", "relation"),
+        optional=("edgeId", "extractor", "rule"),
+        context=context,
+    )
+    pointer = (item.get("edgeId"), item.get("extractor"), item.get("rule"))
+    if any(value is not None for value in pointer) and not all(
+        value is not None for value in pointer
+    ):
+        raise AuditError(
+            f"{context} exact edge pointer requires edgeId, extractor, and rule"
+        )
     return AuditGraphFact(
         source=_text(item["source"], f"{context}.source"),
         target=_text(item["target"], f"{context}.target"),
         relation=_text(item["relation"], f"{context}.relation", identity=True),
+        edge_id=(
+            _text(item["edgeId"], f"{context}.edgeId")
+            if item.get("edgeId") is not None
+            else None
+        ),
+        extractor=(
+            _text(item["extractor"], f"{context}.extractor", identity=True)
+            if item.get("extractor") is not None
+            else None
+        ),
+        rule=(
+            _text(item["rule"], f"{context}.rule", identity=True)
+            if item.get("rule") is not None
+            else None
+        ),
     )
 
 
@@ -729,14 +765,27 @@ def _corpus(value: object, index: int) -> AuditCorpus:
     _keys(
         item,
         required=("name", "commit", "path", "graph", "graphSha256"),
+        optional=("sourceGlobs", "excludeGlobs"),
         context=context,
     )
+    source_globs = item.get("sourceGlobs", [])
+    exclude_globs = item.get("excludeGlobs", [])
+    if not isinstance(source_globs, list) or any(
+        not isinstance(pattern, str) or not pattern for pattern in source_globs
+    ):
+        raise AuditError(f"{context}.sourceGlobs must be a list of non-empty strings")
+    if not isinstance(exclude_globs, list) or any(
+        not isinstance(pattern, str) or not pattern for pattern in exclude_globs
+    ):
+        raise AuditError(f"{context}.excludeGlobs must be a list of non-empty strings")
     return AuditCorpus(
         name=_text(item["name"], f"{context}.name", identity=True),
         commit=_commit(item["commit"], f"{context}.commit"),
         path=_safe_path(item["path"], f"{context}.path", allow_dot=True),
         graph=_safe_path(item["graph"], f"{context}.graph"),
         graph_sha256=_sha256(item["graphSha256"], f"{context}.graphSha256"),
+        source_globs=tuple(source_globs),
+        exclude_globs=tuple(exclude_globs),
     )
 
 
@@ -745,13 +794,13 @@ def _capability(value: object, index: int) -> AuditCapabilityIdentity:
     item = _expect_object(value, context)
     _keys(
         item,
-        required=("adapter", "capability"),
+        required=("producer", "capability"),
         optional=("frameworkPack",),
         context=context,
     )
     framework_pack = item.get("frameworkPack")
     return AuditCapabilityIdentity(
-        adapter=_text(item["adapter"], f"{context}.adapter", identity=True),
+        producer=_text(item["producer"], f"{context}.producer", identity=True),
         capability=_text(item["capability"], f"{context}.capability", identity=True),
         framework_pack=(
             _text(framework_pack, f"{context}.frameworkPack", identity=True)
@@ -768,12 +817,13 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
         item,
         required=(
             "corpus",
-            "adapter",
+            "producer",
             "provider",
             "scannedFiles",
             "parsedFiles",
             "inventorySha256",
         ),
+        optional=("rejectedFiles",),
         context=context,
     )
     scanned = item["scannedFiles"]
@@ -791,9 +841,27 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
             f"{context} must contain a non-empty source population with parsedFiles "
             "between zero and scannedFiles"
         )
+    raw_rejected = item.get("rejectedFiles")
+    if raw_rejected is None:
+        rejected_files = None
+    elif not isinstance(raw_rejected, list):
+        raise AuditError(f"{context}.rejectedFiles must be an array")
+    else:
+        rejected_files = tuple(
+            _safe_path(value, f"{context}.rejectedFiles[{index}]")
+            for index, value in enumerate(raw_rejected)
+        )
+    if rejected_files is not None and rejected_files != tuple(sorted(set(rejected_files))):
+        raise AuditError(
+            f"{context}.rejectedFiles must be sorted and contain no duplicates"
+        )
+    if rejected_files is not None and len(rejected_files) != scanned - parsed:
+        raise AuditError(
+            f"{context}.rejectedFiles must identify every unparsed source file"
+        )
     return AuditSourceOracle(
         corpus=_text(item["corpus"], f"{context}.corpus", identity=True),
-        adapter=_text(item["adapter"], f"{context}.adapter", identity=True),
+        producer=_text(item["producer"], f"{context}.producer", identity=True),
         provider=_text(item["provider"], f"{context}.provider", identity=True),
         scanned_files=scanned,
         parsed_files=parsed,
@@ -801,6 +869,7 @@ def _source_oracle(value: object, index: int) -> AuditSourceOracle:
             item["inventorySha256"],
             f"{context}.inventorySha256",
         ),
+        rejected_files=rejected_files,
     )
 
 
@@ -813,7 +882,7 @@ def _record(value: object, index: int) -> AuditRecord:
             "id",
             "corpus",
             "pool",
-            "adapter",
+            "producer",
             "capability",
             "language",
             "relation",
@@ -857,7 +926,7 @@ def _record(value: object, index: int) -> AuditRecord:
         record_id=_text(item["id"], f"{context}.id", identity=True),
         corpus=_text(item["corpus"], f"{context}.corpus", identity=True),
         pool=pool,
-        adapter=_text(item["adapter"], f"{context}.adapter", identity=True),
+        producer=_text(item["producer"], f"{context}.producer", identity=True),
         framework_pack=(
             _text(framework_pack, f"{context}.frameworkPack", identity=True)
             if framework_pack is not None
@@ -922,7 +991,7 @@ def load_manifest(path: Path) -> AuditManifest:
         )
     )
     source_oracle_keys = [
-        (entry.corpus, entry.adapter) for entry in source_oracles
+        (entry.corpus, entry.producer) for entry in source_oracles
     ]
     if source_oracle_keys != sorted(set(source_oracle_keys)):
         raise AuditError(
@@ -940,7 +1009,7 @@ def load_manifest(path: Path) -> AuditManifest:
     if not capabilities:
         raise AuditError("manifest.advertisedCapabilities must not be empty")
     capability_keys = [
-        (entry.adapter, entry.framework_pack, entry.capability) for entry in capabilities
+        (entry.producer, entry.framework_pack, entry.capability) for entry in capabilities
     ]
     if capability_keys != sorted(set(capability_keys)):
         raise AuditError(
@@ -969,7 +1038,7 @@ def load_manifest(path: Path) -> AuditManifest:
                 f"{source_oracle.corpus!r}"
             )
     advertised = {
-        (entry.adapter, entry.framework_pack, entry.capability) for entry in capabilities
+        (entry.producer, entry.framework_pack, entry.capability) for entry in capabilities
     }
     for record in records:
         if record.corpus not in corpus_names:
@@ -977,7 +1046,7 @@ def load_manifest(path: Path) -> AuditManifest:
                 f"record {record.record_id!r} references unknown corpus {record.corpus!r}"
             )
         capability_key = (
-            record.adapter,
+            record.producer,
             record.framework_pack,
             record.capability,
         )
@@ -993,7 +1062,7 @@ def load_manifest(path: Path) -> AuditManifest:
             )
         if record.pool == "source_oracle" and (
             record.corpus,
-            record.adapter,
+            record.producer,
         ) not in source_oracle_key_set:
             raise AuditError(
                 f"record {record.record_id!r} has no pinned source-oracle inventory"
@@ -1152,6 +1221,45 @@ def _require_fact(
         )
 
 
+def _require_exact_representation(
+    graph: _GraphIndex,
+    fact: AuditGraphFact,
+    record_id: str,
+) -> None:
+    assert fact.edge_id is not None
+    assert fact.extractor is not None
+    assert fact.rule is not None
+    edges = graph.facts.get((fact.source, fact.target, fact.relation), ())
+    matches = [
+        edge
+        for edge in edges
+        if edge.get("id") == fact.edge_id
+        and edge.get("occurrenceRule") == fact.rule
+        and _has_exact_representation_evidence(edge, fact.extractor, fact.rule)
+    ]
+    if len(matches) != 1:
+        raise AuditError(
+            f"record {record_id!r} exact representation edge is absent or stale: "
+            f"{fact.edge_id} ({fact.extractor}, {fact.rule})"
+        )
+
+
+def _has_exact_representation_evidence(
+    edge: dict[str, Any],
+    extractor: str,
+    rule: str,
+) -> bool:
+    evidence = edge.get("evidence")
+    return isinstance(evidence, list) and any(
+        isinstance(item, dict)
+        and item.get("origin") == "ast"
+        and item.get("confidence") == "exact"
+        and item.get("extractor") == extractor
+        and item.get("rule") == rule
+        for item in evidence
+    )
+
+
 def _validate_record_inputs(
     manifest: AuditManifest,
     corpus_root: Path,
@@ -1159,6 +1267,7 @@ def _validate_record_inputs(
 ) -> dict[str, _GraphIndex]:
     indexes: dict[str, _GraphIndex] = {}
     corpus_roots: dict[str, Path] = {}
+    corpus_specs = {corpus.name: corpus for corpus in manifest.corpora}
     single = len(manifest.corpora) == 1
     for corpus in manifest.corpora:
         root = corpus_root if single and corpus.path == "." else corpus_root / corpus.path
@@ -1188,14 +1297,20 @@ def _validate_record_inputs(
 
     for source_oracle in manifest.source_oracles:
         root = corpus_roots[source_oracle.corpus]
-        provider = independent_source_provider_identity(source_oracle.adapter)
+        provider = independent_source_provider_identity(source_oracle.producer)
         if provider != source_oracle.provider:
             raise AuditError(
-                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
                 f"provider mismatch: expected {source_oracle.provider!r}, "
                 f"observed {provider!r}"
             )
-        inventory = independent_source_inventory(root, source_oracle.adapter)
+        corpus = corpus_specs[source_oracle.corpus]
+        inventory = independent_source_inventory(
+            root,
+            source_oracle.producer,
+            include_globs=corpus.source_globs,
+            exclude_globs=corpus.exclude_globs,
+        )
         observed_counts = (inventory.scanned_files, inventory.parsed_files)
         expected_counts = (
             source_oracle.scanned_files,
@@ -1203,18 +1318,39 @@ def _validate_record_inputs(
         )
         if observed_counts != expected_counts:
             raise AuditError(
-                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
                 f"coverage mismatch: expected {expected_counts}, observed {observed_counts}"
             )
         observed_digest = source_construct_inventory_sha256(
-            source_oracle.adapter,
+            source_oracle.producer,
             inventory,
         )
         if observed_digest != source_oracle.inventory_sha256:
             raise AuditError(
-                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
                 "inventory digest mismatch: "
                 f"expected {source_oracle.inventory_sha256}, observed {observed_digest}"
+            )
+        if (
+            source_oracle.rejected_files is not None
+            and inventory.rejected_files != source_oracle.rejected_files
+        ):
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
+                "rejected-file ledger mismatch: "
+                f"expected {source_oracle.rejected_files!r}, "
+                f"observed {inventory.rejected_files!r}"
+            )
+        metadata = dict(inventory.provider_metadata)
+        # Legacy providers (for example the built-in Python AST oracle) do
+        # not publish parser metadata and remain governed by their existing
+        # contracts.  The universal-language wrappers explicitly publish
+        # ``oracleImplementation``/``parserAvailable`` so a bounded lexical
+        # fallback cannot be mistaken for a promotion-grade parser oracle.
+        if metadata.get("oracleImplementation") and metadata.get("parserAvailable") != "true":
+            raise AuditError(
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
+                "is a reproducible fallback inventory, not a pinned parser provider"
             )
 
     for record in manifest.records:
@@ -1243,7 +1379,19 @@ def _validate_record_inputs(
             )
 
         graph = indexes[record.corpus]
-        if record.source.node_id not in graph.nodes:
+        has_exact_representation_pointer = (
+            record.judgment == "represented_elsewhere"
+            and record.representation is not None
+            and record.representation.edge_id is not None
+        )
+        requires_source_node = not (
+            record.pool == "source_oracle"
+            and (
+                record.judgment in {"missing", "ambiguous"}
+                or has_exact_representation_pointer
+            )
+        )
+        if requires_source_node and record.source.node_id not in graph.nodes:
             raise AuditError(
                 f"record {record.record_id!r} source node is absent from the graph"
             )
@@ -1270,12 +1418,19 @@ def _validate_record_inputs(
             _require_fact(graph, fact, record.occurrence, record.record_id)
         elif record.judgment == "represented_elsewhere":
             assert record.representation is not None
-            _require_fact(
-                graph,
-                record.representation,
-                record.occurrence,
-                record.record_id,
-            )
+            if record.representation.edge_id is None:
+                _require_fact(
+                    graph,
+                    record.representation,
+                    record.occurrence,
+                    record.record_id,
+                )
+            else:
+                _require_exact_representation(
+                    graph,
+                    record.representation,
+                    record.record_id,
+                )
         elif record.pool == "source_oracle" and present:
             raise AuditError(
                 f"record {record.record_id!r} is classified {record.judgment!r} "
@@ -1373,7 +1528,7 @@ def _source_coverage(
 ) -> dict[str, dict[str, int | float]]:
     by_language: dict[str, list[AuditSourceOracle]] = defaultdict(list)
     for source_oracle in manifest.source_oracles:
-        by_language[source_oracle.adapter].append(source_oracle)
+        by_language[source_oracle.producer].append(source_oracle)
     coverage: dict[str, dict[str, int | float]] = {}
     for language in sorted(by_language):
         scanned = sum(item.scanned_files for item in by_language[language])
@@ -1398,7 +1553,7 @@ def _qualification_failures(
     for source_oracle in manifest.source_oracles:
         if source_oracle.parsed_files != source_oracle.scanned_files:
             failures.append(
-                f"source oracle {(source_oracle.corpus, source_oracle.adapter)!r} "
+                f"source oracle {(source_oracle.corpus, source_oracle.producer)!r} "
                 f"parsed {source_oracle.parsed_files}/{source_oracle.scanned_files} files; "
                 "complete source coverage is required"
             )
@@ -1425,14 +1580,14 @@ def _qualification_failures(
         values = [
             record
             for record in records
-            if record.adapter == identity.adapter
+            if record.producer == identity.producer
             and record.framework_pack == identity.framework_pack
             and record.capability == identity.capability
         ]
         accepted = sum(record.pool == "accepted" for record in values)
         if accepted < CAPABILITY_MINIMUM:
             failures.append(
-                f"capability {(identity.adapter, identity.framework_pack, identity.capability)!r} "
+                f"capability {(identity.producer, identity.framework_pack, identity.capability)!r} "
                 f"has {accepted} accepted records; {CAPABILITY_MINIMUM} required"
             )
         correct = sum(
@@ -1443,7 +1598,7 @@ def _qualification_failures(
         capability_precision = correct / accepted if accepted else 0.0
         if accepted and capability_precision < CAPABILITY_PRECISION_GATE:
             failures.append(
-                f"capability {(identity.adapter, identity.framework_pack, identity.capability)!r} "
+                f"capability {(identity.producer, identity.framework_pack, identity.capability)!r} "
                 f"precision {capability_precision:.6f} is below "
                 f"{CAPABILITY_PRECISION_GATE:.3f}"
             )
@@ -1462,12 +1617,12 @@ def _qualification_failures(
         )
         if recall_denominator == 0:
             failures.append(
-                f"capability {(identity.adapter, identity.framework_pack, identity.capability)!r} "
+                f"capability {(identity.producer, identity.framework_pack, identity.capability)!r} "
                 "has no source-derived recall candidates"
             )
         elif capability_recall < CAPABILITY_RECALL_GATE:
             failures.append(
-                f"capability {(identity.adapter, identity.framework_pack, identity.capability)!r} "
+                f"capability {(identity.producer, identity.framework_pack, identity.capability)!r} "
                 f"recall {capability_recall:.6f} is below "
                 f"{CAPABILITY_RECALL_GATE:.3f}"
             )

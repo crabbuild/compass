@@ -4,7 +4,8 @@ use std::io::Read;
 use std::path::Path;
 
 use compass_graph::{
-    Communities, GodNode, SuggestedQuestion, SurpriseConnection, find_import_cycles,
+    BlindSpotEdge, BlindSpotNode, BlindSpotReport, Communities, GRAPH_INSIGHTS_SCHEMA, GodNode,
+    SuggestedQuestion, SurpriseConnection, find_import_cycles,
 };
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use crate::OutputError;
 
-pub const ORIENTATION_SCHEMA: &str = "compass.orientation/1";
+pub const ORIENTATION_SCHEMA: &str = "compass.orientation/2";
 pub const ORIENTATION_MARKDOWN_MAX_CHARS: usize = 16_000;
 pub const REPORT_MARKDOWN_MAX_CHARS: usize = 256_000;
 pub const ORIENTATION_JSON_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -153,6 +154,8 @@ pub struct AgentOrientation {
     pub risks: Vec<OrientationRisk>,
     pub suggested_queries: Vec<OrientationQuery>,
     pub learned_questions: Vec<OrientationLearnedQuestion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blind_spots: Option<BlindSpotReport>,
     pub details: OrientationDetails,
     pub omissions: OrientationOmissions,
 }
@@ -440,12 +443,17 @@ pub fn agent_orientation(
     let node_communities = invert_communities(communities);
     let graph = ReportGraph::new(document, &node_communities);
     let cycle_probe = find_import_cycles(document, 5, DETAIL_LIMIT.saturating_add(1));
-    let (community_models, community_total) =
-        build_communities(&graph, communities, cohesion_scores, community_labels);
+    let (community_models, community_total) = build_communities(
+        &graph,
+        communities,
+        cohesion_scores,
+        community_labels,
+        options.min_community_size,
+    );
     let hub_total = god_node_list.len();
     let hubs = god_node_list
         .iter()
-        .filter(|node| !graph.is_pipe_table_structure_node_id(&node.id))
+        .filter(|node| !graph.is_document_table_node_id(&node.id))
         .filter(|node| graph.node_identity_and_anchor_are_safe(&node.id, &node.label))
         .take(HUB_LIMIT)
         .map(|node| build_hub(&graph, node, &node_communities))
@@ -558,8 +566,46 @@ pub fn agent_orientation(
         risks,
         suggested_queries: queries,
         learned_questions,
+        blind_spots: None,
         details,
     };
+    sanitize_orientation_model(&mut model);
+    fit_orientation_json_budget(&mut model);
+    fit_orientation_budget(&mut model);
+    fit_report_budget(&mut model, options.obsidian);
+    model
+}
+
+#[allow(clippy::too_many_arguments)]
+#[must_use]
+pub fn agent_orientation_with_blind_spots(
+    document: &GraphDocument,
+    communities: &Communities,
+    cohesion_scores: &BTreeMap<usize, f64>,
+    community_labels: &BTreeMap<usize, String>,
+    god_node_list: &[GodNode],
+    surprise_list: &[SurpriseConnection],
+    detection: &DetectionSummary,
+    token_cost: TokenCost,
+    suggested_questions: Option<&[SuggestedQuestion]>,
+    blind_spots: Option<&BlindSpotReport>,
+    learning: Option<&Value>,
+    options: &ReportOptions<'_>,
+) -> AgentOrientation {
+    let mut model = agent_orientation(
+        document,
+        communities,
+        cohesion_scores,
+        community_labels,
+        god_node_list,
+        surprise_list,
+        detection,
+        token_cost,
+        suggested_questions,
+        learning,
+        options,
+    );
+    model.blind_spots = blind_spots.cloned();
     sanitize_orientation_model(&mut model);
     fit_orientation_json_budget(&mut model);
     fit_orientation_budget(&mut model);
@@ -675,6 +721,19 @@ pub fn render_agent_report_markdown(
     Ok(rendered)
 }
 
+/// Validate a persisted structural-blind-spot projection before rendering it.
+/// Unknown schema versions and malformed bounded evidence must fail explicitly;
+/// they must not silently turn into an empty historical report.
+pub fn validate_blind_spot_report(report: &BlindSpotReport) -> Result<(), OutputError> {
+    if blind_spot_report_is_safe(report) {
+        Ok(())
+    } else {
+        Err(OutputError::InvalidOrientationModel {
+            reason: "invalid graph-insights report",
+        })
+    }
+}
+
 fn validate_orientation_model(model: &AgentOrientation) -> Result<(), OutputError> {
     if model.schema != ORIENTATION_SCHEMA {
         return Err(OutputError::InvalidOrientationModel {
@@ -688,6 +747,10 @@ fn validate_orientation_model(model: &AgentOrientation) -> Result<(), OutputErro
         && model.risks.len() <= RISK_LIMIT
         && model.suggested_queries.len() <= QUERY_LIMIT
         && model.learned_questions.len() <= QUERY_LIMIT
+        && model
+            .blind_spots
+            .as_ref()
+            .is_none_or(blind_spot_report_is_safe)
         && model.details.surprising_connections.len() <= DETAIL_LIMIT
         && model.details.import_cycles.len() <= DETAIL_LIMIT
         && model.details.hyperedges.len() <= DETAIL_LIMIT
@@ -896,11 +959,45 @@ pub fn generate_report(
     render_report_markdown(&model, options.obsidian)
 }
 
+#[allow(clippy::too_many_arguments)]
+#[must_use]
+pub fn generate_report_with_blind_spots(
+    document: &GraphDocument,
+    communities: &Communities,
+    cohesion_scores: &BTreeMap<usize, f64>,
+    community_labels: &BTreeMap<usize, String>,
+    god_node_list: &[GodNode],
+    surprise_list: &[SurpriseConnection],
+    detection: &DetectionSummary,
+    token_cost: TokenCost,
+    suggested_questions: Option<&[SuggestedQuestion]>,
+    blind_spots: Option<&BlindSpotReport>,
+    learning: Option<&Value>,
+    options: &ReportOptions<'_>,
+) -> String {
+    let model = agent_orientation_with_blind_spots(
+        document,
+        communities,
+        cohesion_scores,
+        community_labels,
+        god_node_list,
+        surprise_list,
+        detection,
+        token_cost,
+        suggested_questions,
+        blind_spots,
+        learning,
+        options,
+    );
+    render_report_markdown(&model, options.obsidian)
+}
+
 fn build_communities(
     graph: &ReportGraph<'_>,
     communities: &Communities,
     cohesion_scores: &BTreeMap<usize, f64>,
     labels: &BTreeMap<usize, String>,
+    min_community_size: usize,
 ) -> (Vec<OrientationCommunity>, usize) {
     let mut eligible = communities
         .iter()
@@ -912,13 +1009,18 @@ fn build_communities(
             (!real.is_empty()).then_some((
                 *community,
                 real.iter()
-                    .all(|member| graph.is_pipe_table_structure_node_id(member)),
+                    .all(|member| graph.is_document_table_node_id(member)),
                 real,
             ))
         })
         .collect::<Vec<_>>();
     let total = eligible.len();
-    eligible.retain(|(_, pipe_table_only, _)| !pipe_table_only);
+    // This threshold only bounds the architecture report. The graph document
+    // and its source-backed community assignments remain complete and
+    // queryable, including singleton communities.
+    eligible.retain(|(_, document_table_only, real)| {
+        !document_table_only && real.len() >= min_community_size
+    });
     eligible.sort_by(|(left_id, _, left_members), (right_id, _, right_members)| {
         right_members
             .len()
@@ -951,8 +1053,8 @@ fn build_communities(
             // when two candidates have equal connectivity.
             representatives.sort_by(|left, right| {
                 graph
-                    .is_pipe_table_structure_node_id(&left.id)
-                    .cmp(&graph.is_pipe_table_structure_node_id(&right.id))
+                    .is_document_table_node_id(&left.id)
+                    .cmp(&graph.is_document_table_node_id(&right.id))
                     .then_with(|| graph.degree(&right.id).cmp(&graph.degree(&left.id)))
             });
             representatives.truncate(if detailed {
@@ -1093,7 +1195,7 @@ fn build_risks(
         .filter(|node| {
             graph.degree(&node.id) <= 1
                 && !graph.is_file_node_id(&node.id)
-                && !graph.is_pipe_table_structure_node_id(&node.id)
+                && !graph.is_document_table_node_id(&node.id)
                 && !is_concept_node(node)
                 && node.string("file_type") != "rationale"
         })
@@ -1102,15 +1204,15 @@ fn build_risks(
         .values()
         .filter(|members| {
             let mut count = 0_usize;
-            let mut pipe_table_only = true;
+            let mut document_table_only = true;
             for member in *members {
                 if graph.is_file_node_id(member) {
                     continue;
                 }
                 count = count.saturating_add(1);
-                pipe_table_only &= graph.is_pipe_table_structure_node_id(member);
+                document_table_only &= graph.is_document_table_node_id(member);
             }
-            count > 0 && count < min_size && !pipe_table_only
+            count > 0 && count < min_size && !document_table_only
         })
         .count();
     let mut risks = Vec::new();
@@ -1611,6 +1713,13 @@ fn sanitize_orientation_model(model: &mut AgentOrientation) {
         .omissions
         .learned_questions
         .set_shown(model.learned_questions.len());
+    if model
+        .blind_spots
+        .as_ref()
+        .is_some_and(|report| !blind_spot_report_is_safe(report))
+    {
+        model.blind_spots = None;
+    }
 
     model
         .details
@@ -1748,6 +1857,82 @@ fn learned_question_is_safe(value: &OrientationLearnedQuestion) -> bool {
     raw_string_fits(&value.question) && raw_string_fits(&value.why)
 }
 
+fn blind_spot_node_is_safe(value: &BlindSpotNode) -> bool {
+    !value.id.is_empty()
+        && raw_string_fits(&value.id)
+        && raw_string_fits(&value.label)
+        && optional_raw_string_fits(value.source_file.as_deref())
+}
+
+fn blind_spot_edge_is_safe(value: &BlindSpotEdge) -> bool {
+    !value.source.is_empty()
+        && !value.target.is_empty()
+        && raw_string_fits(&value.source)
+        && raw_string_fits(&value.target)
+        && raw_string_fits(&value.relation)
+        && raw_string_fits(&value.confidence)
+}
+
+fn blind_spot_report_is_safe(value: &BlindSpotReport) -> bool {
+    const MAX_CANDIDATE_PAIRS: usize = 200_000;
+    const MAX_COMMUNITY_GAPS: usize = 3;
+    const MAX_WITNESSES: usize = 8;
+    const MAX_COMPONENTS: usize = 32;
+    const MAX_COMPONENT_MEMBERS: usize = 64;
+
+    value.schema == GRAPH_INSIGHTS_SCHEMA
+        && value.limits.max_candidate_pairs == MAX_CANDIDATE_PAIRS
+        && value.limits.max_community_gaps == MAX_COMMUNITY_GAPS
+        && value.limits.max_shared_intermediaries == MAX_WITNESSES
+        && value.limits.max_direct_topical_edges == MAX_WITNESSES
+        && value.limits.max_disconnected_components == MAX_COMPONENTS
+        && value.limits.max_component_members == MAX_COMPONENT_MEMBERS
+        && value.community_gaps.len() <= 3
+        && value.disconnected_components.len() <= 32
+        && value.disconnected_components.len() <= value.disconnected_component_count
+        && (value.disconnected_component_count > 1 || value.disconnected_components.is_empty())
+        && value.community_gaps.iter().all(|gap| {
+            !gap.id.is_empty()
+                && !gap.left_anchor.is_empty()
+                && !gap.right_anchor.is_empty()
+                && raw_string_fits(&gap.id)
+                && raw_string_fits(&gap.left_anchor)
+                && raw_string_fits(&gap.right_anchor)
+                && raw_string_fits(&gap.left_label)
+                && raw_string_fits(&gap.right_label)
+                && gap.score.is_finite()
+                && gap.score >= 0.0
+                && gap.shared_intermediaries.len() <= 8
+                && gap.shared_intermediary_count
+                    == gap
+                        .shared_intermediaries
+                        .len()
+                        .saturating_add(gap.omitted_shared_intermediaries)
+                && gap
+                    .shared_intermediaries
+                    .iter()
+                    .all(blind_spot_node_is_safe)
+                && gap.direct_topical_edges.len() <= 8
+                && gap
+                    .direct_topical_edges
+                    .len()
+                    .saturating_add(gap.omitted_direct_topical_edges)
+                    == gap.direct_topical_edge_count
+                && gap.direct_topical_edges.iter().all(blind_spot_edge_is_safe)
+        })
+        && value.disconnected_components.iter().all(|component| {
+            !component.id.is_empty()
+                && raw_string_fits(&component.id)
+                && component.members.len() <= 64
+                && component
+                    .members
+                    .len()
+                    .saturating_add(component.omitted_members)
+                    == component.real_node_count
+                && component.members.iter().all(blind_spot_node_is_safe)
+        })
+}
+
 fn connection_is_safe(value: &OrientationConnection) -> bool {
     raw_string_fits(&value.endpoint_a)
         && raw_string_fits(&value.endpoint_b)
@@ -1830,6 +2015,10 @@ fn orientation_strings_are_bounded(model: &AgentOrientation) -> bool {
         && model.suggested_queries.iter().all(query_is_safe)
         && model.learned_questions.iter().all(learned_question_is_safe)
         && model
+            .blind_spots
+            .as_ref()
+            .is_none_or(blind_spot_report_is_safe)
+        && model
             .details
             .surprising_connections
             .iter()
@@ -1869,6 +2058,9 @@ fn fit_orientation_budget(model: &mut AgentOrientation) {
             model.omissions.risks.set_shown(model.risks.len());
         } else if model.hubs.pop().is_some() {
             model.omissions.hubs.set_shown(model.hubs.len());
+        } else if trim_blind_spots_for_budget(model) {
+            // Keep the bounded structural evidence section within the same
+            // publication budget as the rest of the orientation.
         } else {
             break;
         }
@@ -1877,7 +2069,13 @@ fn fit_orientation_budget(model: &mut AgentOrientation) {
 
 fn fit_orientation_json_budget(model: &mut AgentOrientation) {
     while let Ok(rendered) = serde_json::to_vec_pretty(model) {
-        if rendered.len() <= ORIENTATION_JSON_FIT_BYTES || model.communities.is_empty() {
+        if rendered.len() <= ORIENTATION_JSON_FIT_BYTES {
+            break;
+        }
+        if trim_blind_spots_for_budget(model) {
+            continue;
+        }
+        if model.communities.is_empty() {
             break;
         }
         let scaled = model
@@ -1942,10 +2140,88 @@ fn fit_report_budget(model: &mut AgentOrientation, obsidian: bool) {
                 .omissions
                 .communities
                 .set_shown(model.communities.len());
+        } else if trim_blind_spots_for_budget(model) {
+            // Keep the bounded structural evidence section within the report
+            // publication budget.
         } else {
             break;
         }
     }
+}
+
+fn trim_blind_spots_for_budget(model: &mut AgentOrientation) -> bool {
+    let Some(report) = model.blind_spots.as_mut() else {
+        return false;
+    };
+
+    if let Some(index) = report
+        .disconnected_components
+        .iter()
+        .enumerate()
+        .filter(|(_, component)| component.members.len() > 1)
+        .max_by_key(|(_, component)| component.members.len())
+        .map(|(index, _)| index)
+    {
+        let component = &mut report.disconnected_components[index];
+        let retained = component.members.len() / 2;
+        let removed = component.members.len().saturating_sub(retained);
+        component.members.truncate(retained);
+        component.omitted_members = component.omitted_members.saturating_add(removed);
+        report.omissions.component_members =
+            report.omissions.component_members.saturating_add(removed);
+        return true;
+    }
+
+    if let Some(index) = report
+        .community_gaps
+        .iter()
+        .enumerate()
+        .filter(|(_, gap)| gap.shared_intermediaries.len() > 1)
+        .max_by_key(|(_, gap)| gap.shared_intermediaries.len())
+        .map(|(index, _)| index)
+    {
+        let gap = &mut report.community_gaps[index];
+        let retained = gap.shared_intermediaries.len() / 2;
+        let removed = gap.shared_intermediaries.len().saturating_sub(retained);
+        gap.shared_intermediaries.truncate(retained);
+        gap.omitted_shared_intermediaries =
+            gap.omitted_shared_intermediaries.saturating_add(removed);
+        return true;
+    }
+
+    if let Some(index) = report
+        .community_gaps
+        .iter()
+        .enumerate()
+        .filter(|(_, gap)| gap.direct_topical_edges.len() > 1)
+        .max_by_key(|(_, gap)| gap.direct_topical_edges.len())
+        .map(|(index, _)| index)
+    {
+        let gap = &mut report.community_gaps[index];
+        let retained = gap.direct_topical_edges.len() / 2;
+        let removed = gap.direct_topical_edges.len().saturating_sub(retained);
+        gap.direct_topical_edges.truncate(retained);
+        gap.omitted_direct_topical_edges = gap.omitted_direct_topical_edges.saturating_add(removed);
+        return true;
+    }
+
+    if let Some(component) = report.disconnected_components.pop() {
+        report.omissions.disconnected_components =
+            report.omissions.disconnected_components.saturating_add(1);
+        report.omissions.component_members = report.omissions.component_members.saturating_add(
+            component
+                .real_node_count
+                .saturating_sub(component.omitted_members),
+        );
+        return true;
+    }
+
+    if report.community_gaps.pop().is_some() {
+        report.omissions.community_gaps = report.omissions.community_gaps.saturating_add(1);
+        return true;
+    }
+
+    false
 }
 
 fn render_orientation_markdown_unchecked(model: &AgentOrientation) -> String {
@@ -2022,7 +2298,7 @@ fn render_orientation_markdown_with_community_limit(
         "## Architecture Map".to_owned(),
         "- Leading communities are ranked by member count, connectivity, label, and stable ID. See the complete bounded directory of architecture-relevant communities later in this report."
             .to_owned(),
-        "- Markdown communities containing only pipe-table parser blocks are excluded from this architecture view and counted in omitted coverage; their source-backed nodes remain available in the graph."
+        "- Markdown communities containing only pipe-table parser blocks are excluded from this architecture view and counted in omitted coverage; these are semantic table navigation records whose source-backed nodes remain available in the graph."
             .to_owned(),
         disclosure(SectionOmission::from_total_shown(
             model.omissions.communities.total,
@@ -2083,6 +2359,7 @@ fn render_orientation_markdown_with_community_limit(
             ));
         }
     }
+    lines.extend(blind_spot_lines(model));
     lines.extend([
         String::new(),
         "## High-Connectivity Hubs".to_owned(),
@@ -2178,6 +2455,81 @@ fn render_orientation_markdown_with_community_limit(
         ));
     }
     lines.join("\n")
+}
+
+fn blind_spot_lines(model: &AgentOrientation) -> Vec<String> {
+    let Some(report) = model.blind_spots.as_ref() else {
+        return vec![
+            String::new(),
+            "## Structural Blind Spots".to_owned(),
+            "- No typed structural-gap or disconnected-component evidence was retained.".to_owned(),
+        ];
+    };
+    let mut lines = vec![
+        String::new(),
+        "## Structural Blind Spots".to_owned(),
+        format!(
+            "- Schema: {} · community gaps: {} · disconnected components: {} · largest component: {}",
+            report.schema,
+            report.community_gaps.len(),
+            report.disconnected_component_count,
+            report.largest_component_size,
+        ),
+        format!(
+            "- Omitted evidence: candidate-pair limit={} · gaps={} · components={} · component members={}",
+            report.omissions.candidate_pair_limit_reached,
+            report.omissions.community_gaps,
+            report.omissions.disconnected_components,
+            report.omissions.component_members,
+        ),
+    ];
+    for gap in &report.community_gaps {
+        let witnesses = gap
+            .shared_intermediaries
+            .iter()
+            .map(blind_spot_node_text)
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "- Gap {}: `{}` ↔ `{}` · score {:.4} · shared intermediaries {}/{} · direct topical edges {} · witnesses: {}",
+            compact_identifier(&gap.id),
+            markdown_value(&gap.left_label, MARKDOWN_VALUE_MAX_CHARS),
+            markdown_value(&gap.right_label, MARKDOWN_VALUE_MAX_CHARS),
+            gap.score,
+            gap.shared_intermediaries.len(),
+            gap.shared_intermediary_count,
+            gap.direct_topical_edge_count,
+            if witnesses.is_empty() { "none" } else { &witnesses },
+        ));
+    }
+    for component in &report.disconnected_components {
+        let members = component
+            .members
+            .iter()
+            .map(blind_spot_node_text)
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!(
+            "- Component {}: {} real nodes · members {}/{}: {}",
+            compact_identifier(&component.id),
+            component.real_node_count,
+            component.members.len(),
+            component.real_node_count,
+            if members.is_empty() { "none" } else { &members },
+        ));
+    }
+    lines
+}
+
+fn blind_spot_node_text(node: &BlindSpotNode) -> String {
+    let label = markdown_value(&node.label, MARKDOWN_VALUE_MAX_CHARS);
+    match node.source_file.as_deref() {
+        Some(source) => format!(
+            "`{label}` ({})",
+            markdown_value(source, MARKDOWN_VALUE_MAX_CHARS)
+        ),
+        None => format!("`{label}`"),
+    }
 }
 
 fn render_report_markdown(model: &AgentOrientation, obsidian: bool) -> String {
@@ -2328,7 +2680,7 @@ fn append_community_directory(
         "## Community Directory".to_owned(),
         "- Start here, then use labels with `compass path` or the exact scope with `compass query`. Architecture-relevant communities are ranked by member count, connectivity, label, and stable ID."
             .to_owned(),
-        "- Markdown communities containing only pipe-table parser blocks are excluded and counted in omitted coverage; mixed communities retain their meaningful headings or symbols as entry points."
+        "- Markdown communities containing only pipe-table parser blocks are excluded and counted in omitted coverage; these semantic table navigation records retain source anchors, while mixed communities retain their meaningful headings or symbols as entry points."
             .to_owned(),
         disclosure(model.omissions.communities),
     ]);
@@ -2541,9 +2893,12 @@ impl<'a> ReportGraph<'a> {
             {
                 edge_visits = edge_visits.saturating_add(1);
             }
-            *degrees.entry(edge.source.as_str()).or_default() += 1;
-            if edge.target != edge.source {
-                *degrees.entry(edge.target.as_str()).or_default() += 1;
+            let zero_topology = zero_topology_document_containment(edge, &positions);
+            if !zero_topology {
+                *degrees.entry(edge.source.as_str()).or_default() += 1;
+                if edge.target != edge.source {
+                    *degrees.entry(edge.target.as_str()).or_default() += 1;
+                }
             }
             let relation = relation(edge);
             let confidence = confidence(edge);
@@ -2561,34 +2916,36 @@ impl<'a> ReportGraph<'a> {
                     }
                 }
             }
-            record_node_connectivity(
-                node_connectivity.entry(edge.source.as_str()).or_default(),
-                &relation,
-                &confidence,
-                document.directed.then_some(EndpointDirection::Outgoing),
-            );
-            if edge.target == edge.source {
-                if document.directed {
-                    node_connectivity
-                        .entry(edge.source.as_str())
-                        .or_default()
-                        .incoming += 1;
-                }
-            } else {
+            if !zero_topology {
                 record_node_connectivity(
-                    node_connectivity.entry(edge.target.as_str()).or_default(),
+                    node_connectivity.entry(edge.source.as_str()).or_default(),
                     &relation,
                     &confidence,
-                    document.directed.then_some(EndpointDirection::Incoming),
+                    document.directed.then_some(EndpointDirection::Outgoing),
+                );
+                if edge.target == edge.source {
+                    if document.directed {
+                        node_connectivity
+                            .entry(edge.source.as_str())
+                            .or_default()
+                            .incoming += 1;
+                    }
+                } else {
+                    record_node_connectivity(
+                        node_connectivity.entry(edge.target.as_str()).or_default(),
+                        &relation,
+                        &confidence,
+                        document.directed.then_some(EndpointDirection::Incoming),
+                    );
+                }
+                record_community_connectivity(
+                    &mut community_connectivity,
+                    node_communities.get(edge.source.as_str()).copied(),
+                    node_communities.get(edge.target.as_str()).copied(),
+                    &relation,
+                    document.directed,
                 );
             }
-            record_community_connectivity(
-                &mut community_connectivity,
-                node_communities.get(edge.source.as_str()).copied(),
-                node_communities.get(edge.target.as_str()).copied(),
-                &relation,
-                document.directed,
-            );
         }
         Self {
             nodes: &document.nodes,
@@ -2664,14 +3021,26 @@ impl<'a> ReportGraph<'a> {
             || (label.ends_with("()") && self.degree(id) <= 1)
     }
 
-    fn is_pipe_table_structure_node_id(&self, id: &str) -> bool {
-        self.positions.get(id).is_some_and(|node| {
-            matches!(
-                node.string("document_kind").as_str(),
-                "pipe_table" | "pipe_table_header" | "pipe_table_row" | "pipe_table_cell"
-            )
-        })
+    fn is_document_table_node_id(&self, id: &str) -> bool {
+        self.positions
+            .get(id)
+            .is_some_and(|node| node.is_table_navigation_node())
     }
+}
+
+fn zero_topology_document_containment(
+    edge: &EdgeRecord,
+    positions: &HashMap<&str, &NodeRecord>,
+) -> bool {
+    if edge.relation() != "contains" {
+        return false;
+    }
+    positions
+        .get(edge.source.as_str())
+        .is_some_and(|node| node.is_table_navigation_node())
+        || positions
+            .get(edge.target.as_str())
+            .is_some_and(|node| node.is_table_navigation_node())
 }
 
 #[derive(Clone, Copy)]

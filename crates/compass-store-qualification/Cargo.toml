@@ -15,12 +15,12 @@ name = "compass-store-qualification"
 path = "src/main.rs"
 
 [dependencies]
-compass-cypher = { path = "../compass-cypher", version = "0.3.12" }
-compass-graph = { path = "../compass-graph", version = "0.3.12" }
-compass-model = { path = "../compass-model", version = "0.3.12" }
-compass-query = { path = "../compass-query", version = "0.3.12" }
-compass-store = { path = "../compass-store", version = "0.3.12" }
-compass-store-redb = { path = "../compass-store-redb", version = "0.3.12" }
+compass-cypher = { path = "../compass-cypher", version = "0.3.23" }
+compass-graph = { path = "../compass-graph", version = "0.3.23" }
+compass-model = { path = "../compass-model", version = "0.3.23" }
+compass-query = { path = "../compass-query", version = "0.3.23" }
+compass-store = { path = "../compass-store", version = "0.3.23" }
+compass-store-redb = { path = "../compass-store-redb", version = "0.3.23" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

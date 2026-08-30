@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 use ahash::{AHashMap, AHashSet};
 use compass_files::{
     BuildGuard, BuildScope, Cache, CacheOptions, DetectOptions, Detection, IgnorePolicy, Manifest,
-    ManifestKind, detect, write_atomic_with_digest, write_json_atomic, write_text_atomic,
+    ManifestKind, detect, source_is_generated, write_atomic_with_digest, write_json_atomic,
+    write_text_atomic,
 };
 use compass_graph::{
     BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
@@ -21,7 +22,7 @@ use compass_graph::{
     SnapshotError, SnapshotSelector, SourceDigest, apply_inference_level,
     build_owned_with_tiebreaker_at_inference as build_document, canonical_edge_kind,
     canonical_raw_edge_sites, cluster_incremental, deduped_node_count, extraction_from_v1,
-    garbage_collect_graph_snapshots, graph_insights, graph_snapshot_needs_gc,
+    garbage_collect_graph_snapshots, graph_insights_with_blind_spots, graph_snapshot_needs_gc,
     label_communities_by_hub, max_canonical_graph_bytes,
     normalize_document_v1_with_evidence_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
@@ -36,8 +37,8 @@ use compass_languages::{
     ResolutionConstraint, ScopeFact, SemanticEvidenceBatch, file_stem, make_id,
 };
 use compass_model::code_graph::{
-    CommunityMetadata, CoverageRecord, DiagnosticSeverity, ExtractionStatus, FileNodeDetails,
-    GraphDiagnostic, GraphDocument as V1GraphDocument, NodeDetails, NodeKind,
+    CommunityMetadata, CoverageRecord, DiagnosticSeverity, ExtractionStatus, GraphDiagnostic,
+    GraphDocument as V1GraphDocument, NodeKind,
 };
 use compass_model::provenance::{
     COALESCED_NODE_EVIDENCE_ATTRIBUTE, CONSUME_INCREMENTAL_ENDPOINT_REMAP_ATTRIBUTE,
@@ -48,8 +49,9 @@ use compass_model::provenance::{
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, GraphViewModel, HtmlOptions,
-    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost, agent_orientation,
-    graph_view_model_document, render_agent_report_markdown, render_orientation_json, write_html,
+    OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost,
+    agent_orientation_with_blind_spots, graph_view_model_document, render_agent_report_markdown,
+    render_orientation_json, write_html,
 };
 use compass_resolve::{
     ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
@@ -66,6 +68,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
+use crate::PreparedDocumentSet;
 use crate::build_state::{
     ArtifactSeal, BUILD_STATE_FILE, BuildProfile, BuildState, SavedStats, load_verified,
 };
@@ -94,6 +97,11 @@ const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 // not use this expansion because Compass publishes inventory-only coverage.
 const PREFLIGHT_GRAPH_BYTES_PER_SOURCE_BYTE: u64 = 60;
 const PREFLIGHT_PARTIAL_FILE_BYTES: u64 = 512;
+// Full mark-and-sweep walks every immutable graph object and can dominate a
+// one-file update. Keep a small, explicit number of unreachable manifests so
+// ordinary edits pay only point-update publication; the next sweep still
+// retains exactly the staging and active snapshots.
+const SHARED_STORE_GC_MANIFEST_THRESHOLD: usize = 8;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
 const ROOT_ARTIFACTS: [&str; 7] = [
@@ -143,6 +151,9 @@ pub struct BuildOptions {
     /// keeping it in the build profile prevents a document-inclusive output
     /// from being reused for a code-only build.
     pub code_only: bool,
+    /// Rich documents prepared once at the application boundary. The same
+    /// validated artifacts feed structural publication and semantic slicing.
+    pub prepared_documents: PreparedDocumentSet,
     /// Enable deterministic Program IR analysis and `program.json` output.
     pub program_analysis: bool,
     /// Explicit offline program evidence artifacts, in addition to `index.scip`.
@@ -190,11 +201,12 @@ pub enum BuildPurpose {
 
 const OUTPUT_STATS_FILE: &str = "output-stats.json";
 const AST_FACT_DIGESTS_FILE: &str = "ast-fact-digests.json";
-const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/3";
+const AST_FACT_DIGESTS_SCHEMA: &str = "compass.ast-fact-digests/1";
+const AST_FACT_DIGESTS_PROFILE: &str = "compass.ast-fact-digests/profile/1";
 const MAX_AST_FACT_DIGEST_ENTRIES: usize = 100_000;
 const MAX_AST_FACT_DIGEST_FILE_BYTES: usize = 16 * 1024 * 1024;
 const GRAPH_OVERVIEW_FILE: &str = "graph-overview.json";
-const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/2";
+const GRAPH_OVERVIEW_SCHEMA: &str = "compass.graph-overview/1";
 const GRAPH_OVERVIEW_NODE_LIMIT: isize = 5_000;
 const MAX_INCREMENTAL_REMAP_DIAGNOSTICS: usize = 100;
 const INCREMENTAL_REMAP_DROP_DIAGNOSTIC: &str = "dropped_incremental_remap_without_wiring_site";
@@ -281,10 +293,27 @@ fn compact_extraction(extraction: &mut Extraction) {
                 compact_json_map(&mut annotation.arguments);
                 compact_json_map(&mut annotation.detail);
             }
+            compass_languages::RawFrameworkFact::Role(role) => {
+                compact_json_map(&mut role.detail);
+            }
+            compass_languages::RawFrameworkFact::Relation(relation) => {
+                compact_json_map(&mut relation.detail);
+            }
+            compass_languages::RawFrameworkFact::Configuration(configuration) => {
+                if let Some(value) = configuration.value.as_mut() {
+                    compact_json_value(value);
+                }
+                compact_json_map(&mut configuration.detail);
+            }
+            compass_languages::RawFrameworkFact::FileSet(file_set) => {
+                compact_vec(&mut file_set.patterns);
+                compact_vec(&mut file_set.negative_patterns);
+                compact_json_map(&mut file_set.detail);
+            }
         }
     }
     if let Some(evidence) = extraction.semantic_evidence.as_mut() {
-        compact_vec(&mut evidence.adapter.capabilities);
+        compact_vec(&mut evidence.pipeline.capabilities);
         compact_vec(&mut evidence.declarations);
         compact_vec(&mut evidence.scopes);
         compact_vec(&mut evidence.bindings);
@@ -381,6 +410,7 @@ impl BuildOptions {
             exclude_hubs: None,
             google_workspace: false,
             code_only: false,
+            prepared_documents: PreparedDocumentSet::default(),
             program_analysis: false,
             program_artifacts: Vec::new(),
             program_artifact_limits: compass_program::ArtifactLimits::default(),
@@ -450,17 +480,21 @@ fn build_profile_digest(profile: &BuildProfile, output_dir: &Path) -> Result<Str
         source,
     })?;
     let mut digest = Sha256::new();
-    digest.update(b"compass.ast-fact-digests/profile/3");
+    digest.update(AST_FACT_DIGESTS_PROFILE.as_bytes());
     digest.update([0]);
     for component in [
         compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
         compass_graph::V1_PUBLICATION_SEMANTICS_VERSION,
         compass_languages::EXTRACTION_SEMANTICS_VERSION,
+        compass_languages::FRAMEWORK_PACK_SEMANTICS_VERSION,
         compass_files::AST_CACHE_VERSION,
     ] {
         digest.update((component.len() as u64).to_le_bytes());
         digest.update(component.as_bytes());
     }
+    let framework_digest = compass_languages::framework_semantics_digest();
+    digest.update((framework_digest.len() as u64).to_le_bytes());
+    digest.update(framework_digest.as_bytes());
     digest.update((bytes.len() as u64).to_le_bytes());
     digest.update(bytes);
     Ok(format!("sha256:{:x}", digest.finalize()))
@@ -775,6 +809,27 @@ struct FactDigestFrameworkFacts<'a> {
     facts: &'a [RawFrameworkFact],
 }
 
+fn normalize_framework_fact_digest_value(value: &mut Value) {
+    match value {
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(normalize_framework_fact_digest_value),
+        Value::Object(values) => {
+            // Universal evidence IDs include source ranges. Framework facts
+            // already retain stable graph owners, qualified names, bindings,
+            // and exact anchors, so these redundant internal IDs must not turn
+            // a file-envelope edit into a semantic graph change.
+            for key in ["ownerDeclarationId", "occurrenceId", "scopeId"] {
+                values.remove(key);
+            }
+            values
+                .values_mut()
+                .for_each(normalize_framework_fact_digest_value);
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+    }
+}
+
 impl Serialize for FactDigestFrameworkFacts<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -785,13 +840,16 @@ impl Serialize for FactDigestFrameworkFacts<'_> {
             .iter()
             .map(|fact| {
                 serde_json::to_value(fact)
-                    .map(|value| (value, fact))
+                    .map(|mut value| {
+                        normalize_framework_fact_digest_value(&mut value);
+                        value
+                    })
                     .map_err(S::Error::custom)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        facts.sort_unstable_by(|left, right| compare_fact_values(&left.0, &right.0));
+        facts.sort_unstable_by(compare_fact_values);
         let mut sequence = serializer.serialize_seq(Some(self.facts.len()))?;
-        for (value, _) in facts {
+        for value in facts {
             sequence.serialize_element(&FactDigestValue(&value))?;
         }
         sequence.end()
@@ -935,16 +993,17 @@ impl Serialize for FactDigestDeclaration<'_, '_> {
             map.serialize_entry("directBasesComplete", &true)?;
         }
         map.serialize_entry("variadic", &declaration.variadic)?;
-        if let Some(value) = &declaration.signature_hash {
-            map.serialize_entry("signatureHash", value)?;
-        }
-        if let Some(value) = &declaration.implementation_hash {
-            map.serialize_entry("implementationHash", value)?;
-        }
-        if let Some(value) = &declaration.source_hash {
-            map.serialize_entry("sourceHash", value)?;
-        }
-        if !self.context.declaration_is_file(&declaration.id) {
+        let file_declaration = self.context.declaration_is_file(&declaration.id);
+        if !file_declaration {
+            if let Some(value) = &declaration.signature_hash {
+                map.serialize_entry("signatureHash", value)?;
+            }
+            if let Some(value) = &declaration.implementation_hash {
+                map.serialize_entry("implementationHash", value)?;
+            }
+            if let Some(value) = &declaration.source_hash {
+                map.serialize_entry("sourceHash", value)?;
+            }
             map.serialize_entry("range", &declaration.range)?;
         }
         map.end()
@@ -1007,7 +1066,9 @@ impl Serialize for FactDigestScope<'_, '_> {
             .owner_declaration_id
             .as_deref()
             .is_some_and(|owner| self.context.declaration_is_file(owner));
-        if !file_scope {
+        let file_envelope_scope =
+            file_scope || matches!(self.scope.kind.as_str(), "module" | "package");
+        if !file_envelope_scope {
             map.serialize_entry("range", &self.scope.range)?;
         }
         map.end()
@@ -1146,7 +1207,11 @@ impl Serialize for FactDigestCandidate<'_, '_> {
                 .context
                 .declaration_key(&candidate.source_declaration_id),
         )?;
-        map.serialize_entry("targetSpelling", &candidate.target_spelling)?;
+        if let Some(target) = &candidate.constraints.exact_target_declaration_id {
+            map.serialize_entry("targetSpelling", &self.context.declaration_key(target))?;
+        } else {
+            map.serialize_entry("targetSpelling", &candidate.target_spelling)?;
+        }
         map.serialize_entry(
             "constraints",
             &FactDigestResolutionConstraint {
@@ -1248,7 +1313,7 @@ impl Serialize for FactDigestSemanticEvidence<'_> {
                 })
         });
         let mut map = serializer.serialize_map(Some(7))?;
-        map.serialize_entry("adapter", &self.batch.adapter)?;
+        map.serialize_entry("pipeline", &self.batch.pipeline)?;
         map.serialize_entry(
             "declarations",
             &FactDigestDeclarations {
@@ -1469,7 +1534,7 @@ fn fact_neutral_pre_cache_sources(
 ) -> Option<Vec<PathBuf>> {
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
-        || options.purpose != BuildPurpose::Extract
+        || !supports_fact_neutral_incremental(options.purpose)
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1583,11 +1648,11 @@ fn fact_neutral_incremental_candidate(
     detected_files: &BTreeMap<String, Vec<String>>,
     missing: &[PathBuf],
     source_removed: bool,
-    root: &Path,
+    _root: &Path,
 ) -> bool {
     let has_nonempty_semantic = semantic.is_some_and(|layer| !semantic_layer_is_empty(layer));
     if options.force
-        || options.purpose != BuildPurpose::Extract
+        || !supports_fact_neutral_incremental(options.purpose)
         || options.program_analysis
         || has_nonempty_semantic
         || !supplemental.is_empty()
@@ -1601,17 +1666,22 @@ fn fact_neutral_incremental_candidate(
     let Some(prior_state) = prior_state else {
         return false;
     };
-    if prior_state.profile_digest != current_state.profile_digest
-        || prior_state.project_evidence_digest != current_state.project_evidence_digest
-        || prior_state.entries.len() != current_state.entries.len()
-        || prior_state.entries.keys().ne(current_state.entries.keys())
-    {
-        return false;
-    }
-    missing.iter().all(|path| {
-        let key = relative_fact_path(path, root);
-        prior_state.entries.get(&key) == current_state.entries.get(&key)
-    })
+    // A changed source can still have a valid content-addressed cache entry
+    // after an edit/restore cycle. Comparing only cache misses can therefore
+    // admit a stale prior graph. The complete bounded fact state is already
+    // materialized for this decision; require it to match exactly.
+    fact_digest_state_matches(prior_state, current_state)
+}
+
+fn fact_digest_state_matches(prior: &AstFactDigestState, current: &AstFactDigestState) -> bool {
+    prior.schema == current.schema
+        && prior.profile_digest == current.profile_digest
+        && prior.project_evidence_digest == current.project_evidence_digest
+        && prior.entries == current.entries
+}
+
+const fn supports_fact_neutral_incremental(purpose: BuildPurpose) -> bool {
+    matches!(purpose, BuildPurpose::Update | BuildPurpose::Extract)
 }
 
 fn extraction_file_anchors(
@@ -1733,34 +1803,34 @@ fn prepare_fact_neutral_document(
     } else {
         (None, previous)
     };
-    let mut changed_file_node_ids = BTreeSet::new();
+    let mut changed_node_ids = BTreeSet::new();
     let mut evidence = BuildEvidence::new(root.to_path_buf(), current.graph.build.clone());
     evidence.files = current.graph.files.clone();
+    let changed_file_ids = current
+        .graph
+        .files
+        .iter()
+        .filter(|file| source_digests.contains_key(&file.path))
+        .map(|file| file.id.clone())
+        .collect::<BTreeSet<_>>();
     evidence.coverage = current
         .graph
         .coverage
         .iter()
-        .filter(|coverage| coverage.capability != "file_inventory")
-        .cloned()
-        .collect();
-    evidence.diagnostics = current
-        .graph
-        .diagnostics
-        .iter()
-        .filter(|diagnostic| {
-            !matches!(
-                diagnostic.code.as_str(),
-                "parser_recovery"
-                    | "partial_extraction"
-                    | "extractor_failure"
-                    | "unsupported_input"
-                    | "excluded_input"
-                    | "generated_input"
-                    | "binary_input"
-            )
+        .filter(|coverage| {
+            coverage.capability != "file_inventory"
+                || coverage
+                    .file_id
+                    .as_ref()
+                    .is_none_or(|file_id| !changed_file_ids.contains(file_id))
         })
         .cloned()
         .collect();
+    // The fact-neutral proof covers only successfully and completely parsed
+    // changed files. Preserve extraction diagnostics for every unchanged file;
+    // rebuilding inventory from the changed batch alone would otherwise erase
+    // unrelated parser-recovery and partial-coverage evidence.
+    evidence.diagnostics = current.graph.diagnostics.clone();
     for file in &mut evidence.files {
         if let Some(digest) = source_digests.get(&file.path) {
             file.content_digest.clone_from(&digest.content_digest);
@@ -1768,10 +1838,19 @@ fn prepare_fact_neutral_document(
         }
     }
     evidence.build.configuration_digest = configuration_digest;
-    evidence.include_inventory(inventory)?;
+    let changed_inventory = inventory
+        .into_iter()
+        .filter(|item| source_digests.contains_key(&relative_fact_path(&item.path, root)));
+    evidence.include_inventory(changed_inventory)?;
     canonicalize_fact_neutral_metadata(&mut evidence.coverage, &mut evidence.diagnostics);
 
     let anchors = extraction_file_anchors(extractions, root);
+    let previous_file_sizes = current
+        .graph
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.byte_size))
+        .collect::<BTreeMap<_, _>>();
     current.graph.build = evidence.build;
     current.graph.files = evidence.files;
     current.graph.coverage = evidence.coverage;
@@ -1783,47 +1862,65 @@ fn prepare_fact_neutral_document(
         .map(|file| (file.path.as_str(), file))
         .collect::<BTreeMap<_, _>>();
     for node in &mut current.nodes {
-        if node.kind != NodeKind::File {
-            continue;
-        }
         let before = node.clone();
         let Some(source) = node.source_file() else {
             continue;
         };
         let source = relative_fact_path(Path::new(source), root);
-        let Some(file) = files.get(source.as_str()) else {
+        if !files.contains_key(source.as_str()) {
             continue;
-        };
-        node.details = Some(NodeDetails::File(FileNodeDetails {
-            content_digest: file.content_digest.clone(),
-            byte_size: file.byte_size,
-            generated: file.generated,
-        }));
-        let anchor = source_digests.contains_key(&source).then(|| {
+        }
+        // The canonical graph-v1 file inventory owns digest, size, and generated
+        // state. Do not synthesize an optional file-node payload only on the
+        // fact-neutral route: full publication intentionally preserves the
+        // established graph-v1 node shape, and adding it here makes an
+        // edit-then-restore build differ from a clean build.
+        let refreshed_envelope = source_digests.contains_key(&source).then(|| {
             anchors
                 .get(&source)
                 .cloned()
                 .or_else(|| full_file_source_anchor(&root.join(&source), &source, max_source_bytes))
         });
-        if let Some(anchor) = anchor.flatten() {
-            node.source = Some(anchor.clone());
+        if let Some(anchor) = refreshed_envelope.flatten() {
+            let source_was_file_envelope = node.source.as_ref().is_some_and(|previous| {
+                previous.start_byte == 0
+                    && previous_file_sizes
+                        .get(&source)
+                        .is_some_and(|size| previous.end_byte == *size)
+            });
+            if node.kind == NodeKind::File || source_was_file_envelope {
+                node.source = Some(anchor.clone());
+            }
             for provenance in &mut node.evidence {
                 for candidate in &mut provenance.anchors {
-                    if candidate.file == source {
+                    let candidate_was_file_envelope = candidate.file == source
+                        && candidate.start_byte == 0
+                        && previous_file_sizes
+                            .get(&source)
+                            .is_some_and(|size| candidate.end_byte == *size);
+                    if candidate.file == source
+                        && (node.kind == NodeKind::File || candidate_was_file_envelope)
+                    {
                         candidate.clone_from(&anchor);
                     }
                 }
-                if provenance
-                    .wiring_site
-                    .as_ref()
-                    .is_some_and(|candidate| candidate.file == source)
+                let wiring_was_file_envelope =
+                    provenance.wiring_site.as_ref().is_some_and(|candidate| {
+                        candidate.file == source
+                            && candidate.start_byte == 0
+                            && previous_file_sizes
+                                .get(&source)
+                                .is_some_and(|size| candidate.end_byte == *size)
+                    });
+                if provenance.wiring_site.is_some()
+                    && (node.kind == NodeKind::File || wiring_was_file_envelope)
                 {
                     provenance.wiring_site = Some(anchor.clone());
                 }
             }
         }
         if *node != before {
-            changed_file_node_ids.insert(node.id.clone());
+            changed_node_ids.insert(node.id.clone());
         }
     }
     compass_model::validate_code_graph(&current).map_err(|error| {
@@ -1831,7 +1928,7 @@ fn prepare_fact_neutral_document(
             "fact-neutral incremental graph failed validation: {error}"
         ))
     })?;
-    Ok(Some((previous_for_delta, current, changed_file_node_ids)))
+    Ok(Some((previous_for_delta, current, changed_node_ids)))
 }
 
 /// Keep the byte-preserving JSON delta bounded independently from the graph
@@ -1860,7 +1957,7 @@ fn publish_fact_neutral_incremental(
     empty_files: Vec<PathBuf>,
     previous: Option<&V1GraphDocument>,
     current: &V1GraphDocument,
-    changed_file_node_ids: &BTreeSet<String>,
+    changed_node_ids: &BTreeSet<String>,
     fact_state: &AstFactDigestState,
     timings: &mut BuildTimings,
 ) -> Result<BuildResult, CoreError> {
@@ -1876,7 +1973,8 @@ fn publish_fact_neutral_incremental(
                 "fact-neutral SQLite publication is missing its prior graph".to_owned(),
             )
         })?;
-        let (metrics, seal) = publish_graph_and_store_delta(&output_dir, previous, current)?;
+        let (metrics, seal) =
+            publish_graph_and_store_delta(&output_dir, previous, current, Some(changed_node_ids))?;
         (Some(metrics), Some(seal))
     } else {
         let previous_bytes = read_fact_neutral_delta_source(&graph_path);
@@ -1886,7 +1984,7 @@ fn publish_fact_neutral_incremental(
                 write_fact_neutral_graph_json_delta_prevalidated(
                     bytes,
                     current,
-                    changed_file_node_ids,
+                    changed_node_ids,
                     writer,
                 )
                 .map_err(|source| compass_files::FileError::Io {
@@ -2129,6 +2227,8 @@ pub enum CoreError {
     InvalidSemanticFragment(serde_json::Error),
     #[error("invalid supplemental extraction fragment: {0}")]
     InvalidSupplementalFragment(serde_json::Error),
+    #[error("document processing failed: {0}")]
+    DocumentProcessing(String),
     #[error("could not create an AST worker pool: {0}")]
     WorkerPool(String),
     #[error("build worker panicked during {0}")]
@@ -2388,13 +2488,24 @@ fn build_graph_inner_unscoped(
     let mut internal_started = Instant::now();
     let preserve_prior_semantic =
         prior_semantic_layer_required(read_prior_published_graph, &output_dir);
-    let mut semantic_documents = if preserve_prior_semantic {
-        semantic_document_sources(&output_dir.join("graph.json"), &root)
-    } else {
-        HashSet::new()
-    };
-    if let Some(layer) = semantic {
-        semantic_documents.extend(canonical_source_set(&layer.refreshed_files, &root));
+    let mut prepared_documents = options.prepared_documents.clone();
+    if !options.code_only {
+        let document_paths = detection
+            .files
+            .get("document")
+            .into_iter()
+            .flatten()
+            .map(PathBuf::from)
+            .filter(|path| {
+                Registry::resolve(path).is_none() && prepared_documents.get(path).is_none()
+            })
+            .collect::<Vec<_>>();
+        let native = crate::prepare_document_set(
+            &document_paths,
+            &crate::CoreDocumentProcessingOptions::default(),
+        )
+        .map_err(CoreError::DocumentProcessing)?;
+        prepared_documents.documents.extend(native.documents);
     }
     let mut sources = detection
         .files
@@ -2413,15 +2524,23 @@ fn build_graph_inner_unscoped(
                 .flatten()
                 .map(PathBuf::from)
                 .filter(|path| {
-                    let structural_document = Registry::resolve(path).is_some_and(|spec| {
-                        matches!(spec.kind, ExtractorKind::Markdown | ExtractorKind::Html)
-                    });
-                    Registry::resolve(path).is_some()
-                        && (structural_document
-                            || !semantic_documents.contains(&canonical_identity(path)))
+                    Registry::resolve(path).is_some() || prepared_documents.get(path).is_some()
                 }),
         );
     }
+
+    // Project/configuration inputs are intentionally outside the source-file
+    // manifest (lockfiles and workspace metadata are not graph source files),
+    // but they still participate in framework activation, aliases, JSX
+    // runtime selection, and cache scope. Build the bounded evidence index
+    // before the verified-output fast paths so a lock/config edit cannot be
+    // mistaken for an unchanged graph merely because source discovery stayed
+    // byte-identical.
+    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
+    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
+    let project_evidence_matches_prior = prior_fact_digest_state
+        .as_ref()
+        .is_some_and(|state| state.project_evidence_digest == project_evidence_digest);
 
     let reusable_semantic_layer = semantic.is_none()
         || (options.purpose == BuildPurpose::Extract
@@ -2432,7 +2551,10 @@ fn build_graph_inner_unscoped(
     let profile_digest = build_profile_digest(&build_profile, &output_dir)?;
     let has_program_artifacts =
         options.program_analysis && program_artifact_count(&root, options)? != 0;
-    let verified_state = if reusable_semantic_layer && supplemental.is_empty() && manifest_unchanged
+    let verified_state = if reusable_semantic_layer
+        && supplemental.is_empty()
+        && manifest_unchanged
+        && project_evidence_matches_prior
     {
         load_verified(
             &output_dir,
@@ -2518,6 +2640,7 @@ fn build_graph_inner_unscoped(
     if reusable_semantic_layer
         && supplemental.is_empty()
         && manifest_unchanged
+        && project_evidence_matches_prior
         && verified_output
         && (!options.program_analysis || unchanged_program_available)
         && let Some(stats) = unchanged_output_stats(options, &output_dir)
@@ -2606,8 +2729,6 @@ fn build_graph_inner_unscoped(
         || CacheOptions::output_directory(output_cache_root),
         CacheOptions::shared_history,
     );
-    let project_evidence = Arc::new(ProjectEvidenceIndex::build(&root, &sources));
-    let project_evidence_digest = project_evidence_digest(&project_evidence, &sources, &root);
     let early_missing = fact_neutral_pre_cache_sources(
         options,
         semantic,
@@ -2701,9 +2822,11 @@ fn build_graph_inner_unscoped(
     let mut missing = Vec::new();
     if reuse_cached_analysis {
         for path in &sources {
-            if fs::metadata(path).is_ok_and(|metadata| {
-                metadata.is_file() && metadata.len() > options.max_source_bytes
-            }) {
+            if prepared_documents.get(path).is_none()
+                && fs::metadata(path).is_ok_and(|metadata| {
+                    metadata.is_file() && metadata.len() > options.max_source_bytes
+                })
+            {
                 extractions.insert(
                     path.clone(),
                     oversized_source_extraction(path, options.max_source_bytes)?,
@@ -2721,6 +2844,13 @@ fn build_graph_inner_unscoped(
             if let Some(extraction) = cached {
                 if cached_framework_evidence_matches(&extraction, path, &project_evidence)
                     && cached_universal_evidence_matches(&extraction, path)
+                    && prepared_documents.get(path).is_none_or(|prepared| {
+                        extraction
+                            .extensions
+                            .get("document_cache_identity")
+                            .and_then(Value::as_str)
+                            == Some(prepared.cache_identity.as_str())
+                    })
                 {
                     extractions.insert(path.clone(), extraction);
                 } else {
@@ -2732,9 +2862,11 @@ fn build_graph_inner_unscoped(
         }
     } else {
         for path in &sources {
-            if fs::metadata(path).is_ok_and(|metadata| {
-                metadata.is_file() && metadata.len() > options.max_source_bytes
-            }) {
+            if prepared_documents.get(path).is_none()
+                && fs::metadata(path).is_ok_and(|metadata| {
+                    metadata.is_file() && metadata.len() > options.max_source_bytes
+                })
+            {
                 extractions.insert(
                     path.clone(),
                     oversized_source_extraction(path, options.max_source_bytes)?,
@@ -2774,7 +2906,7 @@ fn build_graph_inner_unscoped(
                 path: path.clone(),
                 source,
             })?;
-            if metadata.len() > options.max_source_bytes {
+            if prepared_documents.get(path).is_none() && metadata.len() > options.max_source_bytes {
                 let graph = oversized_source_extraction(path, options.max_source_bytes)?;
                 if let Some(progress) = progress {
                     let mut completed = completed_files
@@ -2810,8 +2942,30 @@ fn build_graph_inner_unscoped(
                 .unwrap_or(path)
                 .to_string_lossy()
                 .replace('\\', "/");
-            let language = Registry::resolve(path).map_or("", |spec| spec.name);
-            let (mut graph, program) = if options.program_analysis {
+            let prepared_document = prepared_documents.get(path);
+            let language = if prepared_document.is_some() {
+                "document"
+            } else {
+                Registry::resolve(path).map_or("", |spec| spec.name)
+            };
+            let (mut graph, program) = if let Some(prepared) = prepared_document {
+                (
+                    crate::document_processing::project_document(
+                        &source_file,
+                        path,
+                        &prepared.artifact,
+                        &prepared.cache_identity,
+                        prepared.ocr_mode,
+                    )
+                    .map_err(|detail| {
+                        compass_languages::ExtractError::InvalidDocumentEvidence {
+                            path: path.clone(),
+                            detail,
+                        }
+                    })?,
+                    None,
+                )
+            } else if options.program_analysis {
                 let combined = engine.extract_source_combined(path, &source_file, &bytes)?;
                 (combined.graph, combined.program)
             } else {
@@ -3478,12 +3632,13 @@ fn build_graph_inner_unscoped(
         let published_edges = published.document.links.len();
         let no_cluster_graph_write_started = Instant::now();
         let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
-            let (metrics, seal) =
-                if let Some(previous) = load_graph_delta_base(&output_dir, &published.document) {
-                    publish_graph_and_store_delta(&output_dir, &previous, &published.document)?
-                } else {
-                    publish_graph_and_store_from_canonical(&output_dir, &published.document)?
-                };
+            let (metrics, seal) = if let Some(previous) =
+                load_graph_delta_base(&output_dir, &published.document)
+            {
+                publish_graph_and_store_delta(&output_dir, &previous, &published.document, None)?
+            } else {
+                publish_graph_and_store_from_canonical(&output_dir, &published.document)?
+            };
             (Some(metrics), Some(seal))
         } else {
             let graph_path = output_dir.join("graph.json");
@@ -3870,10 +4025,16 @@ fn build_graph_inner_unscoped(
     > {
         let started = Instant::now();
         let analysis_compute_started = Instant::now();
-        let (cohesion, (gods, surprises, questions)) = rayon::join(
+        let (cohesion, insights) = rayon::join(
             || score_communities(&document, &communities),
-            || graph_insights(&document, &communities, &labels, 10, 5, 10),
+            || graph_insights_with_blind_spots(&document, &communities, &labels, 10, 5, 10),
         );
+        let compass_graph::GraphInsights {
+            gods,
+            surprises,
+            questions,
+            blind_spots,
+        } = insights;
         profile_internal_duration(
             "graph analyses computation",
             analysis_compute_started.elapsed(),
@@ -3886,6 +4047,7 @@ fn build_graph_inner_unscoped(
                 "cohesion": cohesion.iter().map(|(key, value)| (key.to_string(), value)).collect::<BTreeMap<_, _>>(),
                 "gods": gods,
                 "surprises": surprises,
+                "blindSpots": blind_spots,
                 "tokens": {"input": tokens.0, "output": tokens.1},
             })
         } else {
@@ -3895,6 +4057,7 @@ fn build_graph_inner_unscoped(
                 "gods": gods,
                 "surprises": surprises,
                 "questions": questions,
+                "blindSpots": blind_spots,
             })
         };
         if options.purpose == BuildPurpose::Extract {
@@ -3918,7 +4081,7 @@ fn build_graph_inner_unscoped(
             let mut report_options = ReportOptions::new(&report_root);
             report_options.built_at_commit = commit.as_deref();
             report_options.health = report_health.clone();
-            Some(agent_orientation(
+            Some(agent_orientation_with_blind_spots(
                 &document,
                 &communities,
                 &cohesion,
@@ -3928,6 +4091,7 @@ fn build_graph_inner_unscoped(
                 &detection_summary,
                 TokenCost::default(),
                 Some(&questions),
+                Some(&blind_spots),
                 None,
                 &report_options,
             ))
@@ -4034,7 +4198,7 @@ fn build_graph_inner_unscoped(
     let (store_metrics, graph_seal) = if options.graph_storage.publishes_store() {
         let (metrics, seal) =
             if let Some(previous) = load_graph_delta_base(&output_dir, &published_document) {
-                publish_graph_and_store_delta(&output_dir, &previous, &published_document)?
+                publish_graph_and_store_delta(&output_dir, &previous, &published_document, None)?
             } else {
                 publish_graph_and_store_from_canonical(&output_dir, &published_document)?
             };
@@ -4349,6 +4513,7 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         .to_owned(),
         inference_level: options.inference_level.as_str().to_owned(),
         max_source_bytes: options.max_source_bytes,
+        document_processing_identity: options.prepared_documents.cache_identity.clone(),
     }
 }
 
@@ -4608,7 +4773,9 @@ fn garbage_collect_shared_store(
         .collect::<Vec<_>>();
     let graph_path = staging_directory.join("graph.json");
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
-    if all_references.len() <= 2 && !graph_snapshot_needs_gc(&store, 2)? {
+    if all_references.len() <= 2
+        && !graph_snapshot_needs_gc(&store, SHARED_STORE_GC_MANIFEST_THRESHOLD)?
+    {
         return Ok(GraphSnapshotGcStats::default());
     }
     let stats = garbage_collect_graph_snapshots(
@@ -4787,6 +4954,7 @@ fn publish_graph_and_store_delta(
     output_dir: &Path,
     previous: &V1GraphDocument,
     graph: &V1GraphDocument,
+    changed_node_ids: Option<&BTreeSet<String>>,
 ) -> Result<(StorePublishMetrics, ArtifactSeal), CoreError> {
     if graph.graph.schema != GRAPH_SCHEMA_V1 {
         return Err(CoreError::InvalidBuildState(format!(
@@ -4795,30 +4963,69 @@ fn publish_graph_and_store_delta(
         )));
     }
     let graph_path = output_dir.join("graph.json");
+    let previous_bytes = changed_node_ids.and_then(|_| read_fact_neutral_delta_source(&graph_path));
     let store = SqliteStore::open(local_sqlite_store_path(&graph_path))?;
     let builder = GraphSnapshotBuilder::new();
     let (graph_receipt, content) = rayon::join(
         || {
-            write_atomic_with_digest(&graph_path, |writer| {
-                write_canonical_graph_json(graph, writer).map_err(|source| {
-                    compass_files::FileError::Io {
-                        path: graph_path.clone(),
-                        source,
+            let started = Instant::now();
+            let result = write_atomic_with_digest(&graph_path, |writer| {
+                let used_delta = match (previous_bytes.as_deref(), changed_node_ids) {
+                    (Some(bytes), Some(changed)) => {
+                        write_fact_neutral_graph_json_delta_prevalidated(
+                            bytes, graph, changed, writer,
+                        )
+                        .map_err(|source| {
+                            compass_files::FileError::Io {
+                                path: graph_path.clone(),
+                                source,
+                            }
+                        })?
                     }
-                })
-            })
+                    _ => false,
+                };
+                if used_delta {
+                    Ok(())
+                } else {
+                    write_canonical_graph_json(graph, writer).map_err(|source| {
+                        compass_files::FileError::Io {
+                            path: graph_path.clone(),
+                            source,
+                        }
+                    })
+                }
+            });
+            profile_internal_duration("graph JSON delta publication", started.elapsed());
+            result
         },
-        || builder.prepare_graph_delta(&store, previous, graph),
+        || {
+            let started = Instant::now();
+            let result = if let Some(changed) = changed_node_ids {
+                builder.prepare_node_value_delta(&store, previous, graph, changed)
+            } else {
+                builder.prepare_graph_delta(&store, previous, graph)
+            };
+            profile_internal_duration("immutable store graph delta", started.elapsed());
+            result
+        },
     );
     let graph_receipt = graph_receipt?;
     let graph_seal = ArtifactSeal {
         bytes: graph_receipt.bytes,
         sha256: graph_receipt.sha256.clone(),
     };
-    let content = content.or_else(|_| builder.prepare_content(&store, graph))?;
+    let content = match content {
+        Ok(content) => content,
+        Err(error) => {
+            profile_internal_message(&format!("immutable store delta fallback: {error}"));
+            builder.prepare_content(&store, graph)?
+        }
+    };
+    let finish_started = Instant::now();
     let prepared =
         builder.finish_content(&store, content, graph_receipt.sha256, graph_receipt.bytes)?;
     let metrics = finish_store_snapshot(output_dir, &store, &builder, prepared)?;
+    profile_internal_duration("immutable store delta activation", finish_started.elapsed());
     Ok((metrics, graph_seal))
 }
 
@@ -5109,6 +5316,10 @@ fn prepare_portable_ast_cache_entry(extraction: &mut Extraction, source: &Path, 
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
             RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
+            RawFrameworkFact::Role(role) => &mut role.anchor.source_file,
+            RawFrameworkFact::Relation(relation) => &mut relation.anchor.source_file,
+            RawFrameworkFact::Configuration(configuration) => &mut configuration.anchor.source_file,
+            RawFrameworkFact::FileSet(file_set) => &mut file_set.anchor.source_file,
         };
         *source_file = normalize_portable_origin_path(
             source_file,
@@ -6538,26 +6749,6 @@ fn save_build_manifest(
     Ok(())
 }
 
-fn semantic_document_sources(graph_path: &Path, root: &Path) -> HashSet<PathBuf> {
-    let Ok(existing) = V1GraphDocument::load(graph_path) else {
-        return HashSet::new();
-    };
-    existing
-        .nodes
-        .into_iter()
-        .filter(|node| node_has_semantic_layer_evidence(node) && node.kind == NodeKind::Resource)
-        .filter_map(|node| {
-            node.source_file().map(Path::new).map(|path| {
-                if path.is_absolute() {
-                    canonical_identity(path)
-                } else {
-                    canonical_identity(&root.join(path))
-                }
-            })
-        })
-        .collect()
-}
-
 fn canonical_identity(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
@@ -6604,7 +6795,7 @@ fn detection_inventory(
                     })
                 {
                     ExtractionStatus::Partial
-                } else if source_is_generated(&absolute) {
+                } else if source_is_generated(root, &absolute) {
                     ExtractionStatus::Generated
                 } else {
                     match category.as_str() {
@@ -6681,7 +6872,18 @@ fn prepare_extraction_for_publication(
     partials.insert(identity, portable_diagnostic_reason(reason, path, root));
     extraction.edges.clear();
     extraction.hyperedges.clear();
-    extraction.framework_facts.clear();
+    // Parser recovery invalidates ordinary AST edges, but a filesystem route
+    // declaration remains a bounded convention fact. Preserve only those
+    // convention-owned route facts so Next/Remix/React Router inventories and
+    // hierarchy stay useful; target resolution remains fail-closed when the
+    // recovered syntax does not expose a unique declaration.
+    extraction.framework_facts.retain(|fact| {
+        matches!(
+            fact,
+            RawFrameworkFact::Route(route)
+                if route.origin == compass_languages::RawFrameworkOrigin::Convention
+        )
+    });
     extraction.raw_calls = None;
 }
 
@@ -6694,6 +6896,10 @@ fn make_framework_fact_sources_portable(extraction: &mut Extraction, root: &Path
             RawFrameworkFact::Route(route) => &mut route.anchor.source_file,
             RawFrameworkFact::Domain(domain) => &mut domain.anchor.source_file,
             RawFrameworkFact::Annotation(annotation) => &mut annotation.anchor.source_file,
+            RawFrameworkFact::Role(role) => &mut role.anchor.source_file,
+            RawFrameworkFact::Relation(relation) => &mut relation.anchor.source_file,
+            RawFrameworkFact::Configuration(configuration) => &mut configuration.anchor.source_file,
+            RawFrameworkFact::FileSet(file_set) => &mut file_set.anchor.source_file,
         };
         let path = Path::new(source_file);
         if !path.is_absolute() {
@@ -6721,15 +6927,6 @@ fn portable_diagnostic_reason(reason: &str, path: &Path, root: &Path) -> String 
         .replace(path_text.as_ref(), &relative)
         .replace('\\', "/");
     sanitized.chars().take(512).collect()
-}
-
-fn source_is_generated(path: &Path) -> bool {
-    fs::read(path).ok().is_some_and(|bytes| {
-        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(2_048)]);
-        ["DO NOT EDIT", "@generated", "Generated by"]
-            .iter()
-            .any(|marker| head.contains(marker))
-    })
 }
 
 fn source_was_deleted(value: Option<&serde_json::Value>, root: &Path) -> bool {
@@ -7127,6 +7324,12 @@ fn profile_internal_duration(label: &str, elapsed: Duration) {
     }
 }
 
+fn profile_internal_message(message: &str) {
+    if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_some() {
+        eprintln!("[compass internal] {message}");
+    }
+}
+
 fn profile_extraction_inventory(extractions: &[Extraction]) {
     if std::env::var_os("COMPASS_PROFILE_INTERNAL").is_none() {
         return;
@@ -7254,17 +7457,17 @@ fn cached_framework_evidence_matches(
 }
 
 fn cached_universal_evidence_matches(extraction: &Extraction, path: &Path) -> bool {
-    let Some(profile) = Registry::universal_adapter(path) else {
+    let Some(pipeline) = Registry::universal_evidence_pipeline(path) else {
         return true;
     };
     extraction.raw_calls.is_none()
         && extraction.semantic_evidence.as_ref().is_some_and(|batch| {
-            batch.adapter.id == profile.id
-                && batch.adapter.language == profile.language
-                && batch.adapter.version == profile.version
-                && batch.adapter.evidence_schema == profile.evidence_schema
-                && batch.adapter.profile == profile.profile
-                && batch.adapter.capabilities.as_slice() == profile.capabilities
+            batch.pipeline.id == pipeline.producer.id
+                && batch.pipeline.language == pipeline.producer.language
+                && batch.pipeline.version == pipeline.producer.version
+                && batch.pipeline.evidence_schema == pipeline.producer.evidence_schema
+                && batch.pipeline.qualification == pipeline.qualification
+                && batch.pipeline.capabilities.as_slice() == pipeline.producer.capabilities
                 && compass_languages::validate_evidence(
                     batch,
                     compass_languages::EvidenceLimits::default(),
@@ -7295,11 +7498,13 @@ fn extraction_has_cacheable_ast_facts(extraction: &Extraction) -> bool {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::io::Write as _;
 
     use compass_graph::{GraphSnapshotReader, IndexKind};
     use compass_model::code_graph::GraphDocument as V1GraphDocument;
     use compass_model::provenance::{EvidenceConfidence, effective_confidence};
     use serde_json::{Map, Value};
+    use zip::write::SimpleFileOptions;
 
     use super::*;
 
@@ -7998,7 +8203,7 @@ mod tests {
     }
 
     #[test]
-    fn universal_adapter_cache_requires_current_valid_evidence() -> Result<(), Box<dyn Error>> {
+    fn universal_evidence_cache_requires_current_valid_evidence() -> Result<(), Box<dyn Error>> {
         let python = Path::new("src/example.py");
         let rust = Path::new("src/example.rs");
         assert!(!cached_universal_evidence_matches(
@@ -8026,7 +8231,7 @@ mod tests {
             .semantic_evidence
             .as_mut()
             .ok_or_else(|| std::io::Error::other("universal evidence is missing"))?
-            .adapter
+            .pipeline
             .capabilities
             .clear();
         assert!(!cached_universal_evidence_matches(&invalid, python));
@@ -8219,6 +8424,10 @@ mod tests {
                 RawFrameworkFact::Route(route) => &route.anchor.source_file,
                 RawFrameworkFact::Domain(domain) => &domain.anchor.source_file,
                 RawFrameworkFact::Annotation(annotation) => &annotation.anchor.source_file,
+                RawFrameworkFact::Role(role) => &role.anchor.source_file,
+                RawFrameworkFact::Relation(relation) => &relation.anchor.source_file,
+                RawFrameworkFact::Configuration(configuration) => &configuration.anchor.source_file,
+                RawFrameworkFact::FileSet(file_set) => &file_set.anchor.source_file,
             };
             framework_source == expected
         }));
@@ -8389,7 +8598,7 @@ mod tests {
             "clustered updates should prepare the VS Code graph overview even with --no-viz"
         );
         let overview: Value = serde_json::from_slice(&fs::read(&overview_path)?)?;
-        assert_eq!(overview["schema"], "compass.graph-overview/2");
+        assert_eq!(overview["schema"], "compass.graph-overview/1");
         assert_eq!(overview["nodeLimit"], 5_000);
         assert_eq!(
             overview["sourceGraphBytes"],
@@ -8518,6 +8727,8 @@ mod tests {
             "def main():\n    return 1\n\n# metadata-only edit\n",
         )?;
         let changed = build_local_graph(&options)?;
+        assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
         let after_store = SqliteStore::open(&store_path)?;
         let after_reader = GraphSnapshotReader::open_active(&after_store)?
             .ok_or("changed snapshot is not active")?;
@@ -8673,6 +8884,92 @@ mod tests {
     }
 
     #[test]
+    fn fact_digest_match_requires_all_cached_source_facts() -> Result<(), Box<dyn Error>> {
+        let mut entries = BTreeMap::new();
+        entries.insert("changed.rb".to_owned(), "old".to_owned());
+        entries.insert("cached.rb".to_owned(), "same".to_owned());
+        let prior_state = AstFactDigestState {
+            schema: AST_FACT_DIGESTS_SCHEMA.to_owned(),
+            profile_digest: "profile".to_owned(),
+            project_evidence_digest: "evidence".to_owned(),
+            entries,
+        };
+        let mut current_state = prior_state.clone();
+        current_state
+            .entries
+            .insert("changed.rb".to_owned(), "new".to_owned());
+        assert!(!fact_digest_state_matches(&prior_state, &current_state));
+
+        current_state
+            .entries
+            .insert("changed.rb".to_owned(), "old".to_owned());
+        assert!(fact_digest_state_matches(&prior_state, &current_state));
+        Ok(())
+    }
+
+    #[test]
+    fn fact_neutral_kotlin_update_refreshes_file_envelope_nodes() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        let source = root.join("Main.kt");
+        fs::write(
+            root.join("recovery.py"),
+            "def broken(\n\ndef healthy():\n    return True\n",
+        )?;
+        let initial = "package example\n\nclass Main\n\n// metadata-only tail\n";
+        let changed_source = "package example\n\nclass Main\n";
+        fs::write(&source, initial)?;
+        let mut options = BuildOptions::new(root);
+        options.no_cluster = true;
+        options.no_viz = true;
+
+        let cold = build_local_graph(&options)?;
+        let cold_graph = V1GraphDocument::load(&cold.output_dir.join("graph.json"))?;
+        assert!(
+            cold_graph
+                .graph
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "parser_recovery")
+        );
+        fs::write(&source, changed_source)?;
+        let changed = build_local_graph(&options)?;
+        assert_eq!(changed.files_extracted, 1);
+        assert_eq!(changed.files_cached, 1);
+        assert_eq!(changed.timings.graph_assembly, Duration::ZERO);
+        assert!(changed.timings.store_new_objects <= 8);
+
+        let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
+        assert_eq!(
+            changed_graph.graph.diagnostics,
+            cold_graph.graph.diagnostics
+        );
+        let semantic_identity = |graph: &V1GraphDocument| {
+            graph
+                .nodes
+                .iter()
+                .filter(|node| node.kind != NodeKind::File)
+                .map(|node| (node.id.clone(), node.kind, node.qualified_name.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            semantic_identity(&changed_graph),
+            semantic_identity(&cold_graph)
+        );
+        let package = changed_graph
+            .nodes
+            .iter()
+            .find(|node| node.kind == NodeKind::Package)
+            .ok_or("Kotlin package node missing")?;
+        assert_eq!(
+            package.source.as_ref().map(|anchor| anchor.end_byte),
+            Some(changed_source.len() as u64)
+        );
+        compass_model::validate_code_graph(&changed_graph)?;
+        Ok(())
+    }
+
+    #[test]
     fn clustered_fact_neutral_incremental_reuses_community_artifacts() -> Result<(), Box<dyn Error>>
     {
         let directory = tempfile::tempdir()?;
@@ -8743,6 +9040,33 @@ mod tests {
         fs::write(&source, changed_source)?;
         let changed =
             engine.extract_source_graph_only(&source, "main.py", changed_source.as_bytes())?;
+        let initial_digest = serde_json::to_value(FactDigestExtraction {
+            extraction: &initial,
+        })?;
+        let changed_digest = serde_json::to_value(FactDigestExtraction {
+            extraction: &changed,
+        })?;
+        assert_eq!(initial_digest, changed_digest);
+        Ok(())
+    }
+
+    #[test]
+    fn fact_digest_ignores_kotlin_file_envelope_edits() -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let source = directory.path().join("Main.kt");
+        let initial_source = "package example\n\nimport org.springframework.context.annotation.Configuration\nimport org.springframework.context.annotation.EnableLoadTimeWeaving\n\n@Configuration\n@EnableLoadTimeWeaving\nclass Main\n";
+        let changed_source = "package example\n\nimport org.springframework.context.annotation.Configuration\nimport org.springframework.context.annotation.EnableLoadTimeWeaving\n\n@Configuration\n@EnableLoadTimeWeaving\nclass Main\n\n// metadata-only edit\n";
+        fs::write(&source, initial_source)?;
+        let evidence = Arc::new(ProjectEvidenceIndex::build(
+            directory.path(),
+            std::slice::from_ref(&source),
+        ));
+        let mut engine = Engine::with_project_evidence(evidence);
+        let initial =
+            engine.extract_source_graph_only(&source, "Main.kt", initial_source.as_bytes())?;
+        fs::write(&source, changed_source)?;
+        let changed =
+            engine.extract_source_graph_only(&source, "Main.kt", changed_source.as_bytes())?;
         let initial_digest = serde_json::to_value(FactDigestExtraction {
             extraction: &initial,
         })?;
@@ -9020,6 +9344,40 @@ char* Arena::AllocateAligned(size_t bytes) { return Allocate(bytes); }
 
         assert!(!code_nodes.is_empty());
         assert!(!document_nodes.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn document_native_docx_blocks_are_published_without_semantic_or_ocr_dependencies()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("report.docx");
+        let mut archive = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        archive.start_file("word/document.xml", SimpleFileOptions::default())?;
+        archive.write_all(br#"<w:document xmlns:w="urn:w"><w:body><w:p><w:r><w:t>Document sentinel</w:t></w:r></w:p></w:body></w:document>"#)?;
+        fs::write(&path, archive.finish()?.into_inner())?;
+
+        let mut options = BuildOptions::new(directory.path());
+        options.no_cluster = true;
+        options.no_viz = true;
+        let result = build_local_graph(&options)?;
+        let graph = V1GraphDocument::load(&result.output_dir.join("graph.json"))?;
+        let document_nodes = graph
+            .nodes
+            .iter()
+            .filter(|node| node.source_file() == Some("report.docx"))
+            .collect::<Vec<_>>();
+        assert!(document_nodes.len() >= 2);
+        assert!(
+            document_nodes
+                .iter()
+                .any(|node| node.name == "Document sentinel")
+        );
+        assert!(graph.links.iter().any(|edge| {
+            edge.source_file() == Some("report.docx")
+                && document_nodes.iter().any(|node| node.id == edge.source)
+                && document_nodes.iter().any(|node| node.id == edge.target)
+        }));
         Ok(())
     }
 

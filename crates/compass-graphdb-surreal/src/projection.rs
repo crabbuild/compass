@@ -115,6 +115,7 @@ pub const fn relation_family(kind: EdgeKind) -> RelationFamily {
         | EdgeKind::Embeds
         | EdgeKind::Extends
         | EdgeKind::Implements
+        | EdgeKind::MixesIn
         | EdgeKind::TypeOf
         | EdgeKind::Overrides
         | EdgeKind::Decorates
@@ -129,7 +130,8 @@ pub const fn relation_family(kind: EdgeKind) -> RelationFamily {
         | EdgeKind::Handles
         | EdgeKind::Schedules
         | EdgeKind::Triggers
-        | EdgeKind::Tests => RelationFamily::Execution,
+        | EdgeKind::Tests
+        | EdgeKind::Renders => RelationFamily::Execution,
         EdgeKind::Returns
         | EdgeKind::Reads
         | EdgeKind::Writes

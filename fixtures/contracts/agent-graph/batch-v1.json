@@ -1,0 +1,49 @@
+{
+  "baseGeneration": {
+    "generationId": "generation-1",
+    "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "idempotencyKey": "idempotency:example-create",
+  "operations": [
+    {
+      "assertion": {
+        "fact": {
+          "factType": "node",
+          "kind": "function",
+          "language": "rust",
+          "name": "enhance",
+          "qualifiedName": "crate::enhance"
+        },
+        "grounding": {
+          "evidence": [
+            {
+              "anchor": {
+                "endByte": 10,
+                "endColumn": 10,
+                "endLine": 1,
+                "file": "src/lib.rs",
+                "startByte": 0,
+                "startColumn": 0,
+                "startLine": 1
+              },
+              "evidenceType": "source_span",
+              "excerptDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+              "file": "src/lib.rs",
+              "fileDigest": "2222222222222222222222222222222222222222222222222222222222222222"
+            }
+          ],
+          "policyId": "compass.agent-graph.topology-source-span",
+          "schema": "compass.agent-graph.grounding/1"
+        },
+        "selector": {
+          "key": "key:enhance",
+          "selector": "new"
+        },
+        "summary": "Source-backed enhancement entry point."
+      },
+      "operation": "put_assertion"
+    }
+  ],
+  "overlay": "overlay:review",
+  "schema": "compass.agent-graph.batch/1"
+}

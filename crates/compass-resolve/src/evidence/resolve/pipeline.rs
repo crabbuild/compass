@@ -8,8 +8,8 @@ use crate::ResolutionAdmission;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ResolutionStage {
     ExactSource,
-    ReceiverHierarchy,
     LanguagePolicy,
+    ReceiverHierarchy,
     ExplicitBinding,
     DirectBase,
     QualifiedOwnership,
@@ -24,8 +24,8 @@ enum ResolutionStage {
 impl ResolutionStage {
     const ORDER: [Self; 12] = [
         Self::ExactSource,
-        Self::ReceiverHierarchy,
         Self::LanguagePolicy,
+        Self::ReceiverHierarchy,
         Self::ExplicitBinding,
         Self::DirectBase,
         Self::QualifiedOwnership,
@@ -116,6 +116,15 @@ impl ResolutionDb<'_> {
         else {
             return StageOutcome::Continue;
         };
+        // The Ruby extractor records the receiver as the lexical fallback
+        // (`QueryTest::Arel`, for example) when the source does not declare a
+        // same-file constant.  Resolve the raw constant spelling against the
+        // enclosing lexical owner before committing to that speculative
+        // hierarchy.  The lookup remains exact and language-scoped; it never
+        // falls back to a terminal method name.
+        if let Some(decision) = self.ruby_lexical_target_decision(candidate) {
+            return StageOutcome::Decided(decision);
+        }
         StageOutcome::Decided(self.resolve_c3_receiver_dispatch(
             context.language,
             receiver_qualified_name,
@@ -214,6 +223,16 @@ impl ResolutionDb<'_> {
 
     fn stage_qualified_target(&self, context: &CandidateContext<'_>) -> StageOutcome {
         let candidate = context.candidate();
+        // Ruby receiver-dispatch candidates intentionally leave
+        // `qualified_name` empty: the receiver hierarchy is the authoritative
+        // constraint.  A qualified constant receiver can still be proven by
+        // Ruby's lexical lookup rules, so run that exact-name pass before the
+        // generic qualified-target guard.
+        if candidate.constraints.hierarchy.is_none()
+            && let Some(decision) = self.ruby_lexical_target_decision(candidate)
+        {
+            return StageOutcome::Decided(decision);
+        }
         let Some(qualified) = candidate.constraints.qualified_name.as_ref() else {
             return StageOutcome::Continue;
         };
@@ -223,6 +242,9 @@ impl ResolutionDb<'_> {
                 return StageOutcome::Decided(ResolutionDecision::Ambiguous { candidate_count });
             }
         };
+        if let Some(decision) = self.ruby_import_decision(candidate, &qualified) {
+            return StageOutcome::Decided(decision);
+        }
         let key = (context.language.to_owned(), qualified.clone());
         if let Some(decision) = [
             self.unique_decision(
@@ -242,6 +264,79 @@ impl ResolutionDb<'_> {
             return StageOutcome::Decided(decision);
         }
         StageOutcome::Continue
+    }
+
+    fn ruby_lexical_target_decision(
+        &self,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if candidate.language != "ruby"
+            || !matches!(
+                candidate.relation,
+                CandidateRelation::Calls
+                    | CandidateRelation::Constructs
+                    | CandidateRelation::Extends
+                    | CandidateRelation::UsesTrait
+            )
+        {
+            return None;
+        }
+        let occurrence = self.occurrence(candidate)?;
+        let qualifier = match candidate.relation {
+            CandidateRelation::Calls | CandidateRelation::Constructs => occurrence.qualifier()?,
+            CandidateRelation::Extends | CandidateRelation::UsesTrait => occurrence.spelling(),
+            _ => return None,
+        };
+        let normalized = qualifier.trim().trim_start_matches("::");
+        if normalized.is_empty()
+            || !normalized.split("::").all(|part| {
+                let mut characters = part.chars();
+                characters.next().is_some_and(char::is_uppercase)
+            })
+        {
+            return None;
+        }
+        let source = self
+            .facts
+            .declarations
+            .get(&candidate.source_declaration_id)?;
+        let names = languages::ruby::lexical_names(&source.qualified_name, qualifier);
+        let context = self.occurrence(candidate).and_then(OccurrenceRef::context);
+        let mut slots = BTreeSet::new();
+        for name in names {
+            let qualified = match candidate.relation {
+                CandidateRelation::Constructs
+                | CandidateRelation::Extends
+                | CandidateRelation::UsesTrait => name,
+                CandidateRelation::Calls => {
+                    let separator = match context {
+                        Some("singleton") => '.',
+                        Some("instance") => '#',
+                        _ => continue,
+                    };
+                    format!("{name}{separator}{}", candidate.target_spelling)
+                }
+                _ => continue,
+            };
+            if let Some(ids) = self
+                .indexes
+                .names
+                .by_qualified
+                .get(&("ruby".to_owned(), qualified))
+            {
+                slots.extend(
+                    ids.iter()
+                        .copied()
+                        .filter(|slot| self.declaration_allowed_slot(*slot, candidate)),
+                );
+            }
+        }
+        let candidates = slots.into_iter().collect::<Vec<_>>();
+        self.unique_decision(
+            (!candidates.is_empty()).then_some(&candidates),
+            candidate,
+            ResolutionRule::ExactLexicalDeclaration,
+        )
     }
 
     fn stage_module_or_package(&self, context: &CandidateContext<'_>) -> StageOutcome {
@@ -282,6 +377,11 @@ impl ResolutionDb<'_> {
         else {
             return StageOutcome::Continue;
         };
+        if is_language_builtin_qualified_target(context.language, &qualified_name)
+            && !self.rust_builtin_external_candidate(context, candidate)
+        {
+            return StageOutcome::Decided(ResolutionDecision::Unresolved);
+        }
         StageOutcome::Decided(ResolutionDecision::QualifiedExternal {
             qualified_name,
             evidence: ResolutionEvidence {
@@ -289,6 +389,47 @@ impl ResolutionDb<'_> {
                 candidate_count: 0,
             },
         })
+    }
+
+    /// Rust's prelude names are intentionally not published as graph hubs for
+    /// ordinary constructor calls (`Vec::new`, `Box::new`, and friends).  Two
+    /// forms still carry useful, source-backed evidence: a receiver whose
+    /// concrete type was inferred from `self`, and a qualified call in a
+    /// scope with an explicit wildcard import (where the imported module may
+    /// provide a project/dependency symbol that is outside the corpus).
+    fn rust_builtin_external_candidate(
+        &self,
+        context: &CandidateContext<'_>,
+        candidate: &RelationshipCandidate,
+    ) -> bool {
+        if context.language != "rust" || candidate.relation != CandidateRelation::Calls {
+            return false;
+        }
+        if self
+            .occurrence(candidate)
+            .and_then(OccurrenceRef::qualifier)
+            .is_some_and(|qualifier| qualifier == "self")
+        {
+            return true;
+        }
+        let mut scope_id = candidate.constraints.scope_id.as_deref();
+        let mut visited = BTreeSet::new();
+        while let Some(scope) = scope_id.filter(|scope| visited.insert((*scope).to_owned())) {
+            if self
+                .indexes
+                .wildcards
+                .by_scope
+                .contains_key(&(context.language.to_owned(), scope.to_owned()))
+            {
+                return true;
+            }
+            scope_id = self
+                .facts
+                .scopes
+                .get(scope)
+                .and_then(|scope| scope.parent_scope_id.as_deref());
+        }
+        false
     }
 
     fn stage_deferred_receiver(&self, context: &CandidateContext<'_>) -> StageOutcome {
@@ -350,8 +491,8 @@ mod tests {
             ResolutionStage::ORDER,
             [
                 ExactSource,
-                ReceiverHierarchy,
                 LanguagePolicy,
+                ReceiverHierarchy,
                 ExplicitBinding,
                 DirectBase,
                 QualifiedOwnership,

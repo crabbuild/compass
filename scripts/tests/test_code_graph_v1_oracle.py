@@ -18,11 +18,15 @@ from code_graph_v1_oracle import (  # noqa: E402
     assert_coverage,
     assert_flows,
     assert_negatives,
+    assert_topology,
     canonical_bytes,
     endpoint_allowed,
     load_json,
     load_manifest,
+    load_topology_policy,
     qualification_summary,
+    topology_metrics,
+    topology_report,
     validate_graph,
 )
 
@@ -94,6 +98,52 @@ class OracleTests(unittest.TestCase):
     def test_endpoint_matrix_rejects_inheritance_to_variable(self) -> None:
         self.assertFalse(endpoint_allowed({"kind": "class"}, {"kind": "extends"}, {"kind": "variable"}))
 
+    def test_endpoint_matrix_accepts_explicit_route_stage_variables(self) -> None:
+        for role in ("route_handler", "service", "middleware"):
+            self.assertTrue(endpoint_allowed(
+                {"kind": "route"},
+                {"kind": "routes_to"},
+                {"kind": "variable", "roles": [role]},
+            ))
+        self.assertFalse(endpoint_allowed(
+            {"kind": "route"},
+            {"kind": "routes_to"},
+            {"kind": "variable", "roles": []},
+        ))
+
+    def test_validate_graph_accepts_unresolved_route_stage_placeholder(self) -> None:
+        route = node("route:1", "route")
+        placeholder = node("symbol:1", "variable")
+        placeholder.update({
+            "language": "typescript",
+            "qualifiedName": "./handlers::authenticate",
+            "details": {"type": "symbol", "data": {}},
+            "evidence": [{
+                "extractor": "compass.graph.external-placeholder",
+                "origin": "heuristic",
+                "confidence": "inferred",
+                "rule": "external-symbol-placeholder",
+                "wiringSite": anchor("sample.py", 0, 1),
+            }],
+        })
+        route["details"] = {"type": "route", "data": {"stages": [{
+            "sourceAnchor": anchor("sample.py", 0, 1),
+            "candidates": [{"nodeId": placeholder["id"]}],
+        }]}}
+        validate_graph(self.graph([route, placeholder]), self.manifest)
+
+    def test_endpoint_matrix_accepts_dart_implicit_interface_classes(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "class", "language": "dart"},
+            {"kind": "implements"},
+            {"kind": "class", "language": "dart"},
+        ))
+        self.assertFalse(endpoint_allowed(
+            {"kind": "class", "language": "csharp"},
+            {"kind": "implements"},
+            {"kind": "class", "language": "csharp"},
+        ))
+
     def test_endpoint_matrix_accepts_top_level_instantiations(self) -> None:
         for source_kind in ("file", "module"):
             with self.subTest(source_kind=source_kind):
@@ -108,6 +158,13 @@ class OracleTests(unittest.TestCase):
             {"kind": "config_key"},
             {"kind": "contains"},
             {"kind": "config_key"},
+        ))
+
+    def test_endpoint_matrix_accepts_object_variable_properties(self) -> None:
+        self.assertTrue(endpoint_allowed(
+            {"kind": "variable"},
+            {"kind": "contains"},
+            {"kind": "property"},
         ))
 
     def test_endpoint_matrix_accepts_only_rust_enum_member_instantiations(self) -> None:
@@ -190,6 +247,180 @@ class OracleTests(unittest.TestCase):
         }]}
         with self.assertRaisesRegex(QualificationError, "false_coverage"):
             assert_coverage(graph, manifest)
+
+    def test_topology_separates_occurrences_from_unique_typed_connections(self) -> None:
+        first = node("function:first", "function")
+        second = node("function:second", "function")
+        third = node("function:third", "function")
+        fourth = node("function:isolated", "function")
+        first["community"] = {"id": 1, "label": "first"}
+        second["community"] = {"id": 1, "label": "renamed without identity change"}
+        third["community"] = {"id": 2, "label": "second"}
+        third["source"] = anchor("other.py")
+        third["evidence"] = evidence("other.py")
+        graph = self.graph([first, second, third, fourth])
+        graph["graph"]["files"].append({
+            "id": "file:other",
+            "path": "other.py",
+            "byteSize": 8,
+            "extractionStatus": "extracted",
+        })
+        graph["links"] = [
+            {
+                "id": "edge:1",
+                "key": "edge:1",
+                "kind": "calls",
+                "source": first["id"],
+                "target": second["id"],
+                "relationshipSite": anchor(),
+                "evidence": evidence(),
+            },
+            {
+                "id": "edge:2",
+                "key": "edge:2",
+                "kind": "calls",
+                "source": first["id"],
+                "target": second["id"],
+                "relationshipSite": anchor(start=2, end=3),
+                "evidence": evidence(),
+            },
+            {
+                "id": "edge:3",
+                "key": "edge:3",
+                "kind": "references",
+                "source": second["id"],
+                "target": third["id"],
+                "relationshipSite": anchor(),
+                "evidence": evidence(),
+            },
+        ]
+
+        self.assertEqual(topology_metrics(graph), {
+            "communities": 2,
+            "connectedComponents": 2,
+            "crossCommunityEdges": 1,
+            "crossFileEdges": 1,
+            "crossFileEdgesPerThousandNodes": 250,
+            "edgeBearingNodes": 3,
+            "edgeBearingNodePermille": 750,
+            "edges": 3,
+            "exactConnectedComponents": 2,
+            "exactCrossCommunityEdges": 1,
+            "exactCrossFileEdges": 1,
+            "exactCrossFileEdgesPerThousandNodes": 250,
+            "exactEdgeBearingNodes": 3,
+            "exactEdgeBearingNodePermille": 750,
+            "exactEdges": 3,
+            "exactIsolatedNodes": 1,
+            "exactLargestComponentNodes": 3,
+            "exactSelfLoops": 0,
+            "exactUniqueTypedEndpointPairs": 2,
+            "exactUniqueTypedEndpointPairsPerThousandNodes": 500,
+            "isolatedNodes": 1,
+            "largestComponentNodes": 3,
+            "nodes": 4,
+            "selfLoops": 0,
+            "singletonCommunities": 1,
+            "uniqueTypedEndpointPairs": 2,
+            "uniqueTypedEndpointPairsPerThousandNodes": 500,
+            "byRelation": {
+                "calls": {
+                    "crossFileEdges": 0,
+                    "edgeBearingNodes": 2,
+                    "edges": 2,
+                    "exactCrossFileEdges": 0,
+                    "exactEdgeBearingNodes": 2,
+                    "exactEdges": 2,
+                    "exactUniqueEndpointPairs": 1,
+                    "uniqueEndpointPairs": 1,
+                },
+                "references": {
+                    "crossFileEdges": 1,
+                    "edgeBearingNodes": 2,
+                    "edges": 1,
+                    "exactCrossFileEdges": 1,
+                    "exactEdgeBearingNodes": 2,
+                    "exactEdges": 1,
+                    "exactUniqueEndpointPairs": 1,
+                    "uniqueEndpointPairs": 1,
+                },
+            },
+        })
+
+    def test_topology_policy_rejects_global_and_relationship_regressions(self) -> None:
+        metrics = {
+            "connectedComponents": 3,
+            "crossFileEdges": 4,
+            "edgeBearingNodes": 8,
+            "isolatedNodes": 2,
+            "uniqueTypedEndpointPairs": 7,
+            "byRelation": {
+                "calls": {
+                    "crossFileEdges": 1,
+                    "edgeBearingNodes": 3,
+                    "edges": 4,
+                    "uniqueEndpointPairs": 2,
+                },
+            },
+        }
+        policy = {
+            "minimums": {
+                "crossFileEdges": 4,
+                "edgeBearingNodes": 8,
+                "uniqueTypedEndpointPairs": 7,
+            },
+            "maximums": {"connectedComponents": 3, "isolatedNodes": 2},
+            "relationshipMinimums": {
+                "calls": {"crossFileEdges": 1, "uniqueEndpointPairs": 2},
+            },
+        }
+        assert_topology(metrics, policy)
+
+        disconnected = copy.deepcopy(metrics)
+        disconnected["connectedComponents"] = 4
+        with self.assertRaisesRegex(QualificationError, "topology_maximum"):
+            assert_topology(disconnected, policy)
+
+        missing_call = copy.deepcopy(metrics)
+        missing_call["byRelation"]["calls"]["crossFileEdges"] = 0
+        with self.assertRaisesRegex(QualificationError, "topology_relationship_minimum"):
+            assert_topology(missing_call, policy)
+
+    def test_topology_policy_and_report_are_strict_v1_contracts(self) -> None:
+        policy = {
+            "schema": "compass.code-graph-topology-policy/1",
+            "topology": {
+                "minimums": {"exactEdgeBearingNodePermille": 500},
+                "maximums": {"exactIsolatedNodes": 1},
+                "relationshipMinimums": {
+                    "calls": {"exactUniqueEndpointPairs": 1},
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "topology.json"
+            path.write_text(json.dumps(policy))
+            self.assertEqual(load_topology_policy(path), policy)
+            policy["extra"] = True
+            path.write_text(json.dumps(policy))
+            with self.assertRaisesRegex(QualificationError, "topology_policy_shape"):
+                load_topology_policy(path)
+
+        graph = self.graph([node("function:only", "function")])
+        permissive = {
+            "schema": "compass.code-graph-topology-policy/1",
+            "topology": {
+                "minimums": {"nodes": 1},
+                "maximums": {"isolatedNodes": 1},
+                "relationshipMinimums": {
+                    "calls": {"exactUniqueEndpointPairs": 0},
+                },
+            },
+        }
+        report = topology_report(graph, permissive, graph_digest="sha256:test")
+        self.assertEqual(report["schema"], "compass.code-graph-topology-report/1")
+        self.assertEqual(report["graphDigest"], "sha256:test")
+        self.assertEqual(report["metrics"]["exactIsolatedNodes"], 1)
 
     def test_flow_checks_exact_handler_identity_kind_and_language(self) -> None:
         route = node("route:1", "route")

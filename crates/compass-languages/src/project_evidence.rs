@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tree_sitter::Parser;
 
+use crate::frameworks::typescript_syntax::{StaticValue, TypeScriptSyntax};
 use crate::json_config::parse_jsonc;
 
 pub const FRAMEWORK_PROJECT_EVIDENCE_EXTENSION: &str = "_compass_framework_project_evidence";
 
-const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/1";
+const EVIDENCE_SCHEMA: &str = "compass.framework-project-evidence/4";
 const MAX_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DEPENDENCIES_PER_PROJECT: usize = 10_000;
 const MAX_PROJECT_CONFIGURATIONS: usize = 256;
@@ -18,8 +20,18 @@ const MAX_PROJECT_CONFIGURATION_KEYS: usize = 2_000;
 const MAX_PROJECT_ALIASES: usize = 2_000;
 const MAX_PROJECT_PLUGINS: usize = 2_000;
 const MAX_PROJECT_ROUTE_ROOTS: usize = 256;
+const MAX_COMPOSER_AUTOLOAD_ROOTS: usize = 4_096;
+const MAX_COMPOSER_ROOTS_PER_PREFIX: usize = 64;
+const MAX_COMPOSER_NAMESPACE_PREFIX_BYTES: usize = 1_024;
+const MAX_COMPOSER_DIRECTORY_BYTES: usize = 4_096;
+const MAX_PYTHON_IMPORT_ROOTS: usize = 1_024;
+const MAX_PYTHON_ROOTS_PER_MANIFEST: usize = 256;
+const MAX_PYTHON_IMPORT_ROOT_BYTES: usize = 4_096;
+const MAX_PYTHON_PACKAGE_PREFIX_BYTES: usize = 1_024;
+const MAX_PROJECT_EVIDENCE_DIAGNOSTICS: usize = 4_096;
 const MAX_PROJECT_SCAN_DIRECTORIES: usize = 4_096;
 const MAX_PROJECT_DIRECTORY_ENTRIES: usize = 4_096;
+const MAX_TYPESCRIPT_CONFIG_CLOSURE: usize = 64;
 const FIXED_MANIFEST_NAMES: &[&str] = &[
     "package.json",
     "composer.json",
@@ -33,6 +45,9 @@ const FIXED_MANIFEST_NAMES: &[&str] = &[
     "Cargo.toml",
     "go.mod",
     "Package.swift",
+    "pubspec.yaml",
+    "pubspec.yml",
+    "build.sbt",
 ];
 const FIXED_CONFIGURATION_NAMES: &[&str] = &[
     "application.properties",
@@ -62,6 +77,12 @@ const FIXED_CONFIGURATION_NAMES: &[&str] = &[
     "vite.config.ts",
     "webpack.config.js",
     "webpack.config.ts",
+    "package-lock.json",
+    "npm-shrinkwrap.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "yarn.lock",
+    ".yarnrc.yml",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,13 +90,105 @@ pub struct ProjectEvidence {
     project_root: PathBuf,
     manifests: Vec<String>,
     ecosystems: Vec<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: Vec<String>,
     dependencies: BTreeSet<String>,
+    dependency_aliases: BTreeMap<String, String>,
     configuration_files: Vec<String>,
     configuration_keys: BTreeSet<String>,
+    jsx_import_sources: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
+    vite_aliases: Vec<ProjectViteAliasRule>,
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
+    composer_autoload_roots: Vec<ComposerAutoloadRoot>,
+    python_import_roots: Vec<PythonImportRoot>,
+    input_digests: BTreeMap<String, String>,
+    typescript_extends: BTreeSet<String>,
+    typescript_project_references: BTreeSet<String>,
+    diagnostics: Vec<ProjectEvidenceDiagnostic>,
     fingerprint: String,
+}
+
+/// One repository-contained Composer PSR-4 mapping.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ComposerAutoloadRoot {
+    pub namespace_prefix: String,
+    pub directory: String,
+    pub development: bool,
+    pub manifest: String,
+}
+
+/// One repository-contained Python import root recovered from static project
+/// configuration. The directory is normalized relative to the repository;
+/// no environment or package-manager discovery contributes to this record.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PythonImportRoot {
+    pub manifest: String,
+    pub directory: String,
+    pub package_prefix: Option<String>,
+    pub kind: PythonImportRootKind,
+}
+
+/// Source-only rule that admitted a Python import root.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum PythonImportRootKind {
+    ProjectRoot,
+    SrcLayout,
+    SetuptoolsPackageDir,
+    SetuptoolsFind,
+    PoetryPackage,
+    HatchWheelPackage,
+}
+
+impl PythonImportRootKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ProjectRoot => "project_root",
+            Self::SrcLayout => "src_layout",
+            Self::SetuptoolsPackageDir => "setuptools_package_dir",
+            Self::SetuptoolsFind => "setuptools_find",
+            Self::PoetryPackage => "poetry_package",
+            Self::HatchWheelPackage => "hatch_wheel_package",
+        }
+    }
+}
+
+/// A deterministic project-manifest diagnostic retained with cache evidence.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ProjectEvidenceDiagnostic {
+    pub code: String,
+    pub manifest: String,
+    pub message: String,
+}
+
+/// One source-ordered Vite `resolve.alias` rule recovered without executing
+/// the configuration module.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ProjectViteAliasRule {
+    pub configuration: String,
+    pub ordinal: u32,
+    pub find: String,
+    pub replacement: String,
+    pub kind: ProjectViteAliasKind,
+}
+
+/// The match form used by a Vite alias rule.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ProjectViteAliasKind {
+    String,
+    Regex,
+}
+
+impl ProjectViteAliasKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Regex => "regex",
+        }
+    }
 }
 
 impl ProjectEvidence {
@@ -94,9 +207,31 @@ impl ProjectEvidence {
         &self.ecosystems
     }
 
+    /// Bounded, source-only project metadata such as a package name or an
+    /// explicitly declared language/toolchain version. Values are never
+    /// obtained by evaluating a build tool or project script.
+    #[must_use]
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
+        &self.metadata
+    }
+
+    /// Project-contained source roots declared by a manifest. The paths are
+    /// normalized relative paths and are only advisory to downstream stages.
+    #[must_use]
+    pub fn source_roots(&self) -> &[String] {
+        &self.source_roots
+    }
+
     #[must_use]
     pub fn dependencies(&self) -> &BTreeSet<String> {
         &self.dependencies
+    }
+
+    /// npm package aliases keyed by the declared import name. A marker such
+    /// as `react: npm:preact@...` must not activate React extraction.
+    #[must_use]
+    pub fn dependency_aliases(&self) -> &BTreeMap<String, String> {
+        &self.dependency_aliases
     }
 
     #[must_use]
@@ -109,9 +244,23 @@ impl ProjectEvidence {
         &self.configuration_keys
     }
 
+    /// Statically declared TypeScript/JavaScript JSX runtime packages.
+    #[must_use]
+    pub fn jsx_import_sources(&self) -> &BTreeSet<String> {
+        &self.jsx_import_sources
+    }
+
     #[must_use]
     pub fn aliases(&self) -> &BTreeMap<String, String> {
         &self.aliases
+    }
+
+    /// Source-ordered aliases owned specifically by Vite configuration.
+    /// These rules are not merged with TypeScript, package-import, or webpack
+    /// aliases.
+    #[must_use]
+    pub fn vite_aliases(&self) -> &[ProjectViteAliasRule] {
+        &self.vite_aliases
     }
 
     #[must_use]
@@ -125,6 +274,76 @@ impl ProjectEvidence {
     }
 
     #[must_use]
+    pub fn composer_autoload_roots(&self) -> &[ComposerAutoloadRoot] {
+        &self.composer_autoload_roots
+    }
+
+    #[must_use]
+    pub fn python_import_roots(&self) -> &[PythonImportRoot] {
+        &self.python_import_roots
+    }
+
+    /// Return every admissible source-only Python module key for a repository-
+    /// relative source path. Explicit or inferred roots take precedence over
+    /// the conventional project root when they contain the source. Distinct
+    /// results are retained so callers can fail closed on ambiguity.
+    #[must_use]
+    pub fn python_module_keys(&self, source_file: &str) -> Vec<String> {
+        let source_file = source_file.replace('\\', "/");
+        if source_file.is_empty()
+            || source_file.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
+            || source_file.starts_with('/')
+            || source_file.contains('\0')
+            || source_file.split('/').any(|component| component == "..")
+        {
+            return Vec::new();
+        }
+        let explicit = self
+            .python_import_roots
+            .iter()
+            .filter(|root| root.kind != PythonImportRootKind::ProjectRoot)
+            .filter_map(|root| python_module_key_for_root(&source_file, root))
+            .collect::<BTreeSet<_>>();
+        let mut keys = if explicit.is_empty() {
+            self.python_import_roots
+                .iter()
+                .filter(|root| root.kind == PythonImportRootKind::ProjectRoot)
+                .filter_map(|root| python_module_key_for_root(&source_file, root))
+                .collect::<BTreeSet<_>>()
+        } else {
+            explicit
+        };
+        keys.retain(|key| !key.is_empty());
+        keys.into_iter().collect()
+    }
+
+    /// SHA-256 digests of bounded project inputs that affect framework scope
+    /// or compiler/configuration semantics. Lockfiles are inputs only; they
+    /// never authorize package-manager execution.
+    #[must_use]
+    pub fn input_digests(&self) -> &BTreeMap<String, String> {
+        &self.input_digests
+    }
+
+    /// Relative TypeScript config paths followed through a bounded `extends`
+    /// closure. Non-relative or over-limit forms remain diagnostics.
+    #[must_use]
+    pub fn typescript_extends(&self) -> &BTreeSet<String> {
+        &self.typescript_extends
+    }
+
+    /// Relative TypeScript project-reference paths observed in configuration.
+    #[must_use]
+    pub fn typescript_project_references(&self) -> &BTreeSet<String> {
+        &self.typescript_project_references
+    }
+
+    #[must_use]
+    pub fn diagnostics(&self) -> &[ProjectEvidenceDiagnostic] {
+        &self.diagnostics
+    }
+
+    #[must_use]
     pub fn fingerprint(&self) -> &str {
         &self.fingerprint
     }
@@ -133,6 +352,10 @@ impl ProjectEvidence {
     pub fn has_dependency(&self, dependency: &str) -> bool {
         let dependency = normalize_dependency(dependency);
         self.dependencies.contains(&dependency)
+            && self
+                .dependency_aliases
+                .get(&dependency)
+                .is_none_or(|target| target == &dependency)
     }
 
     #[must_use]
@@ -174,6 +397,35 @@ impl ProjectEvidence {
         self.route_roots
             .get(&normalize_dependency(framework))
             .is_some_and(|roots| roots.contains(&normalize_project_path(root)))
+    }
+}
+
+fn python_module_key_for_root(source_file: &str, root: &PythonImportRoot) -> Option<String> {
+    let relative = if root.directory == "." {
+        source_file
+    } else {
+        source_file.strip_prefix(&format!("{}/", root.directory))?
+    };
+    let stem = relative
+        .strip_suffix(".pyi")
+        .or_else(|| relative.strip_suffix(".py"))?;
+    let stem = stem.strip_suffix("/__init__").unwrap_or(stem);
+    let segments = stem
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    if segments
+        .iter()
+        .any(|segment| !valid_python_identifier(segment))
+    {
+        return None;
+    }
+    let suffix = segments.join(".");
+    match (root.package_prefix.as_deref(), suffix.is_empty()) {
+        (Some(prefix), true) => Some(prefix.to_owned()),
+        (Some(prefix), false) => Some(format!("{prefix}.{suffix}")),
+        (None, false) => Some(suffix),
+        (None, true) => None,
     }
 }
 
@@ -253,21 +505,110 @@ impl ProjectEvidenceIndex {
             let project_root =
                 project_root_for_file(&repository_root, &manifest_roots, &project_file);
             let builder = builders.entry(project_root.clone()).or_default();
+            if let Some(digest) = project_file_digest(&project_file) {
+                builder
+                    .input_digests
+                    .insert(relative_project_file(&project_root, &project_file), digest);
+            }
+            if is_typescript_configuration(&project_file) {
+                builder.typescript_configs.insert(project_file.clone());
+            }
             if is_recognized_manifest(&project_file) {
                 builder.manifests.insert(file_name(&project_file));
                 if let Some(parsed) = parse_manifest(&project_file) {
                     builder.ecosystems.insert(parsed.ecosystem.to_owned());
+                    for (key, value) in parsed.metadata {
+                        if builder.metadata.len() < MAX_PROJECT_CONFIGURATION_KEYS
+                            || builder.metadata.contains_key(&key)
+                        {
+                            builder.metadata.insert(key, value);
+                        }
+                    }
+                    for root in parsed.source_roots {
+                        let Some(root) =
+                            contained_manifest_root(&repository_root, &project_root, &root)
+                        else {
+                            continue;
+                        };
+                        if builder.source_roots.len() < MAX_PROJECT_ROUTE_ROOTS {
+                            builder.source_roots.insert(root);
+                        }
+                    }
                     let remaining =
                         MAX_DEPENDENCIES_PER_PROJECT.saturating_sub(builder.dependencies.len());
                     builder
                         .dependencies
                         .extend(parsed.dependencies.into_iter().take(remaining));
+                    for (dependency, target) in parsed.dependency_aliases {
+                        if builder.dependency_aliases.len() >= MAX_DEPENDENCIES_PER_PROJECT
+                            && !builder.dependency_aliases.contains_key(&dependency)
+                        {
+                            break;
+                        }
+                        builder.dependency_aliases.insert(dependency, target);
+                    }
+                }
+                if file_name(&project_file).eq_ignore_ascii_case("composer.json") {
+                    let (roots, mut diagnostics) = parse_composer_autoload_roots(
+                        &repository_root,
+                        &project_root,
+                        &project_file,
+                    );
+                    let remaining = MAX_COMPOSER_AUTOLOAD_ROOTS
+                        .saturating_sub(builder.composer_autoload_roots.len());
+                    if roots.len() > remaining {
+                        diagnostics.insert(project_diagnostic(
+                            "composer_psr4_total_limit",
+                            &relative_project_file(&repository_root, &project_file),
+                            "Composer PSR-4 roots exceed the project-wide bounded limit",
+                        ));
+                    }
+                    builder
+                        .composer_autoload_roots
+                        .extend(roots.into_iter().take(remaining));
+                    let diagnostic_capacity =
+                        MAX_PROJECT_EVIDENCE_DIAGNOSTICS.saturating_sub(builder.diagnostics.len());
+                    builder
+                        .diagnostics
+                        .extend(diagnostics.into_iter().take(diagnostic_capacity));
+                }
+                if file_name(&project_file).eq_ignore_ascii_case("pyproject.toml") {
+                    let (roots, mut diagnostics) = parse_python_import_roots(
+                        &repository_root,
+                        &project_root,
+                        &project_file,
+                        sources,
+                    );
+                    let remaining =
+                        MAX_PYTHON_IMPORT_ROOTS.saturating_sub(builder.python_import_roots.len());
+                    if roots.len() > remaining {
+                        diagnostics.insert(project_diagnostic(
+                            "python_import_root_total_limit",
+                            &relative_project_file(&repository_root, &project_file),
+                            "Python import roots exceed the project-wide bounded limit",
+                        ));
+                    }
+                    builder
+                        .python_import_roots
+                        .extend(roots.into_iter().take(remaining));
+                    let diagnostic_capacity =
+                        MAX_PROJECT_EVIDENCE_DIAGNOSTICS.saturating_sub(builder.diagnostics.len());
+                    builder
+                        .diagnostics
+                        .extend(diagnostics.into_iter().take(diagnostic_capacity));
                 }
                 if let Some(parsed) = parse_configuration(&project_file) {
+                    record_typescript_configuration(builder, &project_root, &parsed);
                     builder.configuration_keys.extend(
                         parsed.configuration_keys.into_iter().take(
                             MAX_PROJECT_CONFIGURATION_KEYS
                                 .saturating_sub(builder.configuration_keys.len()),
+                        ),
+                    );
+                    builder.jsx_import_sources.extend(
+                        parsed.jsx_import_sources.into_iter().take(
+                            MAX_PROJECT_CONFIGURATION_KEYS
+                                .saturating_sub(builder.jsx_import_sources.len()),
                         ),
                     );
                     builder.aliases.extend(
@@ -275,6 +616,12 @@ impl ProjectEvidenceIndex {
                             .aliases
                             .into_iter()
                             .take(MAX_PROJECT_ALIASES.saturating_sub(builder.aliases.len())),
+                    );
+                    extend_vite_aliases(
+                        &project_root,
+                        &project_file,
+                        &mut builder.vite_aliases,
+                        parsed.vite_aliases,
                     );
                     builder.plugins.extend(
                         parsed
@@ -290,10 +637,17 @@ impl ProjectEvidenceIndex {
                         .insert(relative_project_file(&project_root, &project_file));
                 }
                 if let Some(parsed) = parse_configuration(&project_file) {
+                    record_typescript_configuration(builder, &project_root, &parsed);
                     builder.configuration_keys.extend(
                         parsed.configuration_keys.into_iter().take(
                             MAX_PROJECT_CONFIGURATION_KEYS
                                 .saturating_sub(builder.configuration_keys.len()),
+                        ),
+                    );
+                    builder.jsx_import_sources.extend(
+                        parsed.jsx_import_sources.into_iter().take(
+                            MAX_PROJECT_CONFIGURATION_KEYS
+                                .saturating_sub(builder.jsx_import_sources.len()),
                         ),
                     );
                     builder.aliases.extend(
@@ -301,6 +655,12 @@ impl ProjectEvidenceIndex {
                             .aliases
                             .into_iter()
                             .take(MAX_PROJECT_ALIASES.saturating_sub(builder.aliases.len())),
+                    );
+                    extend_vite_aliases(
+                        &project_root,
+                        &project_file,
+                        &mut builder.vite_aliases,
+                        parsed.vite_aliases,
                     );
                     builder.plugins.extend(
                         parsed
@@ -311,6 +671,8 @@ impl ProjectEvidenceIndex {
                 }
             }
         }
+
+        merge_inherited_project_inputs(&repository_root, &mut builders);
 
         for source in sources {
             let source = absolute_path(&repository_root, source);
@@ -376,24 +738,72 @@ impl ProjectEvidenceIndex {
 struct ProjectBuilder {
     manifests: BTreeSet<String>,
     ecosystems: BTreeSet<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: BTreeSet<String>,
     dependencies: BTreeSet<String>,
+    dependency_aliases: BTreeMap<String, String>,
     configuration_files: BTreeSet<String>,
     configuration_keys: BTreeSet<String>,
+    jsx_import_sources: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
+    vite_aliases: Vec<ProjectViteAliasRule>,
     plugins: BTreeSet<String>,
     route_roots: BTreeMap<String, BTreeSet<String>>,
+    composer_autoload_roots: BTreeSet<ComposerAutoloadRoot>,
+    python_import_roots: BTreeSet<PythonImportRoot>,
+    input_digests: BTreeMap<String, String>,
+    typescript_configs: BTreeSet<PathBuf>,
+    typescript_extends: BTreeSet<String>,
+    typescript_project_references: BTreeSet<String>,
+    diagnostics: BTreeSet<ProjectEvidenceDiagnostic>,
 }
 
 struct ParsedManifest {
     ecosystem: &'static str,
     dependencies: BTreeSet<String>,
+    dependency_aliases: BTreeMap<String, String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: BTreeSet<String>,
 }
 
 #[derive(Default)]
 struct ParsedConfiguration {
     configuration_keys: BTreeSet<String>,
+    jsx_import_sources: BTreeSet<String>,
     aliases: BTreeMap<String, String>,
+    vite_aliases: Vec<ParsedViteAliasRule>,
     plugins: BTreeSet<String>,
+    typescript_extends: BTreeSet<String>,
+    typescript_project_references: BTreeSet<String>,
+}
+
+struct ParsedViteAliasRule {
+    ordinal: u32,
+    find: String,
+    replacement: String,
+    kind: ProjectViteAliasKind,
+}
+
+fn extend_vite_aliases(
+    project_root: &Path,
+    configuration: &Path,
+    output: &mut Vec<ProjectViteAliasRule>,
+    aliases: Vec<ParsedViteAliasRule>,
+) {
+    let remaining = MAX_PROJECT_ALIASES.saturating_sub(output.len());
+    let configuration = relative_project_file(project_root, configuration);
+    output.extend(
+        aliases
+            .into_iter()
+            .take(remaining)
+            .map(|rule| ProjectViteAliasRule {
+                configuration: configuration.clone(),
+                ordinal: rule.ordinal,
+                find: rule.find,
+                replacement: rule.replacement,
+                kind: rule.kind,
+            }),
+    );
 }
 
 fn finish_project(
@@ -403,12 +813,26 @@ fn finish_project(
 ) -> ProjectEvidence {
     let manifests = builder.manifests.into_iter().collect::<Vec<_>>();
     let ecosystems = builder.ecosystems.into_iter().collect::<Vec<_>>();
+    let metadata = builder.metadata;
+    let source_roots = builder.source_roots.into_iter().collect::<Vec<_>>();
     let dependencies = builder.dependencies;
+    let dependency_aliases = builder.dependency_aliases;
     let configuration_files = builder.configuration_files.into_iter().collect::<Vec<_>>();
     let configuration_keys = builder.configuration_keys;
+    let jsx_import_sources = builder.jsx_import_sources;
     let aliases = builder.aliases;
+    let vite_aliases = builder.vite_aliases;
     let plugins = builder.plugins;
     let route_roots = builder.route_roots;
+    let composer_autoload_roots = builder
+        .composer_autoload_roots
+        .into_iter()
+        .collect::<Vec<_>>();
+    let python_import_roots = builder.python_import_roots.into_iter().collect::<Vec<_>>();
+    let input_digests = builder.input_digests;
+    let typescript_extends = builder.typescript_extends;
+    let typescript_project_references = builder.typescript_project_references;
+    let diagnostics = builder.diagnostics.into_iter().collect::<Vec<_>>();
     let relative_root = project_root
         .strip_prefix(repository_root)
         .unwrap_or(&project_root)
@@ -427,8 +851,24 @@ fn finish_project(
         digest.update(ecosystem.as_bytes());
         digest.update([0]);
     }
+    for (key, value) in &metadata {
+        digest.update(key.as_bytes());
+        digest.update([0]);
+        digest.update(value.as_bytes());
+        digest.update([0]);
+    }
+    for source_root in &source_roots {
+        digest.update(source_root.as_bytes());
+        digest.update([0]);
+    }
     for dependency in &dependencies {
         digest.update(dependency.as_bytes());
+        digest.update([0]);
+    }
+    for (dependency, target) in &dependency_aliases {
+        digest.update(dependency.as_bytes());
+        digest.update([0]);
+        digest.update(target.as_bytes());
         digest.update([0]);
     }
     for configuration_file in &configuration_files {
@@ -439,10 +879,25 @@ fn finish_project(
         digest.update(configuration_key.as_bytes());
         digest.update([0]);
     }
+    for source in &jsx_import_sources {
+        digest.update(source.as_bytes());
+        digest.update([0]);
+    }
     for (alias, target) in &aliases {
         digest.update(alias.as_bytes());
         digest.update([0]);
         digest.update(target.as_bytes());
+        digest.update([0]);
+    }
+    for alias in &vite_aliases {
+        digest.update(alias.configuration.as_bytes());
+        digest.update([0]);
+        digest.update(alias.ordinal.to_le_bytes());
+        digest.update(alias.find.as_bytes());
+        digest.update([0]);
+        digest.update(alias.replacement.as_bytes());
+        digest.update([0]);
+        digest.update(alias.kind.as_str().as_bytes());
         digest.update([0]);
     }
     for plugin in &plugins {
@@ -457,17 +912,993 @@ fn finish_project(
             digest.update([0]);
         }
     }
+    for root in &composer_autoload_roots {
+        digest.update(root.namespace_prefix.as_bytes());
+        digest.update([0]);
+        digest.update(root.directory.as_bytes());
+        digest.update([0]);
+        digest.update([u8::from(root.development)]);
+        digest.update(root.manifest.as_bytes());
+        digest.update([0]);
+    }
+    for root in &python_import_roots {
+        digest.update(root.manifest.as_bytes());
+        digest.update([0]);
+        digest.update(root.directory.as_bytes());
+        digest.update([0]);
+        if let Some(prefix) = &root.package_prefix {
+            digest.update(prefix.as_bytes());
+        }
+        digest.update([0]);
+        digest.update(root.kind.as_str().as_bytes());
+        digest.update([0]);
+    }
+    for (path, input_digest) in &input_digests {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+        digest.update(input_digest.as_bytes());
+        digest.update([0]);
+    }
+    for path in &typescript_extends {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+    }
+    for path in &typescript_project_references {
+        digest.update(path.as_bytes());
+        digest.update([0]);
+    }
+    for diagnostic in &diagnostics {
+        digest.update(diagnostic.code.as_bytes());
+        digest.update([0]);
+        digest.update(diagnostic.manifest.as_bytes());
+        digest.update([0]);
+        digest.update(diagnostic.message.as_bytes());
+        digest.update([0]);
+    }
     ProjectEvidence {
         project_root,
         manifests,
         ecosystems,
+        metadata,
+        source_roots,
         dependencies,
+        dependency_aliases,
         configuration_files,
         configuration_keys,
+        jsx_import_sources,
         aliases,
+        vite_aliases,
         plugins,
         route_roots,
+        composer_autoload_roots,
+        python_import_roots,
+        input_digests,
+        typescript_extends,
+        typescript_project_references,
+        diagnostics,
         fingerprint: format!("sha256:{:x}", digest.finalize()),
+    }
+}
+
+fn project_file_digest(path: &Path) -> Option<String> {
+    let metadata = fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_MANIFEST_BYTES
+    {
+        return None;
+    }
+    let source = fs::read(path).ok()?;
+    let mut digest = Sha256::new();
+    digest.update(source);
+    Some(format!("sha256:{:x}", digest.finalize()))
+}
+
+fn is_typescript_configuration(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            let name = name.to_ascii_lowercase();
+            (name.starts_with("tsconfig.") || name.starts_with("jsconfig."))
+                && name.ends_with(".json")
+        })
+}
+
+fn record_typescript_configuration(
+    builder: &mut ProjectBuilder,
+    project_root: &Path,
+    parsed: &ParsedConfiguration,
+) {
+    builder.typescript_extends.extend(
+        parsed
+            .typescript_extends
+            .iter()
+            .map(|value| normalize_project_path(value)),
+    );
+    builder.typescript_project_references.extend(
+        parsed
+            .typescript_project_references
+            .iter()
+            .map(|value| normalize_project_path(value)),
+    );
+    let _ = project_root;
+}
+
+fn merge_inherited_project_inputs(
+    repository_root: &Path,
+    builders: &mut BTreeMap<PathBuf, ProjectBuilder>,
+) {
+    let roots = builders.keys().cloned().collect::<Vec<_>>();
+    let snapshots = roots
+        .iter()
+        .filter_map(|root| {
+            builders.get(root).map(|builder| {
+                (
+                    root.clone(),
+                    builder.input_digests.clone(),
+                    builder.typescript_configs.clone(),
+                    builder.configuration_keys.clone(),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for target_root in &roots {
+        for (source_root, inputs, _, source_configuration_keys) in &snapshots {
+            if source_root == target_root || !target_root.starts_with(source_root) {
+                continue;
+            }
+            for (relative, digest) in inputs {
+                let source_path = source_root.join(relative);
+                if !is_inherited_project_input(&source_path) {
+                    continue;
+                }
+                let target_relative = relative_project_file(target_root, &source_path);
+                if let Some(builder) = builders.get_mut(target_root) {
+                    builder
+                        .input_digests
+                        .entry(target_relative)
+                        .or_insert_with(|| digest.clone());
+                }
+            }
+            if source_root != target_root
+                && target_root.starts_with(source_root)
+                && let Some(target_builder) = builders.get_mut(target_root)
+            {
+                for key in ["workspaces", "packageManager"] {
+                    if source_configuration_keys.contains(key) {
+                        target_builder.configuration_keys.insert(key.to_owned());
+                    }
+                }
+            }
+        }
+
+        let configs = builders
+            .get(target_root)
+            .map(|builder| builder.typescript_configs.clone())
+            .unwrap_or_default();
+        let Some(builder) = builders.get_mut(target_root) else {
+            continue;
+        };
+        let mut visited = BTreeSet::new();
+        for config in configs {
+            merge_typescript_config_closure(
+                repository_root,
+                target_root,
+                &config,
+                builder,
+                &mut visited,
+                0,
+            );
+        }
+    }
+}
+
+fn is_inherited_project_input(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    is_typescript_configuration(path)
+        || matches!(
+            name.as_str(),
+            "package.json"
+                | "package-lock.json"
+                | "npm-shrinkwrap.json"
+                | "pnpm-lock.yaml"
+                | "pnpm-workspace.yaml"
+                | "yarn.lock"
+                | ".yarnrc.yml"
+        )
+}
+
+fn merge_typescript_config_closure(
+    repository_root: &Path,
+    project_root: &Path,
+    config: &Path,
+    builder: &mut ProjectBuilder,
+    visited: &mut BTreeSet<PathBuf>,
+    depth: usize,
+) {
+    let config = config.to_path_buf();
+    if !visited.insert(config.clone()) {
+        return;
+    }
+    if depth >= MAX_TYPESCRIPT_CONFIG_CLOSURE {
+        builder.diagnostics.insert(project_diagnostic(
+            "typescript_config_extends_limit",
+            &relative_project_file(repository_root, &config),
+            "TypeScript config extends closure exceeded the bounded limit",
+        ));
+        return;
+    }
+    let Some(parsed) = parse_configuration(&config) else {
+        return;
+    };
+    builder.configuration_keys.extend(
+        parsed
+            .configuration_keys
+            .iter()
+            .take(MAX_PROJECT_CONFIGURATION_KEYS.saturating_sub(builder.configuration_keys.len()))
+            .cloned(),
+    );
+    builder.jsx_import_sources.extend(
+        parsed
+            .jsx_import_sources
+            .iter()
+            .take(MAX_PROJECT_CONFIGURATION_KEYS.saturating_sub(builder.jsx_import_sources.len()))
+            .cloned(),
+    );
+    builder.aliases.extend(
+        parsed
+            .aliases
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .take(MAX_PROJECT_ALIASES.saturating_sub(builder.aliases.len())),
+    );
+    record_typescript_configuration(builder, project_root, &parsed);
+    if let Some(digest) = project_file_digest(&config) {
+        builder
+            .input_digests
+            .insert(relative_project_file(project_root, &config), digest);
+    }
+    for reference in &parsed.typescript_project_references {
+        let Some(reference_path) =
+            resolve_typescript_config_path(repository_root, &config, reference)
+        else {
+            builder.diagnostics.insert(project_diagnostic(
+                "typescript_project_reference_unsupported",
+                &relative_project_file(repository_root, &config),
+                "TypeScript project reference must be a contained relative path",
+            ));
+            continue;
+        };
+        builder
+            .typescript_project_references
+            .insert(relative_project_file(project_root, &reference_path));
+        if let Some(digest) = project_file_digest(&reference_path) {
+            builder
+                .input_digests
+                .insert(relative_project_file(project_root, &reference_path), digest);
+        }
+    }
+    for extended in &parsed.typescript_extends {
+        let Some(extended_path) =
+            resolve_typescript_config_path(repository_root, &config, extended)
+        else {
+            builder.diagnostics.insert(project_diagnostic(
+                "typescript_config_extends_unsupported",
+                &relative_project_file(repository_root, &config),
+                "TypeScript config extends must be a contained relative path",
+            ));
+            continue;
+        };
+        builder
+            .typescript_extends
+            .insert(relative_project_file(project_root, &extended_path));
+        merge_typescript_config_closure(
+            repository_root,
+            project_root,
+            &extended_path,
+            builder,
+            visited,
+            depth.saturating_add(1),
+        );
+    }
+}
+
+fn resolve_typescript_config_path(
+    repository_root: &Path,
+    config: &Path,
+    value: &str,
+) -> Option<PathBuf> {
+    if !value.starts_with('.') {
+        return None;
+    }
+    let mut candidate = config.parent()?.join(value);
+    if candidate.is_dir() {
+        candidate.push("tsconfig.json");
+    } else if candidate.extension().is_none() {
+        candidate.set_extension("json");
+    }
+    if !candidate.starts_with(repository_root) || !regular_project_file(&candidate) {
+        return None;
+    }
+    Some(candidate)
+}
+
+fn parse_composer_autoload_roots(
+    repository_root: &Path,
+    project_root: &Path,
+    manifest: &Path,
+) -> (
+    BTreeSet<ComposerAutoloadRoot>,
+    BTreeSet<ProjectEvidenceDiagnostic>,
+) {
+    let manifest_name = relative_project_file(repository_root, manifest);
+    let mut roots = BTreeSet::new();
+    let mut diagnostics = BTreeSet::new();
+    let metadata = match fs::symlink_metadata(manifest) {
+        Ok(metadata)
+            if metadata.file_type().is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.len() <= MAX_MANIFEST_BYTES =>
+        {
+            metadata
+        }
+        Ok(_) => {
+            diagnostics.insert(project_diagnostic(
+                "composer_manifest_rejected",
+                &manifest_name,
+                "Composer manifest is not a bounded regular file",
+            ));
+            return (roots, diagnostics);
+        }
+        Err(_) => return (roots, diagnostics),
+    };
+    let _ = metadata;
+    let source = match fs::read_to_string(manifest) {
+        Ok(source) => source,
+        Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "composer_manifest_unreadable",
+                &manifest_name,
+                "Composer manifest could not be read as UTF-8",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+    let document = match serde_json::from_str::<Value>(&source) {
+        Ok(Value::Object(document)) => document,
+        Ok(_) | Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "composer_manifest_invalid",
+                &manifest_name,
+                "Composer manifest is not a valid JSON object",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+    for (section, development) in [("autoload", false), ("autoload-dev", true)] {
+        let Some(psr4) = document
+            .get(section)
+            .and_then(Value::as_object)
+            .and_then(|autoload| autoload.get("psr-4"))
+        else {
+            continue;
+        };
+        let Some(entries) = psr4.as_object() else {
+            diagnostics.insert(project_diagnostic(
+                "composer_psr4_invalid",
+                &manifest_name,
+                &format!("{section}.psr-4 must be an object"),
+            ));
+            continue;
+        };
+        for (prefix, directories) in entries {
+            let Some(prefix) = normalize_composer_prefix(prefix) else {
+                diagnostics.insert(project_diagnostic(
+                    "composer_psr4_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid PSR-4 namespace prefix {prefix:?}"),
+                ));
+                continue;
+            };
+            let values = match directories {
+                Value::String(directory) => vec![directory.as_str()],
+                Value::Array(values) => values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .take(MAX_COMPOSER_ROOTS_PER_PREFIX.saturating_add(1))
+                    .collect::<Vec<_>>(),
+                _ => {
+                    diagnostics.insert(project_diagnostic(
+                        "composer_psr4_directory_invalid",
+                        &manifest_name,
+                        &format!("PSR-4 root for {prefix:?} must be a string or string array"),
+                    ));
+                    continue;
+                }
+            };
+            if values.len() > MAX_COMPOSER_ROOTS_PER_PREFIX {
+                diagnostics.insert(project_diagnostic(
+                    "composer_psr4_root_limit",
+                    &manifest_name,
+                    &format!("PSR-4 root count for {prefix:?} exceeds the bounded limit"),
+                ));
+                continue;
+            }
+            for directory in values {
+                let Some(directory) =
+                    contained_composer_directory(repository_root, project_root, directory)
+                else {
+                    diagnostics.insert(project_diagnostic(
+                        "composer_psr4_directory_rejected",
+                        &manifest_name,
+                        &format!("PSR-4 root {directory:?} is invalid or leaves the repository"),
+                    ));
+                    continue;
+                };
+                if roots.len() >= MAX_COMPOSER_AUTOLOAD_ROOTS {
+                    diagnostics.insert(project_diagnostic(
+                        "composer_psr4_total_limit",
+                        &manifest_name,
+                        "Composer PSR-4 roots exceed the project-wide bounded limit",
+                    ));
+                    return (roots, diagnostics);
+                }
+                roots.insert(ComposerAutoloadRoot {
+                    namespace_prefix: prefix.clone(),
+                    directory,
+                    development,
+                    manifest: manifest_name.clone(),
+                });
+            }
+        }
+    }
+    (roots, diagnostics)
+}
+
+fn normalize_composer_prefix(prefix: &str) -> Option<String> {
+    let prefix = prefix
+        .trim()
+        .trim_start_matches('\\')
+        .trim_end_matches('\\');
+    if prefix.is_empty() {
+        return Some(String::new());
+    }
+    if prefix.len() > MAX_COMPOSER_NAMESPACE_PREFIX_BYTES {
+        return None;
+    }
+    if !prefix.split('\\').all(valid_php_identifier) {
+        return None;
+    }
+    Some(format!("{prefix}\\"))
+}
+
+fn valid_php_identifier(segment: &str) -> bool {
+    let mut bytes = segment.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
+fn contained_composer_directory(
+    repository_root: &Path,
+    project_root: &Path,
+    directory: &str,
+) -> Option<String> {
+    if directory.len() > MAX_COMPOSER_DIRECTORY_BYTES
+        || directory.starts_with(['/', '\\'])
+        || directory.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut candidate = project_root.to_path_buf();
+    for component in Path::new(directory).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => candidate.push(segment),
+            std::path::Component::ParentDir => {
+                if candidate == repository_root || !candidate.pop() {
+                    return None;
+                }
+            }
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    if !candidate.starts_with(repository_root) {
+        return None;
+    }
+    let canonical_repository = fs::canonicalize(repository_root).ok()?;
+    let mut existing_ancestor = candidate.clone();
+    while !existing_ancestor.exists() {
+        if existing_ancestor == repository_root || !existing_ancestor.pop() {
+            return None;
+        }
+    }
+    let canonical_ancestor = fs::canonicalize(existing_ancestor).ok()?;
+    if !canonical_ancestor.starts_with(canonical_repository) {
+        return None;
+    }
+    let relative = candidate.strip_prefix(repository_root).ok()?;
+    let normalized = normalize_project_path(&relative.to_string_lossy());
+    Some(if normalized.is_empty() {
+        ".".to_owned()
+    } else {
+        normalized
+    })
+}
+
+fn parse_python_import_roots(
+    repository_root: &Path,
+    project_root: &Path,
+    manifest: &Path,
+    sources: &[PathBuf],
+) -> (
+    BTreeSet<PythonImportRoot>,
+    BTreeSet<ProjectEvidenceDiagnostic>,
+) {
+    let manifest_name = relative_project_file(repository_root, manifest);
+    let mut roots = BTreeSet::new();
+    let mut diagnostics = BTreeSet::new();
+    let project_directory = relative_project_file(repository_root, project_root);
+    roots.insert(PythonImportRoot {
+        manifest: manifest_name.clone(),
+        directory: normalized_root_directory(&project_directory),
+        package_prefix: None,
+        kind: PythonImportRootKind::ProjectRoot,
+    });
+
+    let metadata = match fs::symlink_metadata(manifest) {
+        Ok(metadata)
+            if metadata.file_type().is_file()
+                && !metadata.file_type().is_symlink()
+                && metadata.len() <= MAX_MANIFEST_BYTES =>
+        {
+            metadata
+        }
+        Ok(_) => {
+            diagnostics.insert(project_diagnostic(
+                "python_manifest_rejected",
+                &manifest_name,
+                "Python project manifest is not a bounded regular file",
+            ));
+            return (roots, diagnostics);
+        }
+        Err(_) => return (roots, diagnostics),
+    };
+    let _ = metadata;
+    let source = match fs::read_to_string(manifest) {
+        Ok(source) => source,
+        Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "python_manifest_unreadable",
+                &manifest_name,
+                "Python project manifest could not be read as UTF-8",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+    let document = match toml::from_str::<toml::Table>(&source) {
+        Ok(document) => document,
+        Err(_) => {
+            diagnostics.insert(project_diagnostic(
+                "python_manifest_invalid",
+                &manifest_name,
+                "Python project manifest is not valid TOML",
+            ));
+            return (roots, diagnostics);
+        }
+    };
+
+    let mut configured = Vec::<(String, Option<String>, PythonImportRootKind)>::new();
+    if let Some(package_dir) = toml_table_at(&document, &["tool", "setuptools", "package-dir"]) {
+        for (prefix, value) in package_dir {
+            let Some(directory) = value.as_str() else {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_invalid",
+                    &manifest_name,
+                    "tool.setuptools.package-dir values must be static strings",
+                ));
+                continue;
+            };
+            let package_prefix = if prefix.is_empty() {
+                None
+            } else if let Some(prefix) = normalize_python_package_prefix(prefix) {
+                Some(prefix)
+            } else {
+                diagnostics.insert(project_diagnostic(
+                    "python_package_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid setuptools package prefix {prefix:?}"),
+                ));
+                continue;
+            };
+            configured.push((
+                directory.to_owned(),
+                package_prefix,
+                PythonImportRootKind::SetuptoolsPackageDir,
+            ));
+        }
+    }
+    if let Some(find) = toml_table_at(&document, &["tool", "setuptools", "packages", "find"])
+        && let Some(where_value) = find.get("where")
+    {
+        collect_static_string_or_array(
+            where_value,
+            "tool.setuptools.packages.find.where",
+            &manifest_name,
+            &mut diagnostics,
+            |directory| {
+                configured.push((
+                    directory.to_owned(),
+                    None,
+                    PythonImportRootKind::SetuptoolsFind,
+                ));
+            },
+        );
+    }
+    if let Some(poetry) = toml_table_at(&document, &["tool", "poetry"])
+        && let Some(packages) = poetry.get("packages")
+    {
+        let Some(packages) = packages.as_array() else {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_invalid",
+                &manifest_name,
+                "tool.poetry.packages must be a static array of tables",
+            ));
+            return finalize_python_import_roots(
+                repository_root,
+                project_root,
+                &manifest_name,
+                sources,
+                roots,
+                configured,
+                diagnostics,
+            );
+        };
+        for package in packages
+            .iter()
+            .take(MAX_PYTHON_ROOTS_PER_MANIFEST.saturating_add(1))
+        {
+            let Some(package) = package.as_table() else {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_invalid",
+                    &manifest_name,
+                    "tool.poetry.packages entries must be static tables",
+                ));
+                continue;
+            };
+            let Some(include) = package.get("include").and_then(toml::Value::as_str) else {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_invalid",
+                    &manifest_name,
+                    "tool.poetry.packages entries require a static include string",
+                ));
+                continue;
+            };
+            if !valid_python_package_path(include) {
+                diagnostics.insert(project_diagnostic(
+                    "python_package_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid Poetry package include {include:?}"),
+                ));
+                continue;
+            }
+            let directory = package
+                .get("from")
+                .and_then(toml::Value::as_str)
+                .unwrap_or(".");
+            configured.push((
+                directory.to_owned(),
+                None,
+                PythonImportRootKind::PoetryPackage,
+            ));
+        }
+        if packages.len() > MAX_PYTHON_ROOTS_PER_MANIFEST {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_limit",
+                &manifest_name,
+                "tool.poetry.packages exceeds the bounded root limit",
+            ));
+        }
+    }
+    if let Some(wheel) = toml_table_at(&document, &["tool", "hatch", "build", "targets", "wheel"])
+        && let Some(packages) = wheel.get("packages")
+    {
+        let mut hatch_packages = Vec::new();
+        collect_static_string_or_array(
+            packages,
+            "tool.hatch.build.targets.wheel.packages",
+            &manifest_name,
+            &mut diagnostics,
+            |package| hatch_packages.push(package.to_owned()),
+        );
+        for package in hatch_packages {
+            if !valid_python_package_path(&package) {
+                diagnostics.insert(project_diagnostic(
+                    "python_package_prefix_invalid",
+                    &manifest_name,
+                    &format!("invalid Hatch wheel package {package:?}"),
+                ));
+                continue;
+            }
+            let directory = Path::new(&package)
+                .parent()
+                .map(|parent| parent.to_string_lossy().into_owned())
+                .filter(|parent| !parent.is_empty())
+                .unwrap_or_else(|| ".".to_owned());
+            configured.push((directory, None, PythonImportRootKind::HatchWheelPackage));
+        }
+    }
+
+    finalize_python_import_roots(
+        repository_root,
+        project_root,
+        &manifest_name,
+        sources,
+        roots,
+        configured,
+        diagnostics,
+    )
+}
+
+fn finalize_python_import_roots(
+    repository_root: &Path,
+    project_root: &Path,
+    manifest_name: &str,
+    sources: &[PathBuf],
+    mut roots: BTreeSet<PythonImportRoot>,
+    configured: Vec<(String, Option<String>, PythonImportRootKind)>,
+    mut diagnostics: BTreeSet<ProjectEvidenceDiagnostic>,
+) -> (
+    BTreeSet<PythonImportRoot>,
+    BTreeSet<ProjectEvidenceDiagnostic>,
+) {
+    if configured.len() > MAX_PYTHON_ROOTS_PER_MANIFEST {
+        diagnostics.insert(project_diagnostic(
+            "python_import_root_limit",
+            manifest_name,
+            "Python import-root declarations exceed the bounded manifest limit",
+        ));
+    }
+    let mut semantic_roots = BTreeMap::<(String, Option<String>), PythonImportRootKind>::new();
+    for (directory, package_prefix, kind) in
+        configured.into_iter().take(MAX_PYTHON_ROOTS_PER_MANIFEST)
+    {
+        let Some(directory) = contained_python_directory(repository_root, project_root, &directory)
+        else {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_rejected",
+                manifest_name,
+                &format!("Python import root {directory:?} is invalid or leaves the repository"),
+            ));
+            continue;
+        };
+        let semantic_key = (directory.clone(), package_prefix.clone());
+        if let Some(previous) = semantic_roots.insert(semantic_key, kind) {
+            if previous != kind {
+                diagnostics.insert(project_diagnostic(
+                    "python_import_root_duplicate",
+                    manifest_name,
+                    &format!(
+                        "Python import root {directory:?} is declared by both {} and {}",
+                        previous.as_str(),
+                        kind.as_str()
+                    ),
+                ));
+            }
+            continue;
+        }
+        roots.insert(PythonImportRoot {
+            manifest: manifest_name.to_owned(),
+            directory,
+            package_prefix,
+            kind,
+        });
+    }
+
+    let mut prefixes_by_directory = BTreeMap::<String, BTreeSet<Option<String>>>::new();
+    for root in roots
+        .iter()
+        .filter(|root| root.kind != PythonImportRootKind::ProjectRoot)
+    {
+        prefixes_by_directory
+            .entry(root.directory.clone())
+            .or_default()
+            .insert(root.package_prefix.clone());
+    }
+    for (directory, prefixes) in prefixes_by_directory {
+        if prefixes.len() > 1 {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_conflict",
+                manifest_name,
+                &format!(
+                    "Python import root {directory:?} has conflicting package-prefix declarations"
+                ),
+            ));
+        }
+    }
+
+    if inferred_src_layout(repository_root, project_root, sources)
+        && let Some(directory) = contained_python_directory(repository_root, project_root, "src")
+    {
+        let semantic = (directory.clone(), None);
+        if !semantic_roots.contains_key(&semantic) {
+            roots.insert(PythonImportRoot {
+                manifest: manifest_name.to_owned(),
+                directory,
+                package_prefix: None,
+                kind: PythonImportRootKind::SrcLayout,
+            });
+        }
+    }
+    (roots, diagnostics)
+}
+
+fn toml_table_at<'a>(root: &'a toml::Table, path: &[&str]) -> Option<&'a toml::Table> {
+    let (first, rest) = path.split_first()?;
+    let mut table = root.get(*first)?.as_table()?;
+    for component in rest {
+        table = table.get(*component)?.as_table()?;
+    }
+    Some(table)
+}
+
+fn collect_static_string_or_array(
+    value: &toml::Value,
+    field: &str,
+    manifest: &str,
+    diagnostics: &mut BTreeSet<ProjectEvidenceDiagnostic>,
+    mut collect: impl FnMut(&str),
+) {
+    if let Some(value) = value.as_str() {
+        collect(value);
+        return;
+    }
+    let Some(values) = value.as_array() else {
+        diagnostics.insert(project_diagnostic(
+            "python_import_root_invalid",
+            manifest,
+            &format!("{field} must be a static string or string array"),
+        ));
+        return;
+    };
+    for value in values
+        .iter()
+        .take(MAX_PYTHON_ROOTS_PER_MANIFEST.saturating_add(1))
+    {
+        if let Some(value) = value.as_str() {
+            collect(value);
+        } else {
+            diagnostics.insert(project_diagnostic(
+                "python_import_root_invalid",
+                manifest,
+                &format!("{field} contains a non-string value"),
+            ));
+        }
+    }
+    if values.len() > MAX_PYTHON_ROOTS_PER_MANIFEST {
+        diagnostics.insert(project_diagnostic(
+            "python_import_root_limit",
+            manifest,
+            &format!("{field} exceeds the bounded root limit"),
+        ));
+    }
+}
+
+fn contained_python_directory(
+    repository_root: &Path,
+    project_root: &Path,
+    directory: &str,
+) -> Option<String> {
+    if directory.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
+        || directory.contains('\0')
+        || directory.starts_with(['/', '\\'])
+        || directory.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut candidate = project_root.to_path_buf();
+    for component in Path::new(directory).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => candidate.push(segment),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    if !candidate.starts_with(repository_root) || !candidate.is_dir() {
+        return None;
+    }
+    let canonical_repository = fs::canonicalize(repository_root).ok()?;
+    let canonical_candidate = fs::canonicalize(&candidate).ok()?;
+    if !canonical_candidate.starts_with(canonical_repository) {
+        return None;
+    }
+    let relative = candidate.strip_prefix(repository_root).ok()?;
+    Some(normalized_root_directory(&relative.to_string_lossy()))
+}
+
+fn normalized_root_directory(directory: &str) -> String {
+    let directory = normalize_project_path(directory);
+    if directory.is_empty() {
+        ".".to_owned()
+    } else {
+        directory
+    }
+}
+
+fn normalize_python_package_prefix(prefix: &str) -> Option<String> {
+    let prefix = prefix.trim();
+    if prefix.is_empty() || prefix.len() > MAX_PYTHON_PACKAGE_PREFIX_BYTES {
+        return None;
+    }
+    prefix
+        .split('.')
+        .all(valid_python_identifier)
+        .then(|| prefix.to_owned())
+}
+
+fn valid_python_package_path(value: &str) -> bool {
+    if value.is_empty()
+        || value.len() > MAX_PYTHON_IMPORT_ROOT_BYTES
+        || value.contains(['\0', '\\'])
+        || value.starts_with('/')
+        || value.as_bytes().get(1) == Some(&b':')
+    {
+        return false;
+    }
+    Path::new(value)
+        .components()
+        .all(|component| match component {
+            std::path::Component::CurDir => true,
+            std::path::Component::Normal(segment) => segment
+                .to_str()
+                .map(|segment| segment.strip_suffix(".py").unwrap_or(segment))
+                .is_some_and(valid_python_identifier),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => false,
+        })
+}
+
+fn valid_python_identifier(segment: &str) -> bool {
+    let mut characters = segment.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_alphabetic())
+        && characters.all(|character| character == '_' || character.is_alphanumeric())
+}
+
+fn inferred_src_layout(repository_root: &Path, project_root: &Path, sources: &[PathBuf]) -> bool {
+    if !project_root.join("src").is_dir() {
+        return false;
+    }
+    let mut python_sources = sources
+        .iter()
+        .map(|source| absolute_path(repository_root, source))
+        .filter(|source| source.starts_with(project_root))
+        .filter(|source| {
+            source
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| matches!(extension, "py" | "pyi"))
+        })
+        .peekable();
+    python_sources.peek().is_some()
+        && python_sources.all(|source| source.starts_with(project_root.join("src")))
+}
+
+fn project_diagnostic(code: &str, manifest: &str, message: &str) -> ProjectEvidenceDiagnostic {
+    ProjectEvidenceDiagnostic {
+        code: code.to_owned(),
+        manifest: manifest.to_owned(),
+        message: message.to_owned(),
     }
 }
 
@@ -482,21 +1913,97 @@ fn parse_manifest(path: &Path) -> Option<ParsedManifest> {
     let source = fs::read_to_string(path).ok()?;
     let name = path.file_name()?.to_str()?;
     let lower = name.to_ascii_lowercase();
-    let (ecosystem, dependencies) = match lower.as_str() {
-        "package.json" => ("npm", json_dependencies(&source, NPM_DEPENDENCY_KEYS)?),
+    let dependency_aliases = if lower == "package.json" {
+        npm_dependency_aliases(&source)?
+    } else {
+        BTreeMap::new()
+    };
+    let (ecosystem, dependencies, metadata, source_roots) = match lower.as_str() {
+        "package.json" => (
+            "npm",
+            json_dependencies(&source, NPM_DEPENDENCY_KEYS)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
         "composer.json" => (
             "composer",
             json_dependencies(&source, &["require", "require-dev"])?,
+            BTreeMap::new(),
+            BTreeSet::new(),
         ),
-        "pyproject.toml" => ("python", pyproject_dependencies(&source)?),
-        "requirements.txt" | "requirements.in" => ("python", requirements_dependencies(&source)),
-        "gemfile" => ("ruby", gemfile_dependencies(&source)),
-        "pom.xml" => ("maven", pom_dependencies(&source)?),
-        "build.gradle" | "build.gradle.kts" => ("gradle", gradle_dependencies(&source)),
-        "cargo.toml" => ("cargo", cargo_dependencies(&source)?),
-        "go.mod" => ("go", go_mod_dependencies(&source)),
-        "package.swift" => ("swift", swift_package_dependencies(&source)),
-        _ if lower.ends_with(".csproj") => ("dotnet", csproj_dependencies(&source)?),
+        "pyproject.toml" => (
+            "python",
+            pyproject_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "requirements.txt" | "requirements.in" => (
+            "python",
+            requirements_dependencies(&source),
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "gemfile" => (
+            "ruby",
+            gemfile_dependencies(&source),
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "pom.xml" => (
+            "maven",
+            pom_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "build.gradle" | "build.gradle.kts" => {
+            let (metadata, source_roots) = gradle_project_metadata(&source);
+            (
+                "gradle",
+                gradle_dependencies(&source),
+                metadata,
+                source_roots,
+            )
+        }
+        "cargo.toml" => (
+            "cargo",
+            cargo_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "go.mod" => (
+            "go",
+            go_mod_dependencies(&source),
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
+        "package.swift" => {
+            let (metadata, source_roots) = swift_package_metadata(&source);
+            (
+                "swift",
+                swift_package_dependencies(&source),
+                metadata,
+                source_roots,
+            )
+        }
+        "pubspec.yaml" | "pubspec.yml" => {
+            let parsed = pubspec_metadata(&source)?;
+            (
+                "dart",
+                parsed.dependencies,
+                parsed.metadata,
+                parsed.source_roots,
+            )
+        }
+        "build.sbt" => {
+            let (dependencies, metadata, source_roots) = sbt_project_metadata(&source);
+            ("scala", dependencies, metadata, source_roots)
+        }
+        _ if lower.ends_with(".csproj") => (
+            "dotnet",
+            csproj_dependencies(&source)?,
+            BTreeMap::new(),
+            BTreeSet::new(),
+        ),
         _ => return None,
     };
     Some(ParsedManifest {
@@ -507,6 +2014,9 @@ fn parse_manifest(path: &Path) -> Option<ParsedManifest> {
             .filter(|dependency| !dependency.is_empty())
             .take(MAX_DEPENDENCIES_PER_PROJECT)
             .collect(),
+        dependency_aliases,
+        metadata,
+        source_roots,
     })
 }
 
@@ -526,6 +2036,43 @@ fn json_dependencies(source: &str, keys: &[&str]) -> Option<Vec<String>> {
             .flat_map(|dependencies| dependencies.keys().cloned())
             .collect(),
     )
+}
+
+fn npm_dependency_aliases(source: &str) -> Option<BTreeMap<String, String>> {
+    let root = serde_json::from_str::<Value>(source).ok()?;
+    let object = root.as_object()?;
+    let mut aliases = BTreeMap::new();
+    for dependencies in NPM_DEPENDENCY_KEYS
+        .iter()
+        .filter_map(|key| object.get(*key).and_then(Value::as_object))
+    {
+        for (name, specification) in dependencies {
+            let Some(specification) = specification.as_str() else {
+                continue;
+            };
+            let Some(target) = npm_alias_target(specification) else {
+                continue;
+            };
+            if aliases.len() >= MAX_DEPENDENCIES_PER_PROJECT && !aliases.contains_key(name) {
+                return Some(aliases);
+            }
+            aliases.insert(normalize_dependency(name), normalize_dependency(target));
+        }
+    }
+    Some(aliases)
+}
+
+fn npm_alias_target(specification: &str) -> Option<&str> {
+    let alias = specification.strip_prefix("npm:")?;
+    if alias.starts_with('@') {
+        let slash = alias.find('/')?;
+        let version = alias[slash.saturating_add(1)..]
+            .find('@')
+            .map_or(alias.len(), |position| position + slash.saturating_add(1));
+        Some(&alias[..version])
+    } else {
+        Some(alias.split_once('@').map_or(alias, |(package, _)| package))
+    }
 }
 
 fn pyproject_dependencies(source: &str) -> Option<Vec<String>> {
@@ -696,6 +2243,244 @@ fn swift_package_dependencies(source: &str) -> Vec<String> {
         .collect()
 }
 
+fn swift_package_metadata(source: &str) -> (BTreeMap<String, String>, BTreeSet<String>) {
+    let mut metadata = BTreeMap::new();
+    let mut source_roots = default_source_roots(["Sources", "Tests"]);
+    let Ok(package_name) = Regex::new(r#"\bname\s*:\s*[\"']([^\"']+)[\"']"#) else {
+        return (metadata, source_roots);
+    };
+    if let Some(name) = package_name
+        .captures(source)
+        .and_then(|capture| capture.get(1))
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        metadata.insert("swift.package.name".to_owned(), name.to_owned());
+    }
+    let Ok(paths) = Regex::new(r#"\bpath\s*:\s*[\"']([^\"']+)[\"']"#) else {
+        return (metadata, source_roots);
+    };
+    for capture in paths.captures_iter(source).take(MAX_PROJECT_ROUTE_ROOTS) {
+        let Some(path) = capture
+            .get(1)
+            .and_then(|value| bounded_source_root(value.as_str()))
+        else {
+            continue;
+        };
+        source_roots.insert(path);
+    }
+    (metadata, source_roots)
+}
+
+struct ParsedPubspec {
+    dependencies: Vec<String>,
+    metadata: BTreeMap<String, String>,
+    source_roots: BTreeSet<String>,
+}
+
+fn pubspec_metadata(source: &str) -> Option<ParsedPubspec> {
+    let root = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source).ok()?;
+    let mapping = root.as_mapping()?;
+    let mut dependencies = Vec::new();
+    for section in ["dependencies", "dev_dependencies", "dependency_overrides"] {
+        let Some(values) =
+            yaml_mapping_value(mapping, section).and_then(|value| value.as_mapping())
+        else {
+            continue;
+        };
+        dependencies.extend(
+            values
+                .keys()
+                .filter_map(|key| key.as_str().map(str::to_owned)),
+        );
+    }
+    let mut metadata = BTreeMap::new();
+    if let Some(name) = yaml_mapping_value(mapping, "name")
+        .and_then(serde_yaml_ng::Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        metadata.insert("dart.package.name".to_owned(), name.to_owned());
+    }
+    if let Some(sdk) = yaml_mapping_value(mapping, "environment")
+        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(|environment| yaml_mapping_value(environment, "sdk"))
+        .and_then(serde_yaml_ng::Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        metadata.insert("dart.sdk".to_owned(), sdk.to_owned());
+    }
+    if let Some(flutter) = yaml_mapping_value(mapping, "flutter")
+        .and_then(serde_yaml_ng::Value::as_mapping)
+        .and_then(|flutter| yaml_mapping_value(flutter, "module"))
+        .and_then(serde_yaml_ng::Value::as_str)
+        .and_then(bounded_source_root)
+    {
+        metadata.insert("flutter.module".to_owned(), flutter);
+    }
+    Some(ParsedPubspec {
+        dependencies,
+        metadata,
+        source_roots: default_source_roots(["lib", "bin", "test", "tool", "web"]),
+    })
+}
+
+fn yaml_mapping_value<'value>(
+    mapping: &'value serde_yaml_ng::Mapping,
+    key: &str,
+) -> Option<&'value serde_yaml_ng::Value> {
+    mapping.get(serde_yaml_ng::Value::String(key.to_owned()))
+}
+
+fn sbt_project_metadata(source: &str) -> (Vec<String>, BTreeMap<String, String>, BTreeSet<String>) {
+    let mut dependencies = Vec::new();
+    let mut metadata = BTreeMap::new();
+    let mut source_roots = default_source_roots(["src/main/scala", "src/test/scala"]);
+    for line in source.lines().take(MAX_PROJECT_CONFIGURATION_KEYS) {
+        let values = quoted_values(line).take(4).collect::<Vec<_>>();
+        if line.contains('%') && values.len() >= 2 {
+            dependencies.push(format!("{}:{}", values[0], values[1]));
+        }
+    }
+    collect_sbt_metadata(source, "scalaVersion", "scala.version", &mut metadata);
+    collect_sbt_metadata(source, "sbtVersion", "sbt.version", &mut metadata);
+    collect_sbt_metadata(source, "organization", "scala.organization", &mut metadata);
+    let Ok(paths) = Regex::new(
+        r#"(?:scalaSource|javaSource|sourceDirectory)\s*:?=\s*[^\n\r]*?[\"']([^\"']+)[\"']"#,
+    ) else {
+        return (dependencies, metadata, source_roots);
+    };
+    for capture in paths.captures_iter(source).take(MAX_PROJECT_ROUTE_ROOTS) {
+        if let Some(path) = capture
+            .get(1)
+            .and_then(|value| bounded_source_root(value.as_str()))
+        {
+            source_roots.insert(path);
+        }
+    }
+    (dependencies, metadata, source_roots)
+}
+
+fn collect_sbt_metadata(
+    source: &str,
+    setting: &str,
+    key: &str,
+    output: &mut BTreeMap<String, String>,
+) {
+    let pattern = format!(r#"(?m)\b{setting}\s*:?=\s*[\"']([^\"']+)[\"']"#);
+    let Ok(pattern) = Regex::new(&pattern) else {
+        return;
+    };
+    if let Some(value) = pattern
+        .captures(source)
+        .and_then(|capture| capture.get(1))
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        output.insert(key.to_owned(), value.to_owned());
+    }
+}
+
+fn gradle_project_metadata(source: &str) -> (BTreeMap<String, String>, BTreeSet<String>) {
+    let mut metadata = BTreeMap::new();
+    let mut source_roots = default_source_roots([
+        "src/main/groovy",
+        "src/test/groovy",
+        "src/main/java",
+        "src/test/java",
+    ]);
+    for (setting, key) in [("group", "gradle.group"), ("version", "gradle.version")] {
+        collect_gradle_metadata(source, setting, key, &mut metadata);
+    }
+    let Ok(paths) = Regex::new(
+        r#"(?:srcDirs|srcDir|srcDirs\.from)\s*(?:=|\+=|\()\s*[^\n\r]*?[\"']([^\"']+)[\"']"#,
+    ) else {
+        return (metadata, source_roots);
+    };
+    for capture in paths.captures_iter(source).take(MAX_PROJECT_ROUTE_ROOTS) {
+        if let Some(path) = capture
+            .get(1)
+            .and_then(|value| bounded_source_root(value.as_str()))
+        {
+            source_roots.insert(path);
+        }
+    }
+    (metadata, source_roots)
+}
+
+fn collect_gradle_metadata(
+    source: &str,
+    setting: &str,
+    key: &str,
+    output: &mut BTreeMap<String, String>,
+) {
+    let pattern = format!(
+        r#"(?m)^\s*{setting}\s*(?:=|:)\s*[\"']([^\"']+)[\"']|\b{setting}\s*=\s*[\"']([^\"']+)[\"']"#
+    );
+    let Ok(pattern) = Regex::new(&pattern) else {
+        return;
+    };
+    if let Some(value) = pattern
+        .captures(source)
+        .and_then(|capture| capture.get(1).or_else(|| capture.get(2)))
+        .map(|value| value.as_str())
+        .filter(|value| !value.is_empty() && value.len() <= 512)
+    {
+        output.insert(key.to_owned(), value.to_owned());
+    }
+}
+
+fn bounded_source_root(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > 4_096
+        || value.starts_with(['/', '\\'])
+        || value.as_bytes().get(1) == Some(&b':')
+    {
+        return None;
+    }
+    let mut components = Vec::new();
+    for component in Path::new(value).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(segment) => components.push(segment.to_string_lossy()),
+            std::path::Component::ParentDir
+            | std::path::Component::RootDir
+            | std::path::Component::Prefix(_) => return None,
+        }
+    }
+    (!components.is_empty()).then(|| components.join("/"))
+}
+
+fn default_source_roots<const N: usize>(roots: [&str; N]) -> BTreeSet<String> {
+    roots.into_iter().map(str::to_owned).collect()
+}
+
+fn contained_manifest_root(
+    repository_root: &Path,
+    project_root: &Path,
+    relative: &str,
+) -> Option<String> {
+    let candidate = project_root.join(relative);
+    if !candidate.starts_with(repository_root) {
+        return None;
+    }
+    if !candidate.is_dir() {
+        return None;
+    }
+    let canonical_repository = fs::canonicalize(repository_root).ok()?;
+    let mut existing_ancestor = candidate.clone();
+    while !existing_ancestor.exists() {
+        if existing_ancestor == repository_root || !existing_ancestor.pop() {
+            return None;
+        }
+    }
+    let canonical_ancestor = fs::canonicalize(existing_ancestor).ok()?;
+    if !canonical_ancestor.starts_with(canonical_repository) {
+        return None;
+    }
+    Some(normalize_project_path(relative))
+}
+
 fn first_quoted(value: &str) -> Option<String> {
     quoted_values(value).next()
 }
@@ -729,13 +2514,18 @@ fn parse_configuration(path: &Path) -> Option<ParsedConfiguration> {
         name if name.starts_with("tsconfig.") || name.starts_with("jsconfig.") => {
             parse_typescript_configuration(&source, &mut parsed)
         }
-        name if name.starts_with("vite.config.") => parse_vite_configuration(&source, &mut parsed),
-        name if name.starts_with("next.config.") => parse_next_configuration(&source, &mut parsed),
+        name if name.starts_with("vite.config.") => {
+            parse_static_vite_config(path, &source, &mut parsed)
+        }
+        name if name.starts_with("next.config.") => {
+            parse_static_next_config(path, &source, &mut parsed)
+        }
         name if (name.starts_with("application.") || name.starts_with("application-"))
             || (name.starts_with("bootstrap.") || name.starts_with("bootstrap-")) =>
         {
             parse_spring_configuration(&source, &mut parsed)
         }
+        name if is_lockfile_name(name) => {}
         _ => parse_generic_configuration(&source, &mut parsed),
     }
     Some(parsed)
@@ -754,7 +2544,17 @@ fn parse_package_configuration(source: &str, output: &mut ParsedConfiguration) {
             collect_json_aliases(values, &mut output.aliases);
         }
     }
-    for dependency_key in ["dependencies", "devDependencies", "peerDependencies"] {
+    for key in ["workspaces", "packageManager", "exports"] {
+        if object.contains_key(key) {
+            output.configuration_keys.insert(key.to_owned());
+        }
+    }
+    for dependency_key in [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ] {
         let Some(dependencies) = object.get(dependency_key).and_then(Value::as_object) else {
             continue;
         };
@@ -770,6 +2570,20 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
     let Some(root) = parse_jsonc(source) else {
         return;
     };
+    if let Some(extended) = root.get("extends").and_then(Value::as_str) {
+        output.configuration_keys.insert("extends".to_owned());
+        if !extended.is_empty() {
+            output.typescript_extends.insert(extended.to_owned());
+        }
+    }
+    if let Some(references) = root.get("references").and_then(Value::as_array) {
+        output.configuration_keys.insert("references".to_owned());
+        for reference in references.iter().take(MAX_TYPESCRIPT_CONFIG_CLOSURE) {
+            if let Some(path) = reference.get("path").and_then(Value::as_str) {
+                output.typescript_project_references.insert(path.to_owned());
+            }
+        }
+    }
     let Some(options) = root.get("compilerOptions").and_then(Value::as_object) else {
         return;
     };
@@ -777,6 +2591,22 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
         output
             .configuration_keys
             .insert("compilerOptions.baseUrl".to_owned());
+    }
+    for key in ["jsx", "moduleResolution", "allowJs"] {
+        if options.contains_key(key) {
+            output
+                .configuration_keys
+                .insert(format!("compilerOptions.{key}"));
+        }
+    }
+    if let Some(source) = options.get("jsxImportSource").and_then(Value::as_str) {
+        let source = normalize_dependency(source);
+        if !source.is_empty() {
+            output
+                .configuration_keys
+                .insert("compilerOptions.jsxImportSource".to_owned());
+            output.jsx_import_sources.insert(source);
+        }
     }
     if let Some(paths) = options.get("paths").and_then(Value::as_object) {
         output
@@ -786,30 +2616,236 @@ fn parse_typescript_configuration(source: &str, output: &mut ParsedConfiguration
     }
 }
 
-fn parse_vite_configuration(source: &str, output: &mut ParsedConfiguration) {
-    if source.contains("resolve") && source.contains("alias") {
-        output.configuration_keys.insert("resolve.alias".to_owned());
-    }
-    if source.contains("plugins") {
-        output.configuration_keys.insert("plugins".to_owned());
-    }
-    collect_quoted_aliases(source, &mut output.aliases);
-    collect_config_plugins(source, output);
+fn parse_static_vite_config(path: &Path, source: &str, output: &mut ParsedConfiguration) {
+    inspect_frontend_config(path, source, |syntax| {
+        let Some(object) = config_object(syntax) else {
+            return;
+        };
+        for pair in object_pairs(syntax, object) {
+            let Some(name) = syntax.property_name(pair) else {
+                continue;
+            };
+            let Some(value_node) = pair
+                .child_by_field_name("value")
+                .or_else(|| pair.named_child(1))
+            else {
+                continue;
+            };
+            let value = syntax.static_value(value_node);
+            match name.as_str() {
+                "resolve" => {
+                    if let Some((_, aliases)) = value
+                        .object()
+                        .and_then(|values| values.iter().find(|(key, _)| key == "alias"))
+                    {
+                        collect_static_vite_aliases(aliases, &mut output.vite_aliases);
+                        output.configuration_keys.insert("resolve.alias".to_owned());
+                    }
+                }
+                "plugins" => {
+                    output.configuration_keys.insert("plugins".to_owned());
+                    collect_static_plugins(&value, output);
+                }
+                _ => {}
+            }
+        }
+        collect_syntax_plugins(syntax, output);
+    });
 }
 
-fn parse_next_configuration(source: &str, output: &mut ParsedConfiguration) {
-    for key in [
-        "rewrites",
-        "redirects",
-        "headers",
-        "experimental",
-        "pageExtensions",
-    ] {
-        if source.contains(key) {
-            output.configuration_keys.insert(key.to_owned());
+fn parse_static_next_config(path: &Path, source: &str, output: &mut ParsedConfiguration) {
+    inspect_frontend_config(path, source, |syntax| {
+        let Some(object) = config_object(syntax) else {
+            return;
+        };
+        let names = object_pairs(syntax, object)
+            .into_iter()
+            .filter_map(|pair| syntax.property_name(pair))
+            .collect::<BTreeSet<_>>();
+        for key in [
+            "rewrites",
+            "redirects",
+            "headers",
+            "experimental",
+            "pageExtensions",
+        ] {
+            if names.contains(key) {
+                output.configuration_keys.insert(key.to_owned());
+            }
+        }
+        collect_syntax_plugins(syntax, output);
+    });
+}
+
+fn inspect_frontend_config(
+    path: &Path,
+    source: &str,
+    inspect: impl FnOnce(TypeScriptSyntax<'_, '_>),
+) {
+    let language_name = match path.extension().and_then(|extension| extension.to_str()) {
+        Some("ts" | "mts" | "cts") => "typescript",
+        Some("tsx") => "tsx",
+        Some("jsx") => "jsx",
+        Some("js" | "mjs" | "cjs") => "javascript",
+        _ => return,
+    };
+    let Ok(language) = tree_sitter_language_pack::get_language(language_name) else {
+        return;
+    };
+    let mut parser = Parser::new();
+    if parser.set_language(&language).is_err() {
+        return;
+    }
+    let Some(tree) = parser.parse(source.as_bytes(), None) else {
+        return;
+    };
+    inspect(TypeScriptSyntax::new(tree.root_node(), source.as_bytes()));
+}
+
+fn config_object<'tree, 'source>(
+    syntax: TypeScriptSyntax<'tree, 'source>,
+) -> Option<tree_sitter::Node<'tree>> {
+    let define_call = syntax.descendants(syntax.root()).into_iter().find(|node| {
+        let Some(callee) = syntax.call_callee(*node) else {
+            return false;
+        };
+        (callee == "defineConfig"
+            && !syntax
+                .imported_local_names("vite", "defineConfig")
+                .is_empty())
+            || syntax
+                .imported_local_names("vite", "*")
+                .iter()
+                .any(|name| callee == format!("{name}.defineConfig"))
+    });
+    define_call
+        .and_then(|call| syntax.config_object_from_call(call))
+        .or_else(|| syntax.exported_default_config_object())
+}
+
+fn object_pairs<'tree, 'source>(
+    syntax: TypeScriptSyntax<'tree, 'source>,
+    object: tree_sitter::Node<'tree>,
+) -> Vec<tree_sitter::Node<'tree>> {
+    let mut cursor = object.walk();
+    object
+        .named_children(&mut cursor)
+        .filter(|node| {
+            matches!(
+                node.kind(),
+                "pair" | "method_definition" | "public_field_definition"
+            ) && !syntax.is_incomplete(*node)
+        })
+        .collect()
+}
+
+fn collect_static_vite_aliases(value: &StaticValue, output: &mut Vec<ParsedViteAliasRule>) {
+    match value {
+        StaticValue::Object(values) => {
+            for (ordinal, (find, replacement)) in
+                values.iter().take(MAX_PROJECT_ALIASES).enumerate()
+            {
+                let Some(replacement) = replacement.as_string() else {
+                    continue;
+                };
+                push_vite_alias(
+                    output,
+                    ordinal,
+                    find,
+                    replacement,
+                    ProjectViteAliasKind::String,
+                );
+            }
+        }
+        StaticValue::Array(values) => {
+            for (ordinal, value) in values.iter().take(MAX_PROJECT_ALIASES).enumerate() {
+                let Some(entries) = value.object() else {
+                    continue;
+                };
+                let find = entries
+                    .iter()
+                    .find(|(key, _)| key == "find")
+                    .map(|(_, value)| value);
+                let replacement = entries
+                    .iter()
+                    .find(|(key, _)| key == "replacement")
+                    .and_then(|(_, value)| value.as_string());
+                let (Some(find), Some(replacement)) = (find, replacement) else {
+                    continue;
+                };
+                match find {
+                    StaticValue::String(find) => push_vite_alias(
+                        output,
+                        ordinal,
+                        find,
+                        replacement,
+                        ProjectViteAliasKind::String,
+                    ),
+                    StaticValue::Regex(find) => push_vite_alias(
+                        output,
+                        ordinal,
+                        find,
+                        replacement,
+                        ProjectViteAliasKind::Regex,
+                    ),
+                    _ => {}
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_vite_alias(
+    output: &mut Vec<ParsedViteAliasRule>,
+    ordinal: usize,
+    find: &str,
+    replacement: &str,
+    kind: ProjectViteAliasKind,
+) {
+    if output.len() >= MAX_PROJECT_ALIASES {
+        return;
+    }
+    let Some(ordinal) = u32::try_from(ordinal).ok() else {
+        return;
+    };
+    output.push(ParsedViteAliasRule {
+        ordinal,
+        find: find.to_owned(),
+        replacement: replacement.to_owned(),
+        kind,
+    });
+}
+
+fn collect_static_plugins(value: &StaticValue, output: &mut ParsedConfiguration) {
+    let Some(values) = value.array() else {
+        return;
+    };
+    for plugin in values.iter().filter_map(StaticValue::as_string) {
+        if is_plugin_name(plugin) {
+            output.plugins.insert(normalize_dependency(plugin));
         }
     }
-    collect_config_plugins(source, output);
+}
+
+fn collect_syntax_plugins(syntax: TypeScriptSyntax<'_, '_>, output: &mut ParsedConfiguration) {
+    for node in syntax.descendants(syntax.root()) {
+        let import_like = node.kind() == "import_statement"
+            || syntax.call_callee(node).as_deref() == Some("require");
+        if !import_like {
+            continue;
+        }
+        let Some(value) = syntax
+            .descendants(node)
+            .into_iter()
+            .find_map(|child| syntax.literal_string(child))
+        else {
+            continue;
+        };
+        if is_plugin_name(&value) {
+            output.plugins.insert(normalize_dependency(&value));
+        }
+    }
 }
 
 fn parse_spring_configuration(source: &str, output: &mut ParsedConfiguration) {
@@ -901,14 +2937,22 @@ fn collect_config_plugins(source: &str, output: &mut ParsedConfiguration) {
 
 fn is_plugin_name(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    lower.contains("plugin")
-        || lower.starts_with("@vitejs/")
+    lower.starts_with("@vitejs/plugin-")
         || lower.starts_with("vite-plugin-")
+        || lower.starts_with("unplugin-")
         || lower.starts_with("next-plugin-")
-        || matches!(
-            lower.as_str(),
-            "react" | "vue" | "svelte" | "solid" | "legacy"
-        )
+}
+
+fn is_lockfile_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "package-lock.json"
+            | "npm-shrinkwrap.json"
+            | "pnpm-lock.yaml"
+            | "pnpm-workspace.yaml"
+            | "yarn.lock"
+            | ".yarnrc.yml"
+    )
 }
 
 fn normalize_alias(value: &str) -> String {
@@ -1147,12 +3191,13 @@ fn absolute_path(root: &Path, path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::error::Error;
     use std::fs;
 
     use tempfile::tempdir;
 
-    use super::ProjectEvidenceIndex;
+    use super::{ProjectEvidenceIndex, ProjectViteAliasKind, PythonImportRootKind};
 
     #[test]
     fn nearest_project_merges_manifests_and_is_deterministic() -> Result<(), Box<dyn Error>> {
@@ -1187,6 +3232,295 @@ mod tests {
         assert_eq!(
             evidence.fingerprint(),
             second.evidence_for(&source).fingerprint()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn composer_psr4_roots_are_bounded_contained_and_deterministic() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        for path in ["src", "src/Domain", "tests", "packages/shared"] {
+            fs::create_dir_all(root.join(path))?;
+        }
+        let source = root.join("src/Domain/Model.php");
+        fs::write(&source, "<?php namespace App\\Domain; class Model {}")?;
+        fs::write(
+            root.join("composer.json"),
+            r#"{
+              "require": {"laravel/framework": "^12"},
+              "autoload": {"psr-4": {
+                "App\\": ["src/", "./src"],
+                "App\\Domain\\": "src/Domain",
+                "Shared\\": "packages/shared",
+                "Root\\": ""
+              }},
+              "autoload-dev": {"psr-4": {"Tests\\": "tests"}}
+            }"#,
+        )?;
+
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = first.evidence_for(&source);
+        let roots = evidence.composer_autoload_roots();
+
+        assert_eq!(roots.len(), 5, "roots={roots:#?}");
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "App\\" && entry.directory == "src" && !entry.development
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "App\\Domain\\"
+                && entry.directory == "src/Domain"
+                && !entry.development
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "Tests\\" && entry.directory == "tests" && entry.development
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.namespace_prefix == "Root\\" && entry.directory == "." && !entry.development
+        }));
+        assert!(evidence.diagnostics().is_empty());
+        assert_eq!(
+            evidence.fingerprint(),
+            second.evidence_for(&source).fingerprint()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_cover_flat_src_and_namespace_layouts_deterministically()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src/acme/api"))?;
+        fs::write(
+            root.join("pyproject.toml"),
+            r#"[project]
+name = "acme"
+[tool.setuptools.packages.find]
+where = ["src"]
+"#,
+        )?;
+        let source = root.join("src/acme/api/routes.py");
+        fs::write(&source, "def route(): ...\n")?;
+
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = first.evidence_for(&source);
+        assert!(evidence.python_import_roots().iter().any(|entry| {
+            entry.directory == "." && entry.kind == PythonImportRootKind::ProjectRoot
+        }));
+        assert!(evidence.python_import_roots().iter().any(|entry| {
+            entry.directory == "src" && entry.kind == PythonImportRootKind::SetuptoolsFind
+        }));
+        assert_eq!(
+            evidence.fingerprint(),
+            second.evidence_for(&source).fingerprint()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_parse_static_setuptools_poetry_and_hatch_rules()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        for path in ["lib", "packages", "src", "vendor"] {
+            fs::create_dir_all(root.join(path))?;
+        }
+        fs::write(
+            root.join("pyproject.toml"),
+            r#"[project]
+name = "acme"
+[tool.setuptools.package-dir]
+acme_legacy = "lib"
+[tool.setuptools.packages.find]
+where = ["packages"]
+[[tool.poetry.packages]]
+include = "acme"
+from = "src"
+[tool.hatch.build.targets.wheel]
+packages = ["vendor/acme_vendor"]
+"#,
+        )?;
+        let source = root.join("src/acme/api.py");
+        fs::create_dir_all(source.parent().ok_or("missing source parent")?)?;
+        fs::write(&source, "")?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let roots = index.evidence_for(&source).python_import_roots();
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "lib"
+                && entry.package_prefix.as_deref() == Some("acme_legacy")
+                && entry.kind == PythonImportRootKind::SetuptoolsPackageDir
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "packages" && entry.kind == PythonImportRootKind::SetuptoolsFind
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "src" && entry.kind == PythonImportRootKind::PoetryPackage
+        }));
+        assert!(roots.iter().any(|entry| {
+            entry.directory == "vendor" && entry.kind == PythonImportRootKind::HatchWheelPackage
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_reject_escapes_and_retain_duplicate_diagnostics()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src/acme"))?;
+        fs::write(
+            root.join("pyproject.toml"),
+            r#"[project]
+name = "acme"
+[tool.setuptools.package-dir]
+"" = "src"
+escape = "../outside"
+[tool.setuptools.packages.find]
+where = ["src", "/absolute"]
+"#,
+        )?;
+        let source = root.join("src/acme/api.py");
+        fs::write(&source, "")?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        let codes = evidence
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(codes.contains("python_import_root_rejected"));
+        assert!(codes.contains("python_import_root_duplicate"));
+        assert_eq!(
+            evidence
+                .python_import_roots()
+                .iter()
+                .filter(|entry| entry.directory == "src")
+                .count(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_roots_infer_a_sole_src_layout_without_init_files() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src/acme/namespace"))?;
+        fs::write(root.join("pyproject.toml"), "[project]\nname = \"acme\"\n")?;
+        let source = root.join("src/acme/namespace/api.pyi");
+        fs::write(&source, "def route() -> None: ...\n")?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        assert!(
+            index
+                .evidence_for(&source)
+                .python_import_roots()
+                .iter()
+                .any(|entry| {
+                    entry.directory == "src" && entry.kind == PythonImportRootKind::SrcLayout
+                })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn python_import_root_change_invalidates_the_project_fingerprint() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        for path in ["src/acme", "packages/acme"] {
+            fs::create_dir_all(root.join(path))?;
+        }
+        let source = root.join("src/acme/api.py");
+        fs::write(&source, "")?;
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n",
+        )?;
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let first_fingerprint = first.fingerprint_for(&source).to_owned();
+        fs::write(
+            root.join("pyproject.toml"),
+            "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"packages\"]\n",
+        )?;
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        assert_ne!(first_fingerprint, second.fingerprint_for(&source));
+        Ok(())
+    }
+
+    #[test]
+    fn composer_psr4_rejects_escapes_absolute_paths_and_malformed_entries()
+    -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src"))?;
+        let source = root.join("src/App.php");
+        fs::write(&source, "<?php class App {}")?;
+        fs::write(
+            root.join("composer.json"),
+            r#"{
+              "autoload": {"psr-4": {
+                "": "src",
+                "Escape\\": "../../outside",
+                "Absolute\\": "/private/source",
+                "Drive\\": "C:\\source",
+                "Malformed Prefix!\\": "src",
+                "WrongShape\\": 42
+              }}
+            }"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert_eq!(evidence.composer_autoload_roots().len(), 1);
+        assert!(
+            evidence
+                .composer_autoload_roots()
+                .iter()
+                .any(|entry| { entry.namespace_prefix.is_empty() && entry.directory == "src" })
+        );
+        let codes = evidence
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(codes.contains("composer_psr4_directory_rejected"));
+        assert!(codes.contains("composer_psr4_directory_invalid"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn composer_psr4_rejects_a_directory_symlink_that_leaves_the_repository()
+    -> Result<(), Box<dyn Error>> {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir()?;
+        let outside = tempdir()?;
+        let root = directory.path();
+        fs::create_dir_all(root.join("src"))?;
+        symlink(outside.path(), root.join("src/external"))?;
+        let source = root.join("src/App.php");
+        fs::write(&source, "<?php class App {}")?;
+        fs::write(
+            root.join("composer.json"),
+            r#"{"autoload":{"psr-4":{"Escaped\\":"src/external/missing"}}}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(evidence.composer_autoload_roots().is_empty());
+        assert!(
+            evidence
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| { diagnostic.code == "composer_psr4_directory_rejected" })
         );
         Ok(())
     }
@@ -1274,7 +3608,14 @@ mod tests {
         assert!(evidence.configuration_keys().contains("resolve.alias"));
         assert!(evidence.configuration_keys().contains("rewrites"));
         assert_eq!(evidence.aliases().get("@/*"), Some(&"src/*".to_owned()));
-        assert_eq!(evidence.aliases().get("~"), Some(&"src".to_owned()));
+        assert!(!evidence.aliases().contains_key("~"));
+        assert_eq!(evidence.vite_aliases().len(), 1);
+        assert_eq!(evidence.vite_aliases()[0].find, "~");
+        assert_eq!(evidence.vite_aliases()[0].replacement, "./src");
+        assert_eq!(
+            evidence.vite_aliases()[0].kind,
+            ProjectViteAliasKind::String
+        );
         assert!(evidence.has_plugin("@vitejs/plugin-react"));
         assert!(evidence.has_plugin("next-plugin-intl"));
         assert!(evidence.has_route_root("next", "src/app"));
@@ -1315,6 +3656,196 @@ mod tests {
                 .contains("compilerOptions.paths")
         );
         assert_eq!(evidence.aliases().get("@/*"), Some(&"src/*".to_owned()));
+        Ok(())
+    }
+
+    #[test]
+    fn npm_aliases_and_jsx_runtime_are_typed_project_evidence() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("src/app.tsx");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "export function App() { return <main />; }\n")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"react":"npm:preact@10","router":"npm:@scope/router@2"}}"#,
+        )?;
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"preact"}}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(!evidence.has_dependency("react"));
+        assert_eq!(
+            evidence
+                .dependency_aliases()
+                .get("react")
+                .map(String::as_str),
+            Some("preact")
+        );
+        assert_eq!(
+            evidence
+                .dependency_aliases()
+                .get("router")
+                .map(String::as_str),
+            Some("@scope/router")
+        );
+        assert!(
+            evidence
+                .configuration_keys()
+                .contains("compilerOptions.jsxImportSource")
+        );
+        assert!(evidence.jsx_import_sources().contains("preact"));
+        Ok(())
+    }
+
+    #[test]
+    fn workspace_lockfiles_invalidate_only_the_workspace_scope() -> Result<(), Box<dyn Error>> {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let web = root.join("apps/web/src/App.tsx");
+        let admin = root.join("apps/admin/src/App.tsx");
+        fs::create_dir_all(web.parent().ok_or("web source has no parent")?)?;
+        fs::create_dir_all(admin.parent().ok_or("admin source has no parent")?)?;
+        fs::write(&web, "export function App() { return <main />; }\n")?;
+        fs::write(&admin, "export function App() { return <main />; }\n")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"private":true,"workspaces":["apps/*"],"packageManager":"pnpm@10"}"#,
+        )?;
+        fs::write(
+            root.join("apps/web/package.json"),
+            r#"{"dependencies":{"react":"19.0.0"}}"#,
+        )?;
+        fs::write(
+            root.join("apps/admin/package.json"),
+            r#"{"dependencies":{"preact":"10.0.0"}}"#,
+        )?;
+        fs::write(root.join("pnpm-workspace.yaml"), "packages:\n  - apps/*\n")?;
+        fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")?;
+
+        let first = ProjectEvidenceIndex::build(root, &[web.clone(), admin.clone()]);
+        let web_evidence = first.evidence_for(&web);
+        let admin_evidence = first.evidence_for(&admin);
+        assert!(web_evidence.has_dependency("react"));
+        assert!(!admin_evidence.has_dependency("react"));
+        assert!(web_evidence.configuration_keys().contains("workspaces"));
+        assert!(
+            web_evidence
+                .input_digests()
+                .keys()
+                .any(|path| path.ends_with("pnpm-lock.yaml"))
+        );
+        assert!(
+            admin_evidence
+                .input_digests()
+                .keys()
+                .any(|path| path.ends_with("pnpm-lock.yaml"))
+        );
+        let old_web = web_evidence.fingerprint().to_owned();
+        let old_admin = admin_evidence.fingerprint().to_owned();
+
+        fs::write(
+            root.join("pnpm-lock.yaml"),
+            "lockfileVersion: '9'\nimporters: {}\n",
+        )?;
+        let second = ProjectEvidenceIndex::build(root, &[web, admin]);
+        assert_ne!(
+            old_web,
+            second.fingerprint_for(root.join("apps/web/src/App.tsx").as_path())
+        );
+        assert_ne!(
+            old_admin,
+            second.fingerprint_for(root.join("apps/admin/src/App.tsx").as_path())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn typescript_extends_and_references_are_bounded_project_evidence() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("apps/web/src/App.tsx");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::create_dir_all(root.join("apps/shared"))?;
+        fs::write(&source, "export function App() { return <main />; }\n")?;
+        fs::write(root.join("package.json"), r#"{"private":true}"#)?;
+        fs::write(
+            root.join("apps/web/package.json"),
+            r#"{"dependencies":{"react":"19"}}"#,
+        )?;
+        fs::write(
+            root.join("tsconfig.base.json"),
+            r#"{"compilerOptions":{"jsx":"react-jsx","jsxImportSource":"react","baseUrl":"."}}"#,
+        )?;
+        fs::write(
+            root.join("apps/web/tsconfig.json"),
+            r#"{"extends":"../../tsconfig.base.json","references":[{"path":"../shared"}],"compilerOptions":{"paths":{"@/*":["./src/*"]}}}"#,
+        )?;
+        fs::write(
+            root.join("apps/shared/tsconfig.json"),
+            r#"{"compilerOptions":{"composite":true}}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(evidence.jsx_import_sources().contains("react"));
+        assert!(evidence.configuration_keys().contains("extends"));
+        assert!(evidence.configuration_keys().contains("references"));
+        assert!(
+            evidence
+                .configuration_keys()
+                .contains("compilerOptions.jsx")
+        );
+        assert!(
+            evidence
+                .typescript_extends()
+                .iter()
+                .any(|path| path.ends_with("tsconfig.base.json"))
+        );
+        assert!(
+            evidence
+                .typescript_project_references()
+                .iter()
+                .any(|path| path.ends_with("shared/tsconfig.json"))
+        );
+        assert!(
+            evidence
+                .input_digests()
+                .keys()
+                .any(|path| path.ends_with("tsconfig.base.json"))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn non_relative_typescript_extends_fails_closed_with_a_diagnostic() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("src/App.tsx");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "export function App() { return <main />; }\n")?;
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"react":"19"}}"#,
+        )?;
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"extends":"@tsconfig/strictest/tsconfig.json"}"#,
+        )?;
+
+        let index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = index.evidence_for(&source);
+        assert!(
+            evidence
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "typescript_config_extends_unsupported")
+        );
         Ok(())
     }
 
@@ -1380,6 +3911,86 @@ mod tests {
                 .contains("spring.application.name")
         );
         assert!(evidence.configuration_keys().contains("server.port"));
+        Ok(())
+    }
+
+    #[test]
+    fn language_manifests_are_bounded_and_never_execute_build_tools() -> Result<(), Box<dyn Error>>
+    {
+        let directory = tempdir()?;
+        let root = directory.path();
+        let source = root.join("lib/main.dart");
+        fs::create_dir_all(source.parent().ok_or("source has no parent")?)?;
+        fs::write(&source, "class Main {}\n")?;
+        fs::write(
+            root.join("pubspec.yaml"),
+            "name: sample_app\nenvironment:\n  sdk: ^3.4.0\ndependencies:\n  flutter:\n    sdk: flutter\n  riverpod: ^2.5.0\n",
+        )?;
+        fs::write(
+            root.join("build.sbt"),
+            "scalaVersion := \"3.3.3\"\nlibraryDependencies += \"org.typelevel\" %% \"cats-core\" % \"2.12.0\"\n",
+        )?;
+        fs::write(
+            root.join("Package.swift"),
+            "let package = Package(name: \"Sample\", targets: [.target(name: \"Sample\", path: \"Sources/Sample\")])\n",
+        )?;
+
+        let first = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let second = ProjectEvidenceIndex::build(root, std::slice::from_ref(&source));
+        let evidence = first.evidence_for(&source);
+        assert!(evidence.has_dependency("riverpod"));
+        assert_eq!(
+            evidence.metadata().get("dart.package.name"),
+            Some(&"sample_app".to_owned())
+        );
+        assert_eq!(
+            evidence.metadata().get("dart.sdk"),
+            Some(&"^3.4.0".to_owned())
+        );
+        assert!(evidence.source_roots().iter().any(|root| root == "lib"));
+        assert!(
+            evidence
+                .manifests()
+                .iter()
+                .any(|name| name == "pubspec.yaml")
+        );
+        assert_eq!(
+            evidence.fingerprint(),
+            second.evidence_for(&source).fingerprint()
+        );
+
+        let scala_source = root.join("src/main/scala/Main.scala");
+        fs::create_dir_all(scala_source.parent().ok_or("scala source has no parent")?)?;
+        fs::write(&scala_source, "object Main {}\n")?;
+        let scala_index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&scala_source));
+        let scala = scala_index.evidence_for(&scala_source);
+        assert!(scala.has_dependency("org.typelevel:cats-core"));
+        assert_eq!(
+            scala.metadata().get("scala.version"),
+            Some(&"3.3.3".to_owned())
+        );
+        assert!(
+            scala
+                .source_roots()
+                .iter()
+                .any(|root| root == "src/main/scala")
+        );
+
+        let swift_source = root.join("Sources/Sample/Main.swift");
+        fs::create_dir_all(swift_source.parent().ok_or("swift source has no parent")?)?;
+        fs::write(&swift_source, "struct Main {}\n")?;
+        let swift_index = ProjectEvidenceIndex::build(root, std::slice::from_ref(&swift_source));
+        let swift = swift_index.evidence_for(&swift_source);
+        assert_eq!(
+            swift.metadata().get("swift.package.name"),
+            Some(&"Sample".to_owned())
+        );
+        assert!(
+            swift
+                .source_roots()
+                .iter()
+                .any(|root| root == "Sources/Sample")
+        );
         Ok(())
     }
 }

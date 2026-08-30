@@ -24,12 +24,6 @@ fn extract(relative: &str) -> Result<Extraction, Box<dyn Error>> {
     Ok(extraction)
 }
 
-fn merge(target: &mut Extraction, mut source: Extraction) {
-    target.nodes.append(&mut source.nodes);
-    target.edges.append(&mut source.edges);
-    target.framework_facts.append(&mut source.framework_facts);
-}
-
 fn extract_and_resolve(relatives: &[&str]) -> Result<Extraction, Box<dyn Error>> {
     let mut extractions = Vec::with_capacity(relatives.len());
     let mut sources = HashMap::new();
@@ -67,7 +61,12 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -82,7 +81,7 @@ fn laravel_routes_expand_resources_prefixes_and_handler_syntaxes() -> Result<(),
     }));
     assert!(routes.iter().any(|route| {
         route.operation == "POST"
-            && route.handler_reference == "UserController.store"
+            && route.handler_reference == "usercontroller.store"
             && route.normalized_path == "/users"
     }));
 
@@ -106,7 +105,12 @@ Route::resource('/categories', CategoryController::class)->only(['index', 'show'
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(constrained_routes.len(), 2);
@@ -170,23 +174,28 @@ Route::prefix('/wrong')->group(function () {
         .iter()
         .filter_map(|fact| match fact {
             RawFrameworkFact::Route(route) => Some(route),
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(routes.len(), 4, "routes={routes:#?}");
     assert!(routes.iter().any(|route| {
-        route.normalized_path == "/alias" && route.handler_reference == "AliasController.show"
+        route.normalized_path == "/alias" && route.handler_reference == "aliascontroller.show"
     }));
     assert!(routes.iter().any(|route| {
         route.normalized_path == "/grouped-alias"
-            && route.handler_reference == "AliasController.update"
+            && route.handler_reference == "aliascontroller.update"
     }));
     assert!(routes.iter().any(|route| {
         route.normalized_path == "/qualified"
-            && route.handler_reference == "QualifiedController.store"
+            && route.handler_reference == "qualifiedcontroller.store"
     }));
     assert!(routes.iter().any(|route| {
-        route.normalized_path == "/unprefixed" && route.handler_reference == "AliasController.show"
+        route.normalized_path == "/unprefixed" && route.handler_reference == "aliascontroller.show"
     }));
     assert!(
         routes
@@ -198,8 +207,7 @@ Route::prefix('/wrong')->group(function () {
 
 #[test]
 fn drupal_yaml_and_hook_files_publish_auditable_routes() -> Result<(), Box<dyn Error>> {
-    let mut extraction = extract("php/drupal.routing.yml")?;
-    merge(&mut extraction, extract("php/drupal.module")?);
+    let mut extraction = extract_and_resolve(&["php/drupal.routing.yml", "php/drupal.module"])?;
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
 
@@ -215,9 +223,12 @@ fn drupal_yaml_and_hook_files_publish_auditable_routes() -> Result<(), Box<dyn E
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from(["GET", "POST"])
     );
-    assert!(views.iter().all(|route| {
-        route.route.origin.as_str() == "config" && route.state == ResolutionState::Exact
-    }));
+    assert!(
+        views.iter().all(|route| {
+            route.route.origin.as_str() == "config" && route.state == ResolutionState::Exact
+        }),
+        "routes={resolved:#?}"
+    );
     assert!(resolved.iter().any(|route| {
         route.route.operation == "HOOK"
             && route.route.normalized_path == "/__hook/hook_entity_type_build"
@@ -262,6 +273,63 @@ fn rails_routes_resolve_to_controller_actions_and_compose_namespaces() -> Result
             && route.route.handler_reference == "Admin.DashboardController.index"
     }));
     assert!(extract("ruby/near_matches.rb")?.framework_facts.is_empty());
+    Ok(())
+}
+
+#[test]
+fn rails_universal_pack_is_ast_grounded_and_fails_closed() -> Result<(), Box<dyn Error>> {
+    let source = br#"class Admin::ReportsController
+  def index; end
+end
+
+Rails.application.routes.draw do
+  namespace :admin do
+    get "/reports", to: "reports#index"
+  end
+  match "/search", via: [:get, :post], to: "search#show"
+  get dynamic_path, to: dynamic_handler
+end
+
+Application.routes.draw do
+  get "/lookalike", to: "reports#index"
+end
+"#;
+    let extraction = Engine::default().extract_source(Path::new("config/routes.rb"), source)?;
+    let routes = extraction
+        .framework_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            RawFrameworkFact::Route(route) => Some(route),
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(routes.len(), 3, "routes={routes:#?}");
+    assert!(routes.iter().all(|route| {
+        route
+            .detail
+            .get("frameworkPack")
+            .and_then(serde_json::Value::as_str)
+            == Some("rails-ruby")
+    }));
+    assert!(routes.iter().any(|route| {
+        route.operation == "GET"
+            && route.normalized_path == "/admin/reports"
+            && route.handler_reference == "Admin.ReportsController.index"
+    }));
+    assert!(
+        routes
+            .iter()
+            .any(|route| { route.operation == "POST" && route.normalized_path == "/search" })
+    );
+    assert!(routes.iter().all(|route| {
+        !route.normalized_path.contains("dynamic") && !route.normalized_path.contains("lookalike")
+    }));
+    assert!(extraction.raw_calls.is_none());
     Ok(())
 }
 
@@ -402,7 +470,17 @@ class KotlinController {
 }
 "#;
     let mut engine = Engine::default();
-    let mut extraction = engine.extract_source(Path::new("src/KotlinController.kt"), source)?;
+    let extraction = engine.extract_source(Path::new("src/KotlinController.kt"), source)?;
+    assert!(
+        !extraction.framework_facts.is_empty(),
+        "missing Kotlin universal Spring facts: evidence={:#?}",
+        extraction.semantic_evidence
+    );
+    let sources = HashMap::from([(
+        "src/KotlinController.kt".to_owned(),
+        String::from_utf8(source.to_vec())?,
+    )]);
+    let mut extraction = resolve(&[extraction], &sources);
     let resolved =
         resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
 
@@ -410,7 +488,18 @@ class KotlinController {
         resolved.iter().any(|route| {
             route.route.operation == "GET"
                 && route.route.normalized_path == "/api/users/{id}"
-                && route.route.handler_reference == "KotlinController.show"
+                && route
+                    .route
+                    .detail
+                    .get("target_qualified_name")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("example.KotlinController::show")
+                && route
+                    .route
+                    .detail
+                    .get("frameworkPack")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("spring-kotlin")
                 && route.state == ResolutionState::Exact
         }),
         "routes={resolved:#?}"

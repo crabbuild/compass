@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { normalizeStructuredResult, parseNaturalQueryResult } from "./state";
+import {
+  normalizeStructuredResult,
+  parseExplanationResult
+} from "./state";
 
 describe("structured query results", () => {
   it("normalizes consistent object rows into columns", () => {
@@ -17,59 +20,56 @@ describe("structured query results", () => {
   });
 });
 
-describe("natural-language traversal results", () => {
-  it("extracts traversal context and actionable source locations", () => {
-    const result = parseNaturalQueryResult([
-      "Traversal: BFS depth=2 | Start: ['Pipeline'] | 146 nodes found",
+describe("symbol explanations", () => {
+  it("separates node metadata from incoming and outgoing relationships", () => {
+    expect(parseExplanationResult([
+      "Node: Checkout.run",
+      "  ID:        checkout-run",
+      "  Source:    src/checkout.rs L12:1-L18:2",
+      "  Type:      function",
+      "  Community: Checkout",
+      "  Degree:    2",
       "",
-      "NODE Pipeline [src=caching/util/src/Pipeline.scala loc=L154 community=Pipeline]",
-      "NODE .assert() [src=caching/util/src/AssertMacros.scala loc=L32 community=.iassert]",
-      "NODE String [src= loc= community=EtcdClient]"
-    ].join("\n"));
-
-    expect(result.summary).toEqual({
-      strategy: "BFS",
-      depth: 2,
-      starts: ["Pipeline"],
-      total: 146
+      "Connections (2):",
+      "  --> Database.save [calls] [EXACT] src/checkout.rs:L16",
+      "  <-- Api.route [routes_to] [INFERRED] src/api.rs:L8"
+    ].join("\n"))).toEqual({
+      kind: "node",
+      label: "Checkout.run",
+      id: "checkout-run",
+      source: { file: "src/checkout.rs", startLine: 12, endLine: 18 },
+      type: "function",
+      community: "Checkout",
+      degree: 2,
+      connections: [{
+        direction: "outgoing",
+        label: "Database.save",
+        relation: "calls",
+        confidence: "EXACT"
+      }, {
+        direction: "incoming",
+        label: "Api.route",
+        relation: "routes_to",
+        confidence: "INFERRED"
+      }]
     });
-    expect(result.entries).toEqual([
-      {
-        kind: "NODE",
-        label: "Pipeline",
-        community: "Pipeline",
-        source: {
-          file: "caching/util/src/Pipeline.scala",
-          startLine: 154,
-          endLine: 154
-        }
-      },
-      {
-        kind: "NODE",
-        label: ".assert()",
-        community: ".iassert",
-        source: {
-          file: "caching/util/src/AssertMacros.scala",
-          startLine: 32,
-          endLine: 32
-        }
-      },
-      {
-        kind: "NODE",
-        label: "String",
-        community: "EtcdClient"
-      }
-    ]);
   });
 
-  it("preserves prose answers without manufacturing graph entries", () => {
-    const result = parseNaturalQueryResult(
-      "Authentication reaches storage through the repository service."
-    );
-    expect(result.summary).toBeUndefined();
-    expect(result.entries).toEqual([]);
-    expect(result.prose).toBe(
-      "Authentication reaches storage through the repository service."
-    );
+  it("itemizes ambiguous candidates for a full-ID retry", () => {
+    expect(parseExplanationResult([
+      "Ambiguous: 'run' matches 2 source-backed nodes.",
+      "  src/a.rs L3:1-L3:6",
+      "    id: first",
+      "  src/b.rs L7:1-L7:6",
+      "    id: second",
+      "Retry with the full node ID."
+    ].join("\n"))).toEqual({
+      kind: "ambiguous",
+      title: "Ambiguous: 'run' matches 2 source-backed nodes.",
+      candidates: [{ id: "first", source: "src/a.rs L3:1-L3:6" }, {
+        id: "second",
+        source: "src/b.rs L7:1-L7:6"
+      }]
+    });
   });
 });

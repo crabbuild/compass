@@ -144,6 +144,22 @@ body.vscode-high-contrast {
   color-scheme: dark;
 }
 
+.compass-source-notice {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 100;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--compass-warning) 55%, var(--compass-line));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--compass-panel) 96%, transparent);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 28%, transparent);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* Multi-lens visualization workbench */
 .visualization-workbench {
   display: grid;
@@ -152,6 +168,10 @@ body.vscode-high-contrast {
   grid-template-columns: minmax(220px, 268px) minmax(0, 1fr);
   overflow: hidden;
   background: var(--background);
+}
+
+.visualization-workbench[data-navigation-collapsed="true"] {
+  grid-template-columns: 48px minmax(0, 1fr);
 }
 
 .visualization-rail {
@@ -165,11 +185,59 @@ body.vscode-high-contrast {
 }
 
 .visualization-rail > header {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
   padding: 18px 16px 16px;
   border-bottom: 1px solid var(--compass-line);
+}
+
+.visualization-rail-disclosure {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.visualization-rail-disclosure:hover {
+  border-color: var(--compass-line);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.visualization-rail-disclosure svg {
+  width: 16px;
+  height: 16px;
+}
+
+.visualization-rail[data-collapsed="true"] > header {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 7px 10px;
+}
+
+.visualization-rail[data-collapsed="true"] > header > span:nth-child(2),
+.visualization-rail[data-collapsed="true"] nav button > span,
+.visualization-rail[data-collapsed="true"] nav i,
+.visualization-rail[data-collapsed="true"] > footer {
+  display: none;
+}
+
+.visualization-rail[data-collapsed="true"] .visualization-bearing {
+  width: 30px;
+  height: 30px;
+}
+
+.visualization-rail[data-collapsed="true"] nav button {
+  grid-template-columns: 1fr;
+  place-items: center;
+  padding-inline: 5px;
 }
 
 .visualization-bearing {
@@ -189,7 +257,7 @@ body.vscode-high-contrast {
   height: 18px;
 }
 
-.visualization-rail header > span:last-child,
+.visualization-rail header > span:nth-child(2),
 .visualization-rail nav button > span {
   display: grid;
   min-width: 0;
@@ -770,11 +838,14 @@ body.vscode-high-contrast {
   }
 
   .visualization-rail > header {
+    display: flex;
+    flex-direction: column;
     justify-content: center;
+    gap: 9px;
     padding-inline: 8px;
   }
 
-  .visualization-rail header > span:last-child,
+  .visualization-rail header > span:nth-child(2),
   .visualization-rail nav button > span,
   .visualization-rail nav i,
   .visualization-rail > footer {
@@ -1695,6 +1766,7 @@ button:not(:disabled),
 .compass-inspector-disclosure:focus-visible,
 .compass-inspector-resizer:focus-visible,
 .compass-load-action:focus-visible,
+.compass-direction-link:focus-visible,
 .compass-neighbor-link:focus-visible,
 .compass-community-item:focus-within {
   outline: 2px solid var(--compass-focus);
@@ -2132,6 +2204,145 @@ button:not(:disabled),
   font: 9px/1 var(--compass-font-mono);
 }
 
+.compass-semantic-legend {
+  position: absolute;
+  z-index: 4;
+  top: 64px;
+  left: 12px;
+  display: flex;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  gap: 5px 12px;
+  padding: 7px 8px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+
+.compass-semantic-legend section {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 9px;
+}
+
+.compass-semantic-legend section + section {
+  padding-left: 12px;
+  border-left: 1px solid var(--compass-line);
+}
+
+.compass-semantic-legend strong {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.compass-semantic-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.compass-semantic-legend-item small {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.compass-semantic-legend-item i[data-node-category] {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--vscode-descriptionForeground, #8b949e);
+  background: color-mix(
+    in srgb,
+    var(--vscode-descriptionForeground, #8b949e) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+}
+
+.compass-semantic-legend-item i[data-node-category="callable"] {
+  border-color: var(--vscode-symbolIcon-functionForeground, #5fa8ff);
+  border-radius: 50%;
+  background: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-functionForeground, #5fa8ff) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+}
+
+.compass-semantic-legend-item i[data-node-category="type"] {
+  border-color: var(--vscode-symbolIcon-classForeground, #e3b341);
+  background: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-classForeground, #e3b341) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+  transform: rotate(45deg) scale(0.82);
+}
+
+.compass-semantic-legend-item i[data-node-category="module"] {
+  border-color: var(--vscode-symbolIcon-moduleForeground, #56d4b4);
+  border-radius: 1px;
+  background: color-mix(
+    in srgb,
+    var(--vscode-symbolIcon-moduleForeground, #56d4b4) 22%,
+    var(--vscode-editor-background, var(--background))
+  );
+}
+
+.compass-semantic-legend-item i[data-node-category="boundary"] {
+  width: 11px;
+  height: 10px;
+  border: 0;
+  background: var(--vscode-symbolIcon-eventForeground, #ff9b87);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.compass-semantic-legend-item i[data-edge-category] {
+  position: relative;
+  display: inline-block;
+  width: 16px;
+  height: 2px;
+  background: var(--vscode-descriptionForeground, #8b949e);
+}
+
+.compass-semantic-legend-item i[data-edge-category]::after {
+  position: absolute;
+  top: -2px;
+  right: -1px;
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+  content: "";
+}
+
+.compass-semantic-legend-item i[data-edge-category="execution"] {
+  background: var(--vscode-symbolIcon-functionForeground, #5fa8ff);
+  color: var(--vscode-symbolIcon-functionForeground, #5fa8ff);
+}
+
+.compass-semantic-legend-item i[data-edge-category="dependency"] {
+  background: var(--vscode-symbolIcon-moduleForeground, #56d4b4);
+  color: var(--vscode-symbolIcon-moduleForeground, #56d4b4);
+}
+
+.compass-semantic-legend-item i[data-edge-category="structure"] {
+  background: var(--vscode-symbolIcon-classForeground, #e3b341);
+  color: var(--vscode-symbolIcon-classForeground, #e3b341);
+}
+
+.compass-semantic-legend-item i[data-edge-category="flow"] {
+  background: var(--vscode-symbolIcon-eventForeground, #ff9b87);
+  color: var(--vscode-symbolIcon-eventForeground, #ff9b87);
+}
+
 .compass-inspector-resizer {
   position: relative;
   z-index: 6;
@@ -2205,8 +2416,11 @@ button:not(:disabled),
 
 .compass-inspector-header small {
   margin-top: 2px;
+  overflow: hidden;
   color: var(--compass-faint);
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compass-product-mark {
@@ -2273,6 +2487,21 @@ button:not(:disabled),
   position: relative;
   padding: 10px 12px;
   border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-inspector-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.compass-inspector-search-row .compass-search-field:last-child {
+  grid-column: 1 / -1;
+}
+
+.compass-inspector-search-disclosure {
+  border-color: var(--compass-line);
 }
 
 .compass-search-field {
@@ -2365,6 +2594,527 @@ button:not(:disabled),
   border-bottom: 1px solid var(--compass-line);
 }
 
+.compass-document-evidence {
+  --compass-ocr-accent: #e2a94b;
+  --compass-ocr-preview-surface: color-mix(in srgb, var(--compass-focus) 7%, var(--background));
+  display: grid;
+  gap: 10px;
+  margin: 15px 0 16px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--compass-ocr-accent) 28%, var(--compass-line));
+  border-radius: 5px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--compass-ocr-accent) 7%, transparent), transparent 48%),
+    var(--vscode-editorWidget-background, var(--background));
+}
+
+.compass-document-evidence-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.compass-document-evidence-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+
+.compass-document-evidence-heading > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.compass-document-evidence-heading small {
+  color: var(--compass-faint);
+  font: 600 8px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.compass-document-evidence-heading h3 {
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-document-evidence-mark {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--compass-ocr-accent) 58%, var(--compass-line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--compass-ocr-accent) 13%, transparent);
+  color: var(--compass-ocr-accent);
+}
+
+.compass-document-evidence-mark svg {
+  width: 15px;
+  height: 15px;
+}
+
+.compass-ocr-status-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border: 1px solid color-mix(in srgb, var(--compass-success) 42%, var(--compass-line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--compass-success) 8%, transparent);
+  color: var(--compass-success);
+}
+
+.compass-ocr-status-chip[data-status="partial"],
+.compass-ocr-status-chip[data-status="failed"],
+.compass-ocr-status-chip[data-status="not_requested"] {
+  border-color: color-mix(in srgb, var(--compass-warning) 48%, var(--compass-line));
+  background: color-mix(in srgb, var(--compass-warning) 8%, transparent);
+  color: var(--compass-warning);
+}
+
+.compass-ocr-status-chip > svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.compass-ocr-status-chip > span {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.compass-ocr-status-chip strong,
+.compass-ocr-status-chip small,
+.compass-ocr-status-chip em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-ocr-status-chip strong {
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.compass-ocr-status-chip small {
+  color: color-mix(in srgb, currentColor 74%, var(--foreground));
+  font-size: 8px;
+}
+
+.compass-ocr-status-chip em {
+  max-width: 90px;
+  padding-left: 5px;
+  border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  font: 8px/1.2 var(--compass-font-mono);
+  font-style: normal;
+}
+
+.compass-document-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--compass-warning) 42%, var(--compass-line));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--compass-warning) 8%, transparent);
+  color: var(--compass-warning);
+}
+
+.compass-document-warning[data-status="failed"] {
+  border-color: color-mix(in srgb, var(--destructive) 46%, var(--compass-line));
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+  color: var(--destructive);
+}
+
+.compass-document-warning > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  margin-top: 1px;
+}
+
+.compass-document-warning span {
+  display: grid;
+  gap: 2px;
+}
+
+.compass-document-warning strong {
+  color: var(--foreground);
+  font-size: 9px;
+}
+
+.compass-document-warning small {
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.compass-document-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--background) 78%, var(--compass-panel));
+}
+
+.compass-document-tab {
+  display: flex;
+  min-width: 0;
+  min-height: 27px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.compass-document-tab:hover,
+.compass-document-tab[aria-selected="true"] {
+  background: var(--compass-focus-soft);
+  color: var(--foreground);
+}
+
+.compass-document-tab[aria-selected="true"] {
+  box-shadow: inset 0 -2px var(--compass-focus);
+}
+
+.compass-document-tab:focus-visible,
+.compass-document-tab-panel:focus-visible,
+.compass-document-block:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.compass-document-tab > span {
+  display: inline-grid;
+  min-width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--foreground) 9%, transparent);
+  color: var(--compass-faint);
+  font: 8px/1 var(--compass-font-mono);
+}
+
+.compass-document-tab-panel {
+  min-height: 0;
+  max-height: 250px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.compass-document-block-list {
+  display: grid;
+  gap: 5px;
+}
+
+.compass-document-block {
+  display: grid;
+  width: 100%;
+  gap: 5px;
+  padding: 8px 9px;
+  border: 1px solid var(--compass-line);
+  border-left: 3px solid var(--compass-line-strong);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--background) 74%, transparent);
+  color: var(--foreground);
+  text-align: left;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.compass-document-block[data-origin="ocr"] {
+  border-left-color: var(--compass-ocr-accent);
+}
+
+.compass-document-block:hover,
+.compass-document-block[data-active="true"] {
+  border-color: color-mix(in srgb, var(--compass-focus) 54%, var(--compass-line));
+  background: var(--compass-focus-soft);
+}
+
+.compass-document-block[data-active="true"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--compass-focus) 24%, transparent);
+}
+
+.compass-document-block-topline,
+.compass-document-block-locator {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.compass-document-block-kind {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--compass-faint);
+  font: 600 8px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.05em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.compass-document-block-kind svg {
+  width: 12px;
+  height: 12px;
+  color: var(--compass-focus);
+}
+
+.compass-document-block[data-origin="ocr"] .compass-document-block-kind svg {
+  color: var(--compass-ocr-accent);
+}
+
+.compass-document-block-text {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 10px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.compass-document-block-locator {
+  justify-content: flex-start;
+  color: var(--muted-foreground);
+  font: 9px/1.3 var(--compass-font-mono);
+}
+
+.compass-document-block-locator svg {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 11px;
+  color: var(--compass-faint);
+}
+
+.compass-document-block-locator svg:last-child {
+  margin-left: auto;
+  color: var(--compass-ocr-accent);
+}
+
+.compass-ocr-confidence {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 6px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  color: var(--compass-success);
+  font: 700 8px/1 var(--compass-font-mono);
+  letter-spacing: 0.02em;
+}
+
+.compass-ocr-confidence[data-confidence="medium"] {
+  color: var(--compass-warning);
+}
+
+.compass-ocr-confidence[data-confidence="low"] {
+  color: var(--destructive);
+}
+
+.compass-document-empty {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  padding: 18px 10px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.compass-document-empty svg {
+  width: 19px;
+  height: 19px;
+  color: var(--compass-faint);
+}
+
+.compass-document-empty strong {
+  color: var(--foreground);
+  font-size: 10px;
+}
+
+.compass-document-empty span {
+  max-width: 240px;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.compass-ocr-preview {
+  display: grid;
+  gap: 7px;
+  padding-top: 10px;
+  border-top: 1px solid var(--compass-line);
+}
+
+.compass-ocr-preview > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.compass-ocr-preview > header > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.compass-ocr-preview strong {
+  font-size: 9px;
+}
+
+.compass-ocr-preview small,
+.compass-ocr-preview-key {
+  color: var(--compass-faint);
+  font: 8px/1.3 var(--compass-font-mono);
+}
+
+.compass-ocr-preview small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-ocr-preview-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.compass-ocr-preview-key i {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--compass-ocr-accent);
+  background: color-mix(in srgb, var(--compass-ocr-accent) 20%, transparent);
+}
+
+.compass-ocr-preview-canvas {
+  display: block;
+  width: 100%;
+  max-height: 190px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 3px;
+  background: var(--compass-ocr-preview-surface);
+  color: var(--compass-focus);
+}
+
+.compass-document-preview-stage {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-height: 360px;
+  border: 1px solid var(--compass-line-strong);
+  border-radius: 4px;
+  background: var(--compass-ocr-preview-surface);
+  isolation: isolate;
+}
+
+.compass-document-preview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 360px;
+  object-fit: contain;
+}
+
+.compass-document-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--compass-focus);
+  pointer-events: none;
+}
+
+.compass-document-preview-overlay .compass-ocr-preview-box {
+  pointer-events: auto;
+}
+
+.compass-document-preview-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--compass-faint);
+  font: 8px/1 var(--compass-font-mono);
+}
+
+.compass-document-preview-controls button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--compass-focus);
+}
+
+.compass-document-preview-controls button:hover:not(:disabled),
+.compass-document-preview-controls button:focus-visible {
+  border-color: var(--compass-focus);
+  background: var(--compass-focus-soft);
+}
+
+.compass-document-preview-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.compass-document-preview-controls svg {
+  width: 13px;
+  height: 13px;
+}
+
+.compass-ocr-preview-box {
+  fill: color-mix(in srgb, var(--compass-ocr-accent) 18%, transparent);
+  stroke: var(--compass-ocr-accent);
+  stroke-width: 3;
+  cursor: pointer;
+  vector-effect: non-scaling-stroke;
+}
+
+.compass-ocr-preview-box:hover,
+.compass-ocr-preview-box:focus,
+.compass-ocr-preview-box[data-active="true"] {
+  fill: color-mix(in srgb, var(--compass-focus) 22%, transparent);
+  stroke: var(--compass-focus);
+  stroke-width: 4;
+}
+
+.compass-ocr-preview > p {
+  margin: 0;
+  color: var(--compass-faint);
+  font-size: 8px;
+  line-height: 1.35;
+}
+
 .compass-changed-symbols {
   max-height: 30%;
   overflow-y: auto;
@@ -2454,17 +3204,43 @@ button:not(:disabled),
 .compass-code-query-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 5px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 16px;
 }
 
 .compass-code-query-actions button {
-  padding: 5px 4px;
+  display: flex;
+  min-width: 0;
+  min-height: 54px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 4px;
   border: 1px solid var(--compass-line);
   border-radius: 3px;
   background: transparent;
   color: var(--vscode-textLink-foreground, var(--compass-focus));
-  font-size: 9px;
+  font-size: 10px;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.compass-code-query-actions button:hover {
+  border-color: color-mix(in srgb, var(--compass-focus) 55%, var(--compass-line));
+  background: var(--compass-focus-soft);
+  color: var(--foreground);
+}
+
+.compass-code-query-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.compass-code-query-actions button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compass-code-query-actions button:focus-visible {
@@ -3106,25 +3882,251 @@ button.compass-code-evidence-source:focus-visible {
 .compass-inspector-action {
   display: flex;
   width: 100%;
-  min-height: 36px;
+  min-height: 46px;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 14px;
-  padding: 0 10px;
+  padding: 7px 9px;
   border: 1px solid var(--compass-line);
   border-radius: 3px;
   background: var(--workbench-hover);
   color: var(--foreground);
+  text-align: left;
 }
 
-.compass-inspector-action span {
+.compass-inspector-action:hover {
+  border-color: color-mix(in srgb, var(--compass-focus) 55%, var(--compass-line));
+}
+
+.compass-inspector-action-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 3px;
+  background: var(--compass-focus-soft);
+  color: var(--compass-focus);
+}
+
+.compass-inspector-action-icon svg,
+.compass-inspector-action > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.compass-inspector-action-copy {
+  display: block;
   min-width: 0;
+  flex: 1;
+}
+
+.compass-inspector-action-copy strong,
+.compass-inspector-action-copy small {
+  display: block;
   overflow: hidden;
-  color: var(--muted-foreground);
-  font: 10px/1.2 var(--compass-font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.compass-inspector-action-copy strong {
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.compass-inspector-action-copy small {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font: 9px/1.2 var(--compass-font-mono);
+}
+
+.compass-node-actions {
+  margin-top: 16px;
+}
+
+.compass-inspector-subheading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid var(--compass-line);
+}
+
+.compass-inspector-subheading h3 {
+  color: var(--foreground);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.compass-inspector-subheading span {
+  color: var(--compass-faint);
+  font: 9px/1 var(--compass-font-mono);
+}
+
+.compass-relationships {
+  margin-top: 16px;
+}
+
+.compass-relationship-directions {
+  display: grid;
+  gap: 10px;
+  margin-top: 9px;
+}
+
+.compass-direction-group {
+  overflow: hidden;
+  border: 1px solid var(--compass-line);
+  border-left: 3px solid var(--compass-focus);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background, var(--background)) 92%, transparent);
+}
+
+.compass-direction-group[data-direction="outgoing"] {
+  border-left-color: var(--compass-warning);
+}
+
+.compass-direction-heading {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  background: color-mix(in srgb, var(--compass-focus) 6%, transparent);
+}
+
+.compass-direction-group[data-direction="outgoing"] .compass-direction-heading {
+  background: color-mix(in srgb, var(--compass-warning) 6%, transparent);
+}
+
+.compass-direction-icon {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 3px;
+  background: var(--compass-focus-soft);
+  color: var(--compass-focus);
+}
+
+.compass-direction-group[data-direction="outgoing"] .compass-direction-icon {
+  background: color-mix(in srgb, var(--compass-warning) 14%, transparent);
+  color: var(--compass-warning);
+}
+
+.compass-direction-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.compass-direction-copy,
+.compass-direction-count {
+  display: block;
+  min-width: 0;
+}
+
+.compass-direction-copy strong,
+.compass-direction-copy small,
+.compass-direction-count strong,
+.compass-direction-count small {
+  display: block;
+}
+
+.compass-direction-copy strong {
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.compass-direction-copy small,
+.compass-direction-count small {
+  margin-top: 2px;
+  color: var(--compass-faint);
+  font-size: 9px;
+}
+
+.compass-direction-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-direction-count {
+  text-align: right;
+}
+
+.compass-direction-count strong {
+  color: var(--foreground);
+  font: 12px/1 var(--compass-font-mono);
+}
+
+.compass-direction-list {
+  max-height: 150px;
+  overflow-y: auto;
+  border-top: 1px solid var(--compass-line);
+}
+
+.compass-direction-link {
+  display: grid;
+  width: 100%;
+  min-height: 44px;
+  grid-template-columns: 8px minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--compass-line) 70%, transparent);
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+}
+
+.compass-direction-link:last-child {
+  border-bottom: 0;
+}
+
+.compass-direction-link:hover {
+  background: var(--workbench-hover);
+}
+
+.compass-direction-node {
+  display: block;
+  min-width: 0;
+}
+
+.compass-direction-node strong,
+.compass-direction-node small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-direction-node strong {
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.compass-direction-node small {
+  margin-top: 2px;
+  color: var(--compass-faint);
+  font: 9px/1.25 var(--compass-font-mono);
+}
+
+.compass-direction-link > svg {
+  width: 13px;
+  height: 13px;
+  color: var(--compass-faint);
+}
+
+.compass-direction-empty {
+  display: block;
+  padding: 9px;
+  color: var(--compass-faint);
+  font-size: 10px;
 }
 
 .compass-neighbors-heading {
@@ -3726,6 +4728,7 @@ body.vscode-high-contrast-light .compass-load-logo {
   width: 100%;
   gap: 0;
   margin-top: 14px;
+  overflow-x: auto;
   border-bottom: 1px solid var(--query-border);
   background: transparent;
 }
@@ -3733,19 +4736,32 @@ body.vscode-high-contrast-light .compass-load-logo {
 .query-mode button {
   position: relative;
   display: grid;
-  min-width: min(280px, 50%);
+  min-width: min(250px, 42vw);
+  flex: 1 0 220px;
   min-height: 48px;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 7px 12px 8px;
   border: 0;
-  border-top: 2px solid transparent;
+  border-top: 0;
   border-radius: 0;
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
   text-align: left;
+}
+
+.query-mode-indicator {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: var(--query-accent);
+  box-shadow: 0 1px 5px color-mix(in srgb, var(--query-accent) 35%, transparent);
+  opacity: 0;
+  pointer-events: none;
 }
 
 .query-mode button:hover {
@@ -3754,12 +4770,15 @@ body.vscode-high-contrast-light .compass-load-logo {
 }
 
 .query-mode button[aria-selected="true"] {
-  border-top-color: var(--vscode-tab-activeBorder, var(--query-accent));
   background: var(--vscode-tab-activeBackground, var(--query-surface-raised));
   box-shadow:
     inset 1px 0 var(--query-border),
     inset -1px 0 var(--query-border);
   color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.query-mode button[aria-selected="true"] .query-mode-indicator {
+  opacity: 1;
 }
 
 .query-mode button[aria-selected="true"] svg,
@@ -3848,9 +4867,107 @@ body.vscode-high-contrast-light .compass-load-logo {
   font-size: 12px;
 }
 
+.query-composer-panel[data-mode="explain"] .query-editor textarea {
+  font-family: var(--compass-font-mono);
+  font-size: 12px;
+}
+
 .query-editor textarea::placeholder,
 .query-params input::placeholder {
   color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.query-suggestions {
+  display: grid;
+  max-height: 210px;
+  overflow-y: auto;
+  border-top: 1px solid var(--query-border);
+  background: var(--vscode-editorSuggestWidget-background, var(--query-surface-raised));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--foreground));
+}
+
+.query-suggestions-label,
+.query-suggestions-hint {
+  padding: 6px 10px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.2 var(--compass-font-sans);
+}
+
+.query-suggestions-label {
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.query-suggestions-hint {
+  border-top: 1px solid var(--query-border);
+  text-align: right;
+}
+
+.query-suggestions button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.query-suggestions button[aria-selected="true"],
+.query-suggestions button:hover {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--accent));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--foreground));
+}
+
+.query-suggestions button > span {
+  overflow: hidden;
+  font: 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-suggestions button > small {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.query-completion-status {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 7px;
+  padding-inline: 10px;
+  border-top: 1px solid var(--query-border);
+  background: var(--vscode-editorSuggestWidget-background, var(--query-surface-raised));
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.query-completion-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.query-completion-status button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border: 1px solid var(--vscode-button-border, var(--query-border));
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: inherit;
+}
+
+.query-completion-status button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
 }
 
 .query-params input:focus-visible {
@@ -3978,14 +5095,103 @@ body.vscode-high-contrast-light .compass-load-logo {
 }
 
 .query-results {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.query-result-stage {
   min-height: 0;
   overflow: auto;
   padding: clamp(12px, 2vw, 22px);
 }
 
-.query-results > .workbench-state,
-.query-empty {
+.query-result-stage > .workbench-state {
   min-height: 100%;
+}
+
+.query-result-tabs {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--query-border);
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--query-surface-raised));
+}
+
+.query-result-tab {
+  display: grid;
+  min-width: 150px;
+  max-width: 300px;
+  grid-template-columns: minmax(0, 1fr) 26px;
+  border-right: 1px solid var(--query-border);
+  background: var(--vscode-tab-inactiveBackground, transparent);
+}
+
+.query-result-tab:has([aria-selected="true"]) {
+  background: var(--vscode-tab-activeBackground, var(--query-surface));
+  box-shadow: inset 0 2px var(--vscode-tab-activeBorderTop, var(--query-accent));
+}
+
+.query-result-tab[data-status="error"] {
+  box-shadow: inset 0 2px var(--vscode-testing-iconFailed, var(--destructive));
+}
+
+.query-result-tab > [role="tab"] {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 7px 4px 7px 10px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-tab-inactiveForeground, var(--muted-foreground));
+  font: inherit;
+  text-align: left;
+}
+
+.query-result-tab > [role="tab"][aria-selected="true"] {
+  color: var(--vscode-tab-activeForeground, var(--foreground));
+}
+
+.query-result-tab > [role="tab"] span {
+  color: var(--query-accent);
+  font: 9px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.query-result-tab > [role="tab"] strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-result-close {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  align-self: center;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.query-result-close:hover {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.query-result-close svg {
+  width: 13px;
+  height: 13px;
 }
 
 .query-result {
@@ -4067,6 +5273,225 @@ body.vscode-high-contrast-light .compass-load-logo {
 .query-traversal-result {
   display: grid;
   gap: 10px;
+}
+
+.query-typed-result,
+.query-explanation {
+  display: grid;
+  gap: 10px;
+}
+
+.query-diagnostics {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--query-border);
+  border-left: 3px solid var(--vscode-editorWarning-foreground, #cca700);
+  background: var(--query-surface-raised);
+}
+
+.query-diagnostics > h3 {
+  margin: 0;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--query-border);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.query-diagnostics article {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--query-border);
+}
+
+.query-diagnostics article:last-child {
+  border-bottom: 0;
+}
+
+.query-diagnostics article > svg {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.query-diagnostics strong,
+.query-diagnostics p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.query-diagnostics strong {
+  font-size: 11px;
+}
+
+.query-diagnostics p {
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.query-explanation-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr);
+  gap: 12px 18px;
+  padding: 13px 14px;
+  border: 1px solid var(--query-border);
+  border-left: 3px solid var(--query-accent);
+  background: var(--query-surface-raised);
+}
+
+.query-explanation-card > div > span {
+  color: var(--query-accent);
+  font: 9px/1.2 var(--compass-font-mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.query-explanation-card h3 {
+  margin: 3px 0 4px;
+  font-size: 14px;
+}
+
+.query-explanation-card code {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font: 10px/1.4 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-explanation-card > .query-source-action {
+  align-self: center;
+}
+
+.query-explanation-card dl {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 18px;
+  margin: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--query-border);
+}
+
+.query-explanation-card dl > div {
+  display: flex;
+  gap: 6px;
+}
+
+.query-explanation-card dt,
+.query-explanation-card dd {
+  margin: 0;
+  font-size: 10px;
+}
+
+.query-explanation-card dt {
+  color: var(--muted-foreground);
+}
+
+.query-connections {
+  overflow: hidden;
+  border: 1px solid var(--query-border);
+  background: var(--query-surface);
+}
+
+.query-connections > h3 {
+  margin: 0;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--query-border);
+  font-size: 11px;
+}
+
+.query-connections > h3 span {
+  margin-left: 4px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+}
+
+.query-connections article {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--query-border);
+}
+
+.query-connections article:last-child {
+  border-bottom: 0;
+}
+
+.query-connections article > svg {
+  width: 14px;
+  color: var(--query-accent);
+}
+
+.query-connections strong,
+.query-connections p {
+  margin: 0;
+  font-size: 11px;
+}
+
+.query-connections p,
+.query-connections article > span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.query-connections article > span {
+  font-family: var(--compass-font-mono);
+  text-transform: uppercase;
+}
+
+.query-guidance {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--query-border);
+  background: var(--query-surface-raised);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.query-object-result {
+  display: grid;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--query-border);
+  background: var(--query-surface);
+}
+
+.query-object-result > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.28fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--query-border);
+}
+
+.query-object-result > div:last-child {
+  border-bottom: 0;
+}
+
+.query-object-result dt,
+.query-object-result dd {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+}
+
+.query-object-result dt {
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.query-object-result dd {
+  border-left: 1px solid var(--query-border);
+  font: 11px/1.5 var(--compass-font-mono);
+  white-space: pre-wrap;
 }
 
 .query-traversal-summary {
@@ -4311,7 +5736,19 @@ body.vscode-high-contrast-light .query-prose-result,
 body.vscode-high-contrast .query-traversal-summary,
 body.vscode-high-contrast-light .query-traversal-summary,
 body.vscode-high-contrast .query-node-results,
-body.vscode-high-contrast-light .query-node-results {
+body.vscode-high-contrast-light .query-node-results,
+body.vscode-high-contrast .query-diagnostics,
+body.vscode-high-contrast-light .query-diagnostics,
+body.vscode-high-contrast .query-explanation-card,
+body.vscode-high-contrast-light .query-explanation-card,
+body.vscode-high-contrast .query-connections,
+body.vscode-high-contrast-light .query-connections,
+body.vscode-high-contrast .query-object-result,
+body.vscode-high-contrast-light .query-object-result,
+body.vscode-high-contrast .query-suggestions,
+body.vscode-high-contrast-light .query-suggestions,
+body.vscode-high-contrast .query-completion-status,
+body.vscode-high-contrast-light .query-completion-status {
   border-width: 2px;
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
@@ -5451,6 +6888,8 @@ body.vscode-high-contrast-light .history-comparison-control select {
 
 body.vscode-high-contrast .compass-change-legend,
 body.vscode-high-contrast-light .compass-change-legend,
+body.vscode-high-contrast .compass-semantic-legend,
+body.vscode-high-contrast-light .compass-semantic-legend,
 body.vscode-high-contrast .compass-change-badge,
 body.vscode-high-contrast-light .compass-change-badge {
   border-color: var(--vscode-contrastBorder, var(--ring));
@@ -5470,6 +6909,32 @@ body.vscode-high-contrast-light .compass-change-badge {
 
   .query-mode {
     align-self: flex-start;
+  }
+
+  .query-mode button {
+    min-width: 180px;
+  }
+
+  .query-mode small {
+    display: none;
+  }
+
+  .query-suggestions button {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .query-suggestions button > small,
+  .query-suggestions-hint {
+    display: none;
+  }
+
+  .query-explanation-card {
+    grid-template-columns: 1fr;
+  }
+
+  .query-explanation-card dl {
+    grid-column: auto;
   }
 
   .history-diff-toolbar {
@@ -6552,6 +8017,24 @@ body.vscode-high-contrast-light .architecture-call-table {
   font-size: 11px;
 }
 
+.architecture-directory-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--architecture-border);
+  font: 9px/1.2 var(--compass-font-mono);
+}
+
+.architecture-directory-pagination button {
+  padding: 3px 7px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
 .architecture-scope-switch {
   display: flex;
   overflow: hidden;
@@ -6613,11 +8096,49 @@ body.vscode-high-contrast-light .architecture-call-table {
   font-weight: 600;
 }
 
+.architecture-context-strip button {
+  padding: 1px 5px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--primary));
+  font: inherit;
+  cursor: pointer;
+}
+
+.architecture-quality-status {
+  padding: 2px 6px;
+  border: 1px solid var(--architecture-border);
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+
+.architecture-quality-status[data-status="good"] {
+  color: var(--vscode-testing-iconPassed, var(--success));
+}
+
+.architecture-quality-status[data-status="degraded"] {
+  color: var(--vscode-editorWarning-foreground, var(--warning));
+}
+
+.architecture-quality-status[data-status="insufficient"] {
+  color: var(--vscode-editorError-foreground, var(--destructive));
+}
+
 .architecture-coverage-warning {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--vscode-editorWarning-foreground, var(--warning));
+}
+
+.architecture-omitted-selection {
+  margin: 12px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--compass-border);
+  border-radius: 8px;
+  color: var(--compass-muted);
+  background: color-mix(in srgb, var(--compass-surface-raised) 88%, transparent);
 }
 
 .architecture-coverage-warning svg {
@@ -7601,6 +9122,261 @@ body.vscode-high-contrast-light .architecture-map-panel {
   font: 11px/1.3 var(--compass-font-mono);
 }
 
+.call-guide-lookup {
+  position: relative;
+  max-width: 620px;
+  margin-top: 26px;
+}
+
+.call-guide-lookup > label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+  font: 700 9px/1 var(--compass-font-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.call-guide-lookup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  border: 1px solid var(--vscode-input-border, var(--border));
+  border-radius: 5px;
+  background: var(--vscode-input-background, var(--card));
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 12%, transparent);
+}
+
+.call-guide-lookup-row:focus-within {
+  border-color: var(--vscode-focusBorder, var(--compass-focus));
+  box-shadow:
+    0 0 0 1px var(--vscode-focusBorder, var(--compass-focus)),
+    0 12px 32px color-mix(in srgb, #000 12%, transparent);
+}
+
+.call-guide-lookup-input {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding-inline: 12px;
+}
+
+.call-guide-lookup-input svg {
+  width: 15px;
+  height: 15px;
+  color: var(--vscode-textLink-foreground, var(--compass-focus));
+}
+
+.call-guide-lookup-input input {
+  min-width: 0;
+  height: 42px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--vscode-input-foreground, var(--foreground));
+  font: 12px/1 var(--compass-font-mono);
+}
+
+.call-guide-lookup-input input::placeholder {
+  color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+}
+
+.call-guide-lookup-row > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 3px;
+  outline: 0;
+  background: var(--vscode-button-background, var(--compass-focus));
+  color: var(--vscode-button-foreground, var(--primary-foreground));
+  font: 600 11px/1 var(--compass-font-sans);
+}
+
+.call-guide-lookup-row > button:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, var(--primary));
+}
+
+.call-guide-lookup-row > button:focus-visible,
+.call-guide-lookup-directions button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: 2px;
+}
+
+.call-guide-lookup-row > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.call-guide-lookup-row > button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.call-guide-suggestions {
+  display: grid;
+  max-height: 230px;
+  margin-top: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border, var(--border)));
+  border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, var(--card));
+  color: var(--vscode-editorSuggestWidget-foreground, var(--foreground));
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 16%, transparent);
+}
+
+.call-guide-suggestions-label,
+.call-guide-suggestions-hint {
+  padding-block: 6px;
+  padding-inline: 10px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1.25 var(--compass-font-mono);
+}
+
+.call-guide-suggestions-label {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.call-guide-suggestions-hint {
+  border-top: 1px solid var(--vscode-editorSuggestWidget-border, var(--border));
+  text-align: end;
+}
+
+.call-guide-suggestions > button {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding-block: 8px;
+  padding-inline: 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+}
+
+.call-guide-suggestions > button:hover,
+.call-guide-suggestions > button[aria-selected="true"] {
+  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--accent));
+  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--foreground));
+}
+
+.call-guide-suggestions > button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -2px;
+}
+
+.call-guide-suggestions > button > span {
+  min-width: 0;
+  overflow: hidden;
+  font: 11px/1.35 var(--compass-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-guide-suggestions > button > small {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-guide-completion-status {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding-block: 7px;
+  padding-inline: 10px;
+  border: 1px solid var(--vscode-editorSuggestWidget-border, var(--vscode-panel-border, var(--border)));
+  border-radius: 4px;
+  background: var(--vscode-editorSuggestWidget-background, var(--card));
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 10px;
+}
+
+.call-guide-completion-status > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.call-guide-completion-status > button {
+  flex: 0 0 auto;
+  padding-block: 3px;
+  padding-inline: 7px;
+  border: 1px solid var(--vscode-button-border, var(--border));
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, var(--secondary));
+  color: var(--vscode-button-secondaryForeground, var(--secondary-foreground));
+  font: inherit;
+}
+
+.call-guide-completion-status > button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, var(--workbench-hover));
+}
+
+.call-guide-lookup-directions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.call-guide-lookup-directions legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.call-guide-lookup-directions button {
+  min-height: 25px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  outline: 0;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font: 9px/1 var(--compass-font-mono);
+  text-transform: uppercase;
+}
+
+.call-guide-lookup-directions button:hover,
+.call-guide-lookup-directions button[aria-pressed="true"] {
+  border-color: var(--vscode-panel-border, var(--border));
+  background: var(--vscode-list-hoverBackground, var(--workbench-hover));
+  color: var(--vscode-editor-foreground, var(--foreground));
+}
+
+.call-guide-lookup-directions button[aria-pressed="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--vscode-focusBorder, var(--compass-focus)) 65%,
+    var(--border)
+  );
+}
+
+.call-guide-lookup-directions > span {
+  margin-left: auto;
+  color: var(--vscode-disabledForeground, var(--compass-faint));
+  font: 9px/1 var(--compass-font-mono);
+}
+
 .call-guide-source > span:not(.call-guide-source-light) {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8162,6 +9938,16 @@ body.vscode-high-contrast-light .call-guide-action {
   border-color: var(--vscode-contrastBorder, var(--ring));
 }
 
+body.vscode-high-contrast .call-guide-lookup-row,
+body.vscode-high-contrast-light .call-guide-lookup-row,
+body.vscode-high-contrast .call-guide-suggestions,
+body.vscode-high-contrast-light .call-guide-suggestions,
+body.vscode-high-contrast .call-guide-completion-status,
+body.vscode-high-contrast-light .call-guide-completion-status {
+  border-width: 2px;
+  border-color: var(--vscode-contrastBorder, var(--ring));
+}
+
 @media (max-width: 900px) {
   .call-guide-hero {
     grid-template-columns: 1fr;
@@ -8224,6 +10010,33 @@ body.vscode-high-contrast-light .call-guide-action {
 }
 
 @media (max-width: 440px) {
+  .call-guide-lookup-row {
+    grid-template-columns: 1fr;
+  }
+
+  .call-guide-lookup-row > button {
+    min-height: 36px;
+    justify-content: center;
+  }
+
+  .call-guide-lookup-directions {
+    flex-wrap: wrap;
+  }
+
+  .call-guide-lookup-directions > span {
+    width: 100%;
+    margin: 5px 0 0;
+  }
+
+  .call-guide-suggestions > button {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .call-guide-suggestions > button > small {
+    white-space: normal;
+  }
+
   .call-guide-route-stage {
     gap: 5%;
   }

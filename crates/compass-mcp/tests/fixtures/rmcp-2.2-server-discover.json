@@ -1,5 +1,5 @@
 {
-  "serverInfo": { "name": "compass", "version": "0.3.12" },
+  "serverInfo": { "name": "compass", "version": "0.3.23" },
   "capabilities": {
     "experimental": {},
     "resources": { "subscribe": false, "listChanged": false },
@@ -10,28 +10,28 @@
       "name": "search_symbols",
       "description": "Search Compass code symbols with the trusted FTS5 index.",
       "inputSchemaSha256": "523a1c967403f4820b39c5360bfe549b97bda2619cf60710bcd603c981b0c325",
-      "outputSchemaSha256": "4f21d4f3609e8de41ed866beeb00eb8dc160f87039c5ab9a16e43d0b832d6811",
+      "outputSchemaSha256": "72d1addd06e7b86cbd21ad8046c9fbcf20d0cd93e32f9ddfc53fa96405769492",
       "meta": null
     },
     {
       "name": "get_callers",
       "description": "Return one-hop callers and route bindings for a symbol.",
       "inputSchemaSha256": "5d82222c8c5ef1ec1309bc5bfbcfce1ae45d56575093a45f3c3b2e329d21a66e",
-      "outputSchemaSha256": "d8a8e3afa72e1543381e7a0876cc628645a1cf130ed9425c802e85d83a560597",
+      "outputSchemaSha256": "5e9b5eefbffaaa25232298a72ed9d6723a770d272f37fd758f732d4ef03521e1",
       "meta": null
     },
     {
       "name": "get_callees",
       "description": "Return one-hop callees for a symbol.",
       "inputSchemaSha256": "5d82222c8c5ef1ec1309bc5bfbcfce1ae45d56575093a45f3c3b2e329d21a66e",
-      "outputSchemaSha256": "e70af59566e98b2565979f0810e52de25d679cc7d8f7fcfcf2e10c381590cc90",
+      "outputSchemaSha256": "a1354aa83497c9d24b5d49a1a3a68d1b65634d0a9a4b483bec190ccf79c507a8",
       "meta": null
     },
     {
       "name": "get_impact",
       "description": "Return the bounded transitive impact radius for a symbol.",
       "inputSchemaSha256": "5d82222c8c5ef1ec1309bc5bfbcfce1ae45d56575093a45f3c3b2e329d21a66e",
-      "outputSchemaSha256": "0999677d330f016ceaa747342e17a5cb53c21311dfb6a3f9dec0b8054a9a63c9",
+      "outputSchemaSha256": "9cb2a788634ceb6e6cdb940ca7d456b86c881b9b1f5e47b324fcc0c09ce2dcf1",
       "meta": null
     },
     {
@@ -127,8 +127,8 @@
     },
     {
       "name": "task_context",
-      "description": "Compose a bounded, verified compass.task-context/1 packet after exact target resolution. Ambiguous fuzzy candidates are never selected.",
-      "inputSchemaSha256": "c86294300bf2b4c3d20c9c4f7f7881bcf689dd8e9819c1d502408c19c7b8d3a5",
+      "description": "Compose a bounded, verified compass.task-context/2 packet after exact target resolution. The typed framework context reports pack versions, routes, render direction, boundaries, configuration dependencies, provenance, ambiguity, and truncation. Ambiguous fuzzy candidates are never selected.",
+      "inputSchemaSha256": "8398e17210e708925ff78fd3d145ec392c926df57167a9ec00c3a13d1a2ab20c",
       "outputSchemaSha256": null,
       "meta": null
     }
@@ -140,6 +140,7 @@
     { "uri": "compass://god-nodes", "name": "God Nodes", "description": "Top 10 most-connected nodes", "mimeType": "text/plain" },
     { "uri": "compass://surprises", "name": "Surprising Connections", "description": "Cross-community surprising connections", "mimeType": "text/plain" },
     { "uri": "compass://audit", "name": "Confidence Audit", "description": "EXTRACTED/INFERRED/AMBIGUOUS edge breakdown", "mimeType": "text/plain" },
-    { "uri": "compass://questions", "name": "Suggested Questions", "description": "Suggested questions for this codebase", "mimeType": "text/plain" }
+    { "uri": "compass://questions", "name": "Suggested Questions", "description": "Suggested questions for this codebase", "mimeType": "text/plain" },
+    { "uri": "compass://graph-insights", "name": "Graph Insights", "description": "Typed structural gaps, disconnected components, witnesses, and limits", "mimeType": "application/json" }
   ]
 }

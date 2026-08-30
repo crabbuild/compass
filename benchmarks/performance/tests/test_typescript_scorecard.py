@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from benchmarks.performance.compass.typescript_scorecard import (
+    RESULT_SCHEMA,
     SCORECARD_SCHEMA,
     TypeScriptScorecardError,
     scorecard_result,
@@ -28,7 +29,7 @@ def record(
     value: dict[str, object] = {
         "id": record_id,
         "corpus": corpus,
-        "adapter": "typescript",
+        "producer": "typescript",
         "language": "typescript",
         "capability": capability,
         "relation": relation,
@@ -53,7 +54,7 @@ def scorecard(*, mode: str = "diagnostic") -> dict[str, object]:
         "mode": mode,
         "provider": "typescript_checker_api_5_9_3",
         "oracleScriptSha256": "a" * 64,
-        "candidateAdapter": "compass.typescript.candidate",
+        "producer": "compass.typescript",
         "corpora": [
             {"name": "axios", "commit": "1" * 40},
             {"name": "nest", "commit": "2" * 40},
@@ -62,8 +63,8 @@ def scorecard(*, mode: str = "diagnostic") -> dict[str, object]:
         ],
         "releaseGateCorpora": ["axios", "nest", "vite", "zod"],
         "advertisedCapabilities": [
-            {"adapter": "typescript", "capability": "calls"},
-            {"adapter": "typescript", "capability": "members"},
+            {"producer": "typescript", "capability": "calls"},
+            {"producer": "typescript", "capability": "members"},
         ],
         "requiredRelations": ["accesses", "calls"],
         "comparators": [
@@ -125,6 +126,9 @@ class TypeScriptScorecardTests(unittest.TestCase):
         second = scorecard_result(path)
 
         self.assertEqual(first, second)
+        self.assertEqual(first["schema"], RESULT_SCHEMA)
+        self.assertEqual(first["scorecardSchema"], SCORECARD_SCHEMA)
+        self.assertEqual(first["producer"], "compass.typescript")
         self.assertTrue(first["passed"])
         self.assertFalse(first["eligibleForQualityClaim"])
         self.assertEqual(first["precision"]["numerator"], 1)

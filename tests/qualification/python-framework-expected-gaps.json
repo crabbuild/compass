@@ -1,0 +1,24 @@
+{
+  "schema": "compass.python-framework-expected-gaps/1",
+  "status": "established-unqualified",
+  "records": [
+    {
+      "id": "django-registration-contract",
+      "surface": "django-python",
+      "current": "signals-only-registration-evidence",
+      "required": "truthful-middleware-settings-and-admin-registration-capability"
+    },
+    {
+      "id": "drf-custom-router-template",
+      "surface": "django-rest-framework-python",
+      "current": "simple-router-v1-and-default-router-v1-closed-templates",
+      "required": "independently-qualified-custom-router-template"
+    },
+    {
+      "id": "drf-inherited-external-actions",
+      "surface": "django-rest-framework-python",
+      "current": "source-declared-viewset-methods-only",
+      "required": "indexed-exact-inherited-viewset-declarations"
+    }
+  ]
+}

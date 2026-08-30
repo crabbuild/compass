@@ -1,7 +1,9 @@
 import {
   InitializationWizard,
+  OcrModelStatusSchema,
   type InitializationRequest,
-  type InitializationStatus
+  type InitializationStatus,
+  type OcrModelStatus
 } from "@compass/viewer";
 import { createRoot } from "react-dom/client";
 
@@ -18,6 +20,7 @@ let configurationExists = false;
 let scopeFiles: string[] = [];
 let scopeFilesTruncated = false;
 let status: InitializationStatus | undefined;
+let ocrModel: OcrModelStatus = { kind: "checking", profile: "pp-ocrv6-small" };
 
 function render(): void {
   root.render(
@@ -27,6 +30,7 @@ function render(): void {
       configurationExists={configurationExists}
       scopeFiles={scopeFiles}
       scopeFilesTruncated={scopeFilesTruncated}
+      ocrModel={ocrModel}
       {...(status ? { status } : {})}
       host={{
         start(request: InitializationRequest) {
@@ -51,6 +55,15 @@ function render(): void {
         },
         showOutput() {
           vscode.postMessage({ type: "showOutput" });
+        },
+        installOcrModel() {
+          vscode.postMessage({ type: "installOcrModel" });
+        },
+        cancelOcrModel() {
+          vscode.postMessage({ type: "cancelOcrModel" });
+        },
+        verifyOcrModel() {
+          vscode.postMessage({ type: "verifyOcrModel" });
         }
       }}
     />
@@ -67,6 +80,8 @@ window.addEventListener("message", (event) => {
       ? message.scopeFiles.filter((value: unknown): value is string => typeof value === "string")
       : [];
     scopeFilesTruncated = message.scopeFilesTruncated === true;
+    const parsedOcrModel = OcrModelStatusSchema.safeParse(message.ocrModel);
+    if (parsedOcrModel.success) ocrModel = parsedOcrModel.data;
   } else if (message?.type === "progress") {
     const progress = message.event;
     status = {
@@ -87,6 +102,10 @@ window.addEventListener("message", (event) => {
     status = { kind: "cancelled" };
   } else if (message?.type === "configurationChanged") {
     configurationExists = message.configurationExists === true;
+  } else if (message?.type === "ocrModel") {
+    const parsedOcrModel = OcrModelStatusSchema.safeParse(message.status);
+    if (!parsedOcrModel.success) return;
+    ocrModel = parsedOcrModel.data;
   } else {
     return;
   }

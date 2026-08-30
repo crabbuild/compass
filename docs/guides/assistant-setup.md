@@ -52,6 +52,42 @@ skill was installed but no host-specific adapter was detected. Rerun with an
 explicit target, for example `compass install --platform codex` or
 `compass install --platform gemini`.
 
+## Start an agentic coding session
+
+Reload the skill as directed by the install report or begin a new assistant
+session. You can then state the outcome in natural language; the installed
+Compass skill owns the command sequence and safety checks. For example:
+
+```text
+Use Compass to initialize this coding session around authentication. Keep graph
+access read-only, give me a bounded implementation context, and verify decisive
+claims in source.
+```
+
+To let the assistant preserve verified knowledge in an Agent Graph Overlay, say
+so explicitly and name the overlay:
+
+```text
+Use Compass overlay overlay:auth-review. Add only source-cited GROUNDED
+enhancements that will help later coding sessions. Show every applied change,
+pin the resulting revision, and do not mask or delete Base Graph facts.
+```
+
+For enrichment throughout one coding session, opt in explicitly:
+
+```text
+Use Compass in continuous enrichment mode with overlay overlay:auth-review.
+Keep navigation read-only, flush only source-cited milestones, pin each
+receipt, and stop for a complete rebase after any Base Graph refresh.
+```
+
+Read-only analysis does not authorize overlay writes. “Add,” “update,”
+“retract,” “challenge,” or “enhance” makes that intent explicit; masking still
+requires a separate request. The assistant should report the exact Base
+Generation and Overlay Revision so a later session can resume deterministically.
+See [Enhance a graph with an agent](enhancing-a-graph-with-an-agent.md) for the
+complete lifecycle.
+
 ## Global or project scope
 
 ### User installation
@@ -319,6 +355,7 @@ Avoid:
 
 - [Getting started](../getting-started.md)
 - [Explore a codebase](exploring-a-codebase.md)
+- [Enhance a graph with an agent](enhancing-a-graph-with-an-agent.md)
 - [Configuration reference](../reference/configuration.md)
 - [Troubleshooting cookbook](../cookbook/troubleshooting.md)
 

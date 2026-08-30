@@ -23,6 +23,19 @@ pub struct GraphViewModel {
     pub edges: Vec<GraphViewEdge>,
     pub communities: Vec<GraphViewCommunity>,
     pub hyperedges: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_graph: Option<Box<EffectiveGraphViewContext>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveGraphViewContext {
+    pub effective_identity: compass_agent_graph::Digest,
+    pub base_generation: compass_agent_graph::BaseGenerationId,
+    pub overlay_revision: compass_agent_graph::OverlayRevisionId,
+    pub composition_profile: compass_agent_graph::CompositionProfile,
+    pub retractions: compass_agent_graph::EffectiveRetractions,
+    pub omissions: compass_agent_graph::CompositionOmissions,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -68,6 +81,47 @@ pub struct GraphViewNode {
     pub depth: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root: Option<bool>,
+    #[serde(rename = "agentAssertion", skip_serializing_if = "Option::is_none")]
+    pub agent_assertion: Option<compass_agent_graph::AssertionId>,
+    #[serde(rename = "agentSummary", skip_serializing_if = "Option::is_none")]
+    pub agent_summary: Option<String>,
+    #[serde(rename = "groundingStatus", skip_serializing_if = "Option::is_none")]
+    pub grounding_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<compass_agent_graph::EffectiveChallenge>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub document: Option<GraphViewDocument>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphViewDocument {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ordinal: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complete: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visual_coverage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locator: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ocr_profile: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previews: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -102,6 +156,16 @@ pub struct GraphViewEdge {
     pub confidence: Option<String>,
     #[serde(rename = "relationshipSite", skip_serializing_if = "Option::is_none")]
     pub relationship_site: Option<GraphViewSource>,
+    #[serde(rename = "agentAssertion", skip_serializing_if = "Option::is_none")]
+    pub agent_assertion: Option<compass_agent_graph::AssertionId>,
+    #[serde(rename = "agentSummary", skip_serializing_if = "Option::is_none")]
+    pub agent_summary: Option<String>,
+    #[serde(rename = "groundingStatus", skip_serializing_if = "Option::is_none")]
+    pub grounding_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<compass_agent_graph::EffectiveChallenge>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -165,6 +229,12 @@ pub fn graph_view_model(
                 learning_stale: object.get("learning_stale").and_then(Value::as_bool),
                 depth: None,
                 root: None,
+                agent_assertion: None,
+                agent_summary: None,
+                grounding_status: None,
+                challenged: None,
+                challenge: None,
+                document: object.get("document").and_then(document_from_value),
             })
         })
         .collect::<Vec<_>>();
@@ -199,6 +269,11 @@ pub fn graph_view_model(
                     .to_owned()
                 }),
                 relationship_site,
+                agent_assertion: None,
+                agent_summary: None,
+                grounding_status: None,
+                challenged: None,
+                challenge: None,
             })
         })
         .collect::<Vec<_>>();
@@ -247,7 +322,73 @@ pub fn graph_view_model(
         edges,
         communities: view_communities,
         hyperedges,
+        effective_graph: None,
     }
+}
+
+pub fn effective_graph_view_model(
+    effective: &compass_agent_graph::EffectiveGraph,
+    title: impl Into<String>,
+    options: &HtmlOptions<'_>,
+) -> Result<GraphViewModel, compass_model::GraphError> {
+    let document = effective.graph.to_legacy_document()?;
+    // Agent assertions can change topology. Recompute the communities from the
+    // exact Effective Graph and discard labels/counts derived from the base so
+    // a viewer can never present a mixed-revision topology.
+    let communities = compass_graph::cluster(&document, compass_graph::ClusterOptions::default());
+    let effective_options = HtmlOptions {
+        community_labels: None,
+        member_counts: None,
+        node_limit: options.node_limit,
+        learning_overlay: options.learning_overlay,
+    };
+    let mut model = graph_view_model(&document, &communities, title, &effective_options, false);
+    let facts = effective
+        .agent_facts
+        .iter()
+        .map(|fact| (fact.projected_id.as_str(), fact))
+        .collect::<BTreeMap<_, _>>();
+    let challenged = effective
+        .challenges
+        .iter()
+        .map(|challenge| (challenge.target_id.as_str(), challenge))
+        .collect::<BTreeMap<_, _>>();
+    for node in &mut model.nodes {
+        if let Some(fact) = facts.get(node.id.as_str()) {
+            node.agent_assertion = Some(fact.assertion.clone());
+            node.agent_summary = Some(fact.summary.clone());
+            node.grounding_status = Some("GROUNDED".to_owned());
+            node.color = Some(GraphViewColor {
+                background: "#153d3a".to_owned(),
+                border: "#5eead4".to_owned(),
+            });
+        }
+        node.challenge = challenged
+            .get(node.id.as_str())
+            .map(|value| (*value).clone());
+        node.challenged = node.challenge.as_ref().map(|_| true);
+    }
+    for (edge, record) in model.edges.iter_mut().zip(&document.links) {
+        let edge_id = record.string("id");
+        if let Some(fact) = facts.get(edge_id.as_str()) {
+            edge.agent_assertion = Some(fact.assertion.clone());
+            edge.agent_summary = Some(fact.summary.clone());
+            edge.grounding_status = Some("GROUNDED".to_owned());
+        }
+        edge.challenge = challenged
+            .get(edge_id.as_str())
+            .map(|value| (*value).clone());
+        edge.challenged = edge.challenge.as_ref().map(|_| true);
+    }
+    model.effective_graph = Some(Box::new(EffectiveGraphViewContext {
+        effective_identity: effective.effective_identity.clone(),
+        base_generation: effective.base_generation.clone(),
+        overlay_revision: effective.overlay_revision.clone(),
+        composition_profile: effective.composition_profile,
+        retractions: effective.retractions.clone(),
+        omissions: effective.omissions.clone(),
+    }));
+    Ok(model)
 }
 
 fn graph_view_edge_source(edge: &compass_model::EdgeRecord) -> Option<GraphViewSource> {
@@ -363,6 +504,24 @@ fn non_empty(object: &Map<String, Value>, key: &str) -> Option<String> {
     string(object, key).filter(|value| !value.is_empty())
 }
 
+fn document_from_value(value: &Value) -> Option<GraphViewDocument> {
+    let object = value.as_object()?;
+    Some(GraphViewDocument {
+        role: string(object, "role"),
+        kind: string(object, "kind"),
+        format: string(object, "format"),
+        text: string(object, "text"),
+        ordinal: object.get("ordinal").and_then(Value::as_u64),
+        complete: object.get("complete").and_then(Value::as_bool),
+        visual_coverage: string(object, "visualCoverage"),
+        ocr_mode: string(object, "ocrMode"),
+        origin: object.get("origin").cloned(),
+        locator: object.get("locator").cloned(),
+        ocr_profile: object.get("ocrProfile").cloned(),
+        previews: object.get("previews").cloned(),
+    })
+}
+
 fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -430,6 +589,85 @@ mod tests {
             node.source.as_ref().and_then(|source| source.end_line),
             Some(8)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn graph_model_exposes_document_ocr_provenance_for_the_viewer()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "nodes": [{
+                "id": "scan",
+                "label": "scan.pdf",
+                "file_type": "document",
+                "document_kind": "document",
+                "document_format": "pdf",
+                "document_visual_coverage": "partial",
+                "document_ocr_mode": "auto",
+                "document_complete": false,
+                "document_ocr_profile": {
+                    "engine": "OAR-OCR",
+                    "engine_version": "0.9.2",
+                    "profile": "pp-ocrv6-small"
+                },
+                "document_previews": [{
+                    "schema": "compass.document.preview/1",
+                    "kind": "page",
+                    "locator": {"kind": "page", "page": 1},
+                    "label": "Page 1 · Normalized preview",
+                    "width": 100,
+                    "height": 100,
+                    "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\"></svg>",
+                    "regions": [],
+                    "digest": "sha256:ab968df6659867783ee1bf8296158be7b199ea12776cc0b1f1df5c213ac83421"
+                }],
+                "source_file": "docs/scan.pdf"
+            }, {
+                "id": "region",
+                "label": "Invoice total",
+                "file_type": "document",
+                "document_kind": "paragraph",
+                "document_text": "Invoice total",
+                "document_origin": {
+                    "kind": "ocr",
+                    "profile": {
+                        "engine": "OAR-OCR",
+                        "engine_version": "0.9.2",
+                        "profile": "pp-ocrv6-small"
+                    },
+                    "confidence_bps": 9234
+                },
+                "document_locator": {
+                    "kind": "ocr",
+                    "owner": {"kind": "pdf", "page": 4, "item": 1},
+                    "candidate_id": "page-4",
+                    "width": 1000,
+                    "height": 800,
+                    "polygon": [{"x": 10, "y": 12}],
+                    "occurrence": 0
+                },
+                "block_index": 1,
+                "source_file": "docs/scan.pdf"
+            }],
+            "links": []
+        }))?;
+        let communities: Communities =
+            BTreeMap::from([(0, vec!["scan".to_owned(), "region".to_owned()])]);
+        let model = graph_view_model(
+            &document,
+            &communities,
+            "OCR",
+            &HtmlOptions::default(),
+            false,
+        );
+        let json = serde_json::to_value(&model.nodes)?;
+        assert_eq!(json[0]["document"]["role"], "root");
+        assert_eq!(json[0]["document"]["ocrMode"], "auto");
+        assert_eq!(json[0]["document"]["visualCoverage"], "partial");
+        assert_eq!(json[0]["document"]["previews"][0]["kind"], "page");
+        assert_eq!(json[1]["document"]["origin"]["kind"], "ocr");
+        assert_eq!(json[1]["document"]["origin"]["confidence_bps"], 9234);
+        assert_eq!(json[1]["document"]["locator"]["owner"]["page"], 4);
         Ok(())
     }
 
@@ -563,6 +801,33 @@ mod tests {
     }
 
     #[test]
+    fn effective_model_recomputes_communities_and_discards_base_labels()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let effective = serde_json::from_str::<compass_agent_graph::EffectiveGraph>(include_str!(
+            "../../../fixtures/contracts/agent-graph/effective-v1.json"
+        ))?;
+        let stale_labels = BTreeMap::from([(99, "Stale base community".to_owned())]);
+        let model = effective_graph_view_model(
+            &effective,
+            "Effective",
+            &HtmlOptions {
+                community_labels: Some(&stale_labels),
+                ..HtmlOptions::default()
+            },
+        )?;
+
+        assert!(model.communities.is_empty());
+        assert_eq!(
+            model
+                .effective_graph
+                .as_ref()
+                .map(|context| &context.effective_identity),
+            Some(&effective.effective_identity)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn shared_html_embeds_community_models_as_inert_safe_json()
     -> Result<(), Box<dyn std::error::Error>> {
         let model = GraphViewModel {
@@ -578,6 +843,7 @@ mod tests {
             edges: Vec::new(),
             communities: Vec::new(),
             hyperedges: Vec::new(),
+            effective_graph: None,
         };
         let mut detail = model.clone();
         detail.title = "</script><script>alert(1)</script>".to_owned();

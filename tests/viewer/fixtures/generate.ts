@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { graphStaticLoadingMarkup } from "../../../editors/vscode/src/webviews/graphLoadingMarkup";
 import { ArchitectureIndex } from "../../../editors/vscode/src/views/architectureIndex";
-import { CallflowViewModelSchema } from "../../../packages/compass-viewer/src/contracts/callflow";
+import { ArchitectureViewModelSchema } from "../../../packages/compass-viewer/src/contracts/architecture";
 
 export default async function generate(): Promise<void> {
   const root = path.resolve("../..");
@@ -197,8 +197,14 @@ export default async function generate(): Promise<void> {
     ...graph,
     title: "Core detail",
     stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
-    nodes: graph.nodes.slice(0, 2),
-    edges: graph.edges.slice(0, 1),
+    nodes: [graph.nodes[0]!, { ...graph.nodes[3]!, community: 0 }],
+    edges: [{
+      id: "detail-edge",
+      source: "run",
+      target: "store",
+      relation: "uses",
+      confidence: "extracted"
+    }],
     communities: graph.communities.slice(0, 1)
   };
   await writeFile(
@@ -216,15 +222,17 @@ export default async function generate(): Promise<void> {
     sourceFile: `src/api/module-${index}.ts`,
     scope: "production"
   }));
-  const architectureEdges = Array.from({ length: 53 }, (_, index) => ({
+  const architectureRelationships = Array.from({ length: 53 }, (_, index) => ({
+    id: `internal-${index}`,
     source: "authenticate",
     target: index % 4 === 0 ? "database" : `symbol-${2 + (index % 29)}`,
     relation: index % 3 === 0 ? "calls" : "uses",
+    relationClass: index % 3 === 0 ? "execution" : "dependency",
     confidence: index % 5 === 0 ? "inferred" : "extracted"
   }));
-  const architectureSectionNodeId = (index: number) =>
-    index === 0 ? "authenticate" : index === 1 ? "database-adapter" : `section-node-${index}`;
-  const architectureSections = Array.from({ length: 26 }, (_, index) => {
+  const architectureGroupNodeId = (index: number) =>
+    index === 0 ? "authenticate" : index === 1 ? "database-adapter" : `group-node-${index}`;
+  const architectureGroups = Array.from({ length: 26 }, (_, index) => {
     const nodes = index === 0
       ? architectureNodes
       : index === 1
@@ -236,67 +244,133 @@ export default async function generate(): Promise<void> {
           scope: "production"
         }]
         : [{
-          id: architectureSectionNodeId(index),
-          label: `section ${index} entry`,
+          id: architectureGroupNodeId(index),
+          label: `subsystem ${index} entry`,
           kind: "function",
-          sourceFile: `src/section-${index}/entry.ts`,
+          sourceFile: `src/subsystem-${index}/entry.ts`,
           scope: "production"
         }];
-    const edges = index === 0 ? architectureEdges : [];
     return {
-      id: `section-${index}`,
-      name: index === 0 ? "API" : index === 1 ? "Storage" : `Section ${index}`,
-      communities: [`${index}`],
+      id: `group-${index}`,
+      parentId: null,
+      kind: "subsystem",
+      rank: index + 1,
+      name: {
+        value: index === 0 ? "API" : index === 1 ? "Storage" : `Subsystem ${index}`,
+        provenance: "path",
+        membershipSignature: `signature-${index}`,
+        quality: 90,
+        evidence: [`path:src/subsystem-${index}`]
+      },
+      ownerKey: `src/subsystem-${index}`,
+      communityIds: [index],
       nodeCount: nodes.length,
-      internalCallCount: edges.length,
-      nodes,
-      edges
+      relationshipCount: index === 0 ? 54 : index < 25 ? 2 : 1,
+      neighborCount: index === 0 || index === 25 ? 1 : 2,
+      cohesion: index === 0 ? 0.8 : 1,
+      sourceScopes: { production: nodes.length, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 },
+      pinned: false,
+      nodes
     };
   });
-  const architectureOverviewLinks = Array.from({ length: 25 }, (_, index) => ({
-    sourceSection: `section-${index}`,
-    targetSection: `section-${index + 1}`,
-    calls: index + 1
+  const architectureOverviewRoutes = Array.from({ length: 25 }, (_, index) => ({
+    id: `group-${index}->group-${index + 1}`,
+    level: "overview",
+    ownerId: null,
+    sourceGroup: `group-${index}`,
+    targetGroup: `group-${index + 1}`,
+    relationshipCount: index + 1,
+    relationClasses: {
+      execution: index + 1, dependency: 0, type: 0, structure: 0, contextual: 0, unknown: 0
+    },
+    evidence: { extracted: index + 1, inferred: 0, ambiguous: 0 }
   }));
-  const architectureCrossSectionCalls = architectureOverviewLinks.flatMap((link, index) =>
-    Array.from({ length: link.calls }, () => ({
-      source: architectureSectionNodeId(index),
-      target: architectureSectionNodeId(index + 1),
-      sourceSection: link.sourceSection,
-      targetSection: link.targetSection,
+  const architectureCrossGroupRelationships = architectureOverviewRoutes.flatMap((route, index) =>
+    Array.from({ length: route.relationshipCount }, (_, relationshipIndex) => ({
+      id: `route-${index}-${relationshipIndex}`,
+      source: architectureGroupNodeId(index),
+      target: architectureGroupNodeId(index + 1),
       relation: "calls",
+      relationClass: "execution",
       confidence: "extracted"
     }))
   );
+  const rawArchitectureNodes = architectureGroups.flatMap(({ nodes }) => nodes).map((node, index) => ({
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    sourceFile: node.sourceFile,
+    sourceScope: "production",
+    scopeReason: "source_path",
+    community: index < 31 ? 0 : index - 30
+  }));
+  const groups = architectureGroups.map(({ nodes: _nodes, ...group }) => group);
+  const architectureNodeIndex = new Map(rawArchitectureNodes.map((node, index) => [node.id, index]));
+  const architectureGroupIndex = new Map(groups.map((group, index) => [group.id, index]));
+  const memberships = architectureGroups.flatMap((group) =>
+    group.nodes.map((node) => ({
+      nodeIndex: architectureNodeIndex.get(node.id)!,
+      groupIndex: architectureGroupIndex.get(group.id)!
+    }))
+  );
+  const sourceScopes = { production: 56, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 };
+  const relationClasses = {
+    execution: 343, dependency: 35, type: 0, structure: 0, contextual: 0, unknown: 0
+  };
+  const quality = {
+    status: "good",
+    metrics: {
+      sourceScopes,
+      unknownSourceFraction: 0,
+      generatedVendorLeakage: 0,
+      representedNodeFraction: 1,
+      representedRelationshipFraction: 1,
+      duplicateNames: 0,
+      fallbackNames: 0,
+      largestGroupFraction: 31 / 56,
+      unknownRelations: 0,
+      unassignedNodes: 0,
+      unassignedRelationships: 0
+    },
+    diagnostics: []
+  };
+  const projection = {
+    scope: "production",
+    defaultLens: "architecture",
+    groups,
+    memberships,
+    routes: architectureOverviewRoutes,
+    overviewGroupIds: groups.slice(0, 24).map(({ id }) => id),
+    overviewRouteIds: architectureOverviewRoutes.slice(0, 23).map(({ id }) => id),
+    coverage: { admitted: 378, internal: 53, crossGroup: 325, unassigned: 0, relationClasses },
+    omissions: {
+      totalGroups: 26, shownGroups: 24, omittedGroups: 2,
+      representedNodes: 54, omittedNodes: 2,
+      representedRelationships: 329, omittedRelationships: 49,
+      witnessGroupIds: ["group-24", "group-25"], maxOverviewGroups: 24, maxOverviewRoutes: 23
+    },
+    quality
+  };
   const architecture = {
-    schema: "compass.viewer.callflow/1",
+    schema: "compass.viewer.architecture/1",
     title: "Fixture — Architecture Flow",
-    sections: [
-      {
-        id: "overview",
-        name: "Overview",
-        communities: [],
-        nodeCount: 0,
-        internalCallCount: 0,
-        nodes: [],
-        edges: []
-      },
-      ...architectureSections
-    ],
-    overviewLinks: architectureOverviewLinks,
-    crossSectionCalls: architectureCrossSectionCalls,
-    coverage: { internal: 53, crossSection: 325, unassigned: 0 },
-    reportHighlights: [],
+    nodes: rawArchitectureNodes,
+    relationships: [...architectureRelationships, ...architectureCrossGroupRelationships],
+    projections: [projection, { ...projection, scope: "all_code" }],
     statistics: {
       nodes: 56,
-      edges: 378,
+      relationships: 378,
       communities: 26,
-      hyperedges: 0,
       extracted: 367,
       inferred: 11,
       ambiguous: 0
     },
-    provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
+    provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null },
+    limits: {
+      maxNodes: 250000, maxRelationships: 1000000, maxGroups: 100000, maxRoutes: 250000,
+      maxOverviewGroups: 24, maxOverviewRoutes: 23, maxNameCandidates: 12,
+      maxNameEvidence: 4, maxDiagnostics: 128, maxOmissionWitnesses: 8
+    }
   };
   const calls = {
     schema: "compass.program.call_graph/1",
@@ -650,23 +724,25 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 }
 
 function architectureHarness(model: unknown): string {
-  const parsedModel = CallflowViewModelSchema.parse(model);
+  const parsedModel = ArchitectureViewModelSchema.parse(model);
   const index = new ArchitectureIndex(parsedModel);
-  const overview = index.overview("production", "all");
-  const sectionPages: Record<string, unknown> = {};
-  for (const section of overview.sections) {
-    for (const kind of ["symbols", "calls"] as const) {
+  const overview = index.overview("production", "all", "architecture");
+  const groupPages: Record<string, unknown> = {};
+  const productionGroups = parsedModel.projections.find(({ scope }) => scope === "production")!.groups;
+  for (const group of productionGroups) {
+    for (const kind of ["symbols", "relationships"] as const) {
       for (const query of ["", "database"]) {
         for (const page of [1, 2]) {
-          const key = [section.id, kind, page, query].join("|");
-          sectionPages[key] = index.sectionPage({
-            sectionId: section.id,
+          const key = [group.id, kind, page, query].join("|");
+          groupPages[key] = index.groupPage({
+            groupId: group.id,
             kind,
             page,
             pageSize: 100,
             query,
             scope: "production",
-            evidence: "all"
+            evidence: "all",
+            lens: "architecture"
           });
         }
       }
@@ -681,7 +757,8 @@ function architectureHarness(model: unknown): string {
         pageSize: 100,
         query: "",
         scope: "production",
-        evidence: "all"
+        evidence: "all",
+        lens: "architecture"
       })
     ])
   );
@@ -693,11 +770,12 @@ function architectureHarness(model: unknown): string {
         page: 1,
         pageSize: 100,
         scope: "production",
-        evidence: "all"
+        evidence: "all",
+        lens: "architecture"
       })
     ])
   );
-  const fixture = { overview, sectionPages, routePages, searchPages };
+  const fixture = { overview, groupPages, routePages, searchPages };
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass architecture fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.architectureHostMessages=[];
 const architectureFixture=${JSON.stringify(fixture)};
@@ -737,12 +815,12 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     },delayed ? 800 : 20);
     return;
   }
-  if(message.type==="requestSection") {
-    const key=[message.sectionId,message.kind,message.page,message.query||""].join("|");
+  if(message.type==="requestGroup") {
+    const key=[message.groupId,message.kind,message.page,message.query||""].join("|");
     sendArchitecture({
-      type:"architectureSectionPage",
+      type:"architectureGroupPage",
       ...architectureIdentity(message),
-      model:architectureFixture.sectionPages[key]
+      model:architectureFixture.groupPages[key]
     });
     return;
   }
@@ -768,7 +846,12 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     sendArchitecture({
       type:"architectureOverview",
       ...architectureIdentity(message),
-      model:{...architectureFixture.overview,scope:message.scope,evidence:message.evidence}
+      model:{
+        ...architectureFixture.overview,
+        scope:message.scope,
+        evidence:message.evidence,
+        lens:message.lens
+      }
     });
   }
 }})</script><script src="/architecture.js"></script></body></html>`;
@@ -777,9 +860,66 @@ window.acquireVsCodeApi=()=>({postMessage(message){
 function queryHarness(): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass query fixture</title><link rel="stylesheet" href="/viewer.css"></head><body><div id="root"></div><script>
 window.queryHostMessages=[];
-window.queryTimer=undefined;
+window.queryTimers=new Map();
+window.queryCompletionTimers=new Map();
+const queryLimits={
+  maxDepth:8,maxNodes:500,maxEdges:1000,maxPaths:100,maxCandidates:20,
+  maxSourceBytes:1048576,maxResponseBytes:8388608
+};
+const queryNode={
+  id:"pipeline",kind:"function",roles:[],name:"Pipeline",
+  qualifiedName:"caching::util::Pipeline",language:"scala",framework:null,
+  source:{
+    file:"caching/util/src/Pipeline.scala",startByte:0,endByte:8,
+    startLine:154,startColumn:0,endLine:154,endColumn:8
+  },
+  details:null,evidence:[]
+};
+const typedQueryResult=(diagnostic=false)=>({
+  schema:"compass.query/1",operation:"search",
+  results:diagnostic?[]:[{nodeId:"pipeline",score:1,matchedFields:["qualifiedName"]}],
+  nodes:diagnostic?[]:[queryNode],edges:[],files:[],paths:[],
+  diagnostics:diagnostic?[{
+    code:"no_match",
+    message:"No exact node matched. Try a qualified name such as caching::util::Pipeline.",
+    nodeId:null,path:null
+  }]:[],
+  limits:queryLimits,truncated:false
+});
 window.acquireVsCodeApi=()=>({postMessage(message){
   window.queryHostMessages.push(message);
+  if(message.type==="complete") {
+    const params=new URLSearchParams(window.location.search);
+    const requestId=message.request.id;
+    const timer=setTimeout(()=>{
+      window.queryCompletionTimers.delete(requestId);
+      if(params.has("completionError")) {
+        window.postMessage({
+          type:"completionError",requestId,message:"Fixture graph search failed"
+        },"*");
+        return;
+      }
+      const term=message.request.term.toLocaleLowerCase();
+      const matches=[queryNode.name,queryNode.qualifiedName,queryNode.id]
+        .some(value=>value.toLocaleLowerCase().includes(term));
+      window.postMessage({
+        type:"completions",requestId,
+        items:matches?[{
+          nodeId:queryNode.id,label:queryNode.qualifiedName,
+          insertText:queryNode.qualifiedName,
+          detail:"function · caching/util/src/Pipeline.scala:154"
+        }]:[]
+      },"*");
+    },params.has("completionDelay")?800:20);
+    window.queryCompletionTimers.set(requestId,timer);
+    return;
+  }
+  if(message.type==="cancelCompletion") {
+    clearTimeout(window.queryCompletionTimers.get(message.requestId));
+    window.queryCompletionTimers.delete(message.requestId);
+    window.postMessage({type:"completionCancelled",requestId:message.requestId},"*");
+    return;
+  }
   if(message.type==="openSource") {
     window.openedQuerySource=message.source;
     return;
@@ -789,50 +929,46 @@ window.acquireVsCodeApi=()=>({postMessage(message){
     return;
   }
   if(message.type==="ready") {
-    setTimeout(()=>window.postMessage({type:"state",running:false},"*"),0);
+    setTimeout(()=>window.postMessage({type:"state",revision:"fixture-revision"},"*"),0);
     return;
   }
   if(message.type==="cancel") {
-    clearTimeout(window.queryTimer);
-    window.postMessage({type:"state",running:false},"*");
+    clearTimeout(window.queryTimers.get(message.runId));
+    window.queryTimers.delete(message.runId);
+    window.postMessage({type:"cancelled",runId:message.runId},"*");
     return;
   }
   if(message.type!=="execute") return;
-  window.postMessage({type:"state",running:true},"*");
   const params=new URLSearchParams(window.location.search);
   const delay=params.has("delay") ? 1200 : 20;
-  window.queryTimer=setTimeout(()=>{
+  const runId=message.request.id;
+  const timer=setTimeout(()=>{
+    window.queryTimers.delete(runId);
     if(params.has("error")) {
-      window.postMessage({type:"error",message:"CompassQL could not parse this query"},"*");
-    } else if(params.get("result")==="rows") {
       window.postMessage({
-        type:"result",
-        result:{
-          mode:message.request.mode,
-          json:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]},
-          durationMs:18
-        }
+        type:"error",runId,message:"CompassQL could not parse this query"
       },"*");
-    } else if(params.get("result")==="traversal") {
+    } else if(message.request.command==="cql") {
       window.postMessage({
-        type:"result",
-        result:{
-          mode:message.request.mode,
-          text:"Traversal: BFS depth=2 | Start: ['Pipeline'] | 146 nodes found\\n\\nNODE Pipeline [src=caching/util/src/Pipeline.scala loc=L154 community=Pipeline]\\nNODE .assert() [src=caching/util/src/AssertMacros.scala loc=L32 community=.iassert]\\nNODE String [src= loc= community=EtcdClient]",
-          durationMs:24
-        }
+        type:"result",runId,
+        output:{kind:"rows",value:{rows:[{symbol:"run",calls:3},{symbol:"save",calls:2}]}},
+        durationMs:18
+      },"*");
+    } else if(message.request.command==="explain") {
+      window.postMessage({
+        type:"result",runId,
+        output:{kind:"explanation",text:"Node: Pipeline\\n  ID:        pipeline\\n  Source:    caching/util/src/Pipeline.scala L154\\n  Type:      function\\n  Community: Caching\\n  Degree:    2\\n\\nConnections (2):\\n  --> save [calls] [exact]\\n  <-- run [calls] [inferred]"},
+        durationMs:12
       },"*");
     } else {
       window.postMessage({
-        type:"result",
-        result:{
-          mode:message.request.mode,
-          text:"Authentication reaches storage through the repository service.",
-          durationMs:24
-        }
+        type:"result",runId,
+        output:{kind:"code-query",value:typedQueryResult(params.has("diagnostic"))},
+        durationMs:24
       },"*");
     }
   },delay);
+  window.queryTimers.set(runId,timer);
 }})</script><script src="/query.js"></script></body></html>`;
 }
 

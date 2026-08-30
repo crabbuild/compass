@@ -1,9 +1,10 @@
 use std::error::Error;
 
 use compass_languages::{
-    AdapterIdentity, BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceRange,
+    BindingFact, BindingKind, CandidateRelation, DeclarationFact, EvidenceRange,
     LanguageCapability, OccurrenceFact, RelationshipCandidate, ResolutionConstraint, ScopeFact,
-    SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalAdapterProfile,
+    SemanticEvidenceBatch, SemanticRole, UNIVERSAL_EVIDENCE_SCHEMA, UniversalEvidenceIdentity,
+    UniversalEvidenceQualification,
 };
 use compass_resolve::evidence::{
     ResolutionDecision, ResolutionRule, UniversalResolutionIndex, UniversalResolutionLimits,
@@ -78,14 +79,14 @@ fn binding(id: &str, target: &str, target_declaration_id: Option<&str>) -> Bindi
 
 fn batch() -> SemanticEvidenceBatch {
     SemanticEvidenceBatch {
-        adapter: AdapterIdentity {
+        pipeline: UniversalEvidenceIdentity {
             id: "compass.python.contract-test".to_owned(),
             language: LANGUAGE.to_owned(),
             dialect: None,
             version: 1,
             evidence_schema: UNIVERSAL_EVIDENCE_SCHEMA.to_owned(),
-            profile: UniversalAdapterProfile::UniversalCandidate,
-            producer: "contract-test".to_owned(),
+            qualification: UniversalEvidenceQualification::Qualifying,
+            emitter: "contract-test".to_owned(),
             capabilities: vec![
                 LanguageCapability::Declarations,
                 LanguageCapability::LexicalScopes,

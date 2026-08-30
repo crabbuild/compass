@@ -45,6 +45,31 @@ const JAVASCRIPT_BUILTIN_GLOBALS: &[&str] = &[
     "AbortSignal",
     "TextEncoder",
     "TextDecoder",
+    "ArrayBuffer",
+    "SharedArrayBuffer",
+    "DataView",
+    "Int8Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "Int16Array",
+    "Uint16Array",
+    "Int32Array",
+    "Uint32Array",
+    "Float32Array",
+    "Float64Array",
+    "BigInt64Array",
+    "BigUint64Array",
+    "AggregateError",
+    "WeakRef",
+    "FinalizationRegistry",
+    "eval",
+    "fetch",
+    "queueMicrotask",
+    "structuredClone",
+    "setTimeout",
+    "setInterval",
+    "clearTimeout",
+    "clearInterval",
     "console",
 ];
 
@@ -90,11 +115,300 @@ const PYTHON_BUILTIN_GLOBALS: &[&str] = &[
     "delattr",
     "vars",
     "dir",
+    "ascii",
+    "aiter",
+    "anext",
+    "bin",
+    "breakpoint",
+    "bytearray",
+    "chr",
+    "classmethod",
+    "compile",
+    "complex",
+    "divmod",
+    "eval",
+    "exec",
+    "format",
+    "frozenset",
+    "globals",
+    "help",
+    "hex",
+    "input",
+    "issubclass",
+    "locals",
+    "memoryview",
+    "oct",
+    "object",
+    "ord",
+    "pow",
+    "property",
+    "slice",
+    "staticmethod",
+    "__import__",
+    // Built-in exception constructors are especially prone to becoming hubs.
+    "BaseException",
+    "Exception",
+    "ArithmeticError",
+    "AssertionError",
+    "AttributeError",
+    "EOFError",
+    "ImportError",
+    "IndexError",
+    "KeyError",
+    "LookupError",
+    "MemoryError",
+    "NameError",
+    "NotImplementedError",
+    "OSError",
+    "ReferenceError",
+    "RuntimeError",
+    "StopIteration",
+    "SyntaxError",
+    "SystemError",
+    "SystemExit",
+    "TypeError",
+    "ValueError",
+    "Warning",
+    "ZeroDivisionError",
 ];
 
 const GO_BUILTIN_GLOBALS: &[&str] = &[
-    "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len", "make", "max",
-    "min", "new", "panic", "print", "println", "real", "recover",
+    "any",
+    "bool",
+    "byte",
+    "comparable",
+    "complex64",
+    "complex128",
+    "error",
+    "float32",
+    "float64",
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "rune",
+    "string",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "uintptr",
+    "append",
+    "cap",
+    "clear",
+    "close",
+    "complex",
+    "copy",
+    "delete",
+    "imag",
+    "len",
+    "make",
+    "max",
+    "min",
+    "new",
+    "panic",
+    "print",
+    "println",
+    "real",
+    "recover",
+];
+
+const RUST_BUILTIN_GLOBALS: &[&str] = &[
+    // Primitive types are valid call receivers (`u32::from(value)`).
+    "bool",
+    "char",
+    "str",
+    "i8",
+    "i16",
+    "i32",
+    "i64",
+    "i128",
+    "isize",
+    "u8",
+    "u16",
+    "u32",
+    "u64",
+    "u128",
+    "usize",
+    "f32",
+    "f64",
+    // Rust prelude types, variants, traits, and functions.
+    "Box",
+    "Option",
+    "Result",
+    "String",
+    "Vec",
+    "Some",
+    "None",
+    "Ok",
+    "Err",
+    "AsMut",
+    "AsRef",
+    "Borrow",
+    "BorrowMut",
+    "Clone",
+    "Copy",
+    "Default",
+    "DoubleEndedIterator",
+    "Drop",
+    "Eq",
+    "ExactSizeIterator",
+    "Extend",
+    "Fn",
+    "FnMut",
+    "FnOnce",
+    "From",
+    "FromIterator",
+    "Into",
+    "IntoIterator",
+    "Iterator",
+    "Ord",
+    "PartialEq",
+    "PartialOrd",
+    "Send",
+    "Sized",
+    "Sync",
+    "ToOwned",
+    "ToString",
+    "align_of",
+    "align_of_val",
+    "drop",
+    "size_of",
+    "size_of_val",
+];
+
+const JAVA_BUILTIN_GLOBALS: &[&str] = &[
+    // java.lang is imported implicitly by the Java language.
+    "AbstractMethodError",
+    "Appendable",
+    "ArithmeticException",
+    "ArrayIndexOutOfBoundsException",
+    "AssertionError",
+    "AutoCloseable",
+    "Boolean",
+    "Byte",
+    "Character",
+    "CharSequence",
+    "Class",
+    "ClassCastException",
+    "ClassLoader",
+    "ClassNotFoundException",
+    "Cloneable",
+    "Comparable",
+    "Deprecated",
+    "Double",
+    "Enum",
+    "Error",
+    "Exception",
+    "Float",
+    "FunctionalInterface",
+    "Integer",
+    "IllegalArgumentException",
+    "IllegalStateException",
+    "IndexOutOfBoundsException",
+    "InterruptedException",
+    "Iterable",
+    "LinkageError",
+    "Long",
+    "Math",
+    "Number",
+    "NullPointerException",
+    "Object",
+    "Override",
+    "Process",
+    "ProcessBuilder",
+    "Readable",
+    "Record",
+    "Runnable",
+    "Runtime",
+    "RuntimeException",
+    "SecurityException",
+    "Short",
+    "StackTraceElement",
+    "StrictMath",
+    "String",
+    "StringBuffer",
+    "StringBuilder",
+    "SuppressWarnings",
+    "System",
+    "Thread",
+    "ThreadGroup",
+    "ThreadLocal",
+    "Throwable",
+    "UnsupportedOperationException",
+    "VirtualMachineError",
+    "Void",
+];
+
+const SWIFT_BUILTIN_GLOBALS: &[&str] = &[
+    "String",
+    "Int",
+    "Int8",
+    "Int16",
+    "Int32",
+    "Int64",
+    "UInt",
+    "UInt8",
+    "UInt16",
+    "UInt32",
+    "UInt64",
+    "Double",
+    "Float",
+    "Bool",
+    "Character",
+    "Sendable",
+    "Codable",
+    "Decodable",
+    "Encodable",
+    "Equatable",
+    "Hashable",
+    "Identifiable",
+    "Comparable",
+    "CaseIterable",
+    "RawRepresentable",
+    "CustomStringConvertible",
+    "CustomDebugStringConvertible",
+    "AnyObject",
+    "LocalizedError",
+    "Data",
+    "Date",
+    "UUID",
+    "Decimal",
+    "Calendar",
+    "Locale",
+    "TimeZone",
+    "Bundle",
+    "URL",
+    "IndexPath",
+    "IndexSet",
+    "NotificationCenter",
+    "UserDefaults",
+    "FileManager",
+    "URLSession",
+    "URLRequest",
+    "URLComponents",
+    "JSONDecoder",
+    "JSONEncoder",
+    "DateFormatter",
+    "NumberFormatter",
+    "ISO8601DateFormatter",
+    "NSObject",
+    "NSString",
+    "NSError",
+    "NSLock",
+    "NSAttributedString",
+    "DispatchQueue",
+    "DispatchGroup",
+    "OperationQueue",
+    "RunLoop",
+    "Error",
+    "View",
+    "Color",
+    "Font",
+    "filter",
+    "print",
 ];
 
 /// Return whether `name` is an unresolved global supplied by `language`.
@@ -108,6 +422,82 @@ pub fn is_language_builtin_global(language: &str, name: &str) -> bool {
         "javascript" | "typescript" | "tsx" => JAVASCRIPT_BUILTIN_GLOBALS.contains(&name),
         "python" => PYTHON_BUILTIN_GLOBALS.contains(&name),
         "go" => GO_BUILTIN_GLOBALS.contains(&name),
+        "rust" => RUST_BUILTIN_GLOBALS.contains(&name),
+        "java" => JAVA_BUILTIN_GLOBALS.contains(&name),
+        "swift" => SWIFT_BUILTIN_GLOBALS.contains(&name),
         _ => false,
+    }
+}
+
+/// Return whether a qualified target denotes a standard symbol implicitly
+/// supplied by the language rather than a source or imported declaration.
+///
+/// Callers must use this only after source, import, and lexical resolution.
+#[must_use]
+pub fn is_language_builtin_qualified_target(language: &str, qualified_name: &str) -> bool {
+    match language {
+        "rust" => qualified_name
+            .split("::")
+            .next()
+            .is_some_and(|name| is_language_builtin_global(language, name)),
+        "java" => qualified_name
+            .strip_prefix("java.lang.")
+            .and_then(|name| name.split(['.', ':']).next())
+            .is_some_and(|name| is_language_builtin_global(language, name)),
+        "javascript" | "typescript" | "tsx" => qualified_name
+            .strip_prefix("global::")
+            .and_then(|name| name.split(['.', ':']).next())
+            .is_some_and(|name| is_language_builtin_global(language, name)),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_language_builtin_global, is_language_builtin_qualified_target};
+
+    #[test]
+    fn builtin_globals_are_language_scoped_and_case_sensitive() {
+        assert!(is_language_builtin_global("typescript", "Promise"));
+        assert!(is_language_builtin_global("python", "len"));
+        assert!(is_language_builtin_global("go", "make"));
+        assert!(is_language_builtin_global("go", "string"));
+        assert!(is_language_builtin_global("rust", "Vec"));
+        assert!(is_language_builtin_global("rust", "u32"));
+        assert!(is_language_builtin_global("java", "String"));
+        assert!(is_language_builtin_global("java", "Math"));
+        assert!(is_language_builtin_global("swift", "Data"));
+        assert!(is_language_builtin_global("swift", "Sendable"));
+
+        assert!(!is_language_builtin_global("rust", "Promise"));
+        assert!(!is_language_builtin_global("python", "Promise"));
+        assert!(!is_language_builtin_global("swift", "data"));
+        assert!(!is_language_builtin_global("swift", "ProjectService"));
+    }
+
+    #[test]
+    fn qualified_builtin_targets_are_language_scoped() {
+        assert!(is_language_builtin_qualified_target("rust", "Vec::new"));
+        assert!(is_language_builtin_qualified_target("rust", "u32::from"));
+        assert!(is_language_builtin_qualified_target(
+            "java",
+            "java.lang.String::valueOf"
+        ));
+        assert!(is_language_builtin_qualified_target(
+            "typescript",
+            "global::Array.from"
+        ));
+        assert!(is_language_builtin_qualified_target(
+            "javascript",
+            "global::console.log"
+        ));
+        assert!(!is_language_builtin_qualified_target(
+            "rust",
+            "crate::Vec::new"
+        ));
+        assert!(!is_language_builtin_qualified_target(
+            "java",
+            "example.String::valueOf"
+        ));
     }
 }

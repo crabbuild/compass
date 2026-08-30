@@ -1,0 +1,872 @@
+//! Versioned, provenance-preserving document artifact contract.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Component, Path};
+
+use compass_ocr::{OcrPoint, OcrProfileIdentity};
+use serde::{Deserialize, Serialize};
+use sha2::Digest;
+
+use crate::limits::{
+    DOCUMENT_MAX_BLOCKS, DOCUMENT_MAX_DEPTH, DOCUMENT_MAX_DIAGNOSTIC_MESSAGE_BYTES,
+    DOCUMENT_MAX_DIAGNOSTICS, DOCUMENT_MAX_FIELD_BYTES, DOCUMENT_MAX_LINKS,
+    DOCUMENT_MAX_METADATA_ENTRIES, DOCUMENT_MAX_PREVIEW_DIMENSION, DOCUMENT_MAX_PREVIEW_REGIONS,
+    DOCUMENT_MAX_PREVIEW_SVG_BYTES, DOCUMENT_MAX_PREVIEW_TOTAL_BYTES, DOCUMENT_MAX_PREVIEWS,
+    DOCUMENT_MAX_TEXT_CHARS,
+};
+
+pub const DOCUMENT_SCHEMA: &str = "compass.document/1";
+pub const DOCUMENT_INSPECT_SCHEMA: &str = "compass.document.inspect/1";
+pub const DOCUMENT_PREVIEW_SCHEMA: &str = "compass.document.preview/1";
+pub const DOCUMENT_NORMALIZER_VERSION: u32 = 3;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentFormat {
+    Text,
+    Markdown,
+    Html,
+    Pdf,
+    Docx,
+    Xlsx,
+    Pptx,
+    Rtf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DocumentBlockKind {
+    DocumentTitle,
+    Heading { level: u8 },
+    Paragraph,
+    List,
+    ListItem,
+    Code,
+    Quote,
+    Table,
+    Row,
+    Cell,
+    Page,
+    Sheet,
+    Slide,
+    Note,
+    Other { role: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DocumentLocator {
+    TextRange {
+        start_byte: u64,
+        end_byte: u64,
+        start_line: u32,
+        end_line: u32,
+    },
+    Package {
+        part: String,
+        path: String,
+    },
+    Pdf {
+        page: u32,
+        item: u32,
+    },
+    Page {
+        page: u32,
+    },
+    Spreadsheet {
+        sheet: String,
+        row: u32,
+        column: u16,
+    },
+    Slide {
+        slide: u32,
+        shape: u32,
+    },
+    Ocr {
+        owner: Box<DocumentLocator>,
+        candidate_id: String,
+        width: u32,
+        height: u32,
+        polygon: Vec<OcrPoint>,
+        occurrence: u32,
+    },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DocumentOrigin {
+    #[default]
+    Native,
+    Ocr {
+        profile: OcrProfileIdentity,
+        confidence_bps: u16,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentBlock {
+    pub ordinal: u32,
+    pub parent: Option<u32>,
+    pub kind: DocumentBlockKind,
+    pub text: String,
+    pub locator: DocumentLocator,
+    #[serde(default)]
+    pub origin: DocumentOrigin,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentLinkKind {
+    Hyperlink,
+    Relationship,
+    Image,
+    Attachment,
+    Other,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentLink {
+    pub source_block: u32,
+    pub destination: String,
+    pub label: Option<String>,
+    pub relationship: DocumentLinkKind,
+    pub locator: DocumentLocator,
+    pub external: bool,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentDiagnostic {
+    pub code: String,
+    pub severity: DiagnosticSeverity,
+    pub locator: Option<DocumentLocator>,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentPreviewKind {
+    Page,
+    Slide,
+    Sheet,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentPreviewRegion {
+    pub candidate_id: String,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentPreview {
+    pub schema: String,
+    pub kind: DocumentPreviewKind,
+    pub locator: DocumentLocator,
+    pub label: String,
+    pub width: u32,
+    pub height: u32,
+    /// Sanitized, self-contained SVG. It may contain only data URLs for image
+    /// thumbnails and escaped native text.
+    pub svg: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<DocumentPreviewRegion>,
+    pub digest: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisualCoverage {
+    #[default]
+    NotRequested,
+    Complete,
+    Partial,
+    Failed,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DocumentArtifact {
+    pub schema: String,
+    pub normalizer_version: u32,
+    pub format: DocumentFormat,
+    pub blocks: Vec<DocumentBlock>,
+    pub links: Vec<DocumentLink>,
+    pub metadata: BTreeMap<String, serde_json::Value>,
+    pub diagnostics: Vec<DocumentDiagnostic>,
+    pub complete: bool,
+    #[serde(default)]
+    pub visual_coverage: VisualCoverage,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ocr_profile: Option<OcrProfileIdentity>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previews: Vec<DocumentPreview>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DocumentError {
+    #[error("unsupported document format {0:?}")]
+    Unsupported(String),
+    #[error("document rejected: {0}")]
+    Rejected(String),
+    #[error("document parse failed: {0}")]
+    Parse(String),
+    #[error("invalid document artifact: {0}")]
+    InvalidArtifact(String),
+    #[error("could not access {path}: {source}")]
+    Io {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error(transparent)]
+    Ocr(#[from] compass_ocr::OcrError),
+}
+
+impl DocumentArtifact {
+    #[must_use]
+    pub fn new(format: DocumentFormat) -> Self {
+        Self {
+            schema: DOCUMENT_SCHEMA.to_owned(),
+            normalizer_version: DOCUMENT_NORMALIZER_VERSION,
+            format,
+            blocks: Vec::new(),
+            links: Vec::new(),
+            metadata: BTreeMap::new(),
+            diagnostics: Vec::new(),
+            complete: true,
+            visual_coverage: VisualCoverage::NotRequested,
+            ocr_profile: None,
+            previews: Vec::new(),
+        }
+    }
+
+    pub fn push_block(
+        &mut self,
+        parent: Option<u32>,
+        kind: DocumentBlockKind,
+        text: String,
+        locator: DocumentLocator,
+    ) -> Result<u32, DocumentError> {
+        if self.blocks.len() >= DOCUMENT_MAX_BLOCKS {
+            return Err(DocumentError::Rejected(
+                "document block count exceeds limit".to_owned(),
+            ));
+        }
+        let ordinal = u32::try_from(self.blocks.len())
+            .map_err(|_| DocumentError::Rejected("document ordinal overflow".to_owned()))?;
+        self.blocks.push(DocumentBlock {
+            ordinal,
+            parent,
+            kind,
+            text,
+            locator,
+            origin: DocumentOrigin::Native,
+            metadata: BTreeMap::new(),
+        });
+        Ok(ordinal)
+    }
+
+    pub fn validate(&self) -> Result<(), DocumentError> {
+        if self.schema != DOCUMENT_SCHEMA {
+            return Err(DocumentError::InvalidArtifact(format!(
+                "unsupported schema {:?}",
+                self.schema
+            )));
+        }
+        if self.normalizer_version != DOCUMENT_NORMALIZER_VERSION {
+            return Err(DocumentError::InvalidArtifact(format!(
+                "unsupported normalizer version {}",
+                self.normalizer_version
+            )));
+        }
+        if self.blocks.len() > DOCUMENT_MAX_BLOCKS
+            || self.links.len() > DOCUMENT_MAX_LINKS
+            || self.diagnostics.len() > DOCUMENT_MAX_DIAGNOSTICS
+            || self.metadata.len() > DOCUMENT_MAX_METADATA_ENTRIES
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "artifact collection exceeds limit".to_owned(),
+            ));
+        }
+        let mut text_chars = 0_usize;
+        let mut saw_ocr_block = false;
+        for (index, block) in self.blocks.iter().enumerate() {
+            let expected = u32::try_from(index)
+                .map_err(|_| DocumentError::InvalidArtifact("ordinal overflow".to_owned()))?;
+            if block.ordinal != expected {
+                return Err(DocumentError::InvalidArtifact(
+                    "block ordinals must be contiguous".to_owned(),
+                ));
+            }
+            if block.parent.is_some_and(|parent| parent >= block.ordinal) {
+                return Err(DocumentError::InvalidArtifact(
+                    "block parent must precede its child".to_owned(),
+                ));
+            }
+            if depth_for(&self.blocks, block.ordinal)? > DOCUMENT_MAX_DEPTH {
+                return Err(DocumentError::InvalidArtifact(
+                    "block nesting exceeds limit".to_owned(),
+                ));
+            }
+            text_chars = text_chars
+                .checked_add(block.text.chars().count())
+                .ok_or_else(|| DocumentError::InvalidArtifact("text size overflow".to_owned()))?;
+            if block.metadata.len() > DOCUMENT_MAX_METADATA_ENTRIES {
+                return Err(DocumentError::InvalidArtifact(
+                    "block metadata exceeds limit".to_owned(),
+                ));
+            }
+            validate_block_kind(&block.kind)?;
+            validate_locator(&block.locator, 0)?;
+            validate_origin(&block.origin)?;
+            match (&block.origin, &block.locator) {
+                (DocumentOrigin::Ocr { profile, .. }, DocumentLocator::Ocr { .. }) => {
+                    saw_ocr_block = true;
+                    if self.ocr_profile.as_ref() != Some(profile) {
+                        return Err(DocumentError::InvalidArtifact(
+                            "OCR block profile does not match the document profile".to_owned(),
+                        ));
+                    }
+                }
+                (DocumentOrigin::Ocr { .. }, _) => {
+                    return Err(DocumentError::InvalidArtifact(
+                        "OCR-derived block is missing an OCR locator".to_owned(),
+                    ));
+                }
+                (DocumentOrigin::Native, DocumentLocator::Ocr { .. }) => {
+                    return Err(DocumentError::InvalidArtifact(
+                        "native block must not use an OCR locator".to_owned(),
+                    ));
+                }
+                (DocumentOrigin::Native, _) => {}
+            }
+            validate_metadata(&block.metadata)?;
+        }
+        if text_chars > DOCUMENT_MAX_TEXT_CHARS {
+            return Err(DocumentError::InvalidArtifact(
+                "document text exceeds limit".to_owned(),
+            ));
+        }
+        for link in &self.links {
+            if usize::try_from(link.source_block)
+                .ok()
+                .is_none_or(|source| source >= self.blocks.len())
+            {
+                return Err(DocumentError::InvalidArtifact(
+                    "link references a missing block".to_owned(),
+                ));
+            }
+            validate_field("link destination", &link.destination)?;
+            if let Some(label) = &link.label {
+                validate_field("link label", label)?;
+            }
+            validate_locator(&link.locator, 0)?;
+        }
+        validate_metadata(&self.metadata)?;
+        for diagnostic in &self.diagnostics {
+            validate_field("diagnostic code", &diagnostic.code)?;
+            if diagnostic.message.len() > DOCUMENT_MAX_DIAGNOSTIC_MESSAGE_BYTES {
+                return Err(DocumentError::InvalidArtifact(
+                    "diagnostic message exceeds limit".to_owned(),
+                ));
+            }
+            if let Some(locator) = &diagnostic.locator {
+                validate_locator(locator, 0)?;
+            }
+        }
+        if self.previews.len() > DOCUMENT_MAX_PREVIEWS {
+            return Err(DocumentError::InvalidArtifact(
+                "preview count exceeds limit".to_owned(),
+            ));
+        }
+        let mut preview_bytes = 0_usize;
+        for preview in &self.previews {
+            preview.validate()?;
+            preview_bytes = preview_bytes
+                .checked_add(preview.svg.len())
+                .ok_or_else(|| {
+                    DocumentError::InvalidArtifact("preview size overflow".to_owned())
+                })?;
+        }
+        if preview_bytes > DOCUMENT_MAX_PREVIEW_TOTAL_BYTES {
+            return Err(DocumentError::InvalidArtifact(
+                "preview payload exceeds limit".to_owned(),
+            ));
+        }
+        if let Some(profile) = &self.ocr_profile {
+            profile.validate()?;
+        }
+        match self.visual_coverage {
+            VisualCoverage::NotRequested => {
+                if self.ocr_profile.is_some() || saw_ocr_block {
+                    return Err(DocumentError::InvalidArtifact(
+                        "OCR evidence is present when visual coverage was not requested".to_owned(),
+                    ));
+                }
+            }
+            VisualCoverage::Complete => {
+                if self.ocr_profile.is_none() {
+                    return Err(DocumentError::InvalidArtifact(
+                        "complete visual coverage is missing its OCR profile".to_owned(),
+                    ));
+                }
+            }
+            VisualCoverage::Partial | VisualCoverage::Failed => {
+                if self.ocr_profile.is_none() {
+                    return Err(DocumentError::InvalidArtifact(
+                        "incomplete visual coverage is missing its OCR profile".to_owned(),
+                    ));
+                }
+                if self.complete {
+                    return Err(DocumentError::InvalidArtifact(
+                        "partial or failed visual coverage cannot be complete".to_owned(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn to_canonical_json(&self) -> Result<Vec<u8>, DocumentError> {
+        self.validate()?;
+        serde_json::to_vec(self).map_err(|error| DocumentError::InvalidArtifact(error.to_string()))
+    }
+
+    pub fn from_json(bytes: &[u8]) -> Result<Self, DocumentError> {
+        let artifact: Self = serde_json::from_slice(bytes)
+            .map_err(|error| DocumentError::InvalidArtifact(error.to_string()))?;
+        artifact.validate()?;
+        Ok(artifact)
+    }
+}
+
+impl DocumentPreview {
+    pub fn validate(&self) -> Result<(), DocumentError> {
+        if self.schema != DOCUMENT_PREVIEW_SCHEMA {
+            return Err(DocumentError::InvalidArtifact(format!(
+                "unsupported preview schema {:?}",
+                self.schema
+            )));
+        }
+        validate_field("preview label", &self.label)?;
+        if self.width == 0
+            || self.height == 0
+            || self.width > DOCUMENT_MAX_PREVIEW_DIMENSION
+            || self.height > DOCUMENT_MAX_PREVIEW_DIMENSION
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "preview dimensions exceed limit".to_owned(),
+            ));
+        }
+        let pixels = u64::from(self.width)
+            .checked_mul(u64::from(self.height))
+            .ok_or_else(|| {
+                DocumentError::InvalidArtifact("preview pixel count overflow".to_owned())
+            })?;
+        if pixels
+            > u64::from(DOCUMENT_MAX_PREVIEW_DIMENSION)
+                .saturating_mul(u64::from(DOCUMENT_MAX_PREVIEW_DIMENSION))
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "preview pixel count exceeds limit".to_owned(),
+            ));
+        }
+        if self.svg.is_empty()
+            || self.svg.len() > DOCUMENT_MAX_PREVIEW_SVG_BYTES
+            || self.svg.contains('\0')
+        {
+            return Err(DocumentError::InvalidArtifact(
+                "preview SVG is empty or exceeds limit".to_owned(),
+            ));
+        }
+        validate_preview_svg(&self.svg)?;
+        validate_digest(&self.digest)?;
+        let expected_digest = format!("sha256:{:x}", sha2::Sha256::digest(self.svg.as_bytes()));
+        if self.digest != expected_digest {
+            return Err(DocumentError::InvalidArtifact(
+                "preview digest does not match SVG".to_owned(),
+            ));
+        }
+        validate_preview_locator(self.kind, &self.locator)?;
+        if self.regions.len() > DOCUMENT_MAX_PREVIEW_REGIONS {
+            return Err(DocumentError::InvalidArtifact(
+                "preview region count exceeds limit".to_owned(),
+            ));
+        }
+        let mut region_ids = BTreeSet::new();
+        for region in &self.regions {
+            validate_field("preview candidate ID", &region.candidate_id)?;
+            if !region_ids.insert(&region.candidate_id) {
+                return Err(DocumentError::InvalidArtifact(
+                    "preview candidate IDs must be unique".to_owned(),
+                ));
+            }
+            if region.width == 0
+                || region.height == 0
+                || region.x >= self.width
+                || region.y >= self.height
+                || region.x.saturating_add(region.width) > self.width
+                || region.y.saturating_add(region.height) > self.height
+            {
+                return Err(DocumentError::InvalidArtifact(
+                    "preview region is outside the canvas".to_owned(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn depth_for(blocks: &[DocumentBlock], ordinal: u32) -> Result<usize, DocumentError> {
+    let mut depth = 0_usize;
+    let mut current = Some(ordinal);
+    while let Some(value) = current {
+        let index = usize::try_from(value)
+            .map_err(|_| DocumentError::InvalidArtifact("invalid block ordinal".to_owned()))?;
+        let block = blocks.get(index).ok_or_else(|| {
+            DocumentError::InvalidArtifact("parent references a missing block".to_owned())
+        })?;
+        current = block.parent;
+        depth = depth
+            .checked_add(1)
+            .ok_or_else(|| DocumentError::InvalidArtifact("block depth overflow".to_owned()))?;
+        if depth > DOCUMENT_MAX_DEPTH + 1 {
+            return Ok(depth);
+        }
+    }
+    Ok(depth)
+}
+
+fn validate_block_kind(kind: &DocumentBlockKind) -> Result<(), DocumentError> {
+    match kind {
+        DocumentBlockKind::Heading { level } if !(1..=6).contains(level) => Err(
+            DocumentError::InvalidArtifact("heading level must be in 1..=6".to_owned()),
+        ),
+        DocumentBlockKind::Other { role } => validate_field("block role", role),
+        _ => Ok(()),
+    }
+}
+
+fn validate_origin(origin: &DocumentOrigin) -> Result<(), DocumentError> {
+    if let DocumentOrigin::Ocr {
+        profile,
+        confidence_bps,
+    } = origin
+    {
+        profile.validate()?;
+        if *confidence_bps > 10_000 {
+            return Err(DocumentError::InvalidArtifact(
+                "OCR confidence exceeds 10000 basis points".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_locator(locator: &DocumentLocator, depth: usize) -> Result<(), DocumentError> {
+    if depth > DOCUMENT_MAX_DEPTH {
+        return Err(DocumentError::InvalidArtifact(
+            "locator nesting exceeds limit".to_owned(),
+        ));
+    }
+    match locator {
+        DocumentLocator::TextRange {
+            start_byte,
+            end_byte,
+            start_line,
+            end_line,
+        } if start_byte > end_byte || start_line > end_line => Err(DocumentError::InvalidArtifact(
+            "invalid text range".to_owned(),
+        )),
+        DocumentLocator::Package { part, path } => {
+            validate_package_part(part)?;
+            validate_field("package block path", path)
+        }
+        DocumentLocator::Spreadsheet { sheet, row, column } => {
+            validate_field("sheet name", sheet)?;
+            if *row == 0 || *column == 0 {
+                return Err(DocumentError::InvalidArtifact(
+                    "spreadsheet coordinates are one-based".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+        DocumentLocator::Slide { slide, shape } if *slide == 0 || *shape == 0 => Err(
+            DocumentError::InvalidArtifact("slide coordinates are one-based".to_owned()),
+        ),
+        DocumentLocator::Pdf { page, item } if *page == 0 || *item == 0 => Err(
+            DocumentError::InvalidArtifact("PDF coordinates are one-based".to_owned()),
+        ),
+        DocumentLocator::Page { page } if *page == 0 => Err(DocumentError::InvalidArtifact(
+            "page coordinates are one-based".to_owned(),
+        )),
+        DocumentLocator::Ocr {
+            owner,
+            candidate_id,
+            width,
+            height,
+            polygon,
+            occurrence: _,
+        } => {
+            validate_locator(owner, depth + 1)?;
+            validate_field("OCR candidate ID", candidate_id)?;
+            compass_ocr::validate_dimensions(*width, *height)?;
+            if !(4..=16).contains(&polygon.len())
+                || polygon
+                    .iter()
+                    .any(|point| point.x >= *width || point.y >= *height)
+                || polygon_doubled_area(polygon) == 0
+            {
+                return Err(DocumentError::InvalidArtifact(
+                    "invalid OCR locator polygon".to_owned(),
+                ));
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_preview_locator(
+    kind: DocumentPreviewKind,
+    locator: &DocumentLocator,
+) -> Result<(), DocumentError> {
+    let valid = match kind {
+        DocumentPreviewKind::Page => matches!(locator, DocumentLocator::Page { .. }),
+        DocumentPreviewKind::Slide => matches!(locator, DocumentLocator::Slide { .. }),
+        DocumentPreviewKind::Sheet => matches!(locator, DocumentLocator::Spreadsheet { .. }),
+    };
+    if !valid {
+        return Err(DocumentError::InvalidArtifact(
+            "preview locator does not match preview kind".to_owned(),
+        ));
+    }
+    validate_locator(locator, 0)
+}
+
+fn validate_digest(value: &str) -> Result<(), DocumentError> {
+    if value.len() != 71
+        || !value.starts_with("sha256:")
+        || !value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(DocumentError::InvalidArtifact(
+            "preview digest must be a sha256 digest".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_preview_svg(svg: &str) -> Result<(), DocumentError> {
+    let trimmed = svg.trim_start();
+    if !trimmed.starts_with("<svg") || !trimmed.contains("</svg>") {
+        return Err(DocumentError::InvalidArtifact(
+            "preview SVG is not a complete SVG document".to_owned(),
+        ));
+    }
+    let lower = svg.to_ascii_lowercase();
+    for forbidden in [
+        "<script",
+        "<foreignobject",
+        "<iframe",
+        "<object",
+        "javascript:",
+        "vbscript:",
+        "onload=",
+        "onclick=",
+        "onerror=",
+        "onmouseover=",
+        "href=\"http",
+        "href='http",
+        "xlink:href=\"http",
+        "xlink:href='http",
+        "url(http",
+    ] {
+        if lower.contains(forbidden) {
+            return Err(DocumentError::InvalidArtifact(format!(
+                "preview SVG contains forbidden content {forbidden:?}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn polygon_doubled_area(points: &[OcrPoint]) -> i128 {
+    let mut area = 0_i128;
+    for index in 0..points.len() {
+        let current = points[index];
+        let next = points[(index + 1) % points.len()];
+        area +=
+            i128::from(current.x) * i128::from(next.y) - i128::from(next.x) * i128::from(current.y);
+    }
+    area.abs()
+}
+
+fn validate_package_part(value: &str) -> Result<(), DocumentError> {
+    validate_field("package part", value)?;
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+        || value.contains('\\')
+    {
+        return Err(DocumentError::InvalidArtifact(
+            "package part is absolute or escapes its package".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_field(name: &str, value: &str) -> Result<(), DocumentError> {
+    if value.is_empty() || value.len() > DOCUMENT_MAX_FIELD_BYTES || value.contains('\0') {
+        return Err(DocumentError::InvalidArtifact(format!(
+            "{name} is empty or exceeds its bound"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_metadata(metadata: &BTreeMap<String, serde_json::Value>) -> Result<(), DocumentError> {
+    if metadata.len() > DOCUMENT_MAX_METADATA_ENTRIES {
+        return Err(DocumentError::InvalidArtifact(
+            "metadata count exceeds limit".to_owned(),
+        ));
+    }
+    let mut keys = BTreeSet::new();
+    for (key, value) in metadata {
+        validate_field("metadata key", key)?;
+        if !keys.insert(key) {
+            return Err(DocumentError::InvalidArtifact(
+                "duplicate metadata key".to_owned(),
+            ));
+        }
+        let encoded = serde_json::to_vec(value)
+            .map_err(|error| DocumentError::InvalidArtifact(error.to_string()))?;
+        if encoded.len() > DOCUMENT_MAX_FIELD_BYTES {
+            return Err(DocumentError::InvalidArtifact(
+                "metadata value exceeds limit".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artifact_round_trip_is_deterministic() -> Result<(), Box<dyn std::error::Error>> {
+        let mut artifact = DocumentArtifact::new(DocumentFormat::Docx);
+        artifact
+            .metadata
+            .insert("title".to_owned(), serde_json::json!("Guide"));
+        artifact.push_block(
+            None,
+            DocumentBlockKind::Heading { level: 1 },
+            "Guide".to_owned(),
+            DocumentLocator::Package {
+                part: "word/document.xml".to_owned(),
+                path: "body/p[1]".to_owned(),
+            },
+        )?;
+        let first = artifact.to_canonical_json()?;
+        let decoded = DocumentArtifact::from_json(&first)?;
+        assert_eq!(decoded, artifact);
+        assert_eq!(decoded.to_canonical_json()?, first);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unknown_schema_parent_and_package_escape() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut artifact = DocumentArtifact::new(DocumentFormat::Docx);
+        artifact.schema = "compass.document/2".to_owned();
+        assert!(artifact.validate().is_err());
+
+        let mut artifact = DocumentArtifact::new(DocumentFormat::Docx);
+        artifact.push_block(
+            Some(0),
+            DocumentBlockKind::Paragraph,
+            "bad".to_owned(),
+            DocumentLocator::Package {
+                part: "../word/document.xml".to_owned(),
+                path: "body/p[1]".to_owned(),
+            },
+        )?;
+        assert!(artifact.validate().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_incoherent_ocr_profile_origin_geometry_and_completeness()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let profile = OcrProfileIdentity {
+            engine: "fixture".to_owned(),
+            engine_version: "1".to_owned(),
+            profile: "fixture".to_owned(),
+            model_digests: BTreeMap::from([("model".to_owned(), "a".repeat(64))]),
+            languages: vec!["en".to_owned()],
+            preprocessing_version: compass_ocr::OCR_PREPROCESSING_VERSION,
+        };
+        let owner = DocumentLocator::Package {
+            part: "word/document.xml".to_owned(),
+            path: "body/p[1]".to_owned(),
+        };
+        let mut artifact = DocumentArtifact::new(DocumentFormat::Docx);
+        artifact.ocr_profile = Some(profile.clone());
+        artifact.visual_coverage = VisualCoverage::Complete;
+        artifact.push_block(
+            None,
+            DocumentBlockKind::Paragraph,
+            "OCR text".to_owned(),
+            DocumentLocator::Ocr {
+                owner: Box::new(owner),
+                candidate_id: "image-1".to_owned(),
+                width: 100,
+                height: 100,
+                polygon: vec![
+                    OcrPoint { x: 1, y: 1 },
+                    OcrPoint { x: 10, y: 1 },
+                    OcrPoint { x: 10, y: 10 },
+                    OcrPoint { x: 1, y: 10 },
+                ],
+                occurrence: 0,
+            },
+        )?;
+        artifact.blocks[0].origin = DocumentOrigin::Ocr {
+            profile: profile.clone(),
+            confidence_bps: 9_000,
+        };
+        assert!(artifact.validate().is_ok());
+
+        artifact.blocks[0].origin = DocumentOrigin::Native;
+        assert!(artifact.validate().is_err());
+        artifact.blocks[0].origin = DocumentOrigin::Ocr {
+            profile,
+            confidence_bps: 9_000,
+        };
+        if let DocumentLocator::Ocr { polygon, .. } = &mut artifact.blocks[0].locator {
+            polygon[2] = OcrPoint { x: 20, y: 1 };
+            polygon[3] = OcrPoint { x: 30, y: 1 };
+        }
+        assert!(artifact.validate().is_err());
+
+        artifact.blocks.clear();
+        artifact.visual_coverage = VisualCoverage::Partial;
+        artifact.complete = true;
+        assert!(artifact.validate().is_err());
+        Ok(())
+    }
+}

@@ -70,6 +70,53 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
 }
 
 #[test]
+fn typed_ask_rejects_conflicting_current_and_revision_graph_sources() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("ask"),
+            OsString::from("who calls Target?"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+            OsString::from("--at"),
+            OsString::from("HEAD"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+
+    assert_eq!(outcome.code, 1);
+    assert_eq!(
+        outcome.stderr,
+        "error: --graph and --at are mutually exclusive"
+    );
+    for option in ["--engine", "--program", "--cache"] {
+        let outcome = run(
+            Frontend::Compass,
+            [
+                OsString::from("ask"),
+                OsString::from("who calls Target?"),
+                OsString::from("--at"),
+                OsString::from("HEAD"),
+                OsString::from(option),
+                OsString::from("ignored"),
+                OsString::from("--format"),
+                OsString::from("json"),
+            ],
+        );
+        assert_eq!(outcome.code, 1);
+        assert_eq!(
+            outcome.stderr,
+            format!("error: {option} cannot be combined with --at")
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -717,6 +764,43 @@ fn explain_requires_an_exact_id_for_ambiguous_typed_nodes() -> Result<(), Box<dy
     assert_eq!(exact.code, 0, "{}", exact.stderr);
     assert!(exact.stdout.contains("Source:    src/b.rs L7:1-L7:6"));
     assert!(exact.stdout.contains("Type:      code"));
+    Ok(())
+}
+
+#[test]
+fn explain_resolves_a_unique_qualified_name_from_the_traversal_projection()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = directory.path().join("graph.json");
+    let node_id = format!("sha256:{}", "c".repeat(64));
+    std::fs::write(
+        &graph,
+        format!(
+            r#"{{
+                "directed": true, "multigraph": true, "nodes": [
+                    {{"id":"{node_id}","kind":"function","name":"start()","qualifiedName":"cmd/daemon.start","source":{{"file":"cmd/daemon/start.go","startLine":12,"startColumn":1,"endLine":18,"endColumn":2}}}}
+                ], "links": []
+            }}"#
+        ),
+    )?;
+
+    let explained = run(
+        Frontend::Compass,
+        [
+            OsString::from("explain"),
+            OsString::from("cmd/daemon.start"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+        ],
+    );
+
+    assert_eq!(explained.code, 0, "{}", explained.stderr);
+    assert!(explained.stdout.contains(&node_id));
+    assert!(
+        explained
+            .stdout
+            .contains("Source:    cmd/daemon/start.go L12:1-L18:2")
+    );
     Ok(())
 }
 

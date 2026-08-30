@@ -1,27 +1,67 @@
 # Universal semantic evidence
 
 Compass resolves source relationships through a language-neutral evidence
-contract. Python, Go, Rust, and Java use this contract in production, and the
-TypeScript and JavaScript candidate adapters now use the same production route.
-The ECMAScript adapters remain candidates while their complete qualification
-matrix is finished; they do not retain a second direct graph publisher.
+contract. Every hard-cut language uses the same production route. The release
+promotion decision in
+`tests/qualification/universal-evidence-promotion.json` records all 14
+registered pipelines as `Qualified`; they do not retain a second direct graph
+publisher. Swift, Dart, Scala, and Groovy have complete independent audit
+artifacts captured in the mounted qualification target for that decision.
 
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
 
+## Promotion decision (2026-08-28)
+
+The checked-in decision record is the machine-readable source of truth:
+[`tests/qualification/universal-evidence-promotion.json`](../../tests/qualification/universal-evidence-promotion.json).
+It pins the evidence schema, producer versions, canonical dialect aliases, and
+the release gate policy. The runtime registry and Rust conformance test must
+match it exactly.
+
+| Canonical language | Producer | Version | Status |
+| --- | --- | ---: | --- |
+| C# | `compass.csharp` | 1 | `Qualified` |
+| Dart | `compass.dart` | 1 | `Qualified` |
+| Go | `compass.go` | 1 | `Qualified` |
+| Groovy | `compass.groovy` | 1 | `Qualified` |
+| Java | `compass.java` | 1 | `Qualified` |
+| JavaScript | `compass.javascript` | 1 | `Qualified` |
+| Kotlin | `compass.kotlin` | 1 | `Qualified` |
+| PHP | `compass.php` | 1 | `Qualified` |
+| Python | `compass.python` | 1 | `Qualified` |
+| Ruby | `compass.ruby` | 1 | `Qualified` |
+| Rust | `compass.rust` | 1 | `Qualified` |
+| Scala | `compass.scala` | 1 | `Qualified` |
+| Swift | `compass.swift` | 1 | `Qualified` |
+| TypeScript | `compass.typescript` | 1 | `Qualified` |
+
+`Qualified` applies to the bounded capabilities advertised by each producer.
+Dynamic dispatch, compiler-only semantics, malformed regions, and resource
+limits remain explicit unresolved or diagnostic outcomes; promotion never
+turns those cases into inferred relationships. A producer-version or capability
+change invalidates this decision and must return the affected entry to
+`Qualifying` until a new release decision is reviewed.
+
 ## Evidence contract
 
+The serialized evidence schema is `compass.languages.evidence/2`. The
+extraction cache identity is `compass.languages.extraction/4`; changing either
+major version invalidates older artifacts instead of attempting an implicit
+translation.
+
 `SemanticEvidenceBatch` is the unit stored with one source extraction. Its
-`AdapterIdentity` names one language and producer and lists only capabilities
-the adapter actually emits. The batch contains six bounded collections:
+`UniversalEvidenceIdentity` names one language and emitter and lists only the
+capabilities the producer actually emits. The batch contains six bounded
+collections:
 
 - `DeclarationFact` identifies a source-backed declaration and its existing
   graph node, kind, name, qualified name, optional module/package, lexical
   scope, signature, optional bounded canonical parameter-type vector, optional
   complete-direct-base marker for Java types, and exact range. TypeScript and
-  JavaScript candidate evidence may additionally identify the declaration's
+  JavaScript evidence may additionally identify the declaration's
   `namespace` as `value`, `type`, `namespace`, or `value_and_type`; legacy
-  adapters omit this optional field.
+  producers omit this optional field.
 - `ScopeFact` identifies a lexical scope, optional owning declaration, parent
   scope, and exact range.
 - `BindingFact` records an import, import alias, re-export, local alias,
@@ -45,7 +85,7 @@ the adapter actually emits. The batch contains six bounded collections:
   resolves to an exact source declaration or an explicitly qualified external
   identity. An unresolved prelude or imported spelling must not be
   reinterpreted as a repository-local type.
-  The TypeScript/JavaScript candidate adapter may use a member binding
+  The TypeScript/JavaScript producer may use a member binding
   with spelling `*` as a source-range-backed object-owner alias, including a
   CommonJS file-module owner for a proven `module.exports = { ...source }`
   shape, including a source-anchored namespace import, static `require()`
@@ -79,7 +119,7 @@ the adapter actually emits. The batch contains six bounded collections:
   conversions, but only when one applicable vector is more specific than all
   other applicable vectors. Unknown hierarchy or a competing conversion
   remains unresolved.
-  The TypeScript/JavaScript candidate adapter represents a tagged
+  The TypeScript/JavaScript producer represents a tagged
   template (``tag`text ${value}``) as a call with occurrence context
   `tagged_template` (or `tagged_member` for a member tag). Its bounded argument
   vector starts with an explicit unknown slot for the runtime
@@ -103,7 +143,7 @@ the adapter actually emits. The batch contains six bounded collections:
   identity; contextual or malformed non-statement assignments remain
   unresolved rather than being promoted into declarations.
   JSX attribute values, spread attributes, and child expressions are ordinary
-  value-reference contexts. The TypeScript/JavaScript candidate adapter emits
+  value-reference contexts. The TypeScript/JavaScript producer emits
   exact `jsx_value`, `jsx_spread`, and `jsx_child` occurrences
   for local, imported, and unresolved values, while excluding prop names,
   member-property spellings, and call callees. This preserves callback
@@ -157,15 +197,15 @@ rather than becoming crate-qualified placeholders.
 
 `validate_evidence` rejects a batch when any of these conditions is false:
 
-- the adapter language and producer are non-empty;
+- the pipeline language and emitter are non-empty;
 - fact IDs are unique and all references resolve;
 - source paths are normalized, relative, and remain inside the corpus;
 - ranges are non-empty, byte ordered, and line/column ordered;
-- every fact and exact-language constraint agrees with the adapter language;
+- every fact and exact-language constraint agrees with the pipeline language;
 - behavioral candidates have an exact occurrence;
 - each binding, role, and relationship is covered by an advertised
   `LanguageCapability`;
-- external resolution is used only by an adapter advertising
+- external resolution is used only by a producer advertising
   `ExternalReferences`; and
 - declarations, scopes, bindings, occurrences, candidates, diagnostics, and
   diagnostic messages remain within `EvidenceLimits`.
@@ -182,15 +222,17 @@ visited declaration proves that its complete direct-base set was emitted.
 Validation traverses each collection by stable fact ID, so equivalent input
 orders return the same first error.
 
-## Adapter registration
+## Evidence pipeline registration
 
-`AdapterRegistry::universal_profile(language)` is the authority for universal
-cutover. A returned `AdapterProfile` means universal evidence is mandatory.
-Python, Go, Rust, Java, TypeScript, and JavaScript are currently registered;
-TSX resolves to the canonical TypeScript profile. An unregistered language
+`UniversalEvidenceRegistry::pipeline(language)` is the authority for universal
+cutover. A returned `UniversalEvidencePipeline` means universal evidence is mandatory.
+Python, Go, Rust, Java, PHP, C#, Kotlin, Ruby, TypeScript, JavaScript, Swift,
+Dart, Scala, and Groovy are currently registered. TSX resolves to the
+canonical TypeScript pipeline.
+An unregistered language
 does not silently claim universal behavior.
 
-An adapter profile must:
+An evidence pipeline must:
 
 1. use the same normalized language name as `Registry`;
 2. advertise a non-empty, sorted, duplicate-free capability list;
@@ -199,22 +241,22 @@ An adapter profile must:
 4. validate every completed batch; and
 5. stay within the shared evidence limits.
 
-Tree-sitter and source-driven adapters produce the same records. Tree-sitter
-adapters normally obtain byte and line coordinates with `range_for_node`.
+Tree-sitter and source-driven producers produce the same records. Tree-sitter
+producers normally obtain byte and line coordinates with `range_for_node`.
 A source-driven parser constructs the identical `EvidenceRange` from its own
 token offsets. Downstream resolution does not branch on parser technology.
 
-### Minimal in-tree adapter
+### Minimal in-tree producer
 
 This abbreviated example shows the production API shape. The language must
-also have a real extractor and registry case; registering a profile without
+also have a real extractor and registry case; registering a pipeline without
 direct emission is invalid.
 
 ```rust
 use compass_languages::{
-    AdapterProfile, AdapterRegistry, CandidateRelation, EvidenceBuilder,
-    EvidenceLimits, EvidenceRange, LanguageCapability, ResolutionConstraint,
-    SemanticRole,
+    CandidateRelation, EvidenceBuilder, EvidenceLimits, EvidenceRange,
+    LanguageCapability, ResolutionConstraint, SemanticRole,
+    UniversalEvidencePipeline, UniversalEvidenceProducer, UniversalEvidenceQualification,
 };
 
 const WREN_CAPABILITIES: &[LanguageCapability] = &[
@@ -223,9 +265,15 @@ const WREN_CAPABILITIES: &[LanguageCapability] = &[
     LanguageCapability::Calls,
 ];
 
-static WREN_PROFILE: AdapterProfile = AdapterProfile {
-    language: "wren",
-    capabilities: WREN_CAPABILITIES,
+static WREN_PIPELINE: UniversalEvidencePipeline = UniversalEvidencePipeline {
+    producer: UniversalEvidenceProducer {
+        id: "compass.wren",
+        language: "wren",
+        version: 1,
+        evidence_schema: "compass.languages.evidence/2",
+        capabilities: WREN_CAPABILITIES,
+    },
+    qualification: UniversalEvidenceQualification::Qualifying,
 };
 
 let function_range = EvidenceRange {
@@ -248,7 +296,7 @@ let call_range = EvidenceRange {
 };
 
 let mut builder = EvidenceBuilder::new(
-    &WREN_PROFILE,
+    &WREN_PIPELINE,
     "compass.languages.wren",
     "src/main.wren",
     EvidenceLimits::default(),
@@ -288,10 +336,9 @@ builder.relate(
 let batch = builder.finish()?;
 ```
 
-Inside `adapters.rs`, add the profile to the sorted
-`UNIVERSAL_ADAPTERS` table only in the same change that connects extraction
-and removes the replaced resolver path. `AdapterRegistry::validate()` must
-then pass.
+Inside `evidence_pipeline.rs`, add the pipeline to the sorted registry table
+only in the same change that connects extraction and removes the replaced
+resolver path. `UniversalEvidenceRegistry::validate()` must then pass.
 
 ## Resolution
 
@@ -376,7 +423,7 @@ every non-primitive nested trait argument. Lookup uses the implementation
 scope rather than the implementer's declaration scope, preserving imported
 types and implementation-local type parameters. The outer trait remains represented
 only by the `implements` candidate, so the same source token is not also
-published as a generic reference. If the adapter cannot prove the implementer
+published as a generic reference. If the producer cannot prove the implementer
 declaration, the parser recovered through an error, or an argument has
 competing bindings, Compass does not invent a reference endpoint.
 
@@ -451,12 +498,12 @@ Python callable-value occurrences publish a reference candidate for the exact
 value use. They do not publish an indirect call merely because that value
 resolves to a function or method: target identity and callability do not prove
 invocation. An indirect call requires separate source or contract evidence that
-the receiving API invokes the value. The current Python adapter does not infer
+the receiving API invokes the value. The current Python producer does not infer
 such contracts, so uninvoked argument, collection, assignment, and return uses
 remain references.
 
 Python call syntax does not prove whether its target is a function or class,
-and capitalization is not semantic evidence. The adapter therefore emits a
+and capitalization is not semantic evidence. The producer therefore emits a
 call candidate that permits either callable declaration kind. Publication
 normalizes a uniquely resolved class target to `instantiates`; an unresolved
 target remains a call-shaped external or unresolved endpoint rather than an
@@ -481,7 +528,7 @@ language-neutral candidate contract:
   `DirectBase { base_set_complete }`;
 - a member use carries `ReceiverDispatch` with an exact receiver identity and
   a registered linearization strategy; and
-- the adapter must advertise `HierarchyDispatch`, which also makes cached
+- the producer must advertise `HierarchyDispatch`, which also makes cached
   evidence lacking these facts ineligible for reuse.
 
 The shared resolver builds bounded direct-base and directly-owned-member
@@ -536,7 +583,7 @@ possible target. Nested sibling bases use their enclosing class identity. A
 receiver-dispatch candidate cannot also carry a qualified target and cannot
 fall through to a same-named local or imported symbol.
 
-Future adapters reuse the typed boundary with evidence appropriate to their
+Future producers reuse the typed boundary with evidence appropriate to their
 language: compiler-selected overloads, trait or interface order, typed
 receivers, or statically resolved superclass members. A new language semantic
 must add and qualify its own explicit strategy; it must not reinterpret C3 or
@@ -548,15 +595,15 @@ changes for this extension.
 Offline SCIP batches are Program evidence, not `SemanticEvidenceBatch`
 records. For Java calls, Compass can join their symbol identities to this
 contract without weakening its invariants: the compiler
-reference must match an adapter-emitted call occurrence by normalized source
+reference must match a producer-emitted call occurrence by normalized source
 path and exact half-open byte range, and the compiler definition must match an
-adapter-emitted declaration the same way. Only fresh, unanimous, locally
+producer-emitted declaration the same way. Only fresh, unanimous, locally
 defined targets are projected. Non-call references, stale or unverified
 documents, ambiguous definition anchors, and provider conflicts do not create
 or retarget an edge.
 
 The resulting graph provenance has artifact origin and the
-`compiler-exact-anchor` rule while retaining the adapter's exact occurrence as
+`compiler-exact-anchor` rule while retaining the producer's exact occurrence as
 the relationship site. Tree-sitter-only builds and `--no-program` builds keep
 the existing structural behavior.
 
@@ -627,7 +674,7 @@ that removes the old pack entry.
 One language or framework cutover is complete only when:
 
 1. production extraction emits typed evidence directly;
-2. the capability profile states exactly what is emitted;
+2. the producer capability declaration states exactly what is emitted;
 3. malformed or oversized evidence fails closed with a bounded diagnostic;
 4. cached extraction without valid required evidence is treated as a cache
    miss while all existing version values remain unchanged;
@@ -652,9 +699,9 @@ python3 benchmarks/performance/harness.py audit \
   --corpus path/to/pinned/corpus
 ```
 
-The manifest schema is `compass.quality-audit`. It records pinned corpus
+The manifest schema is `compass.quality-audit/2`. It records pinned corpus
 commits and graph hashes, exact source-oracle provider identities and inventory
-digests, advertised adapter/framework capabilities, required relations, and
+digests, advertised producer/framework capabilities, required relations, and
 records from three independent pools:
 
 - `accepted` audits Compass-published edges for precision;
@@ -663,7 +710,7 @@ records from three independent pools:
 - `graphify_hypothesis` classifies Graphify-only facts without treating them
   as truth.
 
-Each record includes corpus, adapter, optional framework pack, capability,
+Each record includes corpus, producer, optional framework pack, capability,
 language, relation, confidence, target cluster, source and target
 expectations, exact occurrence range, normalized snippet SHA-256, judgment,
 and reason. `represented_elsewhere` also names the actual graph fact.
@@ -693,18 +740,78 @@ A qualification requires:
 
 The checked-in `universal-core.json` is a deliberately small conformance
 fixture. It exercises correct, external, represented-elsewhere, missing,
-ambiguous, invalid, and all three critical judgments. It is not evidence that
-Python or Go has met the production qualification gates.
+ambiguous, invalid, and all three critical judgments. It is not, by itself,
+the production audit population; the release decision records the reviewed
+audits and conformance evidence used for each promoted producer.
+
+Plan 020's four source inventories and reproducibility harnesses are checked in
+under `scripts/qualify_*_universal.py` and
+`tests/qualification/*-universal-repositories.toml`. They consume only clean,
+detached checkouts below `/Volumes/Workspace/Github`; they never clone, build,
+execute, or mutate a corpus. A graph-backed audit is assembled with
+`scripts/build_universal_quality_audit.py` and evaluated with the command above.
+The generated manifest records the source globs used by each corpus so the
+audit's inventory digest is exactly the same population as `pinned` mode.
+`scripts/record_universal_baseline.py` records reproducible established-path
+fixture baselines, including graph/evidence digests, relation counts,
+diagnostics, omissions, identity collisions, cold/warm/forced/alternate
+timings, fact-neutral and semantic-edit runs, restore identity, and peak RSS.
+The checked-in Swift, Dart, Scala, and Groovy artifacts were captured from the
+pre-cutover direct extractor at the immutable revision
+`88abe4c071a19ec03b3bca132656830a02a47907`; they are separate from the
+post-cutover pinned-corpus quality-audit artifacts.
+The checked-in wrappers use parser providers when the pinned qualification
+toolchains are provisioned under the mounted target (Swift 6.3.3 with
+SwiftSyntax 603.0.0; Dart SDK 3.13.1 with Analyzer 8.4.0; Scala CLI 1.9.1
+with Scala 3.7.3, scala.meta 4.13.10, and ujson 4.1.0; and Groovy 4.0.27 in
+the current release candidate). They fail closed to the bounded lexical contract when a provider
+is unavailable; that fallback reports `parserAvailable: false` and cannot pass
+the quality-audit evaluator. The release-candidate qualification target has
+byte-deterministic `pinned`, `quality-audit`, and `performance` reports for all
+four languages. Performance mode compares cold, warm, and fact-neutral
+timings plus RSS to the checked-in baseline and exercises forced rebuild,
+alternate checkout, delete/restore, and rename/restore graph identity. The
+promotion decision binds the audited producer versions and aliases to the
+`Qualified` registry state; future producer or capability changes require a
+new decision.
 
 ## Current qualification boundary
 
-Python and Go are hard-cut universal language adapters. Rust, Java,
-TypeScript, and JavaScript remain `UniversalCandidate`; the latter two share a
-bounded ECMAScript emitter but retain distinct adapter identities. TSX uses the
-TypeScript candidate profile. Candidate status means the universal route is
-active while complete capability and corpus qualification remain in progress.
-`spring-java` is the first production universal framework pack and advertises
+Python, Go, Rust, Java, PHP, C#, Kotlin, Ruby, TypeScript, JavaScript, Swift,
+Dart, Scala, and Groovy are hard-cut `Qualified` universal pipelines under the
+checked-in promotion decision. TypeScript and JavaScript share a bounded ECMAScript
+producer but retain distinct producer identities. TSX uses the TypeScript
+pipeline. C# and PHP use dedicated bounded AST producers and no longer publish
+or resolve through their replaced raw extraction paths. `Qualified` records
+that the release decision accepted the fixed gates; it does not claim
+compiler-grade completeness. Unsupported dynamic behavior remains unresolved.
+`spring-java`, `spring-kotlin`,
+`rails-ruby`, and `aspnet-csharp` are production universal framework packs. The
+`php-frameworks` pack consumes exact PHP call/import/ownership evidence for
+Laravel routes and Drupal hooks while configuration and template extraction
+remain separate. The `rails-ruby` pack consumes exact Ruby call occurrences and
+bounded route DSL literals; dynamic Rails routing remains unresolved. Spring
+advertises
 typed HTTP, bean, injection, messaging, scheduling, persistence, transaction,
-and security capabilities. Kotlin Spring remains on its established detector.
+and security capabilities; ASP.NET consumes exact C# imports, attributes,
+ownership, callable signatures, and source ranges to derive MVC routes. The
+Kotlin pack consumes the version-1 Kotlin universal evidence batch and never
+re-enters the removed established detector. Vapor consumes the version-1 Swift
+batch through the `vapor-swift` universal pack; Dart convention facts remain
+outside structural evidence, are marked as bounded convention-origin records,
+and require matching source or manifest activation for Flutter navigation,
+BLoC, and Riverpod contexts.
+
+Kotlin source resolution is exact-language only. Java/Kotlin call edges require
+fresh project/compiler evidence with exact anchored endpoints; imports, shared
+packages, JVM-family membership, or equal terminal names are insufficient. An
+absent or conflicting endpoint remains unresolved.
+
+C# project resolution is language-keyed and namespace/import aware. Direct
+bases and receiver types resolve only to exact C# declarations; ambiguous
+imports remain unresolved. Receiver dispatch includes parameters, inferred
+locals, fields, properties, constrained generic parameters, interfaces, and
+source-proven inherited members. Parser recovery diagnostics use bounded,
+nonempty source ranges even when Tree-sitter reports a zero-width missing token.
 Do not infer support for another language or framework from file extensions,
 raw graph output, or total node and edge counts.

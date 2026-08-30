@@ -18,8 +18,8 @@ use compass_model::query_contract::{
     NodeTrailRequest, SearchRequest,
 };
 use compass_query::{
-    EngineSelection, QueryEngineCache, QueryEngineKind, open, open_with_document, open_with_engine,
-    open_with_store, open_with_store_selector,
+    EngineSelection, NaturalQueryRequest, QueryEngineCache, QueryEngineKind, open,
+    open_with_document, open_with_engine, open_with_store, open_with_store_selector,
 };
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore, StoreRef};
 use compass_store_redb::RedbStore;
@@ -693,6 +693,118 @@ fn default_query_open_prefers_published_store_and_matches_json()
 }
 
 #[test]
+fn aspnet_anchor_questions_are_canonicalized_before_json_and_store_recall()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .first()
+        .ok_or("fixture graph has no nodes")?
+        .clone();
+    let make_node = |id: &str, kind: NodeKind, name: &str, qualified_name: &str| {
+        let mut node = template.clone();
+        node.id = id.to_owned();
+        node.kind = kind;
+        node.name = name.to_owned();
+        node.qualified_name = qualified_name.to_owned();
+        node.language = Some("csharp".to_owned());
+        node.framework = None;
+        node
+    };
+    graph.nodes.extend([
+        make_node(
+            "n:aspnet-http-protocol-process-requests",
+            NodeKind::Method,
+            ".ProcessRequests()",
+            "Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http.HttpProtocol::ProcessRequests",
+        ),
+        make_node(
+            "n:aspnet-iis-middleware-invoke",
+            NodeKind::Method,
+            ".Invoke()",
+            "Microsoft.AspNetCore.Server.IISIntegration.IISMiddleware::Invoke",
+        ),
+        make_node(
+            "n:http-request-noise",
+            NodeKind::Property,
+            "Http",
+            "Microsoft.AspNetCore.Http.DefaultHttpRequest::Http",
+        ),
+        make_node(
+            "n:middleware-noise",
+            NodeKind::Class,
+            "Middleware",
+            "Microsoft.AspNetCore.Analyzers.MiddlewareAnalysis::Middleware",
+        ),
+        make_node(
+            "n:other-middleware-invoke",
+            NodeKind::Method,
+            ".Invoke()",
+            "Microsoft.AspNetCore.HttpsPolicy.HstsMiddleware::Invoke",
+        ),
+    ]);
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let json = open_with_engine(
+        &graph_path,
+        None,
+        &directory.path().join("json-cache"),
+        EngineSelection::Json,
+    )?;
+    let stored = open(&graph_path, None, &directory.path().join("store-cache"))?;
+    assert_eq!(stored.engine_kind(), QueryEngineKind::Store);
+
+    for (question, expected) in [
+        (
+            "how are HTTP requests processed",
+            "n:aspnet-http-protocol-process-requests",
+        ),
+        (
+            "how is middleware invoked",
+            "n:aspnet-iis-middleware-invoke",
+        ),
+    ] {
+        let request = NaturalQueryRequest {
+            question: question.to_owned(),
+            include_heuristic: false,
+            limits: CodeQueryLimits::default(),
+        };
+        for response in [
+            json.query_natural(request.clone())?,
+            stored.query_natural(request)?,
+        ] {
+            assert_eq!(
+                response
+                    .results
+                    .first()
+                    .map(|result| result.node_id.as_str()),
+                Some(expected),
+                "question={question:?}, response={response:#?}"
+            );
+        }
+        for response in [
+            json.discover(discovery_request(question))?,
+            stored.discover(discovery_request(question))?,
+        ] {
+            assert_eq!(
+                response.seeds.first().map(|seed| seed.node_id.as_str()),
+                Some(expected),
+                "question={question:?}, response={response:#?}"
+            );
+            if question == "how is middleware invoked" {
+                assert!(response.seeds[0].ambiguous, "response={response:#?}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn operation_role_fast_path_is_backend_neutral_and_bounded()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
@@ -1121,6 +1233,84 @@ fn store_engine_reads_the_immutable_phase2_snapshot_for_all_code_queries()
 }
 
 #[test]
+fn truncated_callers_use_the_same_edge_id_prefix_for_store_and_json()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    support::write_graph(&graph_path)?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let mut target = graph
+        .nodes
+        .first()
+        .cloned()
+        .ok_or("fixture graph has no template node")?;
+    target.id = "n:bounded-target".to_owned();
+    target.kind = NodeKind::Function;
+    target.name = "bounded_target".to_owned();
+    target.qualified_name = "Bounded.target".to_owned();
+    graph.nodes.push(target);
+
+    let edge_template = graph
+        .links
+        .first()
+        .cloned()
+        .ok_or("fixture graph has no template edge")?;
+    for ordinal in 0..32 {
+        let mut caller = graph
+            .nodes
+            .first()
+            .cloned()
+            .ok_or("fixture graph has no template node")?;
+        caller.id = format!("n:bounded-caller:{ordinal:02}");
+        caller.kind = NodeKind::Function;
+        caller.name = format!("bounded_caller_{ordinal:02}");
+        caller.qualified_name = format!("Bounded.caller_{ordinal:02}");
+
+        let mut edge = edge_template.clone();
+        edge.source = caller.id.clone();
+        edge.target = "n:bounded-target".to_owned();
+        edge.kind = EdgeKind::Calls;
+        edge.occurrence_rule = None;
+        edge.details = None;
+        edge.deferred = false;
+        edge.id = edge_id(
+            &edge.source,
+            edge.kind,
+            &edge.target,
+            edge.relationship_site.as_ref(),
+            None,
+        );
+        edge.key.clone_from(&edge.id);
+        graph.nodes.push(caller);
+        graph.links.push(edge);
+    }
+    fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    publish_phase2_snapshot(directory.path(), &graph_path)?;
+
+    let cache = directory.path().join("cache");
+    let store = open_with_engine(&graph_path, None, &cache, EngineSelection::Store)?;
+    let json = open_with_engine(&graph_path, None, &cache, EngineSelection::Json)?;
+    let request = CallRequest {
+        symbol: "Bounded.target".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits {
+            max_edges: 1,
+            max_nodes: 2,
+            ..CodeQueryLimits::default()
+        },
+    };
+    let store_response = store.callers(request.clone())?;
+    let json_response = json.callers(request)?;
+    assert!(store_response.truncated);
+    assert!(json_response.truncated);
+    assert_eq!(
+        serde_json::to_value(store_response)?,
+        serde_json::to_value(json_response)?,
+    );
+    Ok(())
+}
+
+#[test]
 fn redb_store_runs_the_same_typed_queries_as_json() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
@@ -1386,7 +1576,7 @@ fn explicit_json_selection_survives_a_corrupt_store_sidecar()
 }
 
 #[test]
-fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
+fn provisional_json_index_is_rebuilt_to_v1() -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -1409,7 +1599,7 @@ fn json_index_v3_is_rebuilt_to_v7() -> Result<(), Box<dyn std::error::Error>> {
         connection.query_row("SELECT value FROM metadata WHERE key='format'", [], |row| {
             row.get(0)
         })?;
-    assert_eq!(format, "compass-code-index/7");
+    assert_eq!(format, "compass-code-index/1");
     Ok(())
 }
 

@@ -316,6 +316,7 @@ pub(super) fn output_schema(operation: CodeQueryOperation) -> Value {
                     "position": {"type": "integer", "minimum": 0},
                     "reference": {"type": "string"},
                     "resolution": {"enum": ["exact", "ambiguous", "unresolved"]},
+                    "sourceAnchor": {"anyOf": [{"$ref": "#/$defs/sourceAnchor"}, {"type": "null"}]},
                     "target": {"type": "string"},
                     "candidates": {"type": "array", "items": {"$ref": "#/$defs/resolutionCandidate"}}
                 },

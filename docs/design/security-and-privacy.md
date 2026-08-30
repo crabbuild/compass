@@ -31,6 +31,22 @@ Explicit optional boundaries                      |
 
 The default code-only graph path does not need a network or model key.
 
+## Agent Graph write boundary
+
+Agent Graph writes are denied by default. A trusted adapter mints a bounded,
+expiring grant for one canonical repository, overlay, Base Generation,
+expected revision, principal, permission set, and mask policy. Change requests
+cannot self-assign any of those values. Every batch is validated and Grounded
+before immutable objects are published; selector activation is conditional, so
+competing writers receive a conflict rather than losing an update.
+
+HTTP requires a distinct write credential in addition to normal API
+authentication. Project allowlists are canonicalized at startup, a non-Git
+state root may serve only one project, and the write tool is not advertised
+when disabled. Audit records contain bounded digests and trusted adapter/model
+labels only. Prompts, model responses, chain-of-thought, credentials, tokens,
+and source excerpts are outside the audit contract.
+
 ## Data that remains local by default
 
 For structural source analysis:
@@ -212,6 +228,14 @@ Treat graph artifacts with the same or higher classification as the source
 corpus. Do not upload them to a public artifact store merely because they
 contain less text than the repository.
 
+Markdown frontmatter is untrusted source. Compass validates it within byte,
+key, item, depth, and graph-node budgets; rejects YAML aliases and tags; and
+requires parser-backed source ranges before publication. Public ConfigKey
+labels include values only for a conservative set of content metadata such as
+title, tags, aliases, authors, dates, layout, and status. Generic values,
+including credential-shaped fields, remain out of graph artifacts. This is a
+disclosure reduction, not permission to store credentials in frontmatter.
+
 HTML and SVG exports must remain self-contained and avoid loading untrusted
 external scripts/fonts/resources.
 
@@ -266,6 +290,33 @@ Safe patterns include:
 
 When adding a subprocess, test timeout, nonzero exit, oversized output,
 malformed UTF-8, and missing executable behavior.
+
+## Local document and OCR boundary
+
+PDF and Office bytes, ZIP members, XML, raster dimensions, OCR observations,
+downloaded model bytes, and document-cache JSON are untrusted. Compass checks
+raw and expanded sizes before allocation and keeps raw file/cache reads bounded
+at the stream even if a file grows after its metadata check. It rejects archive
+traversal, unsafe relationships, unknown cache fields, and incoherent OCR
+origin, profile, completeness, or geometry. Formulas/macros/OLE stay inert,
+document URLs are never followed, and every OCR request/result is validated
+against the normalized raster.
+
+OCR extraction is network-disabled by construction. `compass models install`
+is the sole download command; it uses fixed HTTPS release hosts, at most three
+validated redirects, immutable `v0.7.0` artifact names, exact sizes and
+SHA-256, temporary same-directory files, and atomic publication with parent
+directory synchronization. A bounded per-profile lock serializes concurrent
+installers. Symlinked model artifacts, verified markers, and install locks are
+rejected. Extraction, inspection, watch, and history verify local artifacts and
+fail explicitly when a selected profile is absent. They never downgrade to
+native-only processing after OCR was requested.
+
+The ONNX runtime and pure-Rust PDF renderer are linked into Compass. Users do
+not configure an executable or install Python, Tesseract, an office suite,
+Poppler, Java, or a system ONNX library. Native text remains authoritative;
+model output is separately identified derived evidence and cannot execute or
+replace source content.
 
 ## Threat-informed operating checklist
 

@@ -46,7 +46,9 @@ dependencies, or executes Maven or Gradle merely because Java files exist.
 
 ### Available now
 
-Java is a version-1 `UniversalCandidate`. Its Tree-sitter adapter emits
+Java is a version-1 `Qualified` universal evidence pipeline under the checked-in
+promotion decision. Its Tree-sitter
+producer emits
 source-backed declarations, scopes, packages, imports, annotations,
 inheritance, type references, method and constructor candidates, receiver
 spelling, argument counts, ownership, and external-reference evidence.
@@ -113,7 +115,7 @@ watch-mode provider, not the first batch implementation.
   possible.
 - Publishing JDT AST nodes as a second, competing Java graph.
 - Adding network access to historical materialization.
-- Promoting Java to `UniversalComplete` solely because a provider exists.
+- Marking Java `Qualified` solely because a provider exists.
 
 ## User experience
 
@@ -1041,8 +1043,8 @@ watch fixtures and local protocol doubles
 - Introduce `may_dispatch_to` only with a documented consumer and graph
   contract.
 - Qualify structural-only, SCIP, JDT Core, and JDT LS profiles independently.
-- Re-evaluate Java `UniversalCandidate` status only after all claimed
-  capabilities pass their gates.
+- Keep the Java promotion decision pinned to the producer version and claimed
+  capabilities; any expansion requires a new independent gate review.
 
 **Primary areas**
 

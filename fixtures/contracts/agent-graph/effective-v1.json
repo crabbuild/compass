@@ -1,0 +1,41 @@
+{
+  "agentFacts": [],
+  "baseGeneration": {
+    "generationId": "generation-1",
+    "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "challenges": [],
+  "compositionProfile": "augment",
+  "compositionVersion": "compass.agent-graph.composition/1",
+  "effectiveIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "graph": {
+    "directed": true,
+    "graph": {
+      "build": {
+        "builderVersion": "fixture",
+        "configurationDigest": "fixture",
+        "generationId": "generation-1",
+        "schemaFingerprint": "fixture",
+        "sourceTreeDigest": "fixture"
+      },
+      "schema": "compass.graph/1"
+    },
+    "links": [],
+    "multigraph": true,
+    "nodes": []
+  },
+  "omissions": {
+    "cascaded": 0,
+    "direct": 0,
+    "examples": [],
+    "omittedExamples": 0,
+    "total": 0
+  },
+  "overlayRevision": "4444444444444444444444444444444444444444444444444444444444444444",
+  "retractions": {
+    "examples": [],
+    "omittedExamples": 0,
+    "total": 0
+  },
+  "schema": "compass.agent-graph.effective/1"
+}

@@ -1622,7 +1622,7 @@ fn sort_unique(entries: &mut [(Vec<u8>, Vec<u8>)], kind: &str) -> Result<(), His
     }
 }
 
-fn analysis_key(parts: &[&[u8]]) -> Vec<u8> {
+pub(crate) fn analysis_key(parts: &[&[u8]]) -> Vec<u8> {
     parts
         .iter()
         .fold(

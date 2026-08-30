@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::{AdapterRegistry, LanguageCapability, SemanticRole};
+use crate::{LanguageCapability, SemanticRole, UniversalEvidenceRegistry};
 
 use super::FrameworkLimits;
 
@@ -39,11 +39,13 @@ pub enum FrameworkCapability {
     HttpRoutes,
     Beans,
     DependencyInjection,
+    DataModeling,
     Messaging,
     Scheduling,
     Persistence,
     Transactions,
     Security,
+    Ui,
 }
 
 /// Closed framework relationship vocabulary advertised by a universal pack.
@@ -65,6 +67,7 @@ pub enum FrameworkRelation {
     Triggers,
     DependsOn,
     MapsTo,
+    Renders,
 }
 
 impl FrameworkRelation {
@@ -83,6 +86,7 @@ impl FrameworkRelation {
             Self::Triggers => "triggers",
             Self::DependsOn => "depends_on",
             Self::MapsTo => "maps_to",
+            Self::Renders => "renders",
         }
     }
 
@@ -91,7 +95,11 @@ impl FrameworkRelation {
         let required = match self {
             Self::RoutesTo => Some(FrameworkCapability::HttpRoutes),
             Self::Registers => Some(FrameworkCapability::Beans),
-            Self::DependsOn => Some(FrameworkCapability::DependencyInjection),
+            Self::DependsOn => {
+                return capabilities.contains(&FrameworkCapability::DependencyInjection)
+                    || capabilities.contains(&FrameworkCapability::Security)
+                    || capabilities.contains(&FrameworkCapability::DataModeling);
+            }
             Self::Handles
             | Self::Publishes
             | Self::Subscribes
@@ -100,6 +108,7 @@ impl FrameworkRelation {
             Self::Schedules | Self::Triggers => Some(FrameworkCapability::Scheduling),
             Self::MapsTo => Some(FrameworkCapability::Persistence),
             Self::Decorates => None,
+            Self::Renders => Some(FrameworkCapability::Ui),
         };
         required.map_or_else(
             || {
@@ -115,6 +124,12 @@ impl FrameworkRelation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FrameworkPackDescriptor {
     pub id: &'static str,
+    /// Manually reviewed semantic version for this pack's evidence contract.
+    ///
+    /// The registry digest includes this value so detector changes cannot
+    /// silently reuse a cache entry. It is intentionally not derived from a
+    /// function pointer, which would be unstable across builds.
+    pub semantics_version: u32,
     pub kind: FrameworkPackKind,
     pub languages: &'static [&'static str],
     pub required_capabilities: &'static [LanguageCapability],
@@ -132,6 +147,8 @@ pub struct FrameworkPackDescriptor {
 pub enum FrameworkPackRegistryError {
     #[error("framework pack ID must not be empty")]
     EmptyId,
+    #[error("framework pack {0:?} must declare a non-zero semantics version")]
+    InvalidSemanticsVersion(&'static str),
     #[error("duplicate framework pack ID {0:?}")]
     DuplicateId(&'static str),
     #[error("framework pack {0:?} must declare at least one language")]
@@ -230,6 +247,11 @@ fn validate_descriptor(
     if descriptor.id.trim().is_empty() {
         return Err(FrameworkPackRegistryError::EmptyId);
     }
+    if descriptor.semantics_version == 0 {
+        return Err(FrameworkPackRegistryError::InvalidSemanticsVersion(
+            descriptor.id,
+        ));
+    }
     if descriptor.languages.is_empty() {
         return Err(FrameworkPackRegistryError::EmptyLanguages(descriptor.id));
     }
@@ -323,14 +345,14 @@ fn validate_descriptor(
         }
     }
     for &language in descriptor.languages {
-        let Some(profile) = AdapterRegistry::universal_profile(language) else {
+        let Some(pipeline) = UniversalEvidenceRegistry::pipeline(language) else {
             return Err(FrameworkPackRegistryError::NonUniversalLanguage {
                 pack: descriptor.id,
                 language,
             });
         };
         for &capability in descriptor.required_capabilities {
-            if !profile.capabilities.contains(&capability) {
+            if !pipeline.producer.capabilities.contains(&capability) {
                 return Err(FrameworkPackRegistryError::UnsupportedCapability {
                     pack: descriptor.id,
                     language,
@@ -347,6 +369,33 @@ fn validate_descriptor(
             descriptor.limits.max_alias_expansions,
         ),
         ("max_facts_per_file", descriptor.limits.max_facts_per_file),
+        ("max_source_bytes", descriptor.limits.max_source_bytes),
+        ("max_config_bytes", descriptor.limits.max_config_bytes),
+        ("max_syntax_nodes", descriptor.limits.max_syntax_nodes),
+        ("max_syntax_depth", descriptor.limits.max_syntax_depth),
+        (
+            "max_retained_literal_bytes",
+            descriptor.limits.max_retained_literal_bytes,
+        ),
+        ("max_role_facts", descriptor.limits.max_role_facts),
+        ("max_relation_facts", descriptor.limits.max_relation_facts),
+        ("max_diagnostics", descriptor.limits.max_diagnostics),
+        ("max_route_nodes", descriptor.limits.max_route_nodes),
+        ("max_route_stages", descriptor.limits.max_route_stages),
+        ("max_glob_patterns", descriptor.limits.max_glob_patterns),
+        (
+            "max_glob_matches_per_pattern",
+            descriptor.limits.max_glob_matches_per_pattern,
+        ),
+        ("max_file_set_edges", descriptor.limits.max_file_set_edges),
+        (
+            "max_regex_pattern_length",
+            descriptor.limits.max_regex_pattern_length,
+        ),
+        (
+            "max_regex_complexity",
+            descriptor.limits.max_regex_complexity,
+        ),
     ] {
         if value == 0 {
             return Err(FrameworkPackRegistryError::ZeroLimit {
@@ -369,6 +418,7 @@ fn validate_strings(values: &[&str]) -> Result<(), ()> {
 
 pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
     id: "spring-java",
+    semantics_version: 1,
     kind: FrameworkPackKind::Source,
     languages: &["java"],
     required_capabilities: &[
@@ -432,7 +482,607 @@ pub(super) const SPRING_JAVA_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPack
         max_include_depth: 32,
         max_alias_expansions: 1_000,
         max_facts_per_file: 100_000,
+        ..FrameworkLimits::DEFAULT
     },
 };
 
-const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[SPRING_JAVA_DESCRIPTOR];
+pub(super) const SPRING_KOTLIN_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "spring-kotlin",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["kotlin"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Aliases,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::Beans,
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Scheduling,
+        FrameworkCapability::Persistence,
+        FrameworkCapability::Transactions,
+        FrameworkCapability::Security,
+    ],
+    dependency_markers: &[
+        "org.springframework.boot:spring-boot",
+        "org.springframework:spring-web",
+    ],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "spring-annotation-import",
+        "spring-direct-annotation",
+        "spring-project-dependency",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Annotation,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::Decorates,
+        FrameworkRelation::RoutesTo,
+        FrameworkRelation::Registers,
+        FrameworkRelation::Handles,
+        FrameworkRelation::Publishes,
+        FrameworkRelation::Subscribes,
+        FrameworkRelation::Produces,
+        FrameworkRelation::Consumes,
+        FrameworkRelation::Schedules,
+        FrameworkRelation::Triggers,
+        FrameworkRelation::DependsOn,
+        FrameworkRelation::MapsTo,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 20,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+        ..FrameworkLimits::DEFAULT
+    },
+};
+
+pub(super) const RAILS_RUBY_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "rails-ruby",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["ruby"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Traits,
+        LanguageCapability::Calls,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["rails"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["rails-routes-draw"],
+    accepted_roles: &[SemanticRole::Call, SemanticRole::Ownership],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 20,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+        ..FrameworkLimits::DEFAULT
+    },
+};
+
+pub(super) const ASPNET_CSHARP_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "aspnet-csharp",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["csharp"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Aliases,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["microsoft.aspnetcore.app"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["aspnet-mvc-attribute-binding", "aspnet-project-dependency"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Annotation,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits {
+        max_candidates: 64,
+        max_include_depth: 32,
+        max_alias_expansions: 1_000,
+        max_facts_per_file: 100_000,
+        ..FrameworkLimits::DEFAULT
+    },
+};
+
+pub(super) const PHP_FRAMEWORKS_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "php-frameworks",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["php"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Namespaces,
+        LanguageCapability::Imports,
+        LanguageCapability::Aliases,
+        LanguageCapability::Calls,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["drupal/core", "laravel/framework"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "composer-dependency",
+        "drupal-hook-declaration",
+        "laravel-route-call",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const VAPOR_SWIFT_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "vapor-swift",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["swift"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::LexicalScopes,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["vapor"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["vapor-import", "vapor-route-call"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DART_FLUTTER_NAVIGATION_DESCRIPTOR: FrameworkPackDescriptor =
+    FrameworkPackDescriptor {
+        id: "dart-flutter-navigation",
+        semantics_version: 1,
+        kind: FrameworkPackKind::Source,
+        languages: &["dart"],
+        required_capabilities: &[
+            LanguageCapability::Imports,
+            LanguageCapability::Calls,
+            LanguageCapability::Receivers,
+        ],
+        framework_capabilities: &[FrameworkCapability::HttpRoutes],
+        dependency_markers: &["flutter"],
+        manifest_policy: FrameworkManifestPolicy::Advisory,
+        activation_rules: &["flutter-navigation-call", "flutter-navigation-import"],
+        accepted_roles: &[
+            SemanticRole::Import,
+            SemanticRole::Call,
+            SemanticRole::Receiver,
+        ],
+        emitted_relation_families: &[FrameworkRelation::RoutesTo],
+        occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+        limits: FrameworkLimits::DEFAULT,
+    };
+
+pub(super) const DART_BLOC_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "dart-bloc",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["dart"],
+    required_capabilities: &[
+        LanguageCapability::Calls,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::Members,
+    ],
+    framework_capabilities: &[FrameworkCapability::Messaging],
+    dependency_markers: &["bloc", "flutter_bloc"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["bloc-builder", "bloc-event", "bloc-provider"],
+    accepted_roles: &[
+        SemanticRole::Call,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+    ],
+    emitted_relation_families: &[FrameworkRelation::Handles],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DART_RIVERPOD_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "dart-riverpod",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["dart"],
+    required_capabilities: &[LanguageCapability::Calls, LanguageCapability::Members],
+    framework_capabilities: &[FrameworkCapability::Messaging],
+    dependency_markers: &["hooks_riverpod", "riverpod"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["riverpod-provider", "riverpod-reference"],
+    accepted_roles: &[SemanticRole::Call, SemanticRole::MemberAccess],
+    emitted_relation_families: &[FrameworkRelation::Handles],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactAnchoredHeuristic,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const REACT_UI_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "react-ui",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["javascript", "typescript"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Calls,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::Ui],
+    dependency_markers: &[
+        "@vitejs/plugin-react",
+        "@vitejs/plugin-react-swc",
+        "react",
+        "react-dom",
+        "react-router",
+        "react-router-dom",
+    ],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["jsx-component", "react-hook", "react-runtime-import"],
+    accepted_roles: &[SemanticRole::CallableReference],
+    emitted_relation_families: &[FrameworkRelation::Renders],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DJANGO_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "django-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::DataModeling,
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Persistence,
+    ],
+    dependency_markers: &["django"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["django-signal-receiver", "django-url-call"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::RoutesTo,
+        FrameworkRelation::Subscribes,
+        FrameworkRelation::DependsOn,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const DJANGO_REST_FRAMEWORK_PYTHON_DESCRIPTOR: FrameworkPackDescriptor =
+    FrameworkPackDescriptor {
+        id: "django-rest-framework-python",
+        semantics_version: 1,
+        kind: FrameworkPackKind::Source,
+        languages: &["python"],
+        required_capabilities: &[
+            LanguageCapability::Declarations,
+            LanguageCapability::Imports,
+            LanguageCapability::Calls,
+            LanguageCapability::Construction,
+            LanguageCapability::Decorators,
+            LanguageCapability::TypeReferences,
+            LanguageCapability::BaseTypes,
+            LanguageCapability::Members,
+            LanguageCapability::Ownership,
+        ],
+        framework_capabilities: &[
+            FrameworkCapability::HttpRoutes,
+            FrameworkCapability::DependencyInjection,
+            FrameworkCapability::DataModeling,
+            FrameworkCapability::Security,
+        ],
+        dependency_markers: &["djangorestframework"],
+        manifest_policy: FrameworkManifestPolicy::Advisory,
+        activation_rules: &["drf-router-viewset-v1"],
+        accepted_roles: &[
+            SemanticRole::Import,
+            SemanticRole::Call,
+            SemanticRole::Construction,
+            SemanticRole::Decorator,
+            SemanticRole::BaseType,
+            SemanticRole::TypeReference,
+            SemanticRole::MemberAccess,
+            SemanticRole::Ownership,
+        ],
+        emitted_relation_families: &[FrameworkRelation::RoutesTo, FrameworkRelation::DependsOn],
+        occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+        limits: FrameworkLimits::DEFAULT,
+    };
+
+pub(super) const FASTAPI_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "fastapi-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::HttpRoutes,
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::Security,
+    ],
+    dependency_markers: &["fastapi"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["fastapi-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo, FrameworkRelation::DependsOn],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const STARLETTE_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "starlette-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["starlette"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["starlette-receiver-route"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Decorator,
+        SemanticRole::TypeReference,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const PYDANTIC_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "pydantic-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::DependencyInjection,
+        FrameworkCapability::DataModeling,
+    ],
+    dependency_markers: &["pydantic"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["pydantic-base-model"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::DependsOn],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const FLASK_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "flask-python",
+    semantics_version: 2,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[FrameworkCapability::HttpRoutes],
+    dependency_markers: &["flask"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &[
+        "flask-application-factory",
+        "flask-receiver-hook",
+        "flask-receiver-route",
+    ],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Decorator,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::RoutesTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const SQLALCHEMY_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "sqlalchemy-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::TypeReferences,
+        LanguageCapability::BaseTypes,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::DataModeling,
+        FrameworkCapability::Persistence,
+    ],
+    dependency_markers: &["sqlalchemy"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["sqlalchemy-declarative-base", "sqlalchemy-mapped-column"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::BaseType,
+        SemanticRole::TypeReference,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[FrameworkRelation::DependsOn, FrameworkRelation::MapsTo],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+pub(super) const CELERY_PYTHON_DESCRIPTOR: FrameworkPackDescriptor = FrameworkPackDescriptor {
+    id: "celery-python",
+    semantics_version: 1,
+    kind: FrameworkPackKind::Source,
+    languages: &["python"],
+    required_capabilities: &[
+        LanguageCapability::Declarations,
+        LanguageCapability::Imports,
+        LanguageCapability::Calls,
+        LanguageCapability::Construction,
+        LanguageCapability::Decorators,
+        LanguageCapability::Members,
+        LanguageCapability::Ownership,
+    ],
+    framework_capabilities: &[
+        FrameworkCapability::Messaging,
+        FrameworkCapability::Scheduling,
+    ],
+    dependency_markers: &["celery"],
+    manifest_policy: FrameworkManifestPolicy::Advisory,
+    activation_rules: &["celery-task-decorator", "celery-task-invocation"],
+    accepted_roles: &[
+        SemanticRole::Import,
+        SemanticRole::Call,
+        SemanticRole::Construction,
+        SemanticRole::Decorator,
+        SemanticRole::MemberAccess,
+        SemanticRole::Ownership,
+    ],
+    emitted_relation_families: &[
+        FrameworkRelation::Produces,
+        FrameworkRelation::Consumes,
+        FrameworkRelation::Schedules,
+        FrameworkRelation::Triggers,
+    ],
+    occurrence_policy: FrameworkOccurrencePolicy::ExactEvidence,
+    limits: FrameworkLimits::DEFAULT,
+};
+
+const UNIVERSAL_FRAMEWORK_PACKS: &[FrameworkPackDescriptor] = &[
+    ASPNET_CSHARP_DESCRIPTOR,
+    PHP_FRAMEWORKS_DESCRIPTOR,
+    SPRING_JAVA_DESCRIPTOR,
+    SPRING_KOTLIN_DESCRIPTOR,
+    RAILS_RUBY_DESCRIPTOR,
+    VAPOR_SWIFT_DESCRIPTOR,
+    DART_BLOC_DESCRIPTOR,
+    DART_FLUTTER_NAVIGATION_DESCRIPTOR,
+    DART_RIVERPOD_DESCRIPTOR,
+    DJANGO_PYTHON_DESCRIPTOR,
+    DJANGO_REST_FRAMEWORK_PYTHON_DESCRIPTOR,
+    FASTAPI_PYTHON_DESCRIPTOR,
+    FLASK_PYTHON_DESCRIPTOR,
+    PYDANTIC_PYTHON_DESCRIPTOR,
+    SQLALCHEMY_PYTHON_DESCRIPTOR,
+    CELERY_PYTHON_DESCRIPTOR,
+    STARLETTE_PYTHON_DESCRIPTOR,
+    REACT_UI_DESCRIPTOR,
+];

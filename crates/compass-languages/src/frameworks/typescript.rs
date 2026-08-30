@@ -8,6 +8,7 @@ use tree_sitter::Node;
 use super::evidence::{EvidenceKind, EvidenceSet};
 use super::{
     RawDomainFact, RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    RawRouteStageFact, RawRouteStageRole,
 };
 use crate::{Extraction, RawNodeRecord, make_id};
 
@@ -485,6 +486,7 @@ fn collect_node_router_routes(
                             anchor: anchor(path, node),
                             handler_reference: handler.clone(),
                             middleware_references: middleware.clone(),
+                            stages: Vec::new(),
                             origin: RawFrameworkOrigin::Ast,
                             rule: None,
                             detail: detail.clone(),
@@ -556,6 +558,7 @@ fn collect_node_router_routes(
                     anchor: anchor(path, node),
                     handler_reference: handler.clone(),
                     middleware_references: middleware.clone(),
+                    stages: Vec::new(),
                     origin: RawFrameworkOrigin::Ast,
                     rule: None,
                     detail: detail.clone(),
@@ -741,12 +744,6 @@ pub(super) fn detect_non_express(
             "@nestjs/",
         )
         .direct_if(
-            imports_module("react-router"),
-            "react-router",
-            EvidenceKind::Import,
-            "react-router",
-        )
-        .direct_if(
             imports_module("vue-router"),
             "vue-router",
             EvidenceKind::Import,
@@ -758,13 +755,242 @@ pub(super) fn detect_non_express(
     if evidence.activates("angular-router") {
         collect_angular_router_routes(root, source, path, &mut facts);
     }
-    if evidence.activates("react-router") {
-        collect_react_router_routes(root, source, path, &mut facts, "");
-    }
     if evidence.activates("vue-router") {
         collect_vue_router_routes(root, source, path, &mut facts);
     }
     facts
+}
+
+/// Dedicated React Router owner used after the universal pack cut. The
+/// broader `typescript-web` adapter retains Angular/Nest/Vue behavior and
+/// import identity, but no longer publishes React Router route facts.
+pub(super) fn detect_react_router(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+    extraction: &mut Extraction,
+) -> Vec<RawFrameworkFact> {
+    if source.is_empty() {
+        return Vec::new();
+    }
+    let mut imports = Vec::new();
+    collect_import_aliases(path, root, source, &mut imports);
+    attach_import_aliases(path, source, root, extraction, &imports);
+    let file_route = detect_react_router_file_route(path, source, root);
+    let active = imports.iter().any(|alias| {
+        alias.module == "react-router"
+            || alias.module == "react-router-dom"
+            || alias.module.starts_with("react-router/")
+            || alias.module.starts_with("react-router-dom/")
+    });
+    if !active {
+        return file_route
+            .map(|route| vec![RawFrameworkFact::Route(route)])
+            .unwrap_or_default();
+    }
+    let mut facts = Vec::new();
+    if let Some(route) = file_route {
+        facts.push(RawFrameworkFact::Route(route));
+    }
+    collect_react_router_routes(root, source, path, &mut facts, "");
+    facts
+}
+
+/// React Router's framework mode uses a file-based route convention in
+/// `app/routes` or `src/routes`. Those modules frequently import only generated
+/// route types, so the import-gated config detector above cannot activate for
+/// them. Emit the route inventory and named loader/action stages from the
+/// stable file convention while leaving target selection to the resolver.
+fn detect_react_router_file_route(
+    path: &Path,
+    source: &[u8],
+    root: Node<'_>,
+) -> Option<RawRouteFact> {
+    let portable = path.to_string_lossy().replace('\\', "/");
+    let (marker, relative) = ["app/routes/", "src/routes/"].iter().find_map(|marker| {
+        portable
+            .find(marker)
+            .map(|index| (*marker, &portable[index + marker.len()..]))
+    })?;
+    let extension = Path::new(relative)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    // SvelteKit's `src/routes` convention is intentionally distinct from
+    // React Router's file routes.  Its `+page/+server` modules otherwise
+    // satisfy the broad directory heuristic and receive a misleading PAGE
+    // route in projects that have no React Router dependency.
+    if Path::new(relative)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .is_some_and(|stem| {
+            matches!(
+                stem,
+                "+page" | "+server" | "+layout" | "+error" | "+loading"
+            )
+        })
+    {
+        return None;
+    }
+    if !matches!(
+        extension,
+        "ts" | "tsx" | "js" | "jsx" | "mts" | "cts" | "mjs" | "cjs"
+    ) {
+        return None;
+    }
+    let route_file = relative
+        .rsplit_once('.')
+        .map_or(relative, |(stem, _)| stem)
+        .trim_matches('/');
+    if route_file.is_empty() || route_file.ends_with("routes") {
+        return None;
+    }
+    let normalized_path = react_router_file_path(route_file);
+    let syntax = super::typescript_syntax::TypeScriptSyntax::new(root, source);
+    let default_reference = react_router_default_export_reference(syntax);
+    let mut stages = Vec::new();
+    let default_anchor = react_router_named_declaration_anchor(syntax, path, &default_reference)
+        .unwrap_or_else(|| anchor(path, root));
+    stages.push(RawRouteStageFact {
+        role: RawRouteStageRole::RouteComponent,
+        position: 0,
+        reference: default_reference.clone(),
+        anchor: default_anchor,
+        origin: RawFrameworkOrigin::Convention,
+        detail: Map::from_iter([(
+            "convention".to_owned(),
+            Value::String("react-router-file-route".to_owned()),
+        )]),
+    });
+    for (name, role) in [
+        ("loader", RawRouteStageRole::Loader),
+        ("action", RawRouteStageRole::Action),
+    ] {
+        if !react_router_has_declaration(syntax, name) {
+            continue;
+        }
+        let stage_anchor = react_router_named_declaration_anchor(syntax, path, name)
+            .unwrap_or_else(|| anchor(path, root));
+        stages.push(RawRouteStageFact {
+            role,
+            position: u32::try_from(stages.len()).unwrap_or(u32::MAX),
+            reference: name.to_owned(),
+            anchor: stage_anchor,
+            origin: RawFrameworkOrigin::Ast,
+            detail: Map::from_iter([("property".to_owned(), Value::String(name.to_owned()))]),
+        });
+    }
+    Some(RawRouteFact {
+        framework: "react-router".to_owned(),
+        operation: "PAGE".to_owned(),
+        raw_path: normalized_path.clone(),
+        normalized_path,
+        declaring_scope: marker.trim_end_matches('/').to_owned(),
+        anchor: anchor(path, root),
+        handler_reference: default_reference,
+        middleware_references: Vec::new(),
+        stages,
+        origin: RawFrameworkOrigin::Convention,
+        rule: Some("react-router-file-route-convention".to_owned()),
+        detail: Map::from_iter([("file_route".to_owned(), Value::Bool(true))]),
+    })
+}
+
+fn react_router_file_path(route_file: &str) -> String {
+    let mut segments = Vec::new();
+    for piece in route_file.split('/') {
+        let mut pieces = piece.split('.').filter(|part| !part.is_empty());
+        for part in pieces.by_ref() {
+            if part == "_index" || part.starts_with('_') {
+                continue;
+            }
+            if part == "route" {
+                continue;
+            }
+            let segment = part
+                .strip_prefix('$')
+                .map_or_else(|| part.to_owned(), |name| format!("{{{name}}}"));
+            if !segment.is_empty() {
+                segments.push(segment);
+            }
+        }
+    }
+    if segments.is_empty() {
+        "/".to_owned()
+    } else {
+        format!("/{}", segments.join("/"))
+    }
+}
+
+fn react_router_default_export_reference(
+    syntax: super::typescript_syntax::TypeScriptSyntax<'_, '_>,
+) -> String {
+    for statement in syntax
+        .descendants(syntax.root())
+        .into_iter()
+        .filter(|node| node.kind() == "export_statement")
+    {
+        if !syntax.is_default_export_statement(statement) {
+            continue;
+        }
+        let mut cursor = statement.walk();
+        for child in statement.named_children(&mut cursor) {
+            if let Some(name) = child
+                .child_by_field_name("name")
+                .and_then(|name| syntax.text(name))
+                && (child.kind().contains("function") || child.kind().contains("class"))
+            {
+                return name.to_owned();
+            }
+            if matches!(child.kind(), "identifier" | "member_expression") {
+                return syntax.text(child).unwrap_or("default").to_owned();
+            }
+        }
+    }
+    "default".to_owned()
+}
+
+fn react_router_has_declaration(
+    syntax: super::typescript_syntax::TypeScriptSyntax<'_, '_>,
+    expected: &str,
+) -> bool {
+    syntax.descendants(syntax.root()).into_iter().any(|node| {
+        matches!(
+            node.kind(),
+            "function_declaration" | "class_declaration" | "variable_declarator"
+        ) && node
+            .child_by_field_name("name")
+            .and_then(|name| syntax.text(name))
+            .is_some_and(|name| name == expected)
+    })
+}
+
+fn react_router_named_declaration_anchor(
+    syntax: super::typescript_syntax::TypeScriptSyntax<'_, '_>,
+    path: &Path,
+    expected: &str,
+) -> Option<RawFrameworkAnchor> {
+    syntax
+        .descendants(syntax.root())
+        .into_iter()
+        .find_map(|node| {
+            if !matches!(
+                node.kind(),
+                "function_declaration" | "class_declaration" | "variable_declarator"
+            ) {
+                return None;
+            }
+            let name = node.child_by_field_name("name")?;
+            (syntax.text(name) == Some(expected)).then(|| RawFrameworkAnchor {
+                source_file: path.to_string_lossy().into_owned(),
+                start_byte: name.start_byte() as u64,
+                end_byte: name.end_byte() as u64,
+                start_line: u32::try_from(name.start_position().row + 1).unwrap_or(u32::MAX),
+                start_column: u32::try_from(name.start_position().column).unwrap_or(u32::MAX),
+                end_line: u32::try_from(name.end_position().row + 1).unwrap_or(u32::MAX),
+                end_column: u32::try_from(name.end_position().column).unwrap_or(u32::MAX),
+            })
+        })
 }
 
 fn attach_import_aliases(
@@ -872,9 +1098,7 @@ fn collect_default_export_identities(
     exports: &mut Vec<(String, u64)>,
 ) {
     if node.kind() == "export_statement"
-        && node_text(node, source)
-            .trim_start()
-            .starts_with("export default")
+        && super::typescript_syntax::has_default_export_keyword(node)
     {
         let mut cursor = node.walk();
         if let Some(declaration) = node.named_children(&mut cursor).find(|child| {
@@ -1149,6 +1373,7 @@ fn collect_express_routes(
                         anchor: anchor(path, node),
                         handler_reference: handler,
                         middleware_references: middleware,
+                        stages: Vec::new(),
                         origin: RawFrameworkOrigin::Ast,
                         rule: None,
                         detail,
@@ -1665,11 +1890,67 @@ fn collect_route_config_with_parent(
         && let Some(raw_path) = direct_object_string_property(node, source, "path")
     {
         current_parent = join_paths(parent_path, &raw_path);
-        if let Some((handler, opaque_handler)) = direct_object_handler_property(node, source) {
-            let middleware = ["loader", "action"]
-                .into_iter()
-                .filter_map(|property| direct_object_identifier_property(node, source, property))
-                .collect();
+        if let Some((handler, opaque_handler, handler_node, handler_property)) =
+            direct_object_handler_property(node, source)
+        {
+            let mut stages = Vec::new();
+            let mut legacy_middleware = Vec::new();
+            for (property, role) in [
+                ("loader", RawRouteStageRole::Loader),
+                ("action", RawRouteStageRole::Action),
+                ("errorElement", RawRouteStageRole::Boundary),
+                ("errorComponent", RawRouteStageRole::Boundary),
+            ] {
+                let Some((raw_value, value_node)) =
+                    direct_object_value_property(node, source, property)
+                else {
+                    continue;
+                };
+                let raw_value = raw_value.trim();
+                let reference = if is_reference(raw_value) {
+                    raw_value.to_owned()
+                } else if role == RawRouteStageRole::Boundary {
+                    jsx_tag_reference(raw_value).unwrap_or_else(|| {
+                        format!("opaque_route_handler_at_{}", value_node.start_byte())
+                    })
+                } else {
+                    continue;
+                };
+                if role == RawRouteStageRole::Loader {
+                    // Preserve the legacy projection while the typed stage
+                    // remains authoritative for resolver/publication code.
+                    legacy_middleware.push(reference.clone());
+                }
+                stages.push(RawRouteStageFact {
+                    role,
+                    position: u32::try_from(stages.len()).unwrap_or(u32::MAX),
+                    reference,
+                    anchor: anchor(path, value_node),
+                    origin: RawFrameworkOrigin::Ast,
+                    detail: Map::from_iter([(
+                        "property".to_owned(),
+                        Value::String(property.to_owned()),
+                    )]),
+                });
+            }
+            // Preserve the established handler stage for Angular/Vue route
+            // config adapters. React Router framework mode is the one pack
+            // that needs the more specific route-component stage; changing
+            // unrelated adapters would silently break their public route
+            // contract and downstream qualification fixtures.
+            let component_role = if framework == "react-router" {
+                RawRouteStageRole::RouteComponent
+            } else {
+                RawRouteStageRole::Handler
+            };
+            stages.push(RawRouteStageFact {
+                role: component_role,
+                position: u32::try_from(stages.len()).unwrap_or(u32::MAX),
+                reference: handler.clone(),
+                anchor: anchor(path, handler_node),
+                origin: RawFrameworkOrigin::Ast,
+                detail: Map::from_iter([("property".to_owned(), Value::String(handler_property))]),
+            });
             let detail = if opaque_handler {
                 Map::from_iter([("opaque_handler".into(), Value::Bool(true))])
             } else {
@@ -1685,9 +1966,15 @@ fn collect_route_config_with_parent(
                 detail,
             ) {
                 RawFrameworkFact::Route(route) => route,
-                RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => unreachable!(),
+                RawFrameworkFact::Domain(_)
+                | RawFrameworkFact::Annotation(_)
+                | RawFrameworkFact::Role(_)
+                | RawFrameworkFact::Relation(_)
+                | RawFrameworkFact::Configuration(_)
+                | RawFrameworkFact::FileSet(_) => unreachable!(),
             };
-            fact.middleware_references = middleware;
+            fact.middleware_references = legacy_middleware;
+            fact.stages = stages;
             facts.push(RawFrameworkFact::Route(fact));
         }
     }
@@ -1724,6 +2011,7 @@ fn route_fact(
         anchor: anchor(source_path, node),
         handler_reference: handler.to_owned(),
         middleware_references: Vec::new(),
+        stages: Vec::new(),
         origin: RawFrameworkOrigin::Ast,
         rule: None,
         detail,
@@ -1938,12 +2226,39 @@ fn direct_object_string_property(node: Node<'_>, source: &[u8], name: &str) -> O
     direct_object_property(node, source, name).and_then(string_literal)
 }
 
-fn direct_object_identifier_property(node: Node<'_>, source: &[u8], name: &str) -> Option<String> {
-    let value = direct_object_property(node, source, name)?.trim();
-    is_reference(value).then(|| value.to_owned())
+fn direct_object_value_property<'tree>(
+    node: Node<'tree>,
+    source: &[u8],
+    name: &str,
+) -> Option<(String, Node<'tree>)> {
+    let mut cursor = node.walk();
+    node.named_children(&mut cursor)
+        .filter(|child| child.kind() == "pair")
+        .find_map(|pair| {
+            let key = pair.child_by_field_name("key")?;
+            let key = node_text(key, source).trim().trim_matches(['"', '\'', '`']);
+            if key != name {
+                return None;
+            }
+            let value = pair
+                .child_by_field_name("value")
+                .or_else(|| pair.named_child(1))?;
+            Some((node_text(value, source).to_owned(), value))
+        })
 }
 
-fn direct_object_handler_property(node: Node<'_>, source: &[u8]) -> Option<(String, bool)> {
+fn jsx_tag_reference(value: &str) -> Option<String> {
+    let value = value.trim().strip_prefix('<')?;
+    let tag = value
+        .split(|character: char| character.is_whitespace() || matches!(character, '/' | '>'))
+        .next()?;
+    is_reference(tag).then(|| tag.to_owned())
+}
+
+fn direct_object_handler_property<'tree>(
+    node: Node<'tree>,
+    source: &[u8],
+) -> Option<(String, bool, Node<'tree>, String)> {
     for name in [
         "component",
         "element",
@@ -1951,12 +2266,12 @@ fn direct_object_handler_property(node: Node<'_>, source: &[u8]) -> Option<(Stri
         "loadComponent",
         "loadChildren",
     ] {
-        let Some(value) = direct_object_property(node, source, name) else {
+        let Some((value, value_node)) = direct_object_value_property(node, source, name) else {
             continue;
         };
         let value = value.trim();
         if is_reference(value) {
-            return Some((value.to_owned(), false));
+            return Some((value.to_owned(), false, value_node, name.to_owned()));
         }
         if let Some(tag) = value.strip_prefix('<').and_then(|value| {
             value
@@ -1966,12 +2281,14 @@ fn direct_object_handler_property(node: Node<'_>, source: &[u8]) -> Option<(Stri
                 .next()
         }) && is_reference(tag)
         {
-            return Some((tag.to_owned(), false));
+            return Some((tag.to_owned(), false, value_node, name.to_owned()));
         }
         if value.contains("=>") || value.contains("import(") || value.starts_with("lazy(") {
             return Some((
                 format!("opaque_route_handler_at_{}", node.start_byte()),
                 true,
+                value_node,
+                name.to_owned(),
             ));
         }
     }

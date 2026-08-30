@@ -18,6 +18,7 @@ pub(super) fn declaration_node(
     // all generic parameters as `parameter` nodes.
     let graph_kind = match declaration.kind.as_str() {
         "type_parameter" | "lifetime_parameter" | "const_parameter" => "parameter",
+        "object" | "companion_object" if declaration.language == "kotlin" => "class",
         kind => kind,
     };
     let mut attributes = Map::from_iter([
@@ -112,6 +113,9 @@ pub(super) fn declaration_node(
             Value::String(module_or_package.clone()),
         );
     }
+    if declaration.language == "python" && declaration.range.source_file.ends_with(".pyi") {
+        attributes.insert("source_kind".to_owned(), Value::String("stub".to_owned()));
+    }
     if let Some(definition_range) = definition_range.filter(|range| *range != &declaration.range) {
         attributes.insert(
             "source_anchor".to_owned(),
@@ -128,16 +132,21 @@ pub(super) fn declaration_node(
     }
 }
 
-/// Preserve the public callable spelling emitted by the pre-universal
-/// TypeScript/JavaScript extractor. Universal evidence keeps its richer module
-/// qualified name for resolution, while framework route contracts continue to
-/// identify source callables as `name()@offset` (or `Owner::name()@offset`).
+/// Preserve the public callable spelling emitted by pre-universal extractors.
+/// Universal evidence keeps its richer module-qualified name for resolution,
+/// while framework route contracts continue to identify source callables as
+/// `name()@offset` (or `Owner::name()@offset`). Swift's legacy route contract
+/// intentionally omitted the offset, so its compatibility spelling is
+/// `name()`.
 pub(super) fn legacy_callable_qualified_name(declaration: &DeclarationFact) -> Option<String> {
     let start = declaration
         .definition_start_byte
         .unwrap_or(declaration.range.start_byte);
     match declaration.kind.as_str() {
         "function" => {
+            if declaration.language == "swift" {
+                return Some(format!("{}()", declaration.name));
+            }
             if declaration.name == "default" {
                 Some("default".to_owned())
             } else {
@@ -180,9 +189,10 @@ pub(super) fn relation_name(relation: CandidateRelation) -> &'static str {
         CandidateRelation::Returns => "returns",
         CandidateRelation::Extends => "inherits",
         CandidateRelation::Implements => "implements",
+        CandidateRelation::UsesTrait => "mixes_in",
+        CandidateRelation::Overrides => "overrides",
         CandidateRelation::AccessesMember => "accesses",
-        CandidateRelation::Contains => "contains",
-        CandidateRelation::Owns => "owns",
+        CandidateRelation::Contains | CandidateRelation::Owns => "contains",
         CandidateRelation::Embeds => "embeds",
         CandidateRelation::Imports => "imports_from",
         CandidateRelation::Reexports => "re_exports",
@@ -341,6 +351,8 @@ pub(super) fn external_kind(candidate: &RelationshipCandidate) -> &'static str {
         | CandidateRelation::TypeOf
         | CandidateRelation::Returns => "type_alias",
         CandidateRelation::Implements => "interface",
+        CandidateRelation::UsesTrait => "trait",
+        CandidateRelation::Overrides => "function",
         CandidateRelation::AccessesMember => "variable",
         CandidateRelation::Calls | CandidateRelation::IndirectCalls => "function",
         CandidateRelation::Constructs => "class",

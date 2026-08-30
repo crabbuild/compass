@@ -22,6 +22,47 @@ Not every option follows one universal resolver. The command's help and source
 remain authoritative. In automation, prefer explicit non-secret options and
 record them.
 
+## Architecture overlay
+
+Architecture exports work without configuration. When repository-owned domain
+vocabulary is more precise than automatic path and declaration evidence, pass
+a bounded overlay explicitly:
+
+```bash
+compass export callflow-html \
+  --architecture-overlay .compass/architecture.toml
+```
+
+The first schema is `compass.architecture-overlay/1`. It supports source-scope
+rules and named groups selected by normalized path prefixes or numeric
+community IDs. IDs and selectors must be unique; empty or overlapping path
+prefixes and communities claimed by multiple groups fail before output is
+published. Overlay names affect presentation, while stable group identity and
+graph relationships remain separate. Source-rule values are `production`,
+`test`, `generated`, `vendor`, `documentation`, and `unknown`.
+
+```toml
+schema = "compass.architecture-overlay/1"
+
+[[sourceRules]]
+pathPrefix = "generated/client"
+scope = "generated"
+
+[[groups]]
+id = "billing-ledger"
+name = "Billing Ledger"
+pathPrefixes = ["crates/billing"]
+pin = true
+```
+
+For the canonical current-project artifact
+`<project>/compass-out/graph.json`, Compass discovers
+`<project>/.compass/architecture.toml`. Arbitrary or historical graph paths do
+not inspect a live checkout; pass their matching overlay explicitly with
+`--architecture-overlay`. An explicit option always wins. `--sections` is a
+deprecated compatibility spelling; legacy JSON sections are converted to
+overlay community selectors.
+
 ## Output root
 
 Default:
@@ -164,17 +205,35 @@ Current built-in backend code recognizes families including:
 | Backend | Key variables | Endpoint/model examples |
 | --- | --- | --- |
 | Anthropic/Claude | `ANTHROPIC_API_KEY` | `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL` |
+| Kimi/Moonshot | `MOONSHOT_API_KEY` | `KIMI_BASE_URL` |
 | Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` | `GEMINI_BASE_URL`, `COMPASS_GEMINI_MODEL` |
 | OpenAI | `OPENAI_API_KEY` | `OPENAI_BASE_URL`, `OPENAI_MODEL`, `COMPASS_OPENAI_MODEL` |
+| DeepSeek | `DEEPSEEK_API_KEY` | `DEEPSEEK_BASE_URL`, `COMPASS_DEEPSEEK_MODEL` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT` |
 | Ollama-compatible | optional `OLLAMA_API_KEY` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
 | Bedrock | AWS credential chain | `COMPASS_BEDROCK_MODEL` |
+| Claude CLI | local `claude` login | `COMPASS_CLAUDE_CLI_MODEL` |
 
 Some Compass variables retain `COMPASS_` names. Their presence does not
 change the public executable name.
 
-Use `compass extract --help` and current provider documentation before
-deployment; backend support and model defaults can evolve.
+Choose a provider explicitly when more than one credential is present:
+
+```bash
+COMPASS_BACKEND=openai OPENAI_API_KEY="$OPENAI_API_KEY" \
+  COMPASS_MODEL=gpt-4.1-mini compass extract .
+```
+
+`--backend` and `--model` take precedence over `COMPASS_BACKEND` and
+`COMPASS_MODEL`. If neither is supplied, Compass detects the first configured
+built-in provider in this order: Gemini, Kimi, Claude, OpenAI, DeepSeek, Azure,
+Bedrock, then Ollama; custom providers are considered after built-ins. The
+selector and model are not secrets; `COMPASS_MODEL` also takes precedence over
+a provider-specific model variable. Provider credentials remain in the
+provider-specific environment variable or secret store and are never written
+to graph artifacts or history profiles. Use `compass extract --help` and
+current provider documentation before deployment; backend support and model
+defaults can evolve.
 
 ## Custom provider registry
 
@@ -210,6 +269,13 @@ Inspect:
 ```bash
 compass provider list
 compass provider show internal
+```
+
+Use the registered provider without putting its secret in the registry:
+
+```bash
+COMPASS_BACKEND=internal INTERNAL_MODEL_API_KEY="$INTERNAL_MODEL_API_KEY" \
+  compass extract .
 ```
 
 Remove:
@@ -405,6 +471,25 @@ compass install --project --platform codex
 Project scope writes reviewable repository files. Global scope writes
 platform-specific user configuration. The platform list and exact destinations
 come from `compass install --help`.
+
+## Agent Graph MCP configuration
+
+Agent Graph tools are opt-in server configuration:
+
+```text
+--agent-graph-project PATH       repeatable canonical project allowlist
+--agent-graph-principal ID      trusted owner identity
+--agent-graph-state-root PATH   explicit state for one non-Git project
+--agent-graph-writes            advertise and authorize write batches
+--agent-graph-masks             additionally authorize curated masks
+--write-api-key KEY             HTTP write credential, distinct from --api-key
+```
+
+Setting a state root for multiple projects is rejected. Masks require writes.
+HTTP write startup requires non-empty, distinct read and write keys; the same
+values may be supplied through `COMPASS_API_KEY` and
+`COMPASS_WRITE_API_KEY`. Stdio still requires explicit write enablement but
+does not create a network credential boundary.
 
 ## Reproducibility record
 

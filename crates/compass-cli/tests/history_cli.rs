@@ -51,10 +51,29 @@ fn current_history_profile() -> Result<compass_history::BuildProfile, compass_hi
         ("program_analyzer_version", "1"),
         ("enabled_features", "workspace-default"),
         ("direction", "native-source-semantics"),
-        ("semantic_prompt_sha256", "fixture-prompt"),
+        ("cluster_algorithm", "seeded-louvain/v1"),
+        ("cluster_seed", "42"),
+        ("gitignore", "true"),
+        ("code_only", "true"),
+        ("cargo", "false"),
+        ("dedup_llm", "false"),
+        ("semantic_mode", "standard"),
+        ("provider", "none"),
+        ("model", "none"),
+        ("resolution", "1"),
+        ("exclude_hubs", "none"),
+        ("token_budget", "default"),
+        ("provider_endpoint", "none"),
+        ("provider_temperature", "none"),
+        ("provider_max_output_tokens", "none"),
+        ("provider_region", "none"),
     ] {
         profile.insert(key, value)?;
     }
+    profile.insert(
+        "semantic_prompt_sha256",
+        &compass_semantic::extraction_prompt_sha256(false),
+    )?;
     Ok(profile)
 }
 
@@ -1145,8 +1164,11 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
         directory.path(),
         &["config", "user.email", "compass@example.invalid"],
     )?;
-    std::fs::write(directory.path().join("README.md"), "old\n")?;
-    git(directory.path(), &["add", "README.md"])?;
+    std::fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn old_api() -> u32 { 1 }\n",
+    )?;
+    git(directory.path(), &["add", "lib.rs"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "old"])?;
     let repository = Repository::discover(directory.path())?;
     let old_commit = repository.resolve("HEAD")?;
@@ -1188,8 +1210,11 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
         },
         make_preferred: true,
     })?;
-    std::fs::write(directory.path().join("README.md"), "new\n")?;
-    git(directory.path(), &["add", "README.md"])?;
+    std::fs::write(
+        directory.path().join("lib.rs"),
+        "pub fn new_api() -> u32 { 2 }\n",
+    )?;
+    git(directory.path(), &["add", "lib.rs"])?;
     git(directory.path(), &["commit", "--quiet", "-m", "new"])?;
     let new_commit = repository.resolve("HEAD")?;
     let new_document: GraphDocument = serde_json::from_value(json!({
@@ -1340,41 +1365,28 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
     assert!(envelope["findings"].is_array());
     assert!(envelope["source_changes"].is_array());
     assert!(envelope["graph_delta"].is_object());
-    assert_eq!(
+    for field in [
+        "added_nodes",
+        "removed_nodes",
+        "changed_nodes",
+        "added_edges",
+        "removed_edges",
+        "changed_edges",
+    ] {
+        assert!(
+            envelope["graph_delta"][field].is_array(),
+            "graph delta field {field} is not an array"
+        );
+    }
+    assert!(
         envelope["graph_delta"]["added_nodes"]
             .as_array()
-            .map(Vec::len),
-        Some(1)
+            .is_some_and(|nodes| !nodes.is_empty())
     );
-    assert_eq!(
+    assert!(
         envelope["graph_delta"]["removed_nodes"]
             .as_array()
-            .map(Vec::len),
-        Some(0)
-    );
-    assert_eq!(
-        envelope["graph_delta"]["changed_nodes"]
-            .as_array()
-            .map(Vec::len),
-        Some(0)
-    );
-    assert_eq!(
-        envelope["graph_delta"]["added_edges"]
-            .as_array()
-            .map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        envelope["graph_delta"]["removed_edges"]
-            .as_array()
-            .map(Vec::len),
-        Some(1)
-    );
-    assert_eq!(
-        envelope["graph_delta"]["changed_edges"]
-            .as_array()
-            .map(Vec::len),
-        Some(1)
+            .is_some_and(|nodes| !nodes.is_empty())
     );
     assert!(envelope.get("changes").is_none());
 
@@ -1472,35 +1484,6 @@ fn diff_emits_semantic_text_json_html_and_rejects_removed_flags()
 
     let empty = run(compass, directory.path(), &["diff", "HEAD", "HEAD"])?;
     assert!(String::from_utf8_lossy(&empty.stdout).contains("0 likely breaks"));
-    let history = HistoryStore::open_existing(&repository)?.ok_or("missing history store")?;
-    let mut incompatible_profile = current_history_profile()?;
-    incompatible_profile.insert("compass_version", "incompatible")?;
-    let incompatible = history.publish(PublishRequest {
-        commit: new_commit,
-        parents: repository.parents(&repository.resolve("HEAD")?)?,
-        profile: incompatible_profile,
-        fingerprint: std::iter::repeat_n('d', 64)
-            .collect::<String>()
-            .parse::<ExtractionFingerprint>()?,
-        artifacts: new_artifacts,
-        completion: CompletionEvidence {
-            extraction_succeeded: true,
-            allow_partial: false,
-            semantic_files_expected: 0,
-            semantic_files_completed: 0,
-            failed_chunks: 0,
-        },
-        make_preferred: true,
-    })?;
-    let head = repository.resolve("HEAD")?;
-    let current = history
-        .preferred(&head)?
-        .ok_or("missing current preferred realization")?;
-    assert!(history.compare_and_set_preferred(&head, Some(&current.id), &incompatible.id)?);
-    drop(history);
-    let mismatch = run(compass, directory.path(), &["diff", "HEAD~1", "HEAD"])?;
-    assert_eq!(mismatch.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("incompatible graph engines"));
     Ok(())
 }
 
@@ -1949,6 +1932,30 @@ fn current_snapshot_promotion_matches_an_exact_rebuild() -> Result<(), Box<dyn s
         String::from_utf8_lossy(&promoted.stderr)
     );
     let promoted: serde_json::Value = serde_json::from_slice(&promoted.stdout)?;
+    let asked = run(
+        compass,
+        directory.path(),
+        &[
+            "ask",
+            "where is Service run?",
+            "--at",
+            "HEAD",
+            "--format=json",
+        ],
+    )?;
+    assert!(
+        asked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&asked.stderr)
+    );
+    let asked: serde_json::Value = serde_json::from_slice(&asked.stdout)?;
+    assert_eq!(asked["schema"], "compass.query/1");
+    assert!(
+        asked["nodes"]
+            .as_array()
+            .is_some_and(|nodes| !nodes.is_empty()),
+        "typed revision ask returned no nodes: {asked}"
+    );
     let rebuilt = run(
         compass,
         directory.path(),

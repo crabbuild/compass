@@ -1,7 +1,7 @@
 //! Direct universal evidence for the ECMAScript family.
 //!
 //! TypeScript and JavaScript share the bounded source-grounded emitter while
-//! retaining distinct adapter identities. The production registry dispatches
+//! retaining distinct language identities. The production registry dispatches
 //! both languages here; qualification callers use the same entry point so
 //! there is no shadow implementation to drift from the shipped graph path.
 
@@ -18,7 +18,7 @@ use super::model::{
     SemanticEvidenceBatch, SemanticRole, SymbolNamespace,
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits};
-use crate::{AdapterRegistry, make_id};
+use crate::{UniversalEvidenceRegistry, make_id};
 
 const MAX_TRAVERSAL_DEPTH: usize = 512;
 const MAX_INLINE_OBJECT_PROPERTIES: usize = 256;
@@ -298,7 +298,7 @@ struct CandidateState<'source, 'tree> {
     _tree: std::marker::PhantomData<Node<'tree>>,
 }
 
-pub(crate) fn extract_candidate_tree_evidence(
+pub(crate) fn emit_tree_evidence(
     path: &Path,
     source_file: &str,
     source: &[u8],
@@ -310,22 +310,22 @@ pub(crate) fn extract_candidate_tree_evidence(
         "javascript" => "javascript",
         _ => {
             return Err(EvidenceError::new(
-                EvidenceErrorCode::InvalidAdapter,
-                format!("unsupported ECMAScript candidate dialect {dialect:?}"),
+                EvidenceErrorCode::InvalidPipeline,
+                format!("unsupported ECMAScript dialect {dialect:?}"),
             ));
         }
     };
-    let profile = AdapterRegistry::universal_profile(language).ok_or_else(|| {
+    let pipeline = UniversalEvidenceRegistry::pipeline(language).ok_or_else(|| {
         EvidenceError::new(
-            EvidenceErrorCode::InvalidAdapter,
-            format!("ECMAScript universal adapter {language:?} is not registered"),
+            EvidenceErrorCode::InvalidPipeline,
+            format!("ECMAScript universal evidence pipeline {language:?} is not registered"),
         )
     })?;
     let module_name = module_name(path, source_file);
     let dialect_name = dialect_for_path(path, dialect);
     let mut builder = EvidenceBuilder::new_with_dialect(
-        profile,
-        format!("compass.languages.{language}.universal.candidate"),
+        pipeline,
+        format!("compass.languages.{language}.universal"),
         source_file,
         EvidenceLimits::default(),
         Some(&dialect_name),
@@ -4142,11 +4142,6 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         true
     }
 
-    fn builtin_global_target(&self, scope_id: &str, name: &str) -> Option<(String, String)> {
-        self.is_unshadowed_builtin(scope_id, name)
-            .then(|| (format!("global::{name}"), "javascript.global".to_owned()))
-    }
-
     fn builtin_receiver_name(&self, scope_id: &str, object: Node<'tree>) -> Option<String> {
         match object.kind() {
             "identifier" | "type_identifier" | "jsx_identifier" => {
@@ -4166,25 +4161,20 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
         }
     }
 
-    fn builtin_member_target(
+    fn is_builtin_member_target(
         &self,
         scope_id: &str,
         object: Node<'tree>,
         property_name: &str,
-    ) -> Option<(String, String)> {
-        let receiver = self.builtin_receiver_name(scope_id, object)?;
-        let known = if object.kind() == "new_expression" {
+    ) -> bool {
+        let Some(receiver) = self.builtin_receiver_name(scope_id, object) else {
+            return false;
+        };
+        if object.kind() == "new_expression" {
             known_builtin_instance_member(&receiver, property_name)
         } else {
             known_builtin_static_member(&receiver, property_name)
-        };
-        if !known {
-            return None;
         }
-        Some((
-            format!("global::{receiver}.{property_name}"),
-            "javascript.global".to_owned(),
-        ))
     }
 
     fn builtin_type_target(&self, scope_id: &str, name: &str) -> Option<(String, String)> {
@@ -5092,9 +5082,15 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             );
             let Some(resolution) = resolution else {
                 if let Some(object) = object
-                    && let Some((target, module)) =
-                        self.builtin_member_target(scope_id, object, &property_name)
+                    && self.is_builtin_member_target(scope_id, object, &property_name)
                 {
+                    if self.language != "typescript" {
+                        return Ok(());
+                    }
+                    let Some(receiver) = self.builtin_receiver_name(scope_id, object) else {
+                        return Ok(());
+                    };
+                    let target = format!("global::{receiver}.{property_name}");
                     return self.add_external_resolution_candidate(
                         property,
                         scope_id,
@@ -5112,15 +5108,14 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                         Some(&node_text(self.source, function)),
                         member_context,
                         &target,
-                        &module,
+                        "javascript.global",
                         argument_count,
                         argument_types,
                         &[
+                            "class",
+                            "constructor",
                             "function",
                             "method",
-                            "constructor",
-                            "class",
-                            "variable",
                             "property",
                             "external",
                         ],
@@ -5353,9 +5348,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
             &argument_types,
         );
         let Some(resolution) = resolution else {
-            if let Some((qualified_target, module)) =
-                self.builtin_global_target(scope_id, &spelling)
-            {
+            if self.is_unshadowed_builtin(scope_id, &spelling) {
+                if self.language != "typescript" {
+                    return Ok(());
+                }
+                let target_name = format!("global::{spelling}");
                 return self.add_external_resolution_candidate(
                     target,
                     scope_id,
@@ -5372,11 +5369,11 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                     &spelling,
                     None,
                     call_context,
-                    &qualified_target,
-                    &module,
+                    &target_name,
+                    "javascript.global",
                     argument_count,
                     argument_types,
-                    &["function", "class", "external"],
+                    &["class", "constructor", "function", "external"],
                 );
             }
             return self.add_unresolved_candidate(
@@ -5910,24 +5907,8 @@ impl<'source, 'tree> CandidateState<'source, 'tree> {
                 ],
             );
         }
-        if let Some((target, module)) = self.builtin_member_target(scope_id, object, &property_name)
-        {
-            return self.add_external_resolution_candidate(
-                property,
-                scope_id,
-                CandidateRelation::AccessesMember,
-                SemanticRole::MemberAccess,
-                &property_name,
-                Some(&node_text(self.source, object)),
-                "builtin_member",
-                &target,
-                &module,
-                None,
-                Vec::new(),
-                &[
-                    "property", "method", "function", "class", "variable", "external",
-                ],
-            );
+        if self.is_builtin_member_target(scope_id, object, &property_name) {
+            return Ok(());
         }
         // A local variable without a source-proven nominal type is still a
         // real member occurrence, but its target is not safe to derive from
@@ -12310,14 +12291,40 @@ fn collect_import_bindings<'tree>(
         collect_nodes_of_kind(clause, "export_specifier", &mut specifiers);
         for specifier in specifiers {
             let identifiers = direct_identifier_children(specifier, source);
-            let Some(imported) = identifiers.first().copied() else {
+            if let Some(imported) = identifiers.first().copied() {
+                let local = identifiers.get(1).copied().unwrap_or(imported);
+                output.push(ImportBinding {
+                    local_name: node_text(source, local),
+                    imported_name: node_text(source, imported),
+                    anchor: local,
+                    type_only: statement_type_only
+                        || node_text(source, specifier)
+                            .trim_start()
+                            .starts_with("type "),
+                });
+                continue;
+            }
+            // Tree-sitter represents keyword-only specifiers such as
+            // `export { default } from "./component"` without named child
+            // identifier nodes. Recover the bounded spelling from the
+            // specifier text instead of silently dropping the re-export.
+            let specifier_text = node_text(source, specifier);
+            let spelling = specifier_text
+                .trim()
+                .strip_prefix("type ")
+                .unwrap_or_else(|| specifier_text.trim());
+            let mut names = spelling.splitn(2, " as ").map(str::trim);
+            let Some(imported) = names.next().filter(|name| !name.is_empty()) else {
                 continue;
             };
-            let local = identifiers.get(1).copied().unwrap_or(imported);
+            let local = names
+                .next()
+                .filter(|name| !name.is_empty())
+                .unwrap_or(imported);
             output.push(ImportBinding {
-                local_name: node_text(source, local),
-                imported_name: node_text(source, imported),
-                anchor: local,
+                local_name: local.to_owned(),
+                imported_name: imported.to_owned(),
+                anchor: specifier,
                 type_only: statement_type_only
                     || node_text(source, specifier)
                         .trim_start()
@@ -13281,6 +13288,7 @@ fn role_name(role: SemanticRole) -> &'static str {
         SemanticRole::Decorator => "decorator",
         SemanticRole::Annotation => "annotation",
         SemanticRole::BaseType => "base_type",
+        SemanticRole::Override => "override",
         SemanticRole::TypeReference => "type_reference",
         SemanticRole::MemberAccess => "member_access",
         SemanticRole::Ownership => "ownership",

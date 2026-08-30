@@ -24,6 +24,8 @@ jobs:
           versions="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name != "compass-tree-sitter-language-pack") | .version' | sort -u)"
           test "$(printf '%s\n' "$versions" | wc -l | tr -d ' ')" = "1"
           test "$GITHUB_REF_NAME" = "compass-v$versions"
+      - name: Validate universal evidence promotion decision
+        run: python3 scripts/check_universal_evidence_promotion.py
 
   code-graph-qualification:
     needs: metadata
@@ -38,9 +40,16 @@ jobs:
         with:
           workspaces: .
           key: release-code-graph-qualification
+      - name: Provision pinned parser sources
+        env:
+          TSLP_PARSER_SOURCE_DIR: ${{ runner.temp }}/compass-parser-sources
+        run: ./scripts/provision_parser_sources.sh "$TSLP_PARSER_SOURCE_DIR"
+      - name: Fetch pinned Rust dependencies
+        run: cargo fetch --locked
       - name: Qualify pinned enterprise repository
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/compass-code-graph-v1
+          TSLP_PARSER_SOURCE_DIR: ${{ runner.temp }}/compass-parser-sources
         shell: bash
         run: >-
           ./scripts/qualify_code_graph_v1.sh
@@ -111,6 +120,7 @@ jobs:
           "dist/verify/$name/${{ matrix.binary }}" query --help
           test -f "dist/verify/$name/LICENSE-MIT"
           test -f "dist/verify/$name/LICENSE-APACHE"
+          test -f "dist/verify/$name/LICENSE-BOOST"
           test -f "dist/verify/$name/THIRD_PARTY_NOTICES.md"
           (
             cd dist

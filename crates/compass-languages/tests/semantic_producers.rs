@@ -20,206 +20,6 @@ fn relations(extraction: &Extraction) -> HashSet<String> {
         .collect()
 }
 
-fn assert_exact_containment(
-    extraction: &Extraction,
-    target_qualified_prefix: &str,
-    owner_qualified_prefix: Option<&str>,
-) -> Result<(), Box<dyn Error>> {
-    let target = extraction
-        .nodes
-        .iter()
-        .find(|node| {
-            let qualified = node.string("qualified_name");
-            if target_qualified_prefix.ends_with('@') {
-                qualified.starts_with(target_qualified_prefix)
-            } else {
-                qualified == target_qualified_prefix
-            }
-        })
-        .ok_or_else(|| {
-            format!(
-                "missing target {target_qualified_prefix}: {:?}",
-                extraction
-                    .nodes
-                    .iter()
-                    .map(|node| node.string("qualified_name"))
-                    .collect::<Vec<_>>()
-            )
-        })?;
-    let owner = match owner_qualified_prefix {
-        Some(prefix) => extraction
-            .nodes
-            .iter()
-            .find(|node| {
-                let qualified = node.string("qualified_name");
-                if prefix.ends_with('@') {
-                    qualified.starts_with(prefix)
-                } else {
-                    qualified == prefix
-                }
-            })
-            .ok_or_else(|| format!("missing owner {prefix}"))?,
-        None => extraction
-            .nodes
-            .iter()
-            .find(|node| {
-                matches!(node.string("symbol_kind").as_str(), "file" | "source_file")
-                    || (node.string("qualified_name").is_empty() && node.label().contains('.'))
-            })
-            .ok_or_else(|| {
-                format!(
-                    "missing file owner: {:?}",
-                    extraction
-                        .nodes
-                        .iter()
-                        .map(|node| (node.label(), node.string("symbol_kind")))
-                        .collect::<Vec<_>>()
-                )
-            })?,
-    };
-    let start = target.attributes["start_byte"]
-        .as_u64()
-        .ok_or("missing target start byte")?;
-    let end = target.attributes["end_byte"]
-        .as_u64()
-        .ok_or("missing target end byte")?;
-    let occurrences = extraction
-        .edges
-        .iter()
-        .filter(|edge| {
-            edge.string("relation") == "contains"
-                && edge
-                    .attributes
-                    .get("start_byte")
-                    .and_then(serde_json::Value::as_u64)
-                    == Some(start)
-                && edge
-                    .attributes
-                    .get("end_byte")
-                    .and_then(serde_json::Value::as_u64)
-                    == Some(end)
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        occurrences.len(),
-        1,
-        "containment site {start}..{end} for {target_qualified_prefix}: {occurrences:#?}"
-    );
-    assert_eq!(occurrences[0].source, owner.id);
-    assert_eq!(occurrences[0].target, target.id);
-    Ok(())
-}
-
-fn assert_unique_node_ids(extraction: &Extraction) {
-    let ids = extraction
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<HashSet<_>>();
-    assert_eq!(
-        ids.len(),
-        extraction.nodes.len(),
-        "nodes={:#?}",
-        extraction.nodes
-    );
-}
-
-fn assert_containment_sites_belong_to_targets(extraction: &Extraction) {
-    for edge in extraction.edges.iter().filter(|edge| {
-        matches!(
-            edge.string("relation").as_str(),
-            "contains" | "defines" | "method"
-        )
-    }) {
-        let Some(target) = extraction.nodes.iter().find(|node| node.id == edge.target) else {
-            continue;
-        };
-        if target.string("qualified_name").is_empty() {
-            continue;
-        }
-        assert!(
-            target.attributes.contains_key("start_byte")
-                && target.attributes.contains_key("end_byte"),
-            "legacy semantic alias retained containment: target={target:#?} edge={edge:#?}"
-        );
-        assert_eq!(
-            (
-                edge.attributes["start_byte"].as_u64(),
-                edge.attributes["end_byte"].as_u64()
-            ),
-            (
-                target.attributes["start_byte"].as_u64(),
-                target.attributes["end_byte"].as_u64()
-            ),
-            "public containment alias must use its target declaration site: target={target:#?} edge={edge:#?}"
-        );
-    }
-    for target in extraction.nodes.iter().filter(|node| {
-        !node.string("qualified_name").is_empty()
-            && node.attributes.contains_key("start_byte")
-            && node.attributes.contains_key("end_byte")
-            && matches!(
-                node.string("symbol_kind").as_str(),
-                "module"
-                    | "namespace"
-                    | "trait"
-                    | "struct"
-                    | "enum"
-                    | "type_alias"
-                    | "class"
-                    | "interface"
-                    | "record"
-                    | "field"
-                    | "property"
-                    | "constant"
-                    | "enum_member"
-                    | "function"
-                    | "method"
-                    | "constructor"
-                    | "parameter"
-                    | "macro"
-                    | "export"
-                    | "annotation"
-            )
-    }) {
-        let occurrences = extraction
-            .edges
-            .iter()
-            .filter(|edge| {
-                matches!(edge.string("relation").as_str(), "contains" | "method")
-                    && edge.target == target.id
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            occurrences.len(),
-            1,
-            "managed target must have exactly one containment: target={target:#?} edges={occurrences:#?}"
-        );
-        let edge = occurrences[0];
-        let Some(site_start) = edge
-            .attributes
-            .get("start_byte")
-            .and_then(serde_json::Value::as_u64)
-        else {
-            continue;
-        };
-        let Some(site_end) = edge
-            .attributes
-            .get("end_byte")
-            .and_then(serde_json::Value::as_u64)
-        else {
-            continue;
-        };
-        let target_start = target.attributes["start_byte"].as_u64().unwrap_or_default();
-        let target_end = target.attributes["end_byte"].as_u64().unwrap_or_default();
-        assert_eq!(
-            (site_start, site_end),
-            (target_start, target_end),
-            "managed containment site must equal target declaration: target={target:#?} edge={edge:#?}"
-        );
-    }
-}
-
 #[test]
 fn javascript_prototype_and_fn_assignments_publish_bounded_methods() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -393,11 +193,11 @@ fn build(mut graph: Graph) {
         .as_ref()
         .ok_or("missing Rust universal evidence")?;
     assert_eq!(
-        evidence.adapter.evidence_schema,
-        "compass.languages.evidence/1"
+        evidence.pipeline.evidence_schema,
+        "compass.languages.evidence/2"
     );
-    assert_eq!(evidence.adapter.id, "compass.rust");
-    assert_eq!(evidence.adapter.version, 15);
+    assert_eq!(evidence.pipeline.id, "compass.rust");
+    assert_eq!(evidence.pipeline.version, 1);
 
     let calls = evidence
         .occurrences
@@ -634,20 +434,32 @@ class Service : Base {
 }
 "#;
     let csharp_extraction = Engine::default().extract_source(&csharp, csharp_source)?;
-    let node_kinds = kinds(&csharp_extraction);
-    let edge_kinds = relations(&csharp_extraction);
+    let csharp_evidence = csharp_extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing C# universal evidence")?;
     for expected in ["constructor", "property", "field", "constant", "parameter"] {
         assert!(
-            node_kinds.contains(expected),
-            "missing {expected}: nodes={:?}",
-            csharp_extraction.nodes
+            csharp_evidence
+                .declarations
+                .iter()
+                .any(|declaration| declaration.kind == expected),
+            "missing {expected}: declarations={:?}",
+            csharp_evidence.declarations
         );
     }
-    for expected in ["type_of", "returns", "overrides"] {
+    for expected in [
+        CandidateRelation::TypeOf,
+        CandidateRelation::Returns,
+        CandidateRelation::Overrides,
+    ] {
         assert!(
-            edge_kinds.contains(expected),
-            "missing {expected}: edges={:?}",
-            csharp_extraction.edges
+            csharp_evidence
+                .candidates
+                .iter()
+                .any(|candidate| candidate.relation == expected),
+            "missing {expected:?}: candidates={:?}",
+            csharp_evidence.candidates
         );
     }
 
@@ -940,33 +752,67 @@ class Service {
 }
 "#;
     let csharp = Engine::default().extract_source(&csharp_path, csharp_source)?;
-    let csharp_items = csharp
-        .nodes
+    let csharp_evidence = csharp
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing C# universal evidence")?;
+    let csharp_items = csharp_evidence
+        .declarations
         .iter()
-        .filter(|node| node.string("symbol_kind") == "class" && node.label() == "Item")
+        .filter(|declaration| declaration.kind == "class" && declaration.name == "Item")
         .collect::<Vec<_>>();
-    assert_eq!(csharp_items.len(), 2, "nodes={:?}", csharp.nodes);
     assert_eq!(
-        csharp
-            .nodes
-            .iter()
-            .filter(|node| node.string("symbol_kind") == "constructor")
-            .count(),
+        csharp_items.len(),
         2,
-        "nodes={:?}",
-        csharp.nodes
+        "declarations={:?}",
+        csharp_evidence.declarations
+    );
+    assert!(
+        csharp_items
+            .iter()
+            .any(|declaration| declaration.qualified_name == "Alpha.Item")
+    );
+    assert!(
+        csharp_items
+            .iter()
+            .any(|declaration| declaration.qualified_name == "Beta.Item")
     );
     assert_eq!(
-        csharp
-            .nodes
+        csharp_evidence
+            .declarations
             .iter()
-            .filter(|node| {
-                node.string("symbol_kind") == "method" && node.label().contains("Run")
-            })
+            .filter(|declaration| declaration.kind == "constructor")
             .count(),
         2,
-        "nodes={:?}",
-        csharp.nodes
+        "declarations={:?}",
+        csharp_evidence.declarations
+    );
+    assert_eq!(
+        csharp_evidence
+            .declarations
+            .iter()
+            .filter(|declaration| { declaration.kind == "method" && declaration.name == "Run" })
+            .count(),
+        2,
+        "declarations={:?}",
+        csharp_evidence.declarations
+    );
+    let overloaded = csharp_evidence
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.kind == "constructor"
+                || (declaration.kind == "method" && declaration.name == "Run")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        overloaded
+            .iter()
+            .map(|declaration| declaration.id.as_str())
+            .collect::<HashSet<_>>()
+            .len(),
+        overloaded.len(),
+        "C# overload declarations must retain distinct evidence identities"
     );
     Ok(())
 }
@@ -1114,32 +960,65 @@ namespace Two {
     let csharp_path = directory.path().join("Ownership.cs");
     let csharp_source = b"class Shared {} namespace One { class Item { void Run(int value) {} } class Outer { class Leaf {} } } namespace Two { class Item { void Run(int value) {} } class Shared {} }\n";
     let csharp = Engine::default().extract_source(&csharp_path, csharp_source)?;
+    let csharp_evidence = csharp
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing C# universal evidence")?;
     for (target, owner) in [
-        ("Shared@", None),
-        ("One::Item@", Some("One")),
-        ("One::Outer@", Some("One")),
-        ("One::Outer::Leaf@", Some("One::Outer@")),
-        ("Two::Item@", Some("Two")),
-        ("Two::Shared@", Some("Two")),
+        ("Shared", None),
+        ("One", None),
+        ("One.Item", Some("One")),
+        ("One.Outer", Some("One")),
+        ("One.Outer.Leaf", Some("One.Outer")),
+        ("Two", None),
+        ("Two.Item", Some("Two")),
+        ("Two.Shared", Some("Two")),
     ] {
-        assert_exact_containment(&csharp, target, owner)?;
-    }
-    assert_unique_node_ids(&csharp);
-    assert_containment_sites_belong_to_targets(&csharp);
-    assert_eq!(
-        csharp
-            .edges
+        let declaration = csharp_evidence
+            .declarations
             .iter()
-            .filter(|edge| {
-                edge.string("relation") == "method"
-                    && csharp.nodes.iter().any(|node| {
-                        node.id == edge.target && node.string("symbol_kind") == "method"
-                    })
-            })
+            .find(|declaration| declaration.qualified_name == target)
+            .ok_or_else(|| format!("missing C# declaration {target}: {csharp_evidence:#?}"))?;
+        let owner_declaration = match owner {
+            Some(owner) => csharp_evidence
+                .declarations
+                .iter()
+                .find(|declaration| declaration.qualified_name == owner)
+                .ok_or_else(|| format!("missing C# owner {owner}"))?,
+            None => csharp_evidence
+                .declarations
+                .iter()
+                .find(|candidate| candidate.kind == "file")
+                .ok_or("missing C# file declaration")?,
+        };
+        assert!(
+            csharp_evidence.candidates.iter().any(|candidate| {
+                candidate.relation == CandidateRelation::Owns
+                    && candidate.source_declaration_id == owner_declaration.id
+                    && candidate.constraints.exact_target_declaration_id.as_deref()
+                        == Some(declaration.id.as_str())
+            }),
+            "missing exact C# ownership {owner:?} -> {target}: {csharp_evidence:#?}"
+        );
+    }
+    let declaration_ids = csharp_evidence
+        .declarations
+        .iter()
+        .map(|declaration| declaration.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        declaration_ids.len(),
+        csharp_evidence.declarations.len(),
+        "C# declarations must retain unique evidence identities"
+    );
+    assert_eq!(
+        csharp_evidence
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind == "method" && declaration.name == "Run")
             .count(),
         2,
-        "C# semantic methods must retain exact raw method ownership for XAML consumers: edges={:#?}",
-        csharp.edges
+        "C# universal evidence must retain both scoped method occurrences: {csharp_evidence:#?}"
     );
     Ok(())
 }

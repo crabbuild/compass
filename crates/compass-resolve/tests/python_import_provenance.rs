@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use compass_graph::{BuildEvidence, normalize_v1};
-use compass_languages::{Engine, Extraction, RawEdgeRecord};
+use compass_languages::{Engine, Extraction, ProjectEvidenceIndex, RawEdgeRecord};
 use compass_model::code_graph::{EdgeKind, NodeKind};
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance};
 use compass_resolve::{
@@ -243,6 +244,37 @@ fn resolve_fixture(files: &[(&str, &str)]) -> Result<ResolvedFixture, Box<dyn Er
     Ok((directory, resolved, sources))
 }
 
+fn resolve_project_fixture(files: &[(&str, &str)]) -> Result<ResolvedFixture, Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path();
+    let mut paths = Vec::new();
+    for (relative, source) in files {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&path, source)?;
+        paths.push(path);
+    }
+    let project = Arc::new(ProjectEvidenceIndex::build(root, &paths));
+    let mut engine = Engine::with_project_evidence(project);
+    let mut extractions = Vec::new();
+    let mut sources = HashMap::new();
+    for (relative, source) in files
+        .iter()
+        .filter(|(relative, _)| relative.ends_with(".py") || relative.ends_with(".pyi"))
+    {
+        extractions.push(
+            engine
+                .extract_source_combined(&root.join(relative), relative, source.as_bytes())?
+                .graph,
+        );
+        sources.insert((*relative).to_owned(), (*source).to_owned());
+    }
+    let resolved = resolve_with_root(&extractions, &sources, root);
+    Ok((directory, resolved, sources))
+}
+
 fn resolve_fixture_at_low_inference(
     files: &[(&str, &str)],
 ) -> Result<ResolvedFixture, Box<dyn Error>> {
@@ -274,6 +306,151 @@ fn assert_no_retired_python_projection(extraction: &Extraction) {
                     | "python-module-re-export-resolution"
             )
     }));
+}
+
+#[test]
+fn project_python_src_layout_resolves_absolute_imports_with_stable_module_identity()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "pyproject.toml",
+            "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n",
+        ),
+        ("src/acme/api.py", "def handler():\n    return 1\n"),
+        (
+            "src/acme/app.py",
+            "from acme.api import handler\ndef main():\n    return handler()\n",
+        ),
+    ];
+    let (_, first, _) = resolve_project_fixture(&files)?;
+    let (_, second, _) = resolve_project_fixture(&files)?;
+    assert_eq!(first.error, None);
+    assert_eq!(first.nodes, second.nodes);
+    assert_eq!(first.edges, second.edges);
+    let handler = first
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "acme.api.handler")
+        .ok_or("missing src-layout handler")?;
+    let main = first
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "acme.app.main")
+        .ok_or("missing src-layout caller")?;
+    assert!(first.edges.iter().any(|edge| {
+        edge.source == main.id
+            && edge.target == handler.id
+            && edge.string("relation") == "calls"
+            && edge.string("resolution_rule") == "explicit-binding"
+    }));
+    Ok(())
+}
+
+#[test]
+fn python_source_stub_pair_keeps_source_owner_and_stub_only_provenance()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "pyproject.toml",
+            "[project]\nname = \"acme\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n",
+        ),
+        ("src/acme/api.py", "def shared(value):\n    return value\n"),
+        ("src/acme/api.pyi", "def shared(value: int) -> int: ...\n"),
+        ("src/acme/contracts.pyi", "class Contract: ...\n"),
+        (
+            "src/acme/app.py",
+            "from acme.api import shared\nfrom acme.contracts import Contract\ndef main():\n    shared(1)\n    return Contract()\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_project_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+    let shared = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "acme.api.shared")
+        .collect::<Vec<_>>();
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].string("source_file"), "src/acme/api.py");
+    assert!(shared[0].attributes.get("source_kind").is_none());
+    let contract = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "acme.contracts.Contract")
+        .ok_or("missing stub-only Contract")?;
+    assert_eq!(contract.string("source_file"), "src/acme/contracts.pyi");
+    assert_eq!(contract.string("source_kind"), "stub");
+    Ok(())
+}
+
+#[test]
+fn python_source_stub_conflict_is_explicit_and_never_publishes_the_stub_declaration()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        ("pyproject.toml", "[project]\nname = \"acme\"\n"),
+        ("acme/api.py", "def source_only():\n    return 1\n"),
+        (
+            "acme/api.pyi",
+            "def source_only() -> int: ...\ndef stub_only() -> int: ...\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_project_fixture(&files)?;
+    assert_eq!(resolved.error, None);
+    assert!(
+        resolved
+            .nodes
+            .iter()
+            .all(|node| node.string("qualified_name") != "acme.api.stub_only")
+    );
+    let diagnostics = resolved
+        .extensions
+        .get("_compass_v1_graph_diagnostics")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("missing graph diagnostics")?;
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.get("code").and_then(serde_json::Value::as_str)
+            == Some("python_stub_source_conflict")
+            && diagnostic
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|message| message.contains("acme.api.stub_only"))
+    }));
+    Ok(())
+}
+
+#[test]
+fn duplicate_python_module_roots_remain_ambiguous_without_first_root_selection()
+-> Result<(), Box<dyn Error>> {
+    let files = [
+        (
+            "pyproject.toml",
+            "[project]\nname = \"ambiguous\"\n[tool.setuptools.packages.find]\nwhere = [\"one\", \"two\"]\n",
+        ),
+        ("one/api.py", "def handler():\n    return 1\n"),
+        ("two/api.py", "def handler():\n    return 2\n"),
+        (
+            "caller.py",
+            "from api import handler\ndef main():\n    return handler()\n",
+        ),
+    ];
+    let (_, resolved, _) = resolve_project_fixture(&files)?;
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "caller.main")
+        .ok_or("missing ambiguous-root caller")?;
+    let handlers = resolved
+        .nodes
+        .iter()
+        .filter(|node| node.string("qualified_name") == "api.handler")
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    assert_eq!(handlers.len(), 2);
+    assert!(resolved.edges.iter().all(|edge| {
+        edge.source != caller.id
+            || edge.string("relation") != "calls"
+            || !handlers.contains(edge.target.as_str())
+    }));
+    Ok(())
 }
 
 fn edge_span<'a>(edge: &compass_languages::RawEdgeRecord, source: &'a str) -> Option<&'a str> {
@@ -1212,6 +1389,30 @@ fn low_python_local_initializer_calls_the_exact_class_method() -> Result<(), Box
             && edge.target == close.id
             && edge.string("relation") == "calls"
             && edge.string("resolution_rule") == "linearized-receiver-dispatch"
+    }));
+    Ok(())
+}
+
+#[test]
+fn multiline_awaited_call_under_tuple_assignment_keeps_the_exact_target()
+-> Result<(), Box<dyn Error>> {
+    let files = [(
+        "dependencies.py",
+        "async def solve_dependencies():\n    if True:\n        (\n            body_values,\n            body_errors,\n        ) = await request_body_to_args(  # body_params checked above\n            body_fields=[],\n            received_body=None,\n            embed_body_fields=False,\n        )\n        return body_values, body_errors\n\nasync def request_body_to_args(body_fields, received_body, embed_body_fields):\n    return {}, []\n",
+    )];
+    let (_, resolved, _) = resolve_fixture_at_low_inference(&files)?;
+    let caller = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "dependencies.solve_dependencies")
+        .ok_or("missing solve_dependencies")?;
+    let target = resolved
+        .nodes
+        .iter()
+        .find(|node| node.string("qualified_name") == "dependencies.request_body_to_args")
+        .ok_or("missing request_body_to_args")?;
+    assert!(resolved.edges.iter().any(|edge| {
+        edge.source == caller.id && edge.target == target.id && edge.string("relation") == "calls"
     }));
     Ok(())
 }

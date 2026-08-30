@@ -126,9 +126,10 @@ local/project metadata:
 It should not pick one arbitrary project-wide target when evidence is
 ambiguous.
 
-Established direct adapters publish their current graph records and unresolved
-facts through this boundary. Independently qualified universal adapters emit
-the versioned evidence contract and use shared projection instead. See
+Established direct publishers publish their current graph records and
+unresolved facts through this boundary. Independently qualified universal
+evidence producers emit the versioned evidence contract and use shared
+projection instead. See
 [Universal evidence implementation architecture](universal-evidence.md) for
 the current and planned boundaries.
 
@@ -256,6 +257,15 @@ Cases to test:
 
 Performance qualification compares cold, warm unchanged, single-file change,
 rename, and delete cases against Compass-owned baselines.
+
+Published snapshots are immutable. When the active snapshot and the staging
+snapshot share a filesystem, `BuildGuard` stages unchanged artifacts with
+copy-on-write hard links; atomic writers replace staged paths without mutating
+the published realization. Volumes that reject hard links use the bounded
+portable copy fallback. Incremental fact-neutral admission compares the
+complete per-file AST fact digest map, including files with reusable cache
+entries, so an edited cached source can never make a stale graph look
+unchanged.
 
 Extractor semantics use the Compass-owned AST compatibility namespace `v1`.
 This cache version is independent of the Compass package release and advances

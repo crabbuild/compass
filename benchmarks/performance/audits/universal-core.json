@@ -1,5 +1,5 @@
 {
-  "schema": "compass.quality-audit",
+  "schema": "compass.quality-audit/2",
   "mode": "conformance",
   "corpora": [
     {
@@ -13,7 +13,7 @@
   "sourceOracles": [
     {
       "corpus": "universal-core",
-      "adapter": "python",
+      "producer": "python",
       "provider": "python_ast",
       "scannedFiles": 1,
       "parsedFiles": 1,
@@ -21,9 +21,9 @@
     }
   ],
   "advertisedCapabilities": [
-    {"adapter": "python", "capability": "calls"},
-    {"adapter": "python", "capability": "decorators"},
-    {"adapter": "python", "capability": "type_references"}
+    {"producer": "python", "capability": "calls"},
+    {"producer": "python", "capability": "decorators"},
+    {"producer": "python", "capability": "type_references"}
   ],
   "requiredRelations": ["calls", "decorates", "references"],
   "records": [
@@ -31,7 +31,7 @@
       "id": "accepted-correct",
       "corpus": "universal-core",
       "pool": "accepted",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -52,7 +52,7 @@
       "id": "accepted-cross-language",
       "corpus": "universal-core",
       "pool": "accepted",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -73,7 +73,7 @@
       "id": "accepted-external",
       "corpus": "universal-core",
       "pool": "accepted",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -94,7 +94,7 @@
       "id": "accepted-fabricated-occurrence",
       "corpus": "universal-core",
       "pool": "accepted",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -115,7 +115,7 @@
       "id": "accepted-invalid",
       "corpus": "universal-core",
       "pool": "accepted",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -136,7 +136,7 @@
       "id": "accepted-unsafe-substitution",
       "corpus": "universal-core",
       "pool": "accepted",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -157,7 +157,7 @@
       "id": "oracle-ambiguous",
       "corpus": "universal-core",
       "pool": "source_oracle",
-      "adapter": "python",
+      "producer": "python",
       "capability": "calls",
       "language": "python",
       "relation": "calls",
@@ -178,7 +178,7 @@
       "id": "oracle-missing",
       "corpus": "universal-core",
       "pool": "source_oracle",
-      "adapter": "python",
+      "producer": "python",
       "capability": "decorators",
       "language": "python",
       "relation": "decorates",
@@ -199,7 +199,7 @@
       "id": "oracle-represented-elsewhere",
       "corpus": "universal-core",
       "pool": "source_oracle",
-      "adapter": "python",
+      "producer": "python",
       "capability": "type_references",
       "language": "python",
       "relation": "references",

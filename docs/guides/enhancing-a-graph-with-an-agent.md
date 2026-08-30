@@ -1,0 +1,208 @@
+# Enhance a graph with an agent
+
+This guide creates and inspects an opt-in Agent Graph Overlay while leaving the
+Base Graph byte-for-byte unchanged.
+
+## Use it from an AI coding session
+
+Install or refresh Compass's bundled skill, then reload the skill or start a new
+assistant session:
+
+```bash
+compass install --project
+```
+
+The user can ask for the outcome without writing commands or batch JSON:
+
+```text
+Use Compass overlay overlay:review for this coding session. Query the current
+graph first. Preserve only useful source-cited GROUNDED enhancements, show each
+applied change, and pin the exact revision for later reads. Do not mask Base
+facts.
+```
+
+The installed skill teaches the assistant to initialize the Base Generation,
+draft the strict batch, request only the required local write capability, audit
+the receipt, and rebase after source changes. Navigation stays read-only unless
+the user explicitly asks to add, update, retract, challenge, or enhance overlay
+knowledge. `GROUNDED` is awarded by Compass verification, not asserted by the
+assistant.
+
+## Continuous mode during a coding session
+
+Use continuous mode when the assistant should preserve several durable
+discoveries while it works, rather than waiting for one final batch:
+
+```text
+Use Compass in continuous enrichment mode with overlay overlay:review for this
+coding session. Keep navigation read-only by default. At useful milestones,
+preserve only source-cited GROUNDED assertions, show each receipt, and pin the
+new revision. Stop writes after any Base Graph refresh and resolve the rebase
+plan before continuing. Do not mask Base facts.
+```
+
+The skill keeps a bounded candidate ledger in session context. At orientation,
+after a durable design decision, before a commit, and at session end it queries
+the exact Effective Graph, removes duplicates, prepares evidence, applies one
+bounded strict batch, audits and diffs the receipt, and updates the revision
+pin. Transient observations and unsupported chat claims are discarded. The
+overlay audit trail contains only bounded attestations and digests, never the
+prompt or chain-of-thought.
+
+If `compass update .`, `compass watch`, a checkout change, or another refresh
+produces a new Base Generation, the assistant enters a rebase gate. It must
+finish `rebase-plan` and resolve every exact, missing, changed, or ambiguous
+target before it can publish another assertion. A later session resumes with
+the reported Base Generation and overlay revision; it does not replay the old
+conversation.
+
+## 1. Inspect the selected Base Generation
+
+For a Git repository:
+
+```bash
+compass agent-graph status \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:review \
+  --format json
+```
+
+For a non-Git corpus, also pass an absolute `--state-root`. Compass rejects an
+implicit non-Git storage location.
+
+The returned `baseGeneration` must be copied into the request. Do not compute a
+replacement identity from a label or path.
+
+## 2. Prepare exact ingestion material
+
+Ask Compass to calculate canonical Base references and source evidence. Byte
+ranges are repository-relative source byte offsets; repeat each selector as
+needed:
+
+```bash
+compass agent-graph prepare \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:review \
+  --base-node NODE_ID \
+  --source-span src/lib.rs:120:188 \
+  --format json > prepared.json
+```
+
+The versioned response includes `baseGeneration`, the active
+`expectedRevision`, exact `baseNodes` and `baseEdges`, and a complete
+`grounding` submission. Compass reads the selected source inventory, calculates
+line/column anchors plus file, excerpt, and record digests, and rejects stale,
+missing, duplicate, uninventoried, or out-of-range input. Preparation is
+read-only and never emits `GROUNDED`.
+
+## 3. Draft a strict change batch
+
+Start from
+[`fixtures/contracts/agent-graph/batch-v1.json`](../../fixtures/contracts/agent-graph/batch-v1.json).
+Copy the exact Base Generation, expected revision, Base references, and
+grounding payload from `prepared.json`. Do not calculate or edit Compass-owned
+digests. Call `prepare` separately when assertions rely on different source
+spans. Requests cannot contain a Grounding certificate or `GROUNDED` status.
+
+Use `selector: new` with a durable `key:` for creation. For replacement, use
+`selector: existing` with both the Assertion ID and current assertion digest.
+Use Retraction for an agent-owned assertion and Challenge for a Base fact.
+
+## 4. Apply with explicit local authority
+
+```bash
+compass agent-graph apply \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:review \
+  --request change-batch.json \
+  --principal principal:local \
+  --enable-writes \
+  --format json
+```
+
+Mask operations additionally require `--allow-masks`. A successful receipt
+contains the immutable revision, sequence, exact counts, and batch digest.
+Retrying the same idempotency key and content returns the original receipt;
+different content under the same key fails.
+
+## 5. Read and query an exact Effective Graph
+
+```bash
+compass agent-graph query \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:review \
+  --revision REVISION_DIGEST \
+  --profile augment \
+  --cql 'MATCH (a)-[r]->(b) RETURN a, r, b'
+
+compass agent-graph export \
+  --root . \
+  --graph compass-out/graph.json \
+  --overlay overlay:review \
+  --revision REVISION_DIGEST \
+  --output review-effective.json \
+  --format json
+```
+
+`export` confines its output beneath `--root`, writes atomically, and refuses to
+replace any existing file, directory entry, or symbolic link. Task context
+accepts the paired `--agent-overlay` and `--agent-revision` selectors; its
+`agentKnowledge` section keeps `GROUNDED` separate from structural confidence.
+
+To use an immutable historical Base Generation, replace `--graph` with the
+exact history realization selector on every command:
+
+```bash
+compass agent-graph export \
+  --root . \
+  --realization REALIZATION_ID \
+  --overlay overlay:review \
+  --revision REVISION_DIGEST \
+  --profile augment \
+  --output historical-review.json \
+  --format json
+```
+
+Compass opens the trusted graph and an offline detached checkout for that
+realization. It does not update the preferred realization or any history root.
+`--realization` is rejected with `--graph` or `--state-root`.
+
+## 6. Inspect history, audit, or rebase
+
+```bash
+compass agent-graph history --overlay overlay:review --format json
+compass agent-graph audit --revision REVISION_DIGEST --format json
+compass agent-graph rebase-plan \
+  --overlay overlay:review \
+  --revision REVISION_DIGEST \
+  --format json
+```
+
+After a source rebuild, an Effective Graph read for the old Base Generation
+does not silently attach to the new graph. Review the plan, provide grounded
+replacement or Retraction operations for every unresolved item, and submit a
+strict `compass.agent-graph.rebase-commit/1` request.
+
+## MCP operation
+
+Agent Graph tools appear only when the server has a canonical project
+allowlist. `apply_agent_graph` is omitted unless writes are explicitly enabled.
+HTTP writes require a read credential and a distinct write-capability
+credential; the request cannot choose its principal, permissions, mask
+capability, expiry, or limits. `inspect_agent_graph` operation `prepare`
+accepts `base_nodes`, `base_edges`, and strict `source_spans` objects and returns
+the same read-only ingestion-preparation contract. It also supports `effective`,
+`query`, `audit`, history, diff, and rebase-plan reads.
+
+## Related pages
+
+- [Agent Graph Overlays](../concepts/agent-graph-overlays.md)
+- [Task context](task-context.md)
+- [Integrating Compass](integrating-compass.md)
+
+Next, automate batch generation in the agent while keeping Compass's
+verification and authorization adapter outside the model prompt.

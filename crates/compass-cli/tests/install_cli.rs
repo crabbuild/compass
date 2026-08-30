@@ -115,6 +115,11 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(body.contains("references/semantic-extraction.md"));
     assert!(body.contains("references/operations.md"));
     assert!(body.contains("references/command-reference.md"));
+    assert!(body.contains("references/agent-graph.md"));
+    assert!(body.contains("continuous overlay enrichment during coding sessions"));
+    assert!(body.contains("## Continuous enrichment mode"));
+    assert!(body.contains("rebase_required"));
+    assert!(body.contains("Load the continuous-enrichment reference"));
     assert!(body.contains("references/labeling.md"));
     assert!(body.contains("references/security-and-boundaries.md"));
     assert!(body.contains("run `compass update .`\nonce and continue"));
@@ -127,6 +132,7 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     let openai_metadata = fs::read_to_string(openai_metadata)?;
     assert!(openai_metadata.contains("display_name: \"Compass\""));
     assert!(openai_metadata.contains("default_prompt: \"Use $compass"));
+    assert!(openai_metadata.contains("continuous enrichment"));
     assert!(
         skill
             .with_file_name("references")
@@ -143,11 +149,24 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(!query.contains("--context CheckoutService"));
     assert!(!query.contains("anchor a common term inside a subsystem"));
     let references = skill.with_file_name("references");
+    let agent_graph = fs::read_to_string(references.join("agent-graph.md"))?;
+    assert!(agent_graph.contains("What the user can ask"));
+    assert!(agent_graph.contains("compass agent-graph apply"));
+    assert!(agent_graph.contains("compass agent-graph rebase-plan"));
+    assert!(agent_graph.contains("do not need to compose commands or JSON"));
+    assert!(agent_graph.contains("Requests cannot award themselves"));
+    assert!(agent_graph.contains("Never translate “delete this relation”"));
+    let continuous = fs::read_to_string(references.join("continuous-enrichment.md"))?;
+    assert!(continuous.contains("READ_ONLY"));
+    assert!(continuous.contains("READY_TO_FLUSH"));
+    assert!(continuous.contains("rebase-plan"));
+    assert!(continuous.contains("revision_conflict"));
+    assert!(continuous.contains("distinct read and write credentials"));
     assert_eq!(
         fs::read_dir(&references)?
             .collect::<Result<Vec<_>, _>>()?
             .len(),
-        15
+        17
     );
     let hooks: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.project.join(".codex/hooks.json"))?)?;
@@ -164,6 +183,44 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(String::from_utf8_lossy(&output.stdout).contains("/hooks"));
     assert!(String::from_utf8_lossy(&output.stdout).contains("new coding-agent session"));
     assert_focused_skill_collection(&fixture.project.join(".agents/skills"), &["codex"])?;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn project_claude_install_follows_an_in_scope_skills_symlink() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let linked_root = fixture.project.join(".agents/skills");
+    fs::create_dir_all(&linked_root)?;
+    fs::create_dir_all(fixture.project.join(".claude"))?;
+    std::os::unix::fs::symlink("../.agents/skills", fixture.project.join(".claude/skills"))?;
+
+    let output = fixture.run(&["install", "claude"])?;
+    assert_success("Claude install through in-scope skills symlink", &output);
+    assert!(linked_root.join("compass/SKILL.md").is_file());
+    assert!(fixture.project.join(".claude/skills").is_symlink());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn project_claude_install_rejects_an_out_of_scope_skills_symlink() -> Result<(), Box<dyn Error>> {
+    let fixture = InstallFixture::new()?;
+    let outside_root = fixture
+        .project
+        .parent()
+        .ok_or("fixture parent")?
+        .join("external-claude-skills");
+    fs::create_dir_all(&outside_root)?;
+    fs::create_dir_all(fixture.project.join(".claude"))?;
+    fs::write(outside_root.join("sentinel"), "keep")?;
+    std::os::unix::fs::symlink(&outside_root, fixture.project.join(".claude/skills"))?;
+
+    let output = fixture.run(&["install", "claude"])?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("outside the selected scope"));
+    assert!(outside_root.join("sentinel").is_file());
+    assert!(!outside_root.join("compass").exists());
     Ok(())
 }
 

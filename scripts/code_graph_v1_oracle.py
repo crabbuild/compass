@@ -10,12 +10,17 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
+# The graph wire contract remains compass.graph/1.  This expectation schema is
+# independently versioned so adding frontend vocabulary cannot make an older
+# oracle silently accept a newer manifest.
 SCHEMA = "compass.code-graph-qualification/2"
 GRAPH_SCHEMA = "compass.graph/1"
+TOPOLOGY_POLICY_SCHEMA = "compass.code-graph-topology-policy/1"
+TOPOLOGY_REPORT_SCHEMA = "compass.code-graph-topology-report/1"
 NODE_KINDS = (
     "file", "module", "package", "namespace", "class", "struct", "interface",
     "trait", "protocol", "enum", "enum_member", "type_alias", "function",
-    "method", "constructor", "property", "field", "variable", "constant",
+    "method", "constructor", "closure", "property", "field", "variable", "constant",
     "parameter", "import", "export", "macro", "annotation", "route",
     "component", "event", "message", "topic", "queue", "job", "resource",
     "schema", "query", "migration", "config_key", "database",
@@ -24,17 +29,19 @@ NODE_KINDS = (
     "database_trigger",
 )
 EDGE_KINDS = (
-    "contains", "calls", "imports", "exports", "extends", "implements",
+    "contains", "calls", "imports", "exports", "extends", "implements", "mixes_in",
     "references", "type_of", "returns", "instantiates", "overrides",
     "decorates", "routes_to", "reads", "writes", "aliases", "registers",
     "handles", "publishes", "subscribes", "produces", "consumes", "schedules",
     "triggers", "tests", "depends_on", "documents", "maps_to",
+    "renders",
 )
 DETAIL_TYPES = {
     "file": {"file"},
-    "symbol": set(NODE_KINDS[1:24]) | {"migration"},
+    "symbol": set(NODE_KINDS[1:25]) | {"migration"},
     "import_export": {"import", "export"},
     "route": {"route"},
+    "render": {"function", "method", "class", "component", "variable", "property"},
     "component": {"component"},
     "resource": {"resource"},
     "messaging": {"event", "message", "topic", "queue"},
@@ -42,13 +49,35 @@ DETAIL_TYPES = {
     "schema": {"schema"},
     "query": {"query"},
     "config": {"config_key"},
-    "database": set(NODE_KINDS[36:]),
+    "database": set(NODE_KINDS[37:]),
 }
 TRUSTED_ORIGINS = {"ast", "config", "convention", "artifact"}
 ALL_ORIGINS = TRUSTED_ORIGINS | {"heuristic"}
 CONFIDENCES = {"exact", "inferred", "ambiguous"}
 RESOLUTIONS = {"exact", "ambiguous", "unresolved"}
-STAGES = {"handler", "middleware"}
+TOPOLOGY_METRICS = {
+    "communities", "connectedComponents", "crossCommunityEdges",
+    "crossFileEdges", "crossFileEdgesPerThousandNodes", "edgeBearingNodes",
+    "edgeBearingNodePermille", "edges", "exactConnectedComponents",
+    "exactCrossCommunityEdges", "exactCrossFileEdges",
+    "exactCrossFileEdgesPerThousandNodes", "exactEdgeBearingNodes",
+    "exactEdgeBearingNodePermille", "exactEdges", "exactIsolatedNodes",
+    "exactLargestComponentNodes", "exactSelfLoops",
+    "exactUniqueTypedEndpointPairs",
+    "exactUniqueTypedEndpointPairsPerThousandNodes", "isolatedNodes",
+    "largestComponentNodes", "nodes", "selfLoops", "singletonCommunities",
+    "uniqueTypedEndpointPairs", "uniqueTypedEndpointPairsPerThousandNodes",
+}
+RELATION_TOPOLOGY_METRICS = {
+    "crossFileEdges", "edgeBearingNodes", "edges", "exactCrossFileEdges",
+    "exactEdgeBearingNodes", "exactEdges", "exactUniqueEndpointPairs",
+    "uniqueEndpointPairs",
+}
+STAGES = {
+    "handler", "middleware", "layout", "template", "loading", "default",
+    "error_boundary", "not_found", "boundary", "loader", "action",
+    "data_loader", "route_component",
+}
 ENTERPRISE_KINDS = {
     "event", "message", "topic", "queue", "job", "resource", "schema", "query",
     "migration", "config_key", "database", "database_schema", "database_table",
@@ -60,22 +89,22 @@ KNOWN_PRODUCER = re.compile(
 )
 
 TYPE_KINDS = {"class", "struct", "interface", "trait", "protocol", "enum", "type_alias"}
-CALLABLE = {"function", "method", "constructor", "database_procedure"}
+CALLABLE = {"function", "method", "constructor", "closure", "database_procedure"}
 CONTAINER = {
     "file", "module", "package", "namespace", "class", "struct", "interface",
     "trait", "protocol", "enum", "component", "resource", "schema", "database",
     "database_schema", "database_table", "database_view",
 }
-CONTAINS_FILE_TARGETS = set(NODE_KINDS[1:36]) | {"database"}
-CONTAINS_SCOPE_TARGETS = set(NODE_KINDS[:36])
+CONTAINS_FILE_TARGETS = set(NODE_KINDS[1:37]) | {"database"}
+CONTAINS_SCOPE_TARGETS = set(NODE_KINDS[:37])
 CONTAINS_TYPE_TARGETS = {
     "class", "struct", "interface", "trait", "protocol", "enum", "enum_member",
-    "type_alias", "function", "method", "constructor", "property", "field",
+    "type_alias", "function", "method", "constructor", "closure", "property", "field",
     "variable", "constant", "parameter", "macro", "annotation", "component",
 }
 CONTAINS_CALLABLE_TARGETS = {
     "class", "struct", "interface", "trait", "protocol", "enum", "type_alias",
-    "function", "method", "constructor", "property", "field", "variable",
+    "function", "method", "constructor", "closure", "property", "field", "variable",
     "constant", "parameter",
 }
 EXECUTABLE = CALLABLE | {"component", "job", "query", "database_trigger"}
@@ -247,6 +276,42 @@ def load_manifest(
     return manifest
 
 
+def _validate_topology_policy(policy: Any, identity: str) -> None:
+    fields = {"minimums", "maximums", "relationshipMinimums"}
+    if not isinstance(policy, dict) or set(policy) != fields:
+        fail("manifest_topology", identity, f"topology must contain {sorted(fields)}")
+    for bound in ("minimums", "maximums"):
+        values = policy[bound]
+        if not isinstance(values, dict) or not values:
+            fail("manifest_topology", identity, f"{bound} must be a non-empty object")
+        unknown = sorted(set(values) - TOPOLOGY_METRICS)
+        if unknown:
+            fail("manifest_topology", identity, f"unknown {bound} metrics {unknown}")
+        if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in values.values()):
+            fail("manifest_topology", identity, f"{bound} values must be non-negative integers")
+    relationships = policy["relationshipMinimums"]
+    if not isinstance(relationships, dict) or not relationships:
+        fail("manifest_topology", identity, "relationshipMinimums must be a non-empty object")
+    for relation, values in relationships.items():
+        if relation not in EDGE_KINDS or not isinstance(values, dict) or not values:
+            fail("manifest_topology", identity, f"invalid relationship minimum {relation!r}")
+        unknown = sorted(set(values) - RELATION_TOPOLOGY_METRICS)
+        if unknown:
+            fail("manifest_topology", identity, f"unknown {relation} metrics {unknown}")
+        if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in values.values()):
+            fail("manifest_topology", identity, f"{relation} values must be non-negative integers")
+
+
+def load_topology_policy(path: Path) -> dict[str, Any]:
+    document = load_json(path)
+    if not isinstance(document, dict) or set(document) != {"schema", "topology"}:
+        fail("topology_policy_shape", str(path), "expected schema and topology")
+    if document.get("schema") != TOPOLOGY_POLICY_SCHEMA:
+        fail("topology_policy_schema", str(path), f"expected {TOPOLOGY_POLICY_SCHEMA}")
+    _validate_topology_policy(document["topology"], str(path))
+    return document
+
+
 def _unique_id(ids: set[str], identity: str) -> None:
     if not identity or identity == "<missing>" or identity in ids:
         fail("manifest_duplicate_id", identity, "ID is empty or duplicated")
@@ -342,6 +407,14 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
         return (
             (s == "schema" and t == "config_key")
             or (s == "config_key" and t == "config_key")
+            # Framework route hierarchy is an explicit parent-route to
+            # child-route containment relation. Keep this allowance narrow;
+            # do not turn every route into a generic container endpoint.
+            or (s == "route" and t == "route")
+            # Object-valued JavaScript/TypeScript bindings expose their
+            # literal members as properties. This is a declaration-level
+            # containment edge, not an inferred type relationship.
+            or (s == "variable" and t == "property")
             or (s == "file" and t in CONTAINS_FILE_TARGETS)
             or (s in {"module", "package", "namespace"} and t in CONTAINS_SCOPE_TARGETS)
             or (s in TYPE_KINDS | {"component", "schema"} and t in CONTAINS_TYPE_TARGETS)
@@ -378,7 +451,19 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
     if kind == "extends":
         return s in TYPE_KINDS and t in TYPE_KINDS
     if kind == "implements":
-        return s in TYPE_KINDS and t in {"interface", "trait", "protocol"}
+        return (
+            s in TYPE_KINDS
+            and (
+                t in {"interface", "trait", "protocol"}
+                or (
+                    source.get("language") == "dart"
+                    and target.get("language") == "dart"
+                    and t == "class"
+                )
+            )
+        )
+    if kind == "mixes_in":
+        return s in TYPE_KINDS and t in TYPE_KINDS
     if kind == "type_of":
         return s in VALUE_KINDS and t in TYPE_KINDS | {"parameter"}
     if kind == "returns":
@@ -402,7 +487,22 @@ def endpoint_allowed(source: dict[str, Any], edge: dict[str, Any], target: dict[
     if kind == "decorates":
         return s in {"annotation", "macro"} and t in CALLABLE | TYPE_KINDS | VALUE_KINDS | {"component", "route", "resource"}
     if kind == "routes_to":
-        return s == "route" and t in {"file", "function", "method", "class", "component"}
+        return s == "route" and (
+            t in {"file", "function", "method", "class", "component"}
+            or (
+                t == "variable"
+                and bool(
+                    {"route_handler", "service", "middleware"}
+                    & set(target.get("roles", []))
+                )
+            )
+        )
+    if kind == "renders":
+        # Top-level JSX/createElement has no callable owner; production uses
+        # the smallest source module/file as the conservative renderer.
+        return s in EXECUTABLE | {"file", "module", "variable"} and t in {
+            "function", "method", "class", "component", "variable", "property",
+        }
     if kind == "maps_to":
         return s in {"class", "struct", "schema", "database_table", "database_view"} and t in {"database_table", "database_view"}
     if kind == "reads":
@@ -536,6 +636,219 @@ def validate_graph(graph: dict[str, Any], manifest: dict[str, Any]) -> dict[str,
     }
 
 
+def topology_metrics(graph: dict[str, Any]) -> dict[str, Any]:
+    """Measure useful topology without treating repeated occurrences as new connections."""
+    nodes = graph.get("nodes", [])
+    edges = graph.get("links", [])
+    index = {node["id"]: node for node in nodes}
+    parent = {identity: identity for identity in index}
+    component_sizes = {identity: 1 for identity in index}
+    exact_parent = dict(parent)
+    exact_component_sizes = dict(component_sizes)
+
+    def find(identity: str, parents: dict[str, str]) -> str:
+        root = identity
+        while parents[root] != root:
+            root = parents[root]
+        while parents[identity] != identity:
+            next_identity = parents[identity]
+            parents[identity] = root
+            identity = next_identity
+        return root
+
+    def union(
+        left: str,
+        right: str,
+        parents: dict[str, str],
+        sizes: dict[str, int],
+    ) -> None:
+        left_root = find(left, parents)
+        right_root = find(right, parents)
+        if left_root == right_root:
+            return
+        if sizes[left_root] < sizes[right_root]:
+            left_root, right_root = right_root, left_root
+        parents[right_root] = left_root
+        sizes[left_root] += sizes[right_root]
+
+    def community_identity(node: dict[str, Any]) -> Any:
+        community = node.get("community")
+        if isinstance(community, dict):
+            return community.get("id")
+        return community
+
+    incident: set[str] = set()
+    typed_pairs: set[tuple[str, str, str]] = set()
+    cross_file_edges = 0
+    cross_community_edges = 0
+    self_loops = 0
+    relation_edges: Counter[str] = Counter()
+    relation_pairs: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    relation_incident: dict[str, set[str]] = defaultdict(set)
+    relation_cross_file: Counter[str] = Counter()
+    exact_incident: set[str] = set()
+    exact_typed_pairs: set[tuple[str, str, str]] = set()
+    exact_cross_file_edges = 0
+    exact_cross_community_edges = 0
+    exact_self_loops = 0
+    exact_edges = 0
+    relation_exact_edges: Counter[str] = Counter()
+    relation_exact_pairs: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    relation_exact_incident: dict[str, set[str]] = defaultdict(set)
+    relation_exact_cross_file: Counter[str] = Counter()
+    for edge in edges:
+        source_id = edge["source"]
+        target_id = edge["target"]
+        relation = edge["kind"]
+        incident.update((source_id, target_id))
+        typed_pairs.add((source_id, target_id, relation))
+        relation_edges[relation] += 1
+        relation_pairs[relation].add((source_id, target_id))
+        relation_incident[relation].update((source_id, target_id))
+        if source_id == target_id:
+            self_loops += 1
+        else:
+            union(source_id, target_id, parent, component_sizes)
+        source_file = (index[source_id].get("source") or {}).get("file")
+        target_file = (index[target_id].get("source") or {}).get("file")
+        cross_file = (
+            source_file is not None
+            and target_file is not None
+            and source_file != target_file
+        )
+        if cross_file:
+            cross_file_edges += 1
+            relation_cross_file[relation] += 1
+        source_community = community_identity(index[source_id])
+        target_community = community_identity(index[target_id])
+        cross_community = (
+            source_community is not None
+            and target_community is not None
+            and source_community != target_community
+        )
+        if cross_community:
+            cross_community_edges += 1
+
+        is_exact = any(
+            evidence.get("confidence") == "exact"
+            for evidence in edge.get("evidence", [])
+            if isinstance(evidence, dict)
+        )
+        if not is_exact:
+            continue
+        exact_edges += 1
+        exact_incident.update((source_id, target_id))
+        exact_typed_pairs.add((source_id, target_id, relation))
+        relation_exact_edges[relation] += 1
+        relation_exact_pairs[relation].add((source_id, target_id))
+        relation_exact_incident[relation].update((source_id, target_id))
+        if source_id == target_id:
+            exact_self_loops += 1
+        else:
+            union(source_id, target_id, exact_parent, exact_component_sizes)
+        if cross_file:
+            exact_cross_file_edges += 1
+            relation_exact_cross_file[relation] += 1
+        if cross_community:
+            exact_cross_community_edges += 1
+
+    roots = Counter(find(identity, parent) for identity in index)
+    exact_roots = Counter(find(identity, exact_parent) for identity in index)
+    communities = Counter(
+        community
+        for node in nodes
+        if (community := community_identity(node)) is not None
+    )
+    by_relation = {
+        relation: {
+            "crossFileEdges": relation_cross_file[relation],
+            "edgeBearingNodes": len(relation_incident[relation]),
+            "edges": relation_edges[relation],
+            "exactCrossFileEdges": relation_exact_cross_file[relation],
+            "exactEdgeBearingNodes": len(relation_exact_incident[relation]),
+            "exactEdges": relation_exact_edges[relation],
+            "exactUniqueEndpointPairs": len(relation_exact_pairs[relation]),
+            "uniqueEndpointPairs": len(relation_pairs[relation]),
+        }
+        for relation in sorted(relation_edges)
+    }
+    node_count = len(nodes)
+
+    def per_thousand(value: int) -> int:
+        return value * 1_000 // node_count if node_count else 0
+
+    return {
+        "communities": len(communities),
+        "connectedComponents": len(roots),
+        "crossCommunityEdges": cross_community_edges,
+        "crossFileEdges": cross_file_edges,
+        "crossFileEdgesPerThousandNodes": per_thousand(cross_file_edges),
+        "edgeBearingNodes": len(incident),
+        "edgeBearingNodePermille": per_thousand(len(incident)),
+        "edges": len(edges),
+        "exactConnectedComponents": len(exact_roots),
+        "exactCrossCommunityEdges": exact_cross_community_edges,
+        "exactCrossFileEdges": exact_cross_file_edges,
+        "exactCrossFileEdgesPerThousandNodes": per_thousand(exact_cross_file_edges),
+        "exactEdgeBearingNodes": len(exact_incident),
+        "exactEdgeBearingNodePermille": per_thousand(len(exact_incident)),
+        "exactEdges": exact_edges,
+        "exactIsolatedNodes": len(index) - len(exact_incident),
+        "exactLargestComponentNodes": max(exact_roots.values(), default=0),
+        "exactSelfLoops": exact_self_loops,
+        "exactUniqueTypedEndpointPairs": len(exact_typed_pairs),
+        "exactUniqueTypedEndpointPairsPerThousandNodes": per_thousand(
+            len(exact_typed_pairs)
+        ),
+        "isolatedNodes": len(index) - len(incident),
+        "largestComponentNodes": max(roots.values(), default=0),
+        "nodes": len(nodes),
+        "selfLoops": self_loops,
+        "singletonCommunities": sum(size == 1 for size in communities.values()),
+        "uniqueTypedEndpointPairs": len(typed_pairs),
+        "uniqueTypedEndpointPairsPerThousandNodes": per_thousand(len(typed_pairs)),
+        "byRelation": by_relation,
+    }
+
+
+def assert_topology(metrics: dict[str, Any], policy: dict[str, Any]) -> None:
+    for metric, minimum in policy["minimums"].items():
+        actual = metrics.get(metric)
+        if not isinstance(actual, int) or actual < minimum:
+            fail("topology_minimum", metric, f"{actual} < {minimum}")
+    for metric, maximum in policy["maximums"].items():
+        actual = metrics.get(metric)
+        if not isinstance(actual, int) or actual > maximum:
+            fail("topology_maximum", metric, f"{actual} > {maximum}")
+    by_relation = metrics.get("byRelation", {})
+    for relation, minimums in policy["relationshipMinimums"].items():
+        actuals = by_relation.get(relation, {})
+        for metric, minimum in minimums.items():
+            actual = actuals.get(metric, 0)
+            if not isinstance(actual, int) or actual < minimum:
+                fail(
+                    "topology_relationship_minimum",
+                    f"{relation}.{metric}",
+                    f"{actual} < {minimum}",
+                )
+
+
+def topology_report(
+    graph: dict[str, Any],
+    policy_document: dict[str, Any],
+    *,
+    graph_digest: str,
+) -> dict[str, Any]:
+    metrics = topology_metrics(graph)
+    assert_topology(metrics, policy_document["topology"])
+    return {
+        "schema": TOPOLOGY_REPORT_SCHEMA,
+        "graphDigest": graph_digest,
+        "metrics": metrics,
+        "policy": policy_document["topology"],
+    }
+
+
 def _validate_coverage(metadata: dict[str, Any], files: dict[str, dict[str, Any]], manifest: dict[str, Any]) -> None:
     diagnostics = metadata.get("diagnostics", [])
     limit = manifest["limits"]["maxDiagnostics"]
@@ -602,7 +915,23 @@ def _validate_external_placeholders(
             edge for edge in edges
             if node["id"] in (edge["source"], edge["target"])
         ]
+        route_candidates = []
         if not incident:
+            # An unresolved route must not publish a speculative `routes_to`
+            # edge, but its bounded candidate set is still a real wiring
+            # occurrence. Treat that route-stage record as the incident for
+            # placeholder validation and keep the exact source scope check.
+            for route in nodes:
+                if route.get("kind") != "route":
+                    continue
+                data = (route.get("details") or {}).get("data", {})
+                for stage in data.get("stages", []):
+                    if any(
+                        candidate.get("nodeId") == node["id"]
+                        for candidate in stage.get("candidates", [])
+                    ):
+                        route_candidates.append(stage)
+        if not incident and not route_candidates:
             fail("external_placeholder", node["id"], "orphan placeholder")
         for edge in incident:
             edge_file = (edge.get("relationshipSite") or {}).get("file")
@@ -611,6 +940,18 @@ def _validate_external_placeholders(
                     "external_placeholder_deferred",
                     edge["id"],
                     f"deferred={edge.get('deferred')} scope={edge_file!r}",
+                )
+        for stage in route_candidates:
+            stage_anchor = stage.get("sourceAnchor") or {}
+            # A single unresolved import placeholder can be reused by
+            # multiple route registrations in the same module. Its own
+            # provenance identifies the first unresolved wiring site; each
+            # later route-stage candidate supplies its distinct occurrence.
+            if stage_anchor.get("file") != wiring.get("file"):
+                fail(
+                    "external_placeholder_scope",
+                    node["id"],
+                    f"route-stage scope={stage_anchor!r}",
                 )
 
 

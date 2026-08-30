@@ -105,9 +105,18 @@ subsystem cards, or the route-table alternative for another level of detail.
 
 ## Query
 
-Use **Query Codebase** for natural-language discovery or deterministic
-CompassQL. CompassQL parameters and limits are sent as literal process
-arguments. Use Cmd/Ctrl+Enter to run a query.
+Use **Query Codebase** as a three-command workbench:
+
+- **Ask** routes a question through the typed `compass ask` contract and
+  presents graph matches, paths, diagnostics, and source links.
+- **Explain** inspects one symbol and itemizes its incoming and outgoing
+  relationships. Ambiguous names remain explicit and offer full node IDs.
+- **CompassQL** executes deterministic read-only rows with literal parameters
+  and limits.
+
+Each run opens a separate bounded result tab, so answers can be compared
+without replacing earlier output. Use Cmd/Ctrl+Enter to run the selected
+command.
 
 ## Evolution
 

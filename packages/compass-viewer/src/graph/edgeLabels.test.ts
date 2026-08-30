@@ -30,6 +30,7 @@ describe("formatGraphEdgeLabel", () => {
     })).toBe("routes to · middleware 2 · GET");
     expect(formatGraphEdgeLabel({ relation: "publishes" })).toBe("publishes");
     expect(formatGraphEdgeLabel({ relation: "maps_to" })).toBe("maps to");
+    expect(formatGraphEdgeLabel({ relation: "renders" })).toBe("renders");
   });
 
   it("adds the relationship source line when Compass recorded one", () => {

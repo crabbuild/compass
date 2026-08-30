@@ -323,22 +323,29 @@ class SecondController {
 "#,
     )?;
 
-    let extraction = Engine::default().extract(&path)?;
-    let flexible = build_from_extraction(&extraction, true, Some(root));
-    let graph = normalize_document_v1(&flexible, root, "sha256:test", None)?;
-    let methods = graph
-        .nodes
+    // PHP now uses the qualifying universal-evidence pipeline.  The legacy
+    // graph projection is intentionally empty, so validate the same stable
+    // method identities at the evidence boundary instead of treating the
+    // retired generic graph as authoritative.
+    let source = fs::read(&path)?;
+    let evidence = Engine::default().extract_source_universal_evidence(
+        &path,
+        "routes/controllers.php",
+        &source,
+    )?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.kind == NodeKind::Method && node.name == ".index()")
+        .filter(|declaration| declaration.kind == "method" && declaration.name == "index")
         .collect::<Vec<_>>();
 
-    assert_eq!(methods.len(), 2, "nodes={:?}", graph.nodes);
+    assert_eq!(methods.len(), 2, "declarations={:?}", evidence.declarations);
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.qualified_name.as_str())
+            .map(|declaration| declaration.qualified_name.as_str())
             .collect::<BTreeSet<_>>(),
-        ["FirstController::index", "SecondController::index"]
+        ["firstcontroller::index", "secondcontroller::index"]
             .into_iter()
             .collect()
     );

@@ -7,27 +7,45 @@ const overview: ArchitectureOverview = {
   title: "Fixture",
   scope: "production",
   evidence: "all",
-  sections: [
+  lens: "architecture",
+  omissions: {
+    totalGroups: 2, shownGroups: 2, omittedGroups: 0,
+    representedNodes: 32, omittedNodes: 0,
+    representedRelationships: 49, omittedRelationships: 0,
+    witnessGroupIds: [], maxOverviewGroups: 24, maxOverviewRoutes: 64
+  },
+  quality: {
+    status: "good",
+    metrics: {
+      sourceScopes: { production: 30, test: 2, generated: 0, vendor: 0, documentation: 0, unknown: 0 },
+      unknownSourceFraction: 0, generatedVendorLeakage: 0,
+      representedNodeFraction: 1, representedRelationshipFraction: 1,
+      duplicateNames: 0, fallbackNames: 0, largestGroupFraction: 0.69,
+      unknownRelations: 0, unassignedNodes: 0, unassignedRelationships: 0
+    },
+    diagnostics: []
+  },
+  groups: [
     {
       id: "api", name: "API", nodeCount: 20, totalNodeCount: 22,
-      internalCallCount: 12, incomingCalls: 0, outgoingCalls: 30,
-      scopes: { production: 20, test: 2, generated: 0, vendor: 0, unknown: 0 }
+      internalRelationshipCount: 12, incomingRelationships: 0, outgoingRelationships: 30,
+      scopes: { production: 20, test: 2, generated: 0, vendor: 0, documentation: 0, unknown: 0 }
     },
     {
       id: "storage", name: "Storage", nodeCount: 10, totalNodeCount: 10,
-      internalCallCount: 5, incomingCalls: 30, outgoingCalls: 0,
-      scopes: { production: 10, test: 0, generated: 0, vendor: 0, unknown: 0 }
+      internalRelationshipCount: 5, incomingRelationships: 30, outgoingRelationships: 0,
+      scopes: { production: 10, test: 0, generated: 0, vendor: 0, documentation: 0, unknown: 0 }
     }
   ],
   routes: [{
-    id: "api→storage", sourceSection: "api", targetSection: "storage",
-    calls: 30, extracted: 24, inferred: 6, ambiguous: 0
+    id: "api→storage", sourceGroup: "api", targetGroup: "storage",
+    relationships: 30, extracted: 24, inferred: 6, ambiguous: 0
   }],
   statistics: {
-    visibleNodes: 30, totalNodes: 32, visibleCalls: 47, totalCalls: 49,
+    visibleNodes: 30, totalNodes: 32, visibleRelationships: 47, totalRelationships: 49,
     communities: 2, extracted: 40, inferred: 9, ambiguous: 0
   },
-  coverage: { internal: 19, crossSection: 30, unassigned: 0 },
+  coverage: { internal: 19, crossGroup: 30, unassigned: 0 },
   provenance: { projectName: "Fixture", builtAtCommit: null, generatedAt: null }
 };
 
@@ -45,7 +63,7 @@ describe("ArchitectureMap", () => {
       .toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("group", { name: /2 subsystems and 1 directed routes/i }))
       .toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /api to storage, 30 calls/i }))
+    expect(screen.getByRole("button", { name: /api to storage, 30 relationships/i }))
       .toBeInTheDocument();
     expect(screen.getByText("View routes as a table")).toBeInTheDocument();
   });
@@ -97,7 +115,7 @@ describe("ArchitectureMap", () => {
   it("reports route selection from pointer activation", () => {
     const onSelect = vi.fn();
     render(<ArchitectureMap overview={overview} selection={undefined} onSelect={onSelect} />);
-    fireEvent.click(screen.getByRole("button", { name: /api to storage, 30 calls/i }));
+    fireEvent.click(screen.getByRole("button", { name: /api to storage, 30 relationships/i }));
     expect(onSelect).toHaveBeenCalledWith({ kind: "route", id: "api→storage" });
   });
 
@@ -132,7 +150,7 @@ describe("ArchitectureMap", () => {
 
     expect(api.getAttribute("transform")).not.toBe(initialTransform);
     expect(window.localStorage.getItem(
-      "compass.architecture.layout.v2:Fixture:production:all"
+      "compass.architecture.layout.v1:Fixture:production:all"
     )).toContain("\"api\"");
     expect(screen.getByRole("button", { name: "Reset subsystem positions" }))
       .not.toBeDisabled();
@@ -141,10 +159,10 @@ describe("ArchitectureMap", () => {
   it("starts with key routes and reveals the complete map on demand", () => {
     const denseOverview: ArchitectureOverview = {
       ...overview,
-      sections: [
-        overview.sections[0]!,
+      groups: [
+        overview.groups[0]!,
         ...Array.from({ length: 18 }, (_, index) => ({
-          ...overview.sections[1]!,
+          ...overview.groups[1]!,
           id: `storage-${index}`,
           name: `Storage ${index}`
         }))
@@ -152,8 +170,8 @@ describe("ArchitectureMap", () => {
       routes: Array.from({ length: 18 }, (_, index) => ({
         ...overview.routes[0]!,
         id: `api→storage-${index}`,
-        targetSection: `storage-${index}`,
-        calls: index + 1
+        targetGroup: `storage-${index}`,
+        relationships: index + 1
       }))
     };
     render(
@@ -175,31 +193,31 @@ describe("ArchitectureMap", () => {
 
   it("shows only the selected subsystem neighborhood in focused mode", () => {
     const extraSections = Array.from({ length: 8 }, (_, index) => ({
-      ...overview.sections[1]!,
+      ...overview.groups[1]!,
       id: `service-${index}`,
       name: `Service ${index}`
     }));
     const selectedRoutes = extraSections.slice(0, 2).map((target, index) => ({
       ...overview.routes[0]!,
       id: `api-service-${index}`,
-      targetSection: target.id,
-      calls: 2 + index
+      targetGroup: target.id,
+      relationships: 2 + index
     }));
     const unrelatedRoutes = extraSections.slice(2).map((target, index) => ({
       ...overview.routes[0]!,
       id: `unrelated-${index}`,
-      sourceSection: extraSections[0]!.id,
-      targetSection: target.id,
-      calls: 100 + index
+      sourceGroup: extraSections[0]!.id,
+      targetGroup: target.id,
+      relationships: 100 + index
     }));
     render(
       <ArchitectureMap
         overview={{
           ...overview,
-          sections: [overview.sections[0]!, ...extraSections],
+          groups: [overview.groups[0]!, ...extraSections],
           routes: [...selectedRoutes, ...unrelatedRoutes]
         }}
-        selection={{ kind: "section", id: "api" }}
+        selection={{ kind: "group", id: "api" }}
         onSelect={vi.fn()}
       />
     );
@@ -219,32 +237,32 @@ describe("ArchitectureMap", () => {
   it("collapses reciprocal neighbor routes into one bidirectional connection", () => {
     const reciprocalOverview: ArchitectureOverview = {
       ...overview,
-      sections: overview.sections.map((section) => ({
+      groups: overview.groups.map((section) => ({
         ...section,
-        incomingCalls: 30,
-        outgoingCalls: 30
+        incomingRelationships: 30,
+        outgoingRelationships: 30
       })),
       routes: [
         overview.routes[0]!,
         {
           ...overview.routes[0]!,
           id: "storage→api",
-          sourceSection: "storage",
-          targetSection: "api",
-          calls: 20
+          sourceGroup: "storage",
+          targetGroup: "api",
+          relationships: 20
         }
       ]
     };
     render(
       <ArchitectureMap
         overview={reciprocalOverview}
-        selection={{ kind: "section", id: "api" }}
+        selection={{ kind: "group", id: "api" }}
         onSelect={vi.fn()}
       />
     );
 
     const connection = screen.getByRole("button", {
-      name: /api to storage, 30 calls; bidirectional, 20 reverse calls/i
+      name: /api to storage, 30 relationships; bidirectional, 20 reverse relationships/i
     });
     expect(document.querySelectorAll(".architecture-routes > g")).toHaveLength(1);
     expect(connection.querySelector(".architecture-route-line"))
@@ -259,11 +277,11 @@ describe("ArchitectureMap", () => {
       <ArchitectureMap
         overview={{
           ...overview,
-          sections: overview.sections.map((section) => ({
+          groups: overview.groups.map((section) => ({
             ...section,
             nodeCount: 0,
-            incomingCalls: 0,
-            outgoingCalls: 0
+            incomingRelationships: 0,
+            outgoingRelationships: 0
           })),
           routes: []
         }}

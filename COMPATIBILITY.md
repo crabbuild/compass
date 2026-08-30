@@ -50,7 +50,179 @@ CI covers Linux, macOS, and Windows targets listed in
 performance checks are owned by Compass workflows and require no external
 product checkout.
 
+## Document and OCR compatibility
+
+Native PDF, DOCX, PPTX, and XLSX processing is part of the local Rust product
+boundary. It does not require Python, Tesseract, LibreOffice, Poppler, Java, a
+runtime grammar download, or provider credentials. The stable artifact majors
+introduced here are `compass.document/1`, `compass.document.inspect/1`, and
+`compass.ocr/1`; unknown majors and normalizer versions fail explicitly.
+The additive `compass.document.preview/1` payload is carried by Office
+artifacts and the optional `document.previews` field in
+`compass.viewer.graph/1`. It contains bounded, deterministic SVG snapshots for
+DOCX normalized pages, PPTX slides, and XLSX sheet windows. Snapshots are
+self-contained (only escaped text and data-URI PNG thumbnails), digest-bound,
+and validated against script, external-resource, size, and geometry limits;
+older readers may ignore them. They are an inspectable presentation surface,
+not a claim of pixel-perfect Office layout, and native blocks remain
+authoritative.
+
+OCR is off by default. Enabling `auto` or `always` requires one exact verified
+Compass-managed profile. Extraction never downloads models, and `models
+verify` never accesses the network. Document and semantic caches are hard-cut
+by source digest, schema, normalizer, rasterizer, OCR policy, preprocessing,
+profile manifest/model digests, and languages. An incompatible cache entry is
+a miss or explicit corruption error, never a fallback to flattened text.
+
+Managed OCR is unavailable on Intel (`x86_64`) macOS because the pinned ONNX
+Runtime distribution has no self-contained build for that target. Compass
+therefore omits the OCR runtime dependency on Intel macOS instead of requiring
+a system ONNX installation. Native document processing and `--ocr off` remain
+fully available; `models install` and OCR-enabled processing fail explicitly.
+
+The selected OCR identity is included in graph build and immutable history
+profiles. Native text remains authoritative; OCR is additive derived evidence
+with exact source owner, geometry, confidence, and model provenance. Partial
+visual coverage is never labeled complete or finalized as a complete document
+cache entry.
+
+Semantic enrichment accepts explicit provider/model selection through
+`--backend`/`--model` or the non-secret `COMPASS_BACKEND`/`COMPASS_MODEL`
+environment defaults. Provider credentials remain provider-specific
+environment or secret-store values and are excluded from graph artifacts,
+history profiles, and cache identities.
+
 ## Evolving contracts
+
+The closed route-stage vocabulary used by `compass.graph/1`,
+`compass.query/1`, and `compass.framework-context/1` now includes the additive
+`dependency` and `security` values. The query contract manifest and fingerprint
+changed with that enum list. CLI and MCP output use the same typed model, and
+the bundled viewer validates the same list. Deploy strict readers, manifests,
+and generated viewer assets together. Older strict readers must reject these
+values; consumers must not coerce either one to `middleware`. The existing
+graph and context schema majors are unchanged.
+
+The framework-pack cache identity is now `compass.framework-packs/6`.
+Python HTTP routes no longer use the combined `python-web` runtime adapter;
+they are owned independently by version-2 `django-python`, version-1
+`django-rest-framework-python`, version-2 `fastapi-python`, version-2
+`flask-python`, and version-1 `starlette-python` universal packs. Version-1
+`pydantic-python`, `sqlalchemy-python`, and `celery-python` own exact model,
+persistence, task, queue, canvas, and schedule evidence. The legacy
+`enterprise-domain-facts` source pack no longer runs for Python; its non-Python
+language list and behavior are unchanged. Strict `compass.framework-context/1`
+readers must accept those eight Python IDs and reject the removed combined ID.
+Route
+and graph schema majors remain unchanged, but cached framework facts must be
+rebuilt because pack ownership, evidence provenance, and Flask's default
+operation changed. No graph schema major changes: dependency/security stages
+and Pydantic schema flow reuse the existing typed stage, node-role, and
+`depends_on`, `maps_to`, `produces`, `consumes`, `schedules`, and `triggers`
+contracts.
+
+The Django semantics widening retains the existing graph major and additive
+edge vocabulary. Exact URL-pattern collections, DRF generated routes, model
+relationships/managers, and signal subscriptions can add `routes_to`,
+`depends_on`, and `subscribes` records with source anchors. Dynamic patterns,
+custom router templates, external inherited viewset methods, and ambiguous
+serializer/model targets stay unresolved. Settings, middleware, and admin
+registration calls do not publish `registers`: the current pack contract
+would require the unrelated bean-container capability, so readers must not
+infer those edges from missing output.
+
+Python structural evidence now uses producer version 1. The evidence schema
+is unchanged, but previously empty universal callable/type fields can contain
+source-proven parameter shapes, literal call types, `type_of`, `returns`, and
+call-result bindings. Starred call arguments suppress exact arity; `Any`,
+shadowed names, ambiguous return annotations, and unsupported dynamic forms do
+not acquire a guessed target. Strict consumers should key caches and audit
+baselines by the producer version.
+
+The Grounded Agent Graph feature is additive and opt-in. It does not change
+`compass.graph/1`, structural extraction, default query behavior, or immutable
+history schemas. Its versioned contracts use the
+`compass.agent-graph.*/*` and `compass.agent-knowledge/1` namespaces. Unknown
+majors and unknown fields fail closed. `GROUNDED` is a Compass-issued citation
+verification state and must not be interpreted as `INFERRED`, `EXTRACTED`, or
+proof of semantic truth.
+
+`compass.agent-graph.ingestion-preparation/1` is a read-only additive contract.
+It calculates exact Base record and source-evidence digests for a selected Base
+Generation; it does not certify, mutate, or publish an assertion. Apply
+re-verifies prepared evidence against the pinned Base Generation.
+
+The bundled Compass skill also supports an explicit continuous-enrichment mode
+for coding sessions. This is an adapter workflow over the existing versioned
+overlay commands, not a new graph or history schema: it keeps a bounded
+session-local candidate ledger, publishes only milestone batches, pins each
+receipt revision, and requires a complete rebase after a Base Generation
+change. Read-only navigation remains the default.
+
+Overlay writes require explicit CLI or server enablement. Existing MCP servers
+without Agent Graph configuration advertise no Agent Graph tools. Configured
+read-only servers advertise inspection only; HTTP writes additionally require
+a distinct write key. Historical composition is selected explicitly and never
+changes realization preference or stored history content. No migration of
+existing graphs or history is required.
+
+The frontend graph vocabulary is also additive within the pre-release
+`compass.graph/1` contract. React-oriented builds may publish the typed
+`renders` relationship and the `ui_component`, `hook`, `client_boundary`,
+`client_component`, `server_component`, `server_function`, and `data_loader`
+node roles. A reader that validates closed edge or role enums must update to a
+release containing these values before consuming such a graph; older readers
+must fail closed rather than silently dropping them. These values do not make
+the corresponding framework pack a completed quality claim: promotion remains
+gated by the independent qualification corpus, precision/recall, ambiguity,
+limit, and determinism checks in the frontend graph plan.
+
+The checked-in `compass.query/1` enum manifest and fingerprint widen in lockstep
+with this vocabulary. Strict query, MCP, CLI, VS Code, and viewer consumers
+must use the matching manifest; they must reject an unknown `edgeKind` or
+`nodeRole` instead of filtering it into an older response shape.
+
+Markdown semantic table intelligence remains within `compass.graph/1` by using
+the established resource-node, qualified-name, source-anchor, and relationship
+contracts. Pipe tables continue to publish table, header, row, and cell nodes.
+Their semantic labels, stable identities, exact cell-owned references, and
+bounded extraction are producer-logic improvements; no new graph wire fields
+or schema migration are required. Consumers must continue to reject unknown
+graph majors and must not infer document roles from display labels.
+
+Markdown frontmatter intelligence likewise remains within `compass.graph/1`.
+Bounded nested YAML metadata publishes through established `config_key` nodes,
+Config provenance, exact source anchors, canonical key paths, and `contains`
+relationships. Value-independent IDs and JSON Pointer escaping are producer
+identity rules, not new wire fields. Generic metadata values are not copied
+into graph labels; strict readers need no schema migration.
+
+Swift, Dart, Scala, and Groovy/Gradle now publish through their version-1
+universal evidence pipelines. The four pipelines are `Qualified` under the
+checked-in universal-evidence promotion decision: they use one bounded,
+source-grounded publication route and may change unresolved/ambiguous edges
+compared with older direct extraction. Normal cache fingerprints invalidate
+affected files; users do not need to delete artifacts manually. Equal names
+across Swift/native or JVM-family languages do not by themselves create
+cross-language targets.
+
+The same decision records all 14 hard-cut universal pipelines as `Qualified`,
+including C#, Go, Java, JavaScript, Kotlin, PHP, Python, Ruby, Rust, and
+TypeScript. The status is scoped to each producer's advertised bounded
+capabilities and evidence schema/version; changing either requires a fresh
+promotion decision and cache regeneration.
+
+Python publishes through version-1 `compass.python` evidence and uses static,
+bounded `pyproject.toml` import-root evidence. The corresponding internal
+project-evidence identity is `compass.framework-project-evidence/4`. A uniquely
+proven `src/` or configured package layout may therefore change qualified names
+and stable graph IDs; zero candidates retain the contained repository-relative
+identity, while multiple distinct candidates retain that identity plus an
+ambiguity diagnostic instead of selecting a root by order. `.py` and `.pyi`
+normalize to one module key. Paired source owns graph declarations, stub-only
+declarations carry `source_kind: "stub"`, and source/stub disagreement is an
+explicit error diagnostic. No Python interpreter, environment discovery,
+package installation, or repository import participates in these rules.
 
 A user-visible incompatible change requires:
 
@@ -124,6 +296,28 @@ on `query_graph`, are deprecated from 0.4.0. They remain callable with unchanged
 names and output; no removal release is scheduled before typed replacements
 ship and receive a separate compatibility review.
 
+## Architecture viewer compatibility
+
+The architecture viewer is a coordinated hard cut from
+`compass.viewer.callflow/1` to `compass.viewer.architecture/1`. Capability
+negotiation advertises `architecture_viewer`; consumers must reject an unknown
+major. The new payload does not reinterpret old `sections` or `calls` fields:
+it publishes typed nodes and relationships once plus source-specific group,
+membership, route, omission, and quality projections. The `callflow-json` and
+`callflow-html` command names remain available, but direct v1 callflow JSON
+consumers must migrate.
+Membership records are compact validated indexes into the deterministic node
+and per-projection group arrays. Documentation is a first-class All-code source
+scope and cannot influence Production architecture.
+
+Before the first compatibility-stable release, Compass hard-resets active
+internal extraction, cache, publication, store-index, query-index/ranker,
+overview, qualification, and semantic-diff identities to v1. Provisional
+higher-numbered artifacts are unsupported and are not migrated or interpreted
+alongside earlier v1 prototypes. Discard existing pre-release artifacts and
+rebuild project output with the current binary; disposable query indexes rebuild
+automatically.
+
 The release workflow publishes `compass-release.json` with schema
 `compass.release/1`. `compass upgrade` retrieves that bounded static manifest
 through the GitHub release-download path, requires one exact artifact for each
@@ -145,8 +339,8 @@ Versioned history remains on realization schema 1, store-format root
 `compass/store-format/v1`, and the `compass/v1` realization-root namespace.
 The visible output-path cutover does not change those serialized contracts.
 Historical realizations containing former hidden artifact paths are not mapped
-or rewritten; rebuild those revisions when they must be materialized with the
-current visible artifact layout.
+or rewritten; run `compass history rebuild REV` for a revision that must use
+the current visible artifact layout.
 
 The current local build publishes `graph.json` (`compass.graph/1`) directly
 under the selected output root by default. It also materializes
@@ -158,6 +352,22 @@ The additive `compass.graph/1` endpoint matrix accepts exact `calls` edges to
 `property` nodes. This represents source-proven callable fields, callbacks,
 and object properties without changing node or edge identity; consumers that
 validate endpoint kinds should accept this existing-major widening.
+
+The frontend graph vocabulary is also additive within the pre-release
+`compass.graph/1` contract. React-oriented builds may publish the typed
+`renders` relationship and the `ui_component`, `hook`, `client_boundary`,
+`client_component`, `server_component`, `server_function`, and `data_loader`
+node roles. A reader that validates closed edge or role enums must update to a
+release containing these values before consuming such a graph; older readers
+must fail closed rather than silently dropping them. These values do not make
+the corresponding framework pack a completed quality claim: promotion remains
+gated by the independent qualification corpus, precision/recall, ambiguity,
+limit, and determinism checks in the frontend graph plan.
+
+The checked-in `compass.query/1` enum manifest and fingerprint widen in lockstep
+with this vocabulary. Strict query, MCP, CLI, VS Code, and viewer consumers
+must use the matching manifest; they must reject an unknown `edgeKind` or
+`nodeRole` instead of filtering it into an older response shape.
 
 Large universal-evidence collections now degrade explicitly instead of
 silently publishing file scaffolding. Compass retains source declarations and
@@ -176,12 +386,27 @@ and artifact-lens models. Each view carries explicit bounded coverage. Plain
 views, or using `compass export workbench-json`, returns the workbench contract.
 Consumers must reject an unknown workbench major version. The HTML DOM and CSS
 remain presentation details rather than machine contracts.
-Passing `--store sqlite` also publishes a validated `store.sqlite3`
-sidecar and typed `store.ref` selector. Typed code queries use JSON by default;
-`--engine store` explicitly selects and validates the sidecar. The SQLite file
-and reference are internal realizations of the backend-neutral `compass-store`
-contract, not a stable SQL schema or pointer format that consumers may query
-directly.
+Standalone HTML may additionally embed optional, presentation-only source
+navigation metadata for a recognized Git forge and full source commit. This
+metadata is outside `compass.viewer.workbench/1`; `workbench-json` and the
+versioned graph/view contracts are unchanged.
+Rich document nodes may carry an optional additive `document` object in
+`compass.viewer.graph/1`. It contains bounded native/OCR provenance, typed
+page/slide/sheet locators, confidence, and OCR geometry for the viewer; older
+readers may ignore the field, while strict readers should preserve unknown
+nested fields and fail closed only on an unknown contract major.
+When present, `document.previews` lets viewers display the normalized Office
+snapshot selected by an OCR candidate and map its source polygon into the
+embedded-image region. Missing or omitted preview images remain explicit
+diagnostics and never erase native/OCR evidence.
+Structural builds publish a validated `store.sqlite3` sidecar and typed
+`store.ref` selector by default; `--store json` explicitly opts out. Typed code
+queries prefer that validated sidecar by default, while `--engine json`
+explicitly selects the permanent JSON engine. Once a store reference is
+present, corruption or a selector mismatch fails closed instead of silently
+querying a different realization. The SQLite file and reference are internal
+realizations of the backend-neutral `compass-store` contract, not a stable SQL
+schema or pointer format that consumers may query directly.
 
 The additive `compass ask` command continues to route bounded questions to the
 typed `compass.query/1` operations. Plain `compass query` against a typed graph
@@ -191,6 +416,10 @@ preserve the established text traversal and reject discovery controls.
 CompassQL and explicit typed query commands remain unchanged. Discovery text
 pagination uses the versioned `compass.query.discovery-text-page/1` cursor;
 JSON rejects those presentation-only controls.
+`compass ask --at REV` uses the same immutable trusted `compass.graph/1`
+realization selection as revision discovery. The response remains the unchanged
+`compass.query/1` contract; an older realization without that trusted graph is
+rejected and must be rebuilt.
 
 Default discovery JSON remains the strict `compass.query.discovery/1` shape.
 The focused default neighborhood is 64 nodes and 128 edges. The existing hard
@@ -205,9 +434,11 @@ result plus its query-owned `semanticResultDigest`. The digest is computed from
 canonical v1 semantic response bytes; the digest field is outside that result,
 so the v1 payload and its byte/shape contract remain unchanged.
 
-Clustered updates publish `orientation.json` (`compass.orientation/1`) from the
+Clustered updates publish `orientation.json` (`compass.orientation/2`) from the
 same fitted model as `GRAPH_REPORT.md` and include it in the coherent snapshot
-and build state. `compass export orientation-json` and
+and build state. The additive `blindSpots` field carries the versioned,
+bounded graph-insights report with witnesses, exact omission counts, and
+limits. `compass export orientation-json` and
 `compass://orientation` validate that its generation, source/configuration
 identity, commit, graph summary, and exact streamed `graph.json` artifact
 digest match the selected guarded graph. A direct or historical graph without
@@ -221,7 +452,7 @@ instead of publishing a partial semantic result.
 Natural discovery results additionally expose the same query-owned
 `semanticResultDigest` in this transport envelope, enabling direct/persistent
 result parity checks without requiring an agent client to invent a digest.
-Task-oriented results use strict `compass.task-context/1` and
+Task-oriented results use strict `compass.task-context/2` and
 `compass.task-context-profile/1` contracts through `compass context` and MCP
 `task_context`. Exact identity resolution, digest-verified source, provenance,
 omissions, and domain truncation remain inside the result; fuzzy candidates
@@ -242,7 +473,7 @@ The Rust library's `query_natural_profiled` API returns a separate
 fields to `compass.query/1`, so ordinary responses remain deterministic and
 backend-neutral.
 
-Typed symbol search now unconditionally uses `query-ranker/2`. The internal
+Typed symbol search now unconditionally uses `query-ranker/1`. The internal
 `COMPASS_QUERY_RANKER_PROFILE` experiment switch and v1 runtime fallback have
 been removed. This does not change the `compass.query/1` schema, but intentional
 score and ordering improvements can change which equally lexical candidate is
@@ -358,6 +589,16 @@ legacy `--no-program` flag remains accepted and continues to request the
 structural-only profile. Program inspection commands remain read-only and
 require an existing canonical Program IR artifact.
 
+The optional `compass.scip-manifest/1` companion now accepts an additive
+`managed_analyzer` member with the strict
+`compass.managed-analyzer-profile/1` contract. Existing companions without the
+member retain their prior generic SCIP behavior. Managed Python provider IDs
+include the frozen profile and artifact digests, so Python environment, stub,
+project-configuration, permission, limit, or producer changes invalidate the
+artifact cache deterministically. Unknown profile majors and non-complete or
+stale profiles fail closed. No analyzer runtime, installation, network access,
+or project execution is added to structural builds.
+
 Structural build commands accept the additive
 `--inference-level low|medium|high|max` profile input. `low` is the default and
 publishes exact relationships only. `medium`, `high`, and `max` remain explicit
@@ -378,6 +619,18 @@ integer rubric is version 1; each deterministic gate has its own rule version.
 Presentation formats and the reusable GitHub Action consume this report and do
 not redefine its semantics.
 
+When either side of a review has a preferred realization or repository history
+profile with noncurrent engine fields, Compass replaces every engine-owned
+field with the running contract and then validates the complete reconstructed
+profile before materializing both revisions. The persisted `compass_version`
+is provenance, not a compatibility gate: review does not parse, order, or
+allowlist release numbers. This also applies when both revisions already have
+preferred realizations. Reconciliation proceeds only when their user-selected
+options are identical after reconstruction. Historical realizations remain
+immutable and queryable. Malformed or unsupported profile shapes and different
+user options fail explicitly. When the supported profile shape changes, Compass
+uses a hard cutover rather than accumulating release-specific migrations.
+
 Dependency findings in `compass.semantic_diff.report/1` may now carry the
 optional strict `dependency_topology` object. It records source/target community
 IDs when present and bounded directed-cycle participation when the snapshot
@@ -392,6 +645,14 @@ Advisory risk is never a merge gate. The Action supports only
 `GateResult::Fail` states rather than risk band, score, SARIF level, or prose.
 Its required `compass-version` input must name an exact released version
 containing `compass review`; there is no fallback binary version.
+On a fresh checkout, the Action explicitly materializes the target revision
+with the local `--code-only` history profile before invoking review; it does
+not silently downgrade a configured semantic profile.
+
+PR review finding statements now resolve retained entity identities to
+human-readable names. Stable entity identities remain in the canonical finding
+`source_entities` and `target_entities` fields, so this presentation change
+does not alter finding fingerprints or machine traceability.
 
 This is additive in the `0.3.x` line. Existing `compass prs`, graph, history,
 and MCP contracts are unchanged; `compass diff` gains only the optional typed
@@ -437,16 +698,17 @@ qualification tests; it is not a CLI or packaging dependency. PostgreSQL and
 DynamoDB are future adapters, not supported release backends. No local store
 command accepts cloud credentials, endpoints, or TLS configuration.
 
-The default published location is `DIR/graph.json` under the selected
-`--out DIR` (default `compass-out/`). A `--store sqlite` build additionally
+The default published locations are `DIR/graph.json` and the validated SQLite
+sidecar under the selected `--out DIR` (default `compass-out/`). The build
 publishes `store.ref` beside the current snapshot's `graph.json` and keeps the
-shared database at `DIR/store/store.sqlite3`.
+shared database at `DIR/store/store.sqlite3`; `--store json` omits those
+sidecars while retaining the same JSON artifact.
 `compass store status|validate|backup|restore` are the supported operational
 surface. Backups are digest-bound directories and restores never overwrite an
 existing destination. Local publication retains two complete snapshots and
 performs bounded reachability GC; remote leases, service quotas, and
 distributed GC remain deferred. The local API enforces bounded values, scans,
-transactions, and request work. Current `compass.store.graph-index/2`
+transactions, and request work. Current `compass.store.graph-index/1`
 snapshots do not impose an aggregate canonical-payload or record-count limit:
 their manifest uses `u64` byte and record counts, while each immutable tree
 object, write batch, scan, and query remains independently bounded. The legacy
@@ -456,10 +718,18 @@ stream graph and database digests through fixed-size buffers and traverse the
 reachable immutable tree objects with bounded cache and path memory; they do
 not depend on the whole-JSON reader limit.
 
+Directional adjacency indexes advertise an edge-ID-order capability. Bounded
+JSON and store queries select the same canonical edge-ID prefix across the
+requested relationship kinds before applying heuristic filtering. A sidecar
+without that capability remains available for validation, backup, JSON export,
+and recovery, but directional store queries reject it with a rebuild
+instruction; they never reinterpret endpoint-ordered keys as edge-ordered
+results.
+
 The hard-cut boundary is the sidecar and all disposable indexes. When a
 physical format is invalid or outside the support window, preserve
-`graph.json`, run `scripts/rebuild_compass_store.sh`, or continue with the
-default JSON engine. The JSON engine does not require a database and is not a
+`graph.json`, run `scripts/rebuild_compass_store.sh`, or explicitly select
+`--engine json`. The JSON engine does not require a database and is not a
 migration fallback scheduled for removal.
 
 Markdown graph extraction is a structural, extensible projection. New

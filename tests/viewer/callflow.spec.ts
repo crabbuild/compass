@@ -4,22 +4,23 @@ test("architecture and call graph have separate purpose-built views", async ({ p
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto("/architecture.html");
   await expect(page.getByRole("heading", { name: "Fixture" })).toBeVisible();
+  await expect(page.getByText("Architecture quality: good")).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Architecture subsystems" })).toBeVisible();
-  await expect(page.getByText("25 subsystem routes")).toBeVisible();
-  await expect(page.getByText("1 of 25 routes · Show all")).toBeVisible();
+  await expect(page.getByText("23 subsystem routes")).toBeVisible();
+  await expect(page.getByText("1 of 23 routes · Show all")).toBeVisible();
   await expect(page.locator(".architecture-routes > g")).toHaveCount(1);
 
   const diagram = page.getByRole("region", {
     name: "Scrollable architecture flow diagram"
   });
   await page.getByRole("button", { name: /All routes/ }).click();
-  await expect(page.locator(".architecture-routes > g")).toHaveCount(25);
+  await expect(page.locator(".architecture-routes > g")).toHaveCount(23);
   const dimensions = await diagram.evaluate((element) => ({
     clientHeight: element.clientHeight,
     clientWidth: element.clientWidth,
     scrollWidth: element.scrollWidth
   }));
-  expect(dimensions.clientHeight).toBeGreaterThan(700);
+  expect(dimensions.clientHeight).toBeGreaterThan(680);
   expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
   const stageBox = await page.locator(".architecture-stage").boundingBox();
   const panelBox = await page.locator(".architecture-map-panel").boundingBox();
@@ -40,7 +41,7 @@ test("architecture and call graph have separate purpose-built views", async ({ p
 
   await page.goto("/calls.html");
   await expect(page.getByText("depth 1")).toBeVisible();
-  await expect(page.getByText("Calls from run")).toBeVisible();
+  await expect(page.getByTitle("Calls from run", { exact: true })).toBeVisible();
   const callGraphSummary = page.locator(".call-graph-summary");
   await expect(callGraphSummary.getByText("2 nodes", { exact: true })).toBeVisible();
   await expect(callGraphSummary.getByText("1 edge", { exact: true })).toBeVisible();
@@ -73,6 +74,15 @@ test("architecture loading is informative and recoverable", async ({ page }) => 
   ).architectureHostMessages.map(({ type }) => type))).toEqual(["ready", "retry"]);
 });
 
+test("architecture directory reaches groups omitted from the bounded map", async ({ page }) => {
+  await page.goto("/architecture.html");
+  await expect(page.getByText("Overview shows 24 of 26 groups")).toBeVisible();
+  await page.getByRole("button", { name: "Browse all groups" }).click();
+  await page.getByRole("option", { name: /^Subsystem 25\b/ }).click();
+  await expect(page.getByRole("heading", { name: "Subsystem 25" })).toBeVisible();
+  await expect(page.getByText("This group is outside the bounded map overview.")).toBeVisible();
+});
+
 test("architecture searches globally and bounds large symbol and call collections", async ({
   page
 }) => {
@@ -91,11 +101,11 @@ test("architecture searches globally and bounds large symbol and call collection
   await expect(page.locator(".architecture-symbol-list article")).toHaveCount(31);
   await expect(page.getByText("1–31 of 31 symbols")).toBeVisible();
 
-  await page.getByRole("tab", { name: "Calls" }).click();
-  await expect(page.getByText("1–53 of 53 calls")).toBeVisible();
+  await page.getByRole("tab", { name: "Internal relationships" }).click();
+  await expect(page.getByText("1–53 of 53 relationships")).toBeVisible();
   const callFilter = page.getByRole("searchbox", { name: "Filter architecture selection" });
   await callFilter.fill("database");
-  await expect(page.locator(".architecture-call-list article", {
+  await expect(page.locator(".architecture-relationship-list article", {
     hasText: /authenticate.*database/i
   }).first())
     .toBeVisible();
@@ -120,7 +130,7 @@ test("call graph uses a balanced cursor-resolution state and recoverable error",
   expect(Math.abs(
     (content!.x + content!.width / 2) - (shell!.x + shell!.width / 2)
   )).toBeLessThan(2);
-  await expect(page.getByText("Calls from run")).toBeVisible();
+  await expect(page.getByTitle("Calls from run", { exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("helper");
   await page.getByRole("option", { name: /helper/i }).click();
   const source = page.getByRole("button", {

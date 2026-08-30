@@ -100,6 +100,7 @@ async fn stdio_conformance_discovers_lists_invokes_reads_and_closes() -> Result<
             "compass://surprises",
             "compass://audit",
             "compass://questions",
+            "compass://graph-insights",
         ]
     );
 

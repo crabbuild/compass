@@ -1,8 +1,8 @@
 //! Safe, deterministic output formats for Compass graphs.
 
+mod architecture_projection;
 mod backup;
 mod callflow;
-mod callflow_model;
 mod canvas;
 mod cql;
 mod cypher;
@@ -21,15 +21,23 @@ mod viewer_model;
 mod wiki;
 mod workbench;
 
+pub use architecture_projection::{
+    ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA, ArchitectureClassCounts,
+    ArchitectureCoverage, ArchitectureDiagnosticSeverity, ArchitectureEvidenceCounts,
+    ArchitectureGroup, ArchitectureGroupKind, ArchitectureGroupName, ArchitectureLens,
+    ArchitectureMembership, ArchitectureNameProvenance, ArchitectureNode, ArchitectureOmissions,
+    ArchitectureOverlay, ArchitectureOverlayGroup, ArchitectureOverlaySourceRule,
+    ArchitectureProjectionError, ArchitectureProjectionInput, ArchitectureProjectionLimits,
+    ArchitectureProjectionOptions, ArchitectureProvenance, ArchitectureQuality,
+    ArchitectureQualityDiagnostic, ArchitectureQualityMetrics, ArchitectureQualityStatus,
+    ArchitectureRelationClass, ArchitectureRelationship, ArchitectureRoute, ArchitectureRouteLevel,
+    ArchitectureScope, ArchitectureScopeProjection, ArchitectureSourceCounts,
+    ArchitectureSourceScope, ArchitectureStatistics, ArchitectureViewModel, project_architecture,
+};
 pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
     CallflowExport, CallflowOptions, CallflowSection, callflow_html_document,
     derive_callflow_sections, write_callflow_html,
-};
-pub use callflow_model::{
-    CALLFLOW_VIEWER_SCHEMA, CallflowCoverage, CallflowCrossSectionCall, CallflowProvenance,
-    CallflowSourceScope, CallflowStatistics, CallflowViewEdge, CallflowViewLink, CallflowViewModel,
-    CallflowViewNode, CallflowViewSection, callflow_view_model,
 };
 pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
@@ -59,9 +67,10 @@ pub use report::{
     OrientationLearnedQuestion, OrientationNodeReference, OrientationOmissions,
     OrientationPublicationDiagnostic, OrientationQuery, OrientationRisk, OrientationSourceAnchor,
     OrientationWorkMemory, PublicationStatus, REPORT_MARKDOWN_MAX_CHARS, ReportOptions,
-    SectionOmission, TokenCost, WorkingTreeState, agent_orientation, generate_report,
+    SectionOmission, TokenCost, WorkingTreeState, agent_orientation,
+    agent_orientation_with_blind_spots, generate_report, generate_report_with_blind_spots,
     graph_artifact_identity, render_agent_report_markdown, render_orientation_json,
-    render_orientation_markdown, validate_orientation_graph_identity,
+    render_orientation_markdown, validate_blind_spot_report, validate_orientation_graph_identity,
 };
 pub use review::{
     MAX_REVIEW_RENDER_BYTES, RenderedReview, render_readiness_json, render_readiness_markdown,
@@ -71,14 +80,17 @@ pub use review::{
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 pub use viewer_model::{
-    GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewEdge, GraphViewModel, GraphViewNode,
-    GraphViewSource, GraphViewStats, graph_view_model, shared_viewer_html,
+    EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewDocument,
+    GraphViewEdge, GraphViewModel, GraphViewNode, GraphViewSource, GraphViewStats,
+    effective_graph_view_model, graph_view_model, shared_viewer_html,
     shared_viewer_html_with_communities,
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub use workbench::{
-    WORKBENCH_SCHEMA, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
-    WorkbenchViewContent, workbench_html_document, write_workbench_html,
+    SourceNavigation, SourceProvider, WORKBENCH_SCHEMA, WorkbenchCoverage, WorkbenchCoverageStatus,
+    WorkbenchModel, WorkbenchView, WorkbenchViewContent, workbench_html_document,
+    workbench_html_document_with_source_navigation, write_workbench_html,
+    write_workbench_html_with_source_navigation,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -129,6 +141,8 @@ pub enum OutputError {
     EmptyCallflowGraph,
     #[error("no sections defined")]
     NoCallflowSections,
+    #[error("invalid architecture projection: {0}")]
+    InvalidArchitectureProjection(String),
     #[error(
         "communities dict is empty — refusing to clear wiki/. Run `compass extract .` or `compass cluster-only .` first."
     )]

@@ -32,10 +32,17 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   await expect(source).toBeVisible();
   await expect(source.locator(".compass-source-path")).toHaveText("src/lib.rs");
   await expect(source.locator(".compass-source-range")).toHaveText("Lines 5–7");
-  const neighbors = page.locator(".compass-neighbor-link");
-  await expect(neighbors).toHaveCount(2);
-  await expect(neighbors.locator(".compass-neighbor-dot")).toHaveCount(2);
-  await expect(neighbors.first()).toHaveCSS("border-left-width", "0px");
+  const incoming = page.locator('.compass-direction-group[data-direction="incoming"]');
+  const outgoing = page.locator('.compass-direction-group[data-direction="outgoing"]');
+  await expect(incoming).toContainText("Incoming");
+  await expect(incoming).toContainText("run");
+  await expect(incoming).toContainText("calls");
+  await expect(outgoing).toContainText("Outgoing");
+  await expect(outgoing).toContainText("Store");
+  await expect(outgoing).toContainText("uses");
+  const relationships = page.locator(".compass-direction-link");
+  await expect(relationships).toHaveCount(2);
+  await expect(relationships.locator(".compass-neighbor-dot")).toHaveCount(2);
 
   await page.evaluate(() => {
     window.addEventListener("compass:open-source", ((event: CustomEvent) => {
@@ -46,7 +53,26 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource
   )).toEqual({ file: "src/lib.rs", startLine: 5, endLine: 7 });
+  await expect(page.getByText(
+    "Source link unavailable. The exported revision for src/lib.rs is not published by the configured remote. Open this graph in VS Code to navigate to the local source."
+  )).toBeVisible();
   expect(external).toEqual([]);
+});
+
+test("HTML export graph stays still once it becomes interactive", async ({ page }) => {
+  await page.goto("/graph.html");
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeVisible();
+  const canvas = page.locator(".compass-canvas canvas").first();
+
+  await page.waitForTimeout(100);
+  const firstInteractiveFrame = await canvas.evaluate(
+    (element: HTMLCanvasElement) => element.toDataURL()
+  );
+  await page.waitForTimeout(250);
+
+  await expect(canvas.evaluate(
+    (element: HTMLCanvasElement) => element.toDataURL()
+  )).resolves.toBe(firstInteractiveFrame);
 });
 
 test("file-only graph nodes stay inspectable without source navigation", async ({ page }) => {
@@ -243,11 +269,22 @@ test("community double-click enters lazy detail, source opens, and Back restores
     () => (window as typeof window & { openedCommunity?: number }).openedCommunity
   )).toBe(0);
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
+  const visualLegend = page.getByRole("complementary", { name: "Graph visual legend" });
+  await expect(visualLegend).toBeVisible();
+  await expect(visualLegend.getByText("Callable")).toBeVisible();
+  await expect(visualLegend.getByText("Type")).toBeVisible();
+  await expect(visualLegend.getByText("Dependency")).toBeVisible();
 
   const runLayout = page.getByRole("button", { name: "Run layout" });
   await expect(runLayout).toBeVisible();
+  const detailGraph = page.getByRole("region", { name: "Interactive Compass code graph" });
+  await expect(detailGraph).toHaveAttribute("data-physics-running", "false");
   const graphCanvas = page.locator(".compass-canvas canvas").first();
+  await page.waitForTimeout(100);
   const pausedFrame = await graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL());
+  await page.waitForTimeout(250);
+  await expect(graphCanvas.evaluate((canvas: HTMLCanvasElement) => canvas.toDataURL()))
+    .resolves.toBe(pausedFrame);
   await runLayout.click();
   await expect(page.getByRole("button", { name: "Stop layout" })).toBeVisible();
   await expect.poll(async () => graphCanvas.evaluate(
@@ -264,6 +301,18 @@ test("community double-click enters lazy detail, source opens, and Back restores
   await search.fill("run");
   await page.getByRole("option", { name: /^run/i }).click();
   await page.waitForTimeout(300);
+  await runLayout.click();
+  await expect(page.getByRole("button", { name: "Stop layout" })).toBeVisible();
+  await graphCanvas.hover();
+  await expect(page.getByRole("button", { name: "Run layout" })).toBeVisible();
+  await page.waitForTimeout(100);
+  const interactionFrame = await graphCanvas.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.toDataURL()
+  );
+  await page.waitForTimeout(250);
+  await expect(graphCanvas.evaluate(
+    (canvas: HTMLCanvasElement) => canvas.toDataURL()
+  )).resolves.toBe(interactionFrame);
   await page.locator("canvas").dblclick();
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { openedSource?: unknown }).openedSource
@@ -295,6 +344,7 @@ test("self-contained HTML export double-clicks from community overview into exac
   )).toEqual({ communityId: 0 });
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
   await expect(page.locator(".compass-graph-stats")).toContainText("2 nodes");
+  await expect(page.getByRole("complementary", { name: "Graph visual legend" })).toBeVisible();
 
   await page.getByRole("button", { name: "Back to community overview" }).click();
   await expect(page.getByRole("heading", { name: "Communities" })).toBeVisible();

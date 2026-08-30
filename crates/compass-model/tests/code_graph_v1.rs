@@ -1,6 +1,6 @@
 use compass_model::code_graph::{
     BuildMetadata, CODE_GRAPH_SCHEMA_V1, DiagnosticSeverity, EdgeKind, EdgeRecord, GraphMetadata,
-    NodeDetails, NodeKind, NodeRecord, NodeRole, RouteStage,
+    NodeDetails, NodeKind, NodeRecord, NodeRole, RenderEdgeDetails, RenderKind, RouteStage,
 };
 use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, ResolutionState};
 use serde::Serialize;
@@ -26,6 +26,7 @@ fn v1_vocabularies_serialize_to_the_closed_contract() -> Result<(), Box<dyn std:
         (NodeKind::EnumMember, "enum_member"),
         (NodeKind::TypeAlias, "type_alias"),
         (NodeKind::Function, "function"),
+        (NodeKind::Closure, "closure"),
         (NodeKind::Method, "method"),
         (NodeKind::Constructor, "constructor"),
         (NodeKind::Property, "property"),
@@ -71,6 +72,7 @@ fn v1_vocabularies_serialize_to_the_closed_contract() -> Result<(), Box<dyn std:
         (EdgeKind::Exports, "exports"),
         (EdgeKind::Extends, "extends"),
         (EdgeKind::Implements, "implements"),
+        (EdgeKind::MixesIn, "mixes_in"),
         (EdgeKind::References, "references"),
         (EdgeKind::TypeOf, "type_of"),
         (EdgeKind::Returns, "returns"),
@@ -93,12 +95,24 @@ fn v1_vocabularies_serialize_to_the_closed_contract() -> Result<(), Box<dyn std:
         (EdgeKind::DependsOn, "depends_on"),
         (EdgeKind::Documents, "documents"),
         (EdgeKind::MapsTo, "maps_to"),
+        (EdgeKind::Renders, "renders"),
     ];
     for (kind, expected) in edge_kinds {
         assert_eq!(serialized(kind)?, expected);
     }
 
     assert_eq!(serialized(NodeRole::RouteHandler)?, "route_handler");
+    for (role, expected) in [
+        (NodeRole::UiComponent, "ui_component"),
+        (NodeRole::Hook, "hook"),
+        (NodeRole::ClientBoundary, "client_boundary"),
+        (NodeRole::ClientComponent, "client_component"),
+        (NodeRole::ServerComponent, "server_component"),
+        (NodeRole::ServerFunction, "server_function"),
+        (NodeRole::DataLoader, "data_loader"),
+    ] {
+        assert_eq!(serialized(role)?, expected);
+    }
     assert_eq!(serialized(EvidenceOrigin::Config)?, "config");
     assert_eq!(serialized(EvidenceOrigin::Artifact)?, "artifact");
     assert_eq!(serialized(EvidenceConfidence::Ambiguous)?, "ambiguous");
@@ -177,6 +191,15 @@ fn typed_records_use_camel_case_fields_and_networkx_edge_identity()
     assert_eq!(value["kind"], "routes_to");
     assert_eq!(value["key"], value["id"]);
     assert!(value.get("relation").is_none());
+
+    let render_details = compass_model::code_graph::EdgeDetails::Render(RenderEdgeDetails {
+        render_kind: RenderKind::Jsx,
+        boundary: Some("client".to_owned()),
+    });
+    let render_value = serde_json::to_value(render_details)?;
+    assert_eq!(render_value["type"], "render");
+    assert_eq!(render_value["data"]["renderKind"], "jsx");
+    assert_eq!(render_value["data"]["boundary"], "client");
     Ok(())
 }
 
@@ -240,6 +263,14 @@ fn route_details_retain_ordered_stage_resolution_and_candidates_on_the_wire()
     assert_eq!(value["data"]["stages"][0]["reference"], "authenticate");
     assert_eq!(value["data"]["stages"][1]["resolution"], "ambiguous");
     assert!(value["data"]["stages"][1].get("target").is_none());
+    assert_eq!(
+        serde_json::from_value::<RouteStage>(json!("dependency"))?,
+        RouteStage::Dependency
+    );
+    assert_eq!(
+        serde_json::from_value::<RouteStage>(json!("security"))?,
+        RouteStage::Security
+    );
     Ok(())
 }
 
@@ -295,6 +326,7 @@ fn strict_records_reject_unknown_values_and_fields() {
         "evidence": []
     });
     assert!(serde_json::from_value::<EdgeRecord>(unknown_edge_kind).is_err());
+    assert!(serde_json::from_value::<RouteStage>(json!("authorization")).is_err());
 
     let unknown_detail_field = json!({
         "id": "node:details",
@@ -311,6 +343,31 @@ fn strict_records_reject_unknown_values_and_fields() {
         "evidence": []
     });
     assert!(serde_json::from_value::<NodeRecord>(unknown_detail_field).is_err());
+}
+
+#[test]
+fn older_closed_route_stage_readers_reject_the_additive_values() {
+    #[allow(dead_code)]
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    enum LegacyRouteStage {
+        Middleware,
+        Layout,
+        Template,
+        Loading,
+        Default,
+        ErrorBoundary,
+        NotFound,
+        Boundary,
+        Loader,
+        Action,
+        Handler,
+        DataLoader,
+        RouteComponent,
+    }
+
+    assert!(serde_json::from_value::<LegacyRouteStage>(json!("dependency")).is_err());
+    assert!(serde_json::from_value::<LegacyRouteStage>(json!("security")).is_err());
 }
 
 #[test]

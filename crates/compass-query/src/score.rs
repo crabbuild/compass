@@ -438,6 +438,7 @@ pub fn find_node(graph: &Graph, label: &str) -> Vec<NodeIndex> {
     let mut substring = Vec::new();
     for (index, node) in graph.nodes() {
         let norm_label = normalized_label(node);
+        let norm_qualified_name = normalized_qualified_name(node);
         let bare_label = norm_label.trim_end_matches(['(', ')']);
         let label_tokens = search_tokens(&node.string("label")).join(" ");
         let source_tokens = search_tokens(&node.string("source_file")).join(" ");
@@ -450,6 +451,7 @@ pub fn find_node(graph: &Graph, label: &str) -> Vec<NodeIndex> {
             || term == node_id
             || norm_query == norm_label
             || norm_query == bare_label
+            || (!norm_qualified_name.is_empty() && norm_query == norm_qualified_name)
         {
             exact.push(index);
         } else if norm_label.starts_with(&term)
@@ -506,6 +508,7 @@ pub(crate) fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
         .nodes()
         .filter_map(|(index, node)| {
             let norm_label = normalized_label(node);
+            let norm_qualified_name = normalized_qualified_name(node);
             let bare_label = norm_label.trim_end_matches(['(', ')']);
             let label_tokens = search_tokens(&node.string("label")).join(" ");
             let node_id = node.id.to_lowercase();
@@ -514,10 +517,18 @@ pub(crate) fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
                 || term == label_tokens
                 || term == node_id
                 || norm_query == norm_label
-                || norm_query == bare_label)
+                || norm_query == bare_label
+                || (!norm_qualified_name.is_empty() && norm_query == norm_qualified_name))
                 .then_some(index)
         })
         .collect()
+}
+
+fn normalized_qualified_name(node: &NodeRecord) -> String {
+    node.logical_property("qualified_name")
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .map(|value| strip_diacritics(&value).to_lowercase())
+        .unwrap_or_default()
 }
 
 fn compute_idf(nodes: &[NodeText], terms: &[String]) -> HashMap<String, f64> {
@@ -748,6 +759,38 @@ mod tests {
             seeds,
             [graph.node_index("declaration").ok_or("declaration")?]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn graph_v1_markdown_cell_labels_are_retrievable_in_both_rankers() -> Result<(), Box<dyn Error>>
+    {
+        let document: GraphDocument = serde_json::from_value(json!({
+            "directed": true,
+            "multigraph": true,
+            "graph": {},
+            "nodes": [
+                {
+                    "id": "table-row",
+                    "label": "Owner: compass-model",
+                    "kind": "resource",
+                    "qualifiedName": "Ownership::pipe_table#1::pipe_table_row#graph-1::pipe_table_cell#2"
+                },
+                {"id": "unrelated", "label": "unrelated"}
+            ],
+            "links": []
+        }))?;
+        let graph = Graph::from_document(document)?;
+        for profile in [TextRankProfile::FullScanV1, TextRankProfile::Bm25V1] {
+            let scores =
+                score_nodes_with_profile(&graph, &["compass-model".to_owned()], true, profile);
+            let first = scores
+                .scores
+                .ranked
+                .first()
+                .ok_or("missing semantic result")?;
+            assert_eq!(graph.node(first.node).id, "table-row");
+        }
         Ok(())
     }
 

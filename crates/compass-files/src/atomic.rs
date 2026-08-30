@@ -109,6 +109,53 @@ where
     result
 }
 
+/// Atomically create a new file without replacing any existing directory entry.
+///
+/// The complete payload is first written and synchronized in the destination
+/// directory. A same-filesystem hard link then publishes it with the operating
+/// system's create-if-absent semantics, so concurrent exporters cannot clobber
+/// one another or expose a partial file.
+fn atomic_create_new<F>(path: &Path, write: F) -> Result<(), FileError>
+where
+    F: FnOnce(&mut BufWriter<File>) -> Result<(), FileError>,
+{
+    let destination = path.to_path_buf();
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| io_error(parent, source))?;
+    let temporary = temporary_path(&destination);
+    let file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|source| io_error(&temporary, source))?;
+
+    let result = (|| {
+        let mut writer = BufWriter::with_capacity(ATOMIC_WRITE_BUFFER_BYTES, file);
+        write(&mut writer)?;
+        writer
+            .flush()
+            .map_err(|source| io_error(&temporary, source))?;
+        let file = writer
+            .into_inner()
+            .map_err(|error| io_error(&temporary, error.into_error()))?;
+        file.sync_all()
+            .map_err(|source| io_error(&temporary, source))?;
+        drop(file);
+
+        fs::hard_link(&temporary, &destination).map_err(|source| io_error(&destination, source))?;
+        fs::remove_file(&temporary).map_err(|source| io_error(&temporary, source))?;
+        sync_directory(parent)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
 /// Atomically copy an existing file using the platform's native copy path.
 ///
 /// Native copies can use copy-on-write clones or in-kernel copying while the
@@ -270,6 +317,28 @@ pub fn write_json_atomic<T: Serialize>(
     pretty: bool,
 ) -> Result<(), FileError> {
     atomic_replace(path.as_ref(), |writer| {
+        if pretty {
+            serde_json::to_writer_pretty(writer, value)
+        } else {
+            serde_json::to_writer(writer, value)
+        }
+        .map_err(|source| FileError::Json {
+            path: path.as_ref().to_path_buf(),
+            source,
+        })
+    })
+}
+
+/// Atomically serialize JSON only when the destination does not already exist.
+///
+/// An existing file, directory, or symbolic link is never followed or
+/// replaced. Callers receive the underlying `AlreadyExists` I/O error.
+pub fn write_json_atomic_new<T: Serialize>(
+    path: impl AsRef<Path>,
+    value: &T,
+    pretty: bool,
+) -> Result<(), FileError> {
+    atomic_create_new(path.as_ref(), |writer| {
         if pretty {
             serde_json::to_writer_pretty(writer, value)
         } else {
@@ -471,7 +540,12 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
-    use super::{write_atomic_with_digest, write_json_ascii_atomic, write_json_atomic_with_digest};
+    use serde::Serialize;
+
+    use super::{
+        write_atomic_with_digest, write_json_ascii_atomic, write_json_atomic_new,
+        write_json_atomic_with_digest,
+    };
 
     #[test]
     fn streams_python_compatible_ascii_json_with_optional_newline() {
@@ -510,5 +584,50 @@ mod tests {
         let bytes = fs::read(path).unwrap_or_else(|_| std::process::abort());
         assert_eq!(receipt.bytes, bytes.len() as u64);
         assert_eq!(receipt.sha256, format!("{:x}", Sha256::digest(&bytes)));
+    }
+
+    #[test]
+    fn create_new_json_is_atomic_and_never_replaces_an_existing_entry() {
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let path = directory.path().join("export.json");
+        write_json_atomic_new(&path, &json!({"revision": 1}), true)
+            .unwrap_or_else(|_| std::process::abort());
+        let original = fs::read(&path).unwrap_or_else(|_| std::process::abort());
+
+        let error = write_json_atomic_new(&path, &json!({"revision": 2}), true)
+            .err()
+            .unwrap_or_else(|| std::process::abort());
+        assert!(matches!(
+            error,
+            super::FileError::Io { source, .. }
+                if source.kind() == std::io::ErrorKind::AlreadyExists
+        ));
+        assert_eq!(
+            fs::read(&path).unwrap_or_else(|_| std::process::abort()),
+            original
+        );
+    }
+
+    #[test]
+    fn create_new_json_does_not_publish_a_serialization_failure() {
+        struct Fails;
+
+        impl Serialize for Fails {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("intentional failure"))
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap_or_else(|_| std::process::abort());
+        let path = directory.path().join("failed.json");
+        assert!(write_json_atomic_new(&path, &Fails, false).is_err());
+        assert!(!path.exists());
+        let temporary_entries = fs::read_dir(directory.path())
+            .unwrap_or_else(|_| std::process::abort())
+            .count();
+        assert_eq!(temporary_entries, 0);
     }
 }

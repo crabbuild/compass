@@ -2,21 +2,25 @@
 
 use super::super::*;
 use super::{
-    HierarchyIndexes, MemberIndexes, NameIndexes, RustIndexes, TypeScriptIndexes, WildcardIndexes,
+    CSharpBinding, CSharpIndexes, HierarchyIndexes, MemberIndexes, NameIndexes, PhpIndexes,
+    RustIndexes, TypeScriptIndexes, WildcardIndexes,
 };
 use crate::ResolutionAdmission;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct LanguagePresence {
+    python: bool,
     typescript: bool,
     rust: bool,
     go: bool,
+    csharp: bool,
+    php: bool,
 }
 
 impl LanguagePresence {
     fn detect(batches: &[SemanticEvidenceBatch], inventory_nodes: &[NodeRecord]) -> Self {
         let mut presence = Self::default();
-        for language in batches.iter().map(|batch| batch.adapter.language.as_str()) {
+        for language in batches.iter().map(|batch| batch.pipeline.language.as_str()) {
             presence.observe(language);
         }
         for node in inventory_nodes {
@@ -27,11 +31,14 @@ impl LanguagePresence {
 
     fn observe(&mut self, language: &str) {
         match language {
+            "python" => self.python = true,
             "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => {
                 self.typescript = true;
             }
             "rust" => self.rust = true,
             "go" => self.go = true,
+            "csharp" => self.csharp = true,
+            "php" => self.php = true,
             _ => {}
         }
     }
@@ -163,6 +170,7 @@ impl IndexBuilder<'_> {
                     .map_err(|error| format!("invalid universal evidence: {error}"))
             })?;
         }
+        let _stub_diagnostics = crate::prepare_python_source_stubs(&mut batches);
 
         // Check aggregate input sizes before reserving hash-map capacity. A
         // valid batch is bounded on its own, but an unbounded number of valid
@@ -243,6 +251,30 @@ impl IndexBuilder<'_> {
         let bindings = FactTable::from_values(bindings)?;
         let candidates = candidates.finish()?;
         let scopes = FactTable::from_values(scopes)?;
+        let mut csharp_bindings_by_source = AHashMap::<String, Vec<CSharpBinding>>::new();
+        if languages.csharp {
+            for binding in bindings
+                .values()
+                .filter(|binding| binding.language == "csharp")
+            {
+                csharp_bindings_by_source
+                    .entry(binding.range.source_file.clone())
+                    .or_default()
+                    .push(CSharpBinding {
+                        kind: binding.kind,
+                        spelling: binding.spelling.clone(),
+                        qualified_target: binding.qualified_target.clone(),
+                    });
+            }
+            for source_bindings in csharp_bindings_by_source.values_mut() {
+                source_bindings.sort_unstable_by(|left, right| {
+                    left.spelling
+                        .cmp(&right.spelling)
+                        .then_with(|| left.qualified_target.cmp(&right.qualified_target))
+                });
+                source_bindings.truncate(candidate_storage_limit(limits.candidates_per_lookup));
+            }
+        }
         profile_internal("universal fact collection", &mut profile_started);
         let rust_source_wildcard_targets = if languages.rust {
             declarations
@@ -264,6 +296,16 @@ impl IndexBuilder<'_> {
             return Err("universal declaration slot count exceeds u32".to_owned());
         }
         let definition_ranges = unique_definition_ranges(&declarations, &scopes);
+        let python_project_modules = if languages.python {
+            python_project_module_index(
+                &declarations,
+                root,
+                limits.candidates,
+                limits.candidates_per_lookup,
+            )?
+        } else {
+            PythonProjectModuleIndex::default()
+        };
         let (typescript_project_modules, typescript_project_metadata) = if languages.typescript {
             typescript_project_module_index(
                 project_edges,
@@ -459,16 +501,37 @@ impl IndexBuilder<'_> {
             }
             let language = node.string("language");
             let qualified = match language.as_str() {
-                "python" => python_module_name(&node.string("source_file"), root),
+                "python" => python_project_module_keys(
+                    &python_project_modules,
+                    &node.string("source_file"),
+                    root,
+                )
+                .map(<[String]>::to_vec)
+                .or_else(|| {
+                    python_module_name(&node.string("source_file"), root).map(|module| vec![module])
+                })
+                .unwrap_or_default(),
                 "go" => {
                     let package = node.string("package");
-                    (!package.is_empty()).then_some(package)
+                    (!package.is_empty())
+                        .then_some(vec![package])
+                        .unwrap_or_default()
                 }
-                _ => None,
+                _ => Vec::new(),
             };
-            if let Some(qualified) = qualified {
+            for qualified in qualified {
+                if language == "python"
+                    && !python_project_source_is_indexed(
+                        &python_project_modules,
+                        &qualified,
+                        &node.string("source_file"),
+                        root,
+                    )
+                {
+                    continue;
+                }
                 inventory_by_qualified
-                    .entry((language, qualified))
+                    .entry((language.clone(), qualified))
                     .or_default()
                     .push(node.id.clone());
             }
@@ -559,6 +622,7 @@ impl IndexBuilder<'_> {
                     entry.complete &= base_set_complete;
                     if entry.links.len() <= limits.candidates_per_lookup {
                         entry.links.push(DirectBaseLink {
+                            relation: candidate.relation,
                             qualified_name: candidate.constraints.qualified_name.clone(),
                             source_file: range
                                 .map_or_else(String::new, |range| range.source_file.clone()),
@@ -619,6 +683,8 @@ impl IndexBuilder<'_> {
         }
         let mut members_by_owner =
             AHashMap::<(String, String, String), Vec<DeclarationSlot>>::new();
+        let mut php_members_by_owner_folded =
+            AHashMap::<(String, String), Vec<DeclarationSlot>>::new();
         for declaration in declarations.values() {
             let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) else {
                 continue;
@@ -640,9 +706,18 @@ impl IndexBuilder<'_> {
                 ))
                 .or_default()
                 .push(slot);
+            if languages.php && declaration.language == "php" {
+                php_members_by_owner_folded
+                    .entry((
+                        owner.qualified_name.to_ascii_lowercase(),
+                        declaration.name.to_ascii_lowercase(),
+                    ))
+                    .or_default()
+                    .push(slot);
+            }
         }
         // Object-literal members are deliberately collected in their lexical
-        // binding scope by the TypeScript adapter: unlike a class/interface,
+        // binding scope by the TypeScript producer: unlike a class/interface,
         // an object value has no syntax-level scope owner.  Recover the
         // source-qualified object variable as an additional owner so imported
         // chains such as `api.make(value).inspect()` can traverse the
@@ -703,6 +778,15 @@ impl IndexBuilder<'_> {
             }
         }
         for members in members_by_owner.values_mut() {
+            members.sort_unstable_by(|left, right| {
+                declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
+            });
+            members.dedup();
+            if members.len() > limits.candidates_per_lookup {
+                members.truncate(candidate_storage_limit(limits.candidates_per_lookup));
+            }
+        }
+        for members in php_members_by_owner_folded.values_mut() {
             members.sort_unstable_by(|left, right| {
                 declaration_ids[*left as usize].cmp(&declaration_ids[*right as usize])
             });
@@ -996,9 +1080,16 @@ impl IndexBuilder<'_> {
                     impl_traits: rust_impl_traits,
                     source_wildcard_targets: rust_source_wildcard_targets,
                 },
+                csharp: CSharpIndexes {
+                    bindings_by_source: csharp_bindings_by_source,
+                },
+                php: PhpIndexes {
+                    members_by_owner_folded: php_members_by_owner_folded,
+                },
             }),
             project: ProjectContext {
                 root: root.to_path_buf(),
+                python_project_modules,
                 typescript_project_modules,
                 typescript_project_metadata,
                 go_module_path,

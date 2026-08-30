@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use regex::Regex;
@@ -7,9 +7,13 @@ use tree_sitter::Node;
 
 use super::evidence::{EvidenceKind, EvidenceSet};
 use super::text::{anchor, join_route_path, literal, normalize_route_path, split_top_level, text};
-use super::{RawFrameworkFact, RawFrameworkOrigin, RawRouteFact};
+use super::{
+    RawFrameworkAnchor, RawFrameworkFact, RawFrameworkOrigin, RawRouteFact,
+    UniversalDetectionContext,
+};
+use crate::{CandidateRelation, HierarchyConstraint, SemanticRole, SymbolNamespace};
 
-const LARAVEL_ROUTE_FACADE: &str = "Illuminate\\Support\\Facades\\Route";
+const LARAVEL_ROUTE_FACADE: &str = "illuminate\\support\\facades\\route";
 
 #[derive(Clone, Debug)]
 struct LaravelCall {
@@ -20,37 +24,29 @@ struct LaravelCall {
     group_body: Option<(usize, usize)>,
 }
 
-pub(super) fn detect(path: &Path, source: &[u8], root: Node<'_>) -> Vec<RawFrameworkFact> {
-    let body = text(source);
-    let imports = php_imports(root, source);
+pub(super) fn detect(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    if context.evidence.pipeline.language != "php" {
+        return Vec::new();
+    }
+    let route_calls = universal_laravel_call_sites(context);
     let mut calls = Vec::new();
-    collect_laravel_calls(root, source, &imports, &mut calls);
-    let evidence = EvidenceSet::new()
-        .direct_if(
-            !calls.is_empty(),
-            "laravel",
-            EvidenceKind::Receiver,
-            LARAVEL_ROUTE_FACADE,
-        )
-        .supporting_if(
-            is_routes_directory(path),
-            "laravel",
-            EvidenceKind::Convention,
-            "routes/",
-        )
-        .direct_if(
-            is_drupal_hook_file(path),
-            "drupal",
-            EvidenceKind::ConfigurationContract,
-            "Drupal hook extension",
-        );
-    let mut facts = if evidence.activates("laravel") {
-        detect_laravel(path, source, &calls)
+    collect_laravel_calls(context.root, context.source, &route_calls, &mut calls);
+    let laravel_manifest = context.project.is_some_and(|project| {
+        project.has_any_dependency(super::pack::PHP_FRAMEWORKS_DESCRIPTOR.dependency_markers)
+            && project.has_dependency("laravel/framework")
+    });
+    let drupal_manifest = context
+        .project
+        .is_some_and(|project| project.has_dependency("drupal/core"));
+    let type_bindings = unique_type_bindings(context);
+    let mut facts = if !calls.is_empty() || (laravel_manifest && is_routes_directory(context.path))
+    {
+        detect_laravel(context.path, context.source, &calls, &type_bindings)
     } else {
         Vec::new()
     };
-    if evidence.activates("drupal") {
-        facts.extend(detect_drupal_hooks(path, source, body));
+    if drupal_manifest || is_drupal_hook_file(context.path) {
+        facts.extend(detect_drupal_hooks(context));
     }
     facts
 }
@@ -140,6 +136,7 @@ pub(super) fn detect_drupal_routing(path: &Path, source: &[u8]) -> Vec<RawFramew
                 anchor: anchor.clone(),
                 handler_reference: handler_reference.clone(),
                 middleware_references: Vec::new(),
+                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Config,
                 rule: Some("drupal-routing-yaml".to_owned()),
                 detail: Map::new(),
@@ -149,7 +146,12 @@ pub(super) fn detect_drupal_routing(path: &Path, source: &[u8]) -> Vec<RawFramew
     facts
 }
 
-fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawFrameworkFact> {
+fn detect_laravel(
+    path: &Path,
+    source: &[u8],
+    calls: &[LaravelCall],
+    type_bindings: &BTreeMap<String, String>,
+) -> Vec<RawFrameworkFact> {
     let prefixes = laravel_prefixes(calls);
     let mut facts = Vec::new();
     for call in calls {
@@ -171,7 +173,7 @@ fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawF
             let Some(controller) = call
                 .arguments
                 .get(1)
-                .and_then(|value| laravel_controller(value))
+                .and_then(|value| laravel_controller(value, type_bindings))
             else {
                 continue;
             };
@@ -214,7 +216,7 @@ fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawF
         let Some(handler) = call
             .arguments
             .get(handler_index)
-            .and_then(|value| laravel_handler(value))
+            .and_then(|value| laravel_handler(value, type_bindings))
         else {
             continue;
         };
@@ -229,6 +231,7 @@ fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawF
                 anchor: call_anchor.clone(),
                 handler_reference: handler.clone(),
                 middleware_references: Vec::new(),
+                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("laravel-route-facade".to_owned()),
                 detail: Map::new(),
@@ -238,86 +241,68 @@ fn detect_laravel(path: &Path, source: &[u8], calls: &[LaravelCall]) -> Vec<RawF
     facts
 }
 
-fn php_imports(root: Node<'_>, source: &[u8]) -> HashMap<String, String> {
-    let mut imports = HashMap::new();
-    collect_php_imports(root, source, &mut imports);
-    imports
-}
-
-fn collect_php_imports(node: Node<'_>, source: &[u8], imports: &mut HashMap<String, String>) {
-    if node.kind() == "namespace_use_declaration" {
-        parse_php_import_declaration(node_text(node, source), imports);
-        return;
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_php_imports(child, source, imports);
-    }
-}
-
-fn parse_php_import_declaration(declaration: &str, imports: &mut HashMap<String, String>) {
-    let declaration = declaration.trim();
-    let Some(body) = declaration
-        .get(3..)
-        .filter(|_| {
-            declaration
-                .get(..3)
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("use"))
+fn universal_laravel_call_sites(
+    context: &UniversalDetectionContext<'_, '_>,
+) -> BTreeSet<(u64, u64, String)> {
+    let occurrences = context
+        .evidence
+        .occurrences
+        .iter()
+        .map(|occurrence| (occurrence.id.as_str(), occurrence))
+        .collect::<BTreeMap<_, _>>();
+    context
+        .evidence
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.relation == CandidateRelation::Calls)
+        .filter(|candidate| {
+            matches!(
+                candidate.constraints.hierarchy.as_ref(),
+                Some(HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name,
+                    ..
+                }) if receiver_qualified_name.eq_ignore_ascii_case(LARAVEL_ROUTE_FACADE)
+            )
         })
-        .map(str::trim)
-        .and_then(|value| value.strip_suffix(';'))
-        .map(str::trim)
-    else {
-        return;
-    };
-    if starts_with_keyword(body, "function") || starts_with_keyword(body, "const") {
-        return;
-    }
-    if let (Some(open), Some(close)) = (body.find('{'), body.rfind('}')) {
-        if open >= close {
-            return;
-        }
-        let prefix = body[..open].trim().trim_end_matches('\\');
-        for entry in split_top_level(&body[open + 1..close]) {
-            add_php_import(prefix, entry, imports);
-        }
-    } else {
-        for entry in split_top_level(body) {
-            add_php_import("", entry, imports);
-        }
-    }
+        .filter_map(|candidate| {
+            let occurrence = occurrences.get(candidate.occurrence_id.as_deref()?)?;
+            (occurrence.role == SemanticRole::Call).then(|| {
+                (
+                    occurrence.range.start_byte,
+                    occurrence.range.end_byte,
+                    candidate.target_spelling.to_ascii_lowercase(),
+                )
+            })
+        })
+        .collect()
 }
 
-fn add_php_import(prefix: &str, entry: &str, imports: &mut HashMap<String, String>) {
-    let entry = entry.trim();
-    if starts_with_keyword(entry, "function") || starts_with_keyword(entry, "const") {
-        return;
+fn unique_type_bindings(context: &UniversalDetectionContext<'_, '_>) -> BTreeMap<String, String> {
+    let mut grouped = BTreeMap::<String, BTreeSet<String>>::new();
+    for binding in &context.evidence.bindings {
+        if binding.namespace != Some(SymbolNamespace::Type) {
+            continue;
+        }
+        grouped
+            .entry(binding.spelling.to_ascii_lowercase())
+            .or_default()
+            .insert(binding.qualified_target.to_ascii_lowercase());
     }
-    let parts = entry.split_whitespace().collect::<Vec<_>>();
-    let Some(imported) = parts.first().copied() else {
-        return;
-    };
-    let alias = if parts.len() == 3 && parts[1].eq_ignore_ascii_case("as") {
-        parts[2]
-    } else if parts.len() == 1 {
-        imported.rsplit('\\').next().unwrap_or_default()
-    } else {
-        return;
-    };
-    let target = if prefix.is_empty() {
-        normalize_php_name(imported)
-    } else {
-        normalize_php_name(&format!("{prefix}\\{imported}"))
-    };
-    if is_php_qualified_name(alias) && !target.is_empty() {
-        imports.insert(alias.to_owned(), target);
-    }
+    grouped
+        .into_iter()
+        .filter_map(|(spelling, targets)| {
+            if targets.len() != 1 {
+                return None;
+            }
+            targets.into_iter().next().map(|target| (spelling, target))
+        })
+        .collect()
 }
 
 fn collect_laravel_calls(
     node: Node<'_>,
     source: &[u8],
-    imports: &HashMap<String, String>,
+    route_calls: &BTreeSet<(u64, u64, String)>,
     calls: &mut Vec<LaravelCall>,
 ) {
     if node.kind() == "scoped_call_expression"
@@ -328,7 +313,11 @@ fn collect_laravel_calls(
         )
         && matches!(scope.kind(), "name" | "qualified_name")
         && name.kind() == "name"
-        && resolves_laravel_route(node_text(scope, source), imports)
+        && route_calls.contains(&(
+            u64::try_from(name.start_byte()).unwrap_or(u64::MAX),
+            u64::try_from(name.end_byte()).unwrap_or(u64::MAX),
+            node_text(name, source).to_ascii_lowercase(),
+        ))
     {
         let arguments_text = node_text(arguments, source).trim();
         if let Some(arguments_text) = arguments_text
@@ -349,16 +338,8 @@ fn collect_laravel_calls(
     }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor).filter(|child| child.is_named()) {
-        collect_laravel_calls(child, source, imports, calls);
+        collect_laravel_calls(child, source, route_calls, calls);
     }
-}
-
-fn resolves_laravel_route(scope: &str, imports: &HashMap<String, String>) -> bool {
-    let scope = normalize_php_name(scope);
-    scope == LARAVEL_ROUTE_FACADE
-        || imports
-            .get(&scope)
-            .is_some_and(|target| target == LARAVEL_ROUTE_FACADE)
 }
 
 fn scoped_group_body(call: Node<'_>, source: &[u8]) -> Option<(usize, usize)> {
@@ -384,20 +365,6 @@ fn find_descendant<'tree>(node: Node<'tree>, kind: &str) -> Option<Node<'tree>> 
     node.children(&mut cursor)
         .filter(|child| child.is_named())
         .find_map(|child| find_descendant(child, kind))
-}
-
-fn starts_with_keyword(value: &str, keyword: &str) -> bool {
-    value
-        .get(..keyword.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(keyword))
-        && value
-            .as_bytes()
-            .get(keyword.len())
-            .is_some_and(u8::is_ascii_whitespace)
-}
-
-fn normalize_php_name(value: &str) -> String {
-    value.trim().trim_start_matches('\\').to_owned()
 }
 
 fn node_text<'source>(node: Node<'_>, source: &'source [u8]) -> &'source str {
@@ -452,6 +419,7 @@ fn resource_routes(
             anchor: call_anchor.clone(),
             handler_reference: format!("{controller}.{action}"),
             middleware_references: Vec::new(),
+            stages: Vec::new(),
             origin: RawFrameworkOrigin::Ast,
             rule: Some("laravel-resource-expansion".to_owned()),
             detail: Map::from_iter([(
@@ -516,55 +484,104 @@ fn resource_actions(source: &[u8], call: &LaravelCall, api_resource: bool) -> BT
     actions
 }
 
-fn detect_drupal_hooks(path: &Path, source: &[u8], body: &str) -> Vec<RawFrameworkFact> {
-    let module = path
+fn detect_drupal_hooks(context: &UniversalDetectionContext<'_, '_>) -> Vec<RawFrameworkFact> {
+    let module = context
+        .path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or_default();
+    let body = text(context.source);
     let Ok(documented) = Regex::new(
         r"(?is)/\*\*.*?Implements\s+hook_([A-Za-z0-9_]+)\s*\(\s*\)\s*\..*?\*/\s*function\s+([A-Za-z0-9_]+)\s*\(",
     ) else {
         return Vec::new();
     };
-    let Ok(placeholder) = Regex::new(r"(?i)\bfunction\s+(hook_[A-Za-z0-9_]+)\s*\(") else {
-        return Vec::new();
-    };
+    let declarations = context
+        .evidence
+        .declarations
+        .iter()
+        .filter(|declaration| declaration.kind == "function")
+        .collect::<Vec<_>>();
     let mut hooks = documented
         .captures_iter(body)
         .filter_map(|capture| {
             let hook = capture.get(1)?.as_str();
             let function = capture.get(2)?;
-            (function.as_str() == format!("{module}_{hook}"))
-                .then(|| (function.start(), function.end(), hook.to_owned()))
+            if function.as_str() != format!("{module}_{hook}") {
+                return None;
+            }
+            declarations
+                .iter()
+                .find(|declaration| {
+                    declaration.name == function.as_str()
+                        && declaration.range.start_byte
+                            == u64::try_from(function.start()).unwrap_or(u64::MAX)
+                        && declaration.range.end_byte
+                            == u64::try_from(function.end()).unwrap_or(u64::MAX)
+                })
+                .map(|declaration| ((*declaration).clone(), hook.to_owned()))
         })
         .collect::<Vec<_>>();
-    hooks.extend(placeholder.captures_iter(body).filter_map(|capture| {
-        let function = capture.get(1)?;
-        let hook = function.as_str().get("hook_".len()..)?.to_owned();
-        Some((function.start(), function.end(), hook))
+    hooks.extend(declarations.iter().filter_map(|declaration| {
+        declaration
+            .name
+            .get("hook_".len()..)
+            .filter(|_| {
+                declaration
+                    .name
+                    .get(.."hook_".len())
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("hook_"))
+            })
+            .filter(|hook| !hook.is_empty())
+            .map(|hook| ((*declaration).clone(), hook.to_owned()))
     }));
+    hooks.sort_by(|left, right| {
+        left.0
+            .range
+            .start_byte
+            .cmp(&right.0.range.start_byte)
+            .then_with(|| left.0.id.cmp(&right.0.id))
+            .then_with(|| left.1.cmp(&right.1))
+    });
     let mut seen = BTreeSet::new();
-    hooks.sort();
     hooks
         .into_iter()
-        .filter(|(start, end, _)| seen.insert((*start, *end)))
-        .filter_map(|(start, end, hook)| {
-            let name = body.get(start..end)?;
-            Some(RawFrameworkFact::Route(RawRouteFact {
+        .filter(|(declaration, hook)| seen.insert((declaration.id.clone(), hook.clone())))
+        .map(|(declaration, hook)| {
+            RawFrameworkFact::Route(RawRouteFact {
                 framework: "drupal".to_owned(),
                 operation: "HOOK".to_owned(),
                 raw_path: format!("hook://hook_{hook}"),
                 normalized_path: format!("/__hook/hook_{hook}"),
-                declaring_scope: path.to_string_lossy().replace('\\', "/"),
-                anchor: anchor(path, source, start, end),
-                handler_reference: name.to_owned(),
+                declaring_scope: declaration.range.source_file.clone(),
+                anchor: framework_anchor(&declaration.range),
+                handler_reference: declaration.qualified_name.replace('\\', "."),
                 middleware_references: Vec::new(),
+                stages: Vec::new(),
                 origin: RawFrameworkOrigin::Ast,
                 rule: Some("drupal-hook-implementation".to_owned()),
-                detail: Map::from_iter([("hook".into(), Value::String(hook))]),
-            }))
+                detail: Map::from_iter([
+                    ("hook".into(), Value::String(hook)),
+                    (
+                        "declarationId".into(),
+                        Value::String(declaration.id.clone()),
+                    ),
+                ]),
+            })
         })
         .collect()
+}
+
+fn framework_anchor(range: &crate::EvidenceRange) -> RawFrameworkAnchor {
+    RawFrameworkAnchor {
+        source_file: range.source_file.clone(),
+        start_byte: range.start_byte,
+        end_byte: range.end_byte,
+        start_line: range.start_line,
+        start_column: range.start_column,
+        end_line: range.end_line,
+        end_column: range.end_column,
+    }
 }
 
 fn laravel_prefixes(calls: &[LaravelCall]) -> Vec<(String, usize, usize)> {
@@ -579,26 +596,42 @@ fn laravel_prefixes(calls: &[LaravelCall]) -> Vec<(String, usize, usize)> {
         .collect()
 }
 
-fn laravel_handler(value: &str) -> Option<String> {
+fn laravel_handler(value: &str, type_bindings: &BTreeMap<String, String>) -> Option<String> {
     if let Some(handler) = literal(value) {
-        return Some(handler.replace('@', "."));
+        return Some(handler.to_ascii_lowercase().replace('@', "."));
     }
     let parts = value
         .trim()
         .strip_prefix('[')?
         .strip_suffix(']')
         .map(split_top_level)?;
-    let controller = parts.first().and_then(|part| laravel_controller(part))?;
-    let action = parts.get(1).and_then(|part| literal(part))?;
+    let controller = parts
+        .first()
+        .and_then(|part| laravel_controller(part, type_bindings))?;
+    let action = parts
+        .get(1)
+        .and_then(|part| literal(part))?
+        .to_ascii_lowercase();
     Some(format!("{controller}.{action}"))
 }
 
-fn laravel_controller(value: &str) -> Option<String> {
+fn laravel_controller(value: &str, type_bindings: &BTreeMap<String, String>) -> Option<String> {
     let value = value
         .trim()
         .strip_suffix("::class")?
         .trim_start_matches('\\');
-    is_php_qualified_name(value).then(|| value.replace('\\', "."))
+    if !is_php_qualified_name(value) {
+        return None;
+    }
+    let first = value.split('\\').next().unwrap_or(value);
+    let resolved = type_bindings.get(&first.to_ascii_lowercase()).map_or_else(
+        || value.to_ascii_lowercase(),
+        |target| {
+            let suffix = value.strip_prefix(first).unwrap_or_default();
+            format!("{target}{suffix}")
+        },
+    );
+    Some(resolved.replace('\\', "."))
 }
 
 fn array_literals(value: &str) -> Vec<String> {

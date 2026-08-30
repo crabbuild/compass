@@ -186,7 +186,7 @@ pub(crate) fn materialize_bounded_owned(
         // conservative admission profile even when the caller requested a
         // richer one, because closed-world inference would be unsound inside
         // a partial repository view. Every retained candidate carries an
-        // adapter-proven exact target ID.
+        // producer-proven exact target ID.
         let partition_admission = ResolutionAdmission::Low;
         let index =
             UniversalResolutionIndex::new_with_prevalidated_project_inventory_owned_at_inference(
@@ -279,7 +279,7 @@ fn compact_low_inference_evidence(batches: &mut [SemanticEvidenceBatch]) -> usiz
             .flat_map(|batch| &batch.scopes)
             .filter_map(|scope| scope.owner_declaration_id.clone()),
     );
-    // Some adapters intentionally leave lexical targets for the collection
+    // Some producers intentionally leave lexical targets for the collection
     // resolver instead of stamping an exact declaration ID. Preserve a leaf
     // declaration whenever its spelling is used in the same source batch;
     // otherwise compaction could erase a parameter/property before lexical
@@ -437,7 +437,7 @@ fn batch_source_key(batch: &SemanticEvidenceBatch) -> (&str, &str) {
                 .map(|fact| fact.range.source_file.as_str())
         })
         .unwrap_or_default();
-    (source, batch.adapter.language.as_str())
+    (source, batch.pipeline.language.as_str())
 }
 
 #[cfg(test)]
@@ -662,7 +662,7 @@ mod tests {
             .extract_source(Path::new("src/example.py"), b"def run():\n    return 1\n")?
             .semantic_evidence
             .ok_or("missing evidence")?;
-        batch.adapter.language.clear();
+        batch.pipeline.language.clear();
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
 

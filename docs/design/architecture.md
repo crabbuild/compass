@@ -114,12 +114,13 @@ The vendored tree-sitter language pack supplies deterministic parser
 definitions and queries.
 
 The [language architecture](language-architecture.md) separates this grammar
-substrate from adapter-local semantic policy and universal evidence. Python,
-Go, Rust, and Java have hard-cut to the shared evidence and resolution path on
-this branch. Rust has passed its Phase 2 qualification; Java is registered as
-a version-1 `UniversalCandidate` while its pinned-corpus qualification is
-completed. Other registered languages keep their established extraction paths
-until their own independently qualified transitions.
+substrate from producer-local semantic policy and universal evidence. C#,
+Dart, Go, Groovy, Java, JavaScript, Kotlin, PHP, Python, Ruby, Rust, Scala,
+Swift, and TypeScript use the shared evidence and resolution path on this
+branch. Their registry entries are `UniversalEvidencePipeline` values promoted
+to `Qualified` by the checked-in release decision. Other registered languages
+keep their established extraction paths until their own independently
+qualified transitions.
 
 ### `compass-resolve`
 
@@ -127,7 +128,7 @@ Owns cross-file resolution over extraction facts:
 
 - import target canonicalization;
 - universal declaration, scope, binding, occurrence, and candidate indexes;
-- shared projection for hard-cut language adapters;
+- shared projection for hard-cut language producers;
 - JavaScript/TypeScript re-export handling;
 - cross-file calls;
 - language member-call facts;
@@ -142,7 +143,7 @@ making query or rendering decisions.
 
 Universal evidence is inside the deterministic construction layer. It is not
 a parser replacement, a graph database, or a second semantic-provider path.
-The vendored package prepares syntax; a language adapter records source-backed
+The vendored package prepares syntax; a language producer records source-backed
 facts; `compass-resolve` selects defensible project-wide targets; and the
 shared projector creates Code Graph v1 records.
 
@@ -158,17 +159,17 @@ compass-languages: source registry
     +---------------- established language route ------------------+
     |                                                              |
     v                                                              v
-vendored static Tree-sitter grammar                        established adapter
+vendored static Tree-sitter grammar                        established extraction
     |                                                              |
     v                                                              v
 one prepared AST                                           graph facts/call facts
     |                                                              |
     v                                                              |
-universal adapter policy                                           |
+universal evidence pipeline                                        |
 Python | Go | Rust | Java                                          |
     |                                                              |
     v                                                              |
-SemanticEvidenceBatch v1                                           |
+SemanticEvidenceBatch v2                                           |
     |                                                              |
     +--------------------------+-----------------------------------+
                                v
@@ -181,7 +182,7 @@ compass-graph: normalize, deduplicate, cluster, analyze
 graph.json | cache | history | query surfaces
 ```
 
-The registry chooses one publication route per language. A hard-cut adapter
+The registry chooses one publication route per language. A hard-cut pipeline
 does not dual-run its replaced publisher and does not translate old graph
 records into evidence. The established route remains a first-class production
 architecture for languages that have not yet made their own transition.

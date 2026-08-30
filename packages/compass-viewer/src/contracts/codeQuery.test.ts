@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CODE_QUERY_CONTRACT_MANIFEST,
+  CodeRouteStageSchema,
   CodeQueryResponseSchema,
   decodeCodeQueryResponse
 } from "./codeQuery";
@@ -55,6 +56,12 @@ describe("compass.query/1", () => {
       }]
     };
     expect(CodeQueryResponseSchema.safeParse(unsafe).success).toBe(false);
+    expect(CodeRouteStageSchema.safeParse("authorization").success).toBe(false);
+  });
+
+  it("accepts dependency and security route stages", () => {
+    expect(CodeRouteStageSchema.parse("dependency")).toBe("dependency");
+    expect(CodeRouteStageSchema.parse("security")).toBe("security");
   });
 
   it("retains heuristic wiring and ambiguous candidates", () => {
@@ -106,5 +113,35 @@ describe("compass.query/1", () => {
       path: null
     }];
     expect(decodeCodeQueryResponse(value).diagnostics[0]?.code).toBe("direction_mismatch");
+  });
+
+  it("accepts typed render edges without treating them as calls", () => {
+    const value = example() as Record<string, unknown>;
+    value.edges = [{
+      id: "render-edge",
+      source: "component:app",
+      target: "component:button",
+      kind: "renders",
+      relationshipSite: {
+        file: "src/App.tsx",
+        startByte: 42,
+        endByte: 48,
+        startLine: 4,
+        startColumn: 10,
+        endLine: 4,
+        endColumn: 16
+      },
+      details: {
+        type: "render",
+        data: { renderKind: "jsx", boundary: "client" }
+      },
+      evidence: []
+    }];
+    const decoded = decodeCodeQueryResponse(value);
+    expect(decoded.edges[0]?.kind).toBe("renders");
+    expect(decoded.edges[0]?.details).toEqual({
+      type: "render",
+      data: { renderKind: "jsx", boundary: "client" }
+    });
   });
 });

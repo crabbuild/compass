@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 
 use compass_semantic_diff as semantic;
@@ -28,7 +29,13 @@ pub fn analyze(
         .iter()
         .take(MAX_FINDINGS)
         .map(|finding| {
-            convert_finding(request, manifest, finding).map(|converted| (finding, converted))
+            convert_finding(
+                request,
+                manifest,
+                finding,
+                &semantic_diff.entity_display_names,
+            )
+            .map(|converted| (finding, converted))
         })
         .collect::<Result<Vec<_>, _>>()?;
     if semantic_diff.findings.len() > MAX_FINDINGS {
@@ -164,6 +171,7 @@ fn convert_finding(
     request: &ChangeRequest,
     manifest: &EvidenceManifest,
     finding: &semantic::SemanticFinding,
+    entity_display_names: &BTreeMap<String, String>,
 ) -> Result<Finding, PrIntelligenceError> {
     let finding_type = match finding.finding_type {
         semantic::FindingType::ContractChange => FindingType::ContractChange,
@@ -250,7 +258,7 @@ fn convert_finding(
         fingerprint,
         finding_type,
         classifier_version: semantic::CLASSIFIER_VERSION,
-        statement: finding.headline.clone(),
+        statement: humanize_text(&finding.headline, entity_display_names),
         source_entities: vec![finding.subject.clone()],
         target_entities: targets,
         witness,
@@ -260,7 +268,7 @@ fn convert_finding(
             exact_tests,
             recommended_tests,
             gap: verification_gap,
-            reason: finding.verification.reason.clone(),
+            reason: humanize_text(&finding.verification.reason, entity_display_names),
         },
         source_revision: request
             .revisions
@@ -273,9 +281,26 @@ fn convert_finding(
         confidence,
         completeness: manifest.completeness,
         freshness: Freshness::ExactHead,
-        remediation: finding.reviewer_action.clone(),
+        remediation: humanize_text(&finding.reviewer_action, entity_display_names),
         deterministic,
     })
+}
+
+fn humanize_text(value: &str, entity_display_names: &BTreeMap<String, String>) -> String {
+    let mut replacements = entity_display_names
+        .iter()
+        .filter(|(identity, display_name)| identity.as_str() != display_name.as_str())
+        .map(|(identity, display_name)| (identity.as_str(), display_name.as_str()))
+        .collect::<Vec<_>>();
+    replacements.sort_by_key(|(identity, _)| Reverse(identity.len()));
+
+    let mut humanized = value.to_owned();
+    for (identity, display_name) in replacements {
+        if humanized.contains(identity) {
+            humanized = humanized.replace(identity, display_name);
+        }
+    }
+    humanized
 }
 
 fn map_verification_state(value: semantic::VerificationState) -> VerificationState {

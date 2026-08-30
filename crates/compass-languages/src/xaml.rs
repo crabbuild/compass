@@ -8,7 +8,9 @@ use crate::{RawEdgeRecord as EdgeRecord, RawNodeRecord as NodeRecord};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
-use crate::{Engine, ExtractError, Extraction, file_stem, make_id};
+use crate::{
+    CandidateRelation, DeclarationFact, Engine, ExtractError, Extraction, file_stem, make_id,
+};
 
 const MAX_BYTES: u64 = 2 * 1024 * 1024;
 const NON_EVENT_ATTRIBUTES: &[&str] = &[
@@ -161,24 +163,25 @@ pub(crate) fn extract(engine: &mut Engine, path: &Path) -> Result<Extraction, Ex
     let mut generated_members = HashMap::new();
     if !viewmodels.is_empty() {
         let classes = csharp_viewmodels(engine, path);
-        let candidates: HashMap<String, NodeRecord> = viewmodels
+        let candidates: HashMap<String, CsharpViewModel> = viewmodels
             .iter()
             .flat_map(|name| classes.get(name).into_iter().flatten())
-            .map(|node| (node.id.clone(), node.clone()))
+            .map(|viewmodel| (viewmodel.node.id.clone(), viewmodel.clone()))
             .collect();
         if candidates.len() == 1
             && let Some(viewmodel) = candidates.values().next()
         {
-            state.add_existing_node(viewmodel);
+            state.add_existing_node(&viewmodel.node);
             state.add_edge(
                 &root_id,
-                &viewmodel.id,
+                &viewmodel.node.id,
                 "references",
-                state.line_for(Some(viewmodel.label())),
+                state.line_for(Some(viewmodel.node.label())),
                 Some("view_model"),
                 viewmodel_confidence,
             );
-            let (members, edges) = community_toolkit_members(viewmodel);
+            let (members, edges) =
+                community_toolkit_members(&viewmodel.node, &viewmodel.source_path);
             for member in members.values() {
                 state.add_existing_node(member);
             }
@@ -372,25 +375,55 @@ fn codebehind_symbols(engine: &mut Engine, path: &Path, class_name: Option<&str>
             method_edges: Vec::new(),
         };
     };
+    let Some(evidence) = extraction.semantic_evidence.as_ref() else {
+        return Codebehind {
+            class_node: None,
+            methods: HashMap::new(),
+            method_edges: Vec::new(),
+        };
+    };
     let simple = class_name.and_then(|name| name.rsplit('.').next());
-    let class_node = simple
-        .and_then(|name| extraction.nodes.iter().find(|node| node.label() == name))
-        .cloned();
-    let method_edges: Vec<EdgeRecord> = class_node.as_ref().map_or_else(Vec::new, |class_node| {
-        extraction
-            .edges
+    let class_declaration = simple.and_then(|name| {
+        let matches = evidence
+            .declarations
             .iter()
-            .filter(|edge| {
-                edge.source == class_node.id
-                    && edge.attributes.get("relation").and_then(Value::as_str) == Some("method")
+            .filter(|declaration| {
+                matches!(declaration.kind.as_str(), "class" | "record" | "struct")
+                    && declaration.name == name
+                    && class_name.is_none_or(|qualified| {
+                        !qualified.contains('.') || declaration.qualified_name == qualified
+                    })
             })
-            .cloned()
-            .collect()
+            .collect::<Vec<_>>();
+        if matches.len() == 1 {
+            Some(matches[0])
+        } else {
+            None
+        }
     });
-    let method_ids: Option<HashSet<&str>> = class_node.as_ref().map(|_| {
-        method_edges
+    let class_node = class_declaration.map(csharp_declaration_node);
+    let owned_method_ids = class_declaration.map_or_else(HashSet::new, |class_declaration| {
+        evidence
+            .candidates
             .iter()
-            .map(|edge| edge.target.as_str())
+            .filter(|candidate| {
+                candidate.relation == CandidateRelation::Owns
+                    && candidate.source_declaration_id == class_declaration.id
+            })
+            .filter_map(|candidate| candidate.constraints.exact_target_declaration_id.as_deref())
+            .collect::<HashSet<_>>()
+    });
+    let owned_methods = evidence
+        .declarations
+        .iter()
+        .filter(|declaration| {
+            declaration.kind == "method" && owned_method_ids.contains(declaration.id.as_str())
+        })
+        .collect::<Vec<_>>();
+    let method_edges = class_node.as_ref().map_or_else(Vec::new, |class_node| {
+        owned_methods
+            .iter()
+            .map(|method| csharp_method_edge(class_node, method))
             .collect()
     });
     let lines = fs::read(&codebehind_path).map_or_else(
@@ -403,19 +436,19 @@ fn codebehind_symbols(engine: &mut Engine, path: &Path, class_name: Option<&str>
         },
     );
     let mut methods = HashMap::new();
-    for node in extraction.nodes {
-        if method_ids
-            .as_ref()
-            .is_some_and(|ids| !ids.contains(node.id.as_str()))
-        {
+    let mut ambiguous = HashSet::new();
+    for declaration in owned_methods {
+        let node = csharp_declaration_node(declaration);
+        if !has_event_signature(&node, &lines) {
             continue;
         }
-        let label = node.label();
-        if !label.starts_with('.') || !label.ends_with("()") || !has_event_signature(&node, &lines)
-        {
-            continue;
+        let name = declaration.name.clone();
+        if methods.insert(name.clone(), node).is_some() {
+            ambiguous.insert(name);
         }
-        methods.insert(label.trim_matches(['.', '(', ')']).to_owned(), node);
+    }
+    for name in ambiguous {
+        methods.remove(&name);
     }
     Codebehind {
         class_node,
@@ -443,6 +476,67 @@ fn has_event_signature(node: &NodeRecord, lines: &[String]) -> bool {
             .collect::<Vec<_>>()
             .join(" "),
     )
+}
+
+fn csharp_declaration_node(declaration: &DeclarationFact) -> NodeRecord {
+    let mut attributes = Map::new();
+    let label = if declaration.kind == "method" {
+        format!(".{}()", declaration.name)
+    } else {
+        declaration.name.clone()
+    };
+    attributes.insert("label".to_owned(), Value::String(label));
+    attributes.insert("file_type".to_owned(), Value::String("code".to_owned()));
+    attributes.insert(
+        "symbol_kind".to_owned(),
+        Value::String(declaration.kind.clone()),
+    );
+    attributes.insert(
+        "qualified_name".to_owned(),
+        Value::String(declaration.qualified_name.clone()),
+    );
+    attributes.insert(
+        "source_file".to_owned(),
+        Value::String(declaration.range.source_file.clone()),
+    );
+    attributes.insert(
+        "source_location".to_owned(),
+        Value::String(format!("L{}", declaration.range.start_line)),
+    );
+    attributes.insert("start_byte".to_owned(), json!(declaration.range.start_byte));
+    attributes.insert("end_byte".to_owned(), json!(declaration.range.end_byte));
+    if let Some(signature) = declaration.signature.as_ref() {
+        attributes.insert("signature".to_owned(), Value::String(signature.clone()));
+    }
+    NodeRecord {
+        id: declaration.graph_node_id.clone(),
+        attributes,
+    }
+}
+
+fn csharp_method_edge(class_node: &NodeRecord, method: &DeclarationFact) -> EdgeRecord {
+    let mut attributes = Map::new();
+    attributes.insert("relation".to_owned(), Value::String("method".to_owned()));
+    attributes.insert(
+        "confidence".to_owned(),
+        Value::String("EXTRACTED".to_owned()),
+    );
+    attributes.insert(
+        "source_file".to_owned(),
+        Value::String(method.range.source_file.clone()),
+    );
+    attributes.insert(
+        "source_location".to_owned(),
+        Value::String(format!("L{}", method.range.start_line)),
+    );
+    attributes.insert("start_byte".to_owned(), json!(method.range.start_byte));
+    attributes.insert("end_byte".to_owned(), json!(method.range.end_byte));
+    attributes.insert("weight".to_owned(), json!(1.0));
+    EdgeRecord {
+        source: class_node.id.clone(),
+        target: method.graph_node_id.clone(),
+        attributes,
+    }
 }
 
 fn codebehind_path(path: &Path) -> Option<PathBuf> {
@@ -740,23 +834,36 @@ fn inferred_viewmodel_names(view: Option<&str>) -> Vec<String> {
     names
 }
 
-fn csharp_viewmodels(engine: &mut Engine, path: &Path) -> HashMap<String, Vec<NodeRecord>> {
+#[derive(Clone)]
+struct CsharpViewModel {
+    node: NodeRecord,
+    source_path: PathBuf,
+}
+
+fn csharp_viewmodels(engine: &mut Engine, path: &Path) -> HashMap<String, Vec<CsharpViewModel>> {
     let root = project_root(path);
     let mut files = Vec::new();
     collect_csharp_files(&root, &mut files);
     files.sort();
-    let mut classes: HashMap<String, Vec<NodeRecord>> = HashMap::new();
+    let mut classes: HashMap<String, Vec<CsharpViewModel>> = HashMap::new();
     for file in files {
         let Ok(extraction) = engine.extract(&file) else {
             continue;
         };
-        for node in extraction.nodes {
-            let label = node.label();
-            if label.ends_with("ViewModel")
-                && IDENTIFIER.is_match(label)
-                && !node.string("source_file").is_empty()
-            {
-                classes.entry(label.to_owned()).or_default().push(node);
+        let Some(evidence) = extraction.semantic_evidence.as_ref() else {
+            continue;
+        };
+        for declaration in evidence.declarations.iter().filter(|declaration| {
+            matches!(declaration.kind.as_str(), "class" | "record" | "struct")
+        }) {
+            if declaration.name.ends_with("ViewModel") && IDENTIFIER.is_match(&declaration.name) {
+                classes
+                    .entry(declaration.name.clone())
+                    .or_default()
+                    .push(CsharpViewModel {
+                        node: csharp_declaration_node(declaration),
+                        source_path: file.clone(),
+                    });
             }
         }
     }
@@ -821,12 +928,13 @@ fn collect_csharp_files(directory: &Path, output: &mut Vec<PathBuf>) {
 
 fn community_toolkit_members(
     viewmodel: &NodeRecord,
+    source_path: &Path,
 ) -> (HashMap<String, NodeRecord>, Vec<EdgeRecord>) {
     let source_file = viewmodel.string("source_file");
     if source_file.is_empty() {
         return (HashMap::new(), Vec::new());
     }
-    let Ok(bytes) = fs::read(&source_file) else {
+    let Ok(bytes) = fs::read(source_path) else {
         return (HashMap::new(), Vec::new());
     };
     let text = String::from_utf8_lossy(&bytes);

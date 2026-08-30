@@ -213,6 +213,7 @@ fn orientation_is_bounded_deterministic_and_markdown_safe() -> Result<(), Box<dy
                         | "## Architecture Map"
                         | "## High-Connectivity Hubs"
                         | "## Important Diagnostics"
+                        | "## Structural Blind Spots"
                         | "## Suggested Compass Queries"
                         | "## Learned Graph Questions"
                         | "# Bounded Graph Detail"
@@ -371,6 +372,79 @@ fn report_is_a_label_first_directory_of_all_bounded_communities() -> Result<(), 
     }
     assert!(report.contains("Entry points (total=10 shown=10 omitted=0)"));
     assert!(!report.contains("id=internal::node::"));
+    Ok(())
+}
+
+#[test]
+fn report_minimum_community_size_omits_singletons_without_changing_graph_totals()
+-> Result<(), Box<dyn Error>> {
+    let document: GraphDocument = serde_json::from_value(json!({
+        "directed": true,
+        "graph": {},
+        "nodes": [
+            {
+                "id": "connected-a",
+                "label": "Connected A",
+                "source_file": "src/connected.rs",
+                "file_type": "code"
+            },
+            {
+                "id": "connected-b",
+                "label": "Connected B",
+                "source_file": "src/connected.rs",
+                "file_type": "code"
+            },
+            {
+                "id": "isolated",
+                "label": "Isolated",
+                "source_file": "src/isolated.rs",
+                "file_type": "code"
+            }
+        ],
+        "links": [
+            {"source": "connected-a", "target": "connected-b", "relation": "calls"}
+        ]
+    }))?;
+    let communities = BTreeMap::from([
+        (0, vec!["connected-a".to_owned(), "connected-b".to_owned()]),
+        (1, vec!["isolated".to_owned()]),
+    ]);
+    let labels = BTreeMap::from([
+        (0, "Connected subsystem".to_owned()),
+        (1, "Isolated singleton".to_owned()),
+    ]);
+    let mut options = ReportOptions::new("minimum-community-size");
+    options.min_community_size = 2;
+
+    let model = agent_orientation(
+        &document,
+        &communities,
+        &BTreeMap::new(),
+        &labels,
+        &[],
+        &[],
+        &DetectionSummary::default(),
+        TokenCost::default(),
+        None,
+        None,
+        &options,
+    );
+
+    assert_eq!(model.graph_summary.nodes, 3);
+    assert_eq!(model.graph_summary.edges, 1);
+    assert_eq!(model.graph_summary.communities, 2);
+    assert_eq!(model.communities.len(), 1);
+    assert_eq!(model.communities[0].id, 0);
+    assert_eq!(
+        model.omissions.communities,
+        compass_output::SectionOmission {
+            total: 2,
+            shown: 1,
+            omitted: 1,
+        }
+    );
+    assert_eq!(document.nodes.len(), 3);
+    assert_eq!(communities.get(&1), Some(&vec!["isolated".to_owned()]));
     Ok(())
 }
 
@@ -544,6 +618,7 @@ fn nonportable_argv_preserves_exact_punctuation_without_markdown_structure()
                         | "## Architecture Map"
                         | "## High-Connectivity Hubs"
                         | "## Important Diagnostics"
+                        | "## Structural Blind Spots"
                         | "## Suggested Compass Queries"
                         | "## Learned Graph Questions"
                         | "### Exact O'Reilly ∗ ［node］ C:＼path ‹tag› ʼʼʼ $HOME ｜ ＃ ！ &"

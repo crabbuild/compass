@@ -1,5 +1,6 @@
 import { useMemo, type MouseEvent } from "react";
 import type { GraphViewModel } from "../contracts/graph";
+import { nodeSemanticCategory, nodeSemanticCssColor } from "./semanticAppearance";
 
 const WIDTH = 176;
 const HEIGHT = 108;
@@ -73,6 +74,7 @@ export function GraphMinimap({
   visibleNodeIds,
   visibleEdgeIds,
   focusedNodeId,
+  semanticDetail = false,
   onNavigate
 }: {
   model: GraphViewModel;
@@ -80,6 +82,7 @@ export function GraphMinimap({
   visibleNodeIds?: ReadonlySet<string> | undefined;
   visibleEdgeIds?: ReadonlySet<string> | undefined;
   focusedNodeId: string | null;
+  semanticDetail?: boolean;
   onNavigate(position: { x: number; y: number }): void;
 }) {
   const geometry = useMemo(() => graphMinimapGeometry(snapshot), [snapshot]);
@@ -140,9 +143,14 @@ export function GraphMinimap({
                   cx={point.x}
                   cy={point.y}
                   r={node.id === focusedNodeId ? 3 : 1.65}
-                  fill={node.color?.background
-                    ?? communityColors.get(node.community)
-                    ?? "currentColor"}
+                  fill={semanticDetail
+                    ? nodeSemanticCssColor(nodeSemanticCategory(node.kind))
+                    : node.color?.background
+                      ?? communityColors.get(node.community)
+                      ?? "currentColor"}
+                  data-node-category={semanticDetail
+                    ? nodeSemanticCategory(node.kind)
+                    : undefined}
                   data-focused={node.id === focusedNodeId ? "true" : undefined}
                 />
               );

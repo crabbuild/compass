@@ -8,8 +8,16 @@ use super::super::resolve::context::ResolutionDb;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::evidence) enum LanguagePolicyKind {
     TypeScript,
+    CSharp,
     Java,
+    Kotlin,
+    Php,
+    Ruby,
     Rust,
+    Swift,
+    Dart,
+    Scala,
+    Groovy,
     Generic,
 }
 
@@ -17,8 +25,16 @@ impl LanguagePolicyKind {
     pub(in crate::evidence) fn for_language(language: &str) -> Self {
         match language {
             "javascript" | "javascriptreact" | "typescript" | "typescriptreact" => Self::TypeScript,
+            "csharp" => Self::CSharp,
             "java" => Self::Java,
+            "kotlin" => Self::Kotlin,
+            "php" => Self::Php,
+            "ruby" => Self::Ruby,
             "rust" => Self::Rust,
+            "swift" => Self::Swift,
+            "dart" => Self::Dart,
+            "scala" => Self::Scala,
+            "groovy" => Self::Groovy,
             _ => Self::Generic,
         }
     }
@@ -31,6 +47,8 @@ impl LanguagePolicyKind {
     ) -> Option<ResolutionDecision> {
         match self {
             Self::TypeScript => db.resolve_typescript_import_candidate(language, candidate),
+            Self::CSharp => db.resolve_csharp_candidate(language, candidate),
+            Self::Php => db.resolve_php_candidate(language, candidate),
             Self::Rust => {
                 let HierarchyConstraint::RustAssociatedType {
                     receiver_declaration_id,
@@ -48,7 +66,11 @@ impl LanguagePolicyKind {
                     candidate,
                 ))
             }
-            Self::Java | Self::Generic => None,
+            Self::Java => db.resolve_java_same_package_builtin_collision(candidate),
+            Self::Kotlin => db.resolve_kotlin_candidate(candidate),
+            Self::Ruby | Self::Swift | Self::Dart | Self::Scala | Self::Groovy | Self::Generic => {
+                None
+            }
         }
     }
 
@@ -60,7 +82,17 @@ impl LanguagePolicyKind {
     ) -> Option<&'a str> {
         match self {
             Self::Java => db.unique_java_applicable_overload(overloads, argument_types),
-            Self::TypeScript | Self::Rust | Self::Generic => None,
+            Self::CSharp
+            | Self::Kotlin
+            | Self::Php
+            | Self::Ruby
+            | Self::TypeScript
+            | Self::Rust
+            | Self::Swift
+            | Self::Dart
+            | Self::Scala
+            | Self::Groovy
+            | Self::Generic => None,
         }
     }
 }
@@ -76,12 +108,44 @@ mod tests {
             LanguagePolicyKind::TypeScript
         );
         assert_eq!(
+            LanguagePolicyKind::for_language("csharp"),
+            LanguagePolicyKind::CSharp
+        );
+        assert_eq!(
             LanguagePolicyKind::for_language("java"),
             LanguagePolicyKind::Java
         );
         assert_eq!(
+            LanguagePolicyKind::for_language("kotlin"),
+            LanguagePolicyKind::Kotlin
+        );
+        assert_eq!(
             LanguagePolicyKind::for_language("rust"),
             LanguagePolicyKind::Rust
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("php"),
+            LanguagePolicyKind::Php
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("ruby"),
+            LanguagePolicyKind::Ruby
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("swift"),
+            LanguagePolicyKind::Swift
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("dart"),
+            LanguagePolicyKind::Dart
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("scala"),
+            LanguagePolicyKind::Scala
+        );
+        assert_eq!(
+            LanguagePolicyKind::for_language("groovy"),
+            LanguagePolicyKind::Groovy
         );
         assert_eq!(
             LanguagePolicyKind::for_language("future-language"),

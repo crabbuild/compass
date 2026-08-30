@@ -1,4 +1,6 @@
+mod aspnet;
 mod axum;
+mod dart;
 mod domain;
 mod jvm;
 mod native;
@@ -6,12 +8,17 @@ mod node;
 mod php;
 mod python;
 mod qualification;
+mod react;
+mod relations;
 mod routes;
 mod ruby;
 mod spring;
+mod swift;
 mod target_index;
 mod typescript;
 
+pub(crate) use react::project_render_relations;
+pub(crate) use relations::resolve_and_publish as resolve_and_publish_relations;
 pub(crate) use typescript::edge_targets_declared_callable;
 
 use compass_languages::{RawNodeRecord, make_id};
@@ -40,9 +47,24 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         expand: axum::expand_routes,
     },
     RouteExpansionAdapter {
+        pack_id: "django-python",
+        frameworks: &["django"],
+        expand: python::expand_django_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "django-rest-framework-python",
+        frameworks: &["django-rest-framework"],
+        expand: python::expand_drf_routes,
+    },
+    RouteExpansionAdapter {
         pack_id: "express-web",
         frameworks: &["express"],
         expand: node::expand_routes,
+    },
+    RouteExpansionAdapter {
+        pack_id: "fastapi-python",
+        frameworks: &["fastapi"],
+        expand: python::expand_fastapi_routes,
     },
     RouteExpansionAdapter {
         pack_id: "fastify-web",
@@ -50,14 +72,19 @@ const ROUTE_EXPANSION_ADAPTERS: &[RouteExpansionAdapter] = &[
         expand: node::expand_routes,
     },
     RouteExpansionAdapter {
+        pack_id: "flask-python",
+        frameworks: &["flask"],
+        expand: python::expand_flask_routes,
+    },
+    RouteExpansionAdapter {
         pack_id: "hono-web",
         frameworks: &["hono"],
         expand: node::expand_routes,
     },
     RouteExpansionAdapter {
-        pack_id: "python-web",
-        frameworks: &["django", "fastapi", "flask"],
-        expand: python::expand_routes,
+        pack_id: "starlette-python",
+        frameworks: &["starlette"],
+        expand: python::expand_starlette_routes,
     },
 ];
 
@@ -72,18 +99,90 @@ struct UniversalFrameworkPack {
 /// Project-wide expansion adapters are registered by pack identity rather
 /// than selected through a language-specific match. Adding a universal pack
 /// therefore changes one registry entry and leaves the lifecycle unchanged.
-const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[UniversalFrameworkPack {
-    id: "spring-java",
-    expand: spring::expand,
-}];
+const UNIVERSAL_FRAMEWORK_PACKS: &[UniversalFrameworkPack] = &[
+    UniversalFrameworkPack {
+        id: "aspnet-csharp",
+        expand: aspnet::expand,
+    },
+    UniversalFrameworkPack {
+        id: "php-frameworks",
+        expand: php::expand,
+    },
+    UniversalFrameworkPack {
+        id: "spring-java",
+        expand: spring::expand,
+    },
+    UniversalFrameworkPack {
+        id: "spring-kotlin",
+        expand: spring::expand_kotlin,
+    },
+    UniversalFrameworkPack {
+        id: "rails-ruby",
+        expand: ruby::expand,
+    },
+    UniversalFrameworkPack {
+        id: "vapor-swift",
+        expand: swift::expand,
+    },
+    UniversalFrameworkPack {
+        id: "dart-flutter-navigation",
+        expand: dart::expand,
+    },
+    UniversalFrameworkPack {
+        id: "dart-bloc",
+        expand: dart::expand,
+    },
+    UniversalFrameworkPack {
+        id: "dart-riverpod",
+        expand: dart::expand,
+    },
+    UniversalFrameworkPack {
+        id: "react-ui",
+        expand: react::expand,
+    },
+    UniversalFrameworkPack {
+        id: "django-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "django-rest-framework-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "fastapi-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "flask-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "pydantic-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "sqlalchemy-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "celery-python",
+        expand: python::expand,
+    },
+    UniversalFrameworkPack {
+        id: "starlette-python",
+        expand: python::expand,
+    },
+];
 
 pub use domain::{
-    ResolvedDomainFact, publish_resolved_domains, resolve_and_publish_framework_domains,
-    resolve_domains,
+    ResolvedDomainFact, publish_resolved_domains, publish_resolved_domains_with_root,
+    resolve_and_publish_framework_domains, resolve_domains,
 };
 pub use qualification::{
-    FrameworkQualificationCase, FrameworkQualificationError, FrameworkQualificationReport,
-    FrameworkRouteExpectation, qualify_framework_case,
+    FRAMEWORK_EVIDENCE_EXPECTATIONS_SCHEMA, FrameworkEvidenceExpectation,
+    FrameworkEvidenceExpectationError, FrameworkEvidenceExpectationSet, FrameworkQualificationCase,
+    FrameworkQualificationError, FrameworkQualificationReport, FrameworkRouteExpectation,
+    MAX_FRAMEWORK_EVIDENCE_EXPECTATIONS, qualify_framework_case,
 };
 pub use routes::{
     FrameworkResolutionError, ResolvedRoute, RouteStage, RouteStageRole, publish_resolved_routes,
@@ -124,6 +223,10 @@ pub(super) fn expand_framework_routes(
             }
             compass_languages::RawFrameworkFact::Domain(_)
             | compass_languages::RawFrameworkFact::Annotation(_)
+            | compass_languages::RawFrameworkFact::Role(_)
+            | compass_languages::RawFrameworkFact::Relation(_)
+            | compass_languages::RawFrameworkFact::Configuration(_)
+            | compass_languages::RawFrameworkFact::FileSet(_)
             | compass_languages::RawFrameworkFact::Route(_) => None,
         })
         .collect::<Vec<_>>();
@@ -142,7 +245,11 @@ pub(super) fn expand_framework_routes(
             .filter_map(|fact| match fact {
                 compass_languages::RawFrameworkFact::Route(route) => Some(route.clone()),
                 compass_languages::RawFrameworkFact::Domain(_)
-                | compass_languages::RawFrameworkFact::Annotation(_) => None,
+                | compass_languages::RawFrameworkFact::Annotation(_)
+                | compass_languages::RawFrameworkFact::Role(_)
+                | compass_languages::RawFrameworkFact::Relation(_)
+                | compass_languages::RawFrameworkFact::Configuration(_)
+                | compass_languages::RawFrameworkFact::FileSet(_) => None,
             })
             .collect::<Vec<_>>();
         let expanded = (adapter.expand)(&adapter_facts, adapter_routes, limits)?;
@@ -167,6 +274,12 @@ fn fact_framework(fact: &compass_languages::RawFrameworkFact) -> &str {
         compass_languages::RawFrameworkFact::Route(route) => &route.framework,
         compass_languages::RawFrameworkFact::Domain(domain) => &domain.framework,
         compass_languages::RawFrameworkFact::Annotation(annotation) => &annotation.framework,
+        compass_languages::RawFrameworkFact::Role(role) => &role.framework,
+        compass_languages::RawFrameworkFact::Relation(relation) => &relation.framework,
+        compass_languages::RawFrameworkFact::Configuration(configuration) => {
+            &configuration.framework
+        }
+        compass_languages::RawFrameworkFact::FileSet(file_set) => &file_set.framework,
     }
 }
 
@@ -199,11 +312,12 @@ pub(crate) fn resolve_framework_facts(
 fn universal_framework_targets_are_materialized(
     extraction: &compass_languages::Extraction,
 ) -> bool {
-    let Some(batch) = extraction
-        .semantic_evidence
-        .as_ref()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    else {
+    let Some(batch) = extraction.semantic_evidence.as_ref().filter(|batch| {
+        matches!(
+            batch.pipeline.language.as_str(),
+            "csharp" | "javascript" | "php" | "ruby" | "typescript"
+        )
+    }) else {
         return true;
     };
     let existing = extraction
@@ -231,7 +345,7 @@ fn universal_framework_targets_are_materialized(
     })
 }
 
-/// Universal TypeScript/JavaScript extraction publishes declaration evidence
+/// Universal C#/PHP/TypeScript/JavaScript extraction publishes declaration evidence
 /// first and lets the project resolver materialize graph nodes. Framework
 /// route/domain resolution can also be invoked directly on a single-file
 /// extraction, so provide the target index with source-backed declaration
@@ -239,11 +353,12 @@ fn universal_framework_targets_are_materialized(
 pub(super) fn materialize_universal_framework_targets(
     extraction: &compass_languages::Extraction,
 ) -> compass_languages::Extraction {
-    let Some(batches) = extraction
-        .semantic_evidence
-        .as_ref()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    else {
+    let Some(batches) = extraction.semantic_evidence.as_ref().filter(|batch| {
+        matches!(
+            batch.pipeline.language.as_str(),
+            "csharp" | "javascript" | "php" | "ruby" | "typescript"
+        )
+    }) else {
         return extraction.clone();
     };
     let mut enriched = extraction.clone();
@@ -486,6 +601,7 @@ mod tests {
             },
             handler_reference: "handler".to_owned(),
             middleware_references: Vec::new(),
+            stages: Vec::new(),
             origin: RawFrameworkOrigin::Ast,
             rule: None,
             detail: serde_json::Map::new(),

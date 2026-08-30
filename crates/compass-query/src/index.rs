@@ -27,7 +27,7 @@ use crate::graph_engine::{
     read_store_ref,
 };
 
-const INDEX_FORMAT_VERSION: &str = "compass-code-index/7";
+const INDEX_FORMAT_VERSION: &str = "compass-code-index/1";
 
 /// Selects the source used to hydrate the typed query engine.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

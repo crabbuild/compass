@@ -26,3 +26,31 @@ explicitly needs remote clients. Require an API key for non-loopback exposure.
 Serving is long-lived. Report the chosen graph and endpoint, keep secrets out of
 logs, and stop the process when requested. Starting a server does not refresh
 the graph; update or extract first when freshness matters.
+
+## Agent Graph tools
+
+For an AI coding session that needs GROUNDED overlay reads, explicitly allow one
+canonical project:
+
+```bash
+compass serve compass-out/graph.json \
+  --agent-graph-project .
+```
+
+This advertises the read-only `inspect_agent_graph` tool. Add
+`--agent-graph-writes` only when the user wants the connected agent to apply
+versioned change batches. Add `--agent-graph-masks` only for separately approved
+curated masking. Outside Git, also choose an explicit
+`--agent-graph-state-root`.
+
+Before drafting a batch, call `inspect_agent_graph` with operation `prepare`,
+the relevant `base_nodes` or `base_edges`, and one or more `source_spans`
+objects containing `file`, `startByte`, and `endByte`. Compass returns the exact
+Base references, evidence digests, and current expected revision; do not
+calculate them in the client.
+
+HTTP write access requires a distinct `--write-api-key` in addition to the read
+API key. Never accept the principal, allowed project, permissions, expiry, or
+limits from a model request; configure those on the Compass server. Clients
+must preserve the exact Base Generation and Overlay Revision returned in MCP
+receipts and reads. Load `references/agent-graph.md` for the session workflow.

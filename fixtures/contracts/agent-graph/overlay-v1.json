@@ -1,0 +1,59 @@
+{
+  "assertions": {
+    "assertion:5555555555555555555555555555555555555555555555555555555555555555": {
+      "assertionDigest": "6666666666666666666666666666666666666666666666666666666666666666",
+      "certificate": {
+        "baseGeneration": {
+          "generationId": "generation-1",
+          "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "claimDigest": "7777777777777777777777777777777777777777777777777777777777777777",
+        "evidenceDigest": "8888888888888888888888888888888888888888888888888888888888888888",
+        "permittedEffects": [
+          "project_topology",
+          "flag_base_fact"
+        ],
+        "policyId": "compass.agent-graph.topology-source-span",
+        "policyVersion": "1",
+        "status": "GROUNDED",
+        "verifierVersions": [
+          "source-span/1"
+        ]
+      },
+      "certificateDigest": "9999999999999999999999999999999999999999999999999999999999999999",
+      "fact": {
+        "factType": "node",
+        "kind": "function",
+        "language": "rust",
+        "name": "enhance",
+        "qualifiedName": "crate::enhance"
+      },
+      "grounding": {
+        "evidence": [],
+        "policyId": "compass.agent-graph.topology-source-span",
+        "schema": "compass.agent-graph.grounding/1"
+      },
+      "id": "assertion:5555555555555555555555555555555555555555555555555555555555555555",
+      "key": "key:enhance",
+      "owner": "principal:local",
+      "projectionProvenance": {
+        "anchors": [],
+        "confidence": "inferred",
+        "extractor": "compass.agent-graph",
+        "origin": "artifact"
+      },
+      "summary": "Source-backed enhancement entry point.",
+      "version": 1
+    }
+  },
+  "baseGeneration": {
+    "generationId": "generation-1",
+    "graphDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "challengeRetractions": {},
+  "challenges": {},
+  "overlay": "overlay:review",
+  "retractions": {},
+  "schema": "compass.agent-graph.overlay/1",
+  "sequence": 1
+}

@@ -48,7 +48,12 @@ class UserController {
             RawFrameworkFact::Route(route) => {
                 Some((route.operation.as_str(), route.normalized_path.as_str()))
             }
-            RawFrameworkFact::Domain(_) | RawFrameworkFact::Annotation(_) => None,
+            RawFrameworkFact::Domain(_)
+            | RawFrameworkFact::Annotation(_)
+            | RawFrameworkFact::Role(_)
+            | RawFrameworkFact::Relation(_)
+            | RawFrameworkFact::Configuration(_)
+            | RawFrameworkFact::FileSet(_) => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(

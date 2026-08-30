@@ -538,15 +538,17 @@ fn augment_universal_project_inventory(
 ) {
     let mut source_languages = BTreeMap::<String, String>::new();
     let mut source_evidence_lengths = BTreeMap::<String, usize>::new();
-    for batch in evidence_batches
-        .iter()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    {
+    for batch in evidence_batches.iter().filter(|batch| {
+        matches!(
+            batch.pipeline.language.as_str(),
+            "javascript" | "typescript"
+        )
+    }) {
         for declaration in &batch.declarations {
             if !declaration.range.source_file.is_empty() {
                 source_languages
                     .entry(declaration.range.source_file.clone())
-                    .or_insert_with(|| batch.adapter.language.clone());
+                    .or_insert_with(|| batch.pipeline.language.clone());
                 let normalized_source = source_key(&declaration.range.source_file, root);
                 let length = source_evidence_lengths
                     .entry(normalized_source)
@@ -631,7 +633,12 @@ fn augment_universal_project_inventory(
 
     let declaration_ids = evidence_batches
         .iter()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
+        .filter(|batch| {
+            matches!(
+                batch.pipeline.language.as_str(),
+                "javascript" | "typescript"
+            )
+        })
         .flat_map(|batch| {
             batch
                 .declarations
@@ -650,10 +657,12 @@ fn augment_universal_project_inventory(
                 .to_owned()
         })
         .collect::<HashSet<_>>();
-    for batch in evidence_batches
-        .iter()
-        .filter(|batch| matches!(batch.adapter.language.as_str(), "javascript" | "typescript"))
-    {
+    for batch in evidence_batches.iter().filter(|batch| {
+        matches!(
+            batch.pipeline.language.as_str(),
+            "javascript" | "typescript"
+        )
+    }) {
         let occurrences_by_id = batch
             .occurrences
             .iter()
@@ -858,6 +867,21 @@ fn restore_framework_callable_names(
             compass_languages::RawFrameworkFact::Annotation(annotation) => {
                 framework_sources.insert(annotation.anchor.source_file.clone());
             }
+            compass_languages::RawFrameworkFact::Role(role) => {
+                framework_sources.insert(role.anchor.source_file.clone());
+            }
+            compass_languages::RawFrameworkFact::Relation(relation) => {
+                framework_sources.insert(relation.anchor.source_file.clone());
+                if let Some(target_anchor) = relation.target_anchor.as_ref() {
+                    framework_sources.insert(target_anchor.source_file.clone());
+                }
+            }
+            compass_languages::RawFrameworkFact::Configuration(configuration) => {
+                framework_sources.insert(configuration.anchor.source_file.clone());
+            }
+            compass_languages::RawFrameworkFact::FileSet(file_set) => {
+                framework_sources.insert(file_set.anchor.source_file.clone());
+            }
         }
     }
     let nodes_by_id = extraction
@@ -922,7 +946,7 @@ fn restore_framework_callable_names(
         if !framework_sources.contains(&source)
             || !matches!(
                 string_attribute(node, "language").as_str(),
-                "typescript" | "javascript" | "tsx" | "jsx"
+                "typescript" | "javascript" | "tsx" | "jsx" | "swift"
             )
         {
             continue;
@@ -998,7 +1022,7 @@ fn framework_function_start(source: &str, node: &NodeRecord) -> Option<usize> {
 fn finish_resolution(
     mut merged: Extraction,
     mut language_facts: members::LanguageCallFacts,
-    evidence_batches: Vec<SemanticEvidenceBatch>,
+    mut evidence_batches: Vec<SemanticEvidenceBatch>,
     sources: &HashMap<String, String>,
     root: &Path,
     project_edges: Vec<EdgeRecord>,
@@ -1010,6 +1034,26 @@ fn finish_resolution(
     } = mode;
     let mut profile_started = Instant::now();
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let stub_diagnostics = prepare_python_source_stubs(&mut evidence_batches);
+    if !stub_diagnostics.is_empty() {
+        let mut diagnostics = merged
+            .extensions
+            .remove(GRAPH_DIAGNOSTICS_EXTENSION)
+            .and_then(|value| serde_json::from_value::<Vec<GraphDiagnostic>>(value).ok())
+            .unwrap_or_default();
+        diagnostics.extend(stub_diagnostics);
+        diagnostics.sort_by(|left, right| {
+            left.code
+                .cmp(&right.code)
+                .then_with(|| left.message.cmp(&right.message))
+        });
+        diagnostics.dedup();
+        if let Ok(value) = serde_json::to_value(diagnostics) {
+            merged
+                .extensions
+                .insert(GRAPH_DIAGNOSTICS_EXTENSION.to_owned(), value);
+        }
+    }
     let mut project_edges = project_edges;
     augment_universal_project_inventory(
         &mut merged,
@@ -1025,9 +1069,6 @@ fn finish_resolution(
             "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts"
         )
     });
-    let has_csharp = sources
-        .keys()
-        .any(|source| matches!(extension(source).as_str(), "cs" | "razor" | "cshtml"));
     let has_php = sources.keys().any(|source| extension(source) == "php");
     let mut project_resolution = (!project_edges.is_empty()).then(|| Extraction {
         nodes: merged
@@ -1131,6 +1172,11 @@ fn finish_resolution(
         );
         append_universal_resolution_report(&mut merged, &report);
     }
+    // React render relations are a semantic projection over the exact JSX
+    // references emitted by the universal TypeScript/JavaScript evidence
+    // pipeline. Keep the language `references` edge and publish one typed
+    // `renders` occurrence only after universal target selection is complete.
+    frameworks::project_render_relations(&mut merged);
     profile_internal("resolver universal evidence", &mut profile_started);
     restore_framework_callable_names(&mut merged, sources, &canonical_root);
     canonicalize_file_targets(&mut merged, root);
@@ -1153,10 +1199,6 @@ fn finish_resolution(
         "resolver JavaScript workspace symbols",
         &mut profile_started,
     );
-    if has_csharp {
-        canonicalize_csharp_namespace_nodes(&mut merged);
-    }
-    profile_internal("resolver C# namespace normalization", &mut profile_started);
     if has_php {
         resolve_php_type_references(&mut merged, sources);
     }
@@ -1223,7 +1265,9 @@ fn finish_resolution(
     }
     profile_internal("resolver framework routes", &mut profile_started);
     match domains {
-        Ok(domains) => frameworks::publish_resolved_domains(&mut merged, &domains),
+        Ok(domains) => {
+            frameworks::publish_resolved_domains_with_root(&mut merged, &domains, &canonical_root)
+        }
         Err(error) => {
             merged
                 .error
@@ -1231,7 +1275,136 @@ fn finish_resolution(
         }
     }
     profile_internal("resolver framework domains", &mut profile_started);
+    if let Err(error) = frameworks::resolve_and_publish_relations(
+        &mut merged,
+        compass_languages::FrameworkLimits::default(),
+        Some(&canonical_root),
+    ) {
+        merged
+            .error
+            .get_or_insert_with(|| format!("framework relation resolution failed: {error}"));
+    }
+    profile_internal("resolver framework relations", &mut profile_started);
     merged
+}
+
+fn prepare_python_source_stubs(batches: &mut Vec<SemanticEvidenceBatch>) -> Vec<GraphDiagnostic> {
+    let mut by_stem = BTreeMap::<String, (Vec<usize>, Vec<usize>)>::new();
+    for (index, batch) in batches.iter().enumerate() {
+        if batch.pipeline.language != "python" {
+            continue;
+        }
+        let Some(source_file) = batch
+            .declarations
+            .iter()
+            .find(|declaration| declaration.kind == "file")
+            .or_else(|| batch.declarations.first())
+            .map(|declaration| declaration.range.source_file.replace('\\', "/"))
+        else {
+            continue;
+        };
+        let (stem, stub) = if let Some(stem) = source_file.strip_suffix(".pyi") {
+            (stem, true)
+        } else if let Some(stem) = source_file.strip_suffix(".py") {
+            (stem, false)
+        } else {
+            continue;
+        };
+        let entry = by_stem.entry(stem.to_owned()).or_default();
+        if stub {
+            entry.1.push(index);
+        } else {
+            entry.0.push(index);
+        }
+    }
+
+    let mut diagnostics = Vec::new();
+    let mut paired_stub_indices = BTreeSet::new();
+    for (stem, (sources, stubs)) in by_stem {
+        if sources.is_empty() || stubs.is_empty() {
+            continue;
+        }
+        if sources.len() != 1 || stubs.len() != 1 {
+            diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "python_stub_source_conflict".to_owned(),
+                message: format!(
+                    "Python source/stub identity {stem:?} has {} source batches and {} stub batches; no declaration merge was attempted",
+                    sources.len(),
+                    stubs.len()
+                ),
+                anchor: None,
+                related_ids: Vec::new(),
+            });
+            continue;
+        }
+        let source_index = sources[0];
+        let stub_index = stubs[0];
+        let source = &batches[source_index];
+        let stub = &batches[stub_index];
+        let source_modules = source
+            .declarations
+            .iter()
+            .filter_map(|declaration| declaration.module_or_package.clone())
+            .collect::<BTreeSet<_>>();
+        let stub_modules = stub
+            .declarations
+            .iter()
+            .filter_map(|declaration| declaration.module_or_package.clone())
+            .collect::<BTreeSet<_>>();
+        let source_declarations = source
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind != "file")
+            .map(|declaration| (declaration.qualified_name.clone(), declaration.kind.clone()))
+            .collect::<BTreeSet<_>>();
+        let unmatched = stub
+            .declarations
+            .iter()
+            .filter(|declaration| declaration.kind != "file")
+            .map(|declaration| (declaration.qualified_name.clone(), declaration.kind.clone()))
+            .filter(|declaration| !source_declarations.contains(declaration))
+            .collect::<Vec<_>>();
+        if source_modules != stub_modules || !unmatched.is_empty() {
+            let mismatch = unmatched
+                .iter()
+                .take(8)
+                .map(|(qualified, kind)| format!("{qualified} ({kind})"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            diagnostics.push(GraphDiagnostic {
+                severity: DiagnosticSeverity::Error,
+                code: "python_stub_source_conflict".to_owned(),
+                message: if mismatch.is_empty() {
+                    format!(
+                        "Python source/stub identity {stem:?} has conflicting module identities; the source remains authoritative"
+                    )
+                } else {
+                    format!(
+                        "Python stub {stem}.pyi contains declarations absent or incompatible in its source: {mismatch}; the source remains authoritative"
+                    )
+                },
+                anchor: None,
+                related_ids: Vec::new(),
+            });
+        }
+        paired_stub_indices.insert(stub_index);
+    }
+    if !paired_stub_indices.is_empty() {
+        let mut index = 0_usize;
+        batches.retain(|_| {
+            let retain = !paired_stub_indices.contains(&index);
+            index = index.saturating_add(1);
+            retain
+        });
+    }
+    diagnostics.sort_by(|left, right| {
+        left.code
+            .cmp(&right.code)
+            .then_with(|| left.message.cmp(&right.message))
+    });
+    diagnostics.dedup();
+    diagnostics
 }
 
 fn append_universal_resolution_report(
@@ -2429,8 +2602,12 @@ fn read_typescript_config_source(
         .filter(|(candidate, _)| source_key(candidate, root) == source)
         .collect::<Vec<_>>();
     in_memory.sort_by_key(|(candidate, _)| *candidate);
-    if let Some((_, contents)) = in_memory.first() {
-        if in_memory
+    let non_empty = in_memory
+        .iter()
+        .filter(|(_, contents)| !contents.is_empty())
+        .collect::<Vec<_>>();
+    if let Some((_, contents)) = non_empty.first() {
+        if non_empty
             .iter()
             .skip(1)
             .any(|(_, candidate)| *candidate != *contents)
@@ -2438,9 +2615,6 @@ fn read_typescript_config_source(
             return Err(format!(
                 "multiple in-memory contents disagree for TypeScript config {source:?}"
             ));
-        }
-        if contents.is_empty() {
-            return Ok(None);
         }
         if contents.len() as u64 <= MAX_TYPESCRIPT_CONFIG_BYTES {
             return Ok(Some((*contents).clone()));
@@ -3095,7 +3269,17 @@ fn typescript_config_owns_source(
                 .any(|pattern| typescript_pattern_matches(pattern, &source_path, true))
         },
     );
-    if !explicitly_included {
+    // Framework toolchains commonly enable `allowJs` while keeping a narrow
+    // TypeScript `include` (for example, `src/**/*.source.js`).  JavaScript
+    // files outside that compiler program still participate in the bundler's
+    // module graph and must use the same `baseUrl`/`paths` mapping.  Permit
+    // those importers only when they are contained by this config, explicitly
+    // allow JavaScript, and are not excluded; target ownership remains strict.
+    let js_project_importer = config.allow_js
+        && matches!(extension.as_str(), "js" | "jsx" | "mjs" | "cjs")
+        && source_path.starts_with(&config.directory)
+        && config.files.is_none();
+    if !explicitly_included && !js_project_importer {
         return false;
     }
 
@@ -3829,73 +4013,6 @@ fn resolve_javascript_reexports(extraction: &mut Extraction) {
     extraction.edges.extend(additions);
 }
 
-/// Match Python's last-writer graph semantics without making the retained C#
-/// namespace depend on filesystem traversal order. Namespace IDs are label
-/// based, so declarations from multiple files intentionally collide; the
-/// lexicographically earliest source/location is the canonical representative.
-fn canonicalize_csharp_namespace_nodes(extraction: &mut Extraction) {
-    let mut by_label = HashMap::<String, Vec<usize>>::new();
-    for (index, node) in extraction.nodes.iter().enumerate() {
-        if string_attribute(node, "type") == "namespace" {
-            by_label
-                .entry(node.label().to_owned())
-                .or_default()
-                .push(index);
-        }
-    }
-
-    let mut dropped = HashSet::new();
-    let mut remap = HashMap::new();
-    for indexes in by_label.values().filter(|indexes| indexes.len() > 1) {
-        let canonical = indexes
-            .iter()
-            .copied()
-            .min_by_key(|index| {
-                let node = &extraction.nodes[*index];
-                (
-                    string_attribute(node, "source_file"),
-                    string_attribute(node, "source_location"),
-                    node.id.clone(),
-                )
-            })
-            .unwrap_or(indexes[0]);
-        let canonical_id = extraction.nodes[canonical].id.clone();
-        for &index in indexes {
-            if index != canonical {
-                dropped.insert(index);
-                remap.insert(extraction.nodes[index].id.clone(), canonical_id.clone());
-            }
-        }
-    }
-    if dropped.is_empty() {
-        return;
-    }
-    for edge in &mut extraction.edges {
-        let mut rewritten = false;
-        if let Some(target) = remap.get(&edge.source) {
-            edge.source.clone_from(target);
-            rewritten = true;
-        }
-        if let Some(target) = remap.get(&edge.target) {
-            edge.target.clone_from(target);
-            rewritten = true;
-        }
-        if rewritten {
-            stamp_endpoint_rewrite(
-                edge,
-                EndpointRewriteRule::CsharpNamespaceCanonicalization,
-                1.0,
-            );
-        }
-    }
-    let mut index = 0_usize;
-    extraction.nodes.retain(|_| {
-        let keep = !dropped.contains(&index);
-        index += 1;
-        keep
-    });
-}
-
 /// Resolve a sourceless type stub inside the language family of the edge that
 /// references it. A globally common name such as `Processor` is ambiguous, but
 /// a JVM edge can still have exactly one JVM definition. This is the same
@@ -3913,6 +4030,7 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
             stubs.insert(node.id.clone(), label);
         } else if is_type_like_definition(node)
             && let Some(family @ "jvm") = language_family(&source)
+            && !is_hard_cut_universal_source(&source)
         {
             definitions
                 .entry((label, family))
@@ -3962,6 +4080,9 @@ fn rewire_unique_family_stubs(extraction: &mut Extraction) {
             continue;
         };
         let source_file = edge.string("source_file");
+        if is_hard_cut_universal_source(&source_file) {
+            continue;
+        }
         let Some(family @ "jvm") = language_family(&source_file) else {
             continue;
         };
@@ -4622,6 +4743,9 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
         let Some(family) = language_family(&edge.string("source_file")) else {
             continue;
         };
+        if is_hard_cut_universal_source(&edge.string("source_file")) {
+            continue;
+        }
         for endpoint in [&edge.source, &edge.target] {
             if stub_ids.contains(endpoint.as_str()) {
                 stub_relations
@@ -4668,6 +4792,9 @@ fn rewire_unique_stub_nodes(extraction: &mut Extraction) {
                     let Some(candidate_family) = language_family(candidate_source) else {
                         return false;
                     };
+                    if is_hard_cut_universal_source(candidate_source) {
+                        return false;
+                    }
                     let family_compatible = families
                         .is_some_and(|set| set.len() == 1 && set.contains(candidate_family));
                     let scope_compatible = scopes.is_some_and(|set| {
@@ -4924,6 +5051,31 @@ fn disambiguate_colliding_node_ids_with_calls(
         let key = source_key(&raw.source_file, root);
         if let Some(new_id) = remap.get(&(raw.caller_nid.clone(), key)) {
             raw.caller_nid.clone_from(new_id);
+        }
+    }
+    // Universal framework role facts carry the graph identity they annotate.
+    // Keep that reference aligned with source-scoped collision disambiguation
+    // so later role publication cannot become spuriously unresolved.
+    for fact in &mut extraction.framework_facts {
+        let compass_languages::RawFrameworkFact::Domain(domain) = fact else {
+            continue;
+        };
+        if domain.kind != "ui_role" {
+            continue;
+        }
+        let Some(reference) = domain
+            .detail
+            .get("source_reference")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let key = source_key(&domain.anchor.source_file, root);
+        if let Some(new_id) = remap.get(&(reference, key)) {
+            domain
+                .detail
+                .insert("source_reference".to_owned(), Value::String(new_id.clone()));
         }
     }
 }
@@ -5624,6 +5776,10 @@ fn language_name_from_source(source: &str) -> Option<&'static str> {
         "go" => Some("go"),
         "rs" => Some("rust"),
         "java" => Some("java"),
+        "swift" => Some("swift"),
+        "dart" => Some("dart"),
+        "scala" => Some("scala"),
+        "groovy" | "gradle" => Some("groovy"),
         _ => None,
     }
 }
@@ -5651,6 +5807,13 @@ fn language_family(source: &str) -> Option<&'static str> {
         "ps1" | "psm1" | "psd1" => Some("powershell"),
         _ => None,
     }
+}
+
+fn is_hard_cut_universal_source(source: &str) -> bool {
+    matches!(
+        extension(source).as_str(),
+        "swift" | "dart" | "scala" | "groovy" | "gradle"
+    )
 }
 
 fn extension(source: &str) -> String {
@@ -5804,6 +5967,7 @@ mod tests {
                     },
                     handler_reference: "HandlerAlias".to_owned(),
                     middleware_references: Vec::new(),
+                    stages: Vec::new(),
                     origin: compass_languages::RawFrameworkOrigin::Ast,
                     rule: None,
                     detail: Map::new(),
@@ -6056,6 +6220,33 @@ mod tests {
     }
 
     #[test]
+    fn swift_builtin_cross_file_resolution_is_filtered_but_same_file_shadowing_is_kept() {
+        let mut cross_file = Extraction {
+            nodes: vec![
+                node("caller", "caller()", "Sources/Use.swift", "function"),
+                node("data", "Data", "Sources/Model.swift", "constructor"),
+            ],
+            raw_calls: Some(vec![raw("caller", "Data", "Sources/Use.swift")]),
+            ..Extraction::default()
+        };
+        resolve_cross_file_calls(&mut cross_file, &HashMap::new());
+        assert!(cross_file.edges.is_empty());
+
+        let mut same_file = Extraction {
+            nodes: vec![
+                node("caller", "caller()", "Sources/Use.swift", "function"),
+                node("data", "Data", "Sources/Use.swift", "constructor"),
+            ],
+            raw_calls: Some(vec![raw("caller", "Data", "Sources/Use.swift")]),
+            ..Extraction::default()
+        };
+        resolve_cross_file_calls(&mut same_file, &HashMap::new());
+        assert!(same_file.edges.iter().any(|edge| {
+            edge.source == "caller" && edge.target == "data" && relation(edge) == "calls"
+        }));
+    }
+
+    #[test]
     fn collision_disambiguation_rewrites_nodes_edges_and_raw_callers() {
         let mut first = node("duplicate", "Thing", "include/thing.h", "class");
         first.attributes.insert(
@@ -6072,6 +6263,28 @@ mod tests {
             nodes: vec![first, second],
             edges: vec![import],
             raw_calls: Some(vec![raw("duplicate", "work", "src/thing.cpp")]),
+            framework_facts: vec![compass_languages::RawFrameworkFact::Domain(
+                compass_languages::RawDomainFact {
+                    framework: "react".to_owned(),
+                    kind: "ui_role".to_owned(),
+                    name: "Thing".to_owned(),
+                    declaring_scope: String::new(),
+                    anchor: compass_languages::RawFrameworkAnchor {
+                        source_file: "src/thing.cpp".to_owned(),
+                        start_byte: 0,
+                        end_byte: 1,
+                        start_line: 1,
+                        start_column: 0,
+                        end_line: 1,
+                        end_column: 1,
+                    },
+                    origin: compass_languages::RawFrameworkOrigin::Ast,
+                    detail: Map::from_iter([(
+                        "source_reference".to_owned(),
+                        Value::String("duplicate".to_owned()),
+                    )]),
+                },
+            )],
             extensions: Map::from_iter([("fixture".to_owned(), json!(true))]),
             ..Extraction::default()
         };
@@ -6087,6 +6300,17 @@ mod tests {
             Some(&extraction.nodes[1].id)
         );
         assert!(!extraction.edges[0].attributes.contains_key("target_file"));
+        let role_reference = extraction
+            .framework_facts
+            .first()
+            .and_then(|fact| match fact {
+                compass_languages::RawFrameworkFact::Domain(domain) => domain
+                    .detail
+                    .get("source_reference")
+                    .and_then(Value::as_str),
+                _ => None,
+            });
+        assert_eq!(role_reference, Some(extraction.nodes[1].id.as_str()));
     }
 
     #[test]
@@ -6575,42 +6799,6 @@ mod tests {
 
         assert_eq!(extraction.edges[1].target, "package-b-base");
         assert!(extraction.nodes.iter().all(|node| node.id != "base"));
-    }
-
-    #[test]
-    fn csharp_namespace_canonicalization_keeps_lexicographically_earliest_source() {
-        let mut later = node(
-            "namespace-id",
-            "Demo.ViewModels",
-            "views/ToolkitViewModel.cs",
-            "namespace",
-        );
-        later
-            .attributes
-            .insert("source_location".to_owned(), Value::String("L4".to_owned()));
-        let mut earlier = node(
-            "namespace-id",
-            "Demo.ViewModels",
-            "views/DesignViewModel.cs",
-            "namespace",
-        );
-        earlier
-            .attributes
-            .insert("source_location".to_owned(), Value::String("L1".to_owned()));
-        let mut extraction = Extraction {
-            nodes: vec![later, earlier],
-            edges: vec![edge("consumer", "namespace-id", "imports", "views/App.cs")],
-            ..Extraction::default()
-        };
-
-        canonicalize_csharp_namespace_nodes(&mut extraction);
-
-        assert_eq!(extraction.nodes.len(), 1);
-        assert_eq!(
-            extraction.nodes[0].string("source_file"),
-            "views/DesignViewModel.cs"
-        );
-        assert_eq!(extraction.edges[0].target, "namespace-id");
     }
 
     #[test]

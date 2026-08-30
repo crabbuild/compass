@@ -12,6 +12,7 @@ use compass_languages::{
 fn valid_universal_framework_pack(id: &'static str) -> FrameworkPackDescriptor {
     FrameworkPackDescriptor {
         id,
+        semantics_version: 1,
         kind: FrameworkPackKind::Source,
         languages: &["go", "python"],
         required_capabilities: &[LanguageCapability::Calls],
@@ -33,8 +34,35 @@ fn universal_framework_pack_registry_accepts_only_cut_over_language_evidence() {
         FrameworkPackRegistry::validate_descriptors(&[descriptor]),
         Ok(())
     );
-    assert_eq!(FrameworkPackRegistry::descriptors().len(), 1);
-    assert_eq!(FrameworkPackRegistry::descriptors()[0].id, "spring-java");
+    let ids = FrameworkPackRegistry::descriptors()
+        .iter()
+        .map(|descriptor| descriptor.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        ids,
+        [
+            "aspnet-csharp",
+            "celery-python",
+            "dart-bloc",
+            "dart-flutter-navigation",
+            "dart-riverpod",
+            "django-python",
+            "django-rest-framework-python",
+            "fastapi-python",
+            "flask-python",
+            "php-frameworks",
+            "pydantic-python",
+            "rails-ruby",
+            "react-ui",
+            "sqlalchemy-python",
+            "spring-java",
+            "spring-kotlin",
+            "starlette-python",
+            "vapor-swift",
+        ]
+        .into_iter()
+        .collect()
+    );
     assert_eq!(FrameworkPackRegistry::validate(), Ok(()));
 
     let rust = FrameworkPackDescriptor {
@@ -150,9 +178,53 @@ fn universal_framework_pack_registry_enforces_evidence_activation_and_limits() {
         })
     );
 
+    let zero_semantics_version = FrameworkPackDescriptor {
+        semantics_version: 0,
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[zero_semantics_version]),
+        Err(FrameworkPackRegistryError::InvalidSemanticsVersion(
+            descriptor.id,
+        ))
+    );
+
     assert_eq!(
         FrameworkPackRegistry::validate_descriptors(&[descriptor, descriptor]),
         Err(FrameworkPackRegistryError::DuplicateId(descriptor.id))
+    );
+}
+
+#[test]
+fn depends_on_accepts_only_declared_dependency_semantics() {
+    let descriptor = valid_universal_framework_pack("dependency-pack");
+    const DEPENDENCY_INJECTION: &[FrameworkCapability] =
+        &[FrameworkCapability::DependencyInjection];
+    const DATA_MODELING: &[FrameworkCapability] = &[FrameworkCapability::DataModeling];
+    const SECURITY: &[FrameworkCapability] = &[FrameworkCapability::Security];
+    for capabilities in [DEPENDENCY_INJECTION, DATA_MODELING, SECURITY] {
+        let dependency_pack = FrameworkPackDescriptor {
+            framework_capabilities: capabilities,
+            emitted_relation_families: &[FrameworkRelation::DependsOn],
+            ..descriptor
+        };
+        assert_eq!(
+            FrameworkPackRegistry::validate_descriptors(&[dependency_pack]),
+            Ok(())
+        );
+    }
+
+    let persistence_only = FrameworkPackDescriptor {
+        framework_capabilities: &[FrameworkCapability::Persistence],
+        emitted_relation_families: &[FrameworkRelation::DependsOn],
+        ..descriptor
+    };
+    assert_eq!(
+        FrameworkPackRegistry::validate_descriptors(&[persistence_only]),
+        Err(FrameworkPackRegistryError::RelationCapabilityNotDeclared {
+            pack: descriptor.id,
+            relation: FrameworkRelation::DependsOn,
+        })
     );
 }
 
@@ -325,29 +397,23 @@ class SecondController {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let methods = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing PHP semantic evidence")?;
+    let methods = evidence
+        .declarations
         .iter()
-        .filter(|node| node.label() == ".index()")
+        .filter(|declaration| declaration.kind == "method" && declaration.name == "index")
         .collect::<Vec<_>>();
 
-    assert_eq!(methods.len(), 2, "nodes={:?}", extraction.nodes);
+    assert_eq!(methods.len(), 2, "declarations={:?}", evidence.declarations);
     assert_eq!(
         methods
             .iter()
-            .map(|node| node.string("lexical_owner"))
+            .map(|declaration| declaration.qualified_name.clone())
             .collect::<std::collections::BTreeSet<_>>(),
-        ["FirstController", "SecondController"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
-    );
-    assert_eq!(
-        methods
-            .iter()
-            .map(|node| node.string("qualified_name"))
-            .collect::<std::collections::BTreeSet<_>>(),
-        ["FirstController::index", "SecondController::index"]
+        ["firstcontroller::index", "secondcontroller::index"]
             .into_iter()
             .map(str::to_owned)
             .collect()
@@ -368,26 +434,34 @@ class Like {
 "#;
 
     let extraction = Engine::default().extract_source(&path, source)?;
-    let post = extraction
-        .nodes
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing PHP semantic evidence")?;
+    let post = evidence
+        .declarations
         .iter()
-        .find(|node| node.label() == "Post")
+        .find(|declaration| declaration.kind == "class" && declaration.qualified_name == "post")
         .ok_or("missing Post class")?;
-    let method = extraction
-        .nodes
+    let method = evidence
+        .declarations
         .iter()
-        .find(|node| node.label() == ".post()")
+        .find(|declaration| {
+            declaration.kind == "method" && declaration.qualified_name == "like::post"
+        })
         .ok_or("missing Like::post method")?;
 
-    assert!(
-        extraction
-            .edges
-            .iter()
-            .any(|edge| { edge.target == post.id && edge.string("relation") == "calls" })
-    );
-    assert!(!extraction.edges.iter().any(|edge| {
-        edge.string("relation") == "references_constant"
-            && (edge.target == post.id || edge.target == method.id)
+    assert_ne!(post.id, method.id);
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "factory"
+            && matches!(
+                candidate.constraints.hierarchy.as_ref(),
+                Some(compass_languages::HierarchyConstraint::ReceiverDispatch {
+                    receiver_qualified_name,
+                    ..
+                }) if receiver_qualified_name == "post"
+            )
     }));
     Ok(())
 }
@@ -414,9 +488,9 @@ fn repeated_rust_calls_keep_exact_sites_and_known_producer_metadata() -> Result<
         .collect::<Vec<_>>();
 
     assert_eq!(calls.len(), 2, "occurrences={:?}", evidence.occurrences);
-    assert_eq!(evidence.adapter.language, "rust");
+    assert_eq!(evidence.pipeline.language, "rust");
     assert_eq!(
-        evidence.adapter.producer,
+        evidence.pipeline.emitter,
         "compass.languages.rust.universal"
     );
 
@@ -709,8 +783,7 @@ fn repeated_zig_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
 fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let path = directory.path().join("repeated.dart");
-    let source =
-        b"class State {}\nclass Controller { void run() { emit(State()); emit(State()); } }\n";
+    let source = b"import 'package:flutter_bloc/flutter_bloc.dart';\nclass State {}\nclass Controller { void run() { emit(State()); emit(State()); } }\n";
     fs::write(&path, source)?;
 
     let extraction = Engine::default().extract(&path)?;
@@ -733,6 +806,27 @@ fn repeated_dart_framework_calls_keep_each_source_range() -> Result<(), Box<dyn 
     assert_eq!(sites.len(), 2, "edges={:?}", extraction.edges);
     assert!(sites.iter().all(|(start, end)| start < end));
     assert_ne!(sites[0], sites[1]);
+    Ok(())
+}
+
+#[test]
+fn dart_framework_conventions_require_positive_activation() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("inactive.dart");
+    fs::write(
+        &path,
+        b"class State {}\nclass Controller { void run() { emit(State()); go('/home'); } }\n",
+    )?;
+
+    let extraction = Engine::default().extract(&path)?;
+    assert!(
+        extraction
+            .edges
+            .iter()
+            .all(|edge| edge.string("context").is_empty()),
+        "inactive Dart conventions emitted: {:?}",
+        extraction.edges
+    );
     Ok(())
 }
 
@@ -778,30 +872,56 @@ fn dart_navigation_sites(source: &[u8]) -> Result<Vec<NavigationSite>, Box<dyn E
 }
 
 #[test]
+fn dart_navigation_concept_nodes_keep_convention_provenance() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("navigation.dart");
+    fs::write(
+        &path,
+        b"import 'package:flutter/widgets.dart';\nvoid run() { go('/home'); }\n",
+    )?;
+    let extraction = Engine::default().extract(&path)?;
+    let edge = extraction
+        .edges
+        .iter()
+        .find(|edge| edge.string("relation") == "navigates")
+        .ok_or("missing Dart navigation edge")?;
+    let target = extraction
+        .nodes
+        .iter()
+        .find(|node| node.id == edge.target)
+        .ok_or("missing Dart navigation concept")?;
+    assert_eq!(target.string("file_type"), "concept");
+    assert_eq!(target.string("_origin"), "convention");
+    assert_eq!(target.string("rule"), "dart-route_path");
+    assert_eq!(
+        target.string("extractor"),
+        "compass.languages.dart.framework"
+    );
+    assert!(
+        target
+            .attributes
+            .get("source_file")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.ends_with("navigation.dart"))
+    );
+    assert!(
+        target
+            .attributes
+            .get("start_byte")
+            .and_then(serde_json::Value::as_u64)
+            .zip(
+                edge.attributes
+                    .get("end_byte")
+                    .and_then(serde_json::Value::as_u64),
+            )
+            .is_some_and(|(start, end)| start < end)
+    );
+    Ok(())
+}
+
+#[test]
 fn dart_ascii_navigation_range_slices_original_source() -> Result<(), Box<dyn Error>> {
-    let source = b"void run() { go('/home'); }\n";
-    let sites = dart_navigation_sites(source)?;
-
-    assert_eq!(sites.len(), 1);
-    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
-    assert_eq!((sites[0].line, sites[0].column), (1, 13));
-    Ok(())
-}
-
-#[test]
-fn dart_multiline_comment_preserves_navigation_bytes_and_lines() -> Result<(), Box<dyn Error>> {
-    let source = b"/* lead\ncomment */\nvoid run() { go('/home'); }\n";
-    let sites = dart_navigation_sites(source)?;
-
-    assert_eq!(sites.len(), 1);
-    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
-    assert_eq!((sites[0].line, sites[0].column), (3, 13));
-    Ok(())
-}
-
-#[test]
-fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dyn Error>> {
-    let source = "const label = 'café';\nvoid run() { go('/home'); }\n".as_bytes();
+    let source = b"import 'package:flutter/widgets.dart';\nvoid run() { go('/home'); }\n";
     let sites = dart_navigation_sites(source)?;
 
     assert_eq!(sites.len(), 1);
@@ -811,8 +931,30 @@ fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dy
 }
 
 #[test]
+fn dart_multiline_comment_preserves_navigation_bytes_and_lines() -> Result<(), Box<dyn Error>> {
+    let source = b"import 'package:flutter/widgets.dart';\n/* lead\ncomment */\nvoid run() { go('/home'); }\n";
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (4, 13));
+    Ok(())
+}
+
+#[test]
+fn dart_utf8_prefix_preserves_byte_based_navigation_range() -> Result<(), Box<dyn Error>> {
+    let source = "import 'package:flutter/widgets.dart';\nconst label = 'café';\nvoid run() { go('/home'); }\n".as_bytes();
+    let sites = dart_navigation_sites(source)?;
+
+    assert_eq!(sites.len(), 1);
+    assert_eq!(&source[sites[0].start..sites[0].end], b"go('/home'");
+    assert_eq!((sites[0].line, sites[0].column), (3, 13));
+    Ok(())
+}
+
+#[test]
 fn dart_minified_navigation_keeps_same_line_occurrences_distinct() -> Result<(), Box<dyn Error>> {
-    let source = b"void run(){go('/a');go('/b');}\n";
+    let source = b"import 'package:flutter/widgets.dart';\nvoid run(){go('/a');go('/b');}\n";
     let sites = dart_navigation_sites(source)?;
 
     assert_eq!(sites.len(), 2);
@@ -923,7 +1065,7 @@ class Service(Base[ExternalType]):
         value: Annotated[Optional[Union[InputType, None]], "meta"],
     ) -> tuple[OutputType, ...]:
         """A function rationale long enough to be indexed safely."""
-        # WHY: retain this adapter for compatibility with old callers
+        # WHY: retain this evidence path for compatibility with old callers
         local = callback
         assigned = (external_factory, local)
         consume(external_argument, named=external_keyword)
@@ -2064,7 +2206,12 @@ const rows = items.map(formatRow);
         let path = directory.path().join(name);
         fs::write(&path, source)?;
         let extraction = engine.extract(&path)?;
-        assert!(!extraction.nodes.is_empty(), "{name}");
+        if let Some(evidence) = extraction.semantic_evidence.as_ref() {
+            assert!(!evidence.declarations.is_empty(), "{name}");
+            assert!(!evidence.candidates.is_empty(), "{name}");
+            continue;
+        }
+        assert!(!extraction.nodes.is_empty(), "{name}: {extraction:#?}");
         assert!(
             extraction.edges.iter().any(|edge| matches!(
                 edge.string("relation").as_str(),

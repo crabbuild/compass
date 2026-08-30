@@ -267,10 +267,30 @@ impl UniversalResolutionIndex {
                     evidence,
                 } => {
                     let target = self.facts.declarations.get(&declaration_id)?;
+                    let candidate = self.facts.candidates.at(pending.candidate_slot)?;
+                    let source = self
+                        .facts
+                        .declarations
+                        .get(&candidate.source_declaration_id)?;
+                    let relation_override = pending.relation_override.or_else(|| {
+                        let direct_base = matches!(
+                            candidate.constraints.hierarchy.as_ref(),
+                            Some(HierarchyConstraint::DirectBase { .. })
+                        );
+                        let csharp_conformance = candidate.language == "csharp"
+                            && direct_base
+                            && target.kind == "interface";
+                        let swift_conformance =
+                            candidate.language == "swift" && target.kind == "protocol";
+                        (candidate.relation == CandidateRelation::Extends
+                            && source.kind != "interface"
+                            && (csharp_conformance || swift_conformance))
+                            .then_some(CandidateRelation::Implements)
+                    });
                     Some(PreparedTarget {
                         candidate_slot: pending.candidate_slot,
                         candidate_id_override: pending.candidate_id_override,
-                        relation_override: pending.relation_override,
+                        relation_override,
                         target: graph_ids[&target.id].clone(),
                         rule: evidence.rule,
                         target_kind: Some(target.kind.clone()),
@@ -354,9 +374,13 @@ impl UniversalResolutionIndex {
             let Some(original_candidate) = self.facts.candidates.at(prepared.candidate_slot) else {
                 continue;
             };
-            let overridden_candidate = prepared.candidate_id_override.as_ref().map(|id| {
+            let overridden_candidate = (prepared.candidate_id_override.is_some()
+                || prepared.relation_override.is_some())
+            .then(|| {
                 let mut candidate = original_candidate.clone();
-                candidate.id.clone_from(id);
+                if let Some(id) = prepared.candidate_id_override.as_ref() {
+                    candidate.id.clone_from(id);
+                }
                 if let Some(relation) = prepared.relation_override {
                     candidate.relation = relation;
                 }
@@ -434,9 +458,13 @@ impl UniversalResolutionIndex {
                         target_site,
                     )| {
                         let original_candidate = self.facts.candidates.at(candidate_slot)?;
-                        let overridden_candidate = candidate_id_override.map(|id| {
+                        let overridden_candidate = (candidate_id_override.is_some()
+                            || relation_override.is_some())
+                        .then(|| {
                             let mut candidate = original_candidate.clone();
-                            candidate.id = id;
+                            if let Some(id) = candidate_id_override {
+                                candidate.id = id;
+                            }
                             if let Some(relation) = relation_override {
                                 candidate.relation = relation;
                             }
@@ -784,8 +812,19 @@ fn materialized_declaration_ids<'a>(
     }
     let mut ids = AHashMap::new();
     for (graph_node_id, declarations) in groups {
-        if declarations.len() == 1 {
-            ids.insert(declarations[0].id.clone(), graph_node_id);
+        if declarations.len() == 1
+            || declarations.iter().all(|declaration| {
+                declaration.language == "ruby"
+                    && matches!(declaration.kind.as_str(), "class" | "trait")
+                    && declaration.qualified_name == declarations[0].qualified_name
+            })
+        {
+            ids.insert(declarations[0].id.clone(), graph_node_id.clone());
+            if declarations.len() > 1 {
+                for declaration in declarations.iter().skip(1) {
+                    ids.insert(declaration.id.clone(), graph_node_id.clone());
+                }
+            }
             continue;
         }
         for declaration in declarations {

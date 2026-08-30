@@ -13,6 +13,7 @@ compass-out/
 ├── graph.json
 ├── graph.html                   # unless omitted by size or --no-viz
 ├── GRAPH_REPORT.md
+├── orientation.json              # clustered Agent Orientation
 ├── manifest.json
 ├── program.json                 # only with --program or --program-artifact
 ├── graph-overview.json          # clustered builds
@@ -234,22 +235,65 @@ The report can include:
 - communities;
 - surprising connections;
 - cycles/diagnostics;
-- suggested questions.
+- suggested questions, including bounded structural-gap questions when two
+  well-formed communities share topical two-hop evidence but lack a direct
+  topical relationship, and disconnected-component questions for multiple
+  source-backed graph islands.
 
 It is intended for people and can evolve in prose/format. Do not parse it when
 structured data or command JSON exists.
 
+Structural-gap questions are investigative evidence, not newly inferred graph
+edges. Compass dampens shared intermediaries by their degree, excludes
+containment/import/wiring relations from topical linkage, and ignores
+file/concept/JSON-key-only noise. The report may therefore ask what would
+connect two communities without asserting that a connection exists.
+
+## Typed graph-insights projection
+
+Clustered `analysis.json` includes a bounded `blindSpots` value with schema
+`compass.graph-insights/1`. It contains ranked `communityGaps` and, when more
+than one source-backed component exists, `disconnectedComponents`. Each gap
+retains stable anchors, shared-intermediary witnesses, direct topical-edge
+witnesses, and exact counts; each component retains bounded member witnesses.
+`omissions` and `limits` are part of the contract, so a missing item is never
+silently interpreted as evidence that no item existed.
+
+The same projection is included as optional `blindSpots` in
+`compass.orientation/2`, rendered in `GRAPH_REPORT.md`, and exposed through
+the read-only MCP resource `compass://graph-insights`. The projection does not
+add, remove, or rewrite graph edges. `compass history blind-spots --format
+json` compares these exact IDs across immutable realizations; realizations
+without the sidecar are counted as observations without graph insights.
+
 Community evidence labels prefer a meaningful symbol or document heading over
-Markdown pipe-table parser blocks, even when a table container has more
-structural edges. A community containing only pipe-table blocks receives a
+Markdown semantic table navigation records, even when a table container has more
+structural edges. A community containing only table navigation records receives a
 source-anchored `Table (path:line)` label. When other communities share a hub
 name, Compass adds a compact source or wiring-site anchor and, only if needed,
 the graph-local community ID. These labels are deterministic navigation aids,
 not community identity; consumers that need identity should use the community
 ID and member set instead.
 
+The architecture view is a separate, versioned projection rather than a
+presentation alias for raw communities. It classifies Production and All-code
+source scopes before grouping, derives project-specific owner and subsystem
+names from source paths, declarations, and optional overlays, and keeps names
+separate from stable membership-derived IDs. Relation classes and lenses are
+explicit in the model. Large graphs remain bounded by an overview whose exact
+omission counts link to the searchable group directory; omitted groups are
+never merged into a synthetic `Other` subsystem or connected to invented
+routes.
+
+Production excludes Test, Generated, Vendor, Documentation, and Unknown
+sources before grouping. All-code retains them with exact counts. Memberships
+use validated `nodeIndex` and `groupIndex` references into deterministic arrays
+to keep large payloads bounded without discarding drill-down data. Extraction
+completeness, overview omissions, and architecture quality are separate
+signals.
+
 The Architecture Map and Community Directory omit communities made entirely
-of Markdown pipe-table parser blocks. Those communities count toward the
+of Markdown table navigation records. Those communities count toward the
 report's omitted-community coverage and their source-backed nodes remain in
 the graph; the report does not present parser partitions as architectural
 subsystems.
@@ -297,15 +341,36 @@ Optional interactive visualization. It may be absent when:
 It is not required for query commands.
 
 The document is self-contained and uses the same versioned graph workbench as
-the VS Code extension. It performs no runtime network requests, follows the
+the VS Code extension. Loading and exploring it performs no runtime network requests, follows the
 operating system's light or dark color scheme, and retains keyboard, reduced
 motion, narrow-screen, and high-contrast behavior from the shared viewer.
+
+Double-clicking a source-backed node, edge, or inspector source card opens the
+file and highlights its recorded lines in the VS Code extension. A standalone
+HTML export instead opens an immutable forge permalink when all required
+evidence is available: the graph records a full source commit, the graph is
+inside a Git worktree with a recognized `origin`, and that origin is GitHub,
+GitLab, or Bitbucket. Compass uses the recorded commit when it is reachable
+from a local `origin` remote-tracking ref. For a local-only commit, Compass may
+instead use an immutable published common ancestor, but only after a bounded
+Git comparison proves every source path represented by the graph has identical
+content at both commits. This preserves exact files and line anchors while
+avoiding dead forge URLs for local metadata-only commits. Historical
+comparisons use the commit for the selected side. If any evidence is absent,
+unsafe, or source content differs, the viewer does not invent a link and
+explains that the local source can be opened from the VS Code extension.
+No repository URL is added to `compass.viewer.workbench/1` or
+`workbench-json`; standalone HTML carries the optional presentation metadata
+separately.
 
 The embedded `compass.viewer.workbench/1` model contains an ordered list of
 independently bounded views with explicit `complete`, `summary`, or `partial`
 coverage. One HTML file can contain code, call, impact, affected, architecture,
 history-comparison, and artifact-specific lenses. Its navigation rail keeps
 the current graph identity and exposes hash links such as `#view=impact-run`.
+Both the navigation rail and graph inspector can collapse independently, and
+the repository title appears once in the navigation header so inspector space
+starts with search and node details.
 Graph lenses share relationship, evidence, node-kind, and language filters;
 call, impact, and affected views start in a deterministic depth-layer layout.
 Architecture views use subsystem routes, while history views overlay added,
@@ -385,6 +450,16 @@ calls as proof that no target exists.
 
 Use `compass program` for read-only inspection and CompassQL projection.
 Reject unknown schema identifiers rather than guessing compatibility.
+
+A verified managed Python provider has an ID of the form
+`scip-python:<profile-sha256>:<artifact-sha256>`. Its companion SCIP manifest
+uses `compass.scip-manifest/1` and may carry the additive
+`managed_analyzer` object with schema `compass.managed-analyzer-profile/1`.
+The frozen environment is validated and hashed into provider/cache identity,
+but environment paths and platform details are not copied into Program facts.
+Only complete, offline profiles are accepted; unknown profile majors and
+timeout, cancellation, permission, partial, failed, or stale states fail
+explicitly.
 
 ## Query text
 
@@ -542,6 +617,9 @@ risk, deterministic gates, canonical omissions, and a content digest.
 Markdown and text expose the same fingerprints and finding count unless an
 explicit Markdown projection budget omits findings. In that case the footer
 states the exact omitted count; the canonical report and digest are unchanged.
+Finding statements and SARIF messages resolve retained entity identities to
+human-readable names. Stable source and target identities remain available in
+the canonical JSON for machine traceability.
 SARIF 2.1.0 stores each Compass fingerprint in `partialFingerprints` and keeps
 report identity, completeness, factors, gates, evidence, and omissions in
 properties. SARIF severity is a presentation hint, not merge policy.
@@ -629,19 +707,47 @@ Use its command help and retain the source graph.
 First-party editor and offline-viewer contracts are versioned independently:
 
 - `compass.viewer.graph/1` — shared interactive graph model; located edges may
-  include an optional `relationshipSite` source anchor;
-- `compass.graph-overview/2` — rebuildable prepared graph projection used by
+  include an optional `relationshipSite` source anchor, while exact Agent Graph
+  views carry the pinned composition profile, bounded Retraction history,
+  Challenge details, and Grounding metadata;
+- `compass.graph-overview/1` — rebuildable prepared graph projection used by
   editor integrations;
 - `compass.program.call_graph/1` — bounded symbol-centered caller/callee graph;
-- `compass.viewer.callflow/1` — broader subsystem architecture flow;
+- `compass.viewer.architecture/1` — source-scoped subsystem architecture with
+  typed relationships, hierarchy, omissions, and quality diagnostics;
 - `compass.history.timeline/1` — commit and materialization states;
 - `compass.history.change_counts/1` — lazy structural counts between existing
   realizations;
+- `compass.graph-insights/1` — bounded structural-gap and disconnected-component
+  evidence with witnesses and omission limits;
+- `compass.graph-blind-spot-history/1` — active/resolved blind-spot trends over
+  immutable history observations;
+- `compass.orientation/2` — fitted Agent Orientation with optional typed
+  `blindSpots` evidence;
 - `compass.history.viewer_graph/1` — exact historical graph envelope;
 - `compass.semantic_diff.report/1` — exhaustive semantic findings, source
   changes, and exact added, removed, and changed node/edge records consumed by
   the CLI HTML report and editor comparison views;
 - `compass.ide.progress/1` — newline-delimited guided-operation events.
+- `compass.agent-graph.overlay/1` — one immutable logical Overlay state;
+- `compass.agent-graph.ingestion-preparation/1` — read-only, verifier-owned
+  Base references, source evidence, and current expected revision for drafting
+  a change batch;
+- `compass.agent-graph.receipt/1` — atomic publication receipt;
+- `compass.agent-graph.effective/1` — Base Graph plus one exact Overlay
+  Revision and composition profile;
+- `compass.agent-graph.rebase-plan/1` — exact, digest-bound rebase decision;
+- `compass.agent-graph.audit/1` and `audit-result/1` — bounded operational
+  attestations without prompts, credentials, chain-of-thought, or excerpts;
+- `compass.agent-knowledge/1` — bounded task-context projection for one exact
+  Effective Graph.
+
+Agent Graph digests are lowercase SHA-256 and all contracts reject unknown
+fields. `GROUNDED` appears only in Compass-produced results. Effective exports
+carry the Base Generation, Overlay Revision, profile, composition version, and
+effective identity; consumers must validate all of them before caching or
+joining results. A profile change requires a newly composed Effective Graph;
+viewer clients do not reinterpret one effective identity under another profile.
 
 ## Graph quality diagnostics
 

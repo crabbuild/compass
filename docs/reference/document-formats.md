@@ -14,14 +14,14 @@ alone.
 | Lists and task items | List/list-item blocks; `task_checked` when present | `contains` + exact ranges |
 | Block quotes and thematic breaks | Structural block | exact node range |
 | Fenced / indented code | Code block; fenced info string becomes `language` | exact node range |
-| Pipe tables | Table, header, row, and cell blocks | nested `contains` edges |
+| Pipe tables | Table, header, row, and cell blocks with header-qualified labels | nested `contains` edges and exact cell-owned references |
 | Reference definitions | Definition block and definition relationship | definition range |
 | Inline/reference/autolinks | Link relationship with `link_kind` | link-site range |
 | Footnotes | Bounded definition nodes and reference relationships | exact definition/reference ranges |
 | Wikilinks | Local link evidence with `link_kind: "wikilink"` | link-site range |
 | MDX / Quarto extensions | Bounded `other` blocks; no execution | exact source range |
 | Images | Ignored as document relationships | no fetch or edge |
-| Frontmatter | Bounded `document_metadata` map | root metadata; body offsets unchanged |
+| Frontmatter | Bounded nested metadata plus `config_key` graph nodes | exact key/value-pair ranges; body offsets unchanged |
 | Malformed syntax | Recovered evidence plus bounded diagnostic | extraction quality extension |
 
 Markdown is parsed from the caller-supplied bytes with statically linked
@@ -50,10 +50,29 @@ attributes and must not parse stable IDs as path components.
 ### Frontmatter limits
 
 - opening and closing delimiters must be whole lines within 64 KiB;
-- at most 256 metadata keys and 256 scalar-array items are published;
+- at most 256 metadata keys and 256 total array items are normalized;
+- mappings and arrays can nest to 12 levels, with at most 512 source-backed
+  metadata graph nodes;
 - individual metadata keys and strings are capped at 16 KiB;
-- nested mappings, YAML tags/aliases, and non-scalar arrays are diagnosed and
-  omitted rather than projected as arbitrary graph data.
+- YAML tags/aliases, duplicate paths, non-string mapping keys, invalid UTF-8,
+  and unanchorable parser recovery are diagnosed and omitted.
+
+Valid mappings and object arrays publish established `config_key` nodes under
+the Markdown document. `details.format` is `yaml_frontmatter`; `keyPath` is a
+canonical JSON Pointer and `qualifiedName` is prefixed with `frontmatter`.
+Pointer escaping (`~0` and `~1`) prevents dotted or slash-containing keys from
+colliding. Nested `contains` edges and nodes carry exact Config provenance and
+source ranges. IDs depend on source file and key path, not the metadata value,
+so ordinary value edits do not churn graph identity.
+
+The document root uses a bounded string `title` as its display name when one is
+present. Metadata node labels summarize a conservative set of content fields
+such as title, tags, aliases, authors, dates, layout, and status. Generic values
+remain out of the public graph label, preventing credential-shaped frontmatter
+from being copied into graph artifacts. The full bounded `document_metadata`
+map remains available at the raw extraction boundary; `compass.graph/1`
+projects its structure through existing typed config nodes rather than adding a
+new wire field or schema major.
 
 ### Link boundary
 
@@ -92,15 +111,47 @@ lexically against the validated source/base URL, never fetched.
 | Format | Discovery classification | Structural extractor in this release |
 | --- | --- | --- |
 | HTML / HTM | document | structural Tree-sitter adapter and shared ingestion renderer |
-| DOCX | document/media | media conversion surface; no native block graph |
-| PPTX | not a general local document adapter | not yet |
+| PDF | document | native page/text blocks; optional page OCR |
+| DOCX | document | ordered paragraphs, headings, lists, tables, notes, links, embedded-image OCR |
+| PPTX | document | relationship-ordered slides, shapes, tables, notes, links, embedded-image OCR |
 | RTF | not a general local document adapter | not yet |
-| XLSX | document/media | media conversion surface; no native block graph |
+| XLSX | document | sparse typed sheets/rows/cells, formulas as inert metadata, embedded-image OCR |
 | TXT / RST | document | generic/document fallback only |
 
-This distinction keeps product claims honest: future office and rich-text work
-must add bounded parsing, exact or explicitly normalized locators, security
-tests, and cache/version contracts before it becomes graph evidence.
+PDF and Office adapters emit `compass.document/1`. Locators are typed as PDF
+page/item, OOXML package part/path, slide/shape, sheet/row/column, or OCR owner
+plus pixel polygon. Structural graph nodes preserve the serialized locator and
+document origin. Unknown schema or normalizer versions fail rather than being
+flattened through a compatibility adapter.
+
+### OCR commands and defaults
+
+```text
+compass document inspect FILE --ocr off|auto|always --format text|json
+compass extract PATH --ocr off|auto|always
+compass models list|install|verify
+```
+
+OCR defaults to `off`. Native extraction needs no model. `auto` and `always`
+require a verified local profile and never download implicitly. Use
+`--ocr-language TAG` repeatedly for bounded language hints and
+`--allow-partial` only when incomplete visual coverage is acceptable. JSON
+inspection uses `compass.document.inspect/1` and includes the policy, artifact,
+limits, diagnostics, visual coverage, and exact OCR profile identity.
+
+Managed OCR is unavailable on Intel (`x86_64`) macOS because its pinned ONNX
+runtime has no self-contained distribution for that target. Native extraction
+and `--ocr off` remain available without additional installation. Compass
+rejects model installation and OCR-enabled processing there before any model
+download.
+
+Document and cache files are capped while streaming, so size checks still hold
+if an input changes during a read. PDF rasterization reserves aggregate pixels
+before rendering each page, and tiled recognition checks the document deadline
+before and after each inference unit. One native inference call cannot be
+preempted midway; its result is discarded as a timeout if the deadline has
+elapsed. Concurrent installation of the same model profile waits on a bounded
+lock, and verification rejects symlinked artifacts or markers.
 
 ## Related contracts
 

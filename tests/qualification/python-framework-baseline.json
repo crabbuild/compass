@@ -1,0 +1,76 @@
+{
+  "schema": "compass.python-framework-baseline/1",
+  "status": "established-unqualified",
+  "plannedAt": "dd3bf47bf9d5d04298c26a3832a70f040ed3dbb8",
+  "pythonProducer": {
+    "id": "compass.python",
+    "version": 1,
+    "qualification": "qualifying"
+  },
+  "productionFrameworkPacks": [
+    {
+      "id": "django-python",
+      "semanticsVersion": 2,
+      "frameworks": ["django"]
+    },
+    {
+      "id": "django-rest-framework-python",
+      "semanticsVersion": 1,
+      "frameworks": ["django-rest-framework"]
+    },
+    {
+      "id": "fastapi-python",
+      "semanticsVersion": 2,
+      "frameworks": ["fastapi"]
+    },
+    {
+      "id": "flask-python",
+      "semanticsVersion": 2,
+      "frameworks": ["flask"]
+    },
+    {
+      "id": "pydantic-python",
+      "semanticsVersion": 1,
+      "frameworks": ["pydantic"]
+    },
+    {
+      "id": "sqlalchemy-python",
+      "semanticsVersion": 1,
+      "frameworks": ["sqlalchemy"]
+    },
+    {
+      "id": "celery-python",
+      "semanticsVersion": 1,
+      "frameworks": ["celery"]
+    },
+    {
+      "id": "starlette-python",
+      "semanticsVersion": 1,
+      "frameworks": ["starlette"]
+    }
+  ],
+  "fixtureEvidence": {
+    "expectations": 17,
+    "expectedGaps": 3,
+    "graphQualification": "checked-in-conformance-only",
+    "productionQualified": false
+  },
+  "lifecycle": {
+    "cold": "not-recorded-phase-0-skeleton",
+    "warm": "not-recorded-phase-0-skeleton",
+    "forced": "not-recorded-phase-0-skeleton",
+    "semanticEdit": "not-recorded-phase-0-skeleton",
+    "factNeutralEdit": "not-recorded-phase-0-skeleton",
+    "deleteRenameRestore": "not-recorded-phase-0-skeleton",
+    "workerEquivalence": "not-recorded-phase-0-skeleton",
+    "peakRss": "not-recorded-phase-0-skeleton"
+  },
+  "qualification": {
+    "acceptedRelationships": 0,
+    "observedPrecision": null,
+    "wilsonLowerBound": null,
+    "sourceRecall": null,
+    "criticalFailures": null,
+    "eligibleForProductionClaim": false
+  }
+}

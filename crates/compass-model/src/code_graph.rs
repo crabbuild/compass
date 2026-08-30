@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::provenance::{
@@ -12,9 +12,10 @@ use crate::provenance::{
 };
 use crate::{GraphError, validate_code_graph};
 
+/// The strict graph schema emitted and accepted by Compass.
 pub const CODE_GRAPH_SCHEMA_V1: &str = "compass.graph/1";
 
-/// The closed structural and enterprise node vocabulary for `compass.graph/1`.
+/// The closed structural and enterprise node vocabulary for Compass graphs.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
@@ -31,6 +32,7 @@ pub enum NodeKind {
     EnumMember,
     TypeAlias,
     Function,
+    Closure,
     Method,
     Constructor,
     Property,
@@ -130,6 +132,7 @@ impl NodeKind {
             Self::EnumMember => "enum_member",
             Self::TypeAlias => "type_alias",
             Self::Function => "function",
+            Self::Closure => "closure",
             Self::Method => "method",
             Self::Constructor => "constructor",
             Self::Property => "property",
@@ -169,7 +172,11 @@ impl NodeKind {
     pub const fn is_callable(self) -> bool {
         matches!(
             self,
-            Self::Function | Self::Method | Self::Constructor | Self::DatabaseProcedure
+            Self::Function
+                | Self::Closure
+                | Self::Method
+                | Self::Constructor
+                | Self::DatabaseProcedure
         )
     }
 
@@ -177,7 +184,12 @@ impl NodeKind {
     pub const fn is_constructible(self) -> bool {
         matches!(
             self,
-            Self::Class | Self::Struct | Self::Enum | Self::Component | Self::DatabaseProcedure
+            Self::Class
+                | Self::Struct
+                | Self::Enum
+                | Self::Annotation
+                | Self::Component
+                | Self::DatabaseProcedure
         )
     }
 
@@ -237,10 +249,17 @@ pub enum NodeRole {
     Test,
     Fixture,
     Generated,
+    UiComponent,
+    Hook,
+    ClientBoundary,
+    ClientComponent,
+    ServerComponent,
+    ServerFunction,
+    DataLoader,
 }
 
 impl NodeRole {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 20] = [
         Self::Controller,
         Self::RouteHandler,
         Self::Middleware,
@@ -254,6 +273,13 @@ impl NodeRole {
         Self::Test,
         Self::Fixture,
         Self::Generated,
+        Self::UiComponent,
+        Self::Hook,
+        Self::ClientBoundary,
+        Self::ClientComponent,
+        Self::ServerComponent,
+        Self::ServerFunction,
+        Self::DataLoader,
     ];
 
     #[must_use]
@@ -272,6 +298,13 @@ impl NodeRole {
             Self::Test => "test",
             Self::Fixture => "fixture",
             Self::Generated => "generated",
+            Self::UiComponent => "ui_component",
+            Self::Hook => "hook",
+            Self::ClientBoundary => "client_boundary",
+            Self::ClientComponent => "client_component",
+            Self::ServerComponent => "server_component",
+            Self::ServerFunction => "server_function",
+            Self::DataLoader => "data_loader",
         }
     }
 }
@@ -287,6 +320,7 @@ pub enum EdgeKind {
     Exports,
     Extends,
     Implements,
+    MixesIn,
     References,
     TypeOf,
     Returns,
@@ -309,6 +343,7 @@ pub enum EdgeKind {
     DependsOn,
     Documents,
     MapsTo,
+    Renders,
 }
 
 impl EdgeKind {
@@ -354,6 +389,7 @@ impl EdgeKind {
             Self::Exports => "exports",
             Self::Extends => "extends",
             Self::Implements => "implements",
+            Self::MixesIn => "mixes_in",
             Self::References => "references",
             Self::TypeOf => "type_of",
             Self::Returns => "returns",
@@ -376,6 +412,7 @@ impl EdgeKind {
             Self::DependsOn => "depends_on",
             Self::Documents => "documents",
             Self::MapsTo => "maps_to",
+            Self::Renders => "renders",
         }
     }
 }
@@ -563,6 +600,8 @@ pub struct RouteStageDetails {
     pub reference: String,
     pub resolution: ResolutionState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_anchor: Option<SourceAnchor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<ResolutionCandidate>,
@@ -587,6 +626,172 @@ pub struct RouteNodeDetails {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ComponentNodeDetails {
     pub component_type: String,
+}
+
+/// Format of a source-backed document structure node.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentFormat {
+    Markdown,
+    Html,
+    Text,
+    Pdf,
+    Docx,
+    Xlsx,
+    Pptx,
+    Rtf,
+    Other,
+}
+
+/// Semantic role of a source-backed document structure node.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentRole {
+    Document,
+    Heading,
+    Paragraph,
+    List,
+    ListItem,
+    Quote,
+    Code,
+    ThematicBreak,
+    Table,
+    TableRow,
+    LinkDefinition,
+    FootnoteDefinition,
+    Page,
+    Sheet,
+    Slide,
+    Note,
+    Other,
+}
+
+/// Derived significance used by query, topology, and human-facing projections.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentSignificance {
+    Content,
+    Container,
+    Scaffolding,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocumentTableColumnDetails {
+    pub index: u32,
+    pub header: String,
+    pub alignment: TableAlignment,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceAnchor>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableAlignment {
+    Left,
+    Center,
+    Right,
+    Unspecified,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocumentTableDetails {
+    pub columns: Vec<DocumentTableColumnDetails>,
+    pub body_row_count: u32,
+    #[serde(default)]
+    pub omitted_row_count: u32,
+    #[serde(default)]
+    pub omitted_column_count: u32,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableCellState {
+    Present,
+    Empty,
+    Missing,
+    /// The cell exists, but its text was omitted by a bounded extractor.
+    Limited,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocumentTableCellDetails {
+    pub column_index: u32,
+    pub state: TableCellState,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceAnchor>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocumentTableRowDetails {
+    pub row_index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity_cell_index: Option<u32>,
+    pub cells: Vec<DocumentTableCellDetails>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+/// Outcome of resolving a reference embedded in a document.
+///
+/// This is intentionally separate from the code resolver's `ResolutionState`:
+/// document probing has an additional bounded/limited outcome, while widening
+/// the shared resolver enum would make every existing exhaustive resolver
+/// branch silently reinterpret a limit as a normal unresolved result.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentReferenceResolution {
+    Exact,
+    Ambiguous,
+    Unresolved,
+    Limited,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocumentReferenceEvidence {
+    pub spelling: String,
+    pub kind: String,
+    pub site: SourceAnchor,
+    pub resolution: DocumentReferenceResolution,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<ResolutionCandidate>,
+}
+
+/// Bounded document normalization facts.
+///
+/// These facts are used while publishing stable graph/1 identities and
+/// references. The graph/1 validator rejects this details discriminant on a
+/// published artifact; document nodes are downgraded to `Resource(document)`
+/// after their structural nodes and relationships have been derived.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocumentNodeDetails {
+    pub format: DocumentFormat,
+    pub role: DocumentRole,
+    pub ordinal: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    /// Stable document fragment, when the source construct declares one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    pub significance: DocumentSignificance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table: Option<DocumentTableDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table_row: Option<DocumentTableRowDetails>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<DocumentReferenceEvidence>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -662,6 +867,7 @@ pub enum NodeDetails {
     ImportExport(ImportExportNodeDetails),
     Route(RouteNodeDetails),
     Component(ComponentNodeDetails),
+    Document(DocumentNodeDetails),
     Resource(ResourceNodeDetails),
     Messaging(MessagingNodeDetails),
     Job(JobNodeDetails),
@@ -719,7 +925,20 @@ pub struct CallEdgeDetails {
 #[serde(rename_all = "snake_case")]
 pub enum RouteStage {
     Middleware,
+    Dependency,
+    Security,
+    Layout,
+    Template,
+    Loading,
+    Default,
+    ErrorBoundary,
+    NotFound,
+    Boundary,
+    Loader,
+    Action,
     Handler,
+    DataLoader,
+    RouteComponent,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -752,6 +971,24 @@ pub struct MappingEdgeDetails {
     pub mapping_kind: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderKind {
+    Jsx,
+    CreateElement,
+    Root,
+    Lazy,
+    Dynamic,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenderEdgeDetails {
+    pub render_kind: RenderKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
+}
+
 /// Closed, category-specific relationship payloads.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
@@ -761,6 +998,7 @@ pub enum EdgeDetails {
     Messaging(MessagingEdgeDetails),
     Schedule(ScheduleEdgeDetails),
     Mapping(MappingEdgeDetails),
+    Render(RenderEdgeDetails),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -937,6 +1175,7 @@ impl NodeRecord {
                     self.details
                         .as_ref()
                         .and_then(|details| match details {
+                            NodeDetails::Document(_) => Some("document"),
                             NodeDetails::Resource(details) => {
                                 Some(resource_kind_str(details.resource_kind))
                             }
@@ -948,6 +1187,112 @@ impl NodeRecord {
                 }
                 .to_owned(),
             )),
+            "document_format" => self.document_details().map(|details| {
+                serde_json::to_value(details.format)
+                    .unwrap_or_else(|_| Value::String("other".to_owned()))
+            }),
+            "document_kind" | "document_role" => self.document_details().map(|details| {
+                serde_json::to_value(details.role)
+                    .unwrap_or_else(|_| Value::String("other".to_owned()))
+            }),
+            "document_section" => self
+                .document_details()
+                .and_then(|details| details.section.clone())
+                .map(Value::String),
+            "uri" => self
+                .document_details()
+                .and_then(|details| details.uri.clone())
+                .or_else(|| {
+                    self.details.as_ref().and_then(|details| match details {
+                        NodeDetails::Resource(details) => details.uri.clone(),
+                        _ => None,
+                    })
+                })
+                .map(Value::String),
+            "document_content" => self
+                .document_details()
+                .and_then(|details| details.content.clone())
+                .map(Value::String),
+            "document_significance" => self.document_details().map(|details| {
+                serde_json::to_value(details.significance)
+                    .unwrap_or_else(|_| Value::String("content".to_owned()))
+            }),
+            "document_ordinal" => self
+                .document_details()
+                .map(|details| Value::from(details.ordinal)),
+            "table_columns" => self.document_details().and_then(|details| {
+                details
+                    .table
+                    .as_ref()
+                    .map(|table| serde_json::to_value(&table.columns).unwrap_or(Value::Null))
+            }),
+            "table_headers" => self.document_details().and_then(|details| {
+                details.table.as_ref().map(|table| {
+                    Value::Array(
+                        table
+                            .columns
+                            .iter()
+                            .map(|column| Value::String(column.header.clone()))
+                            .collect(),
+                    )
+                })
+            }),
+            "table_alignments" => self.document_details().and_then(|details| {
+                details.table.as_ref().map(|table| {
+                    Value::Array(
+                        table
+                            .columns
+                            .iter()
+                            .map(|column| {
+                                serde_json::to_value(column.alignment).unwrap_or(Value::Null)
+                            })
+                            .collect(),
+                    )
+                })
+            }),
+            "table_body_row_count" => self
+                .document_details()
+                .and_then(|details| details.table.as_ref())
+                .map(|table| Value::from(table.body_row_count)),
+            "table_omitted_row_count" => self
+                .document_details()
+                .and_then(|details| details.table.as_ref())
+                .map(|table| Value::from(table.omitted_row_count)),
+            "table_omitted_column_count" => self
+                .document_details()
+                .and_then(|details| details.table.as_ref())
+                .map(|table| Value::from(table.omitted_column_count)),
+            "table_truncated" => self.document_details().and_then(|details| {
+                details
+                    .table
+                    .as_ref()
+                    .map(|table| Value::Bool(table.truncated))
+                    .or_else(|| {
+                        details
+                            .table_row
+                            .as_ref()
+                            .map(|row| Value::Bool(row.truncated))
+                    })
+            }),
+            "table_row_index" => self
+                .document_details()
+                .and_then(|details| details.table_row.as_ref())
+                .map(|row| Value::from(row.row_index)),
+            "table_identity_cell_index" => self
+                .document_details()
+                .and_then(|details| details.table_row.as_ref())
+                .and_then(|row| row.identity_cell_index)
+                .map(Value::from),
+            "table_cells" => self.document_details().and_then(|details| {
+                details
+                    .table_row
+                    .as_ref()
+                    .map(|row| serde_json::to_value(&row.cells).unwrap_or(Value::Null))
+            }),
+            "document_references" => self.document_details().and_then(|details| {
+                (!details.references.is_empty())
+                    .then(|| serde_json::to_value(&details.references).unwrap_or(Value::Null))
+            }),
             "language" => self.language.clone().map(Value::String),
             "framework" => self.framework.clone().map(Value::String),
             "source_file" => self
@@ -1047,6 +1392,19 @@ impl NodeRecord {
             _ => None,
         }
     }
+
+    fn document_details(&self) -> Option<&DocumentNodeDetails> {
+        match self.details.as_ref()? {
+            NodeDetails::Document(details) => Some(details),
+            _ => None,
+        }
+    }
+
+    /// Return the validated significance profile for document nodes.
+    #[must_use]
+    pub fn document_significance(&self) -> Option<DocumentSignificance> {
+        self.document_details().map(|details| details.significance)
+    }
 }
 
 const NODE_PROPERTY_KEYS: &[&str] = &[
@@ -1056,6 +1414,25 @@ const NODE_PROPERTY_KEYS: &[&str] = &[
     "kind",
     "roles",
     "file_type",
+    "document_format",
+    "document_kind",
+    "document_role",
+    "document_section",
+    "uri",
+    "document_content",
+    "document_significance",
+    "document_ordinal",
+    "table_columns",
+    "table_headers",
+    "table_alignments",
+    "table_body_row_count",
+    "table_omitted_row_count",
+    "table_omitted_column_count",
+    "table_truncated",
+    "table_row_index",
+    "table_identity_cell_index",
+    "table_cells",
+    "document_references",
     "language",
     "framework",
     "source_file",
@@ -1538,10 +1915,112 @@ fn legacy_node_record(node: &NodeRecord) -> Result<crate::NodeRecord, GraphError
         .remove("id")
         .and_then(|value| value.as_str().map(str::to_owned))
         .ok_or(GraphError::MissingNodeId)?;
+    if let Some(NodeDetails::Document(details)) = node.details.as_ref() {
+        insert_legacy_document_attributes(&mut object, details)?;
+    }
     Ok(crate::NodeRecord {
         id,
         attributes: object,
     })
+}
+
+/// Project bounded normalization facts for internal compatibility paths.
+fn insert_legacy_document_attributes(
+    attributes: &mut Map<String, Value>,
+    details: &DocumentNodeDetails,
+) -> Result<(), GraphError> {
+    attributes.insert("file_type".to_owned(), Value::String("document".to_owned()));
+    attributes.insert(
+        "document_format".to_owned(),
+        serialize_json_value(&details.format)?,
+    );
+    attributes.insert(
+        "document_kind".to_owned(),
+        serialize_json_value(&details.role)?,
+    );
+    attributes.insert(
+        "document_role".to_owned(),
+        serialize_json_value(&details.role)?,
+    );
+    attributes.insert("block_index".to_owned(), Value::from(details.ordinal));
+    attributes.insert("document_ordinal".to_owned(), Value::from(details.ordinal));
+    if let Some(section) = &details.section {
+        attributes.insert(
+            "document_section".to_owned(),
+            Value::String(section.clone()),
+        );
+    }
+    if let Some(uri) = &details.uri {
+        attributes.insert("uri".to_owned(), Value::String(uri.clone()));
+    }
+    if let Some(content) = &details.content {
+        attributes.insert(
+            "document_content".to_owned(),
+            Value::String(content.clone()),
+        );
+    }
+    attributes.insert(
+        "document_significance".to_owned(),
+        serialize_json_value(&details.significance)?,
+    );
+    if let Some(table) = &details.table {
+        attributes.insert(
+            "table_columns".to_owned(),
+            serialize_json_value(&table.columns)?,
+        );
+        attributes.insert(
+            "table_headers".to_owned(),
+            Value::Array(
+                table
+                    .columns
+                    .iter()
+                    .map(|column| Value::String(column.header.clone()))
+                    .collect(),
+            ),
+        );
+        attributes.insert(
+            "table_alignments".to_owned(),
+            Value::Array(
+                table
+                    .columns
+                    .iter()
+                    .map(|column| serialize_json_value(&column.alignment))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+        );
+        attributes.insert(
+            "table_body_row_count".to_owned(),
+            Value::from(table.body_row_count),
+        );
+        attributes.insert(
+            "table_omitted_row_count".to_owned(),
+            Value::from(table.omitted_row_count),
+        );
+        attributes.insert(
+            "table_omitted_column_count".to_owned(),
+            Value::from(table.omitted_column_count),
+        );
+        attributes.insert("table_truncated".to_owned(), Value::Bool(table.truncated));
+    }
+    if let Some(row) = &details.table_row {
+        attributes.insert("table_row_index".to_owned(), Value::from(row.row_index));
+        if let Some(index) = row.identity_cell_index {
+            attributes.insert("table_identity_cell_index".to_owned(), Value::from(index));
+        }
+        attributes.insert("table_cells".to_owned(), serialize_json_value(&row.cells)?);
+        attributes.insert("table_truncated".to_owned(), Value::Bool(row.truncated));
+    }
+    if !details.references.is_empty() {
+        attributes.insert(
+            "document_references".to_owned(),
+            serialize_json_value(&details.references)?,
+        );
+    }
+    Ok(())
+}
+
+fn serialize_json_value<T: Serialize>(value: &T) -> Result<Value, GraphError> {
+    serde_json::to_value(value).map_err(GraphError::Corrupt)
 }
 
 fn legacy_edge_record(edge: &EdgeRecord) -> Result<crate::EdgeRecord, GraphError> {
@@ -1569,6 +2048,40 @@ fn legacy_edge_record(edge: &EdgeRecord) -> Result<crate::EdgeRecord, GraphError
 
 fn typed_node_record(node: crate::NodeRecord) -> Result<NodeRecord, GraphError> {
     let mut object = node.attributes;
+    // `legacy_node_record` adds flat document aliases for compatibility
+    // consumers. They are deliberately not part of the strict typed DTO, so
+    // discard only those aliases when reconstructing typed records.
+    let typed_document = object
+        .get("details")
+        .and_then(Value::as_object)
+        .is_some_and(|details| details.get("type").and_then(Value::as_str) == Some("document"));
+    if typed_document {
+        for key in [
+            "file_type",
+            "document_format",
+            "document_kind",
+            "document_role",
+            "block_index",
+            "document_ordinal",
+            "document_section",
+            "uri",
+            "document_content",
+            "document_significance",
+            "table_columns",
+            "table_headers",
+            "table_alignments",
+            "table_body_row_count",
+            "table_omitted_row_count",
+            "table_omitted_column_count",
+            "table_truncated",
+            "table_row_index",
+            "table_identity_cell_index",
+            "table_cells",
+            "document_references",
+        ] {
+            object.remove(key);
+        }
+    }
     object.insert("id".to_owned(), Value::String(node.id));
     serde_json::from_value(Value::Object(object)).map_err(GraphError::Corrupt)
 }

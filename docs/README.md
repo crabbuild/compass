@@ -37,9 +37,11 @@ to yours:
 
 - [Explore an unfamiliar codebase](guides/exploring-a-codebase.md)
 - [Compose task-oriented context](guides/task-context.md)
+- [Enhance a graph with an agent](guides/enhancing-a-graph-with-an-agent.md)
 - [Integrate Compass with other tools](guides/integrating-compass.md)
 - [Set up a coding assistant](guides/assistant-setup.md)
 - [Use versioned graph history](guides/versioned-history.md)
+- [Process PDF and Office documents](reference/document-formats.md)
 - [Review pull requests in GitHub](guides/github-pr-review.md)
 - [Operate watch, serve, hooks, and providers](guides/operations.md)
 - [Solve a concrete problem](cookbook/README.md)
@@ -55,6 +57,7 @@ to yours:
 | [How Compass works](concepts/how-it-works.md) | How does a directory become a queryable graph? |
 | [Graph model](concepts/graph-model.md) | What do the entities and relationships mean? |
 | [Provenance](concepts/provenance.md) | How can I judge where an edge came from? |
+| [Agent Graph Overlays](concepts/agent-graph-overlays.md) | How can an agent add verified knowledge without rewriting the Base Graph? |
 | [CompassQL concepts](concepts/compassql.md) | When should I use an exact structural query? |
 
 ### Complete a task
@@ -64,6 +67,7 @@ to yours:
 | [Getting started](getting-started.md) | A working local graph and your first useful answers |
 | [Exploring a codebase](guides/exploring-a-codebase.md) | A repeatable architecture-reading workflow |
 | [Task context](guides/task-context.md) | A bounded, verified evidence packet for explain, modify, debug, or test work |
+| [Agent graph enhancement](guides/enhancing-a-graph-with-an-agent.md) | A grounded, versioned, opt-in agent enhancement workflow |
 | [Integrating Compass](guides/integrating-compass.md) | Stable, machine-readable data in another tool |
 | [Assistant setup](guides/assistant-setup.md) | A native Compass skill installed at the right scope |
 | [Versioned history](guides/versioned-history.md) | Immutable graphs and diffs for exact Git commits |
@@ -88,6 +92,7 @@ The [cookbook index](cookbook/README.md) routes to:
 | [Outputs](reference/outputs.md) | `compass-out/`, graph JSON, query results, and history exports |
 | [Document formats](reference/document-formats.md) | Markdown fields, limits, and discovery versus extraction |
 | [Framework routes](reference/framework-routes.md) | Recognized routing shapes, graph projection, and conservative boundaries |
+| [React frontend graph](reference/react-framework-graph.md) | React-family roles, render evidence, activation, and qualification boundaries |
 | [PR Intelligence](reference/pr-intelligence.md) | Canonical report, fingerprints, completeness, risk rubric, and gates |
 | [Compatibility](reference/compatibility.md) | Compass contracts, hard cutovers, and portability |
 | [CompassQL](COMPASSQL.md) | Canonical language and runtime contract |
@@ -104,10 +109,15 @@ They are not evidence that an uncompleted design has shipped.
 | [MCP conformance and interoperability](implementation/mcp-conformance-and-interop.md) | Pinned transport conformance evidence and the current named-client gate |
 | [Optional Surreal graph projection](implementation/surreal-graph-projection.md) | Feature isolation, generation activation, schema, engine profiles, and license boundary |
 | [Native agent package distribution](implementation/agent-distribution.md) | Canonical inventory, generated Codex/Claude/OpenCode packages, portability, and lifecycle ownership |
+| [Document OCR qualification](implementation/document-ocr-qualification.md) | Offline contract gate and opt-in pinned-model acceptance procedure |
 | [Evidence resolution framework technical design](implementation/evidence-resolution-framework-technical-design.md) | Target ownership, components, interfaces, and invariants for rearchitecting the resolver |
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
+| [Architecture graph hardening technical design](implementation/architecture-graph-hardening-phased-technical-design.md) | Project-specific architecture projection, quality contract, and phased delivery plan |
+| [Architecture graph hardening qualification](implementation/architecture-graph-hardening-qualification.md) | Real-repository metrics, screenshots, acceptance gates, and residual diagnostics |
 | [Query recall and accuracy design](implementation/query-recall-accuracy/query-performance-accuracy-recall-phased-technical-design.md) | Phased query-quality architecture, evidence, and rollout boundaries |
 | [Query implementation plans](plans/README.md) | Ordered, independently executable query-quality work plans |
+| [Grounded Agent Graph Overlay design](implementation/grounded-agent-graph-overlay-technical-design.md) | Ownership, Grounding, CRUD, composition, security, and history contracts for agent-authored graph enhancement |
+| [Grounded Agent Graph Overlay execution plan](implementation/grounded-agent-graph-overlay-phased-execution-plan.md) | Phased implementation, verification, qualification, and release record for the overlay |
 
 ## How these documents are written
 
@@ -150,10 +160,11 @@ document and open a documentation issue.
 ## Product status in one paragraph
 
 Compass is a Rust workspace that ships the `compass` executable. Structural
-code extraction and graph queries run locally and do not require Python,
-embeddings, a vector database, or runtime grammar downloads. Semantic
-extraction for documents and other non-code sources is optional and may contact
-the provider you explicitly configure. The current release packaging and
+code and document extraction and graph queries run locally and do not require
+Python, embeddings, a vector database, or runtime grammar downloads. OCR is
+optional and local with Compass-managed verified models. Semantic provider
+enrichment is separate and may contact the provider you explicitly configure.
+The current release packaging and
 platform guarantees are recorded in the
 [compatibility ledger](../COMPATIBILITY.md), not inferred from what happens to
 compile on one developer machine.
