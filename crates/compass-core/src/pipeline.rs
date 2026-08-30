@@ -23,10 +23,11 @@ use compass_graph::{
     build_owned_with_tiebreaker_at_inference as build_document, canonical_edge_kind,
     canonical_raw_edge_sites, cluster_incremental, deduped_node_count, extraction_from_v1,
     garbage_collect_graph_snapshots, graph_insights_with_blind_spots, graph_snapshot_needs_gc,
-    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned_at_inference,
+    label_communities_by_hub, max_canonical_graph_bytes,
+    normalize_document_v1_with_evidence_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_best_effort_at_inference, score_communities,
-    write_canonical_graph_json, write_fact_neutral_graph_json_delta_prevalidated,
+    write_canonical_graph_json_bounded, write_fact_neutral_graph_json_delta_prevalidated_bounded,
 };
 use compass_languages::{
     BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
@@ -1974,11 +1975,12 @@ fn publish_fact_neutral_incremental(
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
             let delta_started = Instant::now();
             let used_delta = if let Some(bytes) = previous_bytes.as_deref() {
-                write_fact_neutral_graph_json_delta_prevalidated(
+                write_fact_neutral_graph_json_delta_prevalidated_bounded(
                     bytes,
                     current,
                     changed_node_ids,
                     writer,
+                    max_canonical_graph_bytes(),
                 )
                 .map_err(|source| compass_files::FileError::Io {
                     path: graph_path.clone(),
@@ -1998,12 +2000,11 @@ fn publish_fact_neutral_incremental(
             if used_delta {
                 Ok(())
             } else {
-                write_canonical_graph_json(current, writer).map_err(|source| {
-                    compass_files::FileError::Io {
+                write_canonical_graph_json_bounded(current, writer, max_canonical_graph_bytes())
+                    .map_err(|source| compass_files::FileError::Io {
                         path: graph_path.clone(),
                         source,
-                    }
-                })
+                    })
             }
         })?;
         (
@@ -3629,11 +3630,14 @@ fn build_graph_inner_unscoped(
         } else {
             let graph_path = output_dir.join("graph.json");
             let receipt = write_atomic_with_digest(&graph_path, |writer| {
-                write_canonical_graph_json(&published.document, writer).map_err(|source| {
-                    compass_files::FileError::Io {
-                        path: graph_path.clone(),
-                        source,
-                    }
+                write_canonical_graph_json_bounded(
+                    &published.document,
+                    writer,
+                    max_canonical_graph_bytes(),
+                )
+                .map_err(|source| compass_files::FileError::Io {
+                    path: graph_path.clone(),
+                    source,
                 })
             })?;
             (
@@ -4192,11 +4196,14 @@ fn build_graph_inner_unscoped(
     } else {
         let graph_path = output_dir.join("graph.json");
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
-            write_canonical_graph_json(&published_document, writer).map_err(|source| {
-                compass_files::FileError::Io {
-                    path: graph_path.clone(),
-                    source,
-                }
+            write_canonical_graph_json_bounded(
+                &published_document,
+                writer,
+                max_canonical_graph_bytes(),
+            )
+            .map_err(|source| compass_files::FileError::Io {
+                path: graph_path.clone(),
+                source,
             })
         })?;
         (
@@ -4879,12 +4886,11 @@ fn publish_graph_and_store_from_canonical(
     let (graph_receipt, content) = rayon::join(
         || {
             write_atomic_with_digest(&graph_path, |writer| {
-                write_canonical_graph_json(graph, writer).map_err(|source| {
-                    compass_files::FileError::Io {
+                write_canonical_graph_json_bounded(graph, writer, max_canonical_graph_bytes())
+                    .map_err(|source| compass_files::FileError::Io {
                         path: graph_path.clone(),
                         source,
-                    }
-                })
+                    })
             })
         },
         || builder.prepare_content(&store, graph),
@@ -4922,8 +4928,12 @@ fn publish_graph_and_store_delta(
             let result = write_atomic_with_digest(&graph_path, |writer| {
                 let used_delta = match (previous_bytes.as_deref(), changed_node_ids) {
                     (Some(bytes), Some(changed)) => {
-                        write_fact_neutral_graph_json_delta_prevalidated(
-                            bytes, graph, changed, writer,
+                        write_fact_neutral_graph_json_delta_prevalidated_bounded(
+                            bytes,
+                            graph,
+                            changed,
+                            writer,
+                            max_canonical_graph_bytes(),
                         )
                         .map_err(|source| {
                             compass_files::FileError::Io {
@@ -4937,12 +4947,11 @@ fn publish_graph_and_store_delta(
                 if used_delta {
                     Ok(())
                 } else {
-                    write_canonical_graph_json(graph, writer).map_err(|source| {
-                        compass_files::FileError::Io {
+                    write_canonical_graph_json_bounded(graph, writer, max_canonical_graph_bytes())
+                        .map_err(|source| compass_files::FileError::Io {
                             path: graph_path.clone(),
                             source,
-                        }
-                    })
+                        })
                 }
             });
             profile_internal_duration("graph JSON delta publication", started.elapsed());
@@ -8773,7 +8782,7 @@ mod tests {
 
         let changed_graph = V1GraphDocument::load(&changed.output_dir.join("graph.json"))?;
         let mut canonical_changed = Vec::new();
-        write_canonical_graph_json(&changed_graph, &mut canonical_changed)?;
+        compass_graph::write_canonical_graph_json(&changed_graph, &mut canonical_changed)?;
         assert_eq!(
             fs::read(changed.output_dir.join("graph.json"))?,
             canonical_changed,

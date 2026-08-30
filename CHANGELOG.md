@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Enforce `COMPASS_MAX_GRAPH_BYTES` against the actual canonical bytes streamed
+  into atomic staging for full, SQLite-backed, and fact-neutral delta
+  publications. A real overrun leaves the previous graph and store reference
+  active. Add a five-estate qualification command and measured expansion
+  distribution; source-to-graph ratios remain diagnostic evidence and are not
+  an admission rule.
+
 - Reset all 14 registered universal-evidence producer versions to v1 and keep
   them `Qualified` under the refreshed release decision at
   `tests/qualification/universal-evidence-promotion.json`. Cached evidence

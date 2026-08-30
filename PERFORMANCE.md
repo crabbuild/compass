@@ -24,6 +24,54 @@ Compare a proposed change with a previously approved Compass result captured on
 the same runner and corpus. A median regression above 10% requires explicit
 review and evidence explaining the tradeoff.
 
+## Canonical graph size qualification
+
+`COMPASS_MAX_GRAPH_BYTES` is enforced against the canonical JSON bytes emitted
+into atomic staging. Compass does not predict canonical graph size from source
+bytes: measured expansion varies with language, structural density, inventory
+coverage, and extraction evidence, so a single linear multiplier is not a safe
+admission model. If the emitted stream crosses the bound, publication aborts
+and the previously active artifact set remains intact.
+
+Measure the five-estate corpus after producing one completed `graph.json` per
+estate. The command reads only the bounded metadata prefix, sums the persisted
+`byteSize` values for admitted files, and reports per-estate ratios plus the
+minimum, median, and maximum distribution:
+
+```bash
+python3 scripts/qualify_graph_size_ratios.py \
+  --estate ara-scanworks-ui /path/to/ara-scanworks-ui/compass-out/graph.json \
+  --estate ara-pm /path/to/ara-pm/compass-out/graph.json \
+  --estate captivebrowser-133 /path/to/captivebrowser-133/compass-out/graph.json \
+  --estate venus /path/to/venus/compass-out/graph.json \
+  --estate solaris-platform /path/to/solaris-platform/compass-out/graph.json \
+  --json-output target/qualification/graph-size-ratios.json \
+  --markdown-output target/qualification/graph-size-ratios.md
+```
+
+The report schema is `compass.qualification.graph-size-ratios/1`. Generated
+reports stay under `target/`; a retained observation must identify the Compass
+commit, corpus revision, and host separately. Ratios are sizing evidence only
+and must never be converted into a fatal preflight estimate.
+
+The 2026-08-30 qualification used the release binary from this change, JSON
+storage, and identical `--no-viz --no-cluster --no-program` settings for every
+estate. Admitted source bytes are the persisted `byteSize` values in each
+completed artifact, not a filesystem-wide estimate:
+
+| Estate | Admitted files | Admitted source bytes | Canonical graph bytes | Ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `ara-pm` | 952 | 39,468,272 | 14,274,716 | 0.361676× |
+| `ara-scanworks-ui` | 494 | 6,688,344 | 3,721,796 | 0.556460× |
+| `captivebrowser-133` | 1,602 | 52,006,357 | 403,028,839 | 7.749607× |
+| `solaris-platform` | 5,102 | 112,938,563 | 87,429,961 | 0.774137× |
+| `venus` | 2,410 | 140,482,350 | 6,832,605 | 0.048637× |
+
+The observed distribution is **0.048637× minimum**, **0.556460× median**, and
+**7.749607× maximum**. The roughly 159-fold spread between the minimum and
+maximum is direct evidence that source bytes alone are not a safe fatal
+admission signal.
+
 ## Markdown graph-v1 quality qualification
 
 Markdown tables intentionally retain their table, header, row, and cell nodes.

@@ -19,9 +19,9 @@ use compass_model::code_graph::{
 };
 use compass_model::validate_code_graph;
 use compass_store::{
-    ImmutableWrite, Key, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS, MAX_KEY_SEGMENTS,
-    MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey, Store, StoreError,
-    WriteCondition, decode_key_segments, encode_key_segments,
+    ImmutableWrite, Key, MAX_GRAPH_BYTES, MAX_IMMUTABLE_BATCH_BYTES, MAX_IMMUTABLE_BATCH_ITEMS,
+    MAX_KEY_SEGMENTS, MAX_SCAN_BYTES, MAX_SCAN_ITEMS, MAX_VALUE_BYTES, NamespaceId, PartitionKey,
+    Store, StoreError, WriteCondition, decode_key_segments, encode_key_segments, max_graph_bytes,
 };
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -53,6 +53,14 @@ pub const GRAPH_SNAPSHOT_MAX_OBJECTS: usize = 100_000;
 pub const GRAPH_SNAPSHOT_MAX_ITEMS: usize = 5_000_000;
 pub const GRAPH_SNAPSHOT_MAX_FANOUT: usize = 32;
 pub const GRAPH_SNAPSHOT_MAX_LEAF_ENTRIES: usize = 128;
+/// Default maximum size of the canonical graph published by a snapshot.
+pub const MAX_CANONICAL_GRAPH_BYTES: u64 = MAX_GRAPH_BYTES as u64;
+/// Effective canonical publication bound, including the explicit opt-in
+/// `COMPASS_MAX_GRAPH_BYTES` override.
+#[must_use]
+pub fn max_canonical_graph_bytes() -> u64 {
+    max_graph_bytes() as u64
+}
 /// Maximum previous JSON artifact retained while attempting a byte-preserving
 /// fact-neutral publication. Larger artifacts use the bounded streaming
 /// serializer instead of adding another resident graph-sized buffer.
@@ -111,6 +119,17 @@ pub enum SnapshotError {
     Limit(String),
     #[error("snapshot capability unavailable: {0}")]
     CapabilityUnavailable(String),
+}
+
+impl SnapshotError {
+    /// Construct the stable, actionable failure for canonical graph
+    /// publication above a byte limit.
+    #[must_use]
+    pub fn canonical_graph_too_large(maximum: u64) -> Self {
+        Self::Limit(format!(
+            "canonical graph exceeds the {maximum}-byte limit; retry or rebuild with a smaller scope using --exclude <pattern> or persistent patterns in .compassignore, or explicitly raise the bound with COMPASS_MAX_GRAPH_BYTES=<bytes|NMB|NGB>"
+        ))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -1108,6 +1127,22 @@ pub fn write_canonical_graph_json<W: Write + ?Sized>(
     writer.write_all(b"}")
 }
 
+/// Stream canonical graph JSON while enforcing the configured publication
+/// limit against the bytes that are actually emitted.
+///
+/// The limit is checked before each write reaches the destination. Callers
+/// can therefore use this function inside an atomic staging callback without
+/// ever publishing an oversized artifact or retaining a guessed source-size
+/// multiplier.
+pub fn write_canonical_graph_json_bounded<W: Write + ?Sized>(
+    graph: &GraphDocument,
+    writer: &mut W,
+    maximum: u64,
+) -> io::Result<()> {
+    let mut bounded = CanonicalGraphLimitWriter::new(writer, maximum);
+    write_canonical_graph_json(graph, &mut bounded)
+}
+
 /// Publish a fact-neutral graph edit by reusing the previous canonical node
 /// and link bytes. Fact-neutral edits only update file-node metadata and graph
 /// inventory; the semantic node IDs and every relationship remain unchanged.
@@ -1144,6 +1179,70 @@ pub fn write_fact_neutral_graph_json_delta_prevalidated<W: Write + ?Sized>(
         false,
         writer,
     )
+}
+
+/// Publish a prevalidated fact-neutral delta while enforcing the canonical
+/// graph byte limit against the actual emitted artifact.
+pub fn write_fact_neutral_graph_json_delta_prevalidated_bounded<W: Write + ?Sized>(
+    previous_bytes: &[u8],
+    graph: &GraphDocument,
+    changed_node_ids: &BTreeSet<String>,
+    writer: &mut W,
+    maximum: u64,
+) -> io::Result<bool> {
+    let mut bounded = CanonicalGraphLimitWriter::new(writer, maximum);
+    write_fact_neutral_graph_json_delta_inner(
+        previous_bytes,
+        graph,
+        changed_node_ids,
+        false,
+        &mut bounded,
+    )
+}
+
+struct CanonicalGraphLimitWriter<'a, W: Write + ?Sized> {
+    inner: &'a mut W,
+    bytes: u64,
+    maximum: u64,
+}
+
+impl<'a, W: Write + ?Sized> CanonicalGraphLimitWriter<'a, W> {
+    fn new(inner: &'a mut W, maximum: u64) -> Self {
+        Self {
+            inner,
+            bytes: 0,
+            maximum,
+        }
+    }
+}
+
+impl<W: Write + ?Sized> Write for CanonicalGraphLimitWriter<'_, W> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let buffer_len = u64::try_from(buffer.len())
+            .map_err(|_| io::Error::other("canonical graph byte count does not fit u64"))?;
+        let next = self
+            .bytes
+            .checked_add(buffer_len)
+            .ok_or_else(|| io::Error::other("canonical graph byte count exceeds u64"))?;
+        if next > self.maximum {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                SnapshotError::canonical_graph_too_large(self.maximum),
+            ));
+        }
+        let written = self.inner.write(buffer)?;
+        self.bytes = self
+            .bytes
+            .checked_add(u64::try_from(written).map_err(|_| {
+                io::Error::other("canonical graph written byte count does not fit u64")
+            })?)
+            .ok_or_else(|| io::Error::other("canonical graph byte count exceeds u64"))?;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 fn write_fact_neutral_graph_json_delta_inner<W: Write + ?Sized>(
