@@ -98,15 +98,29 @@ fn report() -> Result<PullRequestReport, Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn all_projections_preserve_fingerprint_and_count() -> Result<(), Box<dyn std::error::Error>> {
+fn machine_projections_preserve_full_ids_while_human_projections_stay_readable()
+-> Result<(), Box<dyn std::error::Error>> {
     let report = report()?;
     let json = render_review_json(&report)?;
     let text = render_review_text(&report)?;
     let markdown = render_review_markdown(&report)?.content;
     let sarif = render_review_sarif(&report)?;
-    for projection in [&json, &text, &markdown, &sarif] {
+    for projection in [&json, &sarif] {
         assert!(projection.contains(&report.findings[0].fingerprint));
     }
+    for projection in [&text, &markdown] {
+        assert!(!projection.contains(&report.findings[0].fingerprint));
+        assert!(!projection.contains("symbol:caller"));
+        assert!(!projection.contains("symbol:api"));
+        assert!(projection.contains("cmpprv1:aaaaaaaaaaaa…"));
+        assert!(projection.contains("1 relationship via calls (exact entities in JSON)"));
+        assert!(projection.contains("Contract change"));
+    }
+    assert!(text.contains("Compass review: crabbuild/compass #42"));
+    assert!(text.contains("Comparison: base 111111111111… -> PR 222222222222…"));
+    assert!(text.contains("Proven contract break: Fail"));
+    assert!(markdown.contains("Repository: `crabbuild/compass`"));
+    assert!(markdown.contains("**Proven contract break: Fail**"));
     let round_trip = PullRequestReport::from_json(json.as_bytes())?;
     assert_eq!(round_trip.findings.len(), 1);
     let sarif: serde_json::Value = serde_json::from_str(&sarif)?;
@@ -144,6 +158,20 @@ fn bounded_markdown_reports_exact_omission_without_mutating_digest()
             .contains("Exactly 1 finding(s) were omitted")
     );
     assert_eq!(report.report_digest, digest);
+    Ok(())
+}
+
+#[test]
+fn human_projections_lengthen_colliding_compact_references()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut report = report()?;
+    report.identity.revisions.merge_base = format!("{}{}", "1".repeat(12), "a".repeat(28));
+    report.identity.revisions.pull_request_head = format!("{}{}", "1".repeat(12), "b".repeat(28));
+    report.report_digest = report_digest(&report)?;
+
+    let text = render_review_text(&report)?;
+    assert!(text.contains("base 111111111111a… -> PR 111111111111b…"));
+    assert!(!text.contains("base 111111111111… -> PR 111111111111…"));
     Ok(())
 }
 
@@ -188,9 +216,11 @@ fn readiness_json_round_trips_and_markdown_references_the_canonical_report()
     let json = render_readiness_json(&readiness)?;
     let markdown = render_readiness_markdown(&readiness)?;
     assert_eq!(PullRequestReadiness::from_json(json.as_bytes())?, readiness);
-    assert!(markdown.contains(&report.report_digest));
-    assert!(markdown.contains(&readiness.extraction_fingerprints.base));
-    assert!(markdown.contains(&readiness.evidence_manifest_digest));
+    assert!(!markdown.contains(&report.report_digest));
+    assert!(!markdown.contains(&readiness.extraction_fingerprints.base));
+    assert!(!markdown.contains(&readiness.evidence_manifest_digest));
+    assert!(markdown.contains("base `111111111111…` → PR `222222222222…`"));
+    assert!(markdown.contains("Full revision, profile, and evidence IDs are available in JSON."));
     assert!(markdown.contains("advisory only"));
     Ok(())
 }

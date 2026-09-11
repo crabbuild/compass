@@ -169,12 +169,13 @@ transport `semanticResultDigest`.
 ## Projections
 
 - JSON is the canonical report and round-trips through the strict schema.
-- Text and Markdown include exact identity, completeness, factors, gates,
-  findings, witness paths/locations, verification gaps, and omissions. Finding
-  statements in the canonical JSON and human-facing projections resolve
-  retained entity identities to human-readable names; stable entity identities
-  remain in `source_entities`, `target_entities`, and fingerprints for machine
-  traceability.
+- Text and Markdown are human projections: they show short revision and finding
+  references, plain-language statuses, locations, verification gaps,
+  relationship-only witness summaries, and exact omission counts. Finding
+  statements resolve retained entity identities to human-readable names. Use
+  JSON or SARIF for full revision IDs, stable entity identities, fingerprints,
+  and witness endpoints; do not parse the prose projections as machine
+  contracts.
 - SARIF 2.1.0 preserves Compass fingerprints in `partialFingerprints` and
   carries the report digest, completeness, advisory result, factors, gates,
   witness evidence, and omissions in typed properties.

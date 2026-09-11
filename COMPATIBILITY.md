@@ -583,6 +583,12 @@ human-readable names. Stable entity identities remain in the canonical finding
 `source_entities` and `target_entities` fields, so this presentation change
 does not alter finding fingerprints or machine traceability.
 
+Human-facing review projections use short revision and fingerprint references,
+plain-language status labels, and relationship-only witness summaries. Exact
+revision IDs, graph entity IDs, fingerprints, and witness endpoints remain in
+canonical JSON and SARIF. Text and Markdown are presentation formats and must
+not be parsed as machine contracts.
+
 This is additive in the `0.3.x` line. Existing `compass prs`, graph, history,
 and MCP contracts are unchanged; `compass diff` gains only the optional typed
 topology field above. Consumers that adopt the new
