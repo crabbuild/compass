@@ -64,6 +64,12 @@ access read-only, give me a bounded implementation context, and verify decisive
 claims in source.
 ```
 
+At the start of an installed agent session—and again after the agent moves to
+a different linked worktree—the agent runs `compass ensure`. The command
+creates that worktree's `compass-out/` when absent and otherwise performs an
+incremental freshness check. It never shares the mutable output directory with
+another worktree.
+
 To let the assistant preserve verified knowledge in an Agent Graph Overlay, say
 so explicitly and name the overlay:
 
@@ -246,7 +252,7 @@ operation when it provides one. The install report prints these actions.
 In a project without a graph:
 
 1. ask the assistant a broad architecture question;
-2. confirm the assistant—not the installer—runs one local `compass update .`;
+2. confirm the assistant—not the installer—runs one local `compass ensure`;
 3. confirm it runs a focused query and uses `compass-out/GRAPH_REPORT.md` for
    repository-wide context;
 4. confirm it verifies graph results in source.
@@ -318,6 +324,8 @@ control or backup when you are certain a removed file was meant to be tracked.
 A healthy repository-level instruction is small and verifiable:
 
 ```text
+At session start and after switching Git worktrees, run compass ensure once.
+
 When compass-out/graph.json exists, use it as the first navigation layer.
 
 Before answering architecture questions:

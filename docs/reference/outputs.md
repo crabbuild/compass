@@ -435,7 +435,7 @@ A forced/cold build can regenerate current output.
 ## `program.json`
 
 `program.json` is the optional canonical, language-neutral Program IR produced
-by native `init`, `update`, `extract`, and `watch` builds when `--program` or
+by native `init`, `ensure`, `update`, `extract`, and `watch` builds when `--program` or
 `--program-artifact` is selected. Its public schema identifier is:
 
 ```text

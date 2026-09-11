@@ -57,6 +57,12 @@ Inspect status before replacing unusual custom hook setups. History mode has its
 own enqueueing behavior; read `references/history.md` before mixing lifecycle
 changes.
 
+Repository checkout hooks are not the authoritative agent-worktree bootstrap:
+an agent can resume or move into an existing worktree without a Git checkout
+event. Installed agent guidance runs `compass ensure` at session entry and
+after a worktree change. The mutable `compass-out/` remains local to that
+worktree.
+
 `--strict` is a Claude Code project PreToolUse behavior. It blocks the first raw
 read in a session until a Compass query has oriented the agent; it is not a
 global security sandbox and does not apply uniformly across platforms.

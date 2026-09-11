@@ -147,6 +147,27 @@ uninstalling them.
 When moving or reinstalling the Compass binary, reinstall hooks so embedded
 invocation paths remain valid.
 
+### Agent worktrees
+
+Use the agent lifecycle, rather than `post-checkout`, as the authoritative
+worktree bootstrap trigger:
+
+```bash
+compass ensure
+```
+
+An agent can resume in an existing worktree or change its working directory
+without causing a Git checkout event. `ensure` is therefore safe to call once
+at session start and after any worktree handoff. It is incremental and reports
+`current` without forcing extraction when the local artifact set already
+matches. Keep one `compass-out/` per worktree; do not direct concurrent agents
+at one mutable output root.
+
+For a long-running session, a supervised `compass watch .` may replace the
+one-shot bootstrap because watch synchronizes before observing changes. Stop
+the watcher with the agent session so abandoned worktrees do not retain
+background processes.
+
 ## Semantic providers
 
 Built-in backends and custom OpenAI-compatible providers are configured

@@ -73,6 +73,7 @@ const GROUPS: &[Group] = &[
         title: "Build and maintain",
         commands: &[
             "init",
+            "ensure",
             "update",
             "extract",
             "document",
@@ -194,6 +195,12 @@ const PAGES: &[Page] = &[
         "Configure project scope and build the first knowledge graph",
         ["compass init [PATH] [OPTIONS]"],
         "Arguments:\n  [PATH]                       Project root [default: .]\n\nOptions:\n  --include <PATH_OR_GLOB>     Include a file, folder, or glob; repeatable\n  --exclude <GLOB>             Exclude a project-relative glob; repeatable\n  --program                    Also build and publish the optional Program IR\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --yes                        Accept the preview without prompting\n  --force                      Replace existing .compass/config.toml\n  --timing                     Print stage timings\n\nExamples:\n  compass init\n  compass init . --include src --exclude '**/generated/**' --yes --timing\n  compass init . --yes --store sqlite\n  compass init . --yes --inference-level medium\n\nNotes:\n  Init writes .compass/config.toml and performs a forced structural build. Program IR is omitted unless --program is selected. SQLite is an explicit sidecar opt-in; graph.json is always published."
+    ),
+    page!(
+        "ensure",
+        "Ensure the active worktree has a current local knowledge graph",
+        ["compass ensure [PATH] [OPTIONS]"],
+        "Arguments:\n  [PATH]                       Active worktree or project root [default: Git worktree root or .]\n\nOptions:\n  --program                    Also build and publish the optional Program IR\n  --program-artifact <PATH>    Add an offline program-evidence artifact; repeatable\n  --no-program                 Explicitly omit the optional Program IR (compatibility flag)\n  --store <json|sqlite>        Graph storage [default: json]\n  --inference-level <LEVEL>    Inference: low, medium, high, or max [default: low]\n  --out <DIR>                  Write artifacts below this directory\n  --force                      Rebuild even when inputs appear unchanged\n  --no-cluster                 Skip community detection\n  --no-viz                     Skip graph.html generation\n  --no-gitignore               Ignore .gitignore rules while scanning\n  --exclude <PATTERN>          Exclude a glob pattern; repeatable\n  --resolution <NUMBER>        Community-detection resolution [default: 1.0]\n  --exclude-hubs <NUMBER>      Exclude high-degree hubs from clustering\n  --timing                     Print stage timings\n\nExamples:\n  compass ensure\n  compass ensure . --no-viz\n  compass ensure ./services/api --program\n\nNotes:\n  With no PATH, Ensure resolves the active Git worktree root. It uses the same incremental, atomic pipeline as update and reports whether the graph was initialized, updated, or already current. Keep the default worktree-local compass-out directory; do not share one mutable output directory across linked worktrees. --force is a recovery option, not part of normal session startup."
     ),
     page!(
         "update",
@@ -1089,7 +1096,10 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
                 "default/hard maximum: 1000",
                 "default: 128; hard maximum: 1000",
             )
-    } else if matches!(page.path, "init" | "update" | "extract" | "watch") {
+    } else if matches!(
+        page.path,
+        "init" | "ensure" | "update" | "extract" | "watch"
+    ) {
         details
             .replace("Graph storage [default: json]", "Graph storage [default: sqlite]")
             .replace(
@@ -1300,7 +1310,7 @@ mod tests {
     #[test]
     fn catalog_has_unique_complete_public_roots() {
         let roots = root_commands();
-        assert_eq!(roots.len(), 52);
+        assert_eq!(roots.len(), 53);
         for root in roots {
             let matches = PAGES.iter().filter(|page| page.path == root).count();
             assert_eq!(matches, 1, "{root}");
@@ -1368,7 +1378,7 @@ mod tests {
 
     #[test]
     fn build_help_describes_low_inference_as_the_default() {
-        for command in ["init", "update", "extract", "watch"] {
+        for command in ["init", "ensure", "update", "extract", "watch"] {
             let command_page = page(command);
             assert!(command_page.is_some(), "missing {command} help page");
             let Some(command_page) = command_page else {

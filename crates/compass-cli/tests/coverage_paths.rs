@@ -197,6 +197,7 @@ fn graph_command_argument_failures_cover_every_local_dispatch_family() {
         &["update", "--max-nodes", "bad"],
         &["update", "--semantic-timeout", "bad"],
         &["update", "--unknown"],
+        &["ensure", "--unknown"],
         &["extract", "--code-only", "--mode", "invalid"],
         &["cache-check"],
         &["merge-chunks"],
@@ -227,6 +228,7 @@ fn graph_command_argument_failures_cover_every_local_dispatch_family() {
 fn completed_command_help_routes_and_parser_boundaries_are_total() {
     for command in [
         "history",
+        "ensure",
         "update",
         "extract",
         "watch",

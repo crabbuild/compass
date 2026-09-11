@@ -115,6 +115,7 @@ pub enum Frontend {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BuildOperation {
     Init,
+    Ensure,
     Extract,
     Update,
 }
@@ -123,6 +124,7 @@ impl BuildOperation {
     fn label(self) -> &'static str {
         match self {
             Self::Init => "init",
+            Self::Ensure => "ensure",
             Self::Extract => "extract",
             Self::Update => "update",
         }
@@ -420,6 +422,7 @@ pub fn run(frontend: Frontend, arguments: impl IntoIterator<Item = OsString>) ->
         "tree" => command_tree(frontend, &args),
         "cluster-only" => command_cluster_only(frontend, &args),
         "diagnose" => command_diagnose(frontend, &args),
+        "ensure" => command_build(frontend, &args, BuildOperation::Ensure),
         "update" => command_build(frontend, &args, BuildOperation::Update),
         "extract" => command_build(frontend, &args, BuildOperation::Extract),
         "init" => Outcome::failure(
@@ -2066,7 +2069,10 @@ fn command_build_with_validation_inner(
                 return Outcome::success(if extract {
                     extract_help()
                 } else {
-                    "Usage: compass update [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--max-workers N] [--no-cluster] [--force] [--no-viz] [--timing]".to_owned()
+                    format!(
+                        "Usage: compass {} [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--max-workers N] [--no-cluster] [--force] [--no-viz] [--timing]",
+                        operation.label()
+                    )
                 });
             }
             value if value.starts_with('-') => {
@@ -2109,6 +2115,12 @@ fn command_build_with_validation_inner(
     } else {
         root.or_else(saved_graph_root)
             .unwrap_or_else(|| PathBuf::from("."))
+    };
+    let root = if operation == BuildOperation::Ensure && !has_explicit_root {
+        compass_history::Repository::discover(&root)
+            .map_or(root, |repository| repository.root().to_path_buf())
+    } else {
+        root
     };
     let mut options = BuildOptions::new(&root);
     options.scope = match ProjectConfig::load(&root) {
@@ -2160,6 +2172,9 @@ fn command_build_with_validation_inner(
         .map(absolute_cli_path)
         .unwrap_or_else(|| root.clone())
         .join(output_name);
+    let graph_existed_before =
+        compass_files::BuildGuard::resolve_artifact(&output_container, "graph.json")
+            .is_ok_and(|path| path.is_file());
     let extract_incremental = extract
         && !force
         && compass_files::BuildGuard::resolve_artifact(&output_container, "graph.json")
@@ -2356,6 +2371,16 @@ fn command_build_with_validation_inner(
                 )
                 .display()
             );
+            if operation == BuildOperation::Ensure {
+                let disposition = if !graph_existed_before {
+                    "initialized"
+                } else if result.outputs_changed {
+                    "updated"
+                } else {
+                    "current"
+                };
+                output = format!("Compass graph {disposition}.\n{output}");
+            }
             output.push('\n');
             output.push_str(&format_program_analysis(&result));
             if !notes.is_empty() {

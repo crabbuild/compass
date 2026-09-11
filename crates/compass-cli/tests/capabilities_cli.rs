@@ -23,6 +23,7 @@ fn capabilities_reports_versioned_ide_contracts() -> Result<(), Box<dyn Error>> 
         "compass.program.call_graph/1"
     );
     assert_eq!(value["features"]["call_graph"], true);
+    assert_eq!(value["features"]["ensure"], true);
     assert_eq!(value["features"]["community_detail"], true);
     assert_eq!(value["features"]["history_timeline_pagination"], true);
     assert!(value["compass_version"].is_string());

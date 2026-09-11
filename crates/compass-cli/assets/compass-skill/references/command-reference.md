@@ -60,7 +60,8 @@ though the query itself does not edit the working tree.
 
 ## Build and enrich
 
-- `compass update`: deterministic structural refresh.
+- `compass ensure`: idempotent session/worktree bootstrap using the incremental structural pipeline.
+- `compass update`: deterministic structural refresh after project changes.
 - `compass extract`: structural plus optional semantic, Cargo, PostgreSQL, or
   Google Workspace layers.
 - `compass document`: inspect PDF, DOCX, PPTX, or XLSX content locally, with

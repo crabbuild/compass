@@ -2,6 +2,18 @@
 
 Load this reference when project files changed or the user requests a rebuild.
 
+## Session and worktree bootstrap
+
+```bash
+compass ensure
+```
+
+Run `ensure` once when an installed agent session starts and after its working
+directory changes to another Git worktree. It uses the normal incremental
+pipeline and reports `initialized`, `updated`, or `current`. Leave
+`compass-out/` inside the active worktree; do not share a mutable output root
+between worktrees. Do not use `--force` for normal bootstrap.
+
 ## Structural update
 
 ```bash

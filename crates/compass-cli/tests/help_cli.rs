@@ -26,6 +26,7 @@ fn root_help_groups_every_public_command_with_descriptions() {
     }
     for command in [
         "init",
+        "ensure",
         "update",
         "extract",
         "watch",
@@ -78,6 +79,7 @@ fn root_help_groups_every_public_command_with_descriptions() {
 fn command_and_nested_help_explain_options_and_examples() {
     for arguments in [
         &["init", "--help"][..],
+        &["ensure", "--help"],
         &["update", "--help"],
         &["query", "--help"],
         &["upgrade", "--help"],

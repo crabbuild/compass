@@ -145,7 +145,7 @@ compass update . --inference-level medium
 ```
 
 Supported values are `low`, `medium`, `high`, and `max`; the default is `low`.
-The option is available on `init`, `update`, `extract`, and `watch`. Use
+The option is available on `init`, `ensure`, `update`, `extract`, and `watch`. Use
 explicit `max` when the former complete-inference breadth is required. It is a
 build-profile input, so changing it causes a coherent republish even when
 source files are unchanged. Extraction caches keep the complete normalized
@@ -163,7 +163,7 @@ exclude = ["**/generated/**"]
 
 An empty include list means the whole eligible repository. Paths are
 project-root-relative; absolute paths and root escapes are rejected.
-`update`, `extract`, and `watch` load this file automatically. Filtering is
+`ensure`, `update`, `extract`, and `watch` load this file automatically. Filtering is
 applied as built-in safety skips, Git ignores, configured includes, configured
 excludes, then command-line exclusions. Invalid configuration stops the build
 instead of silently widening its scope.

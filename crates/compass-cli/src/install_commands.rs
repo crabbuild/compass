@@ -358,7 +358,7 @@ fn install_next_actions(
     }
     if !graph_exists && scope.is_project() {
         actions.push(
-            "Run `compass update .` now, or ask the configured assistant an architecture question to build the project graph on first use."
+            "Run `compass ensure` now, or start a configured assistant session to initialize the worktree-local project graph."
                 .to_owned(),
         );
     }

@@ -39,6 +39,7 @@ pub fn command(frontend: Frontend, args: &[String]) -> Outcome {
         ]),
         features: BTreeMap::from([
             ("init", true),
+            ("ensure", true),
             ("update", true),
             ("watch", true),
             ("graph", true),

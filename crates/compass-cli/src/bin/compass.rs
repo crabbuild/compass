@@ -12,7 +12,7 @@ fn main() -> ExitCode {
     let mut arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
     let one_shot_build = matches!(
         arguments.first().and_then(|argument| argument.to_str()),
-        Some("extract" | "update")
+        Some("ensure" | "extract" | "update")
     );
     if one_shot_build
         && (std::env::var_os("MIMALLOC_PURGE_DELAY").is_none()

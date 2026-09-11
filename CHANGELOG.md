@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `compass ensure` as an idempotent agent-session and linked-worktree
+  bootstrap. It preserves worktree-local mutable graph output, reuses the
+  incremental update pipeline, and reports whether the graph was initialized,
+  updated, or already current. Installed assistant guidance now directs agents
+  to run it when a session starts or moves between worktrees.
+
 - Reset all 14 registered universal-evidence producer versions to v1 and keep
   them `Qualified` under the refreshed release decision at
   `tests/qualification/universal-evidence-promotion.json`. Cached evidence

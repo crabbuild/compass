@@ -84,6 +84,27 @@ Inference defaults to `low` and publishes exact relationships only. Use
 explicitly qualified external references, or explicit `max` to retain all
 inferred relationships including deferred receivers.
 
+### `ensure`
+
+Ensure the active checkout or linked worktree has a current local graph:
+
+```text
+compass ensure [PATH] [UPDATE_OPTIONS]
+```
+
+With no `PATH`, `ensure` resolves the active Git worktree root even when the
+agent starts in a nested directory. It uses the same incremental, atomic
+pipeline and build profile as `update`. It reports whether the worktree-local
+graph was `initialized`, `updated`, or already `current`. Run it once when an
+agent session starts, resumes in a different worktree, or acquires a new
+working directory. Do not pass `--force` during normal session bootstrap;
+compatible manifests and caches make repeated calls inexpensive.
+
+Keep the default `compass-out/` below each worktree. Multiple worktrees may
+contain different uncommitted changes and must not write one shared mutable
+output directory. Repository-wide immutable history and its verified-content
+cache remain shared through the Git common directory.
+
 ### `extract`
 
 Expose the full build surface:
@@ -168,7 +189,7 @@ On Intel (`x86_64`) macOS, managed OCR is unavailable because the pinned ONNX
 runtime has no self-contained distribution; `models install` fails before any
 download, while native document processing and `--ocr off` remain available.
 
-`update`, `extract`, and watch rebuilds may succeed with a warning that Compass
+`ensure`, `update`, `extract`, and watch rebuilds may succeed with a warning that Compass
 published a partial graph. The warning reports exact omitted node, omitted
 edge, and identity-collision counts. The retained `graph.json` remains strictly
 valid and queryable; record examples and the exact summary are in

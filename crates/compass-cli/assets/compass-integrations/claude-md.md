@@ -6,8 +6,9 @@ Setup and synchronization:
 
 1. Run `compass init` once to select repository scope.
 2. Run `compass install` to install the detected assistant integration.
-3. Keep `compass watch` running in a second terminal while you work.
-4. If watch is not running or reports a failure, run `compass update .` after code changes and report the failed refresh.
+3. At session start and after switching Git worktrees, run `compass ensure` once.
+4. Keep `compass watch` running in a second terminal while you work.
+5. If watch is not running or reports a failure, run `compass update .` after code changes and report the failed refresh.
 
 Daily workflow:
 
