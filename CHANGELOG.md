@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Raise the immutable-history aggregate authoritative-evidence limit from
+  512 MiB to 5 GiB so large repositories can publish, validate, and compare
+  complete realizations while retaining the existing per-record and record-count
+  bounds.
+
 - Make `compass review` text and Markdown easier to scan by shortening commit
   and report references, using plain-language status labels, and summarizing
   witness relationships without printing opaque graph-node IDs. Canonical JSON
