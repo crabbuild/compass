@@ -630,8 +630,8 @@ Typed clustered graphs use the complete profile
 `community-limits/v1`. The default resolution is fixed at `1`; an explicit
 `--resolution N` remains a single fixed positive finite resolution. The
 bounded three-candidate selector has identity `bounded-multiresolution/v1` but
-remains qualification-only because it exceeded the clustering-time acceptance
-gate.
+remains qualification-only until its complete pinned-corpus release matrix
+passes the latency, memory, stability, and quality gates.
 
 This is a compatibility-sensitive membership cutover without a
 `compass.graph/1` schema change. Community numeric IDs, membership, labels,

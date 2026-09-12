@@ -43,10 +43,10 @@ Compass also implements a deterministic three-candidate selector over
 `0.75 × base`, `base`, and `4/3 × base`. It compares every candidate at one
 common quality resolution, filters invalid or materially worse partitions, and
 then applies size, conductance, fragmentation, and digest tie-breaks. Compact
-fixtures show that it improves ring-of-cliques and articulation cases, but its
-measured clustering time exceeds the production acceptance gate. It therefore
-remains qualification-only until optimized; omission of `--resolution` does
-not enable it.
+fixtures show that it improves ring-of-cliques and articulation cases and now
+meets the compact timing gate. It remains qualification-only until the complete
+pinned-corpus release matrix also passes latency, memory, stability, and
+quality gates; omission of `--resolution` does not enable it.
 
 ## Incremental updates
 

@@ -16,10 +16,15 @@
   native Leiden over a versioned typed-evidence topology. Publish strict,
   digest-bound `compass.community-quality/1` evidence, preserve frozen
   influence and full-quality fallback during incremental updates, and retain
-  fixed resolution as the default because the bounded three-candidate selector
-  did not meet its clustering-time gate. Community membership and graph-local
-  IDs may change; Base Graph nodes, relationships, direction, multiplicity,
-  provenance, and `compass.graph/1` remain unchanged.
+  fixed resolution as the default while the bounded three-candidate selector
+  awaits complete pinned-corpus qualification. Community membership and
+  graph-local IDs may change; Base Graph nodes, relationships, direction,
+  multiplicity, provenance, and `compass.graph/1` remain unchanged.
+
+- Reduce fixed-resolution Leiden modularity evaluation from repeated
+  per-community edge scans to one canonical edge pass. On the pinned FastAPI
+  release qualification, Leiden now runs within 5.4% of compatibility Louvain
+  while preserving byte-identical partition and quality output.
 
 ## 0.3.24 - 2026-09-11
 

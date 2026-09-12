@@ -3982,7 +3982,7 @@ fn build_graph_inner_unscoped(
         &CommunityRequest {
             profile: CommunityProfile::QualityV1,
             // The bounded three-candidate selector remains qualification-only:
-            // its measured clustering overhead exceeds the production gate.
+            // its complete pinned-corpus release matrix is not yet qualified.
             resolution: ResolutionPolicy::Fixed(options.resolution),
             exclude_hubs_percentile: options.exclude_hubs,
             previous: (!previous.is_empty()).then_some(&previous),

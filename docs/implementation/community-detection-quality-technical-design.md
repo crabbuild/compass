@@ -7,9 +7,9 @@ updates, and `compass-core` orchestration
 
 Implementation status (2026-09-12): phases 0 through 7 are implemented. The
 production profile uses fixed-resolution typed Leiden. The bounded
-three-candidate selector remains qualification-only because its compact
-performance measurement did not justify enabling it by default. See the
-linked qualification report.
+three-candidate selector remains qualification-only until its complete
+pinned-corpus release matrix justifies enabling it by default. See the linked
+qualification report.
 
 Extends:
 [Architecture graph hardening technical design](architecture-graph-hardening-phased-technical-design.md)

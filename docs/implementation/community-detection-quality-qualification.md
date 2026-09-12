@@ -49,21 +49,28 @@ Run and byte-compare the report with:
 
 ## Compact performance decision
 
-On 2026-09-12, an aarch64 macOS debug build ran all 15 compact fixture families
-50 times per sample. Seven-process medians were:
+On 2026-09-12, an aarch64 macOS debug build at candidate commit `c8d121d8` ran
+all 15 compact fixture families 50 times per sample. Seven-process medians were:
 
 | Profile | Median | Compatibility ratio |
 | --- | ---: | ---: |
-| compatibility Louvain | 1.25 s | 1.00× |
-| fixed-resolution typed Leiden | 1.82 s | 1.46× |
-| three-candidate typed Leiden | 3.01 s | 2.41× |
+| compatibility Louvain | 1.15 s | 1.00× |
+| fixed-resolution typed Leiden | 1.23 s | 1.06× |
+| three-candidate typed Leiden | 1.37 s | 1.19× |
 
 These intentionally small debug fixtures magnify topology/evidence setup cost
-and are not the pinned real-repository release performance oracle. They do show
-that automatic selection cannot be enabled merely from the correctness result.
-The production profile therefore stays fixed-resolution as required by the
-design's fallback rule. No cold-build or peak-RSS claim is inferred from these
-numbers.
+and are not the pinned real-repository release performance oracle. The optimized
+fixed and automatic profiles clear the compact clustering overhead gate, but
+automatic selection still requires the complete pinned-corpus release matrix.
+The production profile therefore stays fixed-resolution. No cold-build or
+peak-RSS claim is inferred from these compact numbers.
+
+The corresponding release-mode FastAPI qualification records fixed Leiden at
+`1.054×` the compatibility median on the max-inference graph and `1.041×` on
+the low-inference graph, with byte-identical partition and quality output. See
+[`PERFORMANCE.md`](../../PERFORMANCE.md#community-detection-performance) for
+the corpus identity, graph digests, sampling method, latency, and peak-RSS
+evidence.
 
 ## Corpus status and omissions
 
@@ -77,7 +84,10 @@ that paths or package names are ground truth. Release qualification must still
 record reviewed expectations, exact commits, cold build time, clustering time,
 peak RSS, and incremental measurements for the pinned repository corpus. A
 missing ecosystem is an explicit corpus omission, not a passing measurement.
-This fixture report cannot authorize the automatic selector as the default.
+The release-mode FastAPI detector timing in `PERFORMANCE.md` closes the Python
+latency and peak-RSS observation for fixed Leiden, but it does not provide the
+reviewed subsystem oracle or the remaining ecosystem matrix. This fixture
+report therefore cannot authorize the automatic selector as the default.
 
 ## Related pages
 
