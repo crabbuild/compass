@@ -2,8 +2,9 @@
   "schema": "compass.code-graph-topology-policy/1",
   "topology": {
     "minimums": {
+      "communities": 225,
       "edges": 1284,
-      "exactCrossCommunityEdges": 21,
+      "exactCrossCommunityEdges": 5,
       "exactCrossFileEdges": 81,
       "exactCrossFileEdgesPerThousandNodes": 63,
       "exactEdgeBearingNodePermille": 711,
@@ -16,14 +17,14 @@
       "uniqueTypedEndpointPairs": 1261
     },
     "maximums": {
-      "communities": 242,
+      "communities": 226,
       "connectedComponents": 222,
       "exactConnectedComponents": 496,
       "exactIsolatedNodes": 368,
       "exactSelfLoops": 0,
       "isolatedNodes": 96,
       "selfLoops": 0,
-      "singletonCommunities": 108
+      "singletonCommunities": 96
     },
     "relationshipMinimums": {
       "calls": {
