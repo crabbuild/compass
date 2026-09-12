@@ -316,19 +316,24 @@ fn partition_modularity(
     if total_weight == 0.0 {
         return 0.0;
     }
+    let assignments = assignment(partition, graph.len());
+    let mut internal_weights = vec![0.0; partition.len()];
+    for (left, right, weight) in graph.edges() {
+        let community = assignments[left];
+        if community != usize::MAX && community == assignments[right] {
+            internal_weights[community] += weight;
+        }
+    }
     partition
         .iter()
-        .map(|community| {
-            let internal = graph
-                .edges()
-                .filter(|(left, right, _)| community.contains(left) && community.contains(right))
-                .map(|(_, _, weight)| weight)
-                .sum::<f64>();
+        .enumerate()
+        .map(|(community_index, community)| {
             let volume = community
                 .iter()
                 .map(|node| graph.degree_weighted(*node))
                 .sum::<f64>();
-            internal / total_weight - resolution * (volume / (2.0 * total_weight)).powi(2)
+            internal_weights[community_index] / total_weight
+                - resolution * (volume / (2.0 * total_weight)).powi(2)
         })
         .sum()
 }
@@ -376,6 +381,69 @@ mod tests {
             graph.add_edge(*left, *right, 1.0);
         }
         graph
+    }
+
+    fn reference_partition_modularity(
+        graph: &WeightedGraph,
+        partition: &[BTreeSet<usize>],
+        resolution: f64,
+    ) -> f64 {
+        let total_weight = graph.total_weight();
+        if total_weight == 0.0 {
+            return 0.0;
+        }
+        partition
+            .iter()
+            .map(|community| {
+                let internal = graph
+                    .edges()
+                    .filter(|(left, right, _)| {
+                        community.contains(left) && community.contains(right)
+                    })
+                    .map(|(_, _, weight)| weight)
+                    .sum::<f64>();
+                let volume = community
+                    .iter()
+                    .map(|node| graph.degree_weighted(*node))
+                    .sum::<f64>();
+                internal / total_weight - resolution * (volume / (2.0 * total_weight)).powi(2)
+            })
+            .sum()
+    }
+
+    #[test]
+    fn single_pass_modularity_matches_reference_edge_scans() {
+        let graph = graph(&[
+            (0, 0),
+            (0, 1),
+            (0, 2),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (4, 6),
+            (5, 6),
+            (6, 7),
+        ]);
+        let partitions = [
+            (0..8)
+                .map(|node| BTreeSet::from([node]))
+                .collect::<Vec<_>>(),
+            vec![BTreeSet::from([0, 1, 2, 3]), BTreeSet::from([4, 5, 6, 7])],
+            vec![
+                BTreeSet::from([0, 1, 2]),
+                BTreeSet::from([3, 4]),
+                BTreeSet::from([5, 6, 7]),
+            ],
+        ];
+        for resolution in [0.75, 1.0, 4.0 / 3.0] {
+            for partition in &partitions {
+                assert_eq!(
+                    partition_modularity(&graph, partition, resolution).to_bits(),
+                    reference_partition_modularity(&graph, partition, resolution).to_bits()
+                );
+            }
+        }
     }
 
     #[test]
