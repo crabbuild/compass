@@ -15,15 +15,16 @@ use compass_files::{
     write_text_atomic,
 };
 use compass_graph::{
-    BuildEvidence, ClusterOptions, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
+    BuildEvidence, CommunityExecution, CommunityLimits, CommunityProfile, CommunityQualityArtifact,
+    CommunityRequest, CommunityResult, EntityTiebreaker, GRAPH_DIAGNOSTICS_EXTENSION,
     GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
-    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats,
-    IncrementalClusterLimits, InferenceLevel, InventoryEvidence, PublicationOmissions,
-    SnapshotSelector, SourceDigest, apply_inference_level,
+    GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats, InferenceLevel,
+    InventoryEvidence, PublicationOmissions, ResolutionPolicy, SnapshotSelector, SourceDigest,
+    apply_inference_level, build_communities,
     build_owned_with_tiebreaker_at_inference as build_document, canonical_edge_kind,
-    canonical_raw_edge_sites, cluster_incremental, deduped_node_count, extraction_from_v1,
+    canonical_raw_edge_sites, deduped_node_count, extraction_from_v1,
     garbage_collect_graph_snapshots, graph_insights_with_blind_spots, graph_snapshot_needs_gc,
-    label_communities_by_hub, normalize_document_v1_with_evidence_best_effort_owned_at_inference,
+    normalize_document_v1_with_evidence_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_best_effort_at_inference, score_communities,
     write_canonical_graph_json, write_fact_neutral_graph_json_delta_prevalidated,
@@ -97,7 +98,7 @@ const PARALLEL_AST_FACT_DIGEST_MIN_FILES: usize = 32;
 const SHARED_STORE_GC_MANIFEST_THRESHOLD: usize = 8;
 const STORE_SNAPSHOT_EXCLUSIONS: [&str; 3] =
     [STORE_FILE_NAME, "store.sqlite3-wal", "store.sqlite3-shm"];
-const ROOT_ARTIFACTS: [&str; 7] = [
+const ROOT_ARTIFACTS: [&str; 8] = [
     "GRAPH_REPORT.md",
     "orientation.json",
     "graph-overview.json",
@@ -105,6 +106,7 @@ const ROOT_ARTIFACTS: [&str; 7] = [
     "manifest.json",
     "program.json",
     "graph.json",
+    "community-quality.json",
 ];
 
 #[derive(Clone, Debug)]
@@ -136,6 +138,8 @@ pub struct BuildOptions {
     pub extra_excludes: Vec<String>,
     pub scope: BuildScope,
     pub resolution: f64,
+    /// Whether the user explicitly requested a fixed detector resolution.
+    pub resolution_explicit: bool,
     pub exclude_hubs: Option<f64>,
     pub google_workspace: bool,
     /// Restrict structural extraction to files classified as code.
@@ -400,6 +404,7 @@ impl BuildOptions {
             extra_excludes: Vec::new(),
             scope: BuildScope::default(),
             resolution: 1.0,
+            resolution_explicit: false,
             exclude_hubs: None,
             google_workspace: false,
             code_only: false,
@@ -2026,6 +2031,7 @@ fn publish_fact_neutral_incremental(
     let clustered = !options.no_cluster;
     if !clustered {
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
+        remove_if_exists(&output_dir.join("community-quality.json"))?;
     }
     save_output_stats(
         &output_dir,
@@ -2194,6 +2200,10 @@ pub enum CoreError {
     Graph(#[from] compass_model::GraphError),
     #[error(transparent)]
     Dedup(#[from] compass_graph::DedupError),
+    #[error(transparent)]
+    Community(#[from] compass_graph::CommunityError),
+    #[error(transparent)]
+    CommunityQualityArtifact(#[from] compass_graph::CommunityQualityArtifactError),
     #[error(transparent)]
     Output(#[from] compass_output::OutputError),
     #[error("invalid cached AST extraction for {path}: {source}")]
@@ -3949,19 +3959,9 @@ fn build_graph_inner_unscoped(
         .edges
         .saturating_add(resolution_omitted_candidates);
     let report_health = current_orientation_health(options, omissions);
-    // Legacy clustering and report code needs a compatibility projection, but
-    // retaining it beside the complete typed authority doubles the dominant
-    // graph working set. Move records into the projection and reconstruct the
-    // strict authority after those consumers finish instead.
-    let document = published.document.into_legacy_document()?;
-
     // A history realization must depend only on the target commit and build
     // profile. Prior community numbering is current-worktree operational state
     // and cannot influence the content-addressed result.
-    let cluster_options = ClusterOptions {
-        resolution: options.resolution,
-        exclude_hubs_percentile: options.exclude_hubs,
-    };
     let previous_started = Instant::now();
     let history_build = std::env::var_os("COMPASS_HISTORY_BUILD").is_some();
     let previous = if history_build {
@@ -3976,27 +3976,45 @@ fn build_graph_inner_unscoped(
         .map(|path| relative_fact_path(path, &root))
         .collect::<BTreeSet<_>>();
     let cluster_started = Instant::now();
-    let clustered = cluster_incremental(
-        &document,
-        &previous,
-        &changed_sources,
-        cluster_options,
-        IncrementalClusterLimits::default(),
-    );
+    let community_limits = CommunityLimits::default();
+    let clustered = build_communities(
+        &published.document,
+        &CommunityRequest {
+            profile: CommunityProfile::QualityV1,
+            // The bounded three-candidate selector remains qualification-only:
+            // its measured clustering overhead exceeds the production gate.
+            resolution: ResolutionPolicy::Fixed(options.resolution),
+            exclude_hubs_percentile: options.exclude_hubs,
+            previous: (!previous.is_empty()).then_some(&previous),
+            incremental: !history_build,
+            changed_sources: &changed_sources,
+            limits: community_limits,
+        },
+    )?;
     let cluster_elapsed = cluster_started.elapsed();
     profile_internal_duration(
-        if clustered.used_incremental {
+        if matches!(clustered.execution, CommunityExecution::Incremental { .. }) {
             "bounded incremental clustering"
         } else {
-            "Louvain clustering"
+            "Leiden community detection"
         },
         cluster_elapsed,
     );
     internal_started = Instant::now();
-    let communities = clustered.communities;
+    let CommunityResult {
+        communities,
+        base_labels: labels,
+        quality: community_quality,
+        identity: community_identity,
+        ..
+    } = clustered;
+    // Legacy report code still needs a compatibility projection, but the
+    // complete community operation above consumes the typed authority first.
+    // Move records into the projection and reconstruct the strict authority
+    // after those consumers finish so two complete views are not retained.
+    let document = published.document.into_legacy_document()?;
     timings.graph_assembly += stage_started.elapsed();
     stage_started = Instant::now();
-    let labels = label_communities_by_hub(&document, &communities);
     profile_internal("community labeling", &mut internal_started);
 
     let graph_analyses = ||
@@ -4210,6 +4228,23 @@ fn build_graph_inner_unscoped(
     if let Some(metrics) = store_metrics {
         record_store_metrics(&mut timings, metrics);
     }
+    let graph_seal_for_quality = graph_seal.as_ref().ok_or_else(|| {
+        CoreError::InvalidBuildState(
+            "graph artifact seal is unavailable for community quality evidence".to_owned(),
+        )
+    })?;
+    let quality_artifact = CommunityQualityArtifact::new(
+        published_document.graph.build.generation_id.clone(),
+        format!("sha256:{}", graph_seal_for_quality.sha256),
+        community_identity,
+        community_limits,
+        community_quality,
+    )?;
+    write_json_atomic(
+        output_dir.join("community-quality.json"),
+        &quality_artifact,
+        true,
+    )?;
     if options.purpose == BuildPurpose::Update {
         write_prepared_graph_overview(overview_model, &output_dir)?;
     }
@@ -4454,6 +4489,19 @@ fn build_profile(options: &BuildOptions) -> BuildProfile {
         no_viz: options.no_viz,
         resolution: options.resolution,
         exclude_hubs: options.exclude_hubs,
+        cluster_algorithm: compass_graph::QUALITY_CLUSTER_ALGORITHM.to_owned(),
+        cluster_topology: compass_graph::QUALITY_CLUSTER_TOPOLOGY.to_owned(),
+        cluster_quality: compass_graph::QUALITY_CLUSTER_QUALITY.to_owned(),
+        cluster_selector: compass_graph::COMPATIBILITY_CLUSTER_SELECTOR.to_owned(),
+        cluster_seed: compass_graph::COMPATIBILITY_CLUSTER_SEED,
+        cluster_resolution_policy: "fixed/v1".to_owned(),
+        cluster_hub_policy: if options.exclude_hubs.is_some() {
+            "exclude-percentile/v1"
+        } else {
+            "none/v1"
+        }
+        .to_owned(),
+        cluster_limits_version: compass_graph::QUALITY_CLUSTER_LIMITS.to_owned(),
         code_only: options.code_only,
         program_analysis: options.program_analysis,
         graph_storage: match options.graph_storage {
@@ -4558,11 +4606,13 @@ fn publish_build_state(
                     output_dir.join("labels.json"),
                     output_dir.join("GRAPH_REPORT.md"),
                     output_dir.join("orientation.json"),
+                    output_dir.join("community-quality.json"),
                 ]);
             }
         }
         BuildPurpose::Extract if !options.no_cluster => {
             required.push(output_dir.join("analysis.json"));
+            required.push(output_dir.join("community-quality.json"));
         }
         BuildPurpose::Extract => {}
     }
@@ -7521,6 +7571,32 @@ mod tests {
                 .as_deref()
                 .is_some_and(|profile| profile.contains("inference=medium"))
         );
+    }
+
+    #[test]
+    fn production_community_profile_stays_fixed_for_omitted_and_explicit_resolution() {
+        let omitted = BuildOptions::new(".");
+        let omitted_profile = build_profile(&omitted);
+        assert_eq!(
+            omitted_profile.cluster_algorithm,
+            compass_graph::QUALITY_CLUSTER_ALGORITHM
+        );
+        assert_eq!(
+            omitted_profile.cluster_selector,
+            compass_graph::COMPATIBILITY_CLUSTER_SELECTOR
+        );
+        assert_eq!(omitted_profile.cluster_resolution_policy, "fixed/v1");
+
+        let mut explicit = omitted;
+        explicit.resolution = 1.25;
+        explicit.resolution_explicit = true;
+        let explicit_profile = build_profile(&explicit);
+        assert_eq!(
+            explicit_profile.cluster_selector,
+            compass_graph::COMPATIBILITY_CLUSTER_SELECTOR
+        );
+        assert_eq!(explicit_profile.cluster_resolution_policy, "fixed/v1");
+        assert_eq!(explicit_profile.resolution, 1.25);
     }
 
     #[test]

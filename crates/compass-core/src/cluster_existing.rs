@@ -1,13 +1,15 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use compass_files::{BuildGuard, write_atomic_with_digest, write_json_atomic, write_text_atomic};
 use compass_graph::{
-    ClusterOptions, Communities, GodNode, blind_spot_report, cluster, community_member_signatures,
-    god_nodes, label_communities_by_hub, remap_communities_to_previous, score_communities,
-    suggest_questions, surprising_connections, write_canonical_graph_json,
+    ClusterOptions, Communities, CommunityLimits, CommunityProfile, CommunityQualityArtifact,
+    CommunityRequest, GodNode, ResolutionPolicy, blind_spot_report, build_communities, cluster,
+    community_member_signatures, god_nodes, label_communities_by_hub,
+    remap_communities_to_previous, score_communities, suggest_questions, surprising_connections,
+    write_canonical_graph_json,
 };
 use compass_model::GraphDocument;
 use compass_model::GraphError;
@@ -31,6 +33,7 @@ pub struct ClusterExistingOptions {
     pub no_viz: bool,
     pub no_label: bool,
     pub resolution: f64,
+    pub resolution_explicit: bool,
     pub exclude_hubs: Option<f64>,
     pub min_community_size: usize,
 }
@@ -158,17 +161,43 @@ where
         })
         .collect::<HashMap<_, _>>();
     let cluster_started = Instant::now();
-    let fresh = cluster(
-        document,
-        ClusterOptions {
-            resolution: options.resolution,
-            exclude_hubs_percentile: options.exclude_hubs,
-        },
-    );
-    let communities = if previous.is_empty() {
-        fresh
+    let community_limits = CommunityLimits::default();
+    let (communities, quality_evidence) = if let Some(typed) = typed_document.as_ref() {
+        let changed_sources = BTreeSet::new();
+        let result = build_communities(
+            typed,
+            &CommunityRequest {
+                profile: CommunityProfile::QualityV1,
+                resolution: ResolutionPolicy::Fixed(options.resolution),
+                exclude_hubs_percentile: options.exclude_hubs,
+                previous: (!previous.is_empty()).then_some(&previous),
+                incremental: false,
+                changed_sources: &changed_sources,
+                limits: community_limits,
+            },
+        )?;
+        (
+            result.communities,
+            Some((
+                typed.graph.build.generation_id.clone(),
+                result.identity,
+                result.quality,
+            )),
+        )
     } else {
-        remap_communities_to_previous(&fresh, &previous)
+        let fresh = cluster(
+            document,
+            ClusterOptions {
+                resolution: options.resolution,
+                exclude_hubs_percentile: options.exclude_hubs,
+            },
+        );
+        let communities = if previous.is_empty() {
+            fresh
+        } else {
+            remap_communities_to_previous(&fresh, &previous)
+        };
+        (communities, None)
     };
     let cluster_elapsed = cluster_started.elapsed();
     let analyze_started = Instant::now();
@@ -277,6 +306,7 @@ where
         }),
         true,
     )?;
+    let publishes_quality = quality_evidence.is_some();
     let graph_path = staging.join("graph.json");
     let graph_identity = if let Some(typed) = typed_document {
         let receipt = write_atomic_with_digest(&graph_path, |writer| {
@@ -301,6 +331,16 @@ where
         )?;
         graph_artifact_identity(&graph_path)?
     };
+    if let Some((generation, identity, quality)) = quality_evidence {
+        let artifact = CommunityQualityArtifact::new(
+            generation,
+            graph_identity.clone(),
+            identity,
+            community_limits,
+            quality,
+        )?;
+        write_json_atomic(staging.join("community-quality.json"), &artifact, true)?;
+    }
     orientation.evidence_status.artifact_set_identity = Some(graph_identity);
     let report = render_agent_report_markdown(&orientation, report_options.obsidian)?;
     let orientation_json = render_orientation_json(&orientation)?;
@@ -345,6 +385,9 @@ where
     if html_written {
         artifacts.push("graph.html");
     }
+    if publishes_quality {
+        artifacts.push("community-quality.json");
+    }
     guard.commit_with_artifacts(&artifacts)?;
     BuildGuard::publish_root_artifacts(
         &output_container,
@@ -357,6 +400,7 @@ where
             "graph-overview.json",
             "graph.html",
             "graph.json",
+            "community-quality.json",
         ],
         true,
     )?;
@@ -474,7 +518,13 @@ mod tests {
     use std::error::Error;
     use std::fs::OpenOptions;
 
+    use compass_model::code_graph::{
+        BuildMetadata, EdgeKind, EdgeRecord, ExtractionStatus, FileRecord, NodeKind, NodeRecord,
+    };
+    use compass_model::identity::file_id;
+    use compass_model::provenance::{EvidenceConfidence, EvidenceOrigin, Provenance, SourceAnchor};
     use serde_json::Value;
+    use sha2::{Digest, Sha256};
     use tempfile::TempDir;
 
     use super::*;
@@ -559,6 +609,36 @@ mod tests {
         }
         assert!(!current.join("graph.html").exists());
         assert!(!fixture.output.join("graph.html").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn typed_cluster_only_publishes_graph_bound_fixed_quality_evidence()
+    -> Result<(), Box<dyn Error>> {
+        let fixture = managed_typed_graph_fixture()?;
+        cluster_existing_graph(&fixture.options)?;
+        let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
+        let graph_bytes = fs::read(current.join("graph.json"))?;
+        let graph: V1GraphDocument = serde_json::from_slice(&graph_bytes)?;
+        let quality_bytes = fs::read(current.join("community-quality.json"))?;
+        assert_eq!(
+            quality_bytes,
+            fs::read(fixture.output.join("community-quality.json"))?
+        );
+        let quality: CommunityQualityArtifact = serde_json::from_slice(&quality_bytes)?;
+        quality.validate_for_graph(
+            &graph.graph.build.generation_id,
+            &format!("sha256:{:x}", Sha256::digest(&graph_bytes)),
+        )?;
+        assert_eq!(
+            quality.identity.algorithm,
+            compass_graph::QUALITY_CLUSTER_ALGORITHM
+        );
+        assert_eq!(
+            quality.identity.selector,
+            compass_graph::COMPATIBILITY_CLUSTER_SELECTOR
+        );
+        assert_eq!(quality.partition.candidate_summaries.len(), 1);
         Ok(())
     }
 
@@ -702,6 +782,94 @@ mod tests {
         )
     }
 
+    fn managed_typed_graph_fixture() -> Result<ManagedGraphFixture, Box<dyn Error>> {
+        let digest = format!("sha256:{}", "0".repeat(64));
+        let mut document = V1GraphDocument::empty_v1(BuildMetadata {
+            builder_version: "test".to_owned(),
+            schema_fingerprint: digest.clone(),
+            source_tree_digest: digest.clone(),
+            configuration_digest: digest.clone(),
+            generation_id: digest.clone(),
+            source_commit: None,
+        });
+        document.graph.files.push(FileRecord {
+            id: file_id("src/lib.rs"),
+            path: "src/lib.rs".to_owned(),
+            language: Some("rust".to_owned()),
+            content_digest: digest.clone(),
+            byte_size: 2,
+            generated: false,
+            extraction_status: ExtractionStatus::Extracted,
+            extractor_versions: vec!["cluster-existing-test".to_owned()],
+            coverage: Vec::new(),
+            diagnostics: Vec::new(),
+        });
+        let anchor = |index: u64| SourceAnchor {
+            file: "src/lib.rs".to_owned(),
+            start_byte: index,
+            end_byte: index + 1,
+            start_line: 1,
+            start_column: u32::try_from(index).unwrap_or_default(),
+            end_line: 1,
+            end_column: u32::try_from(index + 1).unwrap_or(u32::MAX),
+        };
+        let evidence = |anchor: SourceAnchor| Provenance {
+            origin: EvidenceOrigin::Ast,
+            extractor: "cluster-existing-test".to_owned(),
+            confidence: EvidenceConfidence::Exact,
+            rule: None,
+            anchors: vec![anchor],
+            wiring_site: None,
+            score: None,
+            candidates: Vec::new(),
+        };
+        document.nodes = ["a", "b"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| NodeRecord {
+                id: id.to_owned(),
+                kind: NodeKind::Function,
+                roles: Vec::new(),
+                name: id.to_owned(),
+                qualified_name: id.to_owned(),
+                language: Some("rust".to_owned()),
+                framework: None,
+                source: Some(anchor(u64::try_from(index).unwrap_or(u64::MAX - 1))),
+                details: None,
+                evidence: vec![evidence(anchor(
+                    u64::try_from(index).unwrap_or(u64::MAX - 1),
+                ))],
+                coverage: Vec::new(),
+                diagnostics: Vec::new(),
+                community: None,
+            })
+            .collect();
+        let relationship_site = anchor(0);
+        let edge_id = compass_model::identity::edge_id(
+            "a",
+            EdgeKind::Calls,
+            "b",
+            Some(&relationship_site),
+            None,
+        );
+        document.links.push(EdgeRecord {
+            id: edge_id.clone(),
+            key: edge_id,
+            source: "a".to_owned(),
+            target: "b".to_owned(),
+            kind: EdgeKind::Calls,
+            occurrence_rule: None,
+            relationship_site: Some(relationship_site.clone()),
+            details: None,
+            evidence: vec![evidence(relationship_site)],
+            weight: Some(1.0),
+            context: None,
+            deferred: false,
+            diagnostics: Vec::new(),
+        });
+        managed_graph_fixture_with_json(&serde_json::to_string(&document)?)
+    }
+
     fn managed_graph_fixture_with_json(
         graph_json: &str,
     ) -> Result<ManagedGraphFixture, Box<dyn Error>> {
@@ -719,6 +887,7 @@ mod tests {
             no_viz: true,
             no_label: true,
             resolution: 1.0,
+            resolution_explicit: false,
             exclude_hubs: None,
             min_community_size: 1,
         };

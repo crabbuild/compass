@@ -1347,6 +1347,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
     let mut no_label = false;
     let mut timing = false;
     let mut resolution = 1.0;
+    let mut resolution_explicit = false;
     let mut exclude_hubs = None;
     let mut min_community_size = 3_usize;
     let mut index = 0;
@@ -1370,6 +1371,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
                     return Outcome::failure("error: --resolution requires a number".to_owned());
                 };
                 resolution = value;
+                resolution_explicit = true;
                 index += 1;
             }
             value if value.starts_with("--resolution=") => {
@@ -1377,6 +1379,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
                     return Outcome::failure("error: --resolution requires a number".to_owned());
                 };
                 resolution = parsed;
+                resolution_explicit = true;
             }
             "--exclude-hubs" => {
                 let Some(argument) = args.get(index + 1) else {
@@ -1403,7 +1406,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
                 min_community_size = parsed;
             }
             "-h" | "--help" => {
-                return Outcome::success("Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]".to_owned());
+                return Outcome::success("Usage: compass cluster-only [PATH] [--graph PATH] [--no-viz] [--no-label] [--resolution N] [--exclude-hubs N] [--min-community-size=N]\nCommunity resolution: omission uses fixed resolution 1; --resolution N uses exactly N. Automatic multi-resolution selection is qualification-only.".to_owned());
             }
             value if value.starts_with('-') => {
                 return Outcome::failure(format!(
@@ -1449,6 +1452,7 @@ fn command_cluster_only(_frontend: Frontend, args: &[String]) -> Outcome {
         no_viz,
         no_label,
         resolution,
+        resolution_explicit,
         exclude_hubs,
         min_community_size,
     }) {
@@ -1781,6 +1785,7 @@ fn command_build_with_validation_inner(
     let mut excludes = Vec::new();
     let mut program_artifacts = Vec::new();
     let mut resolution = 1.0;
+    let mut resolution_explicit = false;
     let mut exclude_hubs = None;
     let mut index = 0;
     while index < args.len() {
@@ -2005,6 +2010,7 @@ fn command_build_with_validation_inner(
                     Ok(value) => value,
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
+                resolution_explicit = true;
                 index += 1;
             }
             value if value.starts_with("--resolution=") => {
@@ -2012,6 +2018,7 @@ fn command_build_with_validation_inner(
                     Ok(value) => value,
                     Err(error) => return extract_parse_failure(frontend, error),
                 };
+                resolution_explicit = true;
             }
             "--exclude-hubs" if index + 1 < args.len() => {
                 let Ok(value) = args[index + 1].parse::<f64>() else {
@@ -2070,7 +2077,7 @@ fn command_build_with_validation_inner(
                     extract_help()
                 } else {
                     format!(
-                        "Usage: compass {} [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--max-workers N] [--no-cluster] [--force] [--no-viz] [--timing]",
+                        "Usage: compass {} [path] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--max-source-bytes N] [--max-workers N] [--no-cluster] [--force] [--no-viz] [--timing] [--resolution N]\nCommunity resolution: omission uses fixed resolution 1; --resolution N uses exactly N. Automatic multi-resolution selection is qualification-only.",
                         operation.label()
                     )
                 });
@@ -2145,6 +2152,7 @@ fn command_build_with_validation_inner(
     }
     options.extra_excludes = excludes;
     options.resolution = resolution;
+    options.resolution_explicit = resolution_explicit;
     options.exclude_hubs = exclude_hubs;
     options.code_only = code_only;
     options.purpose = if extract {
@@ -3055,7 +3063,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn extract_help() -> String {
-    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--ocr off|auto|always] [--ocr-profile NAME] [--ocr-language BCP47] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]\nProvider selection: --backend/--model override COMPASS_BACKEND/COMPASS_MODEL. Built-ins: claude, kimi, ollama, gemini, openai, deepseek, azure, bedrock, claude-cli. Set the selected provider's documented credential variable; custom providers use `compass provider add`. Credentials are never written to Compass artifacts.".to_owned()
+    "Usage: compass extract [PATH] [--program] [--program-artifact PATH] [--no-program] [--store json|sqlite] [--inference-level low|medium|high|max] [--code-only] [--cargo] [--google-workspace] [--postgres DSN] [--backend NAME] [--model MODEL] [--mode deep] [--ocr off|auto|always] [--ocr-profile NAME] [--ocr-language BCP47] [--token-budget N] [--max-concurrency N] [--max-workers N] [--max-source-bytes N] [--api-timeout SECONDS] [--allow-partial] [--dedup-llm] [--timing] [--out DIR] [--no-cluster] [--force] [--no-viz] [--no-gitignore] [--exclude PATTERN] [--resolution N] [--exclude-hubs N]\nCommunity resolution: omission uses fixed resolution 1; --resolution N uses exactly N. Automatic multi-resolution selection is qualification-only.\nProvider selection: --backend/--model override COMPASS_BACKEND/COMPASS_MODEL. Built-ins: claude, kimi, ollama, gemini, openai, deepseek, azure, bedrock, claude-cli. Set the selected provider's documented credential variable; custom providers use `compass provider add`. Credentials are never written to Compass artifacts.".to_owned()
 }
 
 fn saved_graph_root() -> Option<PathBuf> {

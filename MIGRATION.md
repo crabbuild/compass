@@ -25,6 +25,33 @@ Use `--engine json` until the rebuild completes. Do not edit or copy SQLite
 tables to add the capability marker; the directional index key order must be
 rebuilt from the validated graph.
 
+## Rebuild communities for the Leiden profile
+
+Typed clustered graphs now use `seeded-leiden-modularity/v1` over
+`typed-evidence-undirected/v1` with the fixed-resolution selector. Run a normal
+forced build after upgrading:
+
+```bash
+compass update --force
+```
+
+Community membership, numeric IDs, labels, architecture groupings, and derived
+reports may change. Do not copy old `community` attributes or label signatures
+into the new graph. Base Graph node and relationship identity, direction,
+multiplicity, anchors, and provenance are unchanged by clustering.
+
+Omitting `--resolution` uses fixed resolution `1`; an explicit
+`--resolution N` uses exactly one positive finite value. Automatic
+multi-resolution selection is not a production default. Clustered typed builds
+add `community-quality.json`, bound to the exact `graph.json`. Upgrade strict
+artifact readers to accept `compass.community-quality/1` and reject unknown
+majors, unknown fields, digest mismatch, or profile mismatch. Missing evidence
+on an older or legacy graph means unavailable, not zero quality.
+
+Published historical realizations remain immutable. New materializations use
+the complete Leiden profile fingerprint; Compass does not rewrite or silently
+reinterpret older memberships.
+
 ## Frontend graph vocabulary
 
 Recent pre-release builds can add React-oriented `renders` edges and UI/server

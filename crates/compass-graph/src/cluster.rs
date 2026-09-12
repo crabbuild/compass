@@ -4,8 +4,11 @@ use std::time::Instant;
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+
+use crate::community::compatibility_density_scores;
 
 const MAX_COMMUNITY_FRACTION: f64 = 0.25;
 const MIN_SPLIT_SIZE: usize = 10;
@@ -17,7 +20,8 @@ const LOUVAIN_MAX_LEVEL: usize = 10;
 pub type Communities = BTreeMap<usize, Vec<String>>;
 
 /// Bounds for a topology-changing incremental community update.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct IncrementalClusterLimits {
     /// Absolute ceiling for nodes admitted to the local reclustering region.
     pub max_affected_nodes: usize,
@@ -615,9 +619,10 @@ pub fn community_member_signatures(communities: &Communities) -> BTreeMap<usize,
 
 #[must_use]
 pub fn cohesion_score(document: &GraphDocument, members: &[String]) -> f64 {
-    let graph = WeightedGraph::from_document(document);
-    let positions = graph.position_map();
-    cohesion_score_graph(&graph, &positions, members)
+    compatibility_density_scores(document, &BTreeMap::from([(0, members.to_vec())]))
+        .get(&0)
+        .copied()
+        .unwrap_or(1.0)
 }
 
 #[must_use]
@@ -625,54 +630,7 @@ pub fn score_communities(
     document: &GraphDocument,
     communities: &Communities,
 ) -> BTreeMap<usize, f64> {
-    let positions = document
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.id.as_str(), index))
-        .collect::<HashMap<_, _>>();
-    let mut node_community = vec![None; document.nodes.len()];
-    let mut internal_edges = HashMap::<usize, usize>::new();
-    for (community, members) in communities {
-        for member in members {
-            if let Some(position) = positions.get(member.as_str()) {
-                node_community[*position] = Some(*community);
-            }
-        }
-    }
-    let mut seen = HashSet::<(usize, usize)>::new();
-    for edge in &document.links {
-        let (Some(&left), Some(&right)) = (
-            positions.get(edge.source.as_str()),
-            positions.get(edge.target.as_str()),
-        ) else {
-            continue;
-        };
-        let pair = if left <= right {
-            (left, right)
-        } else {
-            (right, left)
-        };
-        if seen.insert(pair)
-            && let Some(community) = node_community[left]
-            && node_community[right] == Some(community)
-        {
-            *internal_edges.entry(community).or_default() += 1;
-        }
-    }
-    communities
-        .iter()
-        .map(|(community, members)| {
-            let count = members.len();
-            let possible = count.saturating_mul(count.saturating_sub(1)) / 2;
-            let score = if possible == 0 {
-                1.0
-            } else {
-                internal_edges.get(community).copied().unwrap_or_default() as f64 / possible as f64
-            };
-            (*community, score)
-        })
-        .collect()
+    compatibility_density_scores(document, communities)
 }
 
 #[must_use]
@@ -743,7 +701,7 @@ pub fn remap_communities_to_previous(
         .collect()
 }
 
-fn excluded_hubs(graph: &WeightedGraph, percentile: Option<f64>) -> HashSet<usize> {
+pub(crate) fn excluded_hubs(graph: &WeightedGraph, percentile: Option<f64>) -> HashSet<usize> {
     let Some(percentile) = percentile else {
         return HashSet::new();
     };
@@ -764,7 +722,11 @@ fn excluded_hubs(graph: &WeightedGraph, percentile: Option<f64>) -> HashSet<usiz
         .collect()
 }
 
-fn reattach_hubs(graph: &WeightedGraph, hubs: &HashSet<usize>, raw: &mut Vec<Vec<String>>) {
+pub(crate) fn reattach_hubs(
+    graph: &WeightedGraph,
+    hubs: &HashSet<usize>,
+    raw: &mut Vec<Vec<String>>,
+) {
     let mut node_community = raw
         .iter()
         .enumerate()
@@ -1063,14 +1025,14 @@ fn aggregate_graph(graph: &WeightedGraph, communities: &[BTreeSet<usize>]) -> We
 }
 
 #[derive(Clone)]
-struct WeightedGraph {
-    ids: Vec<String>,
-    members: Vec<BTreeSet<String>>,
+pub(crate) struct WeightedGraph {
+    pub(crate) ids: Vec<String>,
+    pub(crate) members: Vec<BTreeSet<String>>,
     adjacency: Vec<Vec<(usize, f64)>>,
 }
 
 impl WeightedGraph {
-    fn new(ids: Vec<String>, members: Vec<BTreeSet<String>>) -> Self {
+    pub(crate) fn new(ids: Vec<String>, members: Vec<BTreeSet<String>>) -> Self {
         let adjacency = vec![Vec::new(); ids.len()];
         Self {
             ids,
@@ -1079,7 +1041,7 @@ impl WeightedGraph {
         }
     }
 
-    fn from_document(document: &GraphDocument) -> Self {
+    pub(crate) fn from_document(document: &GraphDocument) -> Self {
         let mut ids = document
             .nodes
             .iter()
@@ -1131,19 +1093,19 @@ impl WeightedGraph {
         graph
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.ids.len()
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.ids.is_empty()
     }
 
-    fn edge_count(&self) -> usize {
+    pub(crate) fn edge_count(&self) -> usize {
         self.edges().count()
     }
 
-    fn position_map(&self) -> HashMap<&String, usize> {
+    pub(crate) fn position_map(&self) -> HashMap<&String, usize> {
         self.ids
             .iter()
             .enumerate()
@@ -1151,14 +1113,14 @@ impl WeightedGraph {
             .collect()
     }
 
-    fn degree_unweighted(&self, node: usize) -> usize {
+    pub(crate) fn degree_unweighted(&self, node: usize) -> usize {
         self.adjacency[node]
             .iter()
             .map(|(neighbor, _)| if *neighbor == node { 2 } else { 1 })
             .sum()
     }
 
-    fn degree_weighted(&self, node: usize) -> f64 {
+    pub(crate) fn degree_weighted(&self, node: usize) -> f64 {
         self.adjacency[node]
             .iter()
             .map(|(neighbor, weight)| {
@@ -1171,7 +1133,7 @@ impl WeightedGraph {
             .sum()
     }
 
-    fn total_weight(&self) -> f64 {
+    pub(crate) fn total_weight(&self) -> f64 {
         self.edges().map(|(_, _, weight)| weight).sum()
     }
 
@@ -1196,7 +1158,7 @@ impl WeightedGraph {
         }
     }
 
-    fn add_edge(&mut self, left: usize, right: usize, weight: f64) {
+    pub(crate) fn add_edge(&mut self, left: usize, right: usize, weight: f64) {
         if let Some((_, existing)) = self.adjacency[left]
             .iter_mut()
             .find(|(neighbor, _)| *neighbor == right)
@@ -1217,7 +1179,7 @@ impl WeightedGraph {
         }
     }
 
-    fn edges(&self) -> impl Iterator<Item = (usize, usize, f64)> + '_ {
+    pub(crate) fn edges(&self) -> impl Iterator<Item = (usize, usize, f64)> + '_ {
         self.adjacency
             .iter()
             .enumerate()
@@ -1229,7 +1191,11 @@ impl WeightedGraph {
             })
     }
 
-    fn subgraph(&self, selected: &[usize]) -> Self {
+    pub(crate) fn neighbors(&self, node: usize) -> &[(usize, f64)] {
+        &self.adjacency[node]
+    }
+
+    pub(crate) fn subgraph(&self, selected: &[usize]) -> Self {
         let positions = selected
             .iter()
             .enumerate()
@@ -1369,7 +1335,7 @@ impl PythonRandom {
         }
     }
 
-    fn shuffle<T>(&mut self, values: &mut [T]) {
+    pub(crate) fn shuffle<T>(&mut self, values: &mut [T]) {
         for index in (1..values.len()).rev() {
             let replacement = self.below(index + 1);
             values.swap(index, replacement);

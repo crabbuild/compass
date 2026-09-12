@@ -330,12 +330,25 @@ pub fn effective_graph_view_model(
     effective: &compass_agent_graph::EffectiveGraph,
     title: impl Into<String>,
     options: &HtmlOptions<'_>,
-) -> Result<GraphViewModel, compass_model::GraphError> {
+) -> Result<GraphViewModel, crate::OutputError> {
     let document = effective.graph.to_legacy_document()?;
     // Agent assertions can change topology. Recompute the communities from the
     // exact Effective Graph and discard labels/counts derived from the base so
     // a viewer can never present a mixed-revision topology.
-    let communities = compass_graph::cluster(&document, compass_graph::ClusterOptions::default());
+    let changed_sources = BTreeSet::new();
+    let communities = compass_graph::build_communities(
+        &effective.graph,
+        &compass_graph::CommunityRequest {
+            profile: compass_graph::CommunityProfile::QualityV1,
+            resolution: compass_graph::ResolutionPolicy::Fixed(1.0),
+            exclude_hubs_percentile: None,
+            previous: None,
+            incremental: false,
+            changed_sources: &changed_sources,
+            limits: compass_graph::CommunityLimits::default(),
+        },
+    )?
+    .communities;
     let effective_options = HtmlOptions {
         community_labels: None,
         member_counts: None,

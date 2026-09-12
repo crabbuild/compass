@@ -10,6 +10,10 @@ use compass_core::{
     build_graph_with_layers_retained,
 };
 use compass_files::{DetectOptions, IgnorePolicy, Manifest, ManifestKind, ProjectConfig, detect};
+use compass_graph::{
+    COMPATIBILITY_CLUSTER_SEED_TEXT, COMPATIBILITY_CLUSTER_SELECTOR, QUALITY_CLUSTER_ALGORITHM,
+    QUALITY_CLUSTER_LIMITS, QUALITY_CLUSTER_QUALITY, QUALITY_CLUSTER_TOPOLOGY,
+};
 use compass_history::{
     BuildProfile, CompletedGraphArtifacts, CompletionEvidence, GraphArtifacts,
     HISTORY_GRAPH_SCHEMA, HistoryError, MAX_DIAGNOSTIC_BYTES,
@@ -91,13 +95,15 @@ impl HistoryBuildOptions {
             "--token-budget",
             "default",
         );
-        push_profile_option(
-            &profile,
-            &mut forwarded,
-            "resolution",
-            "--resolution",
-            "none",
-        );
+        if profile.value("cluster_resolution_policy") == Some("fixed/v1") {
+            push_profile_option(
+                &profile,
+                &mut forwarded,
+                "resolution",
+                "--resolution",
+                "none",
+            );
+        }
         push_profile_option(
             &profile,
             &mut forwarded,
@@ -139,7 +145,10 @@ impl HistoryBuildOptions {
                 ));
             }
         };
-        insert_current_engine_profile(&mut profile, deep)?;
+        let excludes_hubs = profile
+            .value("exclude_hubs")
+            .is_some_and(|value| value != "none");
+        insert_current_engine_profile(&mut profile, deep, excludes_hubs)?;
         if profile.value("ocr_mode").is_none() {
             profile.insert("ocr_mode", "off")?;
         }
@@ -199,7 +208,7 @@ impl HistoryBuildOptions {
             resolve_provider(&mut values)?;
         }
         let mut profile = BuildProfile::default();
-        insert_current_engine_profile(&mut profile, values.deep)?;
+        insert_current_engine_profile(&mut profile, values.deep, values.exclude_hubs.is_some())?;
         for (key, value) in [
             ("gitignore", values.gitignore.to_string()),
             ("code_only", values.code_only.to_string()),
@@ -307,6 +316,9 @@ impl HistoryBuildOptions {
         for exclude in &values.excludes {
             forwarded.extend(["--exclude".to_owned(), exclude.clone()]);
         }
+        // The qualified production profile is fixed-resolution Leiden even
+        // when the user omitted the flag. Forward the resolved value so a
+        // historical subprocess materializes the exact persisted profile.
         forwarded.extend([
             "--resolution".to_owned(),
             normalized_float(values.resolution),
@@ -332,6 +344,7 @@ impl HistoryBuildOptions {
 fn insert_current_engine_profile(
     profile: &mut BuildProfile,
     deep: bool,
+    excludes_hubs: bool,
 ) -> Result<(), HistoryError> {
     for (key, value) in [
         ("compass_version", env!("CARGO_PKG_VERSION").to_owned()),
@@ -428,8 +441,25 @@ fn insert_current_engine_profile(
         ),
         ("enabled_features", "workspace-default".to_owned()),
         ("direction", "native-source-semantics".to_owned()),
-        ("cluster_algorithm", "seeded-louvain/v1".to_owned()),
-        ("cluster_seed", "42".to_owned()),
+        ("cluster_algorithm", QUALITY_CLUSTER_ALGORITHM.to_owned()),
+        ("cluster_seed", COMPATIBILITY_CLUSTER_SEED_TEXT.to_owned()),
+        ("cluster_topology", QUALITY_CLUSTER_TOPOLOGY.to_owned()),
+        ("cluster_quality", QUALITY_CLUSTER_QUALITY.to_owned()),
+        (
+            "cluster_selector",
+            COMPATIBILITY_CLUSTER_SELECTOR.to_owned(),
+        ),
+        ("cluster_resolution_policy", "fixed/v1".to_owned()),
+        (
+            "cluster_hub_policy",
+            if excludes_hubs {
+                "exclude-percentile/v1"
+            } else {
+                "none/v1"
+            }
+            .to_owned(),
+        ),
+        ("cluster_limits_version", QUALITY_CLUSTER_LIMITS.to_owned()),
         (
             "semantic_prompt_sha256",
             compass_semantic::extraction_prompt_sha256(deep),
@@ -477,6 +507,12 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
                 | "direction"
                 | "cluster_algorithm"
                 | "cluster_seed"
+                | "cluster_topology"
+                | "cluster_quality"
+                | "cluster_selector"
+                | "cluster_resolution_policy"
+                | "cluster_hub_policy"
+                | "cluster_limits_version"
                 | "gitignore"
                 | "code_only"
                 | "cargo"
@@ -515,14 +551,40 @@ fn validate_persisted_profile(profile: &BuildProfile) -> Result<(), HistoryError
         ("program_provider_policy", "offline-artifacts-first"),
         ("enabled_features", "workspace-default"),
         ("direction", "native-source-semantics"),
-        ("cluster_algorithm", "seeded-louvain/v1"),
-        ("cluster_seed", "42"),
+        ("cluster_algorithm", QUALITY_CLUSTER_ALGORITHM),
+        ("cluster_seed", COMPATIBILITY_CLUSTER_SEED_TEXT),
+        ("cluster_topology", QUALITY_CLUSTER_TOPOLOGY),
+        ("cluster_quality", QUALITY_CLUSTER_QUALITY),
+        ("cluster_limits_version", QUALITY_CLUSTER_LIMITS),
     ] {
         if profile.value(key) != Some(expected) {
             return Err(HistoryError::InvalidFingerprint(format!(
                 "persisted {key} is incompatible with {expected}"
             )));
         }
+    }
+    if profile.value("cluster_resolution_policy") != Some("fixed/v1") {
+        return Err(HistoryError::InvalidFingerprint(
+            "persisted cluster_resolution_policy is incompatible with fixed/v1".to_owned(),
+        ));
+    }
+    if profile.value("cluster_selector") != Some(COMPATIBILITY_CLUSTER_SELECTOR) {
+        return Err(HistoryError::InvalidFingerprint(format!(
+            "persisted cluster_selector is incompatible with {COMPATIBILITY_CLUSTER_SELECTOR}"
+        )));
+    }
+    let expected_hub_policy = if profile
+        .value("exclude_hubs")
+        .is_some_and(|value| value != "none")
+    {
+        "exclude-percentile/v1"
+    } else {
+        "none/v1"
+    };
+    if profile.value("cluster_hub_policy") != Some(expected_hub_policy) {
+        return Err(HistoryError::InvalidFingerprint(format!(
+            "persisted cluster_hub_policy is incompatible with {expected_hub_policy}"
+        )));
     }
     for (key, expected) in [
         (
@@ -849,6 +911,7 @@ struct HistoryBuildValues {
     ocr_languages: Vec<String>,
     token_budget: Option<usize>,
     resolution: f64,
+    resolution_explicit: bool,
     exclude_hubs: Option<f64>,
     gitignore: bool,
     excludes: Vec<String>,
@@ -872,6 +935,7 @@ impl Default for HistoryBuildValues {
             ocr_languages: Vec::new(),
             token_budget: None,
             resolution: 1.0,
+            resolution_explicit: false,
             exclude_hubs: None,
             gitignore: true,
             excludes: Vec::new(),
@@ -956,7 +1020,10 @@ pub(crate) fn parse_build_command(
                         values.ocr_profile = value.to_owned();
                     }
                     "--token-budget" => values.token_budget = Some(positive_usize(name, value)?),
-                    "--resolution" => values.resolution = positive_float(name, value)?,
+                    "--resolution" => {
+                        values.resolution = positive_float(name, value)?;
+                        values.resolution_explicit = true;
+                    }
                     "--exclude-hubs" => values.exclude_hubs = Some(finite_float(name, value)?),
                     "--format" => format = Some(value.to_owned()),
                     "--profile-from" => profile_from = Some(nonempty(name, value)?.to_owned()),
@@ -1418,6 +1485,7 @@ impl NativeCompleteGraphBuilder {
             .value("resolution")
             .and_then(|value| value.parse().ok())
             .unwrap_or(1.0);
+        options.resolution_explicit = true;
         options.exclude_hubs = self
             .profile
             .value("exclude_hubs")
@@ -1451,12 +1519,21 @@ impl NativeCompleteGraphBuilder {
             })?;
         let manifest = serde_json::from_slice(&manifest_bytes)
             .map_err(|error| MaterializeError::Builder(error.to_string()))?;
-        let artifacts = GraphArtifacts::from_trusted(
+        let mut artifacts = GraphArtifacts::from_trusted(
             retained.document,
             retained.program,
             retained.analysis,
             Some(manifest),
         )?;
+        artifacts.authoritative_sidecars.insert(
+            "community-quality.json".to_owned(),
+            fs::read(result.output_dir.join("community-quality.json")).map_err(|source| {
+                compass_files::FileError::Io {
+                    path: result.output_dir.join("community-quality.json"),
+                    source,
+                }
+            })?,
+        );
         let code_files = result
             .detection
             .files

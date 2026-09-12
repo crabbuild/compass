@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::cluster::{Communities, PythonRandom};
+use crate::cluster::{Communities, PythonRandom, score_communities};
 
 const BUILTIN_NOISE_LABELS: &[&str] = &[
     "str",
@@ -334,7 +334,9 @@ fn suggest_questions_in(
     top_n: usize,
 ) -> (Vec<SuggestedQuestion>, BlindSpotReport) {
     let node_community = invert_communities(communities);
-    let cohesion = community_cohesion_scores(graph, communities, &node_community);
+    let cohesion = score_communities(graph.document, communities)
+        .into_iter()
+        .collect::<HashMap<_, _>>();
     let mut questions = Vec::new();
     for edge in &graph.edges {
         if edge_string(edge.record, "confidence") != "AMBIGUOUS" {
@@ -1692,6 +1694,7 @@ fn relation_edge_sort_key(
 }
 
 struct AnalysisGraph<'a> {
+    document: &'a GraphDocument,
     nodes: Vec<&'a NodeRecord>,
     positions: HashMap<&'a str, usize>,
     edges: Vec<AnalysisEdge<'a>>,
@@ -1752,6 +1755,7 @@ impl<'a> AnalysisGraph<'a> {
             }
         }
         Self {
+            document,
             nodes,
             positions,
             edges,
@@ -1823,34 +1827,6 @@ fn invert_communities(communities: &Communities) -> HashMap<String, usize> {
         .collect()
 }
 
-fn community_cohesion_scores(
-    graph: &AnalysisGraph<'_>,
-    communities: &Communities,
-    node_community: &HashMap<String, usize>,
-) -> HashMap<usize, f64> {
-    let mut internal_edges = HashMap::<usize, usize>::new();
-    for edge in &graph.edges {
-        let left = node_community.get(&graph.nodes[edge.left].id);
-        if let Some(community) = left
-            && node_community.get(&graph.nodes[edge.right].id) == Some(community)
-        {
-            *internal_edges.entry(*community).or_default() += 1;
-        }
-    }
-    communities
-        .iter()
-        .map(|(community, members)| {
-            let count = members.len();
-            let possible = count.saturating_mul(count.saturating_sub(1)) / 2;
-            let score = if possible == 0 {
-                1.0
-            } else {
-                internal_edges.get(community).copied().unwrap_or_default() as f64 / possible as f64
-            };
-            (*community, score)
-        })
-        .collect()
-}
 fn is_concept_node(node: &NodeRecord) -> bool {
     let source = attribute(node, "source_file").unwrap_or_default();
     source.is_empty() || !source.rsplit('/').next().unwrap_or_default().contains('.')

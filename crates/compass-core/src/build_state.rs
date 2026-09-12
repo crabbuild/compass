@@ -91,6 +91,22 @@ pub(crate) struct BuildProfile {
     pub no_viz: bool,
     pub resolution: f64,
     pub exclude_hubs: Option<f64>,
+    #[serde(default = "default_cluster_algorithm")]
+    pub cluster_algorithm: String,
+    #[serde(default = "default_cluster_topology")]
+    pub cluster_topology: String,
+    #[serde(default = "default_cluster_quality")]
+    pub cluster_quality: String,
+    #[serde(default = "default_cluster_selector")]
+    pub cluster_selector: String,
+    #[serde(default = "default_cluster_seed")]
+    pub cluster_seed: u32,
+    #[serde(default = "default_resolution_policy")]
+    pub cluster_resolution_policy: String,
+    #[serde(default = "default_hub_policy")]
+    pub cluster_hub_policy: String,
+    #[serde(default = "default_cluster_limits")]
+    pub cluster_limits_version: String,
     #[serde(default)]
     pub code_only: bool,
     pub program_analysis: bool,
@@ -104,6 +120,38 @@ pub(crate) struct BuildProfile {
     pub max_source_bytes: u64,
     #[serde(default = "default_document_processing_identity")]
     pub document_processing_identity: String,
+}
+
+fn default_cluster_algorithm() -> String {
+    compass_graph::COMPATIBILITY_CLUSTER_ALGORITHM.to_owned()
+}
+
+fn default_cluster_topology() -> String {
+    compass_graph::COMPATIBILITY_CLUSTER_TOPOLOGY.to_owned()
+}
+
+fn default_cluster_quality() -> String {
+    compass_graph::COMPATIBILITY_CLUSTER_QUALITY.to_owned()
+}
+
+fn default_cluster_selector() -> String {
+    compass_graph::COMPATIBILITY_CLUSTER_SELECTOR.to_owned()
+}
+
+const fn default_cluster_seed() -> u32 {
+    compass_graph::COMPATIBILITY_CLUSTER_SEED
+}
+
+fn default_resolution_policy() -> String {
+    "fixed/v1".to_owned()
+}
+
+fn default_hub_policy() -> String {
+    "none/v1".to_owned()
+}
+
+fn default_cluster_limits() -> String {
+    compass_graph::COMPATIBILITY_CLUSTER_LIMITS.to_owned()
 }
 
 // Build-state schema 1 omitted the historical max profile. Keep interpreting
@@ -298,6 +346,14 @@ mod tests {
             no_viz: true,
             resolution: 1.0,
             exclude_hubs: None,
+            cluster_algorithm: default_cluster_algorithm(),
+            cluster_topology: default_cluster_topology(),
+            cluster_quality: default_cluster_quality(),
+            cluster_selector: default_cluster_selector(),
+            cluster_seed: default_cluster_seed(),
+            cluster_resolution_policy: default_resolution_policy(),
+            cluster_hub_policy: default_hub_policy(),
+            cluster_limits_version: default_cluster_limits(),
             code_only: true,
             program_analysis: false,
             graph_storage: "json".to_owned(),
@@ -333,6 +389,14 @@ mod tests {
             no_viz: true,
             resolution: 1.0,
             exclude_hubs: None,
+            cluster_algorithm: default_cluster_algorithm(),
+            cluster_topology: default_cluster_topology(),
+            cluster_quality: default_cluster_quality(),
+            cluster_selector: default_cluster_selector(),
+            cluster_seed: default_cluster_seed(),
+            cluster_resolution_policy: default_resolution_policy(),
+            cluster_hub_policy: default_hub_policy(),
+            cluster_limits_version: default_cluster_limits(),
             code_only: false,
             program_analysis: true,
             graph_storage: "json".to_owned(),

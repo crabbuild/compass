@@ -7,6 +7,15 @@
   witness relationships without printing opaque graph-node IDs. Canonical JSON
   and SARIF retain every exact identity and remain unchanged.
 
+- Replace production community detection for typed graphs with deterministic
+  native Leiden over a versioned typed-evidence topology. Publish strict,
+  digest-bound `compass.community-quality/1` evidence, preserve frozen
+  influence and full-quality fallback during incremental updates, and retain
+  fixed resolution as the default because the bounded three-candidate selector
+  did not meet its clustering-time gate. Community membership and graph-local
+  IDs may change; Base Graph nodes, relationships, direction, multiplicity,
+  provenance, and `compass.graph/1` remain unchanged.
+
 ## 0.3.24 - 2026-09-11
 
 - Add `compass ensure` as an idempotent agent-session and linked-worktree
@@ -28,7 +37,6 @@
   edge-ordered adjacency capability; older sidecars remain valid recovery
   inputs but directional store queries fail with an explicit rebuild
   instruction instead of returning a backend-dependent truncated subset.
-
 - Refactor universal language metadata around `UniversalEvidenceProducer` and
   `UniversalEvidencePipeline`. `UniversalCandidate`/`UniversalComplete` are
   now the clearer lifecycle states `Qualifying`/`Qualified`; the serialized

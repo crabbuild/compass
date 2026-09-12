@@ -15,6 +15,7 @@ usage() {
   cat >&2 <<EOF
 usage:
   $0 --fixtures-only
+  $0 --community-quality [--report <path>]
   $0 --repositories <manifest> [--local-repository <path>]
 EOF
   exit 2
@@ -23,10 +24,20 @@ EOF
 MODE=
 REPOSITORIES_MANIFEST=
 LOCAL_REPOSITORY=
+COMMUNITY_REPORT=
 case "${1:-}" in
   --fixtures-only)
     MODE=fixtures
     shift
+    ;;
+  --community-quality)
+    MODE=community-quality
+    shift
+    if [[ "${1:-}" == "--report" ]]; then
+      COMMUNITY_REPORT="${2:-}"
+      [[ -n "$COMMUNITY_REPORT" ]] || usage
+      shift 2
+    fi
     ;;
   --repositories)
     MODE=repositories
@@ -44,6 +55,35 @@ case "${1:-}" in
     ;;
 esac
 [[ "$#" -eq 0 ]] || usage
+
+if [[ "$MODE" == community-quality ]]; then
+  cd "$QUALIFY_ROOT"
+  REPORT_A="$QUALIFY_TMP/community-quality-a.json"
+  REPORT_B="$QUALIFY_TMP/community-quality-b.json"
+  cargo run --quiet --locked -p compass-graph \
+    --example community_quality_qualification >"$REPORT_A"
+  cargo run --quiet --locked -p compass-graph \
+    --example community_quality_qualification >"$REPORT_B"
+  cmp "$REPORT_A" "$REPORT_B"
+  python3 - "$REPORT_A" <<'PY'
+import json
+import pathlib
+import sys
+
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+if report.get("schema") != "compass.community-quality-qualification/1":
+    raise SystemExit("unexpected community quality qualification schema")
+failed = [name for name, passed in report.get("acceptance", {}).items() if passed is not True]
+if failed:
+    raise SystemExit(f"community quality acceptance failed: {', '.join(failed)}")
+print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+PY
+  if [[ -n "$COMMUNITY_REPORT" ]]; then
+    mkdir -p "$(dirname "$COMMUNITY_REPORT")"
+    cp "$REPORT_A" "$COMMUNITY_REPORT"
+  fi
+  exit 0
+fi
 
 [[ -f "$PARSER_ROOT/sources/language_definitions.json" && -d "$PARSER_ROOT/parsers" ]] || {
   echo "[code-graph-v1] offline qualification requires a pre-provisioned parser source bundle at $PARSER_ROOT (set TSLP_PARSER_SOURCE_DIR)" >&2

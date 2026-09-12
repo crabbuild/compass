@@ -73,6 +73,7 @@ const EDGE_COMPATIBILITY_FIELDS: [&str; 6] = [
 const TRUSTED_GRAPH_CONTENT: &str = "history/graph.v1.json";
 const PROGRAM_SOURCE_DIGEST_CONTENT: &str = "history/program.source-digest";
 const SOURCE_INVENTORY_CONTENT: &str = "source-inventory.json";
+const COMMUNITY_QUALITY_CONTENT: &str = "community-quality.json";
 
 /// All authoritative inputs needed to reconstruct a complete Compass output.
 #[derive(Clone, Debug, PartialEq)]
@@ -225,7 +226,14 @@ impl GraphArtifacts {
         analysis: Option<Value>,
         manifest: Option<Value>,
     ) -> Result<Self, HistoryError> {
-        let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+        let mut trusted_bytes = Vec::new();
+        compass_graph::write_canonical_graph_json(&trusted, &mut trusted_bytes).map_err(
+            |error| {
+                HistoryError::InvalidArtifacts(format!(
+                    "trusted graph canonical encoding failed: {error}"
+                ))
+            },
+        )?;
         let graph = serde_json::to_value(&trusted.graph)?
             .as_object()
             .cloned()
@@ -282,12 +290,18 @@ impl GraphArtifacts {
             ));
         }
         let value: Value = serde_json::from_slice(bytes)?;
-        if canonical_json_bytes(&value)? != *bytes {
+        let document: TrustedGraphDocument = serde_json::from_value(value.clone())?;
+        let mut streamed = Vec::new();
+        compass_graph::write_canonical_graph_json(&document, &mut streamed).map_err(|error| {
+            HistoryError::InvalidArtifacts(format!(
+                "trusted graph canonical encoding failed: {error}"
+            ))
+        })?;
+        if canonical_json_bytes(&value)? != *bytes && streamed != *bytes {
             return Err(HistoryError::InvalidArtifacts(
                 "trusted graph artifact is not canonical JSON".to_owned(),
             ));
         }
-        let document: TrustedGraphDocument = serde_json::from_value(value)?;
         validate_code_graph(&document).map_err(|error| {
             HistoryError::InvalidArtifacts(format!("trusted graph validation failed: {error}"))
         })?;
@@ -341,7 +355,7 @@ impl GraphArtifacts {
         profile_artifact_load("authoritative sidecars", sidecars_started);
         let graph_path = output_dir.join("graph.json");
         let program_path = output_dir.join("program.json");
-        let ((document, trusted_graph), program) = {
+        let ((document, trusted_graph, graph_generation), program) = {
             let (graph, program) = rayon::join(
                 || {
                     let started = Instant::now();
@@ -360,6 +374,13 @@ impl GraphArtifacts {
             // to completion concurrently.
             (graph?, program?)
         };
+        if let Some(bytes) = read_optional_community_quality(
+            &output_dir.join(COMMUNITY_QUALITY_CONTENT),
+            &graph_generation,
+            &trusted_graph,
+        )? {
+            authoritative_sidecars.insert(COMMUNITY_QUALITY_CONTENT.to_owned(), bytes);
+        }
         authoritative_sidecars.insert(TRUSTED_GRAPH_CONTENT.to_owned(), trusted_graph);
         if !validate_program && let Some(digest) = program.source_digest {
             authoritative_sidecars
@@ -397,6 +418,7 @@ impl GraphArtifacts {
     ) -> Result<PartitionedGraph, HistoryError> {
         completion.validate()?;
         validate_sidecar_paths(&self.authoritative_sidecars)?;
+        validate_embedded_community_quality(&self.authoritative_sidecars)?;
         let trusted_graph = self
             .authoritative_sidecars
             .contains_key(TRUSTED_GRAPH_CONTENT);
@@ -1009,10 +1031,30 @@ impl GraphArtifacts {
                 nodes,
                 links,
             };
-            sidecars.insert(
-                TRUSTED_GRAPH_CONTENT.to_owned(),
-                canonical_json_bytes(&serde_json::to_value(trusted)?)?,
-            );
+            let value = serde_json::to_value(&trusted)?;
+            let sorted_bytes = canonical_json_bytes(&value)?;
+            let mut streamed_bytes = Vec::new();
+            compass_graph::write_canonical_graph_json(&trusted, &mut streamed_bytes).map_err(
+                |error| {
+                    HistoryError::InvalidArtifacts(format!(
+                        "trusted graph canonical encoding failed: {error}"
+                    ))
+                },
+            )?;
+            let expected_digest = registry.as_ref().and_then(|registry| {
+                registry
+                    .iter()
+                    .find(|entry| entry.relative_path == "graph.json")
+                    .and_then(|entry| entry.content_digest)
+            });
+            let trusted_bytes = if expected_digest.is_some_and(|expected| {
+                <[u8; 32]>::from(Sha256::digest(&streamed_bytes)) == expected
+            }) {
+                streamed_bytes
+            } else {
+                sorted_bytes
+            };
+            sidecars.insert(TRUSTED_GRAPH_CONTENT.to_owned(), trusted_bytes);
         }
         let restored = Self {
             document: GraphDocument {
@@ -1095,9 +1137,27 @@ impl GraphArtifacts {
     }
 }
 
-fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryError> {
-    let trusted = TrustedGraphDocument::load_for_recluster(path)?;
-    let trusted_bytes = canonical_json_bytes(&serde_json::to_value(&trusted)?)?;
+fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>, String), HistoryError> {
+    let (trusted, artifact_digest) =
+        TrustedGraphDocument::load_for_recluster_with_artifact_digest(path)?;
+    let generation = trusted.graph.build.generation_id.clone();
+    let value = serde_json::to_value(&trusted)?;
+    let sorted_bytes = canonical_json_bytes(&value)?;
+    let mut streamed_bytes = Vec::new();
+    compass_graph::write_canonical_graph_json(&trusted, &mut streamed_bytes).map_err(|error| {
+        HistoryError::InvalidArtifacts(format!("trusted graph canonical encoding failed: {error}"))
+    })?;
+    let streamed_digest = format!("{:x}", Sha256::digest(&streamed_bytes));
+    let sorted_digest = format!("{:x}", Sha256::digest(&sorted_bytes));
+    let trusted_bytes = if artifact_digest == streamed_digest {
+        streamed_bytes
+    } else if artifact_digest == sorted_digest {
+        sorted_bytes
+    } else {
+        // Normalize non-canonical inputs for old history behavior. A quality
+        // sidecar bound to such bytes will fail the graph-identity check.
+        sorted_bytes
+    };
     let graph = serde_json::to_value(&trusted.graph)?
         .as_object()
         .cloned()
@@ -1122,6 +1182,7 @@ fn load_trusted_graph(path: &Path) -> Result<(GraphDocument, Vec<u8>), HistoryEr
             extras: BTreeMap::new(),
         },
         trusted_bytes,
+        generation,
     ))
 }
 
@@ -1348,7 +1409,15 @@ fn artifact_registry_with_graph_bytes(
         if is_internal_artifact(path) {
             continue;
         }
-        let mut entry = authoritative_entry(path, "application/octet-stream", bytes);
+        let media_type = if path == COMMUNITY_QUALITY_CONTENT {
+            "application/json"
+        } else {
+            "application/octet-stream"
+        };
+        let mut entry = authoritative_entry(path, media_type, bytes);
+        if path == COMMUNITY_QUALITY_CONTENT {
+            entry.schema_version = Some(1);
+        }
         if path != SOURCE_INVENTORY_CONTENT {
             entry.storage = Some(bytes.clone());
         }
@@ -1429,7 +1498,12 @@ fn completion_from_partition(
 fn is_builtin_artifact(path: &str) -> bool {
     matches!(
         path,
-        "graph.json" | "program.json" | "analysis.json" | "labels.json" | "manifest.json"
+        "graph.json"
+            | "program.json"
+            | "analysis.json"
+            | "labels.json"
+            | "manifest.json"
+            | COMMUNITY_QUALITY_CONTENT
     )
 }
 
@@ -2093,6 +2167,78 @@ fn read_optional_json(path: &Path) -> Result<Option<Value>, HistoryError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(crate::error::io_error(path, source)),
     }
+}
+
+fn read_optional_authoritative_json(
+    path: &Path,
+    expected_schema: &str,
+) -> Result<Option<Vec<u8>>, HistoryError> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(crate::error::io_error(path, source)),
+    };
+    if metadata.len() > crate::MAX_AUTHORITATIVE_BYTES {
+        return Err(HistoryError::InvalidArtifacts(format!(
+            "authoritative sidecar {} exceeds byte limit",
+            path.display()
+        )));
+    }
+    let bytes = fs::read(path).map_err(|source| crate::error::io_error(path, source))?;
+    let value: Value = serde_json::from_slice(&bytes)?;
+    if value.get("schema").and_then(Value::as_str) != Some(expected_schema) {
+        return Err(HistoryError::InvalidArtifacts(format!(
+            "authoritative sidecar {} has an unsupported schema",
+            path.display()
+        )));
+    }
+    Ok(Some(bytes))
+}
+
+fn read_optional_community_quality(
+    path: &Path,
+    graph_generation: &str,
+    graph_bytes: &[u8],
+) -> Result<Option<Vec<u8>>, HistoryError> {
+    let Some(bytes) =
+        read_optional_authoritative_json(path, compass_graph::COMMUNITY_QUALITY_SCHEMA)?
+    else {
+        return Ok(None);
+    };
+    let artifact: compass_graph::CommunityQualityArtifact = serde_json::from_slice(&bytes)?;
+    let graph_digest = format!("sha256:{:x}", Sha256::digest(graph_bytes));
+    artifact
+        .validate_for_graph(graph_generation, &graph_digest)
+        .map_err(|error| {
+            HistoryError::InvalidArtifacts(format!(
+                "authoritative sidecar {} is invalid: {error}",
+                path.display()
+            ))
+        })?;
+    Ok(Some(bytes))
+}
+
+fn validate_embedded_community_quality(
+    sidecars: &BTreeMap<String, ArtifactContent>,
+) -> Result<(), HistoryError> {
+    let Some(bytes) = sidecars.get(COMMUNITY_QUALITY_CONTENT) else {
+        return Ok(());
+    };
+    let Some(graph_bytes) = sidecars.get(TRUSTED_GRAPH_CONTENT) else {
+        return Err(HistoryError::InvalidArtifacts(
+            "community quality sidecar requires a trusted graph artifact".to_owned(),
+        ));
+    };
+    let graph: TrustedGraphDocument = serde_json::from_slice(graph_bytes)?;
+    let artifact: compass_graph::CommunityQualityArtifact = serde_json::from_slice(bytes)?;
+    let graph_digest = format!("sha256:{:x}", Sha256::digest(graph_bytes));
+    artifact
+        .validate_for_graph(&graph.graph.build.generation_id, &graph_digest)
+        .map_err(|error| {
+            HistoryError::InvalidArtifacts(format!(
+                "authoritative sidecar {COMMUNITY_QUALITY_CONTENT} is invalid: {error}"
+            ))
+        })
 }
 
 fn read_optional_program(

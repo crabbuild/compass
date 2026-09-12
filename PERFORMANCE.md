@@ -1242,6 +1242,31 @@ three-sample median of about 2,353 MiB. These native-volume measurements avoid
 the multi-second publication variance observed on the mounted workspace, but
 remain runner-specific rather than a cross-platform guarantee.
 
+## Community detection qualification
+
+The version-1 community-quality runner evaluates 15 deterministic fixture
+families, including input permutations, planted partitions, articulation, hub,
+direction, confidence, containment, isolate, and resolution-limit cases:
+
+```bash
+./scripts/qualify_code_graph_v1.sh --community-quality
+```
+
+On 2026-09-12, an aarch64 macOS debug build ran the complete compact fixture
+set 50 times per process. Seven-process medians were 1.25 seconds for
+compatibility Louvain, 1.82 seconds for fixed-resolution typed Leiden, and
+3.01 seconds for three-candidate typed Leiden. Compact setup-heavy debug
+timings are diagnostic, not the pinned real-repository release oracle, and no
+RSS or cold-build claim is derived from them.
+
+The fixture quality gates pass, including deterministic equality, connected
+communities, exact required recovery, and improved ring-of-cliques and
+articulation recovery. Production nevertheless uses fixed resolution; the
+automatic selector remains qualification-only until pinned-corpus clustering,
+cold-build, RSS, and incremental gates pass. See the
+[qualification report](docs/implementation/community-detection-quality-qualification.md)
+for exact fixture results and omissions.
+
 ## Versioned history qualification
 
 Build a release binary, then measure a clean real repository:

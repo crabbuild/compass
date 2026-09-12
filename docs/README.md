@@ -56,6 +56,7 @@ to yours:
 | --- | --- |
 | [How Compass works](concepts/how-it-works.md) | How does a directory become a queryable graph? |
 | [Graph model](concepts/graph-model.md) | What do the entities and relationships mean? |
+| [Community detection and quality](concepts/community-detection.md) | How are deterministic communities built, bounded, and evaluated? |
 | [Provenance](concepts/provenance.md) | How can I judge where an edge came from? |
 | [Agent Graph Overlays](concepts/agent-graph-overlays.md) | How can an agent add verified knowledge without rewriting the Base Graph? |
 | [CompassQL concepts](concepts/compassql.md) | When should I use an exact structural query? |
@@ -111,6 +112,8 @@ They are not evidence that an uncompleted design has shipped.
 | [Evidence resolution framework execution plan](implementation/evidence-resolution-framework-phased-execution-plan.md) | Phased, commit-oriented implementation and verification plan |
 | [Architecture graph hardening technical design](implementation/architecture-graph-hardening-phased-technical-design.md) | Project-specific architecture projection, quality contract, and phased delivery plan |
 | [Architecture graph hardening qualification](implementation/architecture-graph-hardening-qualification.md) | Real-repository metrics, screenshots, acceptance gates, and residual diagnostics |
+| [Community detection quality technical design](implementation/community-detection-quality-technical-design.md) | Versioned topology, shared quality evidence, native Leiden, bounded selection, and incremental rollout |
+| [Community detection quality qualification](implementation/community-detection-quality-qualification.md) | Fixture results, performance decision, and remaining corpus evidence |
 | [Query recall and accuracy design](implementation/query-recall-accuracy/query-performance-accuracy-recall-phased-technical-design.md) | Phased query-quality architecture, evidence, and rollout boundaries |
 | [Query implementation plans](plans/README.md) | Ordered, independently executable query-quality work plans |
 | [Grounded Agent Graph Overlay design](implementation/grounded-agent-graph-overlay-technical-design.md) | Ownership, Grounding, CRUD, composition, security, and history contracts for agent-authored graph enhancement |

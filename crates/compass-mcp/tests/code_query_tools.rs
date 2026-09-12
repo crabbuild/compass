@@ -355,6 +355,7 @@ fn cluster_only_output_remains_typed_and_serves_orientation_resources() -> Resul
         no_viz: true,
         no_label: true,
         resolution: 1.0,
+        resolution_explicit: false,
         exclude_hubs: None,
         min_community_size: 1,
     })?;

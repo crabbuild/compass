@@ -614,6 +614,38 @@ The `extract --code-only` profile excludes document extractors from structural
 node and edge publication while retaining the scanned file inventory and its
 status records.
 
+## Community detection profile cutover
+
+Typed clustered graphs use the complete profile
+`seeded-leiden-modularity/v1` + `typed-evidence-undirected/v1` +
+`community-quality/v1` + `fixed-resolution/v1`, seed `42`, and
+`community-limits/v1`. The default resolution is fixed at `1`; an explicit
+`--resolution N` remains a single fixed positive finite resolution. The
+bounded three-candidate selector has identity `bounded-multiresolution/v1` but
+remains qualification-only because it exceeded the clustering-time acceptance
+gate.
+
+This is a compatibility-sensitive membership cutover without a
+`compass.graph/1` schema change. Community numeric IDs, membership, labels,
+reports, and architecture groupings may change. Base Graph node and edge
+identity, direction, multiplicity, anchors, provenance, and canonical encoding
+do not change as a consequence of clustering. The complete profile enters the
+configuration digest and current/history build profiles, so old output is
+rebuilt coherently rather than partially reused.
+
+Clustered typed builds add strict `compass.community-quality/1` at
+`community-quality.json`. Readers must validate its self-digest, graph
+generation, exact canonical graph digest, and profile identity and reject
+unknown majors or fields. Missing evidence on an older, schema-less legacy, or
+unclustered graph means unavailable. Direct reclustering of a schema-less
+legacy graph retains `seeded-louvain/v1` compatibility and publishes no quality
+sidecar.
+
+Historical realizations and their sidecars are immutable. Compass never
+substitutes Louvain results under a Leiden profile or interprets one profile's
+member IDs as another profile's result. Existing `cohesion` remains the public
+density projection, now calculated by the shared quality evaluator.
+
 ## Compass Store release contract
 
 The first supported local store line is `0.3.x`. Its logical machine formats

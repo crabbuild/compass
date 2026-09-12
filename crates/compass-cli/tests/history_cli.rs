@@ -51,8 +51,14 @@ fn current_history_profile() -> Result<compass_history::BuildProfile, compass_hi
         ("program_analyzer_version", "1"),
         ("enabled_features", "workspace-default"),
         ("direction", "native-source-semantics"),
-        ("cluster_algorithm", "seeded-louvain/v1"),
+        ("cluster_algorithm", "seeded-leiden-modularity/v1"),
         ("cluster_seed", "42"),
+        ("cluster_topology", "typed-evidence-undirected/v1"),
+        ("cluster_quality", "community-quality/v1"),
+        ("cluster_selector", "fixed-resolution/v1"),
+        ("cluster_resolution_policy", "fixed/v1"),
+        ("cluster_hub_policy", "none/v1"),
+        ("cluster_limits_version", "community-limits/v1"),
         ("gitignore", "true"),
         ("code_only", "true"),
         ("cargo", "false"),
@@ -69,6 +75,83 @@ fn current_history_profile() -> Result<compass_history::BuildProfile, compass_hi
         ("provider_region", "none"),
     ] {
         profile.insert(key, value)?;
+    }
+    for (key, value) in [
+        ("document_schema", compass_media::DOCUMENT_SCHEMA.to_owned()),
+        (
+            "document_normalizer_version",
+            compass_media::DOCUMENT_NORMALIZER_VERSION.to_string(),
+        ),
+        ("ocr_protocol", compass_ocr::OCR_PROTOCOL_SCHEMA.to_owned()),
+        ("ocr_policy", compass_ocr::OCR_POLICY_VERSION.to_string()),
+        (
+            "ocr_preprocessing",
+            compass_ocr::OCR_PREPROCESSING_VERSION.to_string(),
+        ),
+        (
+            "pdf_rasterizer",
+            compass_media::PDF_RASTERIZER_IDENTITY.to_owned(),
+        ),
+        (
+            "document_raw_bytes_limit",
+            compass_media::MEDIA_MAX_RAW_BYTES.to_string(),
+        ),
+        (
+            "ocr_pdf_pages_limit",
+            compass_media::OCR_MAX_PDF_PAGES.to_string(),
+        ),
+        (
+            "ocr_office_images_limit",
+            compass_media::OCR_MAX_OOXML_IMAGES.to_string(),
+        ),
+        (
+            "ocr_raster_pixels_limit",
+            compass_ocr::OCR_MAX_RASTER_PIXELS.to_string(),
+        ),
+        (
+            "ocr_raster_edge_limit",
+            compass_ocr::OCR_MAX_RASTER_LONG_EDGE.to_string(),
+        ),
+        (
+            "ocr_engine_side_limit",
+            compass_ocr::OCR_ENGINE_MAX_SIDE.to_string(),
+        ),
+        (
+            "ocr_tile_overlap",
+            compass_ocr::OCR_TILE_OVERLAP.to_string(),
+        ),
+        (
+            "ocr_aggregate_pixels_limit",
+            compass_media::OCR_MAX_AGGREGATE_PIXELS.to_string(),
+        ),
+        (
+            "ocr_regions_raster_limit",
+            compass_ocr::OCR_MAX_OBSERVATIONS_PER_RASTER.to_string(),
+        ),
+        (
+            "ocr_regions_document_limit",
+            compass_ocr::OCR_MAX_OBSERVATIONS_PER_DOCUMENT.to_string(),
+        ),
+        (
+            "ocr_text_region_limit",
+            compass_ocr::OCR_MAX_TEXT_BYTES_PER_OBSERVATION.to_string(),
+        ),
+        (
+            "ocr_text_document_limit",
+            compass_ocr::OCR_MAX_TEXT_CHARS_PER_DOCUMENT.to_string(),
+        ),
+        (
+            "ocr_wall_time_seconds",
+            compass_ocr::OCR_MAX_DOCUMENT_WALL_TIME_SECS.to_string(),
+        ),
+        ("ocr_mode", "off".to_owned()),
+        ("ocr_profile", "pp-ocrv6-small".to_owned()),
+        (
+            "ocr_model_manifest",
+            compass_ocr::profile_manifest_digest(compass_ocr::ModelProfile::PpOcrV6Small),
+        ),
+    ] {
+        profile.insert(key, &value)?;
     }
     profile.insert(
         "semantic_prompt_sha256",

@@ -25,6 +25,7 @@ struct LabelArguments {
     backend: Option<String>,
     model: Option<String>,
     resolution: f64,
+    resolution_explicit: bool,
     exclude_hubs: Option<f64>,
     max_concurrency: usize,
     batch_size: usize,
@@ -100,6 +101,7 @@ pub(super) fn command_label(_frontend: Frontend, args: &[String]) -> Outcome {
         no_viz: parsed.no_viz,
         no_label: false,
         resolution: parsed.resolution,
+        resolution_explicit: parsed.resolution_explicit,
         exclude_hubs: parsed.exclude_hubs,
         min_community_size: parsed.min_community_size,
     };
@@ -418,6 +420,7 @@ fn parse_arguments(args: &[String]) -> Result<LabelArguments, String> {
         backend: None,
         model: None,
         resolution: 1.0,
+        resolution_explicit: false,
         exclude_hubs: None,
         max_concurrency: 4,
         batch_size: 100,
@@ -437,7 +440,10 @@ fn parse_arguments(args: &[String]) -> Result<LabelArguments, String> {
                     "--graph" => parsed.graph_override = Some(PathBuf::from(value)),
                     "--backend" => parsed.backend = Some(value.clone()),
                     "--model" => parsed.model = Some(value.clone()),
-                    "--resolution" => parsed.resolution = parse_number(value, argument)?,
+                    "--resolution" => {
+                        parsed.resolution = parse_number(value, argument)?;
+                        parsed.resolution_explicit = true;
+                    }
                     "--exclude-hubs" => parsed.exclude_hubs = Some(parse_number(value, argument)?),
                     "--max-concurrency" => {
                         parsed.max_concurrency = parse_positive(value, argument)?
@@ -457,6 +463,7 @@ fn parse_arguments(args: &[String]) -> Result<LabelArguments, String> {
             value if value.starts_with("--model=") => parsed.model = Some(value[8..].to_owned()),
             value if value.starts_with("--resolution=") => {
                 parsed.resolution = parse_number(&value[13..], "--resolution")?;
+                parsed.resolution_explicit = true;
             }
             value if value.starts_with("--exclude-hubs=") => {
                 parsed.exclude_hubs = Some(parse_number(&value[15..], "--exclude-hubs")?);

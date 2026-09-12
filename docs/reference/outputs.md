@@ -17,6 +17,7 @@ compass-out/
 ├── manifest.json
 ├── program.json                 # only with --program or --program-artifact
 ├── graph-overview.json          # clustered builds
+├── community-quality.json       # clustered typed builds
 ├── cache/                       # Compass-owned disposable cache layout
 ├── current-snapshot
 ├── snapshots/<current>/
@@ -74,6 +75,7 @@ paths.
 | `program.json` (optional) | provenance-aware Program IR | program inspection, semantic analysis |
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `orientation.json` | versioned Agent Orientation bound to the same graph generation | coding assistants and MCP |
+| `community-quality.json` | strict graph-bound community evidence | detector inspection, qualification, immutable history |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
 | binary query caches | disposable acceleration | internal query loading |
@@ -151,6 +153,27 @@ Compass sets `multigraph` from the emitted links. It is `true` when two links
 share an endpoint pair (ordered for directed graphs, unordered for undirected
 graphs), including repeated self-loops. Consumers do not need to request this
 promotion.
+
+## `community-quality.json`
+
+Clustered typed builds publish schema `compass.community-quality/1`. The
+artifact records the exact `graphGeneration` and SHA-256 `graphDigest`, the
+algorithm/topology/quality/selector/seed/limits identity, the numeric limits,
+partition metrics, per-community evidence, candidate summaries, bounded
+witnesses, exact omissions, and `resultDigest`.
+
+Consumers must reject unknown schemas or fields and call the equivalent of
+`validate_for_graph` against the selected canonical `graph.json`. A digest,
+generation, or profile mismatch means the files are not one coherent artifact
+set. `resultDigest` detects mutation of the quality payload itself. A missing
+artifact is valid for an older graph, a schema-less legacy recluster, or a
+`--no-cluster` build and means quality evidence is unavailable.
+
+Metrics form a vector rather than a pass/fail truth label. Modularity is
+reported at the named evaluation resolution; conductance, connectedness,
+largest-community fraction, singleton count, topology evidence mixes, and
+witness omissions must be interpreted alongside it. Numeric community IDs are
+local to this graph realization.
 
 ### Inference levels
 

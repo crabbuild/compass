@@ -2,6 +2,7 @@
 
 mod analyze;
 mod cluster;
+mod community;
 mod dedup;
 mod inference;
 mod quarantine;
@@ -19,6 +20,19 @@ pub use cluster::{
     ClusterOptions, Communities, IncrementalClusterLimits, IncrementalClusterResult, cluster,
     cluster_incremental, cohesion_score, community_member_signatures, label_communities_by_hub,
     remap_communities_to_previous, score_communities,
+};
+pub use community::{
+    COMMUNITY_QUALITY_SCHEMA, COMPATIBILITY_CLUSTER_ALGORITHM, COMPATIBILITY_CLUSTER_LIMITS,
+    COMPATIBILITY_CLUSTER_QUALITY, COMPATIBILITY_CLUSTER_SEED, COMPATIBILITY_CLUSTER_SEED_TEXT,
+    COMPATIBILITY_CLUSTER_SELECTOR, COMPATIBILITY_CLUSTER_TOPOLOGY, CandidateAgreement,
+    CommunityCandidateSummary, CommunityDetectorError, CommunityError, CommunityExecution,
+    CommunityIdentity, CommunityLimits, CommunityProfile, CommunityQuality,
+    CommunityQualityArtifact, CommunityQualityArtifactError, CommunityQualityError,
+    CommunityRequest, CommunityResult, CommunityTopologyError, FallbackReason, PartitionQuality,
+    PreviousCommunities, QUALITY_CLUSTER_ALGORITHM, QUALITY_CLUSTER_LIMITS,
+    QUALITY_CLUSTER_QUALITY, QUALITY_CLUSTER_SELECTOR, QUALITY_CLUSTER_TOPOLOGY, ResolutionPolicy,
+    TopologyEvidence, adjusted_mutual_information, adjusted_rand_index, build_communities,
+    evaluate_partition_quality,
 };
 pub use compass_languages::{RawEdgeRecord, RawNodeRecord};
 use dedup::deduplicate_owned;

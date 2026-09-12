@@ -111,6 +111,10 @@ pub enum OutputError {
     InvalidOrientationModel { reason: &'static str },
     #[error(transparent)]
     File(#[from] compass_files::FileError),
+    #[error(transparent)]
+    Community(#[from] compass_graph::CommunityError),
+    #[error(transparent)]
+    Graph(#[from] compass_model::GraphError),
     #[error("existing graph is non-empty but malformed: {0}")]
     MalformedGraph(std::path::PathBuf),
     #[error("refusing to shrink graph from {existing} nodes to {new}; use force to override")]

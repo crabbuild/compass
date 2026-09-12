@@ -105,6 +105,13 @@ contain different uncommitted changes and must not write one shared mutable
 output directory. Repository-wide immutable history and its verified-content
 cache remain shared through the Git common directory.
 
+Clustered builds use deterministic fixed-resolution Leiden over the typed
+evidence topology. Omitting `--resolution` uses `1`; `--resolution N` uses the
+single positive finite value `N`. Higher values generally create smaller
+communities. The three-candidate automatic selector is qualification-only and
+is not enabled by omitting this option. `--no-cluster` skips community
+membership, analysis, labels, and `community-quality.json`.
+
 ### `extract`
 
 Expose the full build surface:
@@ -243,6 +250,12 @@ compass cluster-only [PATH]
   [--min-community-size=N]
 ```
 
+For a typed `compass.graph/1` input this uses the same fixed-resolution Leiden
+profile as a normal build and atomically republishes graph-bound
+`community-quality.json`. A schema-less legacy graph retains compatibility
+Louvain behavior and does not publish quality evidence. The command never
+interprets a missing older quality artifact as successful evidence.
+
 ### `label`
 
 Generate/update semantic community labels:
@@ -266,6 +279,9 @@ compass label [PATH]
 and in the bounded architecture report. It does not remove nodes, edges, or
 community assignments from the graph; omitted communities remain queryable and
 are included in the report's coverage disclosure. The default is `3`.
+
+When labeling first reclusters a typed graph, its resolution behavior and
+quality artifact are the same as `cluster-only`.
 
 ## Read and query
 
