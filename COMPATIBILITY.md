@@ -94,6 +94,14 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+Immutable history now accepts up to 5 GiB of aggregate authoritative key and
+value bytes per realization, raised from 512 MiB. The history schema and
+canonical encoding are unchanged, as are the per-key, per-value, per-tree,
+JSON-depth, job, and diagnostic bounds. Readers from older Compass releases
+continue to reject a realization whose authoritative content exceeds 512 MiB;
+deploy a reader containing this limit widening before sharing larger
+realizations.
+
 The closed route-stage vocabulary used by `compass.graph/1`,
 `compass.query/1`, and `compass.framework-context/1` now includes the additive
 `dependency` and `security` values. The query contract manifest and fingerprint

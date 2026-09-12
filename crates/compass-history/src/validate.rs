@@ -12,7 +12,7 @@ use crate::{
 
 type Records = Vec<(Vec<u8>, Vec<u8>)>;
 
-pub const MAX_AUTHORITATIVE_BYTES: u64 = 512 * 1024 * 1024;
+pub const MAX_AUTHORITATIVE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 pub const MAX_KEY_BYTES: usize = 1024 * 1024;
 pub const MAX_RECORD_VALUE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_RECORDS_PER_TREE: u64 = 10_000_000;
@@ -592,6 +592,12 @@ mod tests {
             assert!(!exceeds_limit(limit, limit));
             assert!(exceeds_limit(limit + 1, limit));
         }
+    }
+
+    #[test]
+    fn authoritative_history_limit_is_five_gibibytes() {
+        assert_eq!(MAX_AUTHORITATIVE_BYTES, 5_368_709_120);
+        assert!(!exceeds_limit(616_211_608, MAX_AUTHORITATIVE_BYTES));
     }
 
     #[test]

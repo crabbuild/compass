@@ -403,6 +403,12 @@ Export equivalence is semantic and canonical. JSON object or record ordering
 that does not affect meaning is not a contract; graph structure, attributes,
 multiplicity, duplicate id-less hyperedges, and authoritative bytes are.
 
+Each immutable realization accepts at most 5 GiB of aggregate authoritative
+key and value bytes. Per-record and record-count limits remain independently
+enforced, and crossing any limit fails publication rather than exposing a
+partial realization. Compass releases with the former 512 MiB ceiling cannot
+read a realization above that older bound.
+
 ## 8. Choose a preferred realization
 
 When a commit has multiple valid realizations:
