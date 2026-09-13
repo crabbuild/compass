@@ -602,8 +602,12 @@ fn quality_partition(
     let selected = (0..graph.len())
         .filter(|node| graph.degree_unweighted(*node) > 0 && !hubs.contains(node))
         .collect::<Vec<_>>();
-    let connected = graph.subgraph(&selected);
-    let mut communities = leiden(&connected, resolution, max_levels, max_moves)?;
+    let mut communities = if selected.len() == graph.len() {
+        leiden(graph, resolution, max_levels, max_moves)?
+    } else {
+        let connected = graph.subgraph(&selected);
+        leiden(&connected, resolution, max_levels, max_moves)?
+    };
     communities.extend(
         isolates
             .into_iter()

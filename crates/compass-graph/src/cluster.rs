@@ -1179,6 +1179,13 @@ impl WeightedGraph {
         }
     }
 
+    pub(crate) fn add_unique_edge(&mut self, left: usize, right: usize, weight: f64) {
+        self.adjacency[left].push((right, weight));
+        if left != right {
+            self.adjacency[right].push((left, weight));
+        }
+    }
+
     pub(crate) fn edges(&self) -> impl Iterator<Item = (usize, usize, f64)> + '_ {
         self.adjacency
             .iter()
