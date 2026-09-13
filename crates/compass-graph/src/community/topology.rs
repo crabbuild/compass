@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use compass_model::code_graph::{EdgeKind, GraphDocument};
 use compass_model::provenance::{EvidenceConfidence, effective_confidence};
 use serde::{Deserialize, Serialize};
@@ -139,14 +140,19 @@ pub(crate) struct ProjectedPairEvidence {
     pub left: usize,
     pub right: usize,
     pub edge_ids: Vec<String>,
-    pub relationship_counts: BTreeMap<String, usize>,
-    pub strength_counts: BTreeMap<String, usize>,
-    pub confidence_counts: BTreeMap<String, usize>,
+    pub relationship_counts: Vec<(&'static str, usize)>,
+    pub strength_counts: Vec<(&'static str, usize)>,
+    pub confidence_counts: Vec<(&'static str, usize)>,
+}
+
+struct PairAccumulator {
+    evidence: ProjectedPairEvidence,
+    weight: f64,
 }
 
 #[derive(Clone)]
 struct Contribution {
-    edge_id: String,
+    edge_index: usize,
     occurrence_key: String,
     forward: bool,
     weight: f64,
@@ -191,13 +197,20 @@ pub(crate) fn from_typed_document(
         .iter()
         .enumerate()
         .map(|(position, id)| (id.as_str(), position))
-        .collect::<BTreeMap<_, _>>();
-    let mut grouped = BTreeMap::<(usize, usize, String), Vec<Contribution>>::new();
-    let mut projected_pairs = BTreeSet::<(usize, usize)>::new();
+        .collect::<HashMap<_, _>>();
+    let mut grouped =
+        Vec::<((usize, usize, &'static str), Contribution)>::with_capacity(document.links.len());
+    let mut projected_pairs = HashSet::<(usize, usize)>::new();
     let mut evidence = TopologyEvidence {
         input_edge_count: document.links.len(),
         ..TopologyEvidence::default()
     };
+    let mut relationship_counts = HashMap::<&'static str, usize>::with_capacity(32);
+    let mut strength_counts = HashMap::<&'static str, usize>::with_capacity(3);
+    let mut confidence_counts = HashMap::<&'static str, usize>::with_capacity(3);
+    let mut retained_relationship_counts = HashMap::<&'static str, usize>::with_capacity(32);
+    let mut retained_strength_counts = HashMap::<&'static str, usize>::with_capacity(3);
+    let mut retained_confidence_counts = HashMap::<&'static str, usize>::with_capacity(3);
     for (processed, edge) in document.links.iter().enumerate() {
         let Some(&source) = positions.get(edge.source.as_str()) else {
             return Err(CommunityTopologyError::DanglingEndpoint {
@@ -227,19 +240,10 @@ pub(crate) fn from_typed_document(
         }
         let confidence =
             effective_confidence(&edge.evidence).unwrap_or(EvidenceConfidence::Inferred);
-        *evidence
-            .relationship_counts
-            .entry(edge.kind.as_str().to_owned())
-            .or_default() += 1;
+        increment_internal_count(&mut relationship_counts, edge.kind.as_str());
         let strength = relationship_strength(edge.kind);
-        *evidence
-            .strength_counts
-            .entry(strength.name().to_owned())
-            .or_default() += 1;
-        *evidence
-            .confidence_counts
-            .entry(confidence.as_str().to_owned())
-            .or_default() += 1;
+        increment_internal_count(&mut strength_counts, strength.name());
+        increment_internal_count(&mut confidence_counts, confidence.as_str());
         if confidence == EvidenceConfidence::Ambiguous {
             evidence.omitted_ambiguous_count += 1;
             continue;
@@ -249,107 +253,125 @@ pub(crate) fn from_typed_document(
         } else {
             (target, source, false)
         };
-        let relation = edge.kind.as_str().to_owned();
-        let pair_is_new = !projected_pairs.contains(&(left, right));
-        if pair_is_new && projected_pairs.len() == limits.max_projected_pairs {
+        let relation = edge.kind.as_str();
+        if projected_pairs.insert((left, right))
+            && projected_pairs.len() > limits.max_projected_pairs
+        {
             return Err(CommunityTopologyError::LimitExceeded {
                 stage: "projected_pairs",
-                required: projected_pairs.len().saturating_add(1),
+                required: projected_pairs.len(),
                 limit: limits.max_projected_pairs,
                 processed,
             });
         }
-        projected_pairs.insert((left, right));
         let confidence_factor = match confidence {
             EvidenceConfidence::Exact => 1.0,
             EvidenceConfidence::Inferred => 0.5,
             EvidenceConfidence::Ambiguous => 0.0,
         };
-        grouped
-            .entry((left, right, relation))
-            .or_default()
-            .push(Contribution {
-                edge_id: edge.id.clone(),
-                occurrence_key: occurrence_key(edge),
+        grouped.push((
+            (left, right, relation),
+            Contribution {
+                edge_index: processed,
+                occurrence_key: String::new(),
                 forward,
                 weight: strength.weight() * confidence_factor * input_weight,
                 strength: strength.name(),
                 confidence: confidence.as_str(),
-            });
+            },
+        ));
     }
 
     let members = ids.iter().cloned().map(|id| BTreeSet::from([id])).collect();
     let mut graph = WeightedGraph::new(ids, members);
-    let mut pair_weights = BTreeMap::<(usize, usize), f64>::new();
-    let mut pair_evidence = BTreeMap::<(usize, usize), ProjectedPairEvidence>::new();
-    for ((left, right, relation), contributions) in &mut grouped {
-        let before_deduplication = contributions.len();
-        contributions.sort_by(|left, right| {
-            left.occurrence_key
-                .cmp(&right.occurrence_key)
-                .then_with(|| left.forward.cmp(&right.forward))
-                .then_with(|| left.edge_id.cmp(&right.edge_id))
-        });
-        contributions.dedup_by(|left, right| {
-            left.occurrence_key == right.occurrence_key && left.forward == right.forward
-        });
-        evidence.omitted_duplicate_occurrence_count +=
-            before_deduplication.saturating_sub(contributions.len());
-        evidence.omitted_capped_count += contributions
-            .len()
-            .saturating_sub(MAX_OCCURRENCES_PER_PAIR_KIND);
-        for contribution in contributions.iter().take(MAX_OCCURRENCES_PER_PAIR_KIND) {
+    let mut pairs =
+        HashMap::<(usize, usize), PairAccumulator>::with_capacity(projected_pairs.len());
+    grouped.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut group_start = 0usize;
+    while group_start < grouped.len() {
+        let (left, right, relation) = grouped[group_start].0;
+        let mut group_end = group_start + 1;
+        while group_end < grouped.len() && grouped[group_end].0 == grouped[group_start].0 {
+            group_end += 1;
+        }
+        let contributions = &mut grouped[group_start..group_end];
+        if contributions.len() > 1 {
+            for (_, contribution) in contributions.iter_mut() {
+                contribution.occurrence_key =
+                    occurrence_key(&document.links[contribution.edge_index]);
+            }
+            contributions.sort_by(|left, right| {
+                left.1
+                    .occurrence_key
+                    .cmp(&right.1.occurrence_key)
+                    .then_with(|| left.1.forward.cmp(&right.1.forward))
+                    .then_with(|| {
+                        document.links[left.1.edge_index]
+                            .id
+                            .cmp(&document.links[right.1.edge_index].id)
+                    })
+            });
+        }
+        let mut unique_count = 0usize;
+        for index in 0..contributions.len() {
+            let duplicate = index > 0
+                && contributions[index].1.occurrence_key
+                    == contributions[index - 1].1.occurrence_key
+                && contributions[index].1.forward == contributions[index - 1].1.forward;
+            if duplicate {
+                continue;
+            }
+            unique_count += 1;
+            if unique_count > MAX_OCCURRENCES_PER_PAIR_KIND {
+                continue;
+            }
+            let contribution = &contributions[index].1;
             evidence.retained_occurrence_count += 1;
             if contribution.forward {
                 evidence.forward_occurrence_count += 1;
             } else {
                 evidence.reverse_occurrence_count += 1;
             }
-            *evidence
-                .retained_relationship_counts
-                .entry(relation.clone())
-                .or_default() += 1;
-            *evidence
-                .retained_strength_counts
-                .entry(contribution.strength.to_owned())
-                .or_default() += 1;
-            *evidence
-                .retained_confidence_counts
-                .entry(contribution.confidence.to_owned())
-                .or_default() += 1;
-            let pair =
-                pair_evidence
-                    .entry((*left, *right))
-                    .or_insert_with(|| ProjectedPairEvidence {
-                        left: *left,
-                        right: *right,
+            increment_internal_count(&mut retained_relationship_counts, relation);
+            increment_internal_count(&mut retained_strength_counts, contribution.strength);
+            increment_internal_count(&mut retained_confidence_counts, contribution.confidence);
+            let pair = pairs
+                .entry((left, right))
+                .or_insert_with(|| PairAccumulator {
+                    evidence: ProjectedPairEvidence {
+                        left,
+                        right,
                         edge_ids: Vec::new(),
-                        relationship_counts: BTreeMap::new(),
-                        strength_counts: BTreeMap::new(),
-                        confidence_counts: BTreeMap::new(),
-                    });
-            pair.edge_ids.push(contribution.edge_id.clone());
-            *pair
-                .relationship_counts
-                .entry(relation.clone())
-                .or_default() += 1;
-            *pair
-                .strength_counts
-                .entry(contribution.strength.to_owned())
-                .or_default() += 1;
-            *pair
-                .confidence_counts
-                .entry(contribution.confidence.to_owned())
-                .or_default() += 1;
-            *pair_weights.entry((*left, *right)).or_default() += contribution.weight;
+                        relationship_counts: Vec::new(),
+                        strength_counts: Vec::new(),
+                        confidence_counts: Vec::new(),
+                    },
+                    weight: 0.0,
+                });
+            pair.evidence
+                .edge_ids
+                .push(document.links[contribution.edge_index].id.clone());
+            increment_count(&mut pair.evidence.relationship_counts, relation);
+            increment_count(&mut pair.evidence.strength_counts, contribution.strength);
+            increment_count(
+                &mut pair.evidence.confidence_counts,
+                contribution.confidence,
+            );
+            pair.weight += contribution.weight;
         }
+        evidence.omitted_duplicate_occurrence_count +=
+            contributions.len().saturating_sub(unique_count);
+        evidence.omitted_capped_count += unique_count.saturating_sub(MAX_OCCURRENCES_PER_PAIR_KIND);
+        group_start = group_end;
     }
-    evidence.projected_pair_count = pair_weights.len();
-    for (processed, ((left, right), weight)) in pair_weights.into_iter().enumerate() {
-        if weight > MAX_PAIR_WEIGHT {
+    evidence.projected_pair_count = pairs.len();
+    let mut pairs = pairs.into_values().collect::<Vec<_>>();
+    pairs.sort_by_key(|pair| (pair.evidence.left, pair.evidence.right));
+    for (processed, pair) in pairs.iter_mut().enumerate() {
+        if pair.weight > MAX_PAIR_WEIGHT {
             evidence.omitted_pair_weight_cap_count += 1;
         }
-        let retained_weight = weight.min(MAX_PAIR_WEIGHT);
+        let retained_weight = pair.weight.min(MAX_PAIR_WEIGHT);
         let required = evidence.retained_total_weight + retained_weight;
         if !required.is_finite() || required > limits.max_total_weight {
             return Err(CommunityTopologyError::TotalWeightLimitExceeded {
@@ -359,17 +381,46 @@ pub(crate) fn from_typed_document(
             });
         }
         evidence.retained_total_weight = required;
-        graph.add_edge(left, right, retained_weight);
+        graph.add_unique_edge(pair.evidence.left, pair.evidence.right, retained_weight);
+        pair.evidence.edge_ids.sort();
+        pair.evidence.edge_ids.dedup();
+        pair.evidence
+            .relationship_counts
+            .sort_by_key(|(key, _)| *key);
+        pair.evidence.strength_counts.sort_by_key(|(key, _)| *key);
+        pair.evidence.confidence_counts.sort_by_key(|(key, _)| *key);
     }
-    for pair in pair_evidence.values_mut() {
-        pair.edge_ids.sort();
-        pair.edge_ids.dedup();
-    }
+    let pair_evidence = pairs.into_iter().map(|pair| pair.evidence).collect();
+    evidence.relationship_counts = published_counts(relationship_counts);
+    evidence.strength_counts = published_counts(strength_counts);
+    evidence.confidence_counts = published_counts(confidence_counts);
+    evidence.retained_relationship_counts = published_counts(retained_relationship_counts);
+    evidence.retained_strength_counts = published_counts(retained_strength_counts);
+    evidence.retained_confidence_counts = published_counts(retained_confidence_counts);
     Ok(CommunityTopology {
         graph,
         evidence,
-        pair_evidence: pair_evidence.into_values().collect(),
+        pair_evidence,
     })
+}
+
+fn increment_count(counts: &mut Vec<(&'static str, usize)>, key: &'static str) {
+    if let Some((_, count)) = counts.iter_mut().find(|(candidate, _)| *candidate == key) {
+        *count += 1;
+    } else {
+        counts.push((key, 1));
+    }
+}
+
+fn increment_internal_count(counts: &mut HashMap<&'static str, usize>, key: &'static str) {
+    *counts.entry(key).or_default() += 1;
+}
+
+fn published_counts(counts: HashMap<&'static str, usize>) -> BTreeMap<String, usize> {
+    counts
+        .into_iter()
+        .map(|(key, count)| (key.to_owned(), count))
+        .collect()
 }
 
 fn occurrence_key(edge: &compass_model::code_graph::EdgeRecord) -> String {
@@ -388,6 +439,11 @@ fn occurrence_key(edge: &compass_model::code_graph::EdgeRecord) -> String {
     anchors.dedup();
     if anchors.is_empty() {
         edge.id.clone()
+    } else if anchors.len() == 1 {
+        match anchors.pop() {
+            Some(anchor) => anchor,
+            None => edge.id.clone(),
+        }
     } else {
         anchors.join("|")
     }

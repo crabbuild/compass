@@ -479,9 +479,13 @@ pub(crate) fn evaluate_graph_partition(
     })
 }
 
-fn merge_counts(target: &mut BTreeMap<String, usize>, source: &BTreeMap<String, usize>) {
+fn merge_counts(target: &mut BTreeMap<String, usize>, source: &[(&'static str, usize)]) {
     for (key, count) in source {
-        *target.entry(key.clone()).or_default() += count;
+        if let Some(existing) = target.get_mut(*key) {
+            *existing += count;
+        } else {
+            target.insert((*key).to_owned(), *count);
+        }
     }
 }
 

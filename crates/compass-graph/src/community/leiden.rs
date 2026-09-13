@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::borrow::Cow;
+use std::collections::{BTreeSet, VecDeque};
 
 use thiserror::Error;
 
@@ -11,6 +12,22 @@ struct MovePolicy<'a> {
     coarse: Option<&'a [usize]>,
     locked: Option<&'a BTreeSet<usize>>,
     preserve_source_connectivity: bool,
+}
+
+struct LevelStats {
+    total_weight: f64,
+    degrees: Vec<f64>,
+}
+
+impl LevelStats {
+    fn new(graph: &WeightedGraph) -> Self {
+        Self {
+            total_weight: graph.total_weight(),
+            degrees: (0..graph.len())
+                .map(|node| graph.degree_weighted(node))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq)]
@@ -53,19 +70,17 @@ pub(crate) fn leiden(
             processed: 0,
         });
     }
-    let mut current = graph.clone();
+    let mut current = Cow::Borrowed(graph);
     let mut random = PythonRandom::seeded(42);
     let mut moves = 0usize;
     let mut best_modularity = f64::NEG_INFINITY;
-    let mut best = current
-        .members
-        .iter()
-        .map(|members| members.iter().cloned().collect::<Vec<_>>())
-        .collect::<Vec<_>>();
+    let mut best = Vec::new();
 
     for level in 0..max_levels {
+        let stats = LevelStats::new(current.as_ref());
         let coarse = local_move(
-            &current,
+            current.as_ref(),
+            &stats,
             resolution,
             MovePolicy {
                 coarse: None,
@@ -78,7 +93,8 @@ pub(crate) fn leiden(
         )?;
         let coarse_assignment = assignment(&coarse, current.len());
         let refined = local_move(
-            &current,
+            current.as_ref(),
+            &stats,
             resolution,
             MovePolicy {
                 coarse: Some(&coarse_assignment),
@@ -89,14 +105,16 @@ pub(crate) fn leiden(
             &mut moves,
             max_moves,
         )?;
-        if !partition_connected(&current, &refined) {
+        if !partition_connected(current.as_ref(), &refined) {
             return Err(CommunityDetectorError::DisconnectedPartition);
         }
-        let next_modularity = partition_modularity(&current, &refined, resolution);
-        best = original_members(&current, &refined);
+        let next_modularity =
+            partition_modularity_with_stats(current.as_ref(), &refined, resolution, &stats);
         if next_modularity - best_modularity <= MODULARITY_THRESHOLD
             || refined.len() == current.len()
+            || refined.len() <= 1
         {
+            best = original_members(current.as_ref(), &refined);
             break;
         }
         if level + 1 == max_levels {
@@ -107,10 +125,7 @@ pub(crate) fn leiden(
             });
         }
         best_modularity = next_modularity;
-        current = aggregate(&current, &refined);
-        if current.len() <= 1 {
-            break;
-        }
+        current = Cow::Owned(aggregate(current.as_ref(), &refined));
     }
     for members in &mut best {
         members.sort();
@@ -138,8 +153,10 @@ pub(crate) fn leiden_anchored(
     }
     let mut random = PythonRandom::seeded(42);
     let mut moves = 0usize;
+    let stats = LevelStats::new(graph);
     let coarse = local_move(
         graph,
+        &stats,
         resolution,
         MovePolicy {
             coarse: None,
@@ -153,6 +170,7 @@ pub(crate) fn leiden_anchored(
     let coarse_assignment = assignment(&coarse, graph.len());
     let refined = local_move(
         graph,
+        &stats,
         resolution,
         MovePolicy {
             coarse: Some(&coarse_assignment),
@@ -176,28 +194,29 @@ pub(crate) fn leiden_anchored(
 
 fn local_move(
     graph: &WeightedGraph,
+    stats: &LevelStats,
     resolution: f64,
     policy: MovePolicy<'_>,
     random: &mut PythonRandom,
     moves: &mut usize,
     max_moves: usize,
 ) -> Result<Vec<BTreeSet<usize>>, CommunityDetectorError> {
-    let total_weight = graph.total_weight();
+    let total_weight = stats.total_weight;
     let denominator = 2.0 * total_weight.powi(2);
-    let degrees = (0..graph.len())
-        .map(|node| graph.degree_weighted(node))
-        .collect::<Vec<_>>();
+    let degrees = &stats.degrees;
     let mut node_to_community = (0..graph.len()).collect::<Vec<_>>();
     let mut members = (0..graph.len())
         .map(|node| BTreeSet::from([node]))
         .collect::<Vec<_>>();
     let mut totals = degrees.clone();
     let mut nodes = (0..graph.len()).collect::<Vec<_>>();
+    let mut community_positions = vec![usize::MAX; graph.len()];
+    let mut neighbor_weights = Vec::new();
     random.shuffle(&mut nodes);
-    let mut previous_modularity = partition_modularity(graph, &members, resolution);
+    let mut previous_modularity =
+        partition_modularity_with_stats(graph, &members, resolution, stats);
     loop {
-        let previous_members = members.clone();
-        let mut pass_moves = 0usize;
+        let mut pass_moves = Vec::new();
         for node in &nodes {
             if policy.locked.is_some_and(|locked| locked.contains(node)) {
                 continue;
@@ -213,28 +232,21 @@ fn local_move(
                 continue;
             }
             let degree = degrees[*node];
-            let mut neighbor_weights = BTreeMap::<usize, f64>::new();
-            for (neighbor, weight) in graph.neighbors(*node) {
-                if neighbor == node {
-                    continue;
-                }
-                if policy
-                    .coarse
-                    .is_some_and(|partition| partition[*neighbor] != partition[*node])
-                {
-                    continue;
-                }
-                *neighbor_weights
-                    .entry(node_to_community[*neighbor])
-                    .or_default() += weight;
-            }
+            let old_weight = neighbor_community_weights(
+                graph,
+                *node,
+                &node_to_community,
+                old,
+                policy.coarse,
+                &mut community_positions,
+                &mut neighbor_weights,
+            );
             totals[old] -= degree;
-            let old_weight = neighbor_weights.get(&old).copied().unwrap_or_default();
             let remove_cost =
                 -old_weight / total_weight + resolution * totals[old] * degree / denominator;
             let mut best = old;
             let mut best_gain = 0.0;
-            for (candidate, weight) in neighbor_weights {
+            for &(candidate, weight) in &neighbor_weights {
                 if candidate == old {
                     continue;
                 }
@@ -258,15 +270,18 @@ fn local_move(
                 members[best].insert(*node);
                 node_to_community[*node] = best;
                 *moves += 1;
-                pass_moves += 1;
+                pass_moves.push((*node, old, best));
             }
         }
-        if pass_moves == 0 {
+        if pass_moves.is_empty() {
             break;
         }
-        let modularity = partition_modularity(graph, &members, resolution);
+        let modularity = partition_modularity_with_stats(graph, &members, resolution, stats);
         if modularity <= previous_modularity + f64::EPSILON {
-            members = previous_members;
+            for (node, old, best) in pass_moves.into_iter().rev() {
+                members[best].remove(&node);
+                members[old].insert(node);
+            }
             break;
         }
         previous_modularity = modularity;
@@ -277,6 +292,47 @@ fn local_move(
         .collect::<Vec<_>>();
     retained.sort_by_key(|community| community.first().copied().unwrap_or_default());
     Ok(retained)
+}
+
+fn neighbor_community_weights(
+    graph: &WeightedGraph,
+    node: usize,
+    node_to_community: &[usize],
+    old_community: usize,
+    coarse: Option<&[usize]>,
+    community_positions: &mut [usize],
+    output: &mut Vec<(usize, f64)>,
+) -> f64 {
+    for &(community, _) in output.iter() {
+        community_positions[community] = usize::MAX;
+    }
+    output.clear();
+    let mut old_weight = 0.0;
+    for (neighbor, weight) in graph.neighbors(node) {
+        if *neighbor == node
+            || coarse.is_some_and(|partition| partition[*neighbor] != partition[node])
+        {
+            continue;
+        }
+        let community = node_to_community[*neighbor];
+        let position = if community_positions[community] == usize::MAX {
+            let position = output.len();
+            community_positions[community] = position;
+            output.push((community, *weight));
+            position
+        } else {
+            let position = community_positions[community];
+            output[position].1 += weight;
+            position
+        };
+        if community == old_community {
+            old_weight = output[position].1;
+        }
+    }
+    // BTreeMap iteration previously made equal-gain tie-breaking depend on
+    // ascending community ID. Preserve that contract while reusing storage.
+    output.sort_unstable_by_key(|(community, _)| *community);
+    old_weight
 }
 
 fn assignment(partition: &[BTreeSet<usize>], node_count: usize) -> Vec<usize> {
@@ -290,29 +346,48 @@ fn assignment(partition: &[BTreeSet<usize>], node_count: usize) -> Vec<usize> {
 }
 
 fn partition_connected(graph: &WeightedGraph, partition: &[BTreeSet<usize>]) -> bool {
-    partition.iter().all(|community| {
-        let Some(start) = community.first().copied() else {
-            return true;
-        };
-        let mut visited = BTreeSet::from([start]);
-        let mut queue = VecDeque::from([start]);
-        while let Some(node) = queue.pop_front() {
-            for (neighbor, _) in graph.neighbors(node) {
-                if community.contains(neighbor) && visited.insert(*neighbor) {
-                    queue.push_back(*neighbor);
+    let assignments = assignment(partition, graph.len());
+    let mut visited = vec![false; graph.len()];
+    let mut queue = VecDeque::new();
+    partition
+        .iter()
+        .enumerate()
+        .all(|(community_index, community)| {
+            let Some(start) = community.first().copied() else {
+                return true;
+            };
+            visited[start] = true;
+            queue.push_back(start);
+            let mut visited_count = 1usize;
+            while let Some(node) = queue.pop_front() {
+                for (neighbor, _) in graph.neighbors(node) {
+                    if assignments[*neighbor] == community_index && !visited[*neighbor] {
+                        visited[*neighbor] = true;
+                        visited_count += 1;
+                        queue.push_back(*neighbor);
+                    }
                 }
             }
-        }
-        visited.len() == community.len()
-    })
+            visited_count == community.len()
+        })
 }
 
+#[cfg(test)]
 fn partition_modularity(
     graph: &WeightedGraph,
     partition: &[BTreeSet<usize>],
     resolution: f64,
 ) -> f64 {
-    let total_weight = graph.total_weight();
+    partition_modularity_with_stats(graph, partition, resolution, &LevelStats::new(graph))
+}
+
+fn partition_modularity_with_stats(
+    graph: &WeightedGraph,
+    partition: &[BTreeSet<usize>],
+    resolution: f64,
+    stats: &LevelStats,
+) -> f64 {
+    let total_weight = stats.total_weight;
     if total_weight == 0.0 {
         return 0.0;
     }
@@ -330,7 +405,7 @@ fn partition_modularity(
         .map(|(community_index, community)| {
             let volume = community
                 .iter()
-                .map(|node| graph.degree_weighted(*node))
+                .map(|node| stats.degrees[*node])
                 .sum::<f64>();
             internal_weights[community_index] / total_weight
                 - resolution * (volume / (2.0 * total_weight)).powi(2)
@@ -372,6 +447,7 @@ fn aggregate(graph: &WeightedGraph, partition: &[BTreeSet<usize>]) -> WeightedGr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn graph(edges: &[(usize, usize)]) -> WeightedGraph {
         let ids = (0..8).map(|node| node.to_string()).collect::<Vec<_>>();
@@ -444,6 +520,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dense_neighbor_accumulator_matches_ordered_map() {
+        let mut graph = graph(&[(0, 1), (0, 2), (0, 3), (0, 4), (0, 5)]);
+        graph.add_edge(0, 2, 2.5);
+        graph.add_edge(0, 4, 3.25);
+        let assignments = [0, 3, 1, 3, 1, 2, 6, 7];
+        let coarse = [0, 0, 0, 0, 0, 1, 1, 1];
+        let mut positions = vec![usize::MAX; graph.len()];
+        let mut actual = Vec::new();
+
+        let old_weight = neighbor_community_weights(
+            &graph,
+            0,
+            &assignments,
+            1,
+            Some(&coarse),
+            &mut positions,
+            &mut actual,
+        );
+        let mut expected = BTreeMap::<usize, f64>::new();
+        for (neighbor, weight) in graph.neighbors(0) {
+            if *neighbor != 0 && coarse[*neighbor] == coarse[0] {
+                *expected.entry(assignments[*neighbor]).or_default() += weight;
+            }
+        }
+        let expected = expected.into_iter().collect::<Vec<_>>();
+
+        assert_eq!(
+            actual
+                .iter()
+                .map(|(community, weight)| (*community, weight.to_bits()))
+                .collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|(community, weight)| (*community, weight.to_bits()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            old_weight.to_bits(),
+            expected
+                .iter()
+                .find(|(community, _)| *community == 1)
+                .map_or(0.0, |(_, weight)| *weight)
+                .to_bits()
+        );
+
+        neighbor_community_weights(
+            &graph,
+            6,
+            &assignments,
+            6,
+            None,
+            &mut positions,
+            &mut actual,
+        );
+        assert!(actual.is_empty());
     }
 
     #[test]
