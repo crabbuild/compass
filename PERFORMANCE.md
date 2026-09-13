@@ -27,7 +27,7 @@ review and evidence explaining the tradeoff.
 ## Community detection performance
 
 The 2026-09-12 Leiden hot-path qualification used Compass `0.3.24` candidate
-commit `46181d25`, Rust `1.97.1`, and an Apple M2 Max with 32 GiB of memory on
+commit `7e216079`, Rust `1.97.1`, and an Apple M2 Max with 32 GiB of memory on
 arm64 macOS `26.5.2`. The public FastAPI package was pinned at commit
 `0c2b6aafd7a2e3a5bf1055ea0ed0a41da15ba5f4` and treated as a read-only input.
 

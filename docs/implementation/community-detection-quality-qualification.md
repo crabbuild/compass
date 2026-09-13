@@ -49,7 +49,7 @@ Run and byte-compare the report with:
 
 ## Compact performance decision
 
-On 2026-09-12, an aarch64 macOS debug build at candidate commit `46181d25` ran
+On 2026-09-12, an aarch64 macOS debug build at candidate commit `7e216079` ran
 all 15 compact fixture families 50 times per sample. Seven-process medians were:
 
 | Profile | Median | Compatibility ratio |
