@@ -22,9 +22,12 @@
   multiplicity, provenance, and `compass.graph/1` remain unchanged.
 
 - Reduce fixed-resolution Leiden modularity evaluation from repeated
-  per-community edge scans to one canonical edge pass. On the pinned FastAPI
-  release qualification, Leiden now runs within 5.4% of compatibility Louvain
-  while preserving byte-identical partition and quality output.
+  per-community edge scans to one canonical edge pass, reuse dense move
+  scratch space and graph invariants, defer partition copies, and canonicalize
+  typed topology after allocation-light accumulation. On the pinned FastAPI
+  release qualification, Leiden has a lower median than compatibility Louvain
+  on both inference profiles while preserving byte-identical partition and
+  quality output.
 
 ## 0.3.24 - 2026-09-11
 

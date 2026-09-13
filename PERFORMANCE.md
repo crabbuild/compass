@@ -27,14 +27,15 @@ review and evidence explaining the tradeoff.
 ## Community detection performance
 
 The 2026-09-12 Leiden hot-path qualification used Compass `0.3.24` candidate
-commit `c8d121d8`, Rust `1.97.1`, and an Apple M2 Max with 32 GiB of memory on
+commit `46181d25`, Rust `1.97.1`, and an Apple M2 Max with 32 GiB of memory on
 arm64 macOS `26.5.2`. The public FastAPI package was pinned at commit
 `0c2b6aafd7a2e3a5bf1055ea0ed0a41da15ba5f4` and treated as a read-only input.
 
 The release-mode `community_quality_qualification graph-profile` harness ran
-each profile in a fresh process, alternated profile order, discarded three
-warmups, and recorded 31 observations. Both profiles loaded the same typed
-graph document. `fixed` selected one resolution-1 Leiden candidate;
+each profile in a fresh process, alternated profile order, discarded five
+warmups, and recorded 51 observations. The measurement therefore includes
+loading the same typed graph document as well as community construction.
+`fixed` selected one resolution-1 Leiden candidate;
 `compatibility` selected seeded Louvain. The max-inference graph contained
 4,152 nodes and 10,038 relationships with canonical graph digest
 `sha256:1c73b3e98a9ef536bda92111cb4268b656345dd0e8fedffe6dcc4303861374e9`.
@@ -44,23 +45,28 @@ digest
 
 | Graph | Profile | Median | Mean | p95 | Leiden/compatibility median |
 | --- | --- | ---: | ---: | ---: | ---: |
-| max inference | compatibility Louvain | 213.231 ms | 219.745 ms | 244.957 ms | 1.000x |
-| max inference | fixed Leiden | 224.739 ms | 232.955 ms | 260.777 ms | 1.054x |
-| low inference | compatibility Louvain | 75.218 ms | 81.497 ms | 105.571 ms | 1.000x |
-| low inference | fixed Leiden | 78.332 ms | 80.434 ms | 86.703 ms | 1.041x |
+| max inference | compatibility Louvain | 205.449 ms | 213.967 ms | 246.507 ms | 1.000x |
+| max inference | fixed Leiden | 202.579 ms | 211.193 ms | 252.089 ms | 0.986x |
+| low inference | compatibility Louvain | 78.761 ms | 79.302 ms | 85.671 ms | 1.000x |
+| low inference | fixed Leiden | 74.355 ms | 75.188 ms | 80.964 ms | 0.944x |
 
-Five additional max-inference observations recorded median peak resident memory
-of 135.66 MiB for compatibility Louvain and 149.08 MiB for fixed Leiden, a
-9.89% increase. The optimized result is byte-identical to the pre-optimization
-FastAPI profile report (`sha256:4f26ed16c66b5f939e2436255dfff884defa431392b26a3e322c331f957a4e75`),
-and the complete checked-in fixture qualification remains byte-identical.
+Seven additional max-inference observations recorded median peak resident
+memory of 134.19 MiB for compatibility Louvain and 136.13 MiB for fixed
+Leiden, a 1.44% increase. The optimized result is byte-identical to the
+pre-optimization FastAPI profile report
+(`sha256:4f26ed16c66b5f939e2436255dfff884defa431392b26a3e322c331f957a4e75`), and
+the complete checked-in fixture qualification remains byte-identical.
 
 Before the one-pass modularity change, seven release observations of the same
-max-inference fixed profile had a 1.46 s median. The 224.739 ms candidate median
-is an 84.61% reduction. A separate cold low-inference production extraction
-completed in 1.00 s, of which internal Leiden detection used 42 ms; the matching
-`--no-cluster` observation completed in 0.68 s. Those two full-build values are
-single observations and do not substitute for the multi-corpus release matrix.
+max-inference fixed profile had a 1.46 s median. The 202.579 ms candidate median
+is an 86.12% reduction. An in-process release harness that excludes graph JSON
+loading ran all 15 fixture families 50 times per observation. Across 15
+alternating observations, fixed Leiden had a 129.774 ms median versus
+212.570 ms for compatibility Louvain (`0.611×`). A separate cold low-inference
+production extraction completed in 1.00 s, of which internal Leiden detection
+used 42 ms; the matching `--no-cluster` observation completed in 0.68 s. Those
+two full-build values are single observations and do not substitute for the
+multi-corpus release matrix.
 
 ## Markdown graph-v1 quality qualification
 

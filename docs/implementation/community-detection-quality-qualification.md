@@ -49,14 +49,14 @@ Run and byte-compare the report with:
 
 ## Compact performance decision
 
-On 2026-09-12, an aarch64 macOS debug build at candidate commit `c8d121d8` ran
+On 2026-09-12, an aarch64 macOS debug build at candidate commit `46181d25` ran
 all 15 compact fixture families 50 times per sample. Seven-process medians were:
 
 | Profile | Median | Compatibility ratio |
 | --- | ---: | ---: |
-| compatibility Louvain | 1.15 s | 1.00× |
-| fixed-resolution typed Leiden | 1.23 s | 1.06× |
-| three-candidate typed Leiden | 1.37 s | 1.19× |
+| compatibility Louvain | 1.18 s | 1.00× |
+| fixed-resolution typed Leiden | 1.11 s | 0.94× |
+| three-candidate typed Leiden | 1.34 s | 1.13× |
 
 These intentionally small debug fixtures magnify topology/evidence setup cost
 and are not the pinned real-repository release performance oracle. The optimized
@@ -66,7 +66,7 @@ The production profile therefore stays fixed-resolution. No cold-build or
 peak-RSS claim is inferred from these compact numbers.
 
 The corresponding release-mode FastAPI qualification records fixed Leiden at
-`1.054×` the compatibility median on the max-inference graph and `1.041×` on
+`0.986×` the compatibility median on the max-inference graph and `0.944×` on
 the low-inference graph, with byte-identical partition and quality output. See
 [`PERFORMANCE.md`](../../PERFORMANCE.md#community-detection-performance) for
 the corpus identity, graph digests, sampling method, latency, and peak-RSS
