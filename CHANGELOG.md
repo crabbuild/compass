@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Improve Rust call-graph recall for source-proven `Arc`, `Rc`, and `Box`
+  receiver chains, typed chained-call results, and local evaluating
+  `macro_rules!` inputs. Rust universal evidence advances to producer version
+  2 so cached Rust files rebuild; ambiguous and non-evaluating macro inputs
+  continue to fail closed.
+
 - Make query failures and paths more trustworthy: exact-looking missing symbols
   now return structured `no_match` signals across discovery and typed natural
   queries; `compass path` requires exact endpoints, reports unreachable targets,

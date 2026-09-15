@@ -511,7 +511,7 @@ const UNIVERSAL_EVIDENCE_PIPELINES: &[UniversalEvidencePipeline] = &[
         producer: UniversalEvidenceProducer {
             id: "compass.rust",
             language: "rust",
-            version: 1,
+            version: 2,
             evidence_schema: crate::UNIVERSAL_EVIDENCE_SCHEMA,
             capabilities: RUST_CAPABILITIES,
         },

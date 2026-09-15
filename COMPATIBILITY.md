@@ -94,6 +94,13 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+Rust structural evidence now uses producer version 2. The evidence and graph
+schema majors are unchanged, but Rust extraction caches from producer version
+1 are rebuilt so source-proven standard-library dereference chains and
+evaluating local macro inputs can publish newly recovered exact calls.
+Unsupported macro shapes, non-evaluating inputs, and ambiguous receiver owners
+remain unresolved rather than being guessed.
+
 Immutable history now accepts up to 5 GiB of aggregate authoritative key and
 value bytes per realization, raised from 512 MiB. The history schema and
 canonical encoding are unchanged, as are the per-key, per-value, per-tree,

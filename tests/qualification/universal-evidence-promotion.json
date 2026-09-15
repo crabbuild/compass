@@ -1,13 +1,13 @@
 {
   "schema": "compass.universal-evidence-promotion/1",
   "decision": "promote",
-  "decisionId": "universal-evidence-v1-reset-2026-08-28",
-  "decisionDate": "2026-08-28",
+  "decisionId": "rust-v2-receiver-and-macro-evidence-2026-09-15",
+  "decisionDate": "2026-09-15",
   "scope": "advertised-bounded-capabilities",
   "review": {
     "status": "approved",
     "method": "source-oracle-audits;deterministic-conformance;registry-parity",
-    "reviewedAt": "2026-08-28"
+    "reviewedAt": "2026-09-15"
   },
   "evidenceSchema": "compass.languages.evidence/2",
   "requiredGates": {
@@ -41,7 +41,7 @@
     { "id": "compass.php", "language": "php", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
     { "id": "compass.python", "language": "python", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
     { "id": "compass.ruby", "language": "ruby", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
-    { "id": "compass.rust", "language": "rust", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
+    { "id": "compass.rust", "language": "rust", "producerVersion": 2, "decision": "qualified", "evidence": "accepted" },
     { "id": "compass.scala", "language": "scala", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
     { "id": "compass.swift", "language": "swift", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" },
     { "id": "compass.typescript", "language": "typescript", "producerVersion": 1, "decision": "qualified", "evidence": "accepted" }
