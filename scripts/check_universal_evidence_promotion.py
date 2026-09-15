@@ -23,7 +23,7 @@ SCOPE = "advertised-bounded-capabilities"
 REVIEW = {
     "status": "approved",
     "method": "source-oracle-audits;deterministic-conformance;registry-parity",
-    "reviewedAt": "2026-08-28",
+    "reviewedAt": "2026-09-15",
 }
 MAX_MANIFEST_BYTES = 1024 * 1024
 
@@ -38,7 +38,7 @@ EXPECTED_PIPELINES = (
     ("compass.php", "php", 1),
     ("compass.python", "python", 1),
     ("compass.ruby", "ruby", 1),
-    ("compass.rust", "rust", 1),
+    ("compass.rust", "rust", 2),
     ("compass.scala", "scala", 1),
     ("compass.swift", "swift", 1),
     ("compass.typescript", "typescript", 1),

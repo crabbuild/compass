@@ -114,12 +114,12 @@ fn ids_match_python_unicode_casefold_contract() {
 }
 
 #[test]
-fn rust_pipeline_is_version_one_and_qualified() {
+fn rust_pipeline_is_version_two_and_qualified() {
     let rust = UniversalEvidenceRegistry::pipeline("rust").expect("Rust universal pipeline");
     assert_eq!(rust.producer.id, "compass.rust");
     assert_eq!(rust.producer.language, "rust");
     assert_eq!(rust.producer.evidence_schema, UNIVERSAL_EVIDENCE_SCHEMA);
-    assert_eq!(rust.producer.version, 1);
+    assert_eq!(rust.producer.version, 2);
     assert_eq!(
         rust.qualification,
         UniversalEvidenceQualification::Qualified

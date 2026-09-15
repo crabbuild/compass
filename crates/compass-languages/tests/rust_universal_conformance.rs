@@ -32,7 +32,7 @@ fn build() {
         .ok_or("missing Rust semantic evidence")?;
 
     assert_eq!(evidence.pipeline.id, "compass.rust");
-    assert_eq!(evidence.pipeline.version, 1);
+    assert_eq!(evidence.pipeline.version, 2);
     assert_eq!(
         evidence.pipeline.evidence_schema,
         "compass.languages.evidence/2"
@@ -149,6 +149,145 @@ fn unknown<T>(input: T) { input.transform().finish(); }
     assert!(bindings.iter().any(|binding| {
         binding.result_type_qualified_name.is_none()
             && binding.qualified_target == "crate::method_chain::unknown::<T>::transform"
+    }));
+    Ok(())
+}
+
+#[test]
+fn source_proven_arc_field_chains_reach_the_inner_receiver() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("arc_field.rs");
+    let source = br#"use std::{rc::Rc, sync::Arc};
+struct Worker;
+impl Worker { fn run(&self) {} }
+struct Inner { worker: Worker }
+struct Outer { arc: Arc<Inner>, rc: Rc<Inner>, boxed: Box<Inner> }
+impl Outer {
+    fn invoke(&self) {
+        self.arc.worker.run();
+        self.rc.worker.run();
+        self.boxed.worker.run();
+    }
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let calls = evidence
+        .candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.relation == CandidateRelation::Calls && candidate.target_spelling == "run"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(calls.len(), 3, "calls={calls:#?}");
+    assert!(calls.iter().all(|call| {
+        call.constraints.qualified_name.as_deref() == Some("crate::arc_field::Worker::run")
+    }));
+    Ok(())
+}
+
+#[test]
+fn source_proven_clone_results_keep_the_receiver_type() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("clone_chain.rs");
+    let source = br#"use std::sync::Arc;
+struct Worker;
+impl Worker { fn run(self) {} }
+impl Clone for Worker { fn clone(&self) -> Self { Worker } }
+struct Inner { worker: Worker }
+struct Outer { inner: Arc<Inner> }
+impl Outer { fn invoke(&self) { self.inner.worker.clone().run(); } }
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    let binding = evidence
+        .bindings
+        .iter()
+        .find(|binding| {
+            binding.kind == BindingKind::CallResult
+                && binding.spelling == "self.inner.worker.clone()"
+        })
+        .ok_or("missing clone call-result binding")?;
+    assert_eq!(
+        binding.result_type_qualified_name.as_deref(),
+        Some("crate::clone_chain::Worker")
+    );
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "run"
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("crate::clone_chain::Worker::run")
+    }));
+    Ok(())
+}
+
+#[test]
+fn source_proven_expression_macro_arguments_emit_nested_calls() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("macro_call.rs");
+    let source = br#"struct PathRouter;
+impl PathRouter { fn route(&self) {} }
+struct RouterInner { path_router: PathRouter }
+macro_rules! evaluate { ($expr:expr) => { match $expr { () => () } }; }
+macro_rules! tap_inner {
+    ($self_:ident, mut $inner:ident => { $($stmt:stmt)* }) => {{ $($stmt)* }};
+}
+fn invoke(owner: RouterInner) {
+    tap_inner!(owner, mut this => { evaluate!(this.path_router.route()); });
+}
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    assert!(evidence.candidates.iter().any(|candidate| {
+        candidate.relation == CandidateRelation::Calls
+            && candidate.target_spelling == "route"
+            && candidate.constraints.qualified_name.as_deref()
+                == Some("crate::macro_call::PathRouter::route")
+    }));
+    Ok(())
+}
+
+#[test]
+fn non_evaluating_or_ambiguous_macro_inputs_fail_closed() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("macro_negative.rs");
+    let source = br#"struct AlphaWorker;
+impl AlphaWorker { fn run(&self) {} }
+struct BetaWorker;
+impl BetaWorker { fn run(&self) {} }
+struct Alpha { worker: AlphaWorker }
+struct Beta { worker: BetaWorker }
+macro_rules! stringify_only { ($expr:expr) => { stringify!($expr) }; }
+macro_rules! evaluate { ($name:ident, $stmt:stmt) => {{ $stmt }}; }
+fn invoke(alpha: Alpha) {
+    stringify_only!(alpha.worker.run());
+    evaluate!(unknown, unknown.worker.run());
+}
+fn before_definition(alpha: Alpha) { later!(alpha.worker.run()); }
+macro_rules! later { ($expr:expr) => {{ $expr }}; }
+"#;
+    let extraction = Engine::default().extract_source(&path, source)?;
+    let evidence = extraction
+        .semantic_evidence
+        .as_ref()
+        .ok_or("missing Rust semantic evidence")?;
+    assert!(evidence.candidates.iter().all(|candidate| {
+        candidate.relation != CandidateRelation::Calls
+            || candidate.target_spelling != "run"
+            || !matches!(
+                candidate.constraints.qualified_name.as_deref(),
+                Some("crate::macro_negative::AlphaWorker::run")
+                    | Some("crate::macro_negative::BetaWorker::run")
+            )
     }));
     Ok(())
 }
