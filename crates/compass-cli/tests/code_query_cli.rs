@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use compass_cli::{Frontend, run};
 use compass_files::BuildGuard;
 use compass_graph::GraphSnapshotBuilder;
-use compass_model::code_graph::GraphDocument;
+use compass_model::code_graph::{EdgeKind, GraphDocument};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
@@ -139,7 +139,11 @@ fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
             ],
         );
         assert_eq!(outcome.code, 0, "{question}: {}", outcome.stderr);
-        assert!(outcome.stdout.starts_with("Discovery:"), "{question}");
+        assert!(
+            outcome.stdout.starts_with("match_confidence:"),
+            "{question}"
+        );
+        assert!(outcome.stdout.contains("Discovery:"), "{question}");
         assert!(
             outcome.stdout.contains(expected_node),
             "{question}: {}",
@@ -160,7 +164,11 @@ fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
             ],
         );
         assert_eq!(generic.code, 0, "{}", generic.stderr);
-        assert!(generic.stdout.starts_with("Discovery:"), "{question}");
+        assert!(
+            generic.stdout.starts_with("match_confidence:"),
+            "{question}"
+        );
+        assert!(generic.stdout.contains("Discovery:"), "{question}");
         assert!(generic.stdout.contains("Completeness:"), "{question}");
     }
 
@@ -452,6 +460,10 @@ fn natural_discovery_rejects_invalid_duplicate_and_mixed_public_controls()
             vec!["--format", "json", "--cursor", "not-a-cursor"],
             "text-only and cannot be used with --format json",
         ),
+        (
+            vec!["--format", "json", "--evidence"],
+            "text-only and cannot be used with --format json",
+        ),
     ] {
         let mut args = vec![OsString::from("query"), OsString::from("Target")];
         args.extend(arguments.iter().map(OsString::from));
@@ -483,6 +495,9 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "--format <text|json>",
         "--result-envelope",
         "--text-budget <N>",
+        "default: 8000",
+        "--evidence",
+        "full provenance",
         "--cursor <TOKEN>",
         "Natural discovery:",
         "--include-heuristic",
@@ -712,8 +727,171 @@ fn natural_query_renders_typed_source_locations() -> Result<(), Box<dyn Error>> 
     assert!(
         outcome
             .stdout
-            .contains("Node: n:target [function] Fixture.Target @ src/lib.rs:1")
+            .contains("NODE Fixture.Target [function] src/lib.rs:1")
     );
+    Ok(())
+}
+
+#[test]
+fn natural_query_is_concise_by_default_and_evidence_is_opt_in() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let base = [
+        OsString::from("query"),
+        OsString::from("Target"),
+        OsString::from("--graph"),
+        graph.into_os_string(),
+    ];
+
+    let concise = run(Frontend::Compass, base.clone());
+    assert_eq!(concise.code, 0, "{}", concise.stderr);
+    assert!(concise.stdout.starts_with("match_confidence: exact"));
+    assert!(concise.stdout.contains("NODE Fixture.Target [function]"));
+    assert!(concise.stdout.contains("provenance record(s) hidden"));
+    assert!(!concise.stdout.contains("Node evidence:"));
+    assert!(!concise.stdout.contains("Semantic result:"));
+
+    let mut evidence_args = base.to_vec();
+    evidence_args.push(OsString::from("--evidence"));
+    let evidence = run(Frontend::Compass, evidence_args);
+    assert_eq!(evidence.code, 0, "{}", evidence.stderr);
+    assert!(evidence.stdout.contains("Node evidence:"));
+    assert!(evidence.stdout.contains("Semantic result:"));
+    Ok(())
+}
+
+#[test]
+fn natural_and_typed_queries_signal_missing_exact_matches_before_fallbacks()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    for command in ["query", "ask"] {
+        let outcome = run(
+            Frontend::Compass,
+            [
+                OsString::from(command),
+                OsString::from("who calls Targat?"),
+                OsString::from("--graph"),
+                graph.clone().into_os_string(),
+            ],
+        );
+        assert_eq!(outcome.code, 0, "{command}: {}", outcome.stderr);
+        assert!(
+            outcome.stdout.starts_with("match_confidence: none"),
+            "{command}: {}",
+            outcome.stdout
+        );
+        assert!(
+            outcome.stdout.contains("NO EXACT MATCH"),
+            "{command}: {}",
+            outcome.stdout
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn path_resolves_exact_targets_and_ranks_structural_evidence_end_to_end()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template_node = graph.nodes[0].clone();
+    for (id, name) in [
+        ("n:strong-one", "StrongOne"),
+        ("n:strong-two", "StrongTwo"),
+        ("n:weak", "WeakShortcut"),
+        ("n:isolated", "Isolated"),
+    ] {
+        let mut node = template_node.clone();
+        node.id = id.to_owned();
+        node.name = name.to_owned();
+        node.qualified_name = format!("Fixture.{name}");
+        graph.nodes.push(node);
+    }
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    let template_edge = graph.links[0].clone();
+    graph.links.clear();
+    for (id, source, target, kind) in [
+        ("e:strong-1", "n:caller", "n:strong-one", EdgeKind::Calls),
+        (
+            "e:strong-2",
+            "n:strong-one",
+            "n:strong-two",
+            EdgeKind::Contains,
+        ),
+        (
+            "e:strong-3",
+            "n:strong-two",
+            "n:target",
+            EdgeKind::DependsOn,
+        ),
+        ("e:weak-1", "n:caller", "n:weak", EdgeKind::References),
+        ("e:weak-2", "n:weak", "n:target", EdgeKind::Documents),
+    ] {
+        let mut edge = template_edge.clone();
+        edge.id = id.to_owned();
+        edge.key = id.to_owned();
+        edge.source = source.to_owned();
+        edge.target = target.to_owned();
+        edge.kind = kind;
+        graph.links.push(edge);
+    }
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+
+    let path = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("Caller"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_path.clone().into_os_string(),
+        ],
+    );
+    assert_eq!(path.code, 0, "{}", path.stderr);
+    assert!(
+        path.stdout
+            .contains("Target resolved: Target [id=n:target]")
+    );
+    assert!(
+        path.stdout
+            .contains("Best path (weighted, 3 hops, weight 3)")
+    );
+    assert!(path.stdout.contains("shorter (2-hop) but weaker path"));
+
+    let unreachable = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("Caller"),
+            OsString::from("Isolated"),
+            OsString::from("--max-depth"),
+            OsString::from("4"),
+            OsString::from("--graph"),
+            graph_path.clone().into_os_string(),
+        ],
+    );
+    assert_eq!(unreachable.code, 0, "{}", unreachable.stderr);
+    assert!(
+        unreachable
+            .stdout
+            .contains("NO PATH FOUND to resolved target")
+    );
+    assert!(unreachable.stdout.contains("depth limit 4"));
+
+    let missing = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("Call"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+        ],
+    );
+    assert_ne!(missing.code, 0);
+    assert!(missing.stderr.contains("NO EXACT MATCH"));
     Ok(())
 }
 

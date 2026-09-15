@@ -300,6 +300,7 @@ compass query "<question>"
   [--result-envelope]
   [--text-budget N]
   [--cursor TOKEN]
+  [--evidence]
   [--budget N]
   [--page N]
   [--max-nodes N]
@@ -324,10 +325,17 @@ as `call`, `import`, or `route`. It is not a node, file, package, community, or
 subsystem selector. Use repeatable `--scope KIND:VALUE` for explicit OR scope
 over `community`, `source`, `package`, or `node`.
 
-`--text-budget` bounds the discovery text projection. Its opaque cursor binds
+The default text projection is concise: it prints match confidence, seed terms,
+nodes, edges, and source locations without expanding provenance records or the
+semantic digest. `--evidence` selects the full audit projection. Exact-looking
+operands that do not resolve emit `NO EXACT MATCH`; bounded fuzzy and lexical
+candidates can still follow as suggestions but are not represented as exact.
+
+`--text-budget` bounds the discovery text projection and defaults to 8,000
+approximate tokens. Its opaque cursor binds
 the contract version, normalized request/options, selected graph generation and
-digest, semantic-response digest, and next stable section/item. Fetch the next
-page with `--cursor TOKEN` and otherwise unchanged semantic inputs. The
+digest, semantic-response digest, evidence tier, and next stable section/item.
+Fetch the next page with `--cursor TOKEN` and otherwise unchanged semantic inputs. The
 presentation-only `--text-budget` may change between pages. Pages contain whole
 deterministic entries; changed inputs fail instead of silently continuing a
 different result. JSON rejects text pagination controls. Legacy `--budget` and
@@ -387,12 +395,17 @@ Canonical language contract: [CompassQL](../COMPASSQL.md).
 ### `path`
 
 ```text
-compass path "<source>" "<target>" [--graph PATH | --at REV]
+compass path "<source>" "<target>" [--max-depth N] [--graph PATH | --at REV]
 ```
 
-Renders a shortest known graph path while preserving relationship direction.
-If a route exists only by ignoring one or more edge directions, the typed response
-reports `direction_mismatch`; swap the operands to request that route.
+Resolves both endpoints by exact node ID, name, or qualified name before doing
+any graph search; missing and ambiguous endpoints fail explicitly. The text path
+search is bounded to eight hops by default and ranks structural relationships
+such as calls, containment, imports, and dependencies ahead of weak references
+or documentation links. When a meaningfully weaker route is up to two hops
+shorter, Compass shows it separately. Output names the resolved target ID, and
+an unreachable target is reported as `NO PATH FOUND` with the depth bound and
+visited-node count. Relationship arrows always preserve their stored direction.
 
 ### `explain`
 

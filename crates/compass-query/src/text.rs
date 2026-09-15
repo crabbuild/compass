@@ -3,6 +3,38 @@ use std::collections::HashSet;
 pub use compass_model::strip_diacritics;
 use compass_model::{canonical_code_token, identifier_tokens};
 
+const GENERIC_RELATIONAL_TERMS: &[&str] = &[
+    "call",
+    "called",
+    "caller",
+    "callers",
+    "calls",
+    "connect",
+    "connected",
+    "connection",
+    "connections",
+    "depend",
+    "depended",
+    "dependency",
+    "dependent",
+    "dependents",
+    "depends",
+    "path",
+    "reach",
+    "reaches",
+    "relate",
+    "related",
+    "relation",
+    "relations",
+    "relationship",
+    "relationships",
+    "route",
+    "use",
+    "used",
+    "uses",
+    "using",
+];
+
 const QUERY_STOPWORDS: &[&str] = &[
     "how",
     "what",
@@ -214,6 +246,105 @@ pub(crate) fn query_recall_terms(question: &str) -> Vec<String> {
     if content.is_empty() { terms } else { content }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DiscoveryTermSelection {
+    pub recall_terms: Vec<String>,
+    pub ranking_terms: Vec<String>,
+    pub discarded_generic_terms: Vec<String>,
+}
+
+/// Select concrete discovery anchors while keeping relational vocabulary
+/// available to the intent and direction classifiers. High-confidence natural
+/// query shapes seed from their parsed operands; broad questions use their
+/// remaining concrete terms. Generic relationship verbs never become graph
+/// anchors by themselves.
+pub(crate) fn discovery_term_selection(question: &str) -> DiscoveryTermSelection {
+    let operands = discovery_operands(question);
+    let seed_source = if operands.is_empty() {
+        question.to_owned()
+    } else {
+        operands.join(" ")
+    };
+    let explicit_operand_terms = operands
+        .iter()
+        .flat_map(|operand| search_tokens(operand))
+        .map(canonical_query_token)
+        .collect::<HashSet<_>>();
+    let mut recall_terms = Vec::new();
+    let mut ranking_terms = Vec::new();
+    let mut seen_recall = HashSet::new();
+    let mut seen_ranking = HashSet::new();
+    for term in query_recall_terms(&seed_source) {
+        let canonical = canonical_query_token(term.clone());
+        if (is_generic_relational_term(&term) || is_generic_relational_term(&canonical))
+            && !explicit_operand_terms.contains(&canonical)
+        {
+            continue;
+        }
+        if seen_recall.insert(term.clone()) {
+            recall_terms.push(term);
+        }
+        if seen_ranking.insert(canonical.clone()) {
+            ranking_terms.push(canonical);
+        }
+    }
+    ranking_terms.sort();
+
+    let mut discarded_generic_terms = search_tokens(question)
+        .into_iter()
+        .map(canonical_query_token)
+        .filter(|term| is_generic_relational_term(term) && !explicit_operand_terms.contains(term))
+        .collect::<Vec<_>>();
+    discarded_generic_terms.sort();
+    discarded_generic_terms.dedup();
+    DiscoveryTermSelection {
+        recall_terms,
+        ranking_terms,
+        discarded_generic_terms,
+    }
+}
+
+/// Return the concrete symbol operands named by a supported natural query
+/// shape. Neutral comparisons need a small explicit grammar because their
+/// relationship word classifies the request but neither subject may be lost.
+pub(crate) fn discovery_operands(question: &str) -> Vec<String> {
+    let planned = crate::intent::plan_natural_query(question)
+        .ok()
+        .filter(|plan| plan.routes_to_typed_query())
+        .map(|plan| plan.operands().to_vec())
+        .unwrap_or_default();
+    if !planned.is_empty() {
+        return planned;
+    }
+
+    let trimmed = question.trim().trim_end_matches('?').trim();
+    let lowered = trimmed.to_ascii_lowercase();
+    let Some(body) = lowered.strip_prefix("how are ") else {
+        return Vec::new();
+    };
+    let body_offset = trimmed.len().saturating_sub(body.len());
+    for suffix in [" related", " connected", " dependent"] {
+        let Some(subjects) = body.strip_suffix(suffix) else {
+            continue;
+        };
+        let Some(separator) = subjects.find(" and ") else {
+            continue;
+        };
+        let left = trimmed[body_offset..body_offset + separator].trim();
+        let right_start = body_offset + separator + " and ".len();
+        let right_end = body_offset + subjects.len();
+        let right = trimmed[right_start..right_end].trim();
+        if !left.is_empty() && !right.is_empty() {
+            return vec![left.to_owned(), right.to_owned()];
+        }
+    }
+    Vec::new()
+}
+
+fn is_generic_relational_term(term: &str) -> bool {
+    GENERIC_RELATIONAL_TERMS.contains(&term)
+}
+
 #[must_use]
 pub fn sanitize_label(text: &str) -> String {
     text.chars()
@@ -333,5 +464,54 @@ fn is_searchable(term: &str) -> bool {
         term.chars().count() > 2
     } else {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::discovery_term_selection;
+
+    #[test]
+    fn discovery_terms_discard_generic_relationship_words() {
+        let selected =
+            discovery_term_selection("how are PaymentGateway and CheckoutHandler related?");
+        assert!(selected.ranking_terms.contains(&"payment".to_owned()));
+        assert!(selected.ranking_terms.contains(&"gateway".to_owned()));
+        assert!(selected.ranking_terms.contains(&"checkout".to_owned()));
+        assert!(selected.ranking_terms.contains(&"handler".to_owned()));
+        assert!(!selected.ranking_terms.contains(&"relate".to_owned()));
+        assert!(
+            selected
+                .discarded_generic_terms
+                .contains(&"relate".to_owned())
+        );
+    }
+
+    #[test]
+    fn parsed_operands_keep_symbols_that_happen_to_use_generic_words() {
+        let selected = discovery_term_selection("path from Caller to Target");
+        assert!(selected.ranking_terms.contains(&"caller".to_owned()));
+        assert!(selected.ranking_terms.contains(&"target".to_owned()));
+        assert!(!selected.ranking_terms.contains(&"path".to_owned()));
+        assert!(
+            selected
+                .discarded_generic_terms
+                .contains(&"path".to_owned())
+        );
+    }
+
+    #[test]
+    fn comparison_questions_keep_both_explicit_subjects() {
+        let selected = discovery_term_selection("how are Target and Caller connected?");
+        assert!(selected.ranking_terms.contains(&"target".to_owned()));
+        assert!(selected.ranking_terms.contains(&"caller".to_owned()));
+        assert_eq!(selected.discarded_generic_terms, ["connect"]);
+    }
+
+    #[test]
+    fn generic_relationship_words_cannot_seed_discovery_alone() {
+        let selected = discovery_term_selection("how are these connected and related?");
+        assert!(selected.ranking_terms.is_empty());
+        assert_eq!(selected.discarded_generic_terms, ["connect", "relate"]);
     }
 }

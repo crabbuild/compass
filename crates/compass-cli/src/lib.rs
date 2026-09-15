@@ -80,10 +80,11 @@ use compass_output::{
 };
 use compass_prs::{ProcessRunner, SystemRunner};
 use compass_query::{
-    DEFAULT_AFFECTED_RELATIONS, DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions,
-    TextPageOptions, TraversalMode, discovery_request_digest, format_affected, format_benchmark,
-    open as open_code_query, open_with_verified_document, query_graph_text_page,
-    render_discovery_text_page, render_explanation_page, render_shortest_path, run_benchmark,
+    DEFAULT_AFFECTED_RELATIONS, DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET, DEFAULT_PATH_DEPTH_LIMIT,
+    DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions, TextPageOptions, TraversalMode,
+    discovery_request_digest, format_affected, format_benchmark, open as open_code_query,
+    open_with_verified_document, query_graph_text_page, render_discovery_text_page,
+    render_explanation_page, render_shortest_path_with_limit, run_benchmark,
 };
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, PreparedDocumentInputs,
@@ -5217,8 +5218,9 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
     let mode = TraversalMode::Bfs;
     let mut legacy_requested = false;
     let mut discovery_requested = false;
-    let mut discovery_text_budget = DEFAULT_TEXT_TOKEN_BUDGET;
+    let mut discovery_text_budget = DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET;
     let mut discovery_cursor = None::<String>;
+    let mut discovery_evidence = false;
     let mut discovery_text_pagination_requested = false;
     let mut discovery_direction = DiscoveryDirection::Auto;
     let mut discovery_scope = Vec::new();
@@ -5318,6 +5320,14 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
                     );
                 }
                 discovery_include_heuristic = true;
+                discovery_requested = true;
+                index += 1;
+            }
+            "--evidence" => {
+                if !seen_discovery_options.insert("--evidence".to_owned()) {
+                    return Outcome::failure("error: --evidence must not be repeated".to_owned());
+                }
+                discovery_evidence = true;
                 discovery_requested = true;
                 index += 1;
             }
@@ -5432,9 +5442,10 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
         );
     }
     if !legacy_requested {
-        if discovery_format == "json" && discovery_text_pagination_requested {
+        if discovery_format == "json" && (discovery_text_pagination_requested || discovery_evidence)
+        {
             return Outcome::failure(
-                "error: --cursor and --text-budget are text-only and cannot be used with --format json"
+                "error: --cursor, --text-budget, and --evidence are text-only and cannot be used with --format json"
                     .to_owned(),
             );
         }
@@ -5457,6 +5468,7 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
             discovery_text_budget,
             discovery_cursor.as_deref(),
             discovery_result_envelope,
+            discovery_evidence,
         );
         if outcome.code == 0 {
             touch_selected_query_stamp(&selection);
@@ -5591,6 +5603,7 @@ fn command_discovery_query(
     text_budget: usize,
     cursor: Option<&str>,
     result_envelope: bool,
+    include_evidence: bool,
 ) -> Outcome {
     let include_heuristic = request.include_heuristic;
     let execution = match discovery_query(selection, request) {
@@ -5625,6 +5638,7 @@ fn command_discovery_query(
                 request_digest: &request_digest,
                 graph_identity: &execution.graph_identity,
                 graph_digest: &execution.graph_digest,
+                include_evidence,
             },
         ) {
             Ok(page) => Outcome::success(page.text),
@@ -5710,14 +5724,51 @@ fn command_path(frontend: Frontend, args: &[String]) -> Outcome {
         Ok(parsed) => parsed,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    if args.len() != 2 {
+    let Some(source) = args.first() else {
         return Outcome::failure(path_help(frontend));
+    };
+    let Some(target) = args.get(1) else {
+        return Outcome::failure(path_help(frontend));
+    };
+    let mut max_depth = DEFAULT_PATH_DEPTH_LIMIT;
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--max-depth" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure(
+                        "error: --max-depth requires a positive integer".to_owned(),
+                    );
+                };
+                max_depth = match value.parse::<usize>().ok().filter(|value| *value > 0) {
+                    Some(value) => value,
+                    None => {
+                        return Outcome::failure(
+                            "error: --max-depth requires a positive integer".to_owned(),
+                        );
+                    }
+                };
+                index += 2;
+            }
+            value if value.starts_with("--max-depth=") => {
+                max_depth = match value[12..].parse::<usize>().ok().filter(|value| *value > 0) {
+                    Some(value) => value,
+                    None => {
+                        return Outcome::failure(
+                            "error: --max-depth requires a positive integer".to_owned(),
+                        );
+                    }
+                };
+                index += 1;
+            }
+            value => return Outcome::failure(format!("error: unexpected path argument {value}")),
+        }
     }
     let loaded = match load_selection(frontend, &selection, true) {
         Ok(loaded) => loaded,
         Err(outcome) => return outcome,
     };
-    match render_shortest_path(&loaded.graph, &args[0], &args[1]) {
+    match render_shortest_path_with_limit(&loaded.graph, source, target, max_depth) {
         Ok(output) => {
             touch_selected_query_stamp(&selection);
             Outcome::success(output)
@@ -5990,7 +6041,7 @@ fn touch_selected_query_stamp(selection: &GraphSelection) {
 fn query_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
     let help = format!(
-        "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--format text|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --format <text|json>              Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 2000]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text pagination controls. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
+        "Usage: {prefix} query \"<question>\" [--direction auto|incoming|outgoing|both] [--scope KIND:VALUE] [--context VALUE] [--dfs] [--evidence] [--format text|json] [--graph PATH|--at REV]\n\nNatural discovery options (default for a typed graph):\n  --direction <VALUE>               Direction: auto, incoming, outgoing, or both [default: auto]\n  --scope <KIND:VALUE>              Repeatable OR scope; KIND is community, source, package, or node\n  --context <VALUE>                 Repeatable strict relationship-context filter\n  --dfs                             Use depth-first expansion [default: breadth-first]\n  --include-heuristic               Include heuristic evidence [default: excluded]\n  --evidence                        Include full provenance and typed detail in text\n  --format <text|json>              Discovery output [default: text]\n  --text-budget <N>                 Approximate tokens in one text page [default: 8000]\n  --cursor <TOKEN>                  Continue the same immutable semantic result (text only)\n  --max-depth <N>                   Traversal depth [default: 2; hard maximum: 8]\n  --max-seeds <N>                   Ranked seed count [default: 3; hard maximum: 3]\n  --max-candidates <N>              Ranked candidate count [default/hard maximum: 256]\n  --max-nodes <N>                   Returned node count [default/hard maximum: 500]\n  --max-edges <N>                   Returned edge count [default/hard maximum: 1000]\n  --max-expanded-relationships <N>  Examined relationships [default/hard maximum: 10000]\n  --max-response-bytes <N>          Serialized response bytes [default/hard maximum: 8388608]\n  --timeout-ms <N>                  Discovery deadline in milliseconds [default/hard maximum: 30000]\n\nLegacy traversal options:\n  --traverse                        Force legacy relevance traversal\n  --budget <N>                      Approximate tokens per page [default: 2000]\n  --page <N>                        Result page, starting at 1 [default: 1]\n\nGraph selection:\n  --graph <PATH>                    Read a graph JSON file\n  --at <REV>                        Resolve REV once to an immutable typed realization; conflicts with --graph\n\nCompassQL options:\n  --cql                             Use CompassQL mode\n  --timeout-ms <N>                  CompassQL execution timeout\n  --max-expanded-relationships <N>  CompassQL relationship expansion limit\n  Run `{prefix} help query` for all CompassQL controls and examples.\n\nDiscovery limits must be positive; values above a hard maximum are rejected rather than clamped. JSON rejects text-only pagination/evidence controls. Legacy --traverse, --budget, and --page cannot be mixed with discovery controls."
     );
     let help = help
         .replace(
@@ -6008,7 +6059,9 @@ fn query_help(frontend: Frontend) -> String {
 
 fn path_help(frontend: Frontend) -> String {
     let prefix = frontend_name(frontend);
-    format!("Usage: {prefix} path \"<source>\" \"<target>\" [--graph PATH|--at REV]")
+    format!(
+        "Usage: {prefix} path \"<source>\" \"<target>\" [--max-depth N] [--graph PATH|--at REV]"
+    )
 }
 
 fn explain_help(frontend: Frontend) -> String {

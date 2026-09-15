@@ -202,7 +202,10 @@ fn traversal_path_and_explanation_cover_success_and_error_rendering() -> Result<
     assert!(render_shortest_path(&graph, "absent", "run").is_err());
     assert!(render_shortest_path(&graph, "run", "absent").is_err());
     assert!(render_shortest_path(&graph, "run", "run").is_err());
-    assert!(render_shortest_path(&graph, "run", "Isolated")?.contains("No path found"));
+    assert!(
+        render_shortest_path(&graph, "run", "Isolated")?
+            .contains("NO PATH FOUND to resolved target")
+    );
     assert!(render_shortest_path(&graph, "OtherThing", "run")?.contains("2 hops"));
 
     assert!(render_explanation(&graph, "absent", &HashMap::new()).contains("No node matching"));

@@ -5,6 +5,24 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
+## Query text and path resolution
+
+Plain `compass query` output is now concise by default and its page budget is
+8,000 approximate tokens. Scripts or review workflows that need the previous
+expanded provenance should pass `--evidence`. Existing
+`compass.query.discovery-text-page/1` cursors cannot be resumed; start the query
+again to receive a `/2` cursor, and keep the concise/evidence tier unchanged
+while paging. Discovery JSON remains `compass.query.discovery/1`.
+
+Natural structural queries now mark every fuzzy execution or suggestion with
+`NO EXACT MATCH`/the typed `no_match` diagnostic. Handle that signal and retry
+with a suggested exact ID when exact identity is required. `compass path` no
+longer promotes a fuzzy symbol candidate into an endpoint; it is
+weighted toward structural relations, defaults to an eight-hop bound, and
+reports `NO PATH FOUND` separately when both endpoints exist but are
+unreachable. Consumers that parsed the prior human path prose should migrate to
+these explicit signals; machine-query schema versions are unchanged.
+
 ## Rebuild SQLite adjacency sidecars
 
 Store snapshots now declare edge-ID-ordered directional adjacency so bounded

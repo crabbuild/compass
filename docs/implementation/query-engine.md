@@ -150,15 +150,20 @@ on the established relevance traversal. MCP `query_graph` uses the same routing
 rule for typed graphs unless a legacy `mode`, `depth`, `token_budget`, or
 `context_filter` field is present.
 
-Structural operand resolution uses the same bounded exact-ID, normalized-name,
-alias, term-posting, and typo recall assembly as search. Duplicate exact names
-remain ambiguous. For a non-exact operand, a candidate with unique evidence in
-the operation's required relationship role can resolve the operand; otherwise
-the engine returns `ambiguous_match` rather than selecting the top-ranked
-candidate. Relation probes are bounded by the request's candidate limit and a
-one-edge existence check per candidate.
+Structural operand resolution checks unique exact IDs, normalized names, and
+qualified names before fallback recall. Duplicate exact names remain ambiguous.
+Bounded alias, term-posting, relationship, and typo recall can still drive a
+strictly dominant natural-query fallback, but the response always carries
+`no_match` and the text projection begins with `NO EXACT MATCH`; the fallback
+cannot masquerade as exact. Ambiguous fallbacks remain suggestions only.
+Relation probes remain bounded by the request's candidate limit and a one-edge
+existence check per candidate. The dedicated `compass path` command is stricter:
+both endpoints must resolve exactly before traversal.
 
-Node trails traverse published edges from source to target. When no directed
+Node trails traverse published edges from source to target with deterministic
+relation costs: structural call, containment, import, dependency, routing, and
+type-hierarchy evidence is preferred over reference and documentation edges.
+When no directed
 path is found, one undirected probe using the remaining traversal budget
 distinguishes a true no-match from
 a route that requires traversing at least one edge backward. The latter returns

@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -1525,6 +1526,12 @@ impl CodeQueryEngine {
         let max_nodes = usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX);
         let ranking_started = Instant::now();
         let ranked = rank_search_candidates(&request.query, &terms, candidates, max_nodes);
+        let has_exact_match = ranked.iter().any(|result| {
+            matches!(
+                result.candidate_source,
+                CandidateSource::ExactId | CandidateSource::ExactName
+            )
+        });
         instrumentation.ranking += ranking_started.elapsed();
 
         let execution_started = Instant::now();
@@ -1537,6 +1544,7 @@ impl CodeQueryEngine {
                 path: None,
             });
         }
+        let fallback_count = ranked.len();
         for result in ranked {
             let score = result.score;
             let id = result.node_id;
@@ -1549,10 +1557,18 @@ impl CodeQueryEngine {
             });
             response.nodes.push(query_node(&node));
         }
-        if response.results.is_empty() {
+        if !has_exact_match {
+            let related_terms = terms.join(", ");
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::NoMatch,
-                message: format!("No symbol matched {:?}", request.query),
+                message: if fallback_count == 0 {
+                    format!("NO EXACT MATCH for {:?}", request.query)
+                } else {
+                    format!(
+                        "NO EXACT MATCH for {:?}. Showing {fallback_count} fuzzy/lexical fallback result(s) for related terms: {related_terms}",
+                        request.query
+                    )
+                },
                 node_id: None,
                 path: None,
             });
@@ -1828,7 +1844,9 @@ impl CodeQueryEngine {
             }
         }
 
-        let recall_terms = query_recall_terms(query)
+        let discovery_terms = crate::text::discovery_term_selection(query);
+        let recall_terms = discovery_terms
+            .recall_terms
             .into_iter()
             .filter(|term| {
                 !matches!(
@@ -1839,13 +1857,7 @@ impl CodeQueryEngine {
             .take(compass_model::query_contract::MAX_INDEXED_QUERY_TERMS.saturating_add(1))
             .collect::<Vec<_>>();
         validate_search_term_count(&recall_terms)?;
-        let ranking_terms = recall_terms
-            .iter()
-            .cloned()
-            .map(canonical_query_token)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
+        let ranking_terms = discovery_terms.ranking_terms;
         let mut terms = recall_terms.clone();
         for term in &ranking_terms {
             if terms.len() >= compass_model::query_contract::MAX_INDEXED_QUERY_TERMS {
@@ -2622,7 +2634,7 @@ impl CodeQueryEngine {
         if prepared.fts_query.is_empty() {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::NoMatch,
-                message: format!("No symbol matched {query:?}"),
+                message: format!("NO EXACT MATCH for {query:?}"),
                 node_id: None,
                 path: None,
             });
@@ -2669,13 +2681,19 @@ impl CodeQueryEngine {
         if candidates.is_empty() {
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::NoMatch,
-                message: format!("No symbol matched {query:?}"),
+                message: format!("NO EXACT MATCH for {query:?}"),
                 node_id: None,
                 path: None,
             });
             return Ok(None);
         }
         if response.truncated {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::NoMatch,
+                message: format!("NO EXACT MATCH for {query:?}"),
+                node_id: None,
+                path: None,
+            });
             response.diagnostics.push(QueryDiagnostic {
                 code: QueryDiagnosticCode::AmbiguousMatch,
                 message: format!(
@@ -2687,9 +2705,23 @@ impl CodeQueryEngine {
             });
             return Ok(None);
         }
-        let candidate_count = candidates.len();
-        let ranked =
-            rank_search_candidates(query, &prepared.ranking_terms, candidates, candidate_limit);
+        let max_fallback = usize::try_from(response.limits.max_nodes).unwrap_or(usize::MAX);
+        let ranked = rank_search_candidates(
+            query,
+            &prepared.ranking_terms,
+            candidates,
+            candidate_limit.min(max_fallback),
+        );
+        let fallback_count = ranked.len();
+        response.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::NoMatch,
+            message: format!(
+                "NO EXACT MATCH for {query:?}. Showing {fallback_count} fuzzy/lexical fallback result(s) for related terms: {}",
+                prepared.ranking_terms.join(", ")
+            ),
+            node_id: None,
+            path: None,
+        });
         if let [candidate] = ranked.as_slice() {
             return Ok(Some(candidate.node.id.clone()));
         }
@@ -2698,11 +2730,18 @@ impl CodeQueryEngine {
         {
             return Ok(Some(candidate.node.id.clone()));
         }
+        for result in ranked {
+            response.results.push(SearchHit {
+                node_id: result.node_id,
+                score: result.score,
+                matched_fields: result.matched_fields,
+            });
+            response.nodes.push(query_node(&result.node));
+        }
         response.diagnostics.push(QueryDiagnostic {
             code: QueryDiagnosticCode::AmbiguousMatch,
             message: format!(
-                "Symbol {query:?} recalled {} candidates; provide a qualified name or exact ID",
-                candidate_count
+                "Fallback for {query:?} recalled {fallback_count} candidates; provide a qualified name or exact ID"
             ),
             node_id: None,
             path: None,
@@ -2770,11 +2809,22 @@ impl CodeQueryEngine {
         if !budget.consume_node() {
             return Ok((None, true));
         }
-        let mut queue = VecDeque::from([(source.to_owned(), 0_usize)]);
-        let mut visited = HashSet::from([source.to_owned()]);
+        let mut queue = BinaryHeap::from([Reverse((
+            0_u32,
+            0_usize,
+            source.to_owned(),
+            source.to_owned(),
+        ))]);
+        let mut best = HashMap::from([(source.to_owned(), (0_u32, 0_usize, source.to_owned()))]);
+        let mut admitted = HashSet::from([source.to_owned()]);
         let mut predecessor = HashMap::<String, (String, String)>::new();
         let mut truncated = false;
-        while let Some((node, depth)) = queue.pop_front() {
+        while let Some(Reverse((cost, depth, path_key, node))) = queue.pop() {
+            if best.get(&node).is_none_or(|current| {
+                current.0 != cost || current.1 != depth || current.2 != path_key
+            }) {
+                continue;
+            }
             if node == target {
                 let mut nodes = vec![target.to_owned()];
                 let mut edges = Vec::new();
@@ -2820,21 +2870,30 @@ impl CodeQueryEngine {
                 }
             }
             adjacent.sort_by(|left, right| {
-                evidence_quality(&right.1)
-                    .cmp(&evidence_quality(&left.1))
+                code_relation_weight(left.1.kind)
+                    .cmp(&code_relation_weight(right.1.kind))
+                    .then_with(|| evidence_quality(&right.1).cmp(&evidence_quality(&left.1)))
+                    .then_with(|| left.0.cmp(&right.0))
                     .then_with(|| left.1.id.cmp(&right.1.id))
             });
             for (next, edge) in adjacent {
-                if visited.contains(&next) {
+                let next_depth = depth.saturating_add(1);
+                let next_cost = cost.saturating_add(code_relation_weight(edge.kind));
+                let next_key = format!("{path_key}\0{}\0{next}", edge.id);
+                let candidate = (next_cost, next_depth, next_key.clone());
+                if best
+                    .get(&next)
+                    .is_some_and(|current| candidate >= current.clone())
+                {
                     continue;
                 }
-                if !budget.consume_node() {
+                if admitted.insert(next.clone()) && !budget.consume_node() {
                     truncated = true;
                     continue;
                 }
-                visited.insert(next.clone());
+                best.insert(next.clone(), candidate);
                 predecessor.insert(next.clone(), (node.clone(), edge.id.clone()));
-                queue.push_back((next, depth + 1));
+                queue.push(Reverse((next_cost, next_depth, next_key, next)));
             }
         }
         Ok((None, truncated))
@@ -3076,6 +3135,21 @@ fn evidence_quality(edge: &EdgeRecord) -> u8 {
         })
         .max()
         .unwrap_or(0)
+}
+
+const fn code_relation_weight(kind: EdgeKind) -> u32 {
+    match kind {
+        EdgeKind::Contains
+        | EdgeKind::Calls
+        | EdgeKind::Imports
+        | EdgeKind::Extends
+        | EdgeKind::Implements
+        | EdgeKind::RoutesTo
+        | EdgeKind::Handles
+        | EdgeKind::DependsOn => 1,
+        EdgeKind::References | EdgeKind::Documents => 4,
+        _ => 2,
+    }
 }
 
 pub(crate) fn query_node(node: &NodeRecord) -> QueryNode {

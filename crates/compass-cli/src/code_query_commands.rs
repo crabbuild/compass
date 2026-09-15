@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use compass_model::query_contract::{
@@ -223,13 +224,23 @@ fn required<'a>(values: &'a [String], index: usize, usage: &str) -> Result<&'a s
 }
 
 fn render_text(response: &CodeQueryResponse) -> String {
-    let mut lines = vec![format!(
+    let no_match = response.diagnostics.iter().find(|diagnostic| {
+        diagnostic.code == compass_model::query_contract::QueryDiagnosticCode::NoMatch
+    });
+    let mut lines = Vec::new();
+    if let Some(diagnostic) = no_match {
+        lines.push("match_confidence: none".to_owned());
+        lines.push(diagnostic.message.clone());
+    } else if !response.nodes.is_empty() {
+        lines.push("match_confidence: exact".to_owned());
+    }
+    lines.push(format!(
         "{:?}: {} node(s), {} edge(s), {} path(s)",
         response.operation,
         response.nodes.len(),
         response.edges.len(),
         response.paths.len()
-    )];
+    ));
     lines.extend(response.nodes.iter().map(|node| {
         format!(
             "{} [{}] {}",
@@ -241,10 +252,60 @@ fn render_text(response: &CodeQueryResponse) -> String {
                 .unwrap_or_default()
         )
     }));
+    let node_labels = response
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.qualified_name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let edges = response
+        .edges
+        .iter()
+        .map(|edge| (edge.id.as_str(), edge))
+        .collect::<BTreeMap<_, _>>();
+    for (index, path) in response.paths.iter().enumerate() {
+        if let Some(target) = path.node_ids.last() {
+            lines.push(format!("Target resolved: {target}"));
+        }
+        let mut segments = path
+            .node_ids
+            .first()
+            .map(|node| {
+                node_labels
+                    .get(node.as_str())
+                    .copied()
+                    .unwrap_or(node.as_str())
+                    .to_owned()
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        for (edge_id, nodes) in path.edge_ids.iter().zip(path.node_ids.windows(2)) {
+            let Some(edge) = edges.get(edge_id.as_str()) else {
+                continue;
+            };
+            let right = node_labels
+                .get(nodes[1].as_str())
+                .copied()
+                .unwrap_or(nodes[1].as_str());
+            if edge.source == nodes[0] && edge.target == nodes[1] {
+                segments.push(format!("--{}--> {right}", edge.kind.as_str()));
+            } else {
+                segments.push(format!("<--{}-- {right}", edge.kind.as_str()));
+            }
+        }
+        lines.push(format!(
+            "{} path (weighted, {} hops): {}",
+            if index == 0 { "Best" } else { "Alternative" },
+            path.edge_ids.len(),
+            segments.join(" ")
+        ));
+    }
     lines.extend(
         response
             .diagnostics
             .iter()
+            .filter(|diagnostic| {
+                diagnostic.code != compass_model::query_contract::QueryDiagnosticCode::NoMatch
+            })
             .map(|diagnostic| format!("! {:?}: {}", diagnostic.code, diagnostic.message)),
     );
     lines.join("\n")

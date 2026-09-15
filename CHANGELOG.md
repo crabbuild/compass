@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Make query failures and paths more trustworthy: exact-looking missing symbols
+  now return structured `no_match` signals across discovery and typed natural
+  queries; `compass path` requires exact endpoints, reports unreachable targets,
+  and uses deterministic relation-weighted routing with a visible shorter weak
+  alternative.
+
+- Make plain query output concise by default, add `--evidence` for full
+  provenance, raise the default text-page budget to 8,000 tokens, and move text
+  cursors to `compass.query.discovery-text-page/2`. Generic relationship words
+  no longer dominate discovery seeding.
+
 ## 0.3.25 - 2026-09-13
 
 - Raise the immutable-history aggregate authoritative-evidence limit from

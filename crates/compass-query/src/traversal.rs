@@ -1,4 +1,5 @@
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet};
 
 use compass_model::query_contract::{
     DiscoveryLimits, MAX_DISCOVERY_EDGES, MAX_DISCOVERY_EXPANDED_RELATIONSHIPS, MAX_DISCOVERY_NODES,
@@ -8,8 +9,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::score::{
-    TextRankProfile, find_exact_nodes, find_node, pick_scored_endpoint, pick_seeds, score_nodes,
-    score_nodes_with_profile,
+    TextRankProfile, find_exact_nodes, find_node, pick_seeds, score_nodes_with_profile,
 };
 use crate::text::{infer_context_filters, normalize_context_filters, query_terms, sanitize_label};
 
@@ -20,6 +20,7 @@ pub enum TraversalMode {
 }
 
 pub const DEFAULT_TEXT_TOKEN_BUDGET: usize = 2_000;
+pub const DEFAULT_PATH_DEPTH_LIMIT: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TextPageOptions {
@@ -295,67 +296,255 @@ pub fn render_shortest_path(
     source_query: &str,
     target_query: &str,
 ) -> Result<String, String> {
-    let source_scores = score_nodes(
-        graph,
-        &source_query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>(),
-        false,
-    );
-    let target_scores = score_nodes(
-        graph,
-        &target_query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>(),
-        false,
-    );
-    if source_scores.ranked.is_empty() {
-        return Err(format!("No node matching '{source_query}' found."));
+    render_shortest_path_with_limit(graph, source_query, target_query, DEFAULT_PATH_DEPTH_LIMIT)
+}
+
+pub fn render_shortest_path_with_limit(
+    graph: &Graph,
+    source_query: &str,
+    target_query: &str,
+    max_depth: usize,
+) -> Result<String, String> {
+    if max_depth == 0 {
+        return Err("path depth limit must be greater than zero".to_owned());
     }
-    if target_scores.ranked.is_empty() {
-        return Err(format!("No node matching '{target_query}' found."));
-    }
-    let source = pick_scored_endpoint(graph, &source_scores.ranked, source_query);
-    let target = pick_scored_endpoint(graph, &target_scores.ranked, target_query);
+    let source = resolve_exact_path_endpoint(graph, source_query)?;
+    let target = resolve_exact_path_endpoint(graph, target_query)?;
     if source == target {
         return Err(format!(
             "'{source_query}' and '{target_query}' both resolved to the same node '{}'. Use a more specific label or the exact node ID.",
             graph.node(source).id
         ));
     }
-    let Some(path) = shortest_path_undirected(graph, source, target) else {
+    let weighted = ranked_path_undirected(graph, source, target, max_depth, PathRanking::Weighted);
+    let Some(path) = weighted.path else {
         return Ok(format!(
-            "No path found between '{source_query}' and '{target_query}'."
+            "Source resolved: {}\nTarget resolved: {}\nNO PATH FOUND to resolved target (depth limit {max_depth}, {} nodes visited)",
+            rendered_path_endpoint(graph, source),
+            rendered_path_endpoint(graph, target),
+            weighted.visited_nodes,
         ));
     };
-    let mut segments = vec![graph.node(path[0]).label().to_owned()];
-    for pair in path.windows(2) {
-        let left = pair[0];
-        let right = pair[1];
-        if let Some(edge_index) = graph.edge_between(left, right) {
-            let edge = graph.edge(edge_index);
-            let confidence = edge.string("confidence");
-            let suffix = if confidence.is_empty() {
-                String::new()
-            } else {
-                format!(" [{confidence}]")
+    let hops = path.nodes.len().saturating_sub(1);
+    let mut lines = vec![
+        format!("Source resolved: {}", rendered_path_endpoint(graph, source)),
+        format!("Target resolved: {}", rendered_path_endpoint(graph, target)),
+        format!(
+            "Best path (weighted, {hops} hops, weight {}):\n  {}",
+            path.weight,
+            render_graph_path(graph, &path)
+        ),
+    ];
+    let shorter = ranked_path_undirected(graph, source, target, max_depth, PathRanking::Hops);
+    if let Some(alternative) = shorter.path
+        && alternative.edges != path.edges
+        && alternative.nodes.len() < path.nodes.len()
+        && alternative.weight > path.weight
+        && hops <= alternative.nodes.len().saturating_sub(1).saturating_add(2)
+    {
+        lines.push(format!(
+            "Note: a shorter ({}-hop) but weaker path also exists (weight {}):\n  {}",
+            alternative.nodes.len().saturating_sub(1),
+            alternative.weight,
+            render_graph_path(graph, &alternative)
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+fn rendered_path_endpoint(graph: &Graph, index: NodeIndex) -> String {
+    let node = graph.node(index);
+    format!("{} [id={}]", node.label(), node.id)
+}
+
+fn resolve_exact_path_endpoint(graph: &Graph, query: &str) -> Result<NodeIndex, String> {
+    let matches = find_exact_nodes(graph, query);
+    match matches.as_slice() {
+        [node] => Ok(*node),
+        [] => Err(format!("NO EXACT MATCH for {query:?}")),
+        _ => {
+            let mut ids = matches
+                .iter()
+                .map(|node| graph.node(*node).id.clone())
+                .collect::<Vec<_>>();
+            ids.sort();
+            Err(format!(
+                "AMBIGUOUS EXACT MATCH for {query:?}: {}. Pass an exact node ID.",
+                ids.join(", ")
+            ))
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum PathRanking {
+    Weighted,
+    Hops,
+}
+
+struct GraphPathResult {
+    path: Option<WeightedGraphPath>,
+    visited_nodes: usize,
+}
+
+struct WeightedGraphPath {
+    nodes: Vec<NodeIndex>,
+    edges: Vec<EdgeIndex>,
+    weight: u32,
+}
+
+fn ranked_path_undirected(
+    graph: &Graph,
+    source: NodeIndex,
+    target: NodeIndex,
+    max_depth: usize,
+    ranking: PathRanking,
+) -> GraphPathResult {
+    let source_id = graph.node(source).id.clone();
+    let mut queue = BinaryHeap::from([Reverse((0_u32, 0_u32, source_id.clone(), source))]);
+    let mut best = BTreeMap::from([(source, (0_u32, 0_u32, source_id))]);
+    let mut predecessor = BTreeMap::<NodeIndex, (NodeIndex, EdgeIndex)>::new();
+    let mut visited = BTreeSet::new();
+    while let Some(Reverse((primary, secondary, path_key, node))) = queue.pop() {
+        if best.get(&node).is_none_or(|current| {
+            current.0 != primary || current.1 != secondary || current.2 != path_key
+        }) {
+            continue;
+        }
+        visited.insert(node);
+        if node == target {
+            break;
+        }
+        let hops = match ranking {
+            PathRanking::Weighted => secondary,
+            PathRanking::Hops => primary,
+        };
+        if usize::try_from(hops).unwrap_or(usize::MAX) >= max_depth {
+            continue;
+        }
+        for (neighbor, edge_index, weight, edge_key) in graph_adjacency(graph, node) {
+            let next_hops = hops.saturating_add(1);
+            let current_weight = match ranking {
+                PathRanking::Weighted => primary,
+                PathRanking::Hops => secondary,
             };
+            let next_weight = current_weight.saturating_add(weight);
+            let (next_primary, next_secondary) = match ranking {
+                PathRanking::Weighted => (next_weight, next_hops),
+                PathRanking::Hops => (next_hops, next_weight),
+            };
+            let next_key = format!("{path_key}\0{edge_key}\0{}", graph.node(neighbor).id);
+            let candidate = (next_primary, next_secondary, next_key.clone());
+            if best
+                .get(&neighbor)
+                .is_none_or(|current| candidate < current.clone())
+            {
+                best.insert(neighbor, candidate);
+                predecessor.insert(neighbor, (node, edge_index));
+                queue.push(Reverse((next_primary, next_secondary, next_key, neighbor)));
+            }
+        }
+    }
+    if !best.contains_key(&target) || !visited.contains(&target) {
+        return GraphPathResult {
+            path: None,
+            visited_nodes: visited.len(),
+        };
+    }
+    let mut nodes = vec![target];
+    let mut edges = Vec::new();
+    let mut cursor = target;
+    while cursor != source {
+        let Some((previous, edge)) = predecessor.get(&cursor).copied() else {
+            return GraphPathResult {
+                path: None,
+                visited_nodes: visited.len(),
+            };
+        };
+        edges.push(edge);
+        nodes.push(previous);
+        cursor = previous;
+    }
+    nodes.reverse();
+    edges.reverse();
+    let weight = edges
+        .iter()
+        .map(|edge| relation_weight(&graph.edge(*edge).string("relation")))
+        .fold(0_u32, u32::saturating_add);
+    GraphPathResult {
+        path: Some(WeightedGraphPath {
+            nodes,
+            edges,
+            weight,
+        }),
+        visited_nodes: visited.len(),
+    }
+}
+
+fn graph_adjacency(graph: &Graph, node: NodeIndex) -> Vec<(NodeIndex, EdgeIndex, u32, String)> {
+    let edge_indices = graph
+        .outgoing_edges(node)
+        .chain(graph.incoming_edges(node))
+        .collect::<BTreeSet<_>>();
+    let mut adjacent = Vec::with_capacity(edge_indices.len());
+    for edge_index in edge_indices.iter().copied() {
+        let Some((source, target)) = graph.edge_endpoints(edge_index) else {
+            continue;
+        };
+        let neighbor = if source == node { target } else { source };
+        let edge = graph.edge(edge_index);
+        let relation = edge.string("relation");
+        let public_id = edge.string("id");
+        let edge_key = if public_id.is_empty() {
+            format!("{}:{}:{}:{edge_index}", edge.source, relation, edge.target)
+        } else {
+            public_id
+        };
+        adjacent.push((neighbor, edge_index, relation_weight(&relation), edge_key));
+    }
+    adjacent.sort_by(|left, right| {
+        left.2
+            .cmp(&right.2)
+            .then_with(|| graph.node(left.0).id.cmp(&graph.node(right.0).id))
+            .then_with(|| left.3.cmp(&right.3))
+    });
+    adjacent
+}
+
+fn relation_weight(relation: &str) -> u32 {
+    match relation {
+        "calls" | "contains" | "depends_on" | "extends" | "implements" | "imports"
+        | "routes_to" | "handles" => 1,
+        "references" | "documents" | "co_occurs" | "co-occurs" => 4,
+        _ => 2,
+    }
+}
+
+fn render_graph_path(graph: &Graph, path: &WeightedGraphPath) -> String {
+    let mut segments = vec![graph.node(path.nodes[0]).label().to_owned()];
+    for ((left, right), edge_index) in path
+        .nodes
+        .windows(2)
+        .map(|pair| (pair[0], pair[1]))
+        .zip(path.edges.iter().copied())
+    {
+        let edge = graph.edge(edge_index);
+        let confidence = edge.string("confidence");
+        let suffix = if confidence.is_empty() {
+            String::new()
+        } else {
+            format!(" [{confidence}]")
+        };
+        if graph.node_index(&edge.source) == Some(left)
+            && graph.node_index(&edge.target) == Some(right)
+        {
             segments.push(format!(
                 "--{}{}--> {}",
                 edge.string("relation"),
                 suffix,
                 graph.node(right).label()
             ));
-        } else if let Some(edge_index) = graph.edge_between(right, left) {
-            let edge = graph.edge(edge_index);
-            let confidence = edge.string("confidence");
-            let suffix = if confidence.is_empty() {
-                String::new()
-            } else {
-                format!(" [{confidence}]")
-            };
+        } else {
             segments.push(format!(
                 "<--{}{}-- {}",
                 edge.string("relation"),
@@ -364,11 +553,7 @@ pub fn render_shortest_path(
             ));
         }
     }
-    Ok(format!(
-        "Shortest path ({} hops):\n  {}",
-        path.len() - 1,
-        segments.join(" ")
-    ))
+    segments.join(" ")
 }
 
 #[must_use]
@@ -1056,37 +1241,6 @@ fn render_paginated_groups(
     } else {
         Ok(format!("{body}\n{pagination}"))
     }
-}
-
-fn shortest_path_undirected(
-    graph: &Graph,
-    source: NodeIndex,
-    target: NodeIndex,
-) -> Option<Vec<NodeIndex>> {
-    let mut queue = VecDeque::from([source]);
-    let mut previous = HashMap::from([(source, source)]);
-    while let Some(node) = queue.pop_front() {
-        if node == target {
-            break;
-        }
-        for neighbor in graph.successors(node).chain(graph.predecessors(node)) {
-            if let std::collections::hash_map::Entry::Vacant(entry) = previous.entry(neighbor) {
-                entry.insert(node);
-                queue.push_back(neighbor);
-            }
-        }
-    }
-    if !previous.contains_key(&target) {
-        return None;
-    }
-    let mut path = vec![target];
-    let mut current = target;
-    while current != source {
-        current = previous[&current];
-        path.push(current);
-    }
-    path.reverse();
-    Some(path)
 }
 
 fn json_string(value: Option<&Value>) -> String {

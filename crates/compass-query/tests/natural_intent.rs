@@ -131,7 +131,7 @@ fn contradictory_and_ambiguous_questions_never_invent_direction()
 }
 
 #[test]
-fn structural_intents_use_bounded_fuzzy_recall_and_relation_evidence()
+fn structural_intents_disclose_bounded_fuzzy_fallback_before_execution()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
@@ -163,8 +163,11 @@ fn structural_intents_use_bounded_fuzzy_recall_and_relation_evidence()
             response.nodes.iter().any(|node| node.id == "n:list"),
             "{response:#?}"
         );
-        assert!(!response.nodes.iter().any(|node| node.id == "n:ilts"));
         assert!(response.edges.iter().any(|edge| edge.target == "n:list"));
+        assert!(response.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == QueryDiagnosticCode::NoMatch
+                && diagnostic.message.starts_with("NO EXACT MATCH")
+        }));
     }
     Ok(())
 }

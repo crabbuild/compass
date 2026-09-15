@@ -16,7 +16,8 @@ use compass_model::query_contract::{
 use compass_model::search::OPERATION_ROLE_TOKENS;
 
 use crate::code_query::{
-    PinnedDiscoveryBackend, query_edge, query_node, recall_fuzzy_term_variants, search_query_terms,
+    PinnedDiscoveryBackend, normalize_symbol, query_edge, query_node, recall_fuzzy_term_variants,
+    search_query_terms,
 };
 use crate::ranking::{
     OperationRootRank, RelationEvidenceRank, is_explicit_operation_predicate,
@@ -25,7 +26,9 @@ use crate::ranking::{
 use crate::recall::{
     CandidateSource, RecallBudget, RelationshipTermMatch, SearchCandidate, SearchCandidatePool,
 };
-use crate::text::{normalize_context_filters, search_tokens};
+use crate::text::{
+    discovery_operands, discovery_term_selection, normalize_context_filters, search_tokens,
+};
 use crate::{CodeQueryEngine, QueryError, QueryErrorKind};
 
 const ALL_EDGE_KINDS: &[EdgeKind] = &[
@@ -148,6 +151,15 @@ impl CodeQueryEngine {
 
         let relation_contexts = validate_and_normalize_contexts(&request.relation_contexts)?;
         let resolved_scope = self.resolve_scopes(&backend, &request.scope, &guard)?;
+        let term_selection = discovery_term_selection(&request.question);
+        let exact_operands = exact_match_operands(&request.question);
+        let mut exact_check = check_exact_operands(
+            &backend,
+            &exact_operands,
+            &resolved_scope,
+            &request.limits,
+            &guard,
+        )?;
         let (selected_direction, direction_source) = match request.direction {
             DiscoveryDirection::Auto => infer_discovery_direction(&request.question),
             direction => (direction, DiscoveryDirectionSource::Explicit),
@@ -178,12 +190,33 @@ impl CodeQueryEngine {
             &request.limits,
             &guard,
         )?;
+        let trimmed_question = request.question.trim();
+        if exact_operands.is_empty()
+            && !trimmed_question.is_empty()
+            && !trimmed_question.chars().any(char::is_whitespace)
+            && !selection.candidates.iter().any(|candidate| {
+                matches!(
+                    candidate.source,
+                    DiscoverySeedSource::ExactId | DiscoverySeedSource::ExactName
+                )
+            })
+        {
+            exact_check.missing.push(trimmed_question.to_owned());
+        }
         response.stats.candidate_nodes = selection.nodes_read;
         response.stats.candidate_probes = selection.probes;
+        response.stats.candidate_nodes = response
+            .stats
+            .candidate_nodes
+            .saturating_add(exact_check.nodes_read);
+        response.stats.candidate_probes = response
+            .stats
+            .candidate_probes
+            .saturating_add(exact_check.probes);
         response.stats.expanded_relationships = selection.expanded_relationships;
         response.stats.candidates_admitted =
             u64::try_from(selection.candidates.len()).unwrap_or(u64::MAX);
-        if selection.truncated {
+        if selection.truncated || exact_check.truncated {
             response.truncated = true;
         } else {
             response.omissions.candidates = Some(0);
@@ -202,6 +235,22 @@ impl CodeQueryEngine {
             .min(usize::try_from(request.limits.max_nodes).unwrap_or(usize::MAX));
         let (seeds, omitted_alternatives) = discovery_seeds(&selection.candidates, max_seeds);
         response.seeds = seeds;
+        for operand in &exact_check.missing {
+            response.diagnostics.push(QueryDiagnostic {
+                code: QueryDiagnosticCode::NoMatch,
+                message: if response.seeds.is_empty() {
+                    format!("NO EXACT MATCH for {operand:?}")
+                } else {
+                    format!(
+                        "NO EXACT MATCH for {operand:?}. Showing {} fuzzy/lexical fallback result(s) for related terms: {}",
+                        response.seeds.len(),
+                        term_selection.ranking_terms.join(", ")
+                    )
+                },
+                node_id: None,
+                path: None,
+            });
+        }
         if !selection.ambiguity_complete {
             for seed in &mut response.seeds {
                 seed.ambiguous = true;
@@ -241,10 +290,24 @@ impl CodeQueryEngine {
                     node_id: None,
                     path: None,
                 });
-            } else {
+            } else if !response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::NoMatch)
+            {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::NoMatch,
-                    message: format!("No node matched {:?}", request.question),
+                    message: if term_selection.ranking_terms.is_empty()
+                        && !term_selection.discarded_generic_terms.is_empty()
+                    {
+                        format!(
+                            "NO EXACT MATCH for {:?}: no specific seed term remains after discarding generic relational vocabulary ({})",
+                            request.question,
+                            term_selection.discarded_generic_terms.join(", ")
+                        )
+                    } else {
+                        format!("NO EXACT MATCH for {:?}", request.question)
+                    },
                     node_id: None,
                     path: None,
                 });
@@ -1321,6 +1384,55 @@ impl CodeQueryEngine {
             complete.then(|| u64::try_from(omitted_edges).unwrap_or(u64::MAX));
         Ok(complete)
     }
+}
+
+#[derive(Default)]
+struct ExactOperandCheck {
+    missing: Vec<String>,
+    nodes_read: u64,
+    probes: u64,
+    truncated: bool,
+}
+
+fn exact_match_operands(question: &str) -> Vec<String> {
+    discovery_operands(question)
+}
+
+fn check_exact_operands(
+    backend: &PinnedDiscoveryBackend<'_>,
+    operands: &[String],
+    scope: &[DiscoveryScope],
+    limits: &DiscoveryLimits,
+    guard: &DiscoveryGuard<'_>,
+) -> Result<ExactOperandCheck, QueryError> {
+    let mut check = ExactOperandCheck::default();
+    let limit = usize::try_from(limits.max_candidates).unwrap_or(usize::MAX);
+    for operand in operands.iter().take(2) {
+        guard.check()?;
+        check.probes = check.probes.saturating_add(1);
+        if backend
+            .node_by_id(operand)?
+            .is_some_and(|node| discovery_scope_matches(&node, scope))
+        {
+            check.nodes_read = check.nodes_read.saturating_add(1);
+            continue;
+        }
+        check.probes = check.probes.saturating_add(1);
+        let (nodes, truncated) =
+            backend.nodes_by_normalized_name(&normalize_symbol(operand), limit.max(1))?;
+        check.nodes_read = check
+            .nodes_read
+            .saturating_add(u64::try_from(nodes.len()).unwrap_or(u64::MAX));
+        check.truncated |= truncated;
+        if !truncated
+            && !nodes
+                .iter()
+                .any(|node| discovery_scope_matches(node, scope))
+        {
+            check.missing.push(operand.clone());
+        }
+    }
+    Ok(check)
 }
 
 fn retain_specific_discovery_candidates(

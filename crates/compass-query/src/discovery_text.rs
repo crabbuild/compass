@@ -8,8 +8,10 @@ use compass_model::query_contract::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
-pub const DISCOVERY_TEXT_PAGE_VERSION: &str = "compass.query.discovery-text-page/1";
+pub const DISCOVERY_TEXT_PAGE_VERSION: &str = "compass.query.discovery-text-page/2";
+pub const DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET: usize = 8_000;
 const MAX_CURSOR_BYTES: usize = 4_096;
 const MIN_TEXT_BUDGET: usize = 256;
 const MAX_TEXT_BUDGET: usize = 65_536;
@@ -23,6 +25,7 @@ pub struct DiscoveryTextPageOptions<'a> {
     pub request_digest: &'a str,
     pub graph_identity: &'a str,
     pub graph_digest: &'a str,
+    pub include_evidence: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,6 +114,7 @@ struct CursorEnvelope {
     graph_identity: String,
     graph_digest: String,
     semantic_result_digest: String,
+    include_evidence: bool,
     section: String,
     item: usize,
     offset: usize,
@@ -132,7 +136,7 @@ pub fn render_discovery_text_page(
         return Err(DiscoveryTextPageError::InvalidCursorEncoding);
     }
     let semantic_result_digest = discovery_response_digest(response)?;
-    let entries = entries(response);
+    let entries = entries(response, options.include_evidence);
     let start = match options.cursor {
         Some(cursor) => {
             let envelope = decode_cursor(cursor)?;
@@ -143,13 +147,32 @@ pub fn render_discovery_text_page(
                 options.graph_digest,
                 &semantic_result_digest,
                 &entries,
+                options.include_evidence,
             )?;
             envelope.offset
         }
         None => 0,
     };
     let ambiguity = response.seeds.iter().filter(|seed| seed.ambiguous).count();
-    let fixed = vec![
+    let term_selection = crate::text::discovery_term_selection(&response.question);
+    let mut fixed = match_signal_lines(response);
+    fixed.push(format!(
+        "Seed terms: {}{}",
+        if term_selection.ranking_terms.is_empty() {
+            "none".to_owned()
+        } else {
+            rendered_values(&term_selection.ranking_terms)
+        },
+        if term_selection.discarded_generic_terms.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (discarded as too generic: {})",
+                rendered_quoted_values(&term_selection.discarded_generic_terms)
+            )
+        }
+    ));
+    fixed.extend([
         format!(
             "Discovery: {} seed(s), {} node(s), {} edge(s)",
             response.seeds.len(),
@@ -189,8 +212,10 @@ pub fn render_discovery_text_page(
             rendered_values(&response.relation_contexts)
         ),
         format!("Scope (OR): {}", rendered_scopes(response)),
-        format!("Semantic result: sha256:{semantic_result_digest}"),
-    ];
+    ]);
+    if options.include_evidence {
+        fixed.push(format!("Semantic result: sha256:{semantic_result_digest}"));
+    }
     let max_chars = options.token_budget.saturating_mul(4);
     let fixed_chars = fixed
         .iter()
@@ -209,6 +234,7 @@ pub fn render_discovery_text_page(
             candidate_end,
             entries.len(),
             candidate_cursor.as_deref(),
+            options.include_evidence,
         );
         let candidate_entry_chars = entry.text.chars().count().saturating_add(1);
         let footer_chars = footer
@@ -239,6 +265,7 @@ pub fn render_discovery_text_page(
         end,
         entries.len(),
         next_cursor.as_deref(),
+        options.include_evidence,
     );
     if entries.is_empty()
         && fixed_chars.saturating_add(
@@ -276,6 +303,7 @@ fn continuation_cursor(
                 graph_identity: options.graph_identity.to_owned(),
                 graph_digest: options.graph_digest.to_owned(),
                 semantic_result_digest: semantic_result_digest.to_owned(),
+                include_evidence: options.include_evidence,
                 section: entry.section.to_owned(),
                 item: entry.item,
                 offset,
@@ -291,8 +319,9 @@ fn footer(
     end: usize,
     entry_total: usize,
     next_cursor: Option<&str>,
-) -> [String; 2] {
-    [
+    include_evidence: bool,
+) -> Vec<String> {
+    let mut lines = vec![
         format!(
             "Completeness: {} (candidates={}, alternatives={}, nodes={}, edges={}, expandedRelationships={})",
             if response.truncated {
@@ -307,56 +336,110 @@ fn footer(
             omission(response.omissions.expanded_relationships),
         ),
         format!(
-            "Pagination: version={} digest=sha256:{} range={}-{} of {} next={}",
+            "Pagination: version={}{} range={}-{} of {} next={}",
             DISCOVERY_TEXT_PAGE_VERSION,
-            semantic_result_digest,
+            if include_evidence {
+                format!(" digest=sha256:{semantic_result_digest}")
+            } else {
+                String::new()
+            },
             if entry_total == 0 { 0 } else { start + 1 },
             end,
             entry_total,
             next_cursor.unwrap_or("none")
         ),
-    ]
+    ];
+    if !include_evidence {
+        let hidden = response
+            .nodes
+            .iter()
+            .map(|node| node.evidence.len())
+            .sum::<usize>()
+            .saturating_add(
+                response
+                    .edges
+                    .iter()
+                    .map(|edge| edge.evidence.len())
+                    .sum::<usize>(),
+            );
+        if hidden > 0 {
+            lines.push(format!(
+                "({hidden} provenance record(s) hidden — pass --evidence for full detail)"
+            ));
+        }
+    }
+    lines
 }
 
-fn entries(response: &DiscoveryQueryResponse) -> Vec<Entry> {
+fn entries(response: &DiscoveryQueryResponse, include_evidence: bool) -> Vec<Entry> {
     let mut entries = Vec::new();
     let mut alternative_item = 0_usize;
     let mut node_evidence_item = 0_usize;
     let mut edge_evidence_item = 0_usize;
+    let labels = response
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node.qualified_name.as_str()))
+        .collect::<BTreeMap<_, _>>();
     for (item, seed) in response.seeds.iter().enumerate() {
         entries.push(Entry {
             section: "seeds",
             item,
-            text: format!(
-                "Seed: {} [{}; source={}; score={}; matchedFields={}; matchedTerms={}]{}",
-                rendered_scalar(&seed.node_id),
-                score_tier_name(seed.score_tier),
-                seed_source_name(seed.candidate_source),
-                rendered_scalar(&seed.score),
-                rendered_values(&seed.matched_fields),
-                rendered_values(&seed.matched_terms),
-                seed.source
-                    .as_ref()
-                    .map(|source| format!(" @ {}", rendered_anchor(source)))
-                    .unwrap_or_default(),
-            ),
+            text: if include_evidence {
+                format!(
+                    "Seed: {} [{}; source={}; score={}; matchedFields={}; matchedTerms={}]{}",
+                    rendered_scalar(&seed.node_id),
+                    score_tier_name(seed.score_tier),
+                    seed_source_name(seed.candidate_source),
+                    rendered_scalar(&seed.score),
+                    rendered_values(&seed.matched_fields),
+                    rendered_values(&seed.matched_terms),
+                    seed.source
+                        .as_ref()
+                        .map(|source| format!(" @ {}", rendered_anchor(source)))
+                        .unwrap_or_default(),
+                )
+            } else {
+                format!(
+                    "SEED {} [source={}; matched={}]",
+                    rendered_scalar(
+                        labels
+                            .get(seed.node_id.as_str())
+                            .copied()
+                            .unwrap_or(seed.node_id.as_str()),
+                    ),
+                    seed_source_name(seed.candidate_source),
+                    rendered_values(&seed.matched_terms),
+                )
+            },
         });
         for alternative in &seed.alternatives {
             entries.push(Entry {
                 section: "alternatives",
                 item: alternative_item,
-                text: format!(
-                    "Alternative: seed={} node={} qualifiedName={} score={}{}",
-                    rendered_scalar(&seed.node_id),
-                    rendered_scalar(&alternative.node_id),
-                    rendered_scalar(&alternative.qualified_name),
-                    rendered_scalar(&alternative.score),
-                    alternative
-                        .source
-                        .as_ref()
-                        .map(|source| format!(" @ {}", rendered_anchor(source)))
-                        .unwrap_or_default(),
-                ),
+                text: if include_evidence {
+                    format!(
+                        "Alternative: seed={} node={} qualifiedName={} score={}{}",
+                        rendered_scalar(&seed.node_id),
+                        rendered_scalar(&alternative.node_id),
+                        rendered_scalar(&alternative.qualified_name),
+                        rendered_scalar(&alternative.score),
+                        alternative
+                            .source
+                            .as_ref()
+                            .map(|source| format!(" @ {}", rendered_anchor(source)))
+                            .unwrap_or_default(),
+                    )
+                } else {
+                    format!(
+                        "ALTERNATIVE {} @ {}",
+                        rendered_scalar(&alternative.qualified_name),
+                        alternative
+                            .source
+                            .as_ref()
+                            .map_or_else(|| "unknown".to_owned(), rendered_anchor),
+                    )
+                },
             });
             alternative_item += 1;
         }
@@ -365,20 +448,36 @@ fn entries(response: &DiscoveryQueryResponse) -> Vec<Entry> {
         entries.push(Entry {
             section: "nodes",
             item,
-            text: format!(
-                "Node: {} [{}] {}{} [evidence={}; details={}]",
-                rendered_scalar(&node.id),
-                node.kind.as_str(),
-                rendered_scalar(&node.qualified_name),
-                node.source
-                    .as_ref()
-                    .map(|source| format!(" @ {}", rendered_anchor(source)))
-                    .unwrap_or_default(),
-                node.evidence.len(),
-                rendered_details(node.details.as_ref()),
-            ),
+            text: if include_evidence {
+                format!(
+                    "Node: {} [{}] {}{} [evidence={}; details={}]",
+                    rendered_scalar(&node.id),
+                    node.kind.as_str(),
+                    rendered_scalar(&node.qualified_name),
+                    node.source
+                        .as_ref()
+                        .map(|source| format!(" @ {}", rendered_anchor(source)))
+                        .unwrap_or_default(),
+                    node.evidence.len(),
+                    rendered_details(node.details.as_ref()),
+                )
+            } else {
+                format!(
+                    "NODE {} [{}] {}",
+                    rendered_scalar(&node.qualified_name),
+                    node.kind.as_str(),
+                    node.source
+                        .as_ref()
+                        .map_or_else(|| "unknown".to_owned(), rendered_anchor),
+                )
+            },
         });
-        for (evidence_index, evidence) in node.evidence.iter().enumerate() {
+        for (evidence_index, evidence) in node
+            .evidence
+            .iter()
+            .enumerate()
+            .filter(|_| include_evidence)
+        {
             entries.push(Entry {
                 section: "node_evidence",
                 item: node_evidence_item,
@@ -396,7 +495,7 @@ fn entries(response: &DiscoveryQueryResponse) -> Vec<Entry> {
         entries.push(Entry {
             section: "edges",
             item,
-            text: format!(
+            text: if include_evidence { format!(
                 "Edge #{}: {} -{}-> {} [id={}; context={}; site={}; occurrenceRule={}; evidence={}; details={}]",
                 item + 1,
                 rendered_scalar(&edge.source),
@@ -413,13 +512,34 @@ fn entries(response: &DiscoveryQueryResponse) -> Vec<Entry> {
                 rendered_details(edge.occurrence_rule.as_ref()),
                 edge.evidence.len(),
                 rendered_details(edge.details.as_ref()),
-            ),
+            ) } else { format!(
+                "EDGE {} --{}--> {} [{}]",
+                rendered_scalar(
+                    labels
+                        .get(edge.source.as_str())
+                        .copied()
+                        .unwrap_or(edge.source.as_str()),
+                ),
+                edge.kind.as_str(),
+                rendered_scalar(
+                    labels
+                        .get(edge.target.as_str())
+                        .copied()
+                        .unwrap_or(edge.target.as_str()),
+                ),
+                site.map_or_else(|| "site unavailable".to_owned(), rendered_anchor),
+            ) },
         });
         let edge_identity = edge
             .id
             .as_deref()
             .map_or_else(|| format!("anonymous#{}", item + 1), rendered_scalar);
-        for (evidence_index, evidence) in edge.evidence.iter().enumerate() {
+        for (evidence_index, evidence) in edge
+            .evidence
+            .iter()
+            .enumerate()
+            .filter(|_| include_evidence)
+        {
             entries.push(Entry {
                 section: "edge_evidence",
                 item: edge_evidence_item,
@@ -448,6 +568,28 @@ fn entries(response: &DiscoveryQueryResponse) -> Vec<Entry> {
         });
     }
     entries
+}
+
+fn match_signal_lines(response: &DiscoveryQueryResponse) -> Vec<String> {
+    if let Some(diagnostic) = response.diagnostics.iter().find(|diagnostic| {
+        diagnostic.code == QueryDiagnosticCode::NoMatch
+            && diagnostic.message.starts_with("NO EXACT MATCH")
+    }) {
+        return vec![
+            "match_confidence: none".to_owned(),
+            rendered_scalar(&diagnostic.message),
+        ];
+    }
+    let exact_shape = !crate::text::discovery_operands(&response.question).is_empty()
+        || !response.question.trim().chars().any(char::is_whitespace);
+    vec![format!(
+        "match_confidence: {}",
+        if exact_shape {
+            "exact"
+        } else {
+            "not_applicable"
+        }
+    )]
 }
 
 fn canonical_response_bytes(
@@ -494,6 +636,7 @@ fn validate_cursor(
     graph_digest: &str,
     result_digest: &str,
     entries: &[Entry],
+    include_evidence: bool,
 ) -> Result<(), DiscoveryTextPageError> {
     if cursor.version != DISCOVERY_TEXT_PAGE_VERSION {
         return Err(DiscoveryTextPageError::UnsupportedCursorVersion);
@@ -506,6 +649,9 @@ fn validate_cursor(
     }
     if cursor.semantic_result_digest != result_digest {
         return Err(DiscoveryTextPageError::ResultChanged);
+    }
+    if cursor.include_evidence != include_evidence {
+        return Err(DiscoveryTextPageError::RequestChanged);
     }
     let Some(entry) = entries.get(cursor.offset) else {
         return Err(DiscoveryTextPageError::CursorOutOfRange);
@@ -550,6 +696,14 @@ fn rendered_values(values: &[String]) -> String {
     } else {
         rendered_list(values.iter().map(|value| rendered_scalar(value)))
     }
+}
+
+fn rendered_quoted_values(values: &[String]) -> String {
+    rendered_list(
+        values
+            .iter()
+            .map(|value| format!("\"{}\"", rendered_scalar(value))),
+    )
 }
 
 fn rendered_scopes(response: &DiscoveryQueryResponse) -> String {
@@ -854,6 +1008,7 @@ mod tests {
                 request_digest: &"a".repeat(64),
                 graph_identity: "generation-1",
                 graph_digest: &"b".repeat(64),
+                include_evidence: false,
             },
         )?;
         let cursor = first.next_cursor.ok_or("expected a continuation")?;
@@ -865,6 +1020,7 @@ mod tests {
                 request_digest: &"a".repeat(64),
                 graph_identity: "generation-1",
                 graph_digest: &"b".repeat(64),
+                include_evidence: false,
             },
         )?;
         assert_eq!(second.entry_start, first.entry_end);
@@ -888,6 +1044,7 @@ mod tests {
                 request_digest: &"c".repeat(64),
                 graph_identity: "generation-1",
                 graph_digest: &"b".repeat(64),
+                include_evidence: false,
             },
         );
         assert!(matches!(
@@ -906,6 +1063,7 @@ mod tests {
                     request_digest: &"a".repeat(64),
                     graph_identity: "generation-1",
                     graph_digest: &"b".repeat(64),
+                    include_evidence: false,
                 },
             ),
             Err(DiscoveryTextPageError::InvalidCursorChecksum)
@@ -939,6 +1097,7 @@ mod tests {
                     request_digest: &request_digest,
                     graph_identity: "generation-1",
                     graph_digest: &graph_digest,
+                    include_evidence: false,
                 },
             )?;
             if let Some(expected) = &semantic_digest {
@@ -963,6 +1122,7 @@ mod tests {
                 request_digest: &request_digest,
                 graph_identity: "generation-1",
                 graph_digest: &graph_digest,
+                include_evidence: false,
             },
         )?;
         assert_eq!(
@@ -978,6 +1138,7 @@ mod tests {
                 request_digest: &request_digest,
                 graph_identity: "generation-1",
                 graph_digest: &graph_digest,
+                include_evidence: false,
             },
         )?;
         let first_cursor = first.next_cursor.ok_or("expected continuation")?;
@@ -989,6 +1150,7 @@ mod tests {
                 request_digest: &request_digest,
                 graph_identity: "generation-2",
                 graph_digest: &graph_digest,
+                include_evidence: false,
             },
         );
         assert!(matches!(
@@ -1006,6 +1168,7 @@ mod tests {
                 request_digest: &request_digest,
                 graph_identity: "generation-1",
                 graph_digest: &graph_digest,
+                include_evidence: false,
             },
         );
         assert!(matches!(
@@ -1027,6 +1190,7 @@ mod tests {
                     request_digest: &request_digest,
                     graph_identity: "generation-1",
                     graph_digest: &graph_digest,
+                    include_evidence: false,
                 },
             ),
             Err(DiscoveryTextPageError::CursorOutOfRange)
@@ -1082,6 +1246,7 @@ mod tests {
                 request_digest: &"a".repeat(64),
                 graph_identity: "generation-1",
                 graph_digest: &"b".repeat(64),
+                include_evidence: true,
             },
         )?;
 
@@ -1150,6 +1315,7 @@ mod tests {
                     request_digest: &request_digest,
                     graph_identity: "generation-1",
                     graph_digest: &graph_digest,
+                    include_evidence: true,
                 },
             )?;
             covered.extend(page.entry_start..page.entry_end);
@@ -1161,7 +1327,7 @@ mod tests {
         }
         assert_eq!(covered, (0..401).collect::<Vec<_>>());
         assert!(
-            entries(&response)
+            entries(&response, true)
                 .iter()
                 .all(|entry| entry.text.len() < 8_192)
         );

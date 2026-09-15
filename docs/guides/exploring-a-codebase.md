@@ -124,6 +124,13 @@ Save useful output when comparing questions:
 compass query "API token verification failure" > /tmp/compass-auth.txt
 ```
 
+The default result is a concise source-located graph map. Add `--evidence` when
+you need the full provenance audit. If an exact-looking symbol is absent,
+Compass says `NO EXACT MATCH` before listing any fuzzy suggestions. Generic
+relationship words such as “connect,” “depend,” “path,” and “use” guide intent
+but do not become discovery anchors unless they are themselves explicit symbol
+operands.
+
 Do not treat temporary result text as a durable schema. For automation, use
 CompassQL JSON/JSONL.
 
@@ -160,6 +167,12 @@ Once you know two boundaries, connect them:
 ```bash
 compass path HttpHandler TokenVerifier
 ```
+
+Both endpoints must resolve exactly. The path ranking prefers direct structural
+evidence over weak reference or documentation shortcuts, while still showing a
+shorter-but-weaker alternative when it is close. Use `--max-depth N` to change
+the default eight-hop bound. `NO PATH FOUND` means the exact target resolved but
+was unreachable within that bound; it is distinct from `NO EXACT MATCH`.
 
 Useful boundary pairs include:
 

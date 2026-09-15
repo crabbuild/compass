@@ -192,7 +192,7 @@ Run `compass watch` in a second terminal. For a focused task, an installed assis
 
 ```bash
 compass query "where is authentication enforced?"
-compass query "where is authentication enforced?" --text-budget 8000
+compass query "where is authentication enforced?" --evidence
 compass query "where is authentication enforced?" --cursor 'query_cursor_token'
 compass explain TokenVerifier
 compass path ApiHandler TokenVerifier
@@ -201,9 +201,9 @@ compass affected TokenVerifier --depth 3
 
 These commands read the saved graph locally. Results are bounded, read-only, and tied to graph evidence instead of a model-generated guess.
 
-Plain-language `query` uses bounded structured discovery. Its text projection returns complete deterministic entries within the `--text-budget` value, which defaults to 2,000. Follow `next=query_cursor_token` with the unchanged question and options until `next=none`.
+Plain-language `query` uses bounded structured discovery. Its default text is a concise map of seeds, nodes, edges, and source locations; pass `--evidence` for full provenance and semantic digests. Each page contains complete deterministic entries within the `--text-budget` value, which defaults to 8,000. Follow `next=query_cursor_token` with the unchanged question and evidence tier until `next=none`.
 
-The cursor fails when semantic inputs, the selected graph, or the semantic result changes. The `--traverse`, `--budget`, and `--page` options retain the legacy traversal contract; CompassQL uses its own versioned contract.
+The cursor fails when semantic inputs, evidence tier, the selected graph, or the semantic result changes. Exact-looking symbol operands that do not resolve are reported as `NO EXACT MATCH` before any fuzzy or lexical fallback candidates. The `--traverse`, `--budget`, and `--page` options retain the legacy traversal contract; CompassQL uses its own versioned contract.
 
 ### Open the workbench
 

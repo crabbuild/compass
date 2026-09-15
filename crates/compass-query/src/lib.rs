@@ -28,9 +28,9 @@ pub use cql::{
     QueryErrorKind, QueryLimits, QueryProfile, QueryRequest, QueryResult, execute,
 };
 pub use discovery_text::{
-    DISCOVERY_TEXT_PAGE_VERSION, DiscoveryTextPage, DiscoveryTextPageError,
-    DiscoveryTextPageOptions, discovery_request_digest, discovery_response_digest,
-    discovery_result_envelope, render_discovery_text_page,
+    DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET, DISCOVERY_TEXT_PAGE_VERSION, DiscoveryTextPage,
+    DiscoveryTextPageError, DiscoveryTextPageOptions, discovery_request_digest,
+    discovery_response_digest, discovery_result_envelope, render_discovery_text_page,
 };
 pub use graph_engine::{
     DirectGraphEngine, EffectiveGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine,
@@ -65,9 +65,10 @@ pub use telemetry::{
 };
 pub use text::{normalize_context_filters, query_terms, sanitize_label, search_tokens};
 pub use traversal::{
-    DEFAULT_TEXT_TOKEN_BUDGET, ProfiledTextPageOptions, TextPageOptions, TextPaginationError,
-    TraversalMode, query_graph_text, query_graph_text_page, query_graph_text_page_with_profile,
-    render_explanation, render_explanation_page, render_shortest_path,
+    DEFAULT_PATH_DEPTH_LIMIT, DEFAULT_TEXT_TOKEN_BUDGET, ProfiledTextPageOptions, TextPageOptions,
+    TextPaginationError, TraversalMode, query_graph_text, query_graph_text_page,
+    query_graph_text_page_with_profile, render_explanation, render_explanation_page,
+    render_shortest_path, render_shortest_path_with_limit,
 };
 
 #[cfg(test)]
@@ -410,6 +411,64 @@ mod tests {
         );
         assert!(
             reverse.contains("validateSanitySession() <--calls [EXTRACTED]-- createPatchHandler()")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn shortest_path_prefers_strong_evidence_and_reports_a_shorter_weak_route()
+    -> Result<(), Box<dyn Error>> {
+        let graph = load(
+            r#"{
+                "directed": true, "multigraph": false, "graph": {},
+                "nodes": [
+                    {"id":"source","label":"Source"},
+                    {"id":"strong-one","label":"StrongOne"},
+                    {"id":"strong-two","label":"StrongTwo"},
+                    {"id":"target","label":"Target"},
+                    {"id":"weak","label":"WeakShortcut"}
+                ],
+                "links": [
+                    {"source":"source","target":"strong-one","relation":"calls","confidence":"EXTRACTED"},
+                    {"source":"strong-one","target":"strong-two","relation":"contains","confidence":"EXTRACTED"},
+                    {"source":"strong-two","target":"target","relation":"depends_on","confidence":"EXTRACTED"},
+                    {"source":"source","target":"weak","relation":"references","confidence":"INFERRED"},
+                    {"source":"weak","target":"target","relation":"documents","confidence":"INFERRED"}
+                ]
+            }"#,
+        )?;
+
+        let output = render_shortest_path(&graph, "source", "target")?;
+        assert!(output.contains("Target resolved: Target [id=target]"));
+        assert!(output.contains("Best path (weighted, 3 hops, weight 3)"));
+        assert!(output.contains("Source --calls [EXTRACTED]--> StrongOne"));
+        assert!(output.contains("StrongTwo --depends_on [EXTRACTED]--> Target"));
+        assert!(output.contains("shorter (2-hop) but weaker path also exists (weight 8)"));
+        assert!(output.contains("references"));
+        assert!(output.contains("documents"));
+        Ok(())
+    }
+
+    #[test]
+    fn shortest_path_requires_exact_endpoints_and_reports_unreachable_targets()
+    -> Result<(), Box<dyn Error>> {
+        let graph = load(
+            r#"{
+                "directed": true, "multigraph": false, "graph": {},
+                "nodes": [
+                    {"id":"source","label":"Source"},
+                    {"id":"source-helper","label":"SourceHelper"},
+                    {"id":"target","label":"Target"}
+                ],
+                "links": []
+            }"#,
+        )?;
+
+        let missing = render_shortest_path(&graph, "Sour", "Target");
+        assert!(matches!(missing, Err(message) if message.contains("NO EXACT MATCH")));
+        assert!(
+            render_shortest_path(&graph, "Source", "Target")?
+                .contains("NO PATH FOUND to resolved target")
         );
         Ok(())
     }

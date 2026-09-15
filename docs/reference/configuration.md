@@ -354,6 +354,7 @@ Natural-language discovery:
 --scope KIND:VALUE
 --text-budget N
 --cursor TOKEN
+--evidence
 --graph PATH | --at REV
 --max-nodes N
 --max-edges N
@@ -365,8 +366,10 @@ community, or subsystem. Use repeatable `--scope KIND:VALUE` for an explicit OR
 scope over `community`, `source`, `package`, or `node`.
 
 `--text-budget` controls approximate rendered tokens per discovery page
-(default 2,000). Follow the opaque `next` cursor with the same semantic query;
-the presentation-only text budget may change. `--traverse`, `--budget`, and
+(default 8,000). The default projection is concise; `--evidence` includes full
+node/edge provenance and semantic digests. Follow the opaque `next` cursor with
+the same semantic query and evidence tier; the presentation-only text budget may
+change. `--traverse`, `--budget`, and
 `--page` explicitly select the bounded legacy compatibility renderer.
 The default semantic neighborhood contains at most 64 nodes and 128 edges.
 `--max-nodes` and `--max-edges` may raise those bounds to the hard ceilings of
