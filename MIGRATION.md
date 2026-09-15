@@ -132,6 +132,15 @@ registration edge is synthesized: the current descriptor vocabulary cannot
 advertise those registrations without incorrectly claiming bean-container
 semantics.
 
+## Rust receiver and macro evidence rebuild
+
+Rust universal evidence now uses producer version 2. The first graph build
+after upgrading re-extracts cached Rust files automatically. No graph schema
+migration or manual artifact editing is required. The new producer follows
+source-proven `Arc`, `Rc`, and `Box` field chains and recovers calls from a
+bounded local `macro_rules!` shape only when the captured expression or
+statement is proven to be evaluated; ambiguous cases remain unresolved.
+
 ## Ruby universal evidence rebuild
 
 The current release publishes Ruby through the version-1 universal evidence

@@ -527,7 +527,7 @@ fn universal_evidence_pipelines_are_unique_sorted_and_truthful() {
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("rust").map(|pipeline| pipeline.producer.version),
-        Some(1)
+        Some(2)
     );
     assert_eq!(
         UniversalEvidenceRegistry::pipeline("javascript")

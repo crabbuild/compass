@@ -24,7 +24,13 @@ class UniversalEvidencePromotionTests(unittest.TestCase):
         self.assertEqual(document["review"]["status"], "approved")
         self.assertEqual(len(document["pipelines"]), 14)
         self.assertTrue(all(item["decision"] == "qualified" for item in document["pipelines"]))
-        self.assertTrue(all(item["producerVersion"] == 1 for item in document["pipelines"]))
+        versions = {
+            item["language"]: item["producerVersion"] for item in document["pipelines"]
+        }
+        self.assertEqual(versions["rust"], 2)
+        self.assertTrue(
+            all(version == 1 for language, version in versions.items() if language != "rust")
+        )
 
     def test_pipeline_order_and_versions_are_contractual(self) -> None:
         document = load(MANIFEST)

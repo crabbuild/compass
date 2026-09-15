@@ -11,7 +11,7 @@ artifacts captured in the mounted qualification target for that decision.
 This is a hard-cutover interface. It has no raw-fact translation layer, shadow
 mode, terminal-name fallback, or runtime dependency on Graphify.
 
-## Promotion decision (2026-08-28)
+## Promotion decision (2026-09-15)
 
 The checked-in decision record is the machine-readable source of truth:
 [`tests/qualification/universal-evidence-promotion.json`](../../tests/qualification/universal-evidence-promotion.json).
@@ -31,7 +31,7 @@ match it exactly.
 | PHP | `compass.php` | 1 | `Qualified` |
 | Python | `compass.python` | 1 | `Qualified` |
 | Ruby | `compass.ruby` | 1 | `Qualified` |
-| Rust | `compass.rust` | 1 | `Qualified` |
+| Rust | `compass.rust` | 2 | `Qualified` |
 | Scala | `compass.scala` | 1 | `Qualified` |
 | Swift | `compass.swift` | 1 | `Qualified` |
 | TypeScript | `compass.typescript` | 1 | `Qualified` |
@@ -192,6 +192,15 @@ repository-local receiver unless a source declaration or explicit import
 proves that ownership. Unshadowed `Option` and `Result` use their canonical
 standard-library identities; other unproven spellings remain unresolved
 rather than becoming crate-qualified placeholders.
+
+Rust producer version 2 follows fields through source-proven standard-library
+`Arc`, `Rc`, and `Box` dereference wrappers and carries a unique source-visible
+call-result type into the next member call. It also inspects a local
+`macro_rules!` input only when a single `expr` or `stmt` fragment is proven to
+be substituted into an evaluating position. Nested non-evaluating macros,
+multiple rules, unsupported fragment shapes, and ambiguous field owners remain
+unresolved. Calls recovered from evaluated macro inputs retain their original
+byte range and use the ordinary exact resolver.
 
 ### Required invariants
 

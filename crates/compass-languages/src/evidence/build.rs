@@ -1027,6 +1027,7 @@ struct DirectEvidenceState<'source> {
     rust_call_result_bindings: HashMap<(String, String, usize), String>,
     rust_import_nodes: HashSet<usize>,
     rust_test_declarations: HashSet<String>,
+    rust_evaluated_macros: HashMap<String, usize>,
     go_lexical_bindings: HashMap<usize, Vec<GoLexicalBinding>>,
     go_call_result_bindings: HashMap<(String, String, usize), String>,
     go_return_types: HashMap<String, Vec<Option<String>>>,
@@ -1118,6 +1119,7 @@ impl<'source> DirectEvidenceState<'source> {
             rust_call_result_bindings: HashMap::new(),
             rust_import_nodes: HashSet::new(),
             rust_test_declarations: HashSet::new(),
+            rust_evaluated_macros: HashMap::new(),
             go_lexical_bindings: HashMap::new(),
             go_call_result_bindings: HashMap::new(),
             go_return_types: HashMap::new(),
@@ -4143,6 +4145,12 @@ impl<'source> DirectEvidenceState<'source> {
             }
             "macro_definition" => {
                 self.add_rust_named_declaration(node, owner, "macro")?;
+                if rust_macro_evaluates_single_code_fragment(node, self.source)
+                    && let Some(context) = self.declarations.get(&node.id())
+                {
+                    self.rust_evaluated_macros
+                        .insert(context.qualified_name.clone(), node.start_byte());
+                }
                 return Ok(());
             }
             _ => {}
@@ -4918,24 +4926,18 @@ impl<'source> DirectEvidenceState<'source> {
         let mut current = if first == "self" {
             rust_callable_owner(owner)?.to_owned()
         } else {
-            let raw = self.rust_value_type_for(owner, first, use_start, Some(use_node))?;
-            let nominal = rust_nominal_type_path(raw)?;
-            if rust_primitive_type(&nominal) {
-                nominal
-            } else {
-                rust_qualify_evidence_path(self, owner, &nominal, use_start)?
-            }
+            self.rust_value_type_for(owner, first, use_start, Some(use_node))?
+                .to_owned()
         };
         for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
-            let raw = self.rust_field_types.get(&current)?.get(field)?;
-            let nominal = rust_nominal_type_path(raw)?;
-            current = if rust_primitive_type(&nominal) {
-                nominal
-            } else {
-                rust_qualify_evidence_path(self, owner, &nominal, use_start)?
-            };
+            current = self.rust_field_type_for_access(owner, &current, field, use_start)?;
         }
-        Some(current)
+        let nominal = rust_nominal_type_path(&current)?;
+        if rust_primitive_type(&nominal) {
+            Some(nominal)
+        } else {
+            rust_qualify_evidence_path(self, owner, &nominal, use_start)
+        }
     }
 
     fn rust_field_receiver_nominal_type(
@@ -4954,11 +4956,39 @@ impl<'source> DirectEvidenceState<'source> {
                 .to_owned()
         };
         for field in fields.map(str::trim).filter(|field| !field.is_empty()) {
-            let nominal = rust_nominal_type_path(&current)?;
-            let qualified = rust_qualify_evidence_path(self, owner, &nominal, use_start)?;
-            current = self.rust_field_types.get(&qualified)?.get(field)?.clone();
+            current = self.rust_field_type_for_access(owner, &current, field, use_start)?;
         }
         rust_nominal_type_path(&current)
+    }
+
+    fn rust_field_type_for_access(
+        &self,
+        owner: &DeclarationContext,
+        raw_receiver: &str,
+        field: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        let mut raw_receiver = raw_receiver.trim();
+        for _ in 0..16 {
+            let nominal = rust_nominal_type_path(raw_receiver)?;
+            let qualified = if rust_primitive_type(&nominal) {
+                nominal
+            } else {
+                rust_qualify_evidence_path(self, owner, &nominal, use_start)?
+            };
+            if let Some(field_type) = self
+                .rust_field_types
+                .get(&qualified)
+                .and_then(|fields| fields.get(field))
+            {
+                return Some(field_type.clone());
+            }
+            if !rust_source_proven_deref_wrapper(&qualified) {
+                return None;
+            }
+            raw_receiver = rust_single_generic_type_argument(raw_receiver)?;
+        }
+        None
     }
 
     fn collect_rust_parameter_value_types(&mut self, parameters: Node<'_>, scope_id: &str) {
@@ -5604,28 +5634,42 @@ impl<'source> DirectEvidenceState<'source> {
         } else {
             None
         };
-        let qualified_name = platform_reexport_bindings
-            .as_ref()
-            .map_or_else(
-                || {
-                    self.rust_call_qualified_name(
-                        owner,
-                        qualifier,
-                        spelling,
-                        function.start_byte(),
-                        function,
-                    )
-                },
-                |_| None,
-            )
-            .or_else(|| {
-                wildcard_binding.is_some().then(|| {
-                    qualifier.map_or_else(
-                        || spelling.to_owned(),
-                        |qualifier| rust_join_qualified(qualifier, spelling),
-                    )
+        let call_result_qualified_name = call_result_binding.as_deref().and_then(|binding_id| {
+            self.builder
+                .batch
+                .bindings
+                .iter()
+                .find(|binding| binding.id == binding_id)
+                .and_then(|binding| binding.result_type_qualified_name.as_deref())
+                .map(|receiver| {
+                    self.rust_receiver_method_target(receiver, spelling)
+                        .unwrap_or_else(|| rust_join_qualified(receiver, spelling))
                 })
-            });
+        });
+        let qualified_name = call_result_qualified_name.or_else(|| {
+            platform_reexport_bindings
+                .as_ref()
+                .map_or_else(
+                    || {
+                        self.rust_call_qualified_name(
+                            owner,
+                            qualifier,
+                            spelling,
+                            function.start_byte(),
+                            function,
+                        )
+                    },
+                    |_| None,
+                )
+                .or_else(|| {
+                    wildcard_binding.is_some().then(|| {
+                        qualifier.map_or_else(
+                            || spelling.to_owned(),
+                            |qualifier| rust_join_qualified(qualifier, spelling),
+                        )
+                    })
+                })
+        });
         let wildcard_bound = wildcard_binding.is_some();
         let wildcard_external_target_is_explicit = qualifier.is_some_and(|value| {
             qualified_binding_head(value)
@@ -6163,7 +6207,244 @@ impl<'source> DirectEvidenceState<'source> {
                 }),
             },
         )?;
+        if self.rust_macro_is_evaluated(owner, raw_path, node.start_byte())
+            && let Some(token_tree) = first_named_child_of_kind(node, "token_tree")
+        {
+            self.walk_rust_evaluated_macro_tokens(token_tree, owner, 0)?;
+        }
         Ok(())
+    }
+
+    fn rust_macro_is_evaluated(
+        &self,
+        owner: &DeclarationContext,
+        raw_path: &str,
+        use_start: usize,
+    ) -> bool {
+        let (qualifier, spelling) = split_qualified(raw_path);
+        let target = qualifier
+            .and_then(|qualifier| {
+                self.imported_qualified_target_for(owner, qualifier, use_start, true)
+            })
+            .map(|target| rust_join_qualified(&target, spelling))
+            .or_else(|| {
+                self.imported_target_for_occurrence(owner, spelling, use_start, true)
+                    .cloned()
+            })
+            .or_else(|| self.local_target_for(owner, spelling).cloned());
+        target.is_some_and(|target| {
+            self.rust_evaluated_macros
+                .get(&target)
+                .is_some_and(|defined_at| *defined_at <= use_start)
+        })
+    }
+
+    fn walk_rust_evaluated_macro_tokens(
+        &mut self,
+        token_tree: Node<'_>,
+        owner: &DeclarationContext,
+        depth: usize,
+    ) -> Result<(), EvidenceError> {
+        if depth >= 64 {
+            return Err(EvidenceError::new(
+                EvidenceErrorCode::ResourceLimit,
+                "Rust evaluated macro token tree exceeds depth limit",
+            ));
+        }
+        let mut cursor = token_tree.walk();
+        let children = token_tree.children(&mut cursor).collect::<Vec<_>>();
+        for (index, child) in children.iter().copied().enumerate() {
+            if child.kind() != "token_tree" {
+                continue;
+            }
+            let nested_macro = index >= 2
+                && self.text(children[index.saturating_sub(1)]) == "!"
+                && rust_macro_token_identifier(children[index.saturating_sub(2)].kind());
+            if nested_macro {
+                let nested_name = self.text(children[index.saturating_sub(2)]);
+                if self.rust_macro_is_evaluated(owner, &nested_name, child.start_byte()) {
+                    self.walk_rust_evaluated_macro_tokens(child, owner, depth.saturating_add(1))?;
+                }
+                continue;
+            }
+            if self.text(child).starts_with('(')
+                && index > 0
+                && rust_macro_token_identifier(children[index.saturating_sub(1)].kind())
+            {
+                let function_end = children[index.saturating_sub(1)].end_byte();
+                let mut function_start_index = index.saturating_sub(1);
+                while function_start_index >= 2
+                    && matches!(
+                        self.text(children[function_start_index.saturating_sub(1)])
+                            .as_str(),
+                        "." | "::"
+                    )
+                    && rust_macro_token_identifier(
+                        children[function_start_index.saturating_sub(2)].kind(),
+                    )
+                {
+                    function_start_index = function_start_index.saturating_sub(2);
+                }
+                let function_start = children[function_start_index].start_byte();
+                if let Some(raw) = self
+                    .source
+                    .get(function_start..function_end)
+                    .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+                {
+                    let (qualifier, spelling) = split_qualified(&raw);
+                    if !spelling.is_empty() {
+                        self.add_rust_evaluated_macro_call(
+                            owner,
+                            children[index.saturating_sub(1)],
+                            function_start,
+                            function_end,
+                            qualifier,
+                            spelling,
+                        )?;
+                    }
+                }
+            }
+            self.walk_rust_evaluated_macro_tokens(child, owner, depth.saturating_add(1))?;
+        }
+        Ok(())
+    }
+
+    fn add_rust_evaluated_macro_call(
+        &mut self,
+        owner: &DeclarationContext,
+        use_node: Node<'_>,
+        function_start: usize,
+        function_end: usize,
+        qualifier: Option<&str>,
+        spelling: &str,
+    ) -> Result<(), EvidenceError> {
+        let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+        if self.import_binding_is_ambiguous(owner, binding_name) {
+            return Ok(());
+        }
+        let binding = self
+            .binding_for_occurrence(owner, binding_name, function_start, true)
+            .or_else(|| self.rust_wildcard_binding(owner, function_start))
+            .cloned();
+        let qualified_name = qualifier
+            .filter(|qualifier| qualifier.contains('.'))
+            .and_then(|qualifier| {
+                self.rust_field_receiver_type(owner, qualifier, function_start, use_node)
+                    .or_else(|| {
+                        self.rust_unique_macro_field_receiver_type(owner, qualifier, function_start)
+                    })
+            })
+            .map(|receiver| {
+                self.rust_receiver_method_target(&receiver, spelling)
+                    .unwrap_or_else(|| rust_join_qualified(&receiver, spelling))
+            })
+            .or_else(|| {
+                self.rust_call_qualified_name(owner, qualifier, spelling, function_start, use_node)
+            });
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::Call,
+            &owner.fact_id,
+            spelling,
+            qualifier,
+            Some(&owner.scope_id),
+            Some("rust-source-evaluated-macro-input"),
+            range_for_byte_span(self.source_file, self.source, function_start, function_end),
+        )?;
+        let constraints = ResolutionConstraint {
+            exact_target_declaration_id: None,
+            exact_language: Some(self.language.to_owned()),
+            module_or_package: qualified_name
+                .as_deref()
+                .and_then(|qualified| rust_qualified_parent(qualified).map(str::to_owned))
+                .or_else(|| Some(self.module_or_package.clone())),
+            scope_id: Some(owner.scope_id.clone()),
+            qualified_name: qualified_name.clone(),
+            argument_count: None,
+            argument_types: Vec::new(),
+            allowed_target_kinds: vec![
+                "enum_member".to_owned(),
+                "function".to_owned(),
+                "method".to_owned(),
+                "struct".to_owned(),
+            ],
+            hierarchy: None,
+            allow_external: qualified_name.as_deref().is_some_and(|qualified| {
+                !rust_identity_is_internal(&self.module_or_package, qualified)
+            }),
+        };
+        self.builder.relate(
+            CandidateRelation::Calls,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            binding.as_deref(),
+            spelling,
+            constraints.clone(),
+        )?;
+        if self.rust_test_declarations.contains(&owner.fact_id) {
+            self.builder.relate(
+                CandidateRelation::Tests,
+                &owner.fact_id,
+                Some(&occurrence_id),
+                binding.as_deref(),
+                spelling,
+                constraints,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn rust_unique_macro_field_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        qualifier: &str,
+        use_start: usize,
+    ) -> Option<String> {
+        let fields = qualifier
+            .split('.')
+            .skip(1)
+            .map(str::trim)
+            .filter(|field| !field.is_empty())
+            .collect::<Vec<_>>();
+        if fields.is_empty() {
+            return None;
+        }
+        let mut roots = self.rust_field_types.keys().cloned().collect::<Vec<_>>();
+        roots.sort_unstable();
+        let mut receivers = Vec::new();
+        for root in roots {
+            let mut current = root;
+            let mut complete = true;
+            for field in &fields {
+                let Some(next) = self.rust_field_type_for_access(owner, &current, field, use_start)
+                else {
+                    complete = false;
+                    break;
+                };
+                current = next;
+            }
+            if !complete {
+                continue;
+            }
+            let Some(nominal) = rust_nominal_type_path(&current) else {
+                continue;
+            };
+            let receiver = if rust_primitive_type(&nominal) {
+                nominal
+            } else if let Some(receiver) =
+                rust_qualify_evidence_path(self, owner, &nominal, use_start)
+            {
+                receiver
+            } else {
+                continue;
+            };
+            receivers.push(receiver);
+        }
+        receivers.sort_unstable();
+        receivers.dedup();
+        let [receiver] = receivers.as_slice() else {
+            return None;
+        };
+        Some(receiver.clone())
     }
 
     fn add_rust_path_candidate(
@@ -9027,6 +9308,149 @@ fn rust_nominal_type_path(raw: &str) -> Option<String> {
     .then_some(nominal)
 }
 
+fn rust_single_generic_type_argument(raw: &str) -> Option<&str> {
+    let raw = raw.trim();
+    let open = raw.find('<')?;
+    let mut depth = 0_u16;
+    let mut close = None;
+    for (offset, character) in raw.char_indices().skip_while(|(offset, _)| *offset < open) {
+        match character {
+            '<' => depth = depth.checked_add(1)?,
+            '>' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    close = Some(offset);
+                    break;
+                }
+            }
+            ',' if depth == 1 => return None,
+            _ => {}
+        }
+    }
+    let close = close?;
+    if !raw.get(close.saturating_add(1)..)?.trim().is_empty() {
+        return None;
+    }
+    let argument = raw.get(open.saturating_add(1)..close)?.trim();
+    (!argument.is_empty()).then_some(argument)
+}
+
+fn rust_source_proven_deref_wrapper(qualified: &str) -> bool {
+    matches!(
+        qualified,
+        "std::sync::Arc"
+            | "alloc::sync::Arc"
+            | "std::rc::Rc"
+            | "alloc::rc::Rc"
+            | "std::boxed::Box"
+            | "alloc::boxed::Box"
+    )
+}
+
+fn rust_macro_token_identifier(kind: &str) -> bool {
+    matches!(kind, "identifier" | "self" | "super" | "crate" | "Self")
+}
+
+fn rust_macro_evaluates_single_code_fragment(node: Node<'_>, source: &[u8]) -> bool {
+    let mut cursor = node.walk();
+    let rules = node
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "macro_rule")
+        .collect::<Vec<_>>();
+    let [rule] = rules.as_slice() else {
+        return false;
+    };
+    let Some(pattern) = first_named_child_of_kind(*rule, "token_tree_pattern") else {
+        return false;
+    };
+    let Some(expansion) = first_named_child_of_kind(*rule, "token_tree") else {
+        return false;
+    };
+    let mut bindings = Vec::new();
+    collect_rust_macro_fragment_bindings(pattern, source, &mut bindings);
+    let code_bindings = bindings
+        .iter()
+        .filter(|(_, fragment)| matches!(fragment.as_str(), "expr" | "stmt"))
+        .collect::<Vec<_>>();
+    let [code_binding] = code_bindings.as_slice() else {
+        return false;
+    };
+    if bindings
+        .iter()
+        .any(|(_, fragment)| !matches!(fragment.as_str(), "expr" | "stmt" | "ident" | "pat_param"))
+    {
+        return false;
+    }
+    rust_macro_expansion_evaluates_metavariable(expansion, &code_binding.0, source)
+}
+
+fn collect_rust_macro_fragment_bindings(
+    node: Node<'_>,
+    source: &[u8],
+    output: &mut Vec<(String, String)>,
+) {
+    if node.kind() == "token_binding_pattern" {
+        let mut cursor = node.walk();
+        let mut variable = None;
+        let mut fragment = None;
+        for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+            match child.kind() {
+                "metavariable" => variable = rust_node_text(source, child),
+                "fragment_specifier" => fragment = rust_node_text(source, child),
+                _ => {}
+            }
+        }
+        if let (Some(variable), Some(fragment)) = (variable, fragment) {
+            output.push((variable, fragment));
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+        collect_rust_macro_fragment_bindings(child, source, output);
+    }
+}
+
+fn rust_macro_expansion_evaluates_metavariable(
+    node: Node<'_>,
+    variable: &str,
+    source: &[u8],
+) -> bool {
+    if node.kind() == "metavariable"
+        && rust_node_text(source, node).as_deref() == Some(variable)
+        && !rust_macro_metavariable_is_nested_macro_input(node)
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    node.children(&mut cursor)
+        .filter(|child| child.is_named())
+        .any(|child| rust_macro_expansion_evaluates_metavariable(child, variable, source))
+}
+
+fn rust_macro_metavariable_is_nested_macro_input(mut node: Node<'_>) -> bool {
+    for _ in 0..64 {
+        let Some(parent) = node.parent() else {
+            return false;
+        };
+        if parent.kind() == "token_tree"
+            && parent
+                .prev_sibling()
+                .is_some_and(|sibling| sibling.kind() == "!")
+        {
+            return true;
+        }
+        node = parent;
+    }
+    true
+}
+
+fn rust_node_text(source: &[u8], node: Node<'_>) -> Option<String> {
+    source
+        .get(node.start_byte()..node.end_byte())
+        .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
+}
+
 fn rust_return_receiver_type_path(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.starts_with("*mut ") || raw.starts_with("*const ") {
@@ -9394,6 +9818,7 @@ fn rust_qualify_evidence_path(
     }
     if qualifier.is_none() {
         let prelude_type = match binding_name {
+            "Box" => Some("std::boxed::Box"),
             "Option" => Some("std::option::Option"),
             "Result" => Some("std::result::Result"),
             _ => None,
