@@ -1,6 +1,6 @@
 # Compass enhancement advisor plans
 
-Generated from deep product/code audits between 2026-07-23 and 2026-08-25.
+Generated from deep product/code audits between 2026-07-23 and 2026-08-29.
 
 Upstream snapshots:
 
@@ -96,6 +96,14 @@ adds semantic identities and labels, resolves cell-owned references before the
 normalization facts are projected back to graph-v1 resources, keeps table
 navigation out of architecture topology, and adds an independent quality gate.
 
+Plan 025 coordinates the existing source-fidelity, topology, framework, and
+query-relevance evaluators into capability-specific code-graph scorecards. It
+deliberately rejects one numeric graph-quality score: route dependencies,
+declarations, calls, imports, inheritance, and render targets pass or fail
+independently across fidelity, structural usefulness, and agent utility. The
+coordination layer is qualification-only, preserves every existing v1/v2 input
+contract, and begins with pinned FastAPI and React evidence rather than OpenClaw.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -124,6 +132,7 @@ navigation out of architecture topology, and adds an independent quality gate.
 | 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
 | 023 | Make Python framework graphs source-proven and production-qualified | P1 | XXL | —; final gate should consume 005 or equivalent | BLOCKED |
 | 024 | Harden Markdown graph-v1 intelligence | P1 | XL | 009; coordinate with 012 | IN PROGRESS |
+| 025 | Gate code-graph quality with capability-specific scorecards | P1 | XL | Existing quality audit, topology, React, and query relevance; final gate should consume 005 or equivalent | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -194,6 +203,13 @@ helper runtimes prerequisites for native document support.
   internal normalization representation only; the publisher resolves their
   evidence and downgrades them to established resource details before strict
   validation. Table navigation nodes remain public and searchable.
+- Plan 025 is additive: it does not replace or version-bump the generic
+  `quality-audit/2`, topology, React, or query-relevance contracts. It first
+  standardizes capability identity and status semantics, then adapts existing
+  evidence, qualifies the initial fixture/FastAPI/React slices, adds reviewed
+  agent-task slices, and only then enters the existing code-graph release gate.
+  Its release integration should use Plan 005's exact-production-evidence model
+  or an equivalent exact-commit gate.
 
 ## Direction options not promoted to implementation plans
 
@@ -252,3 +268,7 @@ helper runtimes prerequisites for native document support.
 - Make Graphify a CI oracle for document support: rejected because qualification
   must be Compass-owned, offline, deterministic, and independent of another
   product's changing implementation and optional dependencies.
+- Collapse code-graph quality into one weighted or averaged score: rejected
+  because strong node volume, topology, or retrieval in one capability can
+  conceal fabricated targets, missing relationships, or unusable retrieval in
+  another. Plan 025 exposes a logical release status but no numeric aggregate.
