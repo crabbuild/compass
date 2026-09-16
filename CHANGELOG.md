@@ -8,6 +8,8 @@
   2 so cached Rust files rebuild; ambiguous and non-evaluating macro inputs
   continue to fail closed.
 
+## 0.3.26 - 2026-09-15
+
 - Make query failures and paths more trustworthy: exact-looking missing symbols
   now return structured `no_match` signals across discovery and typed natural
   queries; `compass path` requires exact endpoints, reports unreachable targets,
@@ -18,6 +20,9 @@
   provenance, raise the default text-page budget to 8,000 tokens, and move text
   cursors to `compass.query.discovery-text-page/2`. Generic relationship words
   no longer dominate discovery seeding.
+
+- Update the Rust TLS dependency to 0.23.45 to address the security advisory
+  covered by the release branch.
 
 ## 0.3.25 - 2026-09-13
 
