@@ -12,10 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.26" }
-compass-analysis = { path = "../compass-analysis", version = "0.3.26" }
-compass-ir = { path = "../compass-ir", version = "0.3.26" }
-compass-program = { path = "../compass-program", version = "0.3.26" }
+compass-agent-graph = { path = "../compass-agent-graph", version = "0.3.27" }
+compass-analysis = { path = "../compass-analysis", version = "0.3.27" }
+compass-ir = { path = "../compass-ir", version = "0.3.27" }
+compass-program = { path = "../compass-program", version = "0.3.27" }
 ahash.workspace = true
 rayon.workspace = true
 notify.workspace = true
@@ -25,22 +25,22 @@ serde_json.workspace = true
 sha2.workspace = true
 time.workspace = true
 thiserror.workspace = true
-compass-files = { path = "../compass-files", version = "0.3.26" }
-compass-google-workspace = { path = "../compass-google-workspace", version = "0.3.26" }
-compass-languages = { path = "../compass-languages", version = "0.3.26" }
-compass-media = { path = "../compass-media", version = "0.3.26" }
-compass-ocr = { path = "../compass-ocr", version = "0.3.26" }
-compass-model = { path = "../compass-model", version = "0.3.26" }
-compass-graph = { path = "../compass-graph", version = "0.3.26" }
-compass-history = { path = "../compass-history", version = "0.3.26" }
-compass-store = { path = "../compass-store", version = "0.3.26" }
-compass-output = { path = "../compass-output", version = "0.3.26" }
-compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.26" }
-compass-prs = { path = "../compass-prs", version = "0.3.26" }
-compass-query = { path = "../compass-query", version = "0.3.26" }
-compass-reflect = { path = "../compass-reflect", version = "0.3.26" }
-compass-resolve = { path = "../compass-resolve", version = "0.3.26" }
-compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.26" }
+compass-files = { path = "../compass-files", version = "0.3.27" }
+compass-google-workspace = { path = "../compass-google-workspace", version = "0.3.27" }
+compass-languages = { path = "../compass-languages", version = "0.3.27" }
+compass-media = { path = "../compass-media", version = "0.3.27" }
+compass-ocr = { path = "../compass-ocr", version = "0.3.27" }
+compass-model = { path = "../compass-model", version = "0.3.27" }
+compass-graph = { path = "../compass-graph", version = "0.3.27" }
+compass-history = { path = "../compass-history", version = "0.3.27" }
+compass-store = { path = "../compass-store", version = "0.3.27" }
+compass-output = { path = "../compass-output", version = "0.3.27" }
+compass-pr-intelligence = { path = "../compass-pr-intelligence", version = "0.3.27" }
+compass-prs = { path = "../compass-prs", version = "0.3.27" }
+compass-query = { path = "../compass-query", version = "0.3.27" }
+compass-reflect = { path = "../compass-reflect", version = "0.3.27" }
+compass-resolve = { path = "../compass-resolve", version = "0.3.27" }
+compass-semantic-diff = { path = "../compass-semantic-diff", version = "0.3.27" }
 
 [lints]
 workspace = true

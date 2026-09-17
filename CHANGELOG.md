@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.27 - 2026-09-17
+
 - Improve Rust call-graph recall for source-proven `Arc`, `Rc`, and `Box`
   receiver chains, typed chained-call results, and local evaluating
   `macro_rules!` inputs. Rust universal evidence advances to producer version
@@ -13,7 +15,6 @@
   `--format agent-json` and MCP `agentView` expose the same deterministic
   source-linked view while raw query JSON remains unchanged. Discovery text
   keeps its v2 cursor ledger and adds only an answer-first fixed header.
-
 
 ## 0.3.26 - 2026-09-15
 
