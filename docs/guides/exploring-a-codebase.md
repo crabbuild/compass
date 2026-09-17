@@ -118,6 +118,22 @@ If the result is broad, add the boundary or action you care about:
 "API token verification failure"  behavior-shaped
 ```
 
+Read an answer-first result in this order:
+
+1. `RESULT` — decide whether the operation answered, returned candidates,
+   needs resolution, has no exact match, or has no path.
+2. `ANSWER` and `CAVEATS` — understand the bounded conclusion and any blocker
+   before looking at graph records.
+3. `PRIMARY RESULTS`, `PATHS`, and `RELATIONSHIPS` — verify IDs, direction,
+   and source locations.
+4. `NEXT ACTIONS` — follow an exact ID retry, evidence lookup, or continuation
+   cursor instead of reconstructing a command from prose.
+
+For automation, request `--format agent-json` and validate
+`compass.query.agent-view/1`. Keep `--format json` for the complete raw
+evidence contract. A fallback candidate is a lead, not proof of an exact
+answer; a partial execution or unknown coverage state must be disclosed.
+
 Save useful output when comparing questions:
 
 ```bash

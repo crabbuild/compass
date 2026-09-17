@@ -1082,11 +1082,23 @@ fn render_page(page: &Page, style: HelpStyle) -> String {
         let _ = output.pop();
     }
     let details = add_help_option(page.details);
-    let details = if page.path == "query" {
+    let details = if matches!(
+        page.path,
+        "ask" | "search" | "callers" | "callees" | "impact" | "explore" | "node"
+    ) {
+        format!(
+            "{}\n\nAgent View:\n  --format agent-json emits the strict compass.query.agent-view/1 projection.\n  --format text is answer-first and bounded; --format json remains the raw compass.query/1 result.",
+            details.replace("--format <text|json>", "--format <text|agent-json|json>")
+        )
+    } else if page.path == "query" {
         details
             .replace(
                 "Query an exact immutable realization; conflicts with --graph",
                 "Resolve REV once to an immutable typed realization; conflicts with --graph",
+            )
+            .replace(
+                "--format <text|json>            Discovery output",
+                "--format <text|agent-json|json> Discovery output",
             )
             .replace(
                 "default/hard maximum: 500",

@@ -1,5 +1,7 @@
 //! Native graph search, traversal, explanation, and impact analysis.
 
+use sha2::Digest as _;
+
 mod affected;
 mod benchmark;
 mod bm25;
@@ -31,6 +33,7 @@ pub use discovery_text::{
     DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET, DISCOVERY_TEXT_PAGE_VERSION, DiscoveryTextPage,
     DiscoveryTextPageError, DiscoveryTextPageOptions, discovery_request_digest,
     discovery_response_digest, discovery_result_envelope, render_discovery_text_page,
+    render_discovery_text_page_with_prefix,
 };
 pub use graph_engine::{
     DirectGraphEngine, EffectiveGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine,
@@ -71,11 +74,30 @@ pub use traversal::{
     render_shortest_path, render_shortest_path_with_limit,
 };
 
+/// Return the canonical semantic-result digest for a typed code query.
+///
+/// The digest deliberately lives beside the query contract rather than in a
+/// presentation layer. Equivalent responses with different collection order
+/// therefore bind to one source result, while any semantic field retained by
+/// `CodeQueryResponse` changes the digest.
+pub fn code_query_response_digest(
+    response: &compass_model::query_contract::CodeQueryResponse,
+) -> Result<String, serde_json::Error> {
+    let mut canonical = response.clone();
+    canonical.sort_stable();
+    let bytes = serde_json::to_vec(&canonical)?;
+    Ok(format!("{:x}", sha2::Sha256::digest(bytes)))
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::error::Error;
 
+    use compass_model::query_contract::{
+        CodeQueryLimits, CodeQueryOperation, CodeQueryResponse, QueryDiagnostic,
+        QueryDiagnosticCode, SearchHit,
+    };
     use compass_model::{Graph, GraphDocument};
 
     use super::*;
@@ -83,6 +105,52 @@ mod tests {
     fn load(raw: &str) -> Result<Graph, Box<dyn Error>> {
         let document = serde_json::from_str::<GraphDocument>(raw)?;
         Ok(Graph::from_document(document)?)
+    }
+
+    #[test]
+    fn code_query_response_digest_is_order_independent_but_semantic_sensitive()
+    -> Result<(), Box<dyn Error>> {
+        let mut left =
+            CodeQueryResponse::empty(CodeQueryOperation::Search, CodeQueryLimits::default());
+        left.results = vec![
+            SearchHit {
+                node_id: "node:b".to_owned(),
+                score: 0.4,
+                matched_fields: vec!["name".to_owned()],
+            },
+            SearchHit {
+                node_id: "node:a".to_owned(),
+                score: 0.9,
+                matched_fields: vec!["qualified_name".to_owned()],
+            },
+        ];
+        left.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::BoundedTruncation,
+            message: "bounded".to_owned(),
+            node_id: None,
+            path: None,
+        });
+        let mut right = left.clone();
+        right.results.reverse();
+        right.diagnostics.reverse();
+        assert_eq!(
+            code_query_response_digest(&left)?,
+            code_query_response_digest(&right)?
+        );
+
+        let mut changed = right.clone();
+        changed.truncated = true;
+        assert_ne!(
+            code_query_response_digest(&left)?,
+            code_query_response_digest(&changed)?
+        );
+        changed.truncated = left.truncated;
+        changed.limits.max_nodes = left.limits.max_nodes.saturating_add(1);
+        assert_ne!(
+            code_query_response_digest(&left)?,
+            code_query_response_digest(&changed)?
+        );
+        Ok(())
     }
 
     #[test]

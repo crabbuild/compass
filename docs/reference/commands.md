@@ -392,6 +392,34 @@ example `RETURN n.id ORDER BY n.id SKIP 100 LIMIT 100`.
 
 Canonical language contract: [CompassQL](../COMPASSQL.md).
 
+### Typed query commands
+
+The focused typed commands share one output profile:
+
+```text
+compass ask "<question>"       [--format text|agent-json|json]
+compass search "<query>"       [--format text|agent-json|json]
+compass callers "<symbol>"     [--format text|agent-json|json]
+compass callees "<symbol>"     [--format text|agent-json|json]
+compass impact "<symbol>"      [--format text|agent-json|json]
+compass explore "<symbol>" ... [--format text|agent-json|json]
+compass node "<source>" "<target>" [--format text|agent-json|json]
+```
+
+`text` is the answer-first Agent View projection. It starts with `RESULT`,
+`ANSWER`, and any blocking `CAVEATS`, then shows source-located entities,
+paths, relationships, and bounded next actions. `agent-json` emits the strict
+`compass.query.agent-view/1` object. `json` remains the unchanged raw
+`compass.query/1` response and is the right choice when an audit consumer needs
+every evidence record. The natural `query` command accepts the same
+`agent-json` format for discovery; its text header is answer-first while the
+existing discovery entry ledger and v2 cursor remain unchanged.
+
+`agent-json` is incompatible with text-only `--cursor`, `--text-budget`,
+`--evidence`, and `--result-envelope` controls. Agent View JSON contains
+bounded `nextActions` as argv arrays or JSON argument objects; clients should
+use those values instead of reconstructing shell commands from result text.
+
 ### `path`
 
 ```text

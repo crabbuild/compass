@@ -55,6 +55,23 @@ compass query "authentication flow" --at HEAD~20
 
 `--graph` and `--at` are mutually exclusive.
 
+For agent-controlled follow-up, use the versioned Agent View projection:
+
+```bash
+compass query "who calls PaymentGateway.charge?" --format agent-json
+compass callers PaymentGateway.charge --format agent-json
+```
+
+Read `status.resultState`, `answer`, and `caveats` before `primaryResults`,
+`paths`, or `relationships`. `no_match`, `needs_resolution`, and `no_path`
+must remain non-answers; fallback candidates are leads only. Check both
+`sourceExecution` and `projection` for truncation and treat `coverage:
+unknown` as unknown rather than complete. Use exact `nextActions` arguments and
+IDs rather than rebuilding shell commands. Agent View JSON is
+`compass.query.agent-view/1`; raw `--format json` remains the full audit
+result, and human text headings are presentation rather than a parser
+contract.
+
 ## Focused graph operations
 
 ```bash

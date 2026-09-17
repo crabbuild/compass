@@ -23,6 +23,28 @@ boundaries and failure-safe consumption.
 Human text is optimized for clarity and can evolve. Machine consumers should
 prefer explicitly versioned JSON or documented graph schemas.
 
+### Agent View for coding assistants
+
+For focused code questions, use the Agent View projection when the consumer
+must make a follow-up decision:
+
+```bash
+compass callers PaymentService.charge --format agent-json
+compass query "who calls PaymentService.charge?" --format agent-json
+```
+
+The first fields to inspect are `status`, `answer`, and `caveats`. A
+`no_match`, `needs_resolution`, or `no_path` state is not a positive answer;
+fallback candidates remain suggestions. Check `sourceExecution` and
+`projection` before claiming completeness, and use `nextActions` when an exact
+retry or evidence lookup is suggested. `identity.sourceResultDigest` binds the
+projection to the raw result and `identity.viewDigest` detects mutation.
+
+Use `--format json` when you need the complete raw `compass.query/1` response,
+or when a consumer needs evidence fields omitted by the bounded view. Human
+text follows the same order (`RESULT`, `ANSWER`, `CAVEATS`, then details), but
+headings are presentation and are not a machine schema.
+
 ## Integration pattern: produce, validate, publish, consume
 
 Treat a graph build as a producer job:
@@ -210,6 +232,13 @@ Before placing it behind an editor or network service:
 
 For a local coding assistant, stdio avoids opening a listening socket. Use HTTP
 only when a multi-process or remote integration actually needs it.
+
+Typed query tools return answer-first Agent View text. Their structured result
+keeps the raw response in `result`, adds `semanticResultDigest`, and carries
+the optional `agentView` sibling with schema `compass.query.agent-view/1`.
+Consumers that do not use Agent View can ignore that optional sibling while
+continuing to validate the transport envelope and raw result. Consumers that
+do use it must reject unknown Agent View major versions explicitly.
 
 ## Cross-repository registry
 

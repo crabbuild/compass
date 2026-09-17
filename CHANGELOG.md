@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add the bounded `compass.query.agent-view/1` projection for coding agents.
+  Typed CLI and MCP query text now lead with result state, answer, and caveats;
+  `--format agent-json` and MCP `agentView` expose the same deterministic
+  source-linked view while raw query JSON remains unchanged. Discovery text
+  keeps its v2 cursor ledger and adds only an answer-first fixed header.
+
 ## 0.3.26 - 2026-09-15
 
 - Make query failures and paths more trustworthy: exact-looking missing symbols

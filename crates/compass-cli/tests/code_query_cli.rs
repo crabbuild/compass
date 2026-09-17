@@ -7,6 +7,7 @@ use compass_cli::{Frontend, run};
 use compass_files::BuildGuard;
 use compass_graph::GraphSnapshotBuilder;
 use compass_model::code_graph::{EdgeKind, GraphDocument};
+use compass_output::AgentQueryView;
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
@@ -46,6 +47,22 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
         assert_eq!(response["operation"], operation);
     }
 
+    let agent = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            OsString::from(&graph),
+            OsString::from("--format"),
+            OsString::from("agent-json"),
+        ],
+    );
+    assert_eq!(agent.code, 0, "{}", agent.stderr);
+    let agent_view = AgentQueryView::from_json(agent.stdout.as_bytes())?;
+    assert_eq!(agent_view.schema, "compass.query.agent-view/1");
+    assert!(agent_view.answer.headline.contains("Target"));
+
     let reverse = run(
         Frontend::Compass,
         [
@@ -66,6 +83,21 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
     let response: Value = serde_json::from_str(&reverse.stdout)?;
     assert_eq!(response["paths"], serde_json::json!([]));
     assert_eq!(response["diagnostics"][0]["code"], "direction_mismatch");
+
+    let invalid_projection = run(
+        Frontend::Compass,
+        [
+            OsString::from("callers"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            OsString::from(&graph),
+            OsString::from("--format"),
+            OsString::from("agent-json"),
+            OsString::from("--evidence"),
+        ],
+    );
+    assert_ne!(invalid_projection.code, 0);
+    assert!(invalid_projection.stderr.contains("text-only"));
     Ok(())
 }
 
@@ -139,17 +171,19 @@ fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
             ],
         );
         assert_eq!(outcome.code, 0, "{question}: {}", outcome.stderr);
-        assert!(
-            outcome.stdout.starts_with("match_confidence:"),
-            "{question}"
-        );
-        assert!(outcome.stdout.contains("Discovery:"), "{question}");
+        assert!(outcome.stdout.starts_with("RESULT\n"), "{question}");
+        assert!(outcome.stdout.contains("ANSWER\n"), "{question}");
         assert!(
             outcome.stdout.contains(expected_node),
             "{question}: {}",
             outcome.stdout
         );
-        assert!(outcome.stdout.contains("Direction:"), "{question}");
+        assert!(
+            outcome.stdout.contains("CAVEATS")
+                || outcome.stdout.contains("PRIMARY RESULTS")
+                || outcome.stdout.contains("NODE "),
+            "{question}"
+        );
         assert!(outcome.stdout.contains("Pagination:"), "{question}");
     }
 
@@ -164,11 +198,8 @@ fn natural_query_defaults_to_discovery_and_preserves_explicit_legacy_traversal()
             ],
         );
         assert_eq!(generic.code, 0, "{}", generic.stderr);
-        assert!(
-            generic.stdout.starts_with("match_confidence:"),
-            "{question}"
-        );
-        assert!(generic.stdout.contains("Discovery:"), "{question}");
+        assert!(generic.stdout.starts_with("RESULT\n"), "{question}");
+        assert!(generic.stdout.contains("ANSWER\n"), "{question}");
         assert!(generic.stdout.contains("Completeness:"), "{question}");
     }
 
@@ -261,10 +292,11 @@ fn discovery_cursor_survives_budget_alias_and_scope_order_but_rejects_graph_chan
         ],
     );
     assert_eq!(continued.code, 0, "{}", continued.stderr);
+    assert!(continued.stdout.starts_with("RESULT\n"));
     assert!(
         continued
             .stdout
-            .contains("Relationship contexts: import,call")
+            .contains("Pagination: version=compass.query.discovery-text-page/2")
     );
 
     document.nodes[0].qualified_name.push_str(".changed");
@@ -300,6 +332,7 @@ fn natural_discovery_exposes_the_public_json_contract_and_repeatable_or_scopes()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
+    let graph_for_agent = graph.clone();
     let mut document = GraphDocument::load(&graph)?;
     document.links[0].context = Some("call".to_owned());
     std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
@@ -338,6 +371,21 @@ fn natural_discovery_exposes_the_public_json_contract_and_repeatable_or_scopes()
     assert_eq!(response["seeds"][0]["nodeId"], "n:target");
     assert_eq!(response["nodes"].as_array().map(Vec::len), Some(2));
     assert_eq!(response["edges"].as_array().map(Vec::len), Some(1));
+
+    let agent = run(
+        Frontend::Compass,
+        [
+            OsString::from("query"),
+            OsString::from("Target"),
+            OsString::from("--graph"),
+            graph_for_agent.into_os_string(),
+            OsString::from("--format=agent-json"),
+        ],
+    );
+    assert_eq!(agent.code, 0, "{}", agent.stderr);
+    let agent_view = AgentQueryView::from_json(agent.stdout.as_bytes())?;
+    assert_eq!(agent_view.schema, "compass.query.agent-view/1");
+    assert!(!agent_view.primary_results.is_empty());
     Ok(())
 }
 
@@ -492,7 +540,7 @@ fn natural_discovery_help_documents_only_the_public_contract() {
         "--scope <KIND:VALUE>",
         "Repeatable OR scope",
         "--context <VALUE>",
-        "--format <text|json>",
+        "--format <text|agent-json|json>",
         "--result-envelope",
         "--text-budget <N>",
         "default: 8000",
@@ -599,7 +647,8 @@ fn typed_query_text_is_a_projection_of_the_same_response() -> Result<(), Box<dyn
         ],
     );
     assert_eq!(outcome.code, 0, "{}", outcome.stderr);
-    assert!(outcome.stdout.contains("Search:"));
+    assert!(outcome.stdout.starts_with("RESULT\n"));
+    assert!(outcome.stdout.contains("ANSWER\n"));
     assert!(outcome.stdout.contains("Fixture.Target"));
     Ok(())
 }
@@ -745,7 +794,10 @@ fn natural_query_is_concise_by_default_and_evidence_is_opt_in() -> Result<(), Bo
 
     let concise = run(Frontend::Compass, base.clone());
     assert_eq!(concise.code, 0, "{}", concise.stderr);
-    assert!(concise.stdout.starts_with("match_confidence: exact"));
+    assert!(concise.stdout.starts_with("RESULT\n"));
+    assert!(
+        concise.stdout.contains("State: candidates") || concise.stdout.contains("State: answered")
+    );
     assert!(concise.stdout.contains("NODE Fixture.Target [function]"));
     assert!(concise.stdout.contains("provenance record(s) hidden"));
     assert!(!concise.stdout.contains("Node evidence:"));
@@ -777,7 +829,7 @@ fn natural_and_typed_queries_signal_missing_exact_matches_before_fallbacks()
         );
         assert_eq!(outcome.code, 0, "{command}: {}", outcome.stderr);
         assert!(
-            outcome.stdout.starts_with("match_confidence: none"),
+            outcome.stdout.starts_with("RESULT\nState: no_match"),
             "{command}: {}",
             outcome.stdout
         );

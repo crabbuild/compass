@@ -18,6 +18,11 @@ Daily workflow:
   focused query.
 - Inspect direction, ambiguity, graph completeness, domain truncation, and the
   final Pagination line before relying on a result.
+- Prefer `--format agent-json` for agent-controlled follow-up. Read `status`,
+  `answer`, and `caveats` first; `no_match`, `needs_resolution`, and `no_path`
+  are non-answers, and fallback candidates are suggestions only. Check source
+  and projection truncation before claiming completeness, then follow exact
+  `nextActions` arguments. Use raw `--format json` for full provenance.
 - When a seed is ambiguous, repeat the query with the exact node ID.
 - Follow `next=<cursor>` with the unchanged question and options plus
   `--cursor <cursor>` when the requested scope must be exhaustive; stop at

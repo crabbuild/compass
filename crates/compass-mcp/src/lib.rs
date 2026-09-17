@@ -32,8 +32,10 @@ use compass_model::query_contract::{
 };
 use compass_model::{Graph, GraphDocument, NodeIndex};
 use compass_output::{
-    AgentOrientation, ORIENTATION_JSON_MAX_BYTES, render_agent_report_markdown,
-    render_orientation_json, validate_orientation_graph_identity,
+    AgentOperandRole, AgentOperation, AgentOrientation, AgentQueryContext,
+    ORIENTATION_JSON_MAX_BYTES, build_code_query_view, build_discovery_query_view,
+    render_agent_query_text, render_agent_report_markdown, render_orientation_json,
+    validate_orientation_graph_identity,
 };
 use compass_prs::{
     ChangeRequestSource, LocalGitChangeRequestSource, ProcessRunner, SystemRunner,
@@ -1051,25 +1053,65 @@ fn invoke_typed_tool(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let response = code_query::invoke_with_engine(name, arguments, &engine)?;
-    let text = format!(
-        "{:?}: {} nodes, {} edges, {} paths{}",
-        response.operation,
-        response.nodes.len(),
-        response.edges.len(),
-        response.paths.len(),
-        if response.truncated {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
+    let context = typed_agent_query_context(name, arguments, &response, &engine);
+    let view = build_code_query_view(&response, context)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let text = render_agent_query_text(&view)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let semantic_result_digest = compass_query::code_query_response_digest(&response)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let view =
+        serde_json::to_value(view).map_err(|error| InvocationError::Internal(error.to_string()))?;
     Ok(ToolInvocation {
         text,
-        structured_content: Some(transport_envelope(
+        structured_content: Some(transport_envelope_with_view(
             serde_json::to_value(response)
                 .map_err(|error| InvocationError::Internal(error.to_string()))?,
+            Some(&semantic_result_digest),
+            Some(view),
         )?),
     })
+}
+
+fn typed_agent_query_context(
+    name: &str,
+    arguments: &Map<String, Value>,
+    response: &compass_model::query_contract::CodeQueryResponse,
+    engine: &compass_query::CodeQueryEngine,
+) -> AgentQueryContext {
+    let mut context = AgentQueryContext::new(
+        AgentOperation::from(response.operation),
+        engine.graph_identity().to_owned(),
+        engine.build_generation_identity().to_owned(),
+    );
+    let operand = |role: AgentOperandRole, name: &str, context: AgentQueryContext| match arguments
+        .get(name)
+        .and_then(Value::as_str)
+    {
+        Some(value) => context.with_operand(role, value.to_owned()),
+        None => context,
+    };
+    context = match name {
+        "search_symbols" => operand(AgentOperandRole::Query, "query", context),
+        "get_callers" | "get_callees" | "get_impact" => {
+            operand(AgentOperandRole::Symbol, "symbol", context)
+        }
+        "get_node" => {
+            let context = operand(AgentOperandRole::Source, "source", context);
+            operand(AgentOperandRole::Target, "target", context)
+        }
+        "explore_code" => {
+            let mut context = context;
+            if let Some(values) = arguments.get("symbols").and_then(Value::as_array) {
+                for value in values.iter().filter_map(Value::as_str) {
+                    context = context.with_operand(AgentOperandRole::Symbol, value.to_owned());
+                }
+            }
+            operand(AgentOperandRole::Root, "root", context)
+        }
+        _ => context,
+    };
+    context
 }
 
 fn natural_discovery_requested(arguments: &Map<String, Value>) -> bool {
@@ -1094,28 +1136,35 @@ fn invoke_discovery_tool(
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let response = code_query::invoke_discovery_with_engine(arguments, &engine)?;
-    let text = format!(
-        "Discovery: {} seeds, {} nodes, {} edges{}",
-        response.seeds.len(),
-        response.nodes.len(),
-        response.edges.len(),
-        if response.truncated {
-            " (truncated)"
-        } else {
-            ""
-        }
-    );
+    let question = arguments
+        .get("question")
+        .and_then(Value::as_str)
+        .unwrap_or(&response.question);
+    let context = AgentQueryContext::new(
+        AgentOperation::Discovery,
+        engine.graph_identity().to_owned(),
+        engine.build_generation_identity().to_owned(),
+    )
+    .with_question(question.to_owned())
+    .with_operand(AgentOperandRole::Query, question.to_owned());
+    let view = build_discovery_query_view(&response, context)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let text = render_agent_query_text(&view)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
     if let Some(question) = arguments.get("question").and_then(Value::as_str) {
         log_discovery_mcp_query(question, graph_path, &response, started.elapsed());
     }
     let semantic_result_digest = compass_query::discovery_response_digest(&response)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let view =
+        serde_json::to_value(view).map_err(|error| InvocationError::Internal(error.to_string()))?;
     Ok(ToolInvocation {
         text,
-        structured_content: Some(transport_envelope_with_digest(
+        structured_content: Some(transport_envelope_with_view(
             serde_json::to_value(response)
                 .map_err(|error| InvocationError::Internal(error.to_string()))?,
             Some(&semantic_result_digest),
+            Some(view),
         )?),
     })
 }
@@ -1190,6 +1239,14 @@ fn transport_envelope_with_digest(
     result: Value,
     semantic_result_digest: Option<&str>,
 ) -> Result<Value, InvocationError> {
+    transport_envelope_with_view(result, semantic_result_digest, None)
+}
+
+fn transport_envelope_with_view(
+    result: Value,
+    semantic_result_digest: Option<&str>,
+    agent_view: Option<Value>,
+) -> Result<Value, InvocationError> {
     let mut envelope = json!({
         "schema": MCP_TOOL_RESULT_SCHEMA,
         "result": result,
@@ -1203,6 +1260,9 @@ fn transport_envelope_with_digest(
     });
     if let Some(digest) = semantic_result_digest {
         envelope["semanticResultDigest"] = json!(format!("sha256:{digest}"));
+    }
+    if let Some(view) = agent_view {
+        envelope["agentView"] = view;
     }
     for _ in 0..8 {
         let required_bytes = serde_json::to_vec(&envelope)
