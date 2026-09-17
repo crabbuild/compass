@@ -210,6 +210,25 @@ fn code_query_tools_share_the_bounded_versioned_contract() -> Result<(), Box<dyn
         assert!(response["limits"]["maxNodes"].as_u64().is_some(), "{tool}");
     }
 
+    let typed_envelope: Value = serde_json::from_str(&server.invoke(
+        "get_callers",
+        Map::from_iter([("symbol".to_owned(), json!("Target"))]),
+    ))?;
+    assert_eq!(
+        typed_envelope["agentView"]["schema"],
+        "compass.query.agent-view/1"
+    );
+    assert_eq!(
+        typed_envelope["agentView"]["status"]["resultState"],
+        "answered"
+    );
+    assert_eq!(typed_envelope["result"]["schema"], "compass.query/1");
+    assert!(
+        typed_envelope["semanticResultDigest"]
+            .as_str()
+            .is_some_and(|digest| digest.starts_with("sha256:"))
+    );
+
     let reverse = invoke(
         &server,
         "get_node",
@@ -627,6 +646,22 @@ async fn mcp_code_queries_publish_structured_content_and_protocol_errors()
         Some("compass.query/1")
     );
     assert!(!response.content.is_empty());
+    let text = response
+        .content
+        .iter()
+        .find_map(|content| content.as_text().map(|text| text.text.clone()))
+        .ok_or("missing MCP text content")?;
+    assert!(text.starts_with("RESULT\n"));
+    assert!(text.contains("ANSWER\n"));
+    let structured = response
+        .structured_content
+        .as_ref()
+        .ok_or("missing structured content")?;
+    assert_eq!(
+        structured["agentView"]["schema"],
+        "compass.query.agent-view/1"
+    );
+    assert_eq!(structured["result"]["schema"], "compass.query/1");
     assert!(
         client
             .call_tool(CallToolRequestParams::new("search_symbols"))

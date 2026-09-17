@@ -124,6 +124,28 @@ pub fn render_discovery_text_page(
     response: &DiscoveryQueryResponse,
     options: DiscoveryTextPageOptions<'_>,
 ) -> Result<DiscoveryTextPage, DiscoveryTextPageError> {
+    render_discovery_text_page_internal(response, options, None)
+}
+
+/// Render a discovery page using caller-owned, already escaped prefix lines.
+///
+/// Cursor validation and the ordered entry ledger remain owned by this crate;
+/// the prefix is presentation-only and therefore cannot change a v2 cursor's
+/// semantic position. The ordinary renderer above keeps the historical prefix
+/// for library callers that do not opt into the Agent View.
+pub fn render_discovery_text_page_with_prefix(
+    response: &DiscoveryQueryResponse,
+    options: DiscoveryTextPageOptions<'_>,
+    prefix: &[String],
+) -> Result<DiscoveryTextPage, DiscoveryTextPageError> {
+    render_discovery_text_page_internal(response, options, Some(prefix))
+}
+
+fn render_discovery_text_page_internal(
+    response: &DiscoveryQueryResponse,
+    options: DiscoveryTextPageOptions<'_>,
+    prefix: Option<&[String]>,
+) -> Result<DiscoveryTextPage, DiscoveryTextPageError> {
     if !(MIN_TEXT_BUDGET..=MAX_TEXT_BUDGET).contains(&options.token_budget) {
         return Err(DiscoveryTextPageError::InvalidBudget);
     }
@@ -153,69 +175,10 @@ pub fn render_discovery_text_page(
         }
         None => 0,
     };
-    let ambiguity = response.seeds.iter().filter(|seed| seed.ambiguous).count();
-    let term_selection = crate::text::discovery_term_selection(&response.question);
-    let mut fixed = match_signal_lines(response);
-    fixed.push(format!(
-        "Seed terms: {}{}",
-        if term_selection.ranking_terms.is_empty() {
-            "none".to_owned()
-        } else {
-            rendered_values(&term_selection.ranking_terms)
-        },
-        if term_selection.discarded_generic_terms.is_empty() {
-            String::new()
-        } else {
-            format!(
-                " (discarded as too generic: {})",
-                rendered_quoted_values(&term_selection.discarded_generic_terms)
-            )
-        }
-    ));
-    fixed.extend([
-        format!(
-            "Discovery: {} seed(s), {} node(s), {} edge(s)",
-            response.seeds.len(),
-            response.nodes.len(),
-            response.edges.len()
-        ),
-        format!(
-            "Direction: {} ({})",
-            direction_name(response.selected_direction),
-            direction_source_name(response.direction_source)
-        ),
-        format!("Ambiguity: {ambiguity} ambiguous seed(s)"),
-        format!(
-            "Graph coverage: {}",
-            if response
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::IncompleteCoverage)
-            {
-                "incomplete (incomplete_coverage diagnostic)"
-            } else {
-                "no incompleteness reported (coverage otherwise unknown)"
-            },
-        ),
-        format!(
-            "Domain result: {} (domainTruncated={})",
-            if response.truncated {
-                "partial"
-            } else {
-                "complete"
-            },
-            response.truncated
-        ),
-        format!("Traversal: {}", traversal_name(response.traversal)),
-        format!(
-            "Relationship contexts: {}",
-            rendered_values(&response.relation_contexts)
-        ),
-        format!("Scope (OR): {}", rendered_scopes(response)),
-    ]);
-    if options.include_evidence {
-        fixed.push(format!("Semantic result: sha256:{semantic_result_digest}"));
-    }
+    let fixed = prefix.map_or_else(
+        || default_fixed_lines(response, options.include_evidence, &semantic_result_digest),
+        ToOwned::to_owned,
+    );
     let max_chars = options.token_budget.saturating_mul(4);
     let fixed_chars = fixed
         .iter()
@@ -286,6 +249,77 @@ pub fn render_discovery_text_page(
         entry_end: end,
         entry_total: entries.len(),
     })
+}
+
+fn default_fixed_lines(
+    response: &DiscoveryQueryResponse,
+    include_evidence: bool,
+    semantic_result_digest: &str,
+) -> Vec<String> {
+    let ambiguity = response.seeds.iter().filter(|seed| seed.ambiguous).count();
+    let term_selection = crate::text::discovery_term_selection(&response.question);
+    let mut fixed = match_signal_lines(response);
+    fixed.push(format!(
+        "Seed terms: {}{}",
+        if term_selection.ranking_terms.is_empty() {
+            "none".to_owned()
+        } else {
+            rendered_values(&term_selection.ranking_terms)
+        },
+        if term_selection.discarded_generic_terms.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (discarded as too generic: {})",
+                rendered_quoted_values(&term_selection.discarded_generic_terms)
+            )
+        }
+    ));
+    fixed.extend([
+        format!(
+            "Discovery: {} seed(s), {} node(s), {} edge(s)",
+            response.seeds.len(),
+            response.nodes.len(),
+            response.edges.len()
+        ),
+        format!(
+            "Direction: {} ({})",
+            direction_name(response.selected_direction),
+            direction_source_name(response.direction_source)
+        ),
+        format!("Ambiguity: {ambiguity} ambiguous seed(s)"),
+        format!(
+            "Graph coverage: {}",
+            if response
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == QueryDiagnosticCode::IncompleteCoverage)
+            {
+                "incomplete (incomplete_coverage diagnostic)"
+            } else {
+                "no incompleteness reported (coverage otherwise unknown)"
+            },
+        ),
+        format!(
+            "Domain result: {} (domainTruncated={})",
+            if response.truncated {
+                "partial"
+            } else {
+                "complete"
+            },
+            response.truncated
+        ),
+        format!("Traversal: {}", traversal_name(response.traversal)),
+        format!(
+            "Relationship contexts: {}",
+            rendered_values(&response.relation_contexts)
+        ),
+        format!("Scope (OR): {}", rendered_scopes(response)),
+    ]);
+    if include_evidence {
+        fixed.push(format!("Semantic result: sha256:{semantic_result_digest}"));
+    }
+    fixed
 }
 
 fn continuation_cursor(

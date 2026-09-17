@@ -67,14 +67,16 @@ use compass_model::query_contract::{
     DiscoveryQueryResponse, DiscoveryScope, DiscoveryScopeKind, DiscoveryTraversal, ImpactRequest,
 };
 use compass_output::{
-    AffectedLensOptions, AgentOrientation, ArchitectureOverlay, ArchitectureOverlayGroup,
-    ArchitectureProjectionInput, ArchitectureProjectionOptions, ArtifactLens, CallflowOptions,
-    CallflowSection, CanvasOptions, HtmlOptions, ObsidianOptions, SourceNavigation, SvgOptions,
-    TreeOptions, WikiOptions, WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel,
-    WorkbenchView, WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model,
-    export_obsidian, export_wiki, graph_artifact_identity, graph_community_view_model_document,
-    graph_view_model_bundle_document, graph_view_model_document, node_filenames,
-    project_architecture, render_orientation_json, validate_orientation_graph_identity,
+    AffectedLensOptions, AgentOperandRole, AgentOperation, AgentOrientation, AgentQueryContext,
+    ArchitectureOverlay, ArchitectureOverlayGroup, ArchitectureProjectionInput,
+    ArchitectureProjectionOptions, ArtifactLens, CallflowOptions, CallflowSection, CanvasOptions,
+    HtmlOptions, ObsidianOptions, SourceNavigation, SvgOptions, TreeOptions, WikiOptions,
+    WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
+    WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model,
+    build_discovery_query_view, export_obsidian, export_wiki, graph_artifact_identity,
+    graph_community_view_model_document, graph_view_model_bundle_document,
+    graph_view_model_document, node_filenames, project_architecture,
+    render_agent_query_header_lines, render_orientation_json, validate_orientation_graph_identity,
     write_callflow_html, write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
     write_workbench_html_with_source_navigation,
 };
@@ -83,7 +85,7 @@ use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET, DEFAULT_PATH_DEPTH_LIMIT,
     DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions, TextPageOptions, TraversalMode,
     discovery_request_digest, format_affected, format_benchmark, open as open_code_query,
-    open_with_verified_document, query_graph_text_page, render_discovery_text_page,
+    open_with_verified_document, query_graph_text_page, render_discovery_text_page_with_prefix,
     render_explanation_page, render_shortest_path_with_limit, run_benchmark,
 };
 use compass_semantic::{
@@ -5442,10 +5444,11 @@ pub(crate) fn command_natural_query(frontend: Frontend, args: &[String]) -> Outc
         );
     }
     if !legacy_requested {
-        if discovery_format == "json" && (discovery_text_pagination_requested || discovery_evidence)
+        if matches!(discovery_format.as_str(), "json" | "agent-json")
+            && (discovery_text_pagination_requested || discovery_evidence)
         {
             return Outcome::failure(
-                "error: --cursor, --text-budget, and --evidence are text-only and cannot be used with --format json"
+                "error: --cursor, --text-budget, and --evidence are text-only and cannot be used with --format json or agent-json"
                     .to_owned(),
             );
         }
@@ -5522,8 +5525,10 @@ fn apply_discovery_option(
         }
         "--scope" => scope.push(parse_discovery_scope(value)?),
         "--format" => {
-            if !matches!(value, "text" | "json") {
-                return Err("--format must be text or json for discovery queries".to_owned());
+            if !matches!(value, "text" | "json" | "agent-json") {
+                return Err(
+                    "--format must be text, json, or agent-json for discovery queries".to_owned(),
+                );
             }
             *format = value.to_owned();
         }
@@ -5624,13 +5629,52 @@ fn command_discovery_query(
             Ok(output) => Outcome::success(output),
             Err(error) => Outcome::failure(format!("error: {error}")),
         }
+    } else if format == "agent-json" {
+        let context = AgentQueryContext::new(
+            AgentOperation::Discovery,
+            execution.graph_digest.clone(),
+            execution.graph_identity.clone(),
+        )
+        .with_question(execution.response.question.clone())
+        .with_operand(AgentOperandRole::Query, execution.response.question.clone())
+        .with_cursor(cursor.map(str::to_owned))
+        .with_evidence_hidden(!include_evidence);
+        match build_discovery_query_view(&execution.response, context)
+            .and_then(|view| serde_json::to_string_pretty(&view).map_err(Into::into))
+        {
+            Ok(output) => Outcome::success(output),
+            Err(error) => Outcome::failure(format!("error: {error}")),
+        }
     } else {
         let request_digest = match discovery_request_digest(&execution.response, include_heuristic)
         {
             Ok(digest) => digest,
             Err(error) => return Outcome::failure(format!("error: {error}")),
         };
-        match render_discovery_text_page(
+        let context = AgentQueryContext::new(
+            AgentOperation::Discovery,
+            execution.graph_digest.clone(),
+            execution.graph_identity.clone(),
+        )
+        .with_question(execution.response.question.clone())
+        .with_operand(AgentOperandRole::Query, execution.response.question.clone())
+        .with_cursor(cursor.map(str::to_owned))
+        .with_evidence_hidden(!include_evidence);
+        let view = match build_discovery_query_view(&execution.response, context) {
+            Ok(view) => view,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        let mut prefix = match render_agent_query_header_lines(&view) {
+            Ok(prefix) => prefix,
+            Err(error) => return Outcome::failure(format!("error: {error}")),
+        };
+        if include_evidence {
+            prefix.push(format!(
+                "Semantic result: {}",
+                view.identity.source_result_digest
+            ));
+        }
+        match render_discovery_text_page_with_prefix(
             &execution.response,
             DiscoveryTextPageOptions {
                 token_budget: text_budget,
@@ -5640,6 +5684,7 @@ fn command_discovery_query(
                 graph_digest: &execution.graph_digest,
                 include_evidence,
             },
+            &prefix,
         ) {
             Ok(page) => Outcome::success(page.text),
             Err(error) => Outcome::failure(format!("error: {error}")),

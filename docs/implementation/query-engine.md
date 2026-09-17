@@ -424,6 +424,31 @@ Renderers produce:
 Output-to-file uses atomic completion. A failed execution must not leave a
 valid-looking partial result.
 
+## Agent-readable projection
+
+`compass-output` owns the presentation-only `compass.query.agent-view/1`
+projection. The query engine supplies the full raw response and canonical
+source-result digest; it does not select a different node or re-run resolution
+for presentation. The projector records the invocation operands and graph /
+generation identities, then derives deterministic status dimensions:
+
+- result (`answered`, `candidates`, `needs_resolution`, `no_match`, `no_path`);
+- match and evidence state;
+- source execution versus projection truncation;
+- explicit corpus coverage (`incomplete` or `unknown`).
+
+Relationships inline both endpoint IDs and labels, and path steps retain the
+published edge direction (`forward` or `reverse`). Diagnostics become sorted
+caveats before graph detail. Stable bounds (12 primary results, 24
+relationships, 5 paths, 16 caveats, 5 next actions, 256 KiB JSON, 64 KiB
+text) keep the projection safe for tool transports. `identity.viewDigest`
+covers the projection without mutating the raw result.
+
+CLI and MCP call the same projector and text renderer. Raw `json` output and
+MCP `structuredContent.result` remain authoritative and unchanged. The
+discovery page renderer accepts an already escaped fixed header but keeps its
+`compass.query.discovery-text-page/2` entry ledger and cursor semantics.
+
 ## Explain and profile
 
 `EXPLAIN` returns logical operators and optimization records without executing.

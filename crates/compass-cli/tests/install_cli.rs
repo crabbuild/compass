@@ -134,6 +134,8 @@ fn project_codex_install_creates_native_compass_skill() -> Result<(), Box<dyn Er
     assert!(query.contains("2,000-token default"));
     assert!(query.contains("additional pages remain"));
     assert!(query.contains("repeat the unchanged question"));
+    assert!(query.contains("compass.query.agent-view/1"));
+    assert!(query.contains("Read `status.resultState`, `answer`, and `caveats`"));
     assert!(query.contains("filters relationships by their stored evidence context"));
     assert!(query.contains("Use repeatable `--scope KIND:VALUE`"));
     assert!(query.contains("every scope must resolve canonically"));

@@ -1,5 +1,6 @@
 //! Safe, deterministic output formats for Compass graphs.
 
+mod agent_query;
 mod architecture_projection;
 mod backup;
 mod callflow;
@@ -21,6 +22,18 @@ mod viewer_model;
 mod wiki;
 mod workbench;
 
+pub use agent_query::{
+    AGENT_QUERY_VIEW_SCHEMA, AGENT_VIEW_MAX_BYTES, AGENT_VIEW_MAX_CAVEATS,
+    AGENT_VIEW_MAX_NEXT_ACTIONS, AGENT_VIEW_MAX_PATHS, AGENT_VIEW_MAX_PRIMARY_RESULTS,
+    AGENT_VIEW_MAX_RELATIONSHIPS, AGENT_VIEW_MAX_SCALAR_CHARS, AGENT_VIEW_TEXT_MAX_BYTES,
+    AgentActionCli, AgentActionMcp, AgentAnswer, AgentBasis, AgentCaveat, AgentCoverage,
+    AgentEndpoint, AgentEntity, AgentEvidence, AgentExecution, AgentIdentity, AgentMatch,
+    AgentNextAction, AgentOmissions, AgentOperand, AgentOperandRole, AgentOperation, AgentPath,
+    AgentPathDirection, AgentPathStep, AgentProjection, AgentQueryContext, AgentQueryView,
+    AgentRelationship, AgentRelationshipEvidence, AgentRequest, AgentResultState, AgentSeverity,
+    AgentSource, AgentStatus, build_code_query_view, build_discovery_query_view,
+    render_agent_query_header_lines, render_agent_query_text,
+};
 pub use architecture_projection::{
     ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA, ArchitectureClassCounts,
     ArchitectureCoverage, ArchitectureDiagnosticSeverity, ArchitectureEvidenceCounts,
@@ -105,6 +118,10 @@ pub enum OutputError {
     ReviewBudgetExceeded { rendered_bytes: usize, limit: usize },
     #[error("invalid PR review output: {0}")]
     InvalidReview(String),
+    #[error("invalid agent query view: {0}")]
+    InvalidAgentQuery(String),
+    #[error("agent query view text is {rendered_bytes} bytes; limit is {limit}")]
+    AgentQueryTextBudgetExceeded { rendered_bytes: usize, limit: usize },
     #[error(transparent)]
     Review(#[from] compass_pr_intelligence::PrIntelligenceError),
     #[error("invalid orientation model: {reason}")]

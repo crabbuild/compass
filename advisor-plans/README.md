@@ -1,6 +1,6 @@
 # Compass enhancement advisor plans
 
-Generated from deep product/code audits between 2026-07-23 and 2026-08-25.
+Generated from deep product/code audits between 2026-07-23 and 2026-09-16.
 
 Upstream snapshots:
 
@@ -96,6 +96,12 @@ adds semantic identities and labels, resolves cell-owned references before the
 normalization facts are projected back to graph-v1 resources, keeps table
 navigation out of architecture topology, and adds an independent quality gate.
 
+Plan 025 makes code-query output answer-first for coding agents. It adds a
+strict, bounded `compass.query.agent-view/1` projection over unchanged raw
+query results, shares one deterministic renderer between CLI and MCP, exposes
+ambiguity, evidence, coverage, and truncation before graph details, and
+preserves discovery cursor version 2 by leaving its entry ledger intact.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -124,6 +130,7 @@ navigation out of architecture topology, and adds an independent quality gate.
 | 022 | Add bounded, quality-gated OCR to document processing | P1 | XL | 006, 007, 008, 010 | IN PROGRESS |
 | 023 | Make Python framework graphs source-proven and production-qualified | P1 | XXL | —; final gate should consume 005 or equivalent | BLOCKED |
 | 024 | Harden Markdown graph-v1 intelligence | P1 | XL | 009; coordinate with 012 | IN PROGRESS |
+| 025 | Make query output answer-first for coding agents | P1 | L | —; land before 018 when both are selected | DONE |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
@@ -194,6 +201,11 @@ helper runtimes prerequisites for native document support.
   internal normalization representation only; the publisher resolves their
   evidence and downgrades them to established resource details before strict
   validation. Table navigation nodes remain public and searchable.
+- Plan 025 is independently implementable and changes presentation rather than
+  query semantics. If Plan 018 is also selected, Plan 025 should land first so
+  MCP workflow prompts consume the typed Agent View instead of duplicating
+  interpretation rules. Plan 017 may later project ranked execution flows
+  through the same view after defining its own operation contract.
 
 ## Direction options not promoted to implementation plans
 
