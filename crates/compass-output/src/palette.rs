@@ -84,7 +84,10 @@ mod tests {
     fn community_colors_wrap_deterministically() {
         assert_eq!(community_color(0), COMMUNITY_COLORS[0]);
         assert_eq!(community_color(COMMUNITY_COLORS.len()), COMMUNITY_COLORS[0]);
-        assert_eq!(community_color(COMMUNITY_COLORS.len() + 3), COMMUNITY_COLORS[3]);
+        assert_eq!(
+            community_color(COMMUNITY_COLORS.len() + 3),
+            COMMUNITY_COLORS[3]
+        );
     }
 
     #[test]

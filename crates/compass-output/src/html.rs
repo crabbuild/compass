@@ -629,7 +629,10 @@ pub(crate) fn node_values(
         let mut output = Map::new();
         output.insert("id".into(), Value::String(node.id.clone()));
         output.insert("label".into(), Value::String(label.clone()));
-        output.insert("color".into(), node_color(color, &community_border(community)));
+        output.insert(
+            "color".into(),
+            node_color(color, &community_border(community)),
+        );
         output.insert("size".into(), decimal_value(round_tenths(size)));
         output.insert(
             "font".into(),

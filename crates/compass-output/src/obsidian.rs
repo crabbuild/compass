@@ -309,11 +309,8 @@ pub fn export_obsidian(
     let mut color_groups = Vec::new();
     if let Some(labels) = options.community_labels {
         for (community, label) in labels {
-            let rgb = u64::from_str_radix(
-                community_color(*community).trim_start_matches('#'),
-                16,
-            )
-            .unwrap_or_default();
+            let rgb = u64::from_str_radix(community_color(*community).trim_start_matches('#'), 16)
+                .unwrap_or_default();
             color_groups.push(serde_json::json!({
                 "query": format!("tag:#community/{}", label.replace(' ', "_")),
                 "color": {"a": 1, "rgb": rgb}
