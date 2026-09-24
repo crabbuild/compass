@@ -110,7 +110,13 @@ evidence topology. Omitting `--resolution` uses `1`; `--resolution N` uses the
 single positive finite value `N`. Higher values generally create smaller
 communities. The three-candidate automatic selector is qualification-only and
 is not enabled by omitting this option. `--no-cluster` skips community
-membership, analysis, labels, and `community-quality.json`.
+membership, analysis, labels, `community-quality.json`, and
+`community-hierarchy.json`.
+
+Clustered typed builds also publish `community-hierarchy.json`, the bounded
+navigation hierarchy over the published partition. Read it back unchanged with
+`compass export hierarchy-json`, which refuses an unknown schema major or a
+graph identity mismatch.
 
 ### `extract`
 

@@ -902,6 +902,18 @@ substitutes Louvain results under a Leiden profile or interprets one profile's
 member IDs as another profile's result. Existing `cohesion` remains the public
 density projection, now calculated by the shared quality evaluator.
 
+Clustered typed builds additionally publish strict
+`compass.community-hierarchy/1` at `community-hierarchy.json`. The artifact is
+additive: nothing in `graph.json`, `graph-overview.json`, `orientation.json`,
+CompassQL, MCP results, or query semantics reads it, so a consumer that ignores
+it behaves exactly as before. Readers must validate its self-digest, graph
+generation, canonical graph digest, and profile identity and reject unknown
+majors or fields. Absence means level navigation is unavailable — an older
+graph, a schema-less legacy recluster, or a `--no-cluster` build — not an empty
+hierarchy. Levels describe the same partition the quality artifact describes;
+`finestSignature` binds the two. `compass export hierarchy-json` emits the
+artifact unchanged and fails for an unknown major or a mismatched graph.
+
 ## Compass Store release contract
 
 The first supported local store line is `0.3.x`. Its logical machine formats

@@ -149,7 +149,7 @@ results.
 | 024 | Harden Markdown graph-v1 intelligence | P1 | XL | 009; coordinate with 012 | IN PROGRESS |
 | 025 | Make query output answer-first for coding agents | P1 | L | —; land before 018 when both are selected | DONE |
 | 026 | Make the derived community overview answer coupling questions | P1 | M | — | DONE |
-| 027 | Publish a budgeted community hierarchy for navigation | P1 | L | — | TODO |
+| 027 | Publish a budgeted community hierarchy for navigation | P1 | L | — | IN PROGRESS |
 | 028 | Keep community levels stable across builds and qualify them | P2 | L | 027 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.

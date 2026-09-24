@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Publish `community-hierarchy.json` (`compass.community-hierarchy/1`) beside
+  `community-quality.json` on clustered typed builds: a bounded, nested
+  overview of the same partition, with `childIndices` levels instead of
+  repeated node ids, evidence-derived labels that carry their provenance, and a
+  completeness proof the build refuses to violate. Relationship evidence
+  decides a level first; where a repository publishes communities that share no
+  relationship at all — 2,725 of `colinhacks/zod`'s 2,781 — the remaining
+  levels are cut from the directory tree those groups already cite, and the
+  level records that rule, its counts, and whether the root met its budget.
+  Read it back with the new `compass export hierarchy-json`, which reproduces
+  the artifact byte for byte and rejects any other schema major or graph.
 - Make large `graph.html` exports readable: the viewer opens a repository on a
   labelled community overview derived from the embedded model, weights
   cross-community relationships by the number of relationships they summarize,

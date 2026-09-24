@@ -81,6 +81,49 @@ unnecessary churn across updates, but detector, topology, resolution, or source
 changes can legitimately change membership and IDs. Integrations that need
 semantic identity should retain member IDs and the complete profile.
 
+## Hierarchy levels and budgets
+
+A flat partition scales with the repository, so the same build also publishes
+`community-hierarchy.json` (`compass.community-hierarchy/1`) bound to the same
+generation and graph digest. It is a navigation aid over the partition, not a
+second opinion about it: level 0 is a bounded root, the last level is the
+published partition itself, and every level between them is defined by
+`childIndices` into the level below.
+
+The budget tuple is the shipped policy: `rootTarget` 24 groups, `levelTarget`
+300, `maxLevels` 4, and `minLevelResolution` 0.05, published as
+`community-hierarchy-budget/v1`. Levels merge under two rules, and each level
+records which one produced it:
+
+- **Relationship.** The seeded Leiden local moving clustering already uses runs
+  on a graph whose nodes are the level below, at a resolution halved from the
+  previous level, and must remove at least a tenth of the level to be worth
+  publishing.
+- **Location affinity.** Measured repositories publish communities that share
+  no relationship at all — 86 of `pallets/flask`'s 112 communities and 2,725 of
+  `colinhacks/zod`'s 2,781 have no cross-community edge — so relationship
+  evidence alone can never bound the root. The remaining levels are cut out of
+  the directory tree the groups already cite: the cut starts at the repository
+  root and repeatedly expands the largest directory whose children still fit
+  the budget, so every merged group is a directory its members share, and a
+  group that cites no dominant directory stays a group of its own.
+
+`budgetSatisfied` reports whether the root met its target, and `mergeEvidence`
+records the counts behind an affinity level, including how many groups carried
+no location key. A repository whose communities cite nothing in common keeps a
+larger root rather than being merged into units nothing supports.
+
+Labels carry provenance in a fixed order: longest common directory prefix
+covering at least 60% of members, then the most frequent qualified-name prefix,
+then the hub member's name, then a generic community id. Consumers read
+`label.rule` and `label.generic`; they never parse label text. Group quality
+reports cohesion and conductance over the graph that level partitions.
+
+The completeness proof is explicit: every level's children partition the level
+below exactly once and their member counts sum to the parent's, or the build
+fails with a typed error instead of publishing an inconsistent tree. Level
+membership never changes nodes, edges, or query results.
+
 ## Related pages
 
 - [Graph model](graph-model.md)

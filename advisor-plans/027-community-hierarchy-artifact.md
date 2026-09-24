@@ -23,6 +23,29 @@
 ## Status
 
 - **Priority**: P1 — the change that makes repositories with thousands of communities readable
+
+### Implementation status (2026-09-24)
+
+Steps 1–4 and the `hierarchy-json` export are implemented on
+`codex/community-hierarchy-artifact`; Steps 5–7 (workbench contract, viewer
+level navigation, qualification, and docs beyond the artifact reference) are
+outstanding.
+
+Measured on real repositories, relationship-only coarsening cannot bound a
+root: 86 of `pallets/flask`'s 112 communities and 2,725 of
+`colinhacks/zod`'s 2,781 have no cross-community edge at all, so the group
+graph those levels merge is almost empty. This is the plan's STOP condition
+("meeting the root budget appears to require merging communities that share no
+evidence"). The operator chose to keep the budget and add a second, recorded
+rule: levels that relationship evidence cannot reduce are cut from the
+directory tree the groups already cite (`locationAffinity`), every level
+records its rule and counts, groups that cite no dominant directory are never
+merged, and `budgetSatisfied` reports the achieved count. Current results:
+
+| repository | communities | levels | root groups | `budgetSatisfied` |
+| --- | --- | --- | --- | --- |
+| `pallets/flask` | 112 | 3 | 24 | true |
+| `colinhacks/zod` | 2,781 | 4 | 70 (24 directories + 46 location-less singles) | false |
 - **Effort**: L (new artifact + graph-side builder + exporter + viewer consumption + qualification)
 - **Risk**: MED — a new versioned artifact and a new clustering policy; `graph.json` and query semantics stay unchanged
 - **Depends on**: none (Plan 026 is independent; its local label ranking becomes the fallback path)

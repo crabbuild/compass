@@ -76,6 +76,7 @@ paths.
 | `GRAPH_REPORT.md` | derived human orientation | architecture survey |
 | `orientation.json` | versioned Agent Orientation bound to the same graph generation | coding assistants and MCP |
 | `community-quality.json` | strict graph-bound community evidence | detector inspection, qualification, immutable history |
+| `community-hierarchy.json` | strict graph-bound community hierarchy with a level budget | bounded community overview, level navigation |
 | `graph.html` | derived optional visualization | interactive exploration |
 | `manifest.json` | incremental build state | next compatible update |
 | binary query caches | disposable acceleration | internal query loading |
@@ -174,6 +175,55 @@ reported at the named evaluation resolution; conductance, connectedness,
 largest-community fraction, singleton count, topology evidence mixes, and
 witness omissions must be interpreted alongside it. Numeric community IDs are
 local to this graph realization.
+
+## `community-hierarchy.json`
+
+Clustered typed builds publish schema `compass.community-hierarchy/1` beside
+the quality artifact, bound to the same `graphGeneration` and SHA-256
+`graphDigest`. A flat partition scales with the repository, so an overview
+needs a bounded number of named, nested units: measured examples are 112
+communities for `pallets/flask` and 2,781 for `colinhacks/zod`.
+
+The artifact is a list of levels, coarsest first. Level 0 is the root a reader
+opens; the last level is the published partition itself, where group `i` pairs
+with the community id recorded in `groups[i].community`. Community ids are not
+always dense — the incremental path remaps surviving communities — so the
+pairing is explicit rather than positional. Levels never repeat node ids:
+`groups[*].childIndices` index the next finer level, `memberCount` sums the
+members below, and `finestSignature` digests the published partition's member
+signatures, so a reader can prove the hierarchy describes the partition it was
+built from without storing per-node membership.
+
+The budget tuple is `rootTarget` (24), `levelTarget` (300), `maxLevels` (4), and
+`minLevelResolution` (0.05), published with the identity
+`community-hierarchy-budget/v1`. `budgetSatisfied` is a recorded fact, not a
+promise: a repository can publish communities that share no evidence at all,
+and the artifact keeps the achieved count instead of merging them.
+
+Each level records the rule that produced it. A `relationship` level comes from
+the same seeded Leiden local moving clustering uses, at the resolution in
+`resolution`, and must remove at least a tenth of the level below it to be
+published. A `locationAffinity` level is cut out of the directory tree its
+groups already cite: the cut starts at the repository root and repeatedly
+expands the largest directory whose children still fit the budget, so every
+merged group is a real directory its members share, and a group that cites no
+dominant directory stays a group of its own. `mergeEvidence` records the
+counts, including `unkeyedGroups`. The policy identity is published as
+`mergePolicy`.
+
+Group labels carry their provenance in a fixed order: `dominantDirectory`
+(longest common directory prefix covering at least 60% of members),
+`modulePrefix`, `hubMember`, then a generic `communityId`. Consumers must read
+`label.rule` and `label.generic` rather than parsing label text. Group
+`quality` reports cohesion and conductance over the graph that level
+partitions, plus `boundaryKinds` counted from the exact kind set recorded in
+`boundaryKinds`.
+
+Level membership is a navigation aid derived from the same evidence as the
+communities themselves. It never changes nodes, edges, or query results, and
+absence of the artifact means unavailable navigation, not an empty hierarchy.
+`compass export hierarchy-json` reproduces the published artifact unchanged and
+refuses an unknown schema major or a mismatched graph.
 
 ### Inference levels
 

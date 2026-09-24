@@ -602,6 +602,12 @@ const PAGES: &[Page] = &[
         "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n\nExamples:\n  compass export orientation-json\n  compass export orientation-json --graph compass-out/graph.json\n\nNotes:\n  The orientation is accepted only when its generation, graph digest, and publication metadata match the selected graph."
     ),
     page!(
+        "export hierarchy-json",
+        "Export the atomically published community hierarchy",
+        ["compass export hierarchy-json [OPTIONS]"],
+        "Options:\n  --graph <PATH>          Graph JSON [default: compass-out/graph.json]\n  --output <PATH>         Write the artifact to a file instead of stdout\n\nExamples:\n  compass export hierarchy-json\n  compass export hierarchy-json --output compass-out/community-hierarchy.json\n\nNotes:\n  Reproduces `compass.community-hierarchy/1` byte for byte. Levels are defined over the level below, so the artifact stays bounded on large repositories; the root level is level 0 and the last level is the published community partition. An unknown schema major, a missing artifact, or a graph identity mismatch fails instead of emitting a hierarchy that describes another graph."
+    ),
+    page!(
         "export html",
         "Generate the interactive graph HTML report",
         ["compass export html [OPTIONS]"],
