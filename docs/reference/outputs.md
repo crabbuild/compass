@@ -236,6 +236,22 @@ descends one level, narrowed to that group's children; the breadcrumb and the
 export could not draw inside its node budget renders as the overview the export
 already had. Exports without the artifact keep the previous behaviour exactly.
 
+### Group identity and the identity ledger
+
+`groups[*].id` is evidence-derived: `h<level>-<signature16>`, digesting the
+sorted member-community signatures of the group's members, with the algorithm
+recorded as `signatureAlgorithm` (`hierarchy-signature/v1`). `signature` is the
+group's digest in this build; `id` is the durable name, which reconciliation
+rewrites to the previous build's id when the same group survives. `index` stays
+presentation order, so a reader must key on `id`.
+
+Every rebuild publishes `community-hierarchy.json.sig` beside the artifact: a
+ledger of flattened group ordinal to `"<id> <signature>"`. It is written with
+the other required artifacts, removed with `--no-cluster`, and lets a later
+build restore identity when only the ledger survives. Reconciliation events are
+bounded and are not embedded in the artifact; consumers read them from the
+reconciliation report or the history comparison.
+
 ### Inference levels
 
 Graph-building commands accept `--inference-level low|medium|high|max`. The

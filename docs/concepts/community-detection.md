@@ -119,6 +119,31 @@ then the hub member's name, then a generic community id. Consumers read
 `label.rule` and `label.generic`; they never parse label text. Group quality
 reports cohesion and conductance over the graph that level partitions.
 
+### Group identity and reconciliation
+
+A group id is evidence, not position: `h<level>-<signature16>`, where the
+signature digests the sorted member-community signatures of everything below
+the group (`hierarchy-signature/v1`). A level carries its own signature over its
+sorted groups. Two builds that keep a group therefore name it the same way even
+when unrelated groups appear, move, or reorder the payload.
+
+Every rebuild reconciles the fresh hierarchy against the one published beside
+the graph it is reclustering. Groups are matched by Jaccard overlap of their
+member nodes, with the previous id inherited only when the overlap reaches
+`keepThreshold` (0.5) and the parent match is consistent. The result is a
+report, not a rewrite: `stable` counts the 1:1 survivals, and the bounded event
+list carries `split`, `merged`, `appeared`, `disappeared`, and `ambiguous`
+entries with the member counts and overlap ratios that justify them. A group
+whose two successors are within `ambiguityMargin` (0.05) of each other is
+reported as ambiguous and inherits nothing — the artifact never promotes a
+guessed correspondence into a name. Events are capped at `maxEvents` (256) with
+an exact `omittedEvents` count, and membership, labels, and evidence are never
+changed by reconciliation.
+
+The identity ledger `community-hierarchy.json.sig` persists the flattened
+group ordinals as `"<id> <signature>"`, so a later build can reconcile from the
+sidecar alone when the artifact itself is gone.
+
 The completeness proof is explicit: every level's children partition the level
 below exactly once and their member counts sum to the parent's, or the build
 fails with a typed error instead of publishing an inconsistent tree. Level

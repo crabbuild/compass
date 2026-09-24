@@ -914,6 +914,16 @@ hierarchy. Levels describe the same partition the quality artifact describes;
 `finestSignature` binds the two. `compass export hierarchy-json` emits the
 artifact unchanged and fails for an unknown major or a mismatched graph.
 
+Group ids inside that artifact are durable: `h<level>-<signature16>` over the
+group's member signatures. Reconciliation rewrites an id to the previous
+build's when a group survives, so consumers may key on `id` across rebuilds, but
+must treat a changed `signature` as changed membership and must handle
+`ambiguous` events rather than assuming every previous group has exactly one
+successor. The identity ledger `community-hierarchy.json.sig` is additive too:
+absence means identity can only be derived from the artifact's own signatures.
+Any change to the signature algorithm or the reconciliation thresholds is a
+compatibility-sensitive change and needs a version bump.
+
 ## Compass Store release contract
 
 The first supported local store line is `0.3.x`. Its logical machine formats

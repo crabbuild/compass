@@ -75,6 +75,27 @@ shared location (`locationAffinity`) because relationship evidence alone cannot
 reduce it. The location-less fixture asserts the opposite: the artifact reports
 `budgetSatisfied: false` instead of merging groups nothing connects.
 
+### Hierarchy stability
+
+```bash
+./scripts/qualify_code_graph_v1.sh --hierarchy-stability \
+  --report docs/implementation/community-hierarchy-stability.json
+```
+
+`compass.community-hierarchy-stability/1` replays one fixture repository
+through a fixed edit sequence — add symbols to one community, move a file
+between two directories, delete a community — rebuilding and reconciling after
+each step, and runs the whole replay twice before byte-comparing the reports.
+
+| Entry | Measured |
+| --- | --- |
+| `rootBudgetSatisfied` / `completeTree` | every generation's root fits its budget and partitions exactly |
+| `ariAtLeastThreshold` / `amiAtLeastThreshold` | ARI and AMI between consecutive generations over the members they share, threshold 0.5 (measured 1.0 on this fixture) |
+| `stableIdsForUntouchedGroups` | groups whose member set did not change kept their id (5/5, 6/6, 5/5 through the sequence) |
+| `splitMergeEventsMatchEdits` | no event names an untouched group, and the delete is the only edit that removes one |
+| `ambiguousEventsReportedNotResolved` | a forced even split reports `ambiguous` and no successor inherits the id |
+| `deterministicDigest` | two replays produce identical reports and digests |
+
 ## Compact performance decision
 
 On 2026-09-12, an aarch64 macOS debug build at candidate commit `7e216079` ran

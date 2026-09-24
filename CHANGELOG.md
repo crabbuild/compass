@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Give community levels a durable identity. Group ids are now derived from
+  member evidence (`h<level>-<signature16>` over the group's member
+  signatures) instead of position, every rebuild reconciles the fresh hierarchy
+  against the published one so surviving groups keep the id a reader learned,
+  and the reconciliation reports what split, merged, appeared, disappeared, or
+  was too close to call instead of guessing. The viewer lays levels out by that
+  identity, so an untouched group keeps its place when its neighbours change.
 - Publish `community-hierarchy.json` (`compass.community-hierarchy/1`) beside
   `community-quality.json` on clustered typed builds: a bounded, nested
   overview of the same partition, with `childIndices` levels instead of
