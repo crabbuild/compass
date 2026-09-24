@@ -900,7 +900,11 @@ sidecar.
 Historical realizations and their sidecars are immutable. Compass never
 substitutes Louvain results under a Leiden profile or interprets one profile's
 member IDs as another profile's result. Existing `cohesion` remains the public
-density projection, now calculated by the shared quality evaluator.
+density projection, now calculated by the shared quality evaluator. That
+projection is the share of a community's possible member pairs that carry an
+internal edge: a self-loop is an internal edge and stays in the published edge
+and weight inventories, but it is not a member pair, so it never raises the
+share or the hierarchy cohesion that mirrors it above one.
 
 Clustered typed builds additionally publish strict
 `compass.community-hierarchy/1` at `community-hierarchy.json`. The artifact is

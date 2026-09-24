@@ -187,6 +187,13 @@ fn density_scores(graph: &WeightedGraph, communities: &Communities) -> BTreeMap<
     }
     let mut internal_edges = BTreeMap::<usize, usize>::new();
     for (left, right, _) in graph.edges() {
+        // Density is the share of a community's possible member pairs that
+        // carry an internal edge. A self-loop is an internal edge but not a
+        // pair, so it never counts toward that share; it stays in the edge and
+        // weight inventories the published metrics already report.
+        if left == right {
+            continue;
+        }
         if let Some(community) = assignments[left]
             && assignments[right] == Some(community)
         {
@@ -743,6 +750,31 @@ mod tests {
         assert_eq!(quality.communities[&0].boundary_weight, 1.0);
         assert_eq!(quality.communities[&0].density, 1.0);
         assert_eq!(quality.communities[&0].connected_component_count, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn self_loops_stay_in_the_edge_inventory_without_breaking_density()
+    -> Result<(), CommunityQualityError> {
+        // Density is the share of a community's possible member pairs that carry
+        // an internal edge. A self-loop is an internal edge, so it is counted
+        // there, but it is not a pair and cannot push the share past one.
+        let document = GraphDocument {
+            directed: true,
+            multigraph: true,
+            graph: serde_json::Map::new(),
+            nodes: ["a", "b"].into_iter().map(node).collect(),
+            links: vec![edge("a", "b", 1.0), edge("a", "a", 1.0)],
+            extras: BTreeMap::new(),
+        };
+        let communities = BTreeMap::from([(0, vec!["a".to_owned(), "b".to_owned()])]);
+
+        let quality = evaluate_partition_quality(&document, &communities, 1.0)?;
+
+        let metric = &quality.communities[&0];
+        assert_eq!(metric.density, 1.0, "the one possible pair carries an edge");
+        assert_eq!(metric.internal_edge_count, 2, "the self-loop is an edge");
+        assert!(metric.volume.is_finite());
         Ok(())
     }
 

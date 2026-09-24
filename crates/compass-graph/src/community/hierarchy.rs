@@ -1795,7 +1795,11 @@ fn aggregate_metrics(
     for (left, right, weight) in graph.edges() {
         match (assignments[left], assignments[right]) {
             (Some(left_group), Some(right_group)) if left_group == right_group => {
-                if left_group < group_count {
+                // A self-loop is an internal edge but not one of the group's
+                // possible member pairs, so cohesion cannot count it: a group
+                // that calls into itself would otherwise publish a share above
+                // one and fail its own evidence check.
+                if left != right && left_group < group_count {
                     internal_edges[left_group] = internal_edges[left_group].saturating_add(1);
                 }
             }
@@ -2433,6 +2437,43 @@ mod tests {
             assert!(group.child_indices.is_empty());
             assert_eq!(group.member_count, 2);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn self_referential_edges_never_push_a_group_past_full_density() -> TestResult {
+        // A Go package that calls into itself keeps a self-loop in the projected
+        // topology. It is an internal edge but not an internal pair, so counting
+        // it against the possible-pair denominator published a cohesion above
+        // one and the artifact refused to validate.
+        let mut document = document(1);
+        let loop_index = document.links.len();
+        document
+            .links
+            .push(edge(loop_index, "c0n0", "c0n0", EdgeKind::Calls));
+        let identity = identity();
+        let limits = CommunityLimits::default();
+        let artifact = CommunityHierarchy::new(
+            "generation-test".to_owned(),
+            format!("sha256:{}", "0".repeat(64)),
+            build_community_hierarchy(
+                &document,
+                &communities(1),
+                &HierarchyRequest {
+                    identity: &identity,
+                    limits: &limits,
+                    resolution: 1.0,
+                    budget: HierarchyBudget::default(),
+                },
+            )?,
+        )?;
+        let finest = artifact.finest().ok_or("missing finest level")?;
+        let group = finest.groups.first().ok_or("missing group")?;
+        assert_eq!(group.member_count, 2);
+        assert_eq!(
+            group.quality.cohesion, 1.0,
+            "cohesion stays a share of the possible member pairs"
+        );
         Ok(())
     }
 

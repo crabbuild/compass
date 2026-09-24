@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Stop a self-referential edge from failing a clustered build. Cohesion and the
+  `density` it projects count a community's *member pairs*, so a symbol that
+  references, calls, or contains itself is now an internal edge in the edge and
+  weight inventories without also counting as one of the possible pairs. A
+  repository whose groups call into themselves — Go packages do this routinely —
+  no longer publishes a share above one and no longer fails
+  `compass update` with "group quality must be finite and bounded". The
+  published `density` for a community that holds a self-loop drops to its true
+  share of possible pairs.
+- Correct the reconciliation test that expected an unchanged rebuild to list
+  events. A group that survives 1:1 is counted in `stable` and never listed, so
+  the assertion could not pass; the test now states that contract and keeps its
+  identity checks.
 - Give community levels a durable identity. Group ids are now derived from
   member evidence (`h<level>-<signature16>` over the group's member
   signatures) instead of position, every rebuild reconciles the fresh hierarchy

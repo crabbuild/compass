@@ -592,6 +592,47 @@ fn the_finest_level_reports_the_published_partition_metrics() -> TestResult {
 }
 
 #[test]
+fn self_referential_symbols_publish_a_valid_hierarchy() -> TestResult {
+    // A package that calls into itself keeps a self-loop in the projected
+    // topology. The group holding it must still publish a bounded cohesion that
+    // matches the partition's density, and the artifact must validate.
+    let mut document = clustered_document(2, 3, true);
+    let loop_index = document.links.len();
+    document.links.push(edge(
+        loop_index,
+        "cluster0_symbol1",
+        "cluster0_symbol1",
+        EdgeKind::Calls,
+    ));
+    let result = partition(&document)?;
+    let hierarchy = hierarchy_of(
+        &document,
+        &result.communities,
+        result.quality.resolution,
+        HierarchyBudget::default(),
+    )?;
+    let finest = hierarchy.finest().ok_or("missing finest level")?;
+    for (community, quality) in &result.quality.communities {
+        let group = finest
+            .groups
+            .get(*community)
+            .ok_or("missing finest group")?;
+        assert!(
+            (0.0..=1.0).contains(&quality.density),
+            "community {community} density {} is not a share of member pairs",
+            quality.density
+        );
+        assert!(
+            (group.quality.cohesion - quality.density).abs() < 1e-12,
+            "group {community} cohesion {} does not match published density {}",
+            group.quality.cohesion,
+            quality.density
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn boundary_kinds_are_counted_and_the_exact_set_is_recorded() -> TestResult {
     let mut document = clustered_document(2, 4, true);
     if let Some(route) = document
@@ -687,7 +728,13 @@ fn reconciliation_keeps_ids_and_never_changes_membership() -> TestResult {
 
     // Identity is the only thing reconciliation may touch.
     let (report, before, next) = reconciliation(HierarchyBudget::default())?;
-    assert!(!report.events.is_empty());
+    // Nothing changed, so nothing is reported: a group that survives 1:1 is
+    // counted in `stable` and never listed as an event.
+    assert!(
+        report.events.is_empty(),
+        "an unchanged rebuild reports no event"
+    );
+    assert_eq!(report.omitted_events, 0);
     for (previous_level, next_level) in before.iter().zip(next.levels.iter()) {
         assert_eq!(previous_level.groups.len(), next_level.groups.len());
         for (previous_group, next_group) in previous_level.groups.iter().zip(&next_level.groups) {
