@@ -42,6 +42,12 @@ pub const COMMUNITY_HIERARCHY_BUDGET: &str = "community-hierarchy-budget/v1";
 /// rule so a reader can tell the two apart.
 pub const COMMUNITY_HIERARCHY_MERGE_POLICY: &str = "relationship-then-location-affinity/v1";
 
+/// Identity of the rule that derives group signatures and durable ids.
+pub const COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM: &str = "hierarchy-signature/v1";
+
+/// Length of a group signature in hex characters.
+const GROUP_SIGNATURE_LENGTH: usize = 16;
+
 /// Root groups a hierarchy aims for.
 pub const DEFAULT_ROOT_TARGET: usize = 24;
 
@@ -183,6 +189,14 @@ pub struct GroupQuality {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HierarchyGroup {
     pub index: usize,
+    /// Durable identity: `h<level>-<signature>` over the member evidence.
+    ///
+    /// Reconciliation rewrites this to the previous build's id when the same
+    /// group survives, so a level keeps its vocabulary across rebuilds. `index`
+    /// stays presentation order.
+    pub id: String,
+    /// First 16 hex characters of the group's member-signature digest.
+    pub signature: String,
     /// The published community this group is, on the finest level only.
     ///
     /// Community ids are not always dense: the incremental path remaps
@@ -202,6 +216,8 @@ pub struct HierarchyGroup {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HierarchyLevel {
     pub level: usize,
+    /// Digest over the level's sorted group signatures.
+    pub signature: String,
     /// Rule that grouped this level's children into its groups.
     pub merge: LevelMerge,
     /// Resolution that produced this level, for relationship levels only.
@@ -231,6 +247,7 @@ pub struct CommunityHierarchyDraft {
     pub limits: CommunityLimits,
     pub budget_identity: String,
     pub merge_policy: String,
+    pub signature_algorithm: String,
     pub budget: HierarchyBudget,
     /// Exact boundary kind set used for group accounting, sorted.
     pub boundary_kinds: Vec<String>,
@@ -298,6 +315,7 @@ pub struct CommunityHierarchy {
     pub limits: CommunityLimits,
     pub budget_identity: String,
     pub merge_policy: String,
+    pub signature_algorithm: String,
     pub budget: HierarchyBudget,
     pub boundary_kinds: Vec<String>,
     pub finest_community_count: usize,
@@ -339,6 +357,7 @@ impl CommunityHierarchy {
             limits: draft.limits,
             budget_identity: draft.budget_identity,
             merge_policy: draft.merge_policy,
+            signature_algorithm: draft.signature_algorithm,
             budget: draft.budget,
             boundary_kinds: draft.boundary_kinds,
             finest_community_count: draft.finest_community_count,
@@ -402,6 +421,9 @@ impl CommunityHierarchy {
         if self.merge_policy != COMMUNITY_HIERARCHY_MERGE_POLICY {
             return Err(invalid("unexpected merge policy"));
         }
+        if self.signature_algorithm != COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM {
+            return Err(invalid("unexpected signature algorithm"));
+        }
         if self.budget.max_levels == 0
             || self.budget.root_target == 0
             || self.budget.level_target == 0
@@ -445,6 +467,13 @@ impl CommunityHierarchy {
                 if group.index != index {
                     return Err(invalid("group indices must be dense and ordered"));
                 }
+                if !is_group_signature(&group.signature)
+                    || group.id != group_id(level.level, &group.signature)
+                {
+                    return Err(invalid(
+                        "group ids must be the evidence signature of their level",
+                    ));
+                }
                 if group.member_count == 0 {
                     return Err(invalid("groups must cover at least one member"));
                 }
@@ -466,6 +495,19 @@ impl CommunityHierarchy {
                 {
                     return Err(invalid("group quality must be finite and bounded"));
                 }
+            }
+            let mut ids = BTreeSet::new();
+            if level
+                .groups
+                .iter()
+                .any(|group| !ids.insert(group.id.as_str()))
+            {
+                return Err(invalid("group ids must be unique within a level"));
+            }
+            if level.signature
+                != signature_digest(level.groups.iter().map(|group| group.signature.as_str()))
+            {
+                return Err(invalid("level signature must digest its groups"));
             }
             if position + 1 == self.levels.len()
                 && level.groups.len() != self.finest_community_count
@@ -590,11 +632,13 @@ pub fn build_community_hierarchy(
         .iter()
         .map(|id| node_boundary_kinds(nodes.get(id.as_str()).copied()))
         .collect::<Vec<_>>();
+    let community_signatures = community_member_signatures(communities);
 
     let mut levels = vec![finest_level(
         &graph,
         &assignments,
         communities,
+        &community_signatures,
         &boundary_by_node,
         &legacy,
         &nodes,
@@ -662,6 +706,7 @@ pub fn build_community_hierarchy(
             &metrics,
             current,
             communities,
+            &community_signatures,
             &legacy,
             &nodes,
         )?;
@@ -689,6 +734,7 @@ pub fn build_community_hierarchy(
         .enumerate()
         .map(|(level, state)| HierarchyLevel {
             level,
+            signature: level_signature(&state.groups),
             merge: state.merge,
             resolution: state.resolution,
             merge_evidence: state.merge_evidence,
@@ -699,6 +745,8 @@ pub fn build_community_hierarchy(
                 .enumerate()
                 .map(|(index, group)| HierarchyGroup {
                     index,
+                    id: group_id(level, &group.signature),
+                    signature: group.signature.clone(),
                     community: group.community,
                     label: group.label.clone(),
                     member_count: group.member_count,
@@ -719,6 +767,7 @@ pub fn build_community_hierarchy(
         limits: *request.limits,
         budget_identity: COMMUNITY_HIERARCHY_BUDGET.to_owned(),
         merge_policy: COMMUNITY_HIERARCHY_MERGE_POLICY.to_owned(),
+        signature_algorithm: COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM.to_owned(),
         budget,
         boundary_kinds: boundary_kind_names(),
         finest_community_count,
@@ -745,6 +794,8 @@ struct LevelState {
 struct GroupState {
     /// Leaf community ids this group contains, ascending.
     communities: Vec<usize>,
+    /// Digest over this group's member-community signatures.
+    signature: String,
     member_count: usize,
     /// Indices into the next finer level's groups, ascending.
     children: Vec<usize>,
@@ -776,6 +827,7 @@ fn finest_level(
     graph: &WeightedGraph,
     assignments: &[Option<usize>],
     communities: &Communities,
+    community_signatures: &BTreeMap<usize, String>,
     boundary_by_node: &[BTreeMap<String, usize>],
     legacy: &compass_model::GraphDocument,
     nodes: &HashMap<&str, &NodeRecord>,
@@ -791,6 +843,7 @@ fn finest_level(
             let quality = metrics.get(index);
             GroupState {
                 communities: vec![*community],
+                signature: group_signature(&[*community], community_signatures),
                 member_count: members.len(),
                 children: Vec::new(),
                 community: Some(*community),
@@ -823,6 +876,7 @@ fn build_level(
     metrics: &[Metrics],
     finer: &LevelState,
     communities: &Communities,
+    community_signatures: &BTreeMap<usize, String>,
     legacy: &compass_model::GraphDocument,
     nodes: &HashMap<&str, &NodeRecord>,
 ) -> Result<LevelState, CommunityError> {
@@ -848,9 +902,11 @@ fn build_level(
         }
         members.sort();
         leaf_communities.sort_unstable();
+        let signature = group_signature(&leaf_communities, community_signatures);
         let quality = metrics.get(raw);
         groups.push(GroupState {
             communities: leaf_communities,
+            signature,
             member_count,
             children: children.clone(),
             community: None,
@@ -1596,6 +1652,47 @@ fn verify_level_coverage(
     Ok(())
 }
 
+/// Digest a group's member-community signatures.
+///
+/// Hashing the signatures rather than node ids keeps an id alive when a symbol
+/// is renamed inside a community whose membership is otherwise unchanged, and
+/// keeps it independent of the order the members were discovered in.
+fn group_signature(communities: &[usize], signatures: &BTreeMap<usize, String>) -> String {
+    let mut hasher = Sha256::new();
+    for community in communities {
+        if let Some(signature) = signatures.get(community) {
+            hasher.update(signature.as_bytes());
+            hasher.update([0]);
+        }
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    digest.chars().take(GROUP_SIGNATURE_LENGTH).collect()
+}
+
+/// Digest a set of signatures, independent of the order they arrive in.
+fn signature_digest<'a>(signatures: impl IntoIterator<Item = &'a str>) -> String {
+    let mut signatures = signatures.into_iter().collect::<Vec<_>>();
+    signatures.sort_unstable();
+    let mut hasher = Sha256::new();
+    for signature in signatures {
+        hasher.update(signature.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = format!("{:x}", hasher.finalize());
+    digest.chars().take(GROUP_SIGNATURE_LENGTH).collect()
+}
+
+/// Digest a level's sorted group signatures.
+fn level_signature(groups: &[GroupState]) -> String {
+    signature_digest(groups.iter().map(|group| group.signature.as_str()))
+}
+
+/// The published id of a group: durable across builds that keep the group.
+#[must_use]
+pub fn group_id(level: usize, signature: &str) -> String {
+    format!("h{level}-{signature}")
+}
+
 fn keep_smallest(current: &mut Option<String>, candidate: &str) {
     match current {
         Some(existing) if existing.as_str() <= candidate => {}
@@ -1618,6 +1715,16 @@ fn finest_signature(communities: &Communities) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!("sha256:{:x}", Sha256::digest(canonical.as_bytes()))
+}
+
+/// A group signature is a fixed-length lowercase hex digest.
+#[must_use]
+pub fn is_group_signature(value: &str) -> bool {
+    value.len() == GROUP_SIGNATURE_LENGTH
+        && value
+            .as_bytes()
+            .iter()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
 fn is_sha256_identity(value: &str) -> bool {
@@ -1942,6 +2049,7 @@ mod tests {
     fn affinity_cut_partitions_every_level() -> TestResult {
         let group = |index: usize| GroupState {
             communities: vec![index],
+            signature: format!("{:016x}", index),
             member_count: 1,
             children: vec![index],
             community: None,

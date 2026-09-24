@@ -220,6 +220,78 @@ fn hierarchy_is_byte_identical_across_builds() -> TestResult {
 }
 
 #[test]
+fn group_ids_are_member_signatures_and_ignore_node_order() -> TestResult {
+    let document = clustered_document(8, 3, true);
+    let first = hierarchy(&document, HierarchyBudget::default())?;
+    let mut shuffled = document.clone();
+    shuffled.nodes.reverse();
+    let second = hierarchy(&shuffled, HierarchyBudget::default())?;
+    for (left, right) in first.levels.iter().zip(second.levels.iter()) {
+        let ids = left
+            .groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect::<Vec<_>>();
+        let mirrored = right
+            .groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, mirrored, "node order must not move a group id");
+        for group in &left.groups {
+            assert!(
+                group.signature.len() == 16
+                    && group
+                        .signature
+                        .chars()
+                        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+            );
+            assert_eq!(group.id, format!("h{}-{}", left.level, group.signature));
+        }
+        assert_eq!(left.signature.len(), 16);
+    }
+    Ok(())
+}
+
+#[test]
+fn an_untouched_group_keeps_its_id_when_another_group_changes() -> TestResult {
+    let document = clustered_document(6, 3, true);
+    let before = hierarchy(&document, HierarchyBudget::default())?;
+    let mut grown = document.clone();
+    grown.nodes.push(node(
+        "cluster0_newcomer",
+        Some("src/group0/newcomer.rs"),
+        "app::group0::newcomer",
+    ));
+    let edge_index = grown.links.len();
+    grown.links.push(edge(
+        edge_index,
+        "cluster0_symbol0",
+        "cluster0_newcomer",
+        EdgeKind::Calls,
+    ));
+    let after = hierarchy(&grown, HierarchyBudget::default())?;
+    let finest_before = before.finest().ok_or("missing finest level")?;
+    let finest_after = after.finest().ok_or("missing finest level")?;
+    let unchanged = finest_before
+        .groups
+        .iter()
+        .filter(|group| group.community != Some(0))
+        .map(|group| (group.id.clone(), group.member_count))
+        .collect::<Vec<_>>();
+    for (id, members) in unchanged {
+        assert!(
+            finest_after
+                .groups
+                .iter()
+                .any(|group| group.id == id && group.member_count == members),
+            "an untouched group lost its id {id}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn budgeted_hierarchy_stays_inside_its_budget_and_covers_every_community() -> TestResult {
     let document = clustered_document(24, 3, true);
     let hierarchy = hierarchy(
