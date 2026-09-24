@@ -11,6 +11,10 @@ import {
   SourceNavigationSchema,
   type SourceNavigation
 } from "./sourceLinks";
+import {
+  applyThemePreference,
+  type ThemePreference
+} from "./lib/theme";
 import "./theme.css";
 
 function mount() {
@@ -22,9 +26,20 @@ function mount() {
   const untrusted = JSON.parse(modelElement.textContent ?? "");
   const sourceNavigation = parseSourceNavigation();
   const root = createRoot(rootElement);
+  // A standalone document carries its own theme choice: readers may want the
+  // dark palette for a screenshot even when their system is light, or the
+  // reverse. Hosted viewers never get this control; their editor theme wins.
+  let theme: ThemePreference = "auto";
+  applyThemePreference(theme);
+  let renderStandalone: () => void = () => undefined;
+  const setTheme = (next: ThemePreference) => {
+    theme = next;
+    applyThemePreference(next);
+    renderStandalone();
+  };
   const workbench = WorkbenchModelSchema.safeParse(untrusted);
   if (workbench.success) {
-    root.render(
+    renderStandalone = () => root.render(
       <VisualizationWorkbench
         workbench={workbench.data}
         host={{
@@ -32,8 +47,11 @@ function mount() {
             openStandaloneSource(sourceNavigation, source, revision);
           }
         }}
+        themePreference={theme}
+        onThemePreferenceChange={setTheme}
       />
     );
+    renderStandalone();
     return;
   }
   const overview = GraphViewModelSchema.parse(untrusted);
@@ -46,6 +64,8 @@ function mount() {
     root.render(
       <CompassGraph
         model={overview}
+        themePreference={theme}
+        onThemePreferenceChange={setTheme}
         communityDetail={communityDetail}
         communityLoading={communityLoading}
         communityError={communityError}
@@ -94,6 +114,7 @@ function mount() {
       />
     );
   };
+  renderStandalone = render;
   render();
 }
 

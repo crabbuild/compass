@@ -17,6 +17,7 @@ import {
 import type { ArchitectureLens, ArchitectureOverview, ArchitectureViewModel } from "../contracts/architecture";
 import type { GraphViewModel } from "../contracts/graph";
 import type { WorkbenchModel, WorkbenchView } from "../contracts/workbench";
+import type { ThemePreference } from "../lib/theme";
 import { ArchitectureMap, type ArchitectureSelection } from "../architecture/ArchitectureMap";
 import { architectureOverview } from "../architecture/projection";
 import { CallGraph } from "../calls/CallGraph";
@@ -38,7 +39,9 @@ export function VisualizationWorkbench({
   communityError,
   onBackToOverview,
   initialInspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  themePreference,
+  onThemePreferenceChange
 }: {
   workbench: WorkbenchModel;
   host: VisualizationWorkbenchHost;
@@ -48,6 +51,8 @@ export function VisualizationWorkbench({
   onBackToOverview?: (() => void) | undefined;
   initialInspectorLayout?: InspectorLayout | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
+  themePreference?: ThemePreference | undefined;
+  onThemePreferenceChange?: ((next: ThemePreference) => void) | undefined;
 }) {
   const [activeViewId, setActiveViewId] = useState(() => hashView(workbench) ?? workbench.defaultView);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
@@ -151,6 +156,8 @@ export function VisualizationWorkbench({
             onBackToOverview={onBackToOverview}
             initialInspectorLayout={initialInspectorLayout}
             onInspectorLayoutChange={onInspectorLayoutChange}
+            themePreference={themePreference}
+            onThemePreferenceChange={onThemePreferenceChange}
           />
         </section>
       </main>
@@ -166,7 +173,9 @@ function WorkbenchView({
   communityError,
   onBackToOverview,
   initialInspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  themePreference,
+  onThemePreferenceChange
 }: {
   view: WorkbenchView;
   host: VisualizationWorkbenchHost;
@@ -176,6 +185,8 @@ function WorkbenchView({
   onBackToOverview?: (() => void) | undefined;
   initialInspectorLayout?: InspectorLayout | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
+  themePreference?: ThemePreference | undefined;
+  onThemePreferenceChange?: ((next: ThemePreference) => void) | undefined;
 }) {
   if (view.kind === "call") {
     return (
@@ -244,6 +255,8 @@ function WorkbenchView({
       onBackToOverview={view.kind === "code" ? onBackToOverview : undefined}
       initialInspectorLayout={initialInspectorLayout}
       onInspectorLayoutChange={onInspectorLayoutChange}
+      themePreference={themePreference}
+      onThemePreferenceChange={onThemePreferenceChange}
     />
   );
 }
@@ -260,7 +273,9 @@ function FilteredGraph({
   communityError,
   onBackToOverview,
   initialInspectorLayout,
-  onInspectorLayoutChange
+  onInspectorLayoutChange,
+  themePreference,
+  onThemePreferenceChange
 }: {
   model: GraphViewModel;
   host: VisualizationWorkbenchHost;
@@ -274,6 +289,8 @@ function FilteredGraph({
   onBackToOverview?: (() => void) | undefined;
   initialInspectorLayout?: InspectorLayout | undefined;
   onInspectorLayoutChange?: ((layout: InspectorLayout) => void) | undefined;
+  themePreference?: ThemePreference | undefined;
+  onThemePreferenceChange?: ((next: ThemePreference) => void) | undefined;
 }) {
   const [relation, setRelation] = useState("");
   const [evidence, setEvidence] = useState("");
@@ -348,6 +365,8 @@ function FilteredGraph({
         onBackToOverview={communityId === undefined ? onBackToOverview : () => setCommunityId(undefined)}
         initialInspectorLayout={initialInspectorLayout}
         onInspectorLayoutChange={onInspectorLayoutChange}
+        themePreference={themePreference}
+        onThemePreferenceChange={onThemePreferenceChange}
         host={{
           ...host,
           openCommunity: (id) => {

@@ -168,6 +168,69 @@ export default async function generate(): Promise<void> {
     path.join(output, "largeGraph.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Large Compass graph fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(largeGraph)}</script><script>${viewerJs}</script></body></html>`
   );
+  // A large repository that the export did not aggregate: the viewer derives
+  // the community overview from the embedded symbol model.
+  const communityCount = 12;
+  const membersPerCommunity = 75;
+  const symbolCount = communityCount * membersPerCommunity;
+  const symbolNodes = Array.from({ length: symbolCount }, (_, index) => {
+    const community = index % communityCount;
+    return {
+      id: `symbol-${index}`,
+      label: `symbol_${index}`,
+      kind: "function",
+      community,
+      degree: index % 9,
+      language: "python",
+      source: { file: `src/module_${community}.py`, startLine: index + 1 }
+    };
+  });
+  const symbolEdges = symbolNodes.flatMap((node, index) => {
+    // Cross-community edges mix three relationship kinds so the derived
+    // overview has a real relationship mix to state, not one opaque total.
+    const relations = ["calls", "imports", "contains"] as const;
+    const relation = relations[Math.floor(index / communityCount) % relations.length]!;
+    const edges = [{
+      id: `symbol-edge-${index}`,
+      source: node.id,
+      target: `symbol-${(index + 1) % symbolCount}`,
+      relation,
+      confidence: "extracted" as const
+    }];
+    if (index % 5 === 0) {
+      edges.push({
+        id: `symbol-cross-${index}`,
+        source: node.id,
+        target: `symbol-${(index + communityCount) % symbolCount}`,
+        relation: "calls",
+        confidence: "inferred" as const
+      });
+    }
+    return edges;
+  });
+  const symbolGraph = {
+    schema: "compass.viewer.graph/1",
+    title: "Large symbol graph fixture",
+    stats: {
+      nodes: symbolCount,
+      edges: symbolEdges.length,
+      communities: communityCount,
+      aggregated: false
+    },
+    nodes: symbolNodes,
+    edges: symbolEdges,
+    communities: Array.from({ length: communityCount }, (_, index) => ({
+      id: index,
+      label: `module_${index}.py`,
+      color: ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2"][index % 4],
+      hidden: false
+    })),
+    hyperedges: []
+  };
+  await writeFile(
+    path.join(output, "largeSymbolGraph.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Large symbol Compass graph fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(symbolGraph)}</script><script>${viewerJs}</script></body></html>`
+  );
   await writeFile(
     path.join(output, "semanticDiffGraph.html"),
     semanticDiffGraphHarness()

@@ -59,6 +59,7 @@ vi.mock("vis-network/standalone", () => ({
       handlers.push(callback);
       mock.eventHandlers.set(event, handlers);
     }
+    off() {}
     once(event: string, callback: () => void) {
       const wrapped = () => {
         callback();
@@ -227,7 +228,7 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       ["caller", "dot"],
       ["callee", "diamond"]
     ]);
-    expect(mock.dataSets[1]?.[0]?.color).toEqual({ color: "#5fa8ff", opacity: 0.35 });
+    expect(mock.dataSets[1]?.[0]?.color).toEqual({ color: "#4e9bd6", opacity: 0.35 });
   });
 
   it("clears transient hover when the pointer leaves the graph region", () => {

@@ -9,8 +9,70 @@ import {
   type CSSProperties,
   type ReactNode
 } from "react";
+import { BoxesIcon, BracesIcon } from "lucide-react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
+import {
+  communityDetailModel,
+  communityOverviewApplies,
+  communityOverviewModel
+} from "./communityOverview";
+import {
+  communityVariantData,
+  type CommunityVariantData
+} from "./communityVariants";
+import { THEME_PREFERENCES, type ThemePreference } from "../lib/theme";
+import { CommunityMatrix } from "./CommunityMatrix";
+import { CommunityTreemap } from "./CommunityTreemap";
+import { CommunityLanes } from "./CommunityLanes";
+import type { EdgeSemanticCategory } from "./semanticAppearance";
+import {
+  Grid3x3Icon,
+  LayoutDashboardIcon,
+  MonitorIcon,
+  MoonIcon,
+  Rows3Icon,
+  ScatterChartIcon,
+  SunIcon
+} from "lucide-react";
+
+export type CommunityVariant = "bubbles" | "matrix" | "treemap" | "lanes";
+
+/**
+ * One icon per design so the switch reads at a glance and fits the rail: the
+ * scattered map, the coupling grid, the area map, and the tier rows.
+ */
+const COMMUNITY_VARIANTS: ReadonlyArray<{
+  value: CommunityVariant;
+  label: string;
+  hint: string;
+  Icon: typeof ScatterChartIcon;
+}> = [
+  {
+    value: "bubbles",
+    label: "Bubbles",
+    hint: "Packed community map on the canvas",
+    Icon: ScatterChartIcon
+  },
+  {
+    value: "matrix",
+    label: "Matrix",
+    hint: "Who couples to whom, cell by cell",
+    Icon: Grid3x3Icon
+  },
+  {
+    value: "treemap",
+    label: "Area",
+    hint: "Every community sized by symbol count",
+    Icon: LayoutDashboardIcon
+  },
+  {
+    value: "lanes",
+    label: "Tiers",
+    hint: "Importance tiers with coupling ribbons",
+    Icon: Rows3Icon
+  }
+];
 import { GraphInspector } from "./GraphInspector";
 import { GraphTransitionScreen } from "./GraphTransitionScreen";
 import { GraphToolbar } from "./GraphToolbar";
@@ -33,6 +95,7 @@ import {
   type GraphEdgeDirection
 } from "./neighborhood";
 import {
+  autoLayoutApplies,
   visibleGraphEdges,
   type GraphLayoutStyle
 } from "./renderingProfile";
@@ -83,6 +146,11 @@ export type CommunityGraphDetail = {
     limit: number;
     parentMembers: number;
     currentMembers: number;
+    /**
+     * `viewer` marks a bound the viewer chose for a drill-down it computed
+     * itself; omitting it keeps the exported `compass.graphNodeLimit` wording.
+     */
+    scope?: "viewer" | undefined;
   } | undefined;
 };
 
@@ -104,6 +172,8 @@ export type CompassGraphProps = {
   onToolbarLeadingClose?: (() => void) | undefined;
   stageOverlay?: ReactNode;
   showInspectorHeader?: boolean | undefined;
+  themePreference?: ThemePreference | undefined;
+  onThemePreferenceChange?: ((next: ThemePreference) => void) | undefined;
 };
 
 export function CompassGraph({
@@ -123,7 +193,9 @@ export function CompassGraph({
   toolbarLeadingOpen,
   onToolbarLeadingClose,
   stageOverlay,
-  showInspectorHeader = true
+  showInspectorHeader = true,
+  themePreference,
+  onThemePreferenceChange
 }: CompassGraphProps) {
   const [inspectorLayout, setInspectorLayout] = useState(
     () => normalizeInspectorLayout(initialInspectorLayout)
@@ -133,18 +205,137 @@ export function CompassGraph({
     setInspectorLayout(normalized);
     onInspectorLayoutChange?.(normalized);
   }, [onInspectorLayoutChange]);
-  const activeModel = communityDetail?.model ?? model;
-  const viewKey = communityDetail ? `community-${communityDetail.communityId}` : "overview";
+  // A large unaggregated graph opens on a community overview the viewer derives
+  // from the same model, so one screen shows readable, labelled communities
+  // instead of thousands of unreadable symbols.
+  const derivedOverview = useMemo(
+    () => communityOverviewApplies(model) ? communityOverviewModel(model) : undefined,
+    [model]
+  );
+  const [scope, setScope] = useState<"communities" | "symbols">("communities");
+  // Design variants of the community overview. The canvas is one reading; the
+  // matrix, area map, and tier map answer different questions about the same
+  // communities, and the reader picks.
+  const [variant, setVariant] = useState<CommunityVariant>("bubbles");
+  const [derivedCommunityId, setDerivedCommunityId] = useState<number | null>(null);
+  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+  const derivedDetail = useMemo(
+    () => derivedOverview && derivedCommunityId !== null
+      ? communityDetailModel(model, derivedCommunityId)
+      : undefined,
+    [derivedCommunityId, derivedOverview, model]
+  );
+  const overviewOpen = !communityDetail
+    && derivedOverview !== undefined
+    && scope === "communities";
+  const showCommunityOverview = overviewOpen && derivedDetail === undefined;
+  const variantData = useMemo(
+    () => showCommunityOverview
+      ? communityVariantData(model, derivedOverview)
+      : !derivedDetail && model.stats.aggregated
+        ? communityVariantData(model)
+        : undefined,
+    [derivedDetail, derivedOverview, model, showCommunityOverview]
+  );
+  const activeVariant: CommunityVariant = variantData ? variant : "bubbles";
+  const activeModel = communityDetail?.model
+    ?? derivedDetail?.model
+    ?? (showCommunityOverview ? derivedOverview!.model : model);
+  const viewKey = communityDetail
+    ? `community-${communityDetail.communityId}`
+    : derivedDetail
+      ? `community-${derivedCommunityId}`
+      : showCommunityOverview ? "communities" : "overview";
+  const activeDetailCommunityId = communityDetail?.communityId
+    ?? (derivedDetail ? derivedCommunityId ?? undefined : undefined);
+  const activeBounded = communityDetail?.bounded
+    ?? (derivedDetail?.bounded
+      ? { ...derivedDetail.bounded, scope: "viewer" as const }
+      : undefined);
+  const backToOverview = useCallback(() => {
+    setDerivedCommunityId(null);
+    onBackToOverview?.();
+  }, [onBackToOverview]);
+  // Community activation resolves inside the viewer whenever the overview was
+  // derived locally; exported or host-provided details keep their own host.
+  const viewHost = useMemo<GraphHost>(
+    () => derivedOverview && communityDetail === undefined
+      ? { ...host, openCommunity: (communityId) => setDerivedCommunityId(communityId) }
+      : host,
+    [communityDetail, derivedOverview, host]
+  );
+  useEffect(() => {
+    setPendingFocusId(null);
+  }, [viewKey]);
   return (
     <CompassGraphView
       key={viewKey}
       model={activeModel}
-      host={host}
-      detailCommunityId={communityDetail?.communityId}
+      host={viewHost}
+      detailCommunityId={activeDetailCommunityId}
       communityLoading={communityLoading}
       communityError={communityError}
-      onBackToOverview={communityDetail ? onBackToOverview : undefined}
-      bounded={communityDetail?.bounded}
+      onBackToOverview={activeDetailCommunityId !== undefined
+        ? backToOverview
+        : undefined}
+      bounded={activeBounded}
+      initialFocusedNodeId={pendingFocusId ?? undefined}
+      overviewSummary={showCommunityOverview
+        ? {
+          communities: derivedOverview!.model.stats.communities,
+          symbols: model.nodes.length
+        }
+        : undefined}
+      communityImportance={showCommunityOverview ? derivedOverview!.importance : undefined}
+      communityOrder={showCommunityOverview ? derivedOverview!.communityOrder : undefined}
+      edgeSemanticHints={showCommunityOverview ? derivedOverview!.edgeCategories : undefined}
+      variant={activeVariant}
+      variantData={variantData}
+      onVariantChange={setVariant}
+      searchModel={showCommunityOverview ? model : undefined}
+      scopeControls={derivedOverview && communityDetail === undefined
+        ? (
+          <div
+            className="compass-scope-toggle"
+            role="group"
+            aria-label="Graph scope"
+          >
+            <button
+              type="button"
+              aria-label="Communities"
+              aria-pressed={scope === "communities"}
+              title="Show one labelled bubble per community"
+              onClick={() => {
+                setScope("communities");
+                setDerivedCommunityId(null);
+              }}
+            >
+              <BoxesIcon aria-hidden="true" />
+              <span>Communities</span>
+            </button>
+            <button
+              type="button"
+              aria-label="Symbols"
+              aria-pressed={scope === "symbols"}
+              title={`Show all ${model.nodes.length.toLocaleString()} symbols`}
+              onClick={() => {
+                setScope("symbols");
+                setDerivedCommunityId(null);
+              }}
+            >
+              <BracesIcon aria-hidden="true" />
+              <span>Symbols</span>
+            </button>
+          </div>
+        )
+        : undefined}
+      onOpenCommunityFromSearch={derivedOverview && showCommunityOverview
+        ? (communityId, nodeId) => {
+          setPendingFocusId(nodeId);
+          setDerivedCommunityId(communityId);
+        }
+        : undefined}
+      autoLayoutDetail={derivedDetail !== undefined}
       sourceRevisions={sourceRevisions}
       queryResult={queryResult}
       inspectorLayout={inspectorLayout}
@@ -156,6 +347,8 @@ export function CompassGraph({
       onToolbarLeadingClose={onToolbarLeadingClose}
       stageOverlay={stageOverlay}
       showInspectorHeader={showInspectorHeader}
+      themePreference={themePreference}
+      onThemePreferenceChange={onThemePreferenceChange}
     />
   );
 }
@@ -168,6 +361,20 @@ function CompassGraphView({
   communityError,
   onBackToOverview,
   bounded,
+  initialFocusedNodeId,
+  overviewSummary,
+  communityImportance,
+  communityOrder,
+  edgeSemanticHints,
+  variant,
+  variantData,
+  onVariantChange,
+  searchModel,
+  scopeControls,
+  onOpenCommunityFromSearch,
+  autoLayoutDetail,
+  themePreference,
+  onThemePreferenceChange,
   sourceRevisions,
   queryResult,
   inspectorLayout,
@@ -187,6 +394,25 @@ function CompassGraphView({
   communityError?: string | undefined;
   onBackToOverview?: (() => void) | undefined;
   bounded?: CommunityGraphDetail["bounded"];
+  initialFocusedNodeId?: string | undefined;
+  overviewSummary?: { communities: number; symbols: number } | undefined;
+  communityImportance?: ReadonlyMap<string, number> | undefined;
+  communityOrder?: readonly number[] | undefined;
+  edgeSemanticHints?: ReadonlyMap<string, EdgeSemanticCategory> | undefined;
+  variant: CommunityVariant;
+  variantData?: CommunityVariantData | undefined;
+  onVariantChange(variant: CommunityVariant): void;
+  searchModel?: GraphViewModel | undefined;
+  scopeControls?: ReactNode;
+  onOpenCommunityFromSearch?:
+    ((communityId: number, nodeId: string) => void) | undefined;
+  /**
+   * Set for a drill-down the viewer opened itself: the community is arranged
+   * once so the symbols arrive in a readable order instead of a random scatter.
+   */
+  autoLayoutDetail?: boolean | undefined;
+  themePreference?: ThemePreference | undefined;
+  onThemePreferenceChange?: ((next: ThemePreference) => void) | undefined;
   sourceRevisions?: GraphSourceRevisions | undefined;
   queryResult?: CodeQueryResponse | undefined;
   inspectorLayout: InspectorLayout;
@@ -202,7 +428,20 @@ function CompassGraphView({
   const [state, dispatch] = useReducer(
     graphReducer,
     model,
-    (initial) => initialGraphStateForModel(initial, preferredLayout)
+    (initial) => {
+      const base = initialGraphStateForModel(initial, preferredLayout);
+      // Automatic layout arranges itself for graphs a force simulation can
+      // settle within the arranging screen, which covers every interactive
+      // graph: symbol canvases, community overviews, and drill-downs. Larger
+      // graphs keep their deterministic seeded map and wait for an explicit
+      // Layout action so the first frame is never blocked.
+      const arrangeNow = preferredLayout === "automatic" && autoLayoutApplies(initial);
+      return {
+        ...base,
+        ...(arrangeNow ? { physicsRunning: true, initialLayoutPending: true } : {}),
+        ...(initialFocusedNodeId ? { focusedNodeId: initialFocusedNodeId } : {})
+      };
+    }
   );
   const [hover, setHover] = useState<GraphHover | null>(null);
   const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
@@ -236,13 +475,16 @@ function CompassGraphView({
     }
     return { neighborIds, edges };
   }, [model.edges]);
-  const searchIndex = useMemo(() => model.nodes.map((node) => ({
+  // The community overview searches every symbol in the repository, not only
+  // the communities on screen, so search stays the fastest way to reach code.
+  const searchNodes = searchModel?.nodes ?? model.nodes;
+  const searchIndex = useMemo(() => searchNodes.map((node) => ({
     node,
     text: [node.label, node.source?.file, node.kind]
       .filter((value) => value !== undefined)
       .join("\n")
       .toLocaleLowerCase()
-  })), [model.nodes]);
+  })), [searchNodes]);
   const renderedEdgeCount = useMemo(
     () => visibleGraphEdges(model).length,
     [model]
@@ -316,6 +558,18 @@ function CompassGraphView({
     setEdgeHover(null);
     dispatch({ type: "focus", nodeId });
   }, []);
+  const openCommunity = useCallback((communityId: number) => {
+    hostRef.current.openCommunity?.(communityId);
+  }, []);
+  const focusSearchResult = useCallback((nodeId: string) => {
+    if (nodeById.has(nodeId)) {
+      focus(nodeId);
+      return;
+    }
+    const target = searchModel?.nodes.find((node) => node.id === nodeId);
+    if (!target || !onOpenCommunityFromSearch) return;
+    onOpenCommunityFromSearch(target.community, target.id);
+  }, [focus, nodeById, onOpenCommunityFromSearch, searchModel]);
   const pauseForInteraction = useCallback(() => {
     if (state.physicsRunning) {
       dispatch({ type: "setPhysics", running: false });
@@ -373,6 +627,13 @@ function CompassGraphView({
         });
       } else if (key === "m") {
         dispatch({ type: "setMinimap", visible: !state.showMinimap });
+      } else if (key === "l") {
+        // Labels moved out of the toolbar to keep the controls row readable;
+        // the shortcuts and the graph settings panel are now their home.
+        if (event.shiftKey) dispatch({ type: "setEdgeLabels", visible: !state.showEdgeLabels });
+        else dispatch({ type: "setLabels", visible: !state.forceLabels });
+      } else if (key === "escape" && onBackToOverview) {
+        onBackToOverview();
       } else {
         handled = false;
       }
@@ -381,11 +642,14 @@ function CompassGraphView({
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => document.removeEventListener("keydown", handleKeyDown, { capture: true });
   }, [
+    onBackToOverview,
     selected,
     selectedNeighborhood,
     state.edgeDirection,
+    state.forceLabels,
     state.isolateSelection,
     state.neighborhoodDepth,
+    state.showEdgeLabels,
     state.showMinimap
   ]);
   const handleStabilized = useCallback(() => {
@@ -424,13 +688,42 @@ function CompassGraphView({
       edge.change === "removed" ? sourceRevisions?.before : sourceRevisions?.after
     );
   }, [edgeById, sourceRevisions?.after, sourceRevisions?.before]);
+  const detailCommunityLabel = detailCommunityId !== undefined
+    ? model.communities.find((community) => community.id === detailCommunityId)?.label
+      ?? `Community ${detailCommunityId}`
+    : undefined;
+  const variantLabel = COMMUNITY_VARIANTS
+    .find((option) => option.value === variant)?.label;
+  const overviewCounts = overviewSummary
+    ?? (variantData
+      ? { communities: variantData.communities.length, symbols: variantData.symbols }
+      : undefined);
+  const overviewStatus = overviewCounts
+    ? `${variant === "bubbles" || !variantLabel ? "" : `${variantLabel} · `}${
+      overviewCounts.communities.toLocaleString()} communities · ${
+      overviewCounts.symbols.toLocaleString()} symbols${
+      state.layoutStyle === "automatic" && !autoLayoutApplies(model)
+        ? " · press Layout to arrange"
+        : ""}`
+    : undefined;
   const status = selected && state.isolateSelection && selectedNeighborhood
     ? `Isolated ${selectedNeighborhood.nodeIds.size} nodes · ${state.neighborhoodDepth} hop${state.neighborhoodDepth === 1 ? "" : "s"}`
     : selected
     ? `Inspecting ${selected.label}`
-    : state.layoutStyle !== "automatic"
-      ? FIXED_LAYOUT_STATUS[state.layoutStyle]
-      : state.physicsRunning ? "Layout running" : "Layout static";
+    : detailCommunityLabel
+      ? `Community ${detailCommunityLabel} · ${model.stats.nodes.toLocaleString()} symbols`
+      : overviewStatus
+        ? overviewStatus
+        : state.layoutStyle !== "automatic"
+          ? FIXED_LAYOUT_STATUS[state.layoutStyle]
+          : state.physicsRunning
+            ? "Layout running"
+            : autoLayoutApplies(model)
+              ? "Automatic layout"
+              : `Static layout · ${model.nodes.length.toLocaleString()} nodes stay seeded`;
+  // Only the canvas arranges itself; the matrix, area, and tier designs have no
+  // simulation, so their views must not sit behind an arranging screen.
+  const canvasVisible = variant === "bubbles";
   const loadingCommunity = communityLoading !== undefined && communityLoading !== null
     ? model.communities.find((community) => community.id === communityLoading)
     : undefined;
@@ -439,7 +732,7 @@ function CompassGraphView({
       kind: "community" as const,
       communityLabel: loadingCommunity?.label ?? `Community ${communityLoading}`
     }
-    : state.initialLayoutPending
+    : state.initialLayoutPending && canvasVisible
       ? { kind: "layout" as const }
       : null;
 
@@ -459,11 +752,26 @@ function CompassGraphView({
         <main
           className="compass-graph-stage"
           data-comparison={comparisonMode ? "true" : "false"}
+          data-breadcrumb={overviewSummary !== undefined || autoLayoutDetail
+            ? "true"
+            : undefined}
         >
+          {variantData && variant !== "bubbles" ? (
+            <div className="compass-variant-stage">
+              {variant === "matrix" ? (
+                <CommunityMatrix data={variantData} onOpenCommunity={openCommunity} />
+              ) : variant === "treemap" ? (
+                <CommunityTreemap data={variantData} onOpenCommunity={openCommunity} />
+              ) : (
+                <CommunityLanes data={variantData} onOpenCommunity={openCommunity} />
+              )}
+            </div>
+          ) : (
           <VisNetworkCanvas
             ref={canvasRef}
             model={model}
             focusedNodeId={selected?.id ?? null}
+            hoveredNodeId={hover?.nodeId ?? null}
             physicsRunning={state.physicsRunning}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
@@ -477,6 +785,8 @@ function CompassGraphView({
             layoutSpacing={state.layoutSpacing}
             showMinimap={state.showMinimap}
             semanticDetail={detailCommunityId !== undefined && !comparisonMode}
+            communityImportance={communityImportance}
+            edgeSemanticHints={edgeSemanticHints}
             hiddenCommunities={state.hiddenCommunities}
             hiddenChanges={state.hiddenChanges}
             onFocus={focus}
@@ -488,10 +798,33 @@ function CompassGraphView({
             onClear={clear}
             onStabilized={handleStabilized}
           />
+          )}
           {stageOverlay}
+          {overviewSummary !== undefined || autoLayoutDetail ? (
+            <nav
+              className="compass-graph-breadcrumb compass-glass-panel"
+              aria-label="Graph path"
+            >
+              {detailCommunityId === undefined ? (
+                <span aria-current="page">Repository</span>
+              ) : (
+                <>
+                  <button type="button" onClick={onBackToOverview}>
+                    Repository
+                  </button>
+                  <span className="compass-breadcrumb-separator" aria-hidden="true">
+                    ▸
+                  </span>
+                  <span aria-current="page">
+                    {detailCommunityLabel ?? `Community ${detailCommunityId}`}
+                  </span>
+                </>
+              )}
+            </nav>
+          ) : null}
           <GraphToolbar
             status={status}
-            physicsRunning={state.physicsRunning}
+            physicsRunning={state.physicsRunning && canvasVisible}
             layoutStyle={state.layoutStyle}
             forceLabels={state.forceLabels}
             showEdgeLabels={state.showEdgeLabels}
@@ -501,6 +834,52 @@ function CompassGraphView({
             edgeDirection={state.edgeDirection}
             layoutSpacing={state.layoutSpacing}
             showMinimap={state.showMinimap}
+            themeControls={onThemePreferenceChange ? (
+              <div
+                className="compass-scope-toggle compass-theme-toggle"
+                role="group"
+                aria-label="Colour theme"
+              >
+                {THEME_PREFERENCES.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-label={option.label}
+                    aria-pressed={(themePreference ?? "auto") === option.value}
+                    title={option.hint}
+                    onClick={() => onThemePreferenceChange(option.value)}
+                  >
+                    {option.value === "auto"
+                      ? <MonitorIcon aria-hidden="true" />
+                      : option.value === "light"
+                        ? <SunIcon aria-hidden="true" />
+                        : <MoonIcon aria-hidden="true" />}
+                  </button>
+                ))}
+              </div>
+            ) : undefined}
+            scopeControls={scopeControls}
+            canvasControls={variant === "bubbles"}
+            variantControls={variantData ? (
+              <div
+                className="compass-scope-toggle compass-variant-toggle"
+                role="group"
+                aria-label="Overview design"
+              >
+                {COMMUNITY_VARIANTS.map(({ value, label, hint, Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-label={label}
+                    aria-pressed={variant === value}
+                    title={`${label} — ${hint}`}
+                    onClick={() => onVariantChange(value)}
+                  >
+                    <Icon aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+            ) : undefined}
             leadingControls={toolbarLeading}
             leadingPanel={toolbarLeadingPanel}
             leadingPanelOpen={toolbarLeadingOpen}
@@ -598,12 +977,25 @@ function CompassGraphView({
           )}
           {bounded && (
             <div className="compass-bounded-notice" role="status">
-              <strong>Partial community comparison</strong>
-              <span>
-                This view is limited to {bounded.limit.toLocaleString()} nodes. Increase{" "}
-                <code>compass.graphNodeLimit</code> to inspect all{" "}
-                {Math.max(bounded.parentMembers, bounded.currentMembers).toLocaleString()} symbols.
-              </span>
+              {bounded.scope === "viewer" ? (
+                <>
+                  <strong>Most connected symbols first</strong>
+                  <span>
+                    This community holds {bounded.parentMembers.toLocaleString()} symbols;
+                    the view shows the {bounded.currentMembers.toLocaleString()} most
+                    connected. Search for a symbol to open it directly.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <strong>Partial community comparison</strong>
+                  <span>
+                    This view is limited to {bounded.limit.toLocaleString()} nodes. Increase{" "}
+                    <code>compass.graphNodeLimit</code> to inspect all{" "}
+                    {Math.max(bounded.parentMembers, bounded.currentMembers).toLocaleString()} symbols.
+                  </span>
+                </>
+              )}
             </div>
           )}
           {hover && hovered && hoveredActivation && (
@@ -638,6 +1030,7 @@ function CompassGraphView({
           connectedEdges={connectedEdges}
           query={state.query}
           matches={matches}
+          communityOrder={communityOrder}
           hiddenCommunities={state.hiddenCommunities}
           comparisonMode={comparisonMode}
           sourceRevisions={sourceRevisions}
@@ -645,9 +1038,10 @@ function CompassGraphView({
           renderedEdgeCount={renderedEdgeCount}
           showHeader={showInspectorHeader}
           onQueryChange={(query) => dispatch({ type: "search", query })}
-          onFocus={focus}
+          onFocus={focusSearchResult}
           onOpenSource={host.openSource}
           onOpenCommunity={detailCommunityId === undefined ? host.openCommunity : undefined}
+          searchSpansCommunities={searchModel ? true : undefined}
           onQueryNode={host.queryNode}
           onToggleCommunity={(communityId) => dispatch({
             type: "toggleCommunity",

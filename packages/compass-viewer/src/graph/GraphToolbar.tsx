@@ -40,6 +40,7 @@ export function GraphToolbar({
   edgeDirection,
   layoutSpacing,
   showMinimap,
+  scopeControls,
   leadingControls,
   leadingPanel,
   leadingPanelOpen,
@@ -59,7 +60,10 @@ export function GraphToolbar({
   onEdgeDirectionChange,
   onLayoutSpacingChange,
   onToggleMinimap,
-  onBack
+  onBack,
+  canvasControls = true,
+  variantControls,
+  themeControls
 }: {
   status: string;
   physicsRunning: boolean;
@@ -72,6 +76,13 @@ export function GraphToolbar({
   edgeDirection: GraphEdgeDirection;
   layoutSpacing: GraphLayoutSpacing;
   showMinimap: boolean;
+  scopeControls?: ReactNode;
+  /** Design-variant switch for community overviews. */
+  variantControls?: ReactNode;
+  /** Reader-chosen theme, only when the host offers it (standalone documents). */
+  themeControls?: ReactNode;
+  /** Canvas-only controls (layout, physics, zoom, labels) apply to the node-link view. */
+  canvasControls?: boolean;
   leadingControls?: ReactNode;
   leadingPanel?: ReactNode;
   leadingPanelOpen?: boolean | undefined;
@@ -108,6 +119,7 @@ export function GraphToolbar({
   }, [settingsOpen]);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!canvasControls) return;
       if (event.key === "Escape") {
         if (settingsOpen) {
           restoreSettingsFocusRef.current = true;
@@ -130,7 +142,7 @@ export function GraphToolbar({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [onLeadingPanelClose, settingsOpen]);
+  }, [canvasControls, onLeadingPanelClose, settingsOpen]);
 
   return (
     <div
@@ -149,6 +161,12 @@ export function GraphToolbar({
         <span className="compass-viewer-status-text">{status}</span>
       </div>
       <div className="compass-toolbar-actions">
+        {themeControls}
+        {scopeControls}
+        {scopeControls && variantControls ? (
+          <span className="compass-toolbar-separator" aria-hidden="true" />
+        ) : null}
+        {variantControls}
         {onBack && (
           <button
             className="compass-tool-button"
@@ -160,6 +178,8 @@ export function GraphToolbar({
             <span>Overview</span>
           </button>
         )}
+        {canvasControls ? (
+          <>
         <label className="compass-layout-picker">
           <LayoutGridIcon aria-hidden="true" />
           <span className="sr-only">Graph layout</span>
@@ -235,51 +255,6 @@ export function GraphToolbar({
           <Maximize2Icon />
         </button>
         <button
-          className="compass-tool-button compass-tool-icon-button"
-          type="button"
-          aria-label="Fit selected neighborhood"
-          title={hasSelection
-            ? `Fit the selected node and its ${neighborhoodDepth}-hop neighborhood`
-            : "Select a node to fit its neighborhood"}
-          disabled={!hasSelection}
-          onClick={onFitSelection}
-        >
-          <FocusIcon />
-        </button>
-        <button
-          className="compass-tool-button compass-tool-icon-button"
-          type="button"
-          aria-label="Reset graph view"
-          title="Reset graph view"
-          onClick={onReset}
-        >
-          <RotateCcwIcon />
-        </button>
-        <button
-          className="compass-tool-button compass-tool-icon-button"
-          type="button"
-          aria-label={forceLabels ? "Hide labels" : "Show labels"}
-          aria-pressed={forceLabels}
-          title={forceLabels ? "Hide node labels" : "Show all node labels"}
-          onClick={onToggleLabels}
-        >
-          <TagsIcon />
-        </button>
-        <button
-          className="compass-tool-button compass-tool-icon-button"
-          type="button"
-          aria-label={showEdgeLabels
-            ? "Hide relationship labels"
-            : "Show relationship labels"}
-          aria-pressed={showEdgeLabels}
-          title={showEdgeLabels
-            ? "Hide relationship labels"
-            : "Show relationship labels"}
-          onClick={onToggleEdgeLabels}
-        >
-          <RouteIcon />
-        </button>
-        <button
           ref={settingsButtonRef}
           className="compass-tool-button compass-tool-icon-button"
           type="button"
@@ -295,12 +270,14 @@ export function GraphToolbar({
         >
           <SettingsIcon />
         </button>
+          </>
+        ) : null}
         {leadingControls ? (
           <div className="compass-toolbar-leading">{leadingControls}</div>
         ) : null}
       </div>
       {leadingPanel}
-      {settingsOpen ? (
+      {settingsOpen && canvasControls ? (
         <div
           id={explorationId}
           className="compass-explore-panel compass-glass-panel"
@@ -400,6 +377,40 @@ export function GraphToolbar({
           <button
             className="compass-explore-toggle"
             type="button"
+            aria-label="Fit selected neighborhood"
+            aria-pressed={false}
+            title={hasSelection
+              ? `Fit the selected node and its ${neighborhoodDepth}-hop neighborhood`
+              : "Select a node to fit its neighborhood"}
+            disabled={!hasSelection}
+            onClick={onFitSelection}
+          >
+            <FocusIcon aria-hidden="true" />
+            <span>
+              <strong>Fit selection</strong>
+              <small>Zoom to the selected node and its neighborhood</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+          <button
+            className="compass-explore-toggle"
+            type="button"
+            aria-label="Reset graph view"
+            aria-pressed={false}
+            onClick={onReset}
+          >
+            <RotateCcwIcon aria-hidden="true" />
+            <span>
+              <strong>Reset graph view</strong>
+              <small>Return to the opening camera and clear selection</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+          <button
+            className="compass-explore-toggle"
+            type="button"
             aria-label="Show minimap"
             aria-pressed={showMinimap}
             onClick={onToggleMinimap}
@@ -408,6 +419,38 @@ export function GraphToolbar({
             <span>
               <strong>Show minimap</strong>
               <small>Track and reposition the visible viewport</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+          <button
+            className="compass-explore-toggle"
+            type="button"
+            aria-label={forceLabels ? "Hide labels" : "Show labels"}
+            aria-pressed={forceLabels}
+            onClick={onToggleLabels}
+          >
+            <TagsIcon aria-hidden="true" />
+            <span>
+              <strong>Show node labels</strong>
+              <small>Label every symbol, not only the ranked set</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+          <button
+            className="compass-explore-toggle"
+            type="button"
+            aria-label={showEdgeLabels
+              ? "Hide relationship labels"
+              : "Show relationship labels"}
+            aria-pressed={showEdgeLabels}
+            onClick={onToggleEdgeLabels}
+          >
+            <RouteIcon aria-hidden="true" />
+            <span>
+              <strong>Show relationship labels</strong>
+              <small>Print the relationship kind on every edge</small>
             </span>
             <i aria-hidden="true" />
           </button>
@@ -426,6 +469,11 @@ export function GraphToolbar({
               <div><dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Depth</dd></div>
               <div><dt><kbd>D</kbd></dt><dd>Direction</dd></div>
               <div><dt><kbd>M</kbd></dt><dd>Minimap</dd></div>
+              <div><dt><kbd>L</kbd></dt><dd>Labels</dd></div>
+              <div><dt><kbd>⇧ L</kbd></dt><dd>Relationship labels</dd></div>
+              {onBack ? (
+                <div><dt><kbd>Esc</kbd></dt><dd>Back to overview</dd></div>
+              ) : null}
             </dl>
           </div>
         </div>

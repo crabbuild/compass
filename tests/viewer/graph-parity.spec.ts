@@ -98,14 +98,15 @@ test("file-only graph nodes stay inspectable without source navigation", async (
   await expect(page.getByRole("button", { name: /open source/i })).toHaveCount(0);
 });
 
-test("graph layout styles can be selected without enabling physics", async ({ page }) => {
+test("automatic layout settles itself and fixed styles never start physics", async ({ page }) => {
   await page.goto("/graph.html");
   const layout = page.getByRole("combobox", { name: "Graph layout" });
   const graph = page.getByRole("region", { name: "Interactive Compass code graph" });
 
   await expect(page.getByRole("option", { name: "Depth layers" })).toHaveCount(0);
+  // Automatic arranges on open, then settles and stops by itself.
   await expect(graph).toHaveAttribute("data-physics-running", "false");
-  await expect(page.getByRole("status")).toContainText("Layout static");
+  await expect(page.getByRole("status")).toContainText("Automatic layout");
   const canvas = page.locator(".compass-canvas canvas").first();
   await page.waitForTimeout(100);
   const staticFrame = await canvas.evaluate((element) => element.toDataURL());
@@ -142,15 +143,22 @@ test("graph toolbar exposes camera, neighborhood, and label controls", async ({ 
   await page.getByRole("button", { name: "Reset zoom to 100%" }).click();
   await page.getByRole("button", { name: "Zoom in" }).click();
 
+  // Selection-specific actions live in the graph settings panel.
+  await page.getByRole("button", { name: "Graph settings" }).click();
   const fitSelection = page.getByRole("button", {
     name: "Fit selected neighborhood"
   });
   await expect(fitSelection).toBeDisabled();
+  await page.keyboard.press("Escape");
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("Store");
   await page.getByRole("option", { name: /Store/i }).click();
+  await page.getByRole("button", { name: "Graph settings" }).click();
   await expect(fitSelection).toBeEnabled();
   await fitSelection.click();
+  await page.keyboard.press("Escape");
 
+  // Relationship labels live in the graph settings panel.
+  await page.getByRole("button", { name: "Graph settings" }).click();
   await page.getByRole("button", { name: "Show relationship labels" }).click();
   await expect(page.getByRole("button", {
     name: "Hide relationship labels"
@@ -223,14 +231,16 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
     (window as typeof window & { initialNetwork?: Element | null }).initialNetwork =
       document.querySelector(".vis-network");
   });
-  await page.getByRole("button", { name: "Show labels" }).click();
-  await expect(page.getByRole("button", { name: "Hide labels" })).toBeVisible();
+  // The L shortcut toggles labels without touching the network instance.
+  await page.keyboard.press("l");
   expect(await page.evaluate(() => (
     window as typeof window & { initialNetwork?: Element | null }
   ).initialNetwork === document.querySelector(".vis-network"))).toBe(true);
-  await page.getByRole("button", { name: "Hide labels" }).click();
-  await expect(page.getByRole("button", { name: "Show labels" })).toBeVisible();
-  await page.getByRole("button", { name: "Show labels" }).click();
+  await page.keyboard.press("l");
+  await page.keyboard.press("Shift+L");
+  expect(await page.evaluate(() => (
+    window as typeof window & { initialNetwork?: Element | null }
+  ).initialNetwork === document.querySelector(".vis-network"))).toBe(true);
   await page.evaluate(() => {
     document.documentElement.style.setProperty("--vscode-editor-background", "#f8fafc");
     document.documentElement.style.setProperty("--vscode-sideBar-background", "#eef2f7");
@@ -239,7 +249,9 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
     document.documentElement.style.setProperty("--vscode-contrastBorder", "#ff00ff");
     document.body.classList.add("vscode-high-contrast");
   });
-  const light = await stage.evaluate((element) => getComputedStyle(element).backgroundImage);
+  // The stage is flat schematic paper now, so the adapting surface is its
+  // background color (plus the canvas itself, asserted below).
+  const light = await stage.evaluate((element) => getComputedStyle(element).backgroundColor);
   await expect.poll(() => canvas.evaluate((element) => element.toDataURL()))
     .not.toBe(initialCanvas);
   expect(await page.evaluate(() => (
@@ -250,7 +262,7 @@ test("canvas colors adapt to VS Code theme variables", async ({ page }) => {
     document.documentElement.style.setProperty("--vscode-editor-background", "#08111f");
     document.documentElement.style.setProperty("--vscode-sideBar-background", "#101b2d");
   });
-  const dark = await stage.evaluate((element) => getComputedStyle(element).backgroundImage);
+  const dark = await stage.evaluate((element) => getComputedStyle(element).backgroundColor);
   expect(light).not.toBe(dark);
 });
 

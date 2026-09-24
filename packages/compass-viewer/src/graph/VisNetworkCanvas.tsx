@@ -16,12 +16,22 @@ import {
   type GraphNetworkHandlers
 } from "./networkEvents";
 import {
+  centerCommunityOverviewPositions,
   graphRenderingProfile,
+  relaxCommunityOverviewPositions,
+  seedCommunityOverviewPositions,
   seedGraphLayoutPositions,
   seedStaticGraphPositions,
   visibleGraphEdges,
   type GraphLayoutStyle
 } from "./renderingProfile";
+import {
+  COMMUNITY_LABEL_FONT_SIZE,
+  communityOverviewLabelText,
+  communityOverviewLabelledIds
+} from "./communityOverview";
+import { blendColor, isDarkColor } from "../lib/color";
+import { cssColor, useThemeRevision } from "../lib/theme";
 import type { GraphChangeType } from "./state";
 import type { GraphLayoutSpacing } from "./state";
 import {
@@ -53,6 +63,8 @@ export type GraphCanvasPosition = {
 type Props = {
   model: GraphViewModel;
   focusedNodeId: string | null;
+  /** Node under the pointer, so hovering a context bubble can reveal its hue. */
+  hoveredNodeId?: string | null | undefined;
   physicsRunning: boolean;
   layoutStyle?: GraphLayoutStyle;
   initialPositions?: ReadonlyMap<string, GraphCanvasPosition>;
@@ -63,6 +75,10 @@ type Props = {
   layoutSpacing?: GraphLayoutSpacing;
   showMinimap?: boolean;
   semanticDetail?: boolean;
+  /** Importance per community bubble id, for label ranking in an overview. */
+  communityImportance?: ReadonlyMap<string, number> | undefined;
+  /** Dominant relationship category per aggregated edge id, for edge colour. */
+  edgeSemanticHints?: ReadonlyMap<string, EdgeSemanticCategory> | undefined;
   hiddenCommunities: ReadonlySet<number>;
   hiddenChanges: ReadonlySet<GraphChangeType>;
   onFocus(nodeId: string): void;
@@ -84,28 +100,41 @@ type ComparisonPalette = Record<GraphChangeType, ComparisonColor>;
 type SemanticNodePalette = Record<NodeSemanticCategory, ComparisonColor>;
 type SemanticEdgePalette = Record<EdgeSemanticCategory, string>;
 
+/**
+ * Fallbacks used until the host theme resolves. They follow the shared Compass
+ * palette: deep, desaturated fills with a brighter companion border, so a graph
+ * looks the same in a standalone export and inside an editor.
+ */
 const fallbackComparisonPalette: ComparisonPalette = {
-  added: { background: "#163d24", border: "#56d364" },
-  removed: { background: "#4b1f24", border: "#ff7b72" },
-  changed: { background: "#3d3015", border: "#d7a72b" },
-  unchanged: { background: "#29313b", border: "#8b949e" }
+  added: { background: "#14351f", border: "#4fbe6b" },
+  removed: { background: "#3d1c20", border: "#e06c75" },
+  changed: { background: "#332a15", border: "#c9902c" },
+  unchanged: { background: "#20262e", border: "#7a838e" }
 };
 const fallbackSemanticNodePalette: SemanticNodePalette = {
-  callable: { background: "#193652", border: "#5fa8ff" },
-  type: { background: "#3d341b", border: "#e3b341" },
-  module: { background: "#193b38", border: "#56d4b4" },
-  boundary: { background: "#432b29", border: "#ff9b87" },
-  other: { background: "#29313b", border: "#8b949e" }
+  callable: { background: "#123048", border: "#4e9bd6" },
+  type: { background: "#382a16", border: "#c4814c" },
+  module: { background: "#0f322e", border: "#43b39e" },
+  boundary: { background: "#3a2320", border: "#d9755f" },
+  other: { background: "#222831", border: "#8593a3" }
 };
 const fallbackSemanticEdgePalette: SemanticEdgePalette = {
-  execution: "#5fa8ff",
-  dependency: "#56d4b4",
-  structure: "#e3b341",
-  flow: "#ff9b87",
-  other: "#60728b"
+  execution: "#4e9bd6",
+  dependency: "#43b39e",
+  structure: "#d2a15c",
+  flow: "#c07bb4",
+  other: "#8593a3"
 };
 const STATIC_VISIBLE_LABEL_LIMIT = 200;
 const MINIMAP_POSITION_LIMIT = 1_500;
+/**
+ * Neutral fill for the long tail of a community overview. Hue is spent on the
+ * communities the reader is meant to notice (the labelled, coupled, and
+ * boundary-rich ones); everything else is context, and colouring it would turn
+ * the map into confetti.
+ */
+const CONTEXT_NODE_FILL = "#8D97A3";
+const CONTEXT_NODE_BORDER = "#6B7581";
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 3;
 const MIN_LAYOUT_REHEAT_DISTANCE = 18;
@@ -189,6 +218,52 @@ const defaultOptions: Options = {
       springConstant: 0.08,
       damping: 0.4,
       avoidOverlap: 0.8
+    }
+  }
+};
+
+/**
+ * Community overviews are already laid out as a packed map, so they open
+ * without physics: the packed bubbles stay put, labels remain readable, and
+ * pressing Run layout still reheats the map when the reader wants it.
+ */
+const communityOverviewOptions: Options = {
+  autoResize: true,
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: { enabled: true }
+  },
+  layout: {
+    improvedLayout: false,
+    randomSeed: 17
+  },
+  nodes: {
+    borderWidth: 2,
+    shape: "dot"
+  },
+  edges: {
+    arrows: { to: { enabled: false } },
+    chosen: false,
+    smooth: { enabled: true, type: "continuous", roundness: 0.24 },
+    selectionWidth: 3
+  },
+  physics: {
+    enabled: false,
+    solver: "forceAtlas2Based",
+    stabilization: { enabled: true, iterations: 260, fit: true, updateInterval: 25 },
+    forceAtlas2Based: {
+      // Overview bubbles are small and carry labels, so the arrangement stays
+      // compact: coupled communities pull together, everything keeps a body's
+      // width of separation, and the fitted view keeps labels legible.
+      gravitationalConstant: -34,
+      centralGravity: 0.02,
+      springLength: 96,
+      springConstant: 0.08,
+      damping: 0.45,
+      avoidOverlap: 1
     }
   }
 };
@@ -300,15 +375,34 @@ export function graphNodeColor(
   };
 }
 
-function cssColor(name: string, fallback: string): string {
-  if (typeof window === "undefined") return fallback;
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+function comparisonColor(
+  background: string,
+  border: string,
+  dark: boolean,
+  context = false
+): ComparisonColor {
+  return {
+    background: blendColor(background, border, context
+      ? dark ? 0.18 : 0.1
+      : dark ? 0.26 : 0.14),
+    border
+  };
 }
 
-function edgeAppearance(confidence: string | undefined) {
+function edgeAppearance(confidence: string | undefined, weight?: number | undefined) {
   if (confidence === "extracted") return { dashes: false, width: 2, opacity: 0.7 };
   if (confidence === "ambiguous") return { dashes: [3, 4], width: 2, opacity: 0.62 };
-  if (confidence === "aggregated") return { dashes: false, width: 1, opacity: 0.2 };
+  if (confidence === "aggregated") {
+    // Aggregated relationships carry the exact number of crossed relationships
+    // as their weight: heavier community routes read thicker and darker.
+    const crossings = Math.max(1, weight ?? 1);
+    const presence = Math.log2(1 + crossings);
+    return {
+      dashes: false,
+      width: Math.min(5, 1 + 1.5 * presence),
+      opacity: Math.min(0.5, 0.16 + 0.09 * presence)
+    };
+  }
   return { dashes: true, width: 1, opacity: 0.35 };
 }
 
@@ -316,7 +410,8 @@ function comparisonEdgeAppearance(
   change: GraphChangeType | undefined,
   confidence: string | undefined,
   fallback: string,
-  palette: ComparisonPalette
+  palette: ComparisonPalette,
+  weight?: number | undefined
 ) {
   if (change === "added") {
     return { color: palette.added.border, dashes: false, width: 1.7, opacity: 0.6 };
@@ -330,7 +425,7 @@ function comparisonEdgeAppearance(
   if (change === "unchanged") {
     return { color: palette.unchanged.border, dashes: true, width: 1, opacity: 0.2 };
   }
-  const appearance = edgeAppearance(confidence);
+  const appearance = edgeAppearance(confidence, weight);
   return { color: fallback, ...appearance };
 }
 
@@ -355,6 +450,34 @@ function comparisonEdgeCurve(change: GraphChangeType | undefined) {
     return { enabled: true, type: "curvedCCW" as const, roundness: 0.13 };
   }
   return { enabled: true, type: "continuous" as const, roundness: 0.1 };
+}
+
+/**
+ * Canvas label for a community bubble: the bounded community name with the
+ * exact member count underneath, because bubble area alone cannot be read.
+ */
+function communityBubbleLabel(node: GraphNode): string {
+  const name = communityOverviewLabelText(node.label);
+  const members = node.memberCount ?? 0;
+  return members > 0 ? `${name}\n${members.toLocaleString()} symbols` : name;
+}
+
+function communityBubbleFontSize(node: GraphNode): number {
+  return Math.round((node.size ?? 12) + 12);
+}
+
+/**
+ * Soft halo under a signal bubble, in the community's own hue. It separates the
+ * hubs from the neutral context field on a dark canvas without adding chrome.
+ */
+function signalGlow(node: GraphNode) {
+  return {
+    enabled: true,
+    color: node.color?.background ?? "#8D97A3",
+    size: Math.round((node.size ?? 12) * 0.6),
+    x: 0,
+    y: 0
+  };
 }
 
 function seedComparisonPositions(nodes: GraphNode[]): ReadonlyMap<string, { x: number; y: number }> {
@@ -388,83 +511,11 @@ function seedComparisonPositions(nodes: GraphNode[]): ReadonlyMap<string, { x: n
   return positions;
 }
 
-function useThemeRevision(): number {
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    const refresh = () => setRevision((current) => current + 1);
-    const observer = new MutationObserver(refresh);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class", "style"]
-    });
-    observer.observe(document.body, {
-      attributes: true,
-      attributeFilter: ["class", "style"]
-    });
-    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
-    colorScheme.addEventListener("change", refresh);
-    return () => {
-      observer.disconnect();
-      colorScheme.removeEventListener("change", refresh);
-    };
-  }, []);
-  return revision;
-}
-
-function parseRgb(color: string): [number, number, number] | undefined {
-  const hex = color.match(/^#([\da-f]{3}|[\da-f]{6})$/i)?.[1];
-  if (hex) {
-    const normalized = hex.length === 3
-      ? [...hex].map((value) => `${value}${value}`).join("")
-      : hex;
-    return [
-      Number.parseInt(normalized.slice(0, 2), 16),
-      Number.parseInt(normalized.slice(2, 4), 16),
-      Number.parseInt(normalized.slice(4, 6), 16)
-    ];
-  }
-  const rgb = color.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
-  if (!rgb) return undefined;
-  return [
-    Number.parseFloat(rgb[1] ?? "0"),
-    Number.parseFloat(rgb[2] ?? "0"),
-    Number.parseFloat(rgb[3] ?? "0")
-  ];
-}
-
-function blendColor(background: string, foreground: string, foregroundRatio: number): string {
-  const backgroundRgb = parseRgb(background);
-  const foregroundRgb = parseRgb(foreground);
-  if (!backgroundRgb || !foregroundRgb) return foreground;
-  const values = backgroundRgb.map((value, index) =>
-    Math.round(value * (1 - foregroundRatio) + foregroundRgb[index]! * foregroundRatio));
-  return `rgb(${values[0]}, ${values[1]}, ${values[2]})`;
-}
-
-function isDarkColor(color: string): boolean {
-  const rgb = parseRgb(color);
-  if (!rgb) return true;
-  return (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000 < 145;
-}
-
-function comparisonColor(
-  background: string,
-  border: string,
-  dark: boolean,
-  context = false
-): ComparisonColor {
-  return {
-    background: blendColor(background, border, context
-      ? dark ? 0.18 : 0.1
-      : dark ? 0.26 : 0.14),
-    border
-  };
-}
-
 export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
   function VisNetworkCanvas({
     model,
     focusedNodeId,
+    hoveredNodeId,
     physicsRunning,
     layoutStyle = "automatic",
     initialPositions,
@@ -475,6 +526,8 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     layoutSpacing = 1,
     showMinimap = false,
     semanticDetail = false,
+    communityImportance,
+    edgeSemanticHints,
     hiddenCommunities,
     hiddenChanges,
     onFocus,
@@ -519,6 +572,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => graphRenderingProfile(model),
       [model.edges.length, model.nodes.length]
     );
+    const communityOverview = model.stats.aggregated;
     const renderedEdges = useMemo(
       () => visibleGraphEdges(model),
       [model]
@@ -588,6 +642,13 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => cssColor(
         "--vscode-editor-foreground",
         cssColor("--foreground", "#d8e4f2")
+      ),
+      [themeRevision]
+    );
+    const canvasBackground = useMemo(
+      () => cssColor(
+        "--vscode-editor-background",
+        cssColor("--background", "#08111f")
       ),
       [themeRevision]
     );
@@ -663,8 +724,10 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         || model.edges.some((edge) => edge.change !== undefined),
       [model.edges, model.nodes]
     );
-    const automaticLabelIds = useMemo(() => new Set(
-      comparisonMode
+    const automaticLabelIds = useMemo(() => communityOverview
+      ? new Set(communityOverviewLabelledIds(model.nodes, communityImportance))
+      : new Set(
+        comparisonMode
         ? model.nodes
           .filter((node) => node.change !== "unchanged")
           .sort((left, right) =>
@@ -678,7 +741,21 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             .slice(0, 20)
             .map((node) => node.id)
           : []
-    ), [comparisonMode, model.nodes, renderingProfile]);
+      ), [communityImportance, communityOverview, comparisonMode, model.nodes, renderingProfile]);
+
+    // A community bubble carries its hue when it is signal: labelled by the
+    // importance budget, or the bubble the reader is pointing at or has selected.
+    // The rest is context, so hue marks what matters instead of decorating
+    // every dot on the map.
+    const signalBubble = useCallback((nodeId: string) => !communityOverview
+      || automaticLabelIds.has(nodeId)
+      || nodeId === focusedNodeId
+      || nodeId === hoveredNodeId, [
+      automaticLabelIds,
+      communityOverview,
+      focusedNodeId,
+      hoveredNodeId
+    ]);
     const expandedLabelIds = useMemo(() => renderingProfile === "static"
       ? new Set([...model.nodes]
         .sort((left, right) =>
@@ -698,10 +775,19 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       [layoutStyle, model.nodes, model.stats.aggregated]
     );
     const staticPositions = useMemo(
-      () => renderingProfile === "static" && !comparisonMode
+      () => communityOverview
+        ? seedCommunityOverviewPositions(model.nodes, communityImportance)
+        : renderingProfile === "static" && !comparisonMode
         ? seedStaticGraphPositions(model.nodes, model.stats.aggregated)
         : new Map(),
-      [comparisonMode, model.nodes, model.stats.aggregated, renderingProfile]
+      [
+        communityImportance,
+        communityOverview,
+        comparisonMode,
+        model.nodes,
+        model.stats.aggregated,
+        renderingProfile
+      ]
     );
     const contrastBorder = useMemo(() => {
       if (typeof document === "undefined") return undefined;
@@ -726,31 +812,50 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         const spacedPosition = position
           ? { x: position.x * fixedLayoutSpacing, y: position.y * fixedLayoutSpacing }
           : undefined;
+        // Unlabelled long-tail bubbles sit back so the labelled communities and
+        // their relationships stay the first thing a reader sees.
+        const restOpacity = communityOverview && !automaticLabelIds.has(node.id)
+          ? 0.82
+          : node.change === "unchanged" ? 0.58 : 1;
         return {
           id: node.id,
-          label: node.label,
-          color: graphNodeColor(
-            model,
-            node,
-            undefined,
-            fallbackComparisonPalette,
-            communityColors,
-            semanticDetail ? fallbackSemanticNodePalette : undefined
-          ),
+          label: communityOverview
+            ? communityBubbleLabel(node)
+            : node.label,
+          color: signalBubble(node.id)
+            ? graphNodeColor(
+              model,
+              node,
+              undefined,
+              fallbackComparisonPalette,
+              communityColors,
+              semanticDetail ? fallbackSemanticNodePalette : undefined
+            )
+            : { background: CONTEXT_NODE_FILL, border: CONTEXT_NODE_BORDER },
           shape: semanticDetail
             ? nodeSemanticShape(nodeSemanticCategory(node.kind))
             : "dot",
           size,
           ...(spacedPosition ?? {}),
-          opacity: node.change === "unchanged" ? 0.58 : 1,
+          opacity: restOpacity,
+          ...(communityOverview ? { borderWidth: 2 } : {}),
+          ...(communityOverview && signalBubble(node.id)
+            ? { shadow: signalGlow(node) }
+            : {}),
           font: {
             color: "#eef5ff",
             face: "system-ui",
-            size: comparisonMode
-              ? automaticLabelIds.has(node.id) ? 12 : 0
-              : renderingProfile === "static"
+            size: communityOverview
+              ? automaticLabelIds.has(node.id) ? COMMUNITY_LABEL_FONT_SIZE : 0
+              : comparisonMode
                 ? automaticLabelIds.has(node.id) ? 12 : 0
-                : (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0
+                : renderingProfile === "static"
+                  ? automaticLabelIds.has(node.id) ? 12 : 0
+                  : (node.degree ?? 1) >= maxDegree * 0.15 ? 12 : 0,
+            vadjust: communityOverview ? Math.round(size + 12) : 0,
+            ...(communityOverview
+              ? { strokeWidth: 3, strokeColor: canvasBackground }
+              : {})
           }
         };
       })
@@ -761,6 +866,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       comparisonMode,
       comparisonPositions,
       communityColors,
+      communityOverview,
       initialPositions,
       fixedLayoutSpacing,
       maxDegree,
@@ -772,13 +878,17 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     ]);
     const edgeData = useMemo(() => new DataSet<Edge>(
       renderedEdges.map((edge) => {
+        const hinted = edgeSemanticHints?.get(edge.id);
         const appearance = effectiveEdgeAppearance(edge, comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
-          semanticDetail
-            ? fallbackSemanticEdgePalette[edgeSemanticCategory(edge.relation)]
-            : "#60728b",
-          fallbackComparisonPalette
+          hinted
+            ? fallbackSemanticEdgePalette[hinted]
+            : semanticDetail
+              ? fallbackSemanticEdgePalette[edgeSemanticCategory(edge.relation)]
+              : "#60728b",
+          fallbackComparisonPalette,
+          edge.weight
         ));
         return {
           id: edge.id,
@@ -792,14 +902,19 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           color: { color: appearance.color, opacity: appearance.opacity }
         };
       })
-    ), [comparisonMode, renderedEdges, renderingProfile, semanticDetail]);
+    // The mount-time palette is theme-independent on purpose: the focus effect
+    // restyles edges in place when the theme changes, so a theme switch never
+    // destroys and rebuilds the Network.
+    ), [comparisonMode, edgeSemanticHints, renderedEdges, renderingProfile, semanticDetail]);
     useEffect(() => {
       const container = containerRef.current;
       if (!container) return;
       initialViewRef.current = null;
-      const options = renderingProfile === "static"
-        ? staticOptions
-        : comparisonMode ? comparisonOptions : defaultOptions;
+      const options = communityOverview
+        ? communityOverviewOptions
+        : renderingProfile === "static"
+          ? staticOptions
+          : comparisonMode ? comparisonOptions : defaultOptions;
       const network = new Network(container, {
         nodes: nodeData,
         edges: edgeData
@@ -823,6 +938,25 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         // stabilization iterations. Freeze synchronously before React removes
         // the loading screen so the first interactive frame cannot drift.
         network.stopSimulation();
+        if (communityOverview) {
+          // The simulation is good at structure and bad at labels and balance:
+          // re-centre it on importance so the big communities hold the middle
+          // and the tail scatters outside, separate the bubbles so every label
+          // keeps its room, then re-fit.
+          const settled = new Map(Object.entries(network.getPositions()));
+          const relaxed = relaxCommunityOverviewPositions(
+            model.nodes,
+            centerCommunityOverviewPositions(model.nodes, settled, communityImportance),
+            communityImportance
+          );
+          nodeData.update([...relaxed].map(([id, position]) => ({
+            id,
+            x: position.x,
+            y: position.y
+          })));
+          network.redraw();
+          if (physicsRunningRef.current) network.fit({ animation: false });
+        }
         initialViewRef.current = {
           position: network.getViewPosition(),
           scale: network.getScale()
@@ -841,11 +975,27 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         || staticPositions.size > 0;
       if (!physicsRunningRef.current && hasSeededPositions) {
         network.stopSimulation();
-        network.fit({ animation: false });
-        initialViewRef.current = {
-          position: network.getViewPosition(),
-          scale: network.getScale()
+        // The stage can still be unsized on the first frame, which would fit the
+        // seeded layout against a zero-sized canvas. Retry on the container's
+        // first real resize so the opening camera always frames the whole graph.
+        const fitSeededLayout = (): boolean => {
+          const element = containerRef.current;
+          if (!element || element.clientWidth <= 1 || element.clientHeight <= 1) {
+            return false;
+          }
+          network.fit({ animation: false });
+          initialViewRef.current = {
+            position: network.getViewPosition(),
+            scale: network.getScale()
+          };
+          return true;
         };
+        if (!fitSeededLayout()) {
+          const fitOnResize = () => {
+            if (fitSeededLayout()) network.off("resize", fitOnResize);
+          };
+          network.on("resize", fitOnResize);
+        }
       }
       const minimapTimer = window.setTimeout(refreshMinimap, 0);
       return () => {
@@ -945,21 +1095,25 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       nodeData.update(model.nodes.map((node) => {
         const isFocused = node.id === focusedNodeId;
         const isVisible = !focusedNodeId || isFocused || connected.has(node.id);
-        const comparisonOpacity = node.change === "unchanged" ? 0.58 : 1;
+        const comparisonOpacity = communityOverview && !automaticLabelIds.has(node.id)
+          ? 0.82
+          : node.change === "unchanged" ? 0.58 : 1;
         return {
           id: node.id,
           opacity: !focusedNodeId
             ? comparisonOpacity
-            : isVisible ? Math.max(comparisonOpacity, 0.72) : 0.08,
-          borderWidth: isFocused ? 4 : contrastBorder ? 2.5 : 1.5,
-          color: graphNodeColor(
-            model,
-            node,
-            contrastBorder,
-            comparisonPalette,
-            communityColors,
-            semanticDetail ? semanticNodePalette : undefined
-          ),
+            : isVisible ? Math.max(comparisonOpacity, 0.72) : 0.32,
+          borderWidth: isFocused ? 4 : contrastBorder ? 2.5 : communityOverview ? 2 : 1.5,
+          color: signalBubble(node.id) || isVisible && focusedNodeId !== null
+            ? graphNodeColor(
+              model,
+              node,
+              contrastBorder,
+              comparisonPalette,
+              communityColors,
+              semanticDetail ? semanticNodePalette : undefined
+            )
+            : { background: CONTEXT_NODE_FILL, border: CONTEXT_NODE_BORDER },
           shadow: isFocused
             ? {
                 enabled: true,
@@ -978,13 +1132,17 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         };
       }));
       edgeData.update(renderedEdges.map((edge) => {
+        const hinted = edgeSemanticHints?.get(edge.id);
         const appearance = effectiveEdgeAppearance(edge, comparisonEdgeAppearance(
           edge.change,
           edge.confidence,
-          semanticDetail
-            ? semanticEdgePalette[edgeSemanticCategory(edge.relation)]
-            : edgeColor,
-          comparisonPalette
+          hinted
+            ? semanticEdgePalette[hinted]
+            : semanticDetail
+              ? semanticEdgePalette[edgeSemanticCategory(edge.relation)]
+              : edgeColor,
+          comparisonPalette,
+          edge.weight
         ));
         const connectedEdge = edge.source === focusedNodeId || edge.target === focusedNodeId;
         return {
@@ -992,7 +1150,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
           dashes: appearance.dashes,
           color: {
             color: appearance.color,
-            opacity: !focusedNodeId ? appearance.opacity : connectedEdge ? 0.92 : 0.05
+            opacity: !focusedNodeId ? appearance.opacity : connectedEdge ? 0.92 : 0.12
           },
           width: connectedEdge ? Math.max(3, appearance.width) : appearance.width
         };
@@ -1016,11 +1174,14 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         network.unselectAll();
       }
     }, [
+      automaticLabelIds,
+      communityOverview,
       contrastBorder,
       comparisonPalette,
       communityColors,
       edgeColor,
       edgeData,
+      edgeSemanticHints,
       focusedNodeId,
       model,
       nodeData,
@@ -1035,20 +1196,35 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         id: node.id,
         font: {
           color: labelColor,
-          size: (forceLabels && (renderingProfile !== "static" || expandedLabelIds.has(node.id)))
-            || node.id === focusedNodeId
-            || (comparisonMode
-              ? automaticLabelIds.has(node.id)
-              : renderingProfile === "static"
+          size: communityOverview
+            ? (forceLabels
+              || node.id === focusedNodeId
+              || automaticLabelIds.has(node.id))
+              ? COMMUNITY_LABEL_FONT_SIZE
+              : 0
+            : (forceLabels && (renderingProfile !== "static" || expandedLabelIds.has(node.id)))
+              || node.id === focusedNodeId
+              || (comparisonMode
                 ? automaticLabelIds.has(node.id)
-                : (node.degree ?? 1) >= maxDegree * 0.15)
-            ? 12
-            : 0
+                : renderingProfile === "static"
+                  ? automaticLabelIds.has(node.id)
+                  : (node.degree ?? 1) >= maxDegree * 0.15)
+              ? 12
+              : 0,
+          ...(communityOverview
+            ? {
+              vadjust: communityBubbleFontSize(node),
+              strokeWidth: 3,
+              strokeColor: canvasBackground
+            }
+            : {})
         }
       })));
     }, [
       automaticLabelIds,
+      canvasBackground,
       comparisonMode,
+      communityOverview,
       expandedLabelIds,
       focusedNodeId,
       forceLabels,

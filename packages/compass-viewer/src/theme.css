@@ -46,41 +46,41 @@
     Consolas,
     monospace
   );
-  --background: var(--vscode-editor-background, #0d131d);
-  --foreground: var(--vscode-editor-foreground, #d7e1ed);
-  --card: var(--vscode-sideBar-background, #121b28);
-  --card-foreground: var(--vscode-sideBar-foreground, #d7e1ed);
-  --popover: var(--vscode-menu-background, #172231);
-  --popover-foreground: var(--vscode-menu-foreground, #d7e1ed);
-  --primary: var(--vscode-button-background, #2f81f7);
+  --background: var(--vscode-editor-background, #0b0e13);
+  --foreground: var(--vscode-editor-foreground, #e6eaf0);
+  --card: var(--vscode-sideBar-background, #101419);
+  --card-foreground: var(--vscode-sideBar-foreground, #e6eaf0);
+  --popover: var(--vscode-menu-background, #141920);
+  --popover-foreground: var(--vscode-menu-foreground, #e6eaf0);
+  --primary: var(--vscode-button-background, #3e7bfa);
   --primary-foreground: var(--vscode-button-foreground, #ffffff);
-  --secondary: var(--vscode-button-secondaryBackground, #263448);
-  --secondary-foreground: var(--vscode-button-secondaryForeground, #d7e1ed);
-  --muted: var(--vscode-list-inactiveSelectionBackground, #1d2938);
-  --muted-foreground: var(--vscode-descriptionForeground, #93a4b8);
+  --secondary: var(--vscode-button-secondaryBackground, #1b2129);
+  --secondary-foreground: var(--vscode-button-secondaryForeground, #e6eaf0);
+  --muted: var(--vscode-list-inactiveSelectionBackground, #171c23);
+  --muted-foreground: var(--vscode-descriptionForeground, #97a2af);
   --accent: var(--vscode-list-activeSelectionBackground, #264f78);
   --accent-foreground: var(--vscode-list-activeSelectionForeground, #ffffff);
   --destructive: var(--vscode-errorForeground, #f47067);
-  --border: var(--vscode-panel-border, #2c3a4d);
-  --input: var(--vscode-input-border, #3b4a5e);
-  --ring: var(--vscode-focusBorder, #4f9cf9);
+  --border: var(--vscode-panel-border, #242a33);
+  --input: var(--vscode-input-border, #333b46);
+  --ring: var(--vscode-focusBorder, #7ea6ff);
   --radius: 0.625rem;
-  --compass-canvas: var(--vscode-editor-background, #08111f);
-  --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 82%, #000);
-  --compass-panel: var(--vscode-sideBar-background, #101b2d);
+  --compass-canvas: var(--vscode-editor-background, #0c1015);
+  --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 88%, #000);
+  --compass-panel: var(--vscode-sideBar-background, #101419);
   --compass-panel-raised: color-mix(
     in srgb,
-    var(--vscode-menu-background, #142236) 88%,
+    var(--vscode-menu-background, #141920) 88%,
     transparent
   );
-  --compass-line: var(--vscode-panel-border, rgba(154, 178, 211, 0.16));
-  --compass-line-strong: var(--vscode-contrastBorder, rgba(154, 178, 211, 0.3));
-  --compass-focus: var(--vscode-focusBorder, #76b7ff);
+  --compass-line: var(--vscode-panel-border, rgba(230, 234, 240, 0.1));
+  --compass-line-strong: var(--vscode-contrastBorder, rgba(230, 234, 240, 0.2));
+  --compass-focus: var(--vscode-focusBorder, #7ea6ff);
   --compass-focus-soft: color-mix(in srgb, var(--compass-focus) 14%, transparent);
-  --compass-faint: var(--vscode-disabledForeground, #60728b);
-  --compass-grid: color-mix(in srgb, var(--foreground) 16%, transparent);
-  --compass-success: var(--vscode-testing-iconPassed, #3fb950);
-  --compass-warning: var(--vscode-editorWarning-foreground, #d29922);
+  --compass-faint: var(--vscode-disabledForeground, #6c7783);
+  --compass-grid: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --compass-success: var(--vscode-testing-iconPassed, #2fa36b);
+  --compass-warning: var(--vscode-editorWarning-foreground, #c9902c);
   --sidebar: var(--vscode-sideBar-background, var(--background));
   --sidebar-foreground: var(--vscode-sideBar-foreground, var(--foreground));
   --sidebar-accent: var(--vscode-list-activeSelectionBackground, var(--accent));
@@ -107,30 +107,35 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --background: var(--vscode-editor-background, #f7f9fc);
-    --foreground: var(--vscode-editor-foreground, #172033);
+    --background: var(--vscode-editor-background, #f6f7f9);
+    --foreground: var(--vscode-editor-foreground, #0e1319);
     --card: var(--vscode-sideBar-background, #ffffff);
-    --card-foreground: var(--vscode-sideBar-foreground, #172033);
+    --card-foreground: var(--vscode-sideBar-foreground, #0e1319);
     --popover: var(--vscode-menu-background, #ffffff);
-    --popover-foreground: var(--vscode-menu-foreground, #172033);
-    --primary: var(--vscode-button-background, #0969da);
+    --popover-foreground: var(--vscode-menu-foreground, #0e1319);
+    --primary: var(--vscode-button-background, #2f6bea);
     --primary-foreground: var(--vscode-button-foreground, #ffffff);
-    --secondary: var(--vscode-button-secondaryBackground, #e8edf4);
-    --secondary-foreground: var(--vscode-button-secondaryForeground, #172033);
-    --muted: var(--vscode-list-inactiveSelectionBackground, #edf1f6);
-    --muted-foreground: var(--vscode-descriptionForeground, #576579);
-    --accent: var(--vscode-list-activeSelectionBackground, #dbeafe);
-    --accent-foreground: var(--vscode-list-activeSelectionForeground, #172033);
-    --border: var(--vscode-panel-border, #c8d1dc);
-    --input: var(--vscode-input-border, #aeb9c8);
-    --ring: var(--vscode-focusBorder, #0969da);
-    --compass-canvas: var(--vscode-editor-background, #f4f7fb);
-    --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 94%, #dbe3ed);
+    --secondary: var(--vscode-button-secondaryBackground, #eef1f5);
+    --secondary-foreground: var(--vscode-button-secondaryForeground, #0e1319);
+    --muted: var(--vscode-list-inactiveSelectionBackground, #f0f2f5);
+    --muted-foreground: var(--vscode-descriptionForeground, #56616d);
+    --accent: var(--vscode-list-activeSelectionBackground, #e2eafd);
+    --accent-foreground: var(--vscode-list-activeSelectionForeground, #0e1319);
+    --border: var(--vscode-panel-border, #e2e6eb);
+    --input: var(--vscode-input-border, #c7cfd8);
+    --ring: var(--vscode-focusBorder, #2f6bea);
+    --compass-canvas: var(--vscode-editor-background, #fbfcfd);
+    --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 96%, #e7ebf0);
     --compass-panel: var(--vscode-sideBar-background, #ffffff);
     --compass-panel-raised: var(--vscode-menu-background, #ffffff);
-    --compass-line: var(--vscode-panel-border, #ccd6e1);
-    --compass-line-strong: var(--vscode-contrastBorder, #9eacbd);
-    --compass-faint: var(--vscode-disabledForeground, #68778a);
+    --compass-line: var(--vscode-panel-border, #e5e8ed);
+    --compass-line-strong: var(--vscode-contrastBorder, #c8ced6);
+    --compass-faint: var(--vscode-disabledForeground, #7a838e);
+    --compass-focus: var(--vscode-focusBorder, #2f6bea);
+    --compass-focus-soft: color-mix(in srgb, var(--compass-focus) 10%, transparent);
+    --compass-grid: color-mix(in srgb, var(--foreground) 5.5%, transparent);
+    --compass-success: var(--vscode-testing-iconPassed, #17855a);
+    --compass-warning: var(--vscode-editorWarning-foreground, #a2661a);
   }
 }
 
@@ -142,6 +147,61 @@ body.vscode-high-contrast-light {
 body.vscode-dark,
 body.vscode-high-contrast {
   color-scheme: dark;
+}
+
+/*
+ * Reader-chosen theme for standalone documents (the viewer sets
+ * `data-compass-theme`). Only the tokens the graph surface needs are pinned, so
+ * an editor that injects its own theme still wins everywhere it speaks.
+ */
+:root[data-compass-theme="light"] {
+  color-scheme: light;
+  --background: var(--vscode-editor-background, #f6f7f9);
+  --foreground: var(--vscode-editor-foreground, #0e1319);
+  --card: var(--vscode-sideBar-background, #ffffff);
+  --card-foreground: var(--vscode-sideBar-foreground, #0e1319);
+  --popover: var(--vscode-menu-background, #ffffff);
+  --muted: var(--vscode-list-inactiveSelectionBackground, #f0f2f5);
+  --muted-foreground: var(--vscode-descriptionForeground, #56616d);
+  --border: var(--vscode-panel-border, #e2e6eb);
+  --compass-canvas: var(--vscode-editor-background, #fbfcfd);
+  --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 96%, #e7ebf0);
+  --compass-panel: var(--vscode-sideBar-background, #ffffff);
+  --compass-line: var(--vscode-panel-border, #e5e8ed);
+  --compass-line-strong: var(--vscode-contrastBorder, #c8ced6);
+  --compass-faint: var(--vscode-disabledForeground, #7a838e);
+  --compass-focus: var(--vscode-focusBorder, #2f6bea);
+  --compass-focus-soft: color-mix(in srgb, var(--compass-focus) 10%, transparent);
+  --compass-grid: color-mix(in srgb, var(--foreground) 5.5%, transparent);
+  --workbench-hover: var(
+    --vscode-list-hoverBackground,
+    color-mix(in srgb, var(--foreground) 5%, transparent)
+  );
+}
+
+:root[data-compass-theme="dark"] {
+  color-scheme: dark;
+  --background: var(--vscode-editor-background, #0a0b0e);
+  --foreground: var(--vscode-editor-foreground, #e6eaf0);
+  --card: var(--vscode-sideBar-background, #0e1014);
+  --card-foreground: var(--vscode-sideBar-foreground, #e6eaf0);
+  --popover: var(--vscode-menu-background, #121419);
+  --muted: var(--vscode-list-inactiveSelectionBackground, #15181d);
+  --muted-foreground: var(--vscode-descriptionForeground, #97a2af);
+  --border: var(--vscode-panel-border, #20242b);
+  --compass-canvas: var(--vscode-editor-background, #08090c);
+  --compass-canvas-deep: color-mix(in srgb, var(--compass-canvas) 88%, #000);
+  --compass-panel: var(--vscode-sideBar-background, #0e1014);
+  --compass-line: var(--vscode-panel-border, rgba(230, 234, 240, 0.1));
+  --compass-line-strong: var(--vscode-contrastBorder, rgba(230, 234, 240, 0.2));
+  --compass-faint: var(--vscode-disabledForeground, #6c7783);
+  --compass-focus: var(--vscode-focusBorder, #7ea6ff);
+  --compass-focus-soft: color-mix(in srgb, var(--compass-focus) 14%, transparent);
+  --compass-grid: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --workbench-hover: var(
+    --vscode-list-hoverBackground,
+    color-mix(in srgb, var(--foreground) 7%, transparent)
+  );
 }
 
 .compass-source-notice {
@@ -179,9 +239,7 @@ body.vscode-high-contrast {
   min-width: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
   border-right: 1px solid var(--compass-line);
-  background:
-    linear-gradient(180deg, var(--compass-focus-soft), transparent 180px),
-    var(--compass-panel);
+  background: var(--compass-panel);
 }
 
 .visualization-rail > header {
@@ -1533,10 +1591,13 @@ button:not(:disabled),
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 45% 42%, color-mix(in srgb, var(--compass-focus) 21%, transparent), transparent 34%),
-    radial-gradient(circle at 76% 75%, color-mix(in srgb, var(--compass-success) 10%, transparent), transparent 28%),
-    linear-gradient(145deg, var(--compass-canvas) 0%, var(--compass-canvas-deep) 100%);
+  /* Schematic paper: one flat surface plus a hairline grid, so the graph reads
+     as a technical drawing instead of a decorated background. */
+  background: var(--compass-canvas);
+  /* The control rail adapts to the stage it sits in, not to the window: the
+     same document is wide in a browser and narrow beside an editor rail. */
+  container-type: inline-size;
+  container-name: compass-stage;
 }
 
 .compass-graph-stage::after {
@@ -1544,9 +1605,10 @@ button:not(:disabled),
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.16;
-  background-image: radial-gradient(var(--compass-grid) 0.55px, transparent 0.55px);
-  background-size: 22px 22px;
+  background-image:
+    linear-gradient(to right, var(--compass-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--compass-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 .compass-graph-stage[data-comparison="true"] {
@@ -1554,7 +1616,7 @@ button:not(:disabled),
 }
 
 .compass-graph-stage[data-comparison="true"]::after {
-  opacity: 0.09;
+  opacity: 0.6;
 }
 
 .compass-canvas {
@@ -1586,6 +1648,306 @@ button:not(:disabled),
   min-height: 42px;
   padding: 5px 6px 5px 10px;
   border-radius: 4px;
+}
+
+/* Repository path for the viewer-derived community overview and its details. */
+.compass-graph-breadcrumb {
+  position: absolute;
+  z-index: 4;
+  top: 60px;
+  left: 12px;
+  display: flex;
+  max-width: min(60%, 420px);
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 6px 0 10px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.compass-graph-breadcrumb button {
+  min-height: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.compass-graph-breadcrumb button:hover {
+  border-color: var(--compass-line);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.compass-graph-breadcrumb button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
+}
+
+.compass-graph-breadcrumb [aria-current="page"] {
+  overflow: hidden;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-breadcrumb-separator {
+  color: var(--compass-faint);
+}
+
+/* Keep the semantic legend clear of the repository path when both are shown. */
+.compass-graph-stage[data-breadcrumb="true"] .compass-semantic-legend {
+  top: 96px;
+}
+
+/* Community overview design variants: matrix, area map, and tier map. */
+.compass-variant-stage {
+  position: absolute;
+  z-index: 3;
+  inset: 104px 12px 12px;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.compass-variant {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.compass-variant-scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+}
+
+.compass-variant-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 14px;
+  padding: 7px 10px;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, var(--compass-panel));
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.compass-variant-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  color: var(--foreground);
+}
+
+.compass-variant-detail strong {
+  font-weight: 600;
+}
+
+.compass-variant-hint {
+  color: var(--compass-faint);
+}
+
+.compass-matrix table {
+  border-collapse: separate;
+  border-spacing: 2px;
+}
+
+.compass-matrix caption {
+  text-align: left;
+}
+
+.compass-matrix th {
+  color: var(--compass-faint);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.compass-matrix thead th {
+  width: 22px;
+  text-align: center;
+}
+
+.compass-matrix thead th[data-active="true"],
+.compass-matrix tbody tr[data-active="true"] th {
+  color: var(--foreground);
+}
+
+.compass-matrix tbody th {
+  display: flex;
+  max-width: 200px;
+  align-items: center;
+  gap: 7px;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.compass-matrix-row-label {
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+.compass-matrix tbody th small {
+  color: var(--compass-faint);
+  font-size: 9px;
+}
+
+.compass-matrix-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.compass-matrix td {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+
+.compass-matrix-cell {
+  display: block;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--compass-line);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.compass-matrix-cell:disabled {
+  cursor: default;
+}
+
+.compass-matrix-cell i {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: var(--compass-matrix-fill);
+}
+
+.compass-matrix td[data-self="true"] .compass-matrix-cell {
+  border-style: dashed;
+}
+
+.compass-matrix-self {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--compass-line-strong);
+}
+
+.compass-matrix-cell:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 1px;
+}
+
+.compass-treemap-canvas,
+.compass-lanes-canvas {
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  border: 1px solid var(--compass-line);
+  border-radius: 4px;
+  background:
+    linear-gradient(to right, var(--compass-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(to bottom, var(--compass-grid) 1px, transparent 1px) 0 0 / 24px 24px,
+    var(--compass-canvas);
+}
+
+.compass-treemap-hit,
+.compass-lane-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+.compass-treemap-hit:focus-visible,
+.compass-lane-hit:focus-visible {
+  outline: none;
+  stroke: var(--compass-focus);
+  stroke-width: 2.5;
+}
+
+.compass-treemap-label,
+.compass-lane-label {
+  font-size: 12px;
+}
+
+.compass-treemap-count,
+.compass-lane-count {
+  fill: var(--muted-foreground);
+  font-size: 10px;
+}
+
+/* Tail tiles keep theme ink; community tiles carry their own chosen ink. */
+.compass-treemap-label,
+.compass-treemap-count,
+.compass-lane-label,
+.compass-lane-count {
+  fill: var(--foreground);
+}
+
+.compass-treemap g[data-tail="true"] text,
+.compass-lanes g[data-tail="true"] text {
+  fill: var(--muted-foreground);
+}
+
+.compass-lane-tier {
+  fill: var(--compass-faint);
+  font: 10px/1 var(--compass-font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.compass-lane-ribbon {
+  fill: none;
+  opacity: 0.52;
+  stroke-linecap: round;
+}
+
+.compass-lane-ribbon[data-dim="true"] {
+  opacity: 0.12;
+}
+
+.compass-lane-ribbon[data-active="true"] {
+  opacity: 0.95;
+}
+
+.compass-lane-bar {
+  stroke: color-mix(in srgb, var(--compass-canvas) 55%, transparent);
+  stroke-width: 1;
+}
+
+@media (max-width: 980px) {
+  .compass-variant-toggle button {
+    padding: 0 7px;
+  }
 }
 
 .compass-viewer-status {
@@ -1705,6 +2067,60 @@ button:not(:disabled),
 .compass-layout-picker:focus-within {
   outline: 1px solid var(--vscode-focusBorder, var(--compass-focus));
   outline-offset: 1px;
+}
+
+/* Community overview ⇄ symbol canvas scope switch on the graph toolbar. */
+.compass-scope-toggle {
+  display: inline-flex;
+  min-height: 30px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, transparent);
+}
+
+.compass-scope-toggle button {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.compass-scope-toggle button + button {
+  border-left: 1px solid var(--compass-line);
+}
+
+.compass-scope-toggle button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.compass-scope-toggle button:hover {
+  background: var(--workbench-hover);
+  color: var(--foreground);
+}
+
+.compass-scope-toggle button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--compass-focus) 15%, transparent);
+  color: var(--foreground);
+}
+
+/* Icon-only designs: the pressed state has to carry the whole selection. */
+.compass-variant-toggle button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--compass-focus) 24%, transparent);
+}
+
+.compass-scope-toggle button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
 }
 
 .compass-tool-button:disabled {
@@ -4272,6 +4688,15 @@ button.compass-code-evidence-source:focus-visible {
   border-radius: 3px;
 }
 
+.compass-community-item > label {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
 .compass-community-item:hover {
   background: var(--workbench-hover);
   color: var(--foreground);
@@ -4279,6 +4704,39 @@ button.compass-code-evidence-source:focus-visible {
 
 .compass-community-item[data-hidden="true"] {
   opacity: 0.36;
+}
+
+.compass-community-open {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--compass-faint);
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+.compass-community-open svg {
+  width: 13px;
+  height: 13px;
+}
+
+.compass-community-open:hover,
+.compass-community-open:focus-visible {
+  border-color: var(--compass-line);
+  background: var(--workbench-hover);
+  color: var(--foreground);
+  opacity: 1;
+}
+
+.compass-community-open:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: 2px;
 }
 
 .compass-community-item input,
@@ -4576,6 +5034,12 @@ body.vscode-high-contrast-light .compass-load-logo {
   .compass-tool-button span {
     display: none;
   }
+
+  /* The design switcher is text-only, so its labels must survive narrow widths. */
+  .compass-scope-toggle:not(.compass-variant-toggle) button span {
+    display: none;
+  }
+
 
   .compass-tool-button {
     padding: 0 11px;
@@ -10070,5 +10534,56 @@ body.vscode-high-contrast-light .call-guide-completion-status {
   .call-guide-action-arrow,
   .call-guide-walkthrough svg:last-child {
     transition: none;
+  }
+}
+
+/*
+ * Narrow stage: the toolbar wraps onto a second row so every control stays
+ * visible instead of scrolling out of reach beside the editor rail. The
+ * breadcrumb and legend move down with it.
+ */
+@container compass-stage (max-width: 1240px) {
+  .compass-graph-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .compass-toolbar-actions {
+    flex: 1 1 100%;
+    gap: 6px;
+  }
+
+  .compass-tool-button.compass-tool-icon-button {
+    width: 30px;
+    flex-basis: 30px;
+  }
+
+  .compass-layout-picker select {
+    max-width: 132px;
+  }
+
+  .compass-zoom-reset {
+    min-width: 42px;
+  }
+
+  .compass-scope-toggle button {
+    padding: 0 7px;
+  }
+
+  .compass-graph-breadcrumb {
+    top: 100px;
+  }
+
+  .compass-graph-stage[data-breadcrumb="true"] .compass-semantic-legend {
+    top: 136px;
+  }
+
+  .compass-scope-toggle:not(.compass-variant-toggle) button span {
+    display: none;
+  }
+}
+
+@container compass-stage (max-width: 900px) {
+  .compass-viewer-status-text {
+    max-width: 190px;
   }
 }

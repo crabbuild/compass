@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { GraphNode, GraphViewModel } from "../contracts/graph";
 import {
+  centerCommunityOverviewPositions,
+  relaxCommunityOverviewPositions,
   AGGREGATED_EDGE_RENDER_LIMIT,
   graphRenderingProfile,
+  seedCommunityOverviewPositions,
   seedGraphLayoutPositions,
   seedStaticGraphPositions,
   STATIC_LAYOUT_EDGE_THRESHOLD,
   STATIC_LAYOUT_NODE_THRESHOLD,
   visibleGraphEdges
 } from "./renderingProfile";
+import {
+  communityNodeSize,
+  communityOverviewLabelText,
+  communityOverviewLabelledIds
+} from "./communityOverview";
 
 function model(nodes: number, edges: number): GraphViewModel {
   return {
@@ -69,25 +77,209 @@ describe("seedStaticGraphPositions", () => {
     expect(coordinates.size).toBe(nodes.length);
   });
 
-  it("places aggregated communities in a deterministic hub-centered disc", () => {
-    const nodes: GraphNode[] = Array.from({ length: 400 }, (_, index) => ({
+  it("centres large communities and scatters the tail outside", () => {
+    const nodes: GraphNode[] = Array.from({ length: 120 }, (_, index) => ({
       id: `community-${index}`,
       label: `Community ${index}`,
       community: index,
-      degree: index === 237 ? 10_000 : index % 17,
-      memberCount: 400 - index
+      degree: index % 17,
+      memberCount: 120 - index,
+      size: 8 + 10 * Math.sqrt((120 - index) / 120)
     }));
     const positions = seedStaticGraphPositions(nodes, true);
-    const reversed = seedStaticGraphPositions([...nodes].reverse(), true);
-    expect([...positions]).toEqual([...reversed]);
-    expect(positions.get("community-237")).toEqual({ x: 0, y: 0 });
+    expect([...positions]).toEqual([
+      ...seedStaticGraphPositions([...nodes].reverse(), true)
+    ]);
+    expect(positions.size).toBe(nodes.length);
 
     const coordinates = [...positions.values()];
-    const width = Math.max(...coordinates.map(({ x }) => x))
-      - Math.min(...coordinates.map(({ x }) => x));
-    const height = Math.max(...coordinates.map(({ y }) => y))
-      - Math.min(...coordinates.map(({ y }) => y));
-    expect(Math.max(width, height) / Math.min(width, height)).toBeLessThan(1.15);
+    const left = Math.min(...coordinates.map(({ x }) => x));
+    const right = Math.max(...coordinates.map(({ x }) => x));
+    const top = Math.min(...coordinates.map(({ y }) => y));
+    const bottom = Math.max(...coordinates.map(({ y }) => y));
+    // The map widens toward the canvas aspect instead of leaving the side
+    // margins of a square grid empty.
+    expect((right - left) / (bottom - top)).toBeGreaterThan(1.15);
+
+    // Importance reads as centrality: the first half of the ranking holds the
+    // middle, the second half is scattered further out.
+    const centroid = {
+      x: (left + right) / 2,
+      y: (top + bottom) / 2
+    };
+    const meanRadius = (entries: readonly GraphNode[]) => entries.reduce(
+      (sum, entry) => {
+        const position = positions.get(entry.id)!;
+        return sum + Math.hypot(position.x - centroid.x, position.y - centroid.y);
+      },
+      0
+    ) / entries.length;
+    expect(meanRadius(nodes.slice(0, nodes.length / 2)))
+      .toBeLessThan(meanRadius(nodes.slice(nodes.length / 2)));
+
+    // Rendered bubbles never overlap, so the overview stays readable.
+    for (let left_index = 0; left_index < nodes.length; left_index += 1) {
+      for (let right_index = left_index + 1; right_index < nodes.length; right_index += 1) {
+        const first = nodes[left_index]!;
+        const second = nodes[right_index]!;
+        const firstPosition = positions.get(first.id)!;
+        const secondPosition = positions.get(second.id)!;
+        const distance = Math.hypot(
+          firstPosition.x - secondPosition.x,
+          firstPosition.y - secondPosition.y
+        );
+        expect(distance).toBeGreaterThanOrEqual(
+          (first.size ?? 0) + (second.size ?? 0) - 0.001
+        );
+      }
+    }
+  });
+});
+
+describe("centerCommunityOverviewPositions", () => {
+  it("moves each rank toward the radius its importance earns", () => {
+    const nodes: GraphNode[] = Array.from({ length: 9 }, (_, index) => ({
+      id: `community:${index}`,
+      label: `module_${index}.ts`,
+      community: index,
+      memberCount: 90 - index * 10,
+      degree: 0,
+      size: 10
+    }));
+    // A settled square whose order has nothing to do with importance.
+    const settled = new Map(nodes.map((node, index) => [
+      node.id,
+      { x: (index % 3) * 120, y: Math.floor(index / 3) * 120 }
+    ]));
+    const centered = centerCommunityOverviewPositions(nodes, settled, undefined, 1);
+    const centroid = { x: 120, y: 120 };
+    const radius = (id: string) => {
+      const position = centered.get(id)!;
+      return Math.hypot(position.x - centroid.x, position.y - centroid.y);
+    };
+
+    expect(radius("community:0")).toBeLessThan(radius("community:4"));
+    expect(radius("community:4")).toBeLessThan(radius("community:8"));
+    // The angular reading from the arrangement survives the radial move.
+    const before = settled.get("community:8")!;
+    const after = centered.get("community:8")!;
+    expect(Math.sign(after.x - centroid.x)).toBe(Math.sign(before.x - centroid.x));
+    expect([...centerCommunityOverviewPositions(nodes, settled, undefined, 1)])
+      .toEqual([...centered]);
+  });
+});
+
+describe("relaxCommunityOverviewPositions", () => {
+  it("separates overlapping bubbles while keeping the settled arrangement", () => {
+    const nodes: GraphNode[] = Array.from({ length: 12 }, (_, index) => ({
+      id: `community:${index}`,
+      label: `module_${index}.ts`,
+      community: index,
+      memberCount: 40 - index,
+      degree: index % 5,
+      size: 8 + (index % 3) * 4
+    }));
+    // Every bubble starts on top of the others, as a collapsed simulation would.
+    const collapsed = new Map(nodes.map((node) => [node.id, { x: 0, y: 0 }]));
+    const relaxed = relaxCommunityOverviewPositions(nodes, collapsed);
+    const positions = [...relaxed.values()];
+
+    expect(relaxed.size).toBe(nodes.length);
+    expect(positions.some(({ x, y }) => x !== 0 || y !== 0)).toBe(true);
+    // Footprints keep at least their own width apart, which is what keeps the
+    // label under each bubble readable.
+    for (let left = 0; left < nodes.length; left += 1) {
+      for (let right = left + 1; right < nodes.length; right += 1) {
+        const first = relaxed.get(nodes[left]!.id)!;
+        const second = relaxed.get(nodes[right]!.id)!;
+        const separated = Math.abs(first.x - second.x) >= 2 * (nodes[left]!.size ?? 0)
+          || Math.abs(first.y - second.y) >= 2 * (nodes[right]!.size ?? 0);
+        expect(separated).toBe(true);
+      }
+    }
+  });
+
+  it("is deterministic and leaves a non-overlapping layout untouched", () => {
+    const nodes: GraphNode[] = Array.from({ length: 6 }, (_, index) => ({
+      id: `community:${index}`,
+      label: `module_${index}.ts`,
+      community: index,
+      memberCount: 10,
+      degree: 1,
+      size: 10
+    }));
+    const spaced = new Map(nodes.map((node, index) => [
+      node.id,
+      { x: index * 400, y: 0 }
+    ]));
+    const first = relaxCommunityOverviewPositions(nodes, spaced);
+    const second = relaxCommunityOverviewPositions([...nodes].reverse(), spaced);
+    expect([...first]).toEqual([...second]);
+    for (const [id, position] of spaced) {
+      expect(first.get(id)).toEqual(position);
+    }
+  });
+});
+
+describe("seedCommunityOverviewPositions", () => {
+  it("keeps bubble labels clear of every neighbouring bubble", () => {
+    const labels = [
+      "test_basic.py",
+      "setupmethod",
+      "test_blueprints.py",
+      "Flask (flask/app.py:L110)",
+      "TestGenericHandlers",
+      "__init__.py (flask/__init__.py:L1)"
+    ];
+    const nodes: GraphNode[] = Array.from({ length: 174 }, (_, index) => ({
+      id: `community:${index}`,
+      label: labels[index % labels.length]!,
+      community: index,
+      degree: index % 6,
+      memberCount: Math.max(5, 375 - index * 2)
+    })).map((node, _, all) => ({
+      ...node,
+      size: communityNodeSize(
+        node.memberCount ?? 1,
+        Math.max(...all.map((entry) => entry.memberCount ?? 1))
+      )
+    }));
+    const positions = seedCommunityOverviewPositions(nodes);
+    const labelled = communityOverviewLabelledIds(nodes);
+    // Average glyph width of the rendered 13px label font.
+    const glyphWidth = 7.2;
+
+    expect([...positions]).toEqual([
+      ...seedCommunityOverviewPositions([...nodes].reverse())
+    ]);
+    for (const node of nodes) {
+      if (!labelled.has(node.id)) continue;
+      const position = positions.get(node.id)!;
+      const radius = node.size ?? 12;
+      const halfText = communityOverviewLabelText(node.label).length * glyphWidth / 2;
+      const label = {
+        left: position.x - halfText,
+        right: position.x + halfText,
+        top: position.y + radius,
+        bottom: position.y + radius + 28
+      };
+      for (const other of nodes) {
+        if (other.id === node.id) continue;
+        const otherPosition = positions.get(other.id)!;
+        const otherRadius = other.size ?? 12;
+        const horizontal = Math.max(
+          label.left - otherPosition.x,
+          0,
+          otherPosition.x - label.right
+        );
+        const vertical = Math.max(
+          label.top - otherPosition.y,
+          0,
+          otherPosition.y - label.bottom
+        );
+        expect(Math.hypot(horizontal, vertical) - otherRadius).toBeGreaterThan(0);
+      }
+    }
   });
 });
 

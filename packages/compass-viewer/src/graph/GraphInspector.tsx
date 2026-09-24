@@ -166,7 +166,8 @@ function DirectionalRelationshipGroup({
 
 export function visibleCommunityControls(
   communities: GraphViewModel["communities"],
-  query: string
+  query: string,
+  order?: readonly number[] | undefined
 ): GraphViewModel["communities"] {
   const normalized = query.trim().toLocaleLowerCase();
   const matches = normalized
@@ -174,7 +175,13 @@ export function visibleCommunityControls(
       community.label.toLocaleLowerCase().includes(normalized)
       || String(community.id).includes(normalized))
     : communities;
-  return matches.slice(0, COMMUNITY_CONTROL_LIMIT);
+  if (!order) return matches.slice(0, COMMUNITY_CONTROL_LIMIT);
+  const rank = new Map(order.map((communityId, index) => [communityId, index]));
+  return [...matches]
+    .sort((left, right) =>
+      (rank.get(left.id) ?? Number.MAX_SAFE_INTEGER)
+      - (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, COMMUNITY_CONTROL_LIMIT);
 }
 
 function lineRange(node: GraphNode): string | undefined {
@@ -232,6 +239,8 @@ export function GraphInspector({
   connectedEdges,
   query,
   matches,
+  searchSpansCommunities,
+  communityOrder,
   hiddenCommunities,
   comparisonMode,
   sourceRevisions,
@@ -254,6 +263,13 @@ export function GraphInspector({
   connectedEdges: GraphEdge[];
   query: string;
   matches: GraphNode[];
+  /**
+   * Set when matches come from every community rather than only the graph on
+   * screen, so a result names the community that holds it.
+   */
+  searchSpansCommunities?: boolean | undefined;
+  /** Community ids ordered by reader importance, when the viewer derived them. */
+  communityOrder?: readonly number[] | undefined;
   hiddenCommunities: ReadonlySet<number>;
   comparisonMode: boolean;
   sourceRevisions?: GraphSourceRevisions | undefined;
@@ -280,15 +296,31 @@ export function GraphInspector({
   const communityCounts = useMemo(() => {
     const counts = new Map<number, number>();
     for (const node of model.nodes) {
-      counts.set(node.community, (counts.get(node.community) ?? 0) + 1);
+      // An aggregated overview holds one bubble per community, so the panel
+      // reports the community's symbols rather than counting that bubble.
+      counts.set(
+        node.community,
+        (counts.get(node.community) ?? 0) + (node.memberCount ?? 1)
+      );
     }
     return counts;
   }, [model.nodes]);
+  const aggregatedSymbols = useMemo(() => model.stats.aggregated
+    ? model.nodes.reduce((sum, node) => sum + (node.memberCount ?? 0), 0)
+    : undefined, [model.nodes, model.stats.aggregated]);
   const allVisible = hiddenCommunities.size === 0;
   const nodeLookup = useMemo(
     () => new Map(model.nodes.map((node) => [node.id, node])),
     [model.nodes]
   );
+  const searchResultContext = (node: GraphNode): string => {
+    const base = node.source?.file ?? node.kind ?? "Graph node";
+    if (!searchSpansCommunities || nodeLookup.has(node.id)) return base;
+    const community = node.communityName
+      ?? model.communities.find((item) => item.id === node.community)?.label
+      ?? `Community ${node.community}`;
+    return `${community} · ${base}`;
+  };
   const communityColors = useMemo(
     () => new Map(model.communities.map((community) => [community.id, community.color])),
     [model.communities]
@@ -430,7 +462,7 @@ export function GraphInspector({
                 onClick={() => choose(node)}
               >
                 <strong>{node.label}</strong>
-                <span>{node.source?.file ?? node.kind ?? "Graph node"}</span>
+                <span>{searchResultContext(node)}</span>
               </button>
             ))}
           </div>
@@ -734,6 +766,8 @@ export function GraphInspector({
               allVisible={allVisible}
               onSetAllVisible={onSetAllVisible}
               onToggleCommunity={onToggleCommunity}
+              communityOrder={communityOrder}
+              onOpenCommunity={onOpenCommunity}
             />
           </details>
         ) : (
@@ -746,16 +780,32 @@ export function GraphInspector({
               allVisible={allVisible}
               onSetAllVisible={onSetAllVisible}
               onToggleCommunity={onToggleCommunity}
+              communityOrder={communityOrder}
+              onOpenCommunity={onOpenCommunity}
             />
           </>
         )}
       </section>
       <footer className="compass-graph-stats">
-        {model.stats.nodes.toLocaleString()} nodes · {model.stats.edges.toLocaleString()} edges
-        {renderedEdgeCount < model.stats.edges
-          ? ` (${renderedEdgeCount.toLocaleString()} shown)`
-          : ""} ·{" "}
-        {model.stats.communities.toLocaleString()} communities
+        {model.stats.aggregated ? (
+          <>
+            {model.stats.communities.toLocaleString()} communities ·{" "}
+            {(aggregatedSymbols ?? 0).toLocaleString()} symbols ·{" "}
+            {model.stats.edges.toLocaleString()} cross-community relationships
+            {renderedEdgeCount < model.stats.edges
+              ? ` (${renderedEdgeCount.toLocaleString()} shown)`
+              : ""}
+          </>
+        ) : (
+          <>
+            {model.stats.nodes.toLocaleString()} nodes ·{" "}
+            {model.stats.edges.toLocaleString()} edges
+            {renderedEdgeCount < model.stats.edges
+              ? ` (${renderedEdgeCount.toLocaleString()} shown)`
+              : ""} ·{" "}
+            {model.stats.communities.toLocaleString()} communities
+          </>
+        )}
       </footer>
     </aside>
   );
@@ -767,7 +817,9 @@ function CommunityControls({
   hiddenCommunities,
   allVisible,
   onSetAllVisible,
-  onToggleCommunity
+  onToggleCommunity,
+  communityOrder,
+  onOpenCommunity
 }: {
   model: GraphViewModel;
   communityCounts: ReadonlyMap<number, number>;
@@ -775,11 +827,13 @@ function CommunityControls({
   allVisible: boolean;
   onSetAllVisible(visible: boolean): void;
   onToggleCommunity(communityId: number): void;
+  communityOrder?: readonly number[] | undefined;
+  onOpenCommunity?: ((communityId: number) => void) | undefined;
 }) {
   const [query, setQuery] = useState("");
   const visibleCommunities = useMemo(
-    () => visibleCommunityControls(model.communities, query),
-    [model.communities, query]
+    () => visibleCommunityControls(model.communities, query, communityOrder),
+    [communityOrder, model.communities, query]
   );
   const matchingCount = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -815,24 +869,37 @@ function CommunityControls({
         {visibleCommunities.map((community) => {
           const visible = !hiddenCommunities.has(community.id);
           return (
-            <label
+            <div
               key={community.id}
               className="compass-community-item"
               data-hidden={!visible}
             >
-              <input
-                type="checkbox"
-                checked={visible}
-                onChange={() => onToggleCommunity(community.id)}
-              />
-              <span
-                className="compass-community-dot"
-                aria-hidden="true"
-                style={{ background: community.color }}
-              />
-              <span className="compass-community-label">{community.label}</span>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={visible}
+                  onChange={() => onToggleCommunity(community.id)}
+                />
+                <span
+                  className="compass-community-dot"
+                  aria-hidden="true"
+                  style={{ background: community.color }}
+                />
+                <span className="compass-community-label">{community.label}</span>
+              </label>
               <small>{communityCounts.get(community.id) ?? 0}</small>
-            </label>
+              {onOpenCommunity ? (
+                <button
+                  className="compass-community-open"
+                  type="button"
+                  aria-label={`Open group ${community.label}`}
+                  title={`Open community ${community.label}`}
+                  onClick={() => onOpenCommunity(community.id)}
+                >
+                  <ChevronRightIcon aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
           );
         })}
       </div>

@@ -179,12 +179,37 @@ test("standalone HTML export follows the operating-system light theme", async ({
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/exportCommunity.html");
 
-  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(247, 249, 252)");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(246, 247, 249)");
   await expect.poll(() => page.locator(".compass-graph-stage").evaluate((element) =>
     getComputedStyle(element).getPropertyValue("--compass-canvas").trim()
-  )).toBe("#f4f7fb");
+  )).toBe("#fbfcfd");
   await expect(page.getByRole("complementary", { name: "Graph inspector" }))
     .toHaveCSS("background-color", "rgb(255, 255, 255)");
+});
+
+test("a standalone export pins light or dark on request", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/exportCommunity.html");
+  const canvas = page.locator(".compass-graph-stage");
+  const canvasToken = () => canvas.evaluate((element) =>
+    getComputedStyle(element).getPropertyValue("--compass-canvas").trim());
+
+  const theme = page.getByRole("group", { name: "Colour theme" });
+  await expect(theme.getByRole("button", { name: "Auto" }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect.poll(canvasToken).toBe("#fbfcfd");
+
+  // Readers may want the dark palette for a screenshot even on a light system.
+  await theme.getByRole("button", { name: "Dark" }).click();
+  await expect.poll(canvasToken).toBe("#08090c");
+  await expect(page.locator("html")).toHaveAttribute("data-compass-theme", "dark");
+
+  await theme.getByRole("button", { name: "Light" }).click();
+  await expect.poll(canvasToken).toBe("#fbfcfd");
+  await expect(page.locator("html")).toHaveAttribute("data-compass-theme", "light");
+
+  await theme.getByRole("button", { name: "Auto" }).click();
+  await expect(page.locator("html")).not.toHaveAttribute("data-compass-theme", /.+/);
 });
 
 test("narrow Architecture, Ask Codebase, and Evolution views preserve core actions", async ({

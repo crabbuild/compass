@@ -160,6 +160,15 @@ export function edgeSemanticCategory(relation: string): EdgeSemanticCategory {
   return "other";
 }
 
+/**
+ * Boundary kinds are the things a reader navigates by (routes, jobs, database
+ * objects, configuration keys). The community overview ranks them ahead of
+ * plain callables of the same size.
+ */
+export function isBoundaryKind(kind: string | undefined): boolean {
+  return kind !== undefined && BOUNDARY_KINDS.has(normalizeSemanticName(kind));
+}
+
 export function nodeSemanticShape(category: NodeSemanticCategory) {
   if (category === "type") return "diamond" as const;
   if (category === "module") return "square" as const;
@@ -167,34 +176,39 @@ export function nodeSemanticShape(category: NodeSemanticCategory) {
   return "dot" as const;
 }
 
+/**
+ * Category colors follow the shared Compass palette so that a legend swatch, an
+ * edge stroke, and a matrix cell always agree: execution reads blue, dependency
+ * teal, structure amber, boundary/flow magenta-coral, everything else slate.
+ */
 export function nodeSemanticCssColor(category: NodeSemanticCategory): string {
   if (category === "callable") {
-    return "var(--vscode-symbolIcon-functionForeground, #5fa8ff)";
+    return "var(--vscode-symbolIcon-functionForeground, #3d86c2)";
   }
   if (category === "type") {
-    return "var(--vscode-symbolIcon-classForeground, #e3b341)";
+    return "var(--vscode-symbolIcon-classForeground, #b4763f)";
   }
   if (category === "module") {
-    return "var(--vscode-symbolIcon-moduleForeground, #56d4b4)";
+    return "var(--vscode-symbolIcon-moduleForeground, #2f9a8b)";
   }
   if (category === "boundary") {
-    return "var(--vscode-symbolIcon-eventForeground, #ff9b87)";
+    return "var(--vscode-symbolIcon-eventForeground, #c46a5c)";
   }
-  return "var(--vscode-descriptionForeground, #8b949e)";
+  return "var(--vscode-descriptionForeground, #7a838e)";
 }
 
 export function edgeSemanticCssColor(category: EdgeSemanticCategory): string {
   if (category === "execution") {
-    return "var(--vscode-symbolIcon-functionForeground, #5fa8ff)";
+    return "var(--vscode-symbolIcon-functionForeground, #3d86c2)";
   }
   if (category === "dependency") {
-    return "var(--vscode-symbolIcon-moduleForeground, #56d4b4)";
+    return "var(--vscode-symbolIcon-moduleForeground, #2f9a8b)";
   }
   if (category === "structure") {
-    return "var(--vscode-symbolIcon-classForeground, #e3b341)";
+    return "var(--vscode-symbolIcon-classForeground, #b4763f)";
   }
   if (category === "flow") {
-    return "var(--vscode-symbolIcon-eventForeground, #ff9b87)";
+    return "var(--vscode-symbolIcon-eventForeground, #a96298)";
   }
-  return "var(--vscode-descriptionForeground, #8b949e)";
+  return "var(--vscode-descriptionForeground, #7a838e)";
 }
