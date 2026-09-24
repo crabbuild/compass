@@ -59,7 +59,7 @@ use compass_files::{
     write_text_atomic,
 };
 use compass_global::{GlobalPaths, global_add};
-use compass_graph::god_nodes;
+use compass_graph::{CommunityHierarchy, god_nodes};
 use compass_graphdb::{push_to_falkordb, push_to_neo4j};
 use compass_model::GraphError;
 use compass_model::code_graph::{EdgeKind, GraphDocument};
@@ -3511,6 +3511,9 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     if format == "orientation-json" {
         return command_export_orientation_json(&args[1..]);
     }
+    if format == "hierarchy-json" {
+        return command_export_hierarchy_json(&args[1..]);
+    }
     if !matches!(
         format,
         "html"
@@ -5316,13 +5319,112 @@ fn safe_output_name(value: &str) -> String {
 }
 
 fn export_help() -> String {
-    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output JSON]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
+    "Usage: compass export <format>\n  orientation-json [--graph PATH]\n  hierarchy-json [--graph PATH]\n  html      [--graph PATH] [--output HTML] [VIEW ...]\n  json      [--graph PATH] [--node-limit N] [--community ID] [VIEW ...]\n  workbench-json [--graph PATH] [VIEW ...]\n  callflow-html [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output HTML]\n  callflow-json [GRAPH|DIR] [--graph PATH] [--labels PATH] [--architecture-overlay PATH] [--output JSON]\n  obsidian  [--graph PATH] [--labels PATH] [--dir PATH]\n  wiki      [--graph PATH] [--labels PATH]\n  svg       [--graph PATH] [--labels PATH]\n  graphml   [--graph PATH]\n  neo4j     [--graph PATH] [--push URI] [--user U] [--password P]\n  falkordb  [--graph PATH] [--push URI] [--user U] [--password P]\n\nVIEW may be repeated: --code-graph, --architecture-graph, --call-graph SYMBOL, --impact-graph SYMBOL, --affected-graph NODE, --history-graph OLD..NEW, --artifact-lens LENS, or --view SPEC.".to_owned()
 }
 
 fn export_workbench_help(format: &str) -> String {
     format!(
         "Usage: compass export {format} [--graph PATH] [--labels PATH] [--node-limit N] [--output HTML] [VIEW ...]\n\nViews are emitted in command order into one navigable workbench:\n  --code-graph\n  --architecture-graph\n  --call-graph SYMBOL\n  --impact-graph SYMBOL\n  --affected-graph NODE\n  --history-graph OLD..NEW\n  --artifact-lens dependencies|routes|data|messaging|tests|provenance\n  --view code|architecture|call:SYMBOL|impact:SYMBOL|affected:NODE|history:OLD..NEW|artifact:LENS\n\nView options:\n  --direction callers|callees|both\n  --depth N\n  --max-nodes N\n  --max-edges N\n  --relation RELATION (repeatable; affected views)\n  --include-heuristic (impact views)\n  --program PATH (Program IR enrichment for call views)"
     )
+}
+
+/// Bounded read cap for the published hierarchy, which is a navigation artifact
+/// and must stay small even on repositories with thousands of communities.
+const MAX_HIERARCHY_JSON_BYTES: u64 = 32 * 1024 * 1024;
+
+fn command_export_hierarchy_json(args: &[String]) -> Outcome {
+    if args
+        .iter()
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help"))
+    {
+        return Outcome::success(
+            "Usage: compass export hierarchy-json [--graph PATH] [--output PATH]\n\nEmit the versioned budgeted community hierarchy that was atomically published with the selected graph generation. An artifact whose schema major or graph identity does not match the selected graph fails instead of being emitted."
+                .to_owned(),
+        );
+    }
+    let mut requested_graph = default_graph_path();
+    let mut output_path: Option<PathBuf> = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--graph" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --graph requires a path".to_owned());
+                };
+                requested_graph = PathBuf::from(value);
+                index += 2;
+            }
+            "--output" => {
+                let Some(value) = args.get(index + 1) else {
+                    return Outcome::failure("error: --output requires a path".to_owned());
+                };
+                output_path = Some(PathBuf::from(value));
+                index += 2;
+            }
+            value if value.starts_with("--graph=") => {
+                requested_graph = PathBuf::from(&value[8..]);
+                index += 1;
+            }
+            value if value.starts_with("--output=") => {
+                output_path = Some(PathBuf::from(&value[9..]));
+                index += 1;
+            }
+            value => {
+                return Outcome::failure(format!(
+                    "error: unexpected hierarchy-json export argument {value}"
+                ));
+            }
+        }
+    }
+    let graph_path = match compass_files::BuildGuard::resolve_requested_artifact(&requested_graph) {
+        Ok(path) => path,
+        Err(error) => return Outcome::failure(format!("error: could not resolve graph: {error}")),
+    };
+    let (graph, graph_digest) =
+        match compass_model::code_graph::GraphDocument::load_with_artifact_digest(&graph_path) {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                return Outcome::failure(format!("error: could not load selected graph: {error}"));
+            }
+        };
+    let hierarchy_path = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("community-hierarchy.json");
+    let hierarchy_json =
+        match hook_commands::read_text_bounded(&hierarchy_path, MAX_HIERARCHY_JSON_BYTES) {
+            Ok(hierarchy_json) => hierarchy_json,
+            Err(error) => {
+                return Outcome::failure(format!(
+                    "error: coherent community hierarchy is unavailable for {}: {error}",
+                    graph_path.display()
+                ));
+            }
+        };
+    let hierarchy = match serde_json::from_str::<CommunityHierarchy>(&hierarchy_json) {
+        Ok(hierarchy) => hierarchy,
+        Err(error) => {
+            return Outcome::failure(format!("error: invalid community hierarchy: {error}"));
+        }
+    };
+    if let Err(error) = hierarchy.validate_for_graph(
+        &graph.graph.build.generation_id,
+        &format!("sha256:{graph_digest}"),
+    ) {
+        return Outcome::failure(format!("error: {error}"));
+    }
+    match output_path {
+        Some(path) => match compass_files::write_text_atomic(&path, &hierarchy_json) {
+            Ok(()) => Outcome::success(format!("wrote {}", path.display())),
+            Err(error) => Outcome::failure(format!(
+                "error: could not write {}: {error}",
+                path.display()
+            )),
+        },
+        // Emitted unchanged: the published bytes are what a consumer digests,
+        // so stdout carries no extra trailing newline.
+        None => Outcome::success_exact(hierarchy_json),
+    }
 }
 
 fn command_export_orientation_json(args: &[String]) -> Outcome {
