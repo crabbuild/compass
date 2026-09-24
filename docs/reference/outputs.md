@@ -437,6 +437,124 @@ and discloses the rendered count. This keeps repositories with thousands of
 communities from producing an expensive rectangular edge curtain without
 changing `graph.json` or the complete overview model.
 
+When an exported graph is large but not itself aggregated — for example a
+repository under the 5,000-node export limit — the viewer derives the same
+community overview from the embedded model instead of painting thousands of
+unlabeled symbols on one screen. The overview packs one labelled bubble per
+community, sized by exact member count, with cross-community relationships
+weighted by the number of relationships they summarize and drawn in the colour
+of their dominant relationship category. Hovering an aggregated relationship
+states the exact mix (for example `12 calls · 4 imports`), so the overview
+answers what binds two subsystems, not only that they are bound. The first
+screen then reads as a map of the repository rather than a hairball.
+
+Community overviews keep their labels readable in a fitted view: the packing
+reserves label room for the communities that matter most — ranked by member
+count, cross-community coupling, and boundary content such as routes and
+database objects — the rest stay available on hover and in the inspector, and
+**Show labels** reveals every bubble label. A `Repository` path above the canvas
+shows where the reader is and returns to the overview from a community detail,
+and every community row in the inspector can open its group directly.
+
+The same communities can be read through four designs, switchable from the
+**Overview design** control in the graph toolbar:
+
+- **Bubbles** — the packed canvas map above; position and labels carry
+  importance, edge colour carries the dominant relationship kind.
+- **Matrix** — one row and column per community (bounded to the most important
+  ones, with the omitted count stated), cell saturation is the exact
+  relationship count and cell colour the dominant relationship kind; selecting a
+  cell opens that community.
+- **Area** — a strip treemap where every tile's area is exactly proportional to
+  its symbol count, including a single disclosed tail tile when the render bound
+  applies. This is the design that stays readable for repositories with
+  thousands of communities.
+- **Tiers** — importance tiers of proportional bars with coupling ribbons
+  between them, which shows how the important layer couples into the rest.
+
+Every design reads the same validated model and the same overview projection, so
+switching designs never changes a query result, an artifact, or a community
+identity. When an export records only relationship counts — the aggregated
+fallback above the node limit — the matrix and tiers say so instead of implying
+that a neutral cell colour means something.
+
+Community colours come from one shared presentation palette
+(`crates/compass-output/src/palette.rs`) used by the viewer model, the HTML and
+SVG exports, and the Obsidian export, so the same graph looks the same wherever
+it is opened. The twelve hues sit in a narrow lightness band with moderate
+chroma: no community shouts, labels stay legible in ink or on white, and the
+index alternates hue families so neighbouring communities rarely share a hue.
+Colour is presentation only — it carries no meaning that a query depends on, and
+changes to it never invalidate a graph, a community identity, or a cached
+artifact.
+
+The graph canvas is flat schematic paper: one surface colour plus a hairline
+grid, with the community shapes, relationships, and labels carrying the
+information. Light and dark operating-system themes, VS Code themes, and
+high-contrast themes all drive the same tokens, so a standalone export and the
+editor extension stay visually identical.
+
+**Automatic** layout arranges itself when a view opens: the canvas starts from
+its deterministic seeded map, runs the force simulation until it settles, and
+stops by itself — symbol canvases, community overviews, and community
+drill-downs all benefit, and the arranging screen offers "Show graph now" if a
+graph takes longer than expected. Once settled, a deterministic separation pass
+removes any bubble and label collisions the simulation left behind, so the
+arrangement follows the couplings while labels stay readable. Graphs past the
+interactive budget (1,000 nodes or 4,000 relationships) keep their deterministic
+seeded map and say `press Layout to arrange` instead of blocking the first
+frame. Choosing Circle, Concentric, Spiral, or Square grid places the seeded
+layout immediately and never starts physics; **Layout** and **Stop** remain
+explicit actions on the toolbar, and `F`, `+`, `−`, `0`, `I`, `[`, `]`, `D`,
+and `M` keep working as documented in the graph settings panel.
+
+Layout is centre-weighted. The community overview and the flat community map
+both place the most important community in the middle and settle every next one
+outward within its own radius, so large communities hold the centre while small
+communities and single symbols scatter around the outside. Automatic layout adds
+a second step after the force simulation: each settled node keeps the direction
+its couplings gave it and moves toward the radius its importance rank earns
+before collisions are separated, which is what keeps a 174-community map centred
+and comfortable instead of drifting to one side.
+
+Community overviews spend hue on signal rather than on everything. The
+communities the importance budget labels keep their palette colour and a soft
+halo in the same hue; the long tail renders as neutral context, and pointing at
+or selecting a context bubble reveals its community colour on the spot. That is
+what stops a 174-community map from reading as confetti while still letting a
+reader find any community's colour, which the inspector's community list keeps
+as the full key.
+
+Standalone documents carry a **Colour theme** control — `Auto`, `Light`, or
+`Dark` — in the graph toolbar. `Auto` follows the operating system, and pinning
+a theme keeps the export's own surfaces stable for a screenshot or a shared
+file regardless of the viewer's system. The control never appears in an editor
+or IDE host, where the editor's own theme tokens take precedence over every
+Compass token.
+
+The control rail keeps the frequent actions and gives the rest a home. Scope,
+design variant, layout, run layout, zoom, fit, graph settings, and any host
+control (such as the workbench **Filters**) stay on the rail; **node labels**,
+**relationship labels**, **fit selection**, and **reset view** live in the graph
+settings panel, and `L` / `⇧ L` toggle labels from the keyboard. The design
+switch carries one icon per design — scattered map, coupling grid, area map,
+tier rows — and names itself on hover and to assistive technology rather than
+spending rail width on a label. When the graph
+stage is narrower than 1,240 px — an editor rail and an inspector are often
+enough — the rail wraps onto a second row, the scope and design switches drop to
+icons, and the breadcrumb and legend move down with it, so no control scrolls
+out of reach. Every control keeps an accessible name whether or not its visible
+label fits.
+**Communities** and **Symbols** in the graph toolbar switch between the derived
+overview and the unmodified symbol canvas; the graph remains the same validated
+model and no artifact is rewritten.
+
+Opening a community from a derived overview arranges that community once, then
+settles into the usual paused layout. A community larger than the viewer's
+drill-down budget opens its most connected symbols first and says so in the
+view; search still reaches every symbol and opens the community that holds it.
+**Overview**, the toolbar back control, or `Escape` returns to the overview.
+
 The HTML DOM and CSS classes are presentation details, not a compatibility
 contract. Automations should consume `graph.json` or `compass export json`
 instead of scraping the viewer.

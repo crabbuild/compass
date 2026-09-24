@@ -2,6 +2,54 @@
 
 ## Unreleased
 
+- Make large `graph.html` exports readable: the viewer opens a repository on a
+  labelled community overview derived from the embedded model, weights
+  cross-community relationships by the number of relationships they summarize,
+  and switches between the overview and the symbol canvas from the graph
+  toolbar. Opening a community arranges it once, bounds very large communities
+  to their most connected symbols with an explicit notice, and returns to the
+  overview from the toolbar or `Escape`. Search reaches every symbol from the
+  overview and opens the community that holds it.
+- Offer four switchable designs of that community overview — the packed bubble
+  canvas, a coupling matrix, an area map whose tile area is exactly the symbol
+  count, and tiered bars with coupling ribbons. They read one projection of the
+  same validated model, so switching designs never changes artifacts, community
+  identities, or query results, and every design states its own bounds and
+  omissions.
+- Recolour the graph for a cleaner, more technical read: one shared twelve-hue
+  palette (narrow lightness band, moderate chroma, hue families alternating by
+  index) replaces four per-renderer copies of the old Tableau set, so the viewer,
+  HTML, SVG, and Obsidian exports finally agree. The canvas becomes flat
+  schematic paper with a hairline grid instead of decorative gradients, community
+  bubbles and tiles gain a deeper companion border, and tile labels pick the ink
+  with the higher measured contrast. Light, dark, high-contrast, and VS Code
+  themes keep driving the same tokens.
+- Let **Automatic** layout arrange itself: a view opens on its deterministic
+  seeded map, the force simulation settles and stops without another click, and
+  a deterministic separation pass clears the bubble and label collisions the
+  simulation leaves behind. Symbol canvases, community overviews, and
+  drill-downs all arrange on open; graphs past the interactive budget keep their
+  seeded map with an explicit "press Layout to arrange" hint, and fixed layout
+  styles still place immediately without starting physics.
+- Spend colour on signal in community overviews: labelled communities keep
+  their hue and gain a soft halo, the long tail renders as neutral context, and
+  hovering or selecting a context bubble reveals its community colour. Add a
+  reader-facing `Auto | Light | Dark` control to standalone exports so the dark
+  palette is available on a light system (and vice versa) without overriding an
+  editor host's own theme.
+- Give the design switch one icon per design (scattered map, coupling grid, area
+  map, tier rows) with the name and explanation on hover, and make layout
+  centre-weighted: the most important community anchors the middle, every next
+  one settles outward within its own radius, and the Automatic arrangement
+  re-centres settled nodes on their importance rank, so large communities hold
+  the centre while the long tail scatters outside.
+- Keep every graph control reachable: node labels, relationship labels, fit
+  selection, and reset view moved into the graph settings panel (with `L` and
+  `⇧ L` keyboard toggles), and the control rail now adapts to the graph stage
+  rather than the window — below 1,240 px it wraps onto a second row, drops the
+  scope switch to icons, and moves the breadcrumb with it, so nothing is hidden
+  behind a horizontal scroll.
+
 ## 0.3.29 - 2026-09-23
 
 - Spend a `--source` request on the declaration. `compass explain <symbol>
