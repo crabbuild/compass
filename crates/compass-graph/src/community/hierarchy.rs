@@ -467,11 +467,15 @@ impl CommunityHierarchy {
                 if group.index != index {
                     return Err(invalid("group indices must be dense and ordered"));
                 }
-                if !is_group_signature(&group.signature)
-                    || group.id != group_id(level.level, &group.signature)
-                {
+                if !is_group_signature(&group.signature) {
+                    return Err(invalid("group signatures must be digests"));
+                }
+                // Reconciliation rewrites an id to the previous build's, so an
+                // id has to be a well-formed identity of its level rather than
+                // the digest of this build's membership.
+                if !is_group_id(level.level, &group.id) {
                     return Err(invalid(
-                        "group ids must be the evidence signature of their level",
+                        "group ids must name their level and carry a signature",
                     ));
                 }
                 if group.member_count == 0 {
@@ -572,11 +576,99 @@ impl CommunityHierarchy {
         Ok(())
     }
 
+    /// Recompute the artifact digest after reconciliation rewrote group ids.
+    ///
+    /// Reconciliation changes identity, never membership, so the tree still
+    /// has to satisfy the same validation before the digest is republished.
+    pub fn reseal(&mut self) -> Result<(), CommunityHierarchyArtifactError> {
+        self.result_digest = self.calculate_digest()?;
+        self.validate()
+    }
+
     fn calculate_digest(&self) -> Result<String, serde_json::Error> {
         let mut canonical = self.clone();
         canonical.result_digest.clear();
         let bytes = serde_json::to_vec(&canonical)?;
         Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+    }
+}
+
+/// How much of a previous group's membership a successor must cover to inherit
+/// its identity, and how close two candidates may be before the match is
+/// reported as ambiguous instead of guessed.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconcilePolicy {
+    pub keep_threshold: f64,
+    pub ambiguity_margin: f64,
+    pub max_events: usize,
+}
+
+impl Default for ReconcilePolicy {
+    fn default() -> Self {
+        Self {
+            keep_threshold: 0.5,
+            ambiguity_margin: 0.05,
+            max_events: 256,
+        }
+    }
+}
+
+/// What happened to a group between two builds.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HierarchyEventKind {
+    Stable,
+    Split,
+    Merged,
+    Appeared,
+    Disappeared,
+    /// Two candidates were close enough that choosing one would invent a fact.
+    Ambiguous,
+}
+
+/// One bounded, evidence-carrying entry in a reconciliation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HierarchyEvent {
+    pub kind: HierarchyEventKind,
+    pub level: usize,
+    /// Previous-build group ids involved, sorted.
+    pub previous_ids: Vec<String>,
+    /// New-build group ids involved, sorted.
+    pub next_ids: Vec<String>,
+    /// Best overlap ratio that justifies this entry.
+    pub overlap: f64,
+    /// Members involved on the new side, or the previous side for a disappearance.
+    pub member_count: usize,
+}
+
+/// The counts and the bounded event list for one reconciliation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HierarchyReconciliation {
+    pub policy: ReconcilePolicy,
+    pub matched: usize,
+    pub stable: usize,
+    pub split: usize,
+    pub merged: usize,
+    pub appeared: usize,
+    pub disappeared: usize,
+    pub ambiguous: usize,
+    pub events: Vec<HierarchyEvent>,
+    /// Events beyond the policy bound, counted exactly rather than dropped.
+    pub omitted_events: usize,
+}
+
+impl HierarchyReconciliation {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.matched == 0
+            && self.split == 0
+            && self.merged == 0
+            && self.appeared == 0
+            && self.disappeared == 0
+            && self.ambiguous == 0
     }
 }
 
@@ -778,6 +870,403 @@ pub fn build_community_hierarchy(
 }
 
 /// A level while it is being derived, before the hierarchy is ordered.
+/// The member nodes of every group, per level.
+///
+/// The artifact deliberately stores no node ids, so the published partition is
+/// supplied alongside it. Comparing raw node ids is the only way to see that a
+/// community split: the successor communities are new communities whose
+/// signatures have nothing in common with their predecessor's. Levels are
+/// coarsest first, matching the artifact's order.
+fn level_community_sets(
+    hierarchy: &CommunityHierarchy,
+    communities: &Communities,
+) -> Vec<Vec<BTreeSet<String>>> {
+    let mut levels = vec![Vec::new(); hierarchy.levels.len()];
+    let Some(finest) = hierarchy.levels.last() else {
+        return levels;
+    };
+    if let Some(slot) = levels.last_mut() {
+        *slot = finest
+            .groups
+            .iter()
+            .map(|group| {
+                group
+                    .community
+                    .and_then(|community| communities.get(&community))
+                    .map(|members| members.iter().cloned().collect::<BTreeSet<_>>())
+                    .unwrap_or_default()
+            })
+            .collect();
+    }
+    for position in (0..hierarchy.levels.len().saturating_sub(1)).rev() {
+        let Some(finer) = levels.get(position + 1).cloned() else {
+            continue;
+        };
+        let Some(level) = hierarchy.levels.get(position) else {
+            continue;
+        };
+        let sets = level
+            .groups
+            .iter()
+            .map(|group| {
+                let mut members = BTreeSet::new();
+                for child in &group.child_indices {
+                    if let Some(child_members) = finer.get(*child) {
+                        members.extend(child_members.iter().cloned());
+                    }
+                }
+                members
+            })
+            .collect::<Vec<_>>();
+        if let Some(slot) = levels.get_mut(position) {
+            *slot = sets;
+        }
+    }
+    levels
+}
+
+/// Which group of the level above contains each group of a level.
+fn level_parents(hierarchy: &CommunityHierarchy) -> Vec<Vec<Option<usize>>> {
+    let mut parents = vec![Vec::new(); hierarchy.levels.len()];
+    for position in 0..hierarchy.levels.len().saturating_sub(1) {
+        let (Some(coarser), Some(finer)) = (
+            hierarchy.levels.get(position),
+            hierarchy.levels.get(position + 1),
+        ) else {
+            continue;
+        };
+        let mut map = vec![None; finer.groups.len()];
+        for group in &coarser.groups {
+            for child in &group.child_indices {
+                if let Some(slot) = map.get_mut(*child) {
+                    *slot = Some(group.index);
+                }
+            }
+        }
+        if let Some(slot) = parents.get_mut(position + 1) {
+            *slot = map;
+        }
+    }
+    parents
+}
+
+fn jaccard(left: &BTreeSet<String>, right: &BTreeSet<String>) -> f64 {
+    let union = left.union(right).count();
+    if union == 0 {
+        return 0.0;
+    }
+    left.intersection(right).count() as f64 / union as f64
+}
+
+/// Every previous group with the new groups it overlaps enough to be related to,
+/// strongest first.
+fn overlap_matrix(
+    previous: &[BTreeSet<String>],
+    next: &[BTreeSet<String>],
+    threshold: f64,
+) -> Vec<Vec<(f64, usize)>> {
+    previous
+        .iter()
+        .map(|previous_members| {
+            let mut row = next
+                .iter()
+                .enumerate()
+                .map(|(index, next_members)| (jaccard(previous_members, next_members), index))
+                .filter(|(overlap, _)| *overlap >= threshold)
+                .collect::<Vec<_>>();
+            row.sort_by(|left, right| {
+                right
+                    .0
+                    .partial_cmp(&left.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| left.1.cmp(&right.1))
+            });
+            row
+        })
+        .collect()
+}
+
+/// Reconcile a freshly built hierarchy against the previous one.
+///
+/// Identity only: a group that survives keeps the previous build's id so a
+/// reader's vocabulary outlives the rebuild, and the event list says exactly
+/// what split, merged, appeared, or disappeared. Membership is never changed,
+/// no label or evidence block is copied from the previous build, and a group
+/// with two equally good successors is reported as `ambiguous` rather than
+/// resolved by picking one.
+pub fn reconcile_hierarchy(
+    previous: &CommunityHierarchy,
+    previous_communities: &Communities,
+    next: &mut CommunityHierarchy,
+    next_communities: &Communities,
+    policy: &ReconcilePolicy,
+) -> Result<HierarchyReconciliation, CommunityHierarchyArtifactError> {
+    if !policy.keep_threshold.is_finite()
+        || !(0.0..=1.0).contains(&policy.keep_threshold)
+        || !policy.ambiguity_margin.is_finite()
+        || policy.ambiguity_margin < 0.0
+        || policy.max_events == 0
+    {
+        return Err(CommunityHierarchyArtifactError::InvalidEvidence(
+            "reconcile policy is outside its domain".to_owned(),
+        ));
+    }
+    let previous_sets = level_community_sets(previous, previous_communities);
+    let next_sets = level_community_sets(next, next_communities);
+    let previous_parents = level_parents(previous);
+    let next_parents = level_parents(next);
+    let mut events = Vec::new();
+    let mut matched = 0usize;
+    let mut ambiguous = 0usize;
+    let mut parent_matches = Vec::<HashMap<usize, usize>>::new();
+    for position in 0..next.levels.len().min(previous.levels.len()) {
+        // Identity facts, owned up front: inheriting an id mutates the level
+        // this loop also reads.
+        let Some(previous_level_number) = previous.levels.get(position).map(|level| level.level)
+        else {
+            continue;
+        };
+        let Some(next_level_number) = next.levels.get(position).map(|level| level.level) else {
+            continue;
+        };
+        let previous_ids = previous.levels[position]
+            .groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect::<Vec<_>>();
+        let previous_members = previous.levels[position]
+            .groups
+            .iter()
+            .map(|group| group.member_count)
+            .collect::<Vec<_>>();
+        let next_ids = next.levels[position]
+            .groups
+            .iter()
+            .map(|group| group.id.clone())
+            .collect::<Vec<_>>();
+        let next_members = next.levels[position]
+            .groups
+            .iter()
+            .map(|group| group.member_count)
+            .collect::<Vec<_>>();
+        let (Some(previous_sets), Some(next_sets)) =
+            (previous_sets.get(position), next_sets.get(position))
+        else {
+            continue;
+        };
+        let rows = overlap_matrix(previous_sets, next_sets, policy.keep_threshold);
+        let mut predecessors = vec![Vec::<usize>::new(); next_sets.len()];
+        for (previous_index, row) in rows.iter().enumerate() {
+            for (_, next_index) in row {
+                if let Some(slot) = predecessors.get_mut(*next_index) {
+                    slot.push(previous_index);
+                }
+            }
+        }
+        let parent_match = parent_matches.last().cloned().unwrap_or_default();
+        let previous_parent_of = |index: usize| -> Option<usize> {
+            previous_parents
+                .get(position)
+                .and_then(|parents| parents.get(index).copied().flatten())
+        };
+        let next_parent_of = |index: usize| -> Option<usize> {
+            next_parents
+                .get(position)
+                .and_then(|parents| parents.get(index).copied().flatten())
+        };
+        let mut matched_here = HashMap::<usize, usize>::new();
+        for (previous_index, row) in rows.iter().enumerate() {
+            let Some(previous_id) = previous_ids.get(previous_index) else {
+                continue;
+            };
+            match row.as_slice() {
+                [] => {}
+                [(overlap, next_index)] => {
+                    // Two predecessors for one successor is a merge, not a
+                    // rename, so only an unshared successor inherits an id.
+                    if predecessors.get(*next_index).map_or(0, Vec::len) > 1 {
+                        continue;
+                    }
+                    let Some(next_id) = next_ids.get(*next_index) else {
+                        continue;
+                    };
+                    if position > 0
+                        && let (Some(previous_parent), Some(next_parent)) = (
+                            previous_parent_of(previous_index),
+                            next_parent_of(*next_index),
+                        )
+                        && parent_match.get(&previous_parent) != Some(&next_parent)
+                    {
+                        continue;
+                    }
+                    if let Some(group) = next
+                        .levels
+                        .get_mut(position)
+                        .and_then(|level| level.groups.get_mut(*next_index))
+                    {
+                        group.id = previous_id.clone();
+                    }
+                    matched_here.insert(previous_index, *next_index);
+                    matched += 1;
+                    events.push(HierarchyEvent {
+                        kind: HierarchyEventKind::Stable,
+                        level: next_level_number,
+                        previous_ids: vec![previous_id.clone()],
+                        next_ids: vec![next_id.clone()],
+                        overlap: *overlap,
+                        member_count: next_members.get(*next_index).copied().unwrap_or_default(),
+                    });
+                }
+                [(best, best_index), (runner_up, _), ..] => {
+                    // Two successors this close mean the evidence does not name
+                    // a single heir, so no id is inherited.
+                    if best - runner_up <= policy.ambiguity_margin {
+                        ambiguous += 1;
+                        events.push(HierarchyEvent {
+                            kind: HierarchyEventKind::Ambiguous,
+                            level: next_level_number,
+                            previous_ids: vec![previous_id.clone()],
+                            next_ids: row
+                                .iter()
+                                .filter_map(|(_, next_index)| next_ids.get(*next_index).cloned())
+                                .collect(),
+                            overlap: *best,
+                            member_count: next_members
+                                .get(*best_index)
+                                .copied()
+                                .unwrap_or_default(),
+                        });
+                    }
+                }
+            }
+        }
+        for (previous_index, row) in rows.iter().enumerate() {
+            if row.len() < 2 {
+                continue;
+            }
+            let Some(previous_id) = previous_ids.get(previous_index) else {
+                continue;
+            };
+            events.push(HierarchyEvent {
+                kind: HierarchyEventKind::Split,
+                level: next_level_number,
+                previous_ids: vec![previous_id.clone()],
+                next_ids: row
+                    .iter()
+                    .filter_map(|(_, next_index)| next_ids.get(*next_index).cloned())
+                    .collect(),
+                overlap: row.first().map_or(0.0, |(overlap, _)| *overlap),
+                member_count: row
+                    .iter()
+                    .map(|(_, next_index)| {
+                        next_members.get(*next_index).copied().unwrap_or_default()
+                    })
+                    .sum(),
+            });
+        }
+        for (next_index, previous_indices) in predecessors.iter().enumerate() {
+            if previous_indices.len() < 2 {
+                continue;
+            }
+            let Some(next_id) = next_ids.get(next_index) else {
+                continue;
+            };
+            events.push(HierarchyEvent {
+                kind: HierarchyEventKind::Merged,
+                level: next_level_number,
+                previous_ids: previous_indices
+                    .iter()
+                    .filter_map(|index| previous_ids.get(*index).cloned())
+                    .collect(),
+                next_ids: vec![next_id.clone()],
+                overlap: previous_indices
+                    .iter()
+                    .filter_map(|index| {
+                        rows.get(*index).and_then(|row| {
+                            row.iter()
+                                .find(|(_, candidate)| *candidate == next_index)
+                                .map(|(overlap, _)| *overlap)
+                        })
+                    })
+                    .fold(0.0_f64, f64::max),
+                member_count: next_members.get(next_index).copied().unwrap_or_default(),
+            });
+        }
+        for (previous_index, previous_id) in previous_ids.iter().enumerate() {
+            let related = rows.get(previous_index).is_some_and(|row| !row.is_empty());
+            if !related && !matched_here.contains_key(&previous_index) {
+                events.push(HierarchyEvent {
+                    kind: HierarchyEventKind::Disappeared,
+                    level: previous_level_number,
+                    previous_ids: vec![previous_id.clone()],
+                    next_ids: Vec::new(),
+                    overlap: 0.0,
+                    member_count: previous_members
+                        .get(previous_index)
+                        .copied()
+                        .unwrap_or_default(),
+                });
+            }
+        }
+        let claimed = matched_here.values().copied().collect::<BTreeSet<_>>();
+        for (next_index, next_id) in next_ids.iter().enumerate() {
+            if claimed.contains(&next_index) || !predecessors[next_index].is_empty() {
+                continue;
+            }
+            events.push(HierarchyEvent {
+                kind: HierarchyEventKind::Appeared,
+                level: next_level_number,
+                previous_ids: Vec::new(),
+                next_ids: vec![next_id.clone()],
+                overlap: 0.0,
+                member_count: next_members.get(next_index).copied().unwrap_or_default(),
+            });
+        }
+        parent_matches.push(matched_here);
+    }
+    events.sort_by(|left, right| {
+        left.level
+            .cmp(&right.level)
+            .then_with(|| left.kind.cmp(&right.kind))
+            .then_with(|| left.previous_ids.cmp(&right.previous_ids))
+            .then_with(|| left.next_ids.cmp(&right.next_ids))
+    });
+    let mut counts = BTreeMap::<HierarchyEventKind, usize>::new();
+    for event in &events {
+        *counts.entry(event.kind).or_default() += 1;
+    }
+    let omitted_events = events.len().saturating_sub(policy.max_events);
+    events.truncate(policy.max_events);
+    next.reseal()?;
+    Ok(HierarchyReconciliation {
+        policy: *policy,
+        matched,
+        stable: counts
+            .get(&HierarchyEventKind::Stable)
+            .copied()
+            .unwrap_or_default(),
+        split: counts
+            .get(&HierarchyEventKind::Split)
+            .copied()
+            .unwrap_or_default(),
+        merged: counts
+            .get(&HierarchyEventKind::Merged)
+            .copied()
+            .unwrap_or_default(),
+        appeared: counts
+            .get(&HierarchyEventKind::Appeared)
+            .copied()
+            .unwrap_or_default(),
+        disappeared: counts
+            .get(&HierarchyEventKind::Disappeared)
+            .copied()
+            .unwrap_or_default(),
+        ambiguous,
+        events,
+        omitted_events,
+    })
+}
+
 struct LevelState {
     /// The graph this level partitions: the typed projection for the finest
     /// level, and the previous level's group graph above it.
@@ -843,7 +1332,14 @@ fn finest_level(
             let quality = metrics.get(index);
             GroupState {
                 communities: vec![*community],
-                signature: group_signature(&[*community], community_signatures),
+                // The finest level *is* the published partition, so its
+                // signature is the community's own member signature: the same
+                // community keeps that signature even when its numeric id
+                // moves, which is what two builds can compare.
+                signature: community_signatures
+                    .get(community)
+                    .cloned()
+                    .unwrap_or_else(|| group_signature(&[*community], community_signatures)),
                 member_count: members.len(),
                 children: Vec::new(),
                 community: Some(*community),
@@ -1725,6 +2221,13 @@ pub fn is_group_signature(value: &str) -> bool {
             .as_bytes()
             .iter()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+/// A published group id names its level and carries a 16-hex signature.
+#[must_use]
+pub fn is_group_id(level: usize, id: &str) -> bool {
+    id.strip_prefix(&format!("h{level}-"))
+        .is_some_and(is_group_signature)
 }
 
 fn is_sha256_identity(value: &str) -> bool {

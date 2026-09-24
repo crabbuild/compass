@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 use compass_graph::{
     Communities, CommunityError, CommunityHierarchy, CommunityLimits, CommunityProfile,
     CommunityRequest, CommunityResult, HierarchyBudget, HierarchyLabelRule, HierarchyRequest,
-    LevelMerge, ResolutionPolicy, build_communities, build_community_hierarchy,
+    LevelMerge, ReconcilePolicy, ResolutionPolicy, build_communities, build_community_hierarchy,
+    reconcile_hierarchy,
 };
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
@@ -636,6 +637,197 @@ fn boundary_kinds_are_counted_and_the_exact_set_is_recorded() -> TestResult {
     assert_eq!(
         root_boundary, 2,
         "coarser levels inherit boundary accounting"
+    );
+    Ok(())
+}
+
+#[test]
+fn reconciliation_keeps_ids_and_never_changes_membership() -> TestResult {
+    let document = clustered_document(6, 3, true);
+    let result = partition(&document)?;
+    let reconciliation = |budget: HierarchyBudget| -> Result<_, Box<dyn std::error::Error>> {
+        let previous = hierarchy_of(
+            &document,
+            &result.communities,
+            result.quality.resolution,
+            budget,
+        )?;
+        let mut next = hierarchy_of(
+            &document,
+            &result.communities,
+            result.quality.resolution,
+            budget,
+        )?;
+        let before = next.levels.clone();
+        let report = reconcile_hierarchy(
+            &previous,
+            &result.communities,
+            &mut next,
+            &result.communities,
+            &ReconcilePolicy::default(),
+        )?;
+        Ok((report, before, next))
+    };
+
+    // An unchanged rebuild keeps every id and reports nothing else.
+    let (report, _, next) = reconciliation(HierarchyBudget::default())?;
+    assert_eq!(report.split, 0);
+    assert_eq!(report.merged, 0);
+    assert_eq!(report.appeared, 0);
+    assert_eq!(report.disappeared, 0);
+    assert_eq!(report.ambiguous, 0);
+    assert!(report.matched > 0);
+    assert_eq!(
+        report.stable,
+        next.levels
+            .iter()
+            .map(|level| level.groups.len())
+            .sum::<usize>()
+    );
+
+    // Identity is the only thing reconciliation may touch.
+    let (report, before, next) = reconciliation(HierarchyBudget::default())?;
+    assert!(!report.events.is_empty());
+    for (previous_level, next_level) in before.iter().zip(next.levels.iter()) {
+        assert_eq!(previous_level.groups.len(), next_level.groups.len());
+        for (previous_group, next_group) in previous_level.groups.iter().zip(&next_level.groups) {
+            assert_eq!(previous_group.member_count, next_group.member_count);
+            assert_eq!(previous_group.child_indices, next_group.child_indices);
+            assert_eq!(previous_group.community, next_group.community);
+            assert_eq!(previous_group.signature, next_group.signature);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn reconciliation_reports_splits_ambiguity_and_bounded_events() -> TestResult {
+    let document = clustered_document(1, 4, false);
+    let mut sorted = document
+        .nodes
+        .iter()
+        .map(|node| node.id.clone())
+        .collect::<Vec<_>>();
+    sorted.sort();
+    let previous_communities = Communities::from([(0usize, sorted.clone())]);
+    let mut split = Communities::new();
+    split.insert(0, sorted.iter().take(2).cloned().collect::<Vec<_>>());
+    split.insert(1, sorted.iter().skip(2).cloned().collect::<Vec<_>>());
+    let previous = hierarchy_of(
+        &document,
+        &previous_communities,
+        1.0,
+        HierarchyBudget::default(),
+    )?;
+    let mut next = hierarchy_of(&document, &split, 1.0, HierarchyBudget::default())?;
+    let structure = next
+        .levels
+        .iter()
+        .map(|level| {
+            level
+                .groups
+                .iter()
+                .map(|group| {
+                    (
+                        group.member_count,
+                        group.child_indices.clone(),
+                        group.community,
+                        group.signature.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let report = reconcile_hierarchy(
+        &previous,
+        &previous_communities,
+        &mut next,
+        &split,
+        &ReconcilePolicy::default(),
+    )?;
+    let after = next
+        .levels
+        .iter()
+        .map(|level| {
+            level
+                .groups
+                .iter()
+                .map(|group| {
+                    (
+                        group.member_count,
+                        group.child_indices.clone(),
+                        group.community,
+                        group.signature.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(structure, after, "membership is never reconciled");
+    assert!(
+        report.ambiguous + report.split >= 1,
+        "one previous group over two successors is reported, not resolved: {report:?}"
+    );
+    assert_eq!(
+        report.policy.max_events,
+        ReconcilePolicy::default().max_events
+    );
+
+    // A tiny bound truncates the list but keeps the accounting exact.
+    let mut bounded_next = hierarchy_of(&document, &split, 1.0, HierarchyBudget::default())?;
+    let bounded = reconcile_hierarchy(
+        &previous,
+        &previous_communities,
+        &mut bounded_next,
+        &split,
+        &ReconcilePolicy {
+            max_events: 1,
+            ..ReconcilePolicy::default()
+        },
+    )?;
+    let total = bounded.stable
+        + bounded.split
+        + bounded.merged
+        + bounded.appeared
+        + bounded.disappeared
+        + bounded.ambiguous;
+    assert_eq!(bounded.events.len(), 1);
+    assert_eq!(bounded.omitted_events, total.saturating_sub(1));
+    Ok(())
+}
+
+#[test]
+fn an_edit_sequence_reports_appeared_and_disappeared_groups() -> TestResult {
+    let document = clustered_document(5, 3, true);
+    let before = hierarchy(&document, HierarchyBudget::default())?;
+    let mut shrunk = document.clone();
+    shrunk.nodes.retain(|node| !node.id.starts_with("cluster0"));
+    shrunk.links.retain(|edge| {
+        !edge.source.starts_with("cluster0") && !edge.target.starts_with("cluster0")
+    });
+    let mut after = hierarchy(&shrunk, HierarchyBudget::default())?;
+    let report = reconcile_hierarchy(
+        &before,
+        &partition(&document)?.communities,
+        &mut after,
+        &partition(&shrunk)?.communities,
+        &ReconcilePolicy::default(),
+    )?;
+    assert!(
+        report.disappeared >= 1,
+        "a removed group is reported: {report:?}"
+    );
+    let disappeared = report
+        .events
+        .iter()
+        .filter(|event| event.kind == compass_graph::HierarchyEventKind::Disappeared)
+        .collect::<Vec<_>>();
+    assert!(!disappeared.is_empty());
+    assert!(
+        disappeared
+            .iter()
+            .all(|event| !event.previous_ids.is_empty() && event.next_ids.is_empty()),
+        "a disappearance names the previous group and no successor"
     );
     Ok(())
 }

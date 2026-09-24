@@ -23,9 +23,9 @@ pub use cluster::{
 };
 pub use community::{
     BOUNDARY_KINDS, COMMUNITY_HIERARCHY_BUDGET, COMMUNITY_HIERARCHY_MERGE_POLICY,
-    COMMUNITY_HIERARCHY_SCHEMA, COMMUNITY_QUALITY_SCHEMA, COMPATIBILITY_CLUSTER_ALGORITHM,
-    COMPATIBILITY_CLUSTER_LIMITS, COMPATIBILITY_CLUSTER_QUALITY, COMPATIBILITY_CLUSTER_SEED,
-    COMPATIBILITY_CLUSTER_SEED_TEXT, COMPATIBILITY_CLUSTER_SELECTOR,
+    COMMUNITY_HIERARCHY_SCHEMA, COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM, COMMUNITY_QUALITY_SCHEMA,
+    COMPATIBILITY_CLUSTER_ALGORITHM, COMPATIBILITY_CLUSTER_LIMITS, COMPATIBILITY_CLUSTER_QUALITY,
+    COMPATIBILITY_CLUSTER_SEED, COMPATIBILITY_CLUSTER_SEED_TEXT, COMPATIBILITY_CLUSTER_SELECTOR,
     COMPATIBILITY_CLUSTER_TOPOLOGY, CandidateAgreement, CommunityCandidateSummary,
     CommunityDetectorError, CommunityError, CommunityExecution, CommunityHierarchy,
     CommunityHierarchyArtifactError, CommunityHierarchyDraft, CommunityHierarchyLevels,
@@ -33,12 +33,14 @@ pub use community::{
     CommunityQualityArtifact, CommunityQualityArtifactError, CommunityQualityError,
     CommunityRequest, CommunityResult, CommunityTopologyError, DEFAULT_LEVEL_TARGET,
     DEFAULT_MAX_LEVELS, DEFAULT_ROOT_TARGET, FallbackReason, GroupQuality, HierarchyBudget,
-    HierarchyGroup, HierarchyLabel, HierarchyLabelRule, HierarchyLevel, HierarchyRequest,
-    LABEL_COVERAGE_THRESHOLD, LevelMerge, MIN_LEVEL_RESOLUTION, PartitionQuality,
-    PreviousCommunities, QUALITY_CLUSTER_ALGORITHM, QUALITY_CLUSTER_LIMITS,
-    QUALITY_CLUSTER_QUALITY, QUALITY_CLUSTER_SELECTOR, QUALITY_CLUSTER_TOPOLOGY, ResolutionPolicy,
+    HierarchyEvent, HierarchyEventKind, HierarchyGroup, HierarchyLabel, HierarchyLabelRule,
+    HierarchyLevel, HierarchyReconciliation, HierarchyRequest, LABEL_COVERAGE_THRESHOLD,
+    LevelMerge, MIN_LEVEL_RESOLUTION, PartitionQuality, PreviousCommunities,
+    QUALITY_CLUSTER_ALGORITHM, QUALITY_CLUSTER_LIMITS, QUALITY_CLUSTER_QUALITY,
+    QUALITY_CLUSTER_SELECTOR, QUALITY_CLUSTER_TOPOLOGY, ReconcilePolicy, ResolutionPolicy,
     TopologyEvidence, adjusted_mutual_information, adjusted_rand_index, boundary_kind_names,
-    build_communities, build_community_hierarchy, evaluate_partition_quality,
+    build_communities, build_community_hierarchy, evaluate_partition_quality, group_id,
+    is_group_id, is_group_signature, reconcile_hierarchy,
 };
 pub use compass_languages::{RawEdgeRecord, RawNodeRecord};
 use dedup::deduplicate_owned;
