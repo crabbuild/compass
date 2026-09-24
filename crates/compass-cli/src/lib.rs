@@ -3382,6 +3382,7 @@ fn validate_export_options(
             "--graph",
             "--labels",
             "--node-limit",
+            "--hierarchy-level",
             "--no-viz",
             "--output",
             "--view",
@@ -3411,6 +3412,7 @@ fn validate_export_options(
             "--graph",
             "--labels",
             "--node-limit",
+            "--hierarchy-level",
             "--view",
             "--direction",
             "--depth",
@@ -3560,6 +3562,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
     let mut max_diagram_edges = 24_usize;
     let mut node_limit = 5000_isize;
     let mut community = None;
+    let mut hierarchy_level = None;
     let mut no_viz = false;
     let mut obsidian_dir = default_graph_path()
         .parent()
@@ -3708,6 +3711,35 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 node_limit = value;
                 index += 2;
             }
+            "--hierarchy-level" if matches!(format, "html" | "workbench-json") => {
+                seen_options.insert("--hierarchy-level");
+                let Some(value) = next().and_then(|value| value.parse::<usize>().ok()) else {
+                    return Outcome::failure(
+                        "error: --hierarchy-level must be a non-negative integer".to_owned(),
+                    );
+                };
+                if hierarchy_level.is_some() {
+                    return Outcome::failure("error: duplicate --hierarchy-level".to_owned());
+                }
+                hierarchy_level = Some(value);
+                index += 2;
+            }
+            value
+                if matches!(format, "html" | "workbench-json")
+                    && value.starts_with("--hierarchy-level=") =>
+            {
+                seen_options.insert("--hierarchy-level");
+                let Some(value) = value
+                    .strip_prefix("--hierarchy-level=")
+                    .and_then(|value| value.parse::<usize>().ok())
+                else {
+                    return Outcome::failure(
+                        "error: --hierarchy-level must be a non-negative integer".to_owned(),
+                    );
+                };
+                hierarchy_level = Some(value);
+                index += 1;
+            }
             "--community" if matches!(format, "json" | "viewer-json") => {
                 seen_options.insert("--community");
                 let Some(value) = next().and_then(|value| value.parse::<usize>().ok()) else {
@@ -3743,6 +3775,12 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
             "--community" => {
                 return Outcome::failure(
                     "error: --community is only valid with export json".to_owned(),
+                );
+            }
+            "--hierarchy-level" => {
+                return Outcome::failure(
+                    "error: --hierarchy-level is only valid with export html or export workbench-json"
+                        .to_owned(),
                 );
             }
             value if value.starts_with("--community=") => {
@@ -4074,6 +4112,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                         relations: &view_relations,
                         program_path: program_path.as_deref(),
                     },
+                    hierarchy_level,
                 )
                 .and_then(|model| {
                     let source_navigation = export_source_navigation(&inputs, &graph_path);
@@ -4097,6 +4136,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                         relations: &view_relations,
                         program_path: program_path.as_deref(),
                     },
+                    hierarchy_level,
                 )
                 .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
                 .map(ExportOutput::text)
@@ -4149,6 +4189,7 @@ fn command_export(frontend: Frontend, args: &[String]) -> Outcome {
                 relations: &view_relations,
                 program_path: program_path.as_deref(),
             },
+            hierarchy_level,
         )
         .and_then(|model| serde_json::to_string(&model).map_err(|error| error.to_string()))
         .map(ExportOutput::text),
@@ -4261,6 +4302,7 @@ fn build_export_workbench(
     node_limit: isize,
     requested_views: &[ExportViewRequest],
     options: &ExportViewOptions<'_>,
+    hierarchy_level: Option<usize>,
 ) -> Result<WorkbenchModel, String> {
     let default_views = [ExportViewRequest::Code];
     let requests = if requested_views.is_empty() {
@@ -4287,6 +4329,17 @@ fn build_export_workbench(
         let (base_id, view) = match request {
             ExportViewRequest::Code => {
                 let hierarchy = load_export_hierarchy(graph_path)?;
+                if let Some(level) = hierarchy_level {
+                    let levels = hierarchy
+                        .as_ref()
+                        .map_or(0, |artifact| artifact.levels.len());
+                    if level >= levels {
+                        return Err(format!(
+                            "--hierarchy-level {level} is unavailable: the published hierarchy at {} has {levels} level(s)",
+                            graph_path.display()
+                        ));
+                    }
+                }
                 let bundle = graph_view_model_bundle_document_with_hierarchy(
                     &inputs.document,
                     &inputs.communities,
@@ -4296,6 +4349,7 @@ fn build_export_workbench(
                         .as_ref()
                         .map(CommunityHierarchy::levels_view)
                         .as_ref(),
+                    hierarchy_level,
                 )
                 .map_err(|error| error.to_string())?;
                 let coverage = if bundle.truncated {
@@ -5336,7 +5390,7 @@ fn export_help() -> String {
 
 fn export_workbench_help(format: &str) -> String {
     format!(
-        "Usage: compass export {format} [--graph PATH] [--labels PATH] [--node-limit N] [--output HTML] [VIEW ...]\n\nViews are emitted in command order into one navigable workbench:\n  --code-graph\n  --architecture-graph\n  --call-graph SYMBOL\n  --impact-graph SYMBOL\n  --affected-graph NODE\n  --history-graph OLD..NEW\n  --artifact-lens dependencies|routes|data|messaging|tests|provenance\n  --view code|architecture|call:SYMBOL|impact:SYMBOL|affected:NODE|history:OLD..NEW|artifact:LENS\n\nView options:\n  --direction callers|callees|both\n  --depth N\n  --max-nodes N\n  --max-edges N\n  --relation RELATION (repeatable; affected views)\n  --include-heuristic (impact views)\n  --program PATH (Program IR enrichment for call views)"
+        "Usage: compass export {format} [--graph PATH] [--labels PATH] [--node-limit N] [--hierarchy-level N] [--output HTML] [VIEW ...]\n\nViews are emitted in command order into one navigable workbench:\n  --code-graph\n  --architecture-graph\n  --call-graph SYMBOL\n  --impact-graph SYMBOL\n  --affected-graph NODE\n  --history-graph OLD..NEW\n  --artifact-lens dependencies|routes|data|messaging|tests|provenance\n  --view code|architecture|call:SYMBOL|impact:SYMBOL|affected:NODE|history:OLD..NEW|artifact:LENS\n\nView options:\n  --direction callers|callees|both\n  --depth N\n  --max-nodes N\n  --max-edges N\n  --relation RELATION (repeatable; affected views)\n  --include-heuristic (impact views)\n  --program PATH (Program IR enrichment for call views)\n  --hierarchy-level N (code views; level the page opens on, default 0)"
     )
 }
 

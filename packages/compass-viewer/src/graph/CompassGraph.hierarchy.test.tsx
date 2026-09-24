@@ -270,6 +270,30 @@ describe("hierarchy level navigation", () => {
       .toEqual(["a", "b", "c", "d"]);
   });
 
+  it("opens on the level the export asked for", () => {
+    render(
+      <CompassGraph
+        model={baseModel()}
+        hierarchy={hierarchy()}
+        initialLevel={1}
+        host={{ openSource: () => undefined, openCommunity: () => undefined }}
+      />
+    );
+    expect(latestNodes().map((node) => node.id)).toEqual(["0", "1"]);
+  });
+
+  it("falls back to the root when the requested level does not exist", () => {
+    render(
+      <CompassGraph
+        model={baseModel()}
+        hierarchy={hierarchy()}
+        initialLevel={7}
+        host={{ openSource: () => undefined, openCommunity: () => undefined }}
+      />
+    );
+    expect(latestNodes().map((node) => node.id)).toEqual(["0"]);
+  });
+
   it("keeps the derived community overview when the export has no hierarchy", () => {
     render(
       <CompassGraph

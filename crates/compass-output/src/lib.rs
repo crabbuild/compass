@@ -65,7 +65,7 @@ pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
 pub use hierarchy_view::{
     CommunityHierarchyView, HIERARCHY_VIEW_SCHEMA, HierarchyGroupView, HierarchyLevelView,
-    community_hierarchy_view,
+    HierarchyViewContext, community_hierarchy_view,
 };
 pub use history_bundle::{
     DerivedArtifactRequest, HistoricalPublicationEvidence, HistoryBundleInput,

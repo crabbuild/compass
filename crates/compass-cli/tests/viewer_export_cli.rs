@@ -347,6 +347,56 @@ fn workbench_code_view_carries_the_published_hierarchy() -> Result<(), Box<dyn E
         hierarchy["levels"][0]["groups"][0]["labelRule"],
         "dominantDirectory"
     );
+
+    // The page opens on the level the caller named, and refuses one that the
+    // published hierarchy does not have.
+    let named = support::compass_command()
+        .args([
+            "export",
+            "workbench-json",
+            "--graph",
+            hierarchy_directory
+                .path()
+                .join("compass-out/graph.json")
+                .to_string_lossy()
+                .as_ref(),
+            "--code-graph",
+            "--hierarchy-level",
+            "0",
+        ])
+        .current_dir(hierarchy_directory.path())
+        .output()?;
+    assert_eq!(
+        named.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&named.stderr)
+    );
+    let named: Value = serde_json::from_slice(&named.stdout)?;
+    assert_eq!(named["views"][0]["hierarchy"]["initialLevel"], 0);
+
+    let missing = support::compass_command()
+        .args([
+            "export",
+            "workbench-json",
+            "--graph",
+            hierarchy_directory
+                .path()
+                .join("compass-out/graph.json")
+                .to_string_lossy()
+                .as_ref(),
+            "--code-graph",
+            "--hierarchy-level",
+            "4",
+        ])
+        .current_dir(hierarchy_directory.path())
+        .output()?;
+    assert_ne!(missing.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("--hierarchy-level 4 is unavailable"),
+        "unexpected error: {}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
     Ok(())
 }
 

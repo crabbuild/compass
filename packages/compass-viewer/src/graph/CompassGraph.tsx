@@ -165,6 +165,8 @@ export type CompassGraphProps = {
    * descends one level instead of opening a community.
    */
   hierarchy?: CommunityHierarchyView | undefined;
+  /** Level the export asks the reader to open on. */
+  initialLevel?: number | undefined;
   communityDetail?: CommunityGraphDetail | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
@@ -188,6 +190,7 @@ export function CompassGraph({
   model,
   host,
   hierarchy,
+  initialLevel,
   communityDetail,
   communityLoading,
   communityError,
@@ -227,7 +230,12 @@ export function CompassGraph({
   // Which published level the reader is reading, and the groups they descended
   // through to reach it. Descending narrows the level below to one group's
   // children, so the canvas reads as a zoom instead of a redraw.
-  const [activeLevel, setActiveLevel] = useState(0);
+  const [activeLevel, setActiveLevel] = useState(() =>
+    initialLevel !== undefined
+    && hierarchy?.levels.some((level) => level.level === initialLevel)
+      ? initialLevel
+      : 0
+  );
   const [trail, setTrail] = useState<
     ReadonlyArray<{ level: number; groupIndex: number; label: string }>
   >([]);

@@ -24,6 +24,9 @@ pub struct CommunityHierarchyView {
     pub schema: &'static str,
     pub budget_identity: String,
     pub merge_policy: String,
+    /// Level the export asks the viewer to open on, when a caller chose one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_level: Option<usize>,
     pub root_target: usize,
     pub level_target: usize,
     pub max_levels: usize,
@@ -73,16 +76,34 @@ pub struct HierarchyGroupView {
 /// the symbol canvas: a level that cannot be drawn inside the budget publishes
 /// its groups and no model, so the payload stays bounded on a repository with
 /// thousands of communities.
+/// Everything a level projection needs from the export it belongs to.
+#[derive(Clone, Copy)]
+pub struct HierarchyViewContext<'a> {
+    pub document: &'a GraphDocument,
+    pub communities: &'a Communities,
+    pub community_details: &'a BTreeMap<usize, GraphViewModel>,
+    pub options: &'a HtmlOptions<'a>,
+    pub title: &'a str,
+    /// Groups a level may hold and still publish a drawable projection.
+    pub node_budget: usize,
+    /// Level the export asks the viewer to open on.
+    pub initial_level: Option<usize>,
+}
+
 #[must_use]
 pub fn community_hierarchy_view(
     hierarchy: &CommunityHierarchyLevels<'_>,
-    document: &GraphDocument,
-    communities: &Communities,
-    community_details: &BTreeMap<usize, GraphViewModel>,
-    options: &HtmlOptions<'_>,
-    title: &str,
-    node_budget: usize,
+    context: &HierarchyViewContext<'_>,
 ) -> CommunityHierarchyView {
+    let HierarchyViewContext {
+        document,
+        communities,
+        community_details,
+        options,
+        title,
+        node_budget,
+        initial_level,
+    } = *context;
     let members_by_group = level_members(hierarchy, communities);
     let levels = hierarchy
         .levels
@@ -157,6 +178,7 @@ pub fn community_hierarchy_view(
         schema: HIERARCHY_VIEW_SCHEMA,
         budget_identity: hierarchy.budget_identity.to_owned(),
         merge_policy: hierarchy.merge_policy.to_owned(),
+        initial_level,
         root_target: hierarchy.budget.root_target,
         level_target: hierarchy.budget.level_target,
         max_levels: hierarchy.budget.max_levels,

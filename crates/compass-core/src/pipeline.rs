@@ -4135,6 +4135,7 @@ fn build_graph_inner_unscoped(
                         ..HtmlOptions::default()
                     },
                     Some(&hierarchy_levels),
+                    None,
                 ) {
                     Ok(rendered) => rendered,
                     Err(OutputError::HtmlTooLarge { .. }) => None,

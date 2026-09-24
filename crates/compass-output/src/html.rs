@@ -170,19 +170,23 @@ pub fn graph_view_model_bundle_document_with_hierarchy(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
     hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
+    initial_level: Option<usize>,
 ) -> Result<GraphViewBundle, OutputError> {
     let mut bundle = graph_view_model_bundle_document(document, communities, output_path, options)?;
     if let Some(hierarchy) = hierarchy {
         let title = sanitize_label(&bundle.overview.title);
         bundle.hierarchy = Some(crate::hierarchy_view::community_hierarchy_view(
             hierarchy,
-            document,
-            communities,
-            &bundle.community_details,
-            options,
-            &title,
-            usize::try_from(options.node_limit.unwrap_or_else(viz_node_limit))
-                .unwrap_or(EMBEDDED_DETAIL_NODE_BUDGET),
+            &crate::hierarchy_view::HierarchyViewContext {
+                document,
+                communities,
+                community_details: &bundle.community_details,
+                options,
+                title: &title,
+                node_budget: usize::try_from(options.node_limit.unwrap_or_else(viz_node_limit))
+                    .unwrap_or(EMBEDDED_DETAIL_NODE_BUDGET),
+                initial_level,
+            },
         ));
     }
     Ok(bundle)
@@ -194,7 +198,7 @@ pub fn html_document(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
 ) -> Result<Option<HtmlRender>, OutputError> {
-    html_document_with_hierarchy(document, communities, output_path, options, None)
+    html_document_with_hierarchy(document, communities, output_path, options, None, None)
 }
 
 /// Render the standalone page with the published community hierarchy embedded,
@@ -205,6 +209,7 @@ pub fn html_document_with_hierarchy(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
     hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
+    initial_level: Option<usize>,
 ) -> Result<Option<HtmlRender>, OutputError> {
     let limit = options.node_limit.unwrap_or_else(viz_node_limit);
     if document.nodes.len() as isize > limit {
@@ -235,6 +240,7 @@ pub fn html_document_with_hierarchy(
                 EMBEDDED_DETAIL_EDGE_BUDGET,
             )),
             hierarchy,
+            initial_level,
         )?;
         return Ok(Some(HtmlRender {
             nodes: meta.nodes.len(),
@@ -251,6 +257,7 @@ pub fn html_document_with_hierarchy(
             options,
             None,
             hierarchy,
+            initial_level,
         )?,
         aggregated: false,
         nodes: document.nodes.len(),
@@ -404,7 +411,7 @@ pub fn write_html(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
 ) -> Result<Option<HtmlRender>, OutputError> {
-    write_html_with_hierarchy(document, communities, output_path, options, None)
+    write_html_with_hierarchy(document, communities, output_path, options, None, None)
 }
 
 /// Write the standalone page, embedding the published community hierarchy when
@@ -415,6 +422,7 @@ pub fn write_html_with_hierarchy(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
     hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
+    initial_level: Option<usize>,
 ) -> Result<Option<HtmlRender>, OutputError> {
     let output_path = output_path.as_ref();
     let owned_overlay;
@@ -429,8 +437,14 @@ pub fn write_html_with_hierarchy(
     } else {
         options.clone()
     };
-    let rendered =
-        html_document_with_hierarchy(document, communities, output_path, &effective, hierarchy)?;
+    let rendered = html_document_with_hierarchy(
+        document,
+        communities,
+        output_path,
+        &effective,
+        hierarchy,
+        initial_level,
+    )?;
     if let Some(rendered) = &rendered {
         write_text_atomic(output_path, &rendered.html)?;
     }
@@ -444,6 +458,7 @@ fn render(
     options: &HtmlOptions<'_>,
     drilldown: Option<(&GraphDocument, &Communities, usize, usize)>,
     hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
+    initial_level: Option<usize>,
 ) -> Result<String, OutputError> {
     let title = sanitize_label(&output_path.to_string_lossy());
     let mut model = crate::viewer_model::graph_view_model(
@@ -482,13 +497,16 @@ fn render(
     let hierarchy_view = hierarchy.map(|hierarchy| {
         crate::hierarchy_view::community_hierarchy_view(
             hierarchy,
-            hierarchy_document,
-            hierarchy_communities,
-            &details,
-            options,
-            &title,
-            usize::try_from(options.node_limit.unwrap_or_else(viz_node_limit))
-                .unwrap_or(EMBEDDED_DETAIL_NODE_BUDGET),
+            &crate::hierarchy_view::HierarchyViewContext {
+                document: hierarchy_document,
+                communities: hierarchy_communities,
+                community_details: &details,
+                options,
+                title: &title,
+                node_budget: usize::try_from(options.node_limit.unwrap_or_else(viz_node_limit))
+                    .unwrap_or(EMBEDDED_DETAIL_NODE_BUDGET),
+                initial_level,
+            },
         )
     });
     Ok(crate::viewer_model::shared_viewer_html_with_hierarchy(
@@ -2839,6 +2857,7 @@ mod tests {
             "graph.html",
             &HtmlOptions::default(),
             Some(&draft.levels_view()),
+            None,
         )?
         .ok_or("HTML unexpectedly skipped")?;
         assert!(
@@ -3019,6 +3038,7 @@ mod tests {
                 ..HtmlOptions::default()
             },
             Some((&graph, &communities, 2, 1)),
+            None,
             None,
         )?;
         assert!(rendered.contains("\"detailAvailable\":true"));

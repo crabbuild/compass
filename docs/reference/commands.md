@@ -118,6 +118,12 @@ navigation hierarchy over the published partition. Read it back unchanged with
 `compass export hierarchy-json`, which refuses an unknown schema major or a
 graph identity mismatch.
 
+`compass export html` and `compass export workbench-json` embed that hierarchy
+for the selected graph, so the page navigates levels instead of one flat
+partition. `--hierarchy-level N` opens the page on level `N` (default `0`); an
+unknown level, or a graph whose build published no hierarchy, fails with a
+bounded error rather than rendering a different page.
+
 ### `extract`
 
 Expose the full build surface:

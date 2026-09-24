@@ -55,6 +55,8 @@ export const CommunityHierarchyViewSchema = z.strictObject({
   schema: z.literal(HIERARCHY_VIEW_SCHEMA),
   budgetIdentity: z.string().min(1),
   mergePolicy: z.string().min(1),
+  /** Level the export asks the viewer to open on. */
+  initialLevel: z.number().int().nonnegative().optional(),
   rootTarget: z.number().int().positive(),
   levelTarget: z.number().int().positive(),
   maxLevels: z.number().int().positive(),

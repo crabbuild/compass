@@ -391,6 +391,7 @@ where
                 .as_ref()
                 .map(compass_graph::CommunityHierarchy::levels_view)
                 .as_ref(),
+            None,
         )?;
         if rendered.is_none() {
             remove_if_exists(&html_path)?;

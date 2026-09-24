@@ -67,6 +67,7 @@ function mount() {
       <CompassGraph
         model={overview}
         hierarchy={hierarchy}
+        initialLevel={hierarchy?.initialLevel}
         themePreference={theme}
         onThemePreferenceChange={setTheme}
         communityDetail={communityDetail}
