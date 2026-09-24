@@ -643,7 +643,8 @@ export function relaxFootprintPositions(
       const start = positions.get(footprint.id);
       if (!start) return [];
       return [{ ...footprint, x: start.x, y: start.y }];
-    });
+    })
+    .map((entry, index) => ({ ...entry, index }));
   if (entries.length < 2) {
     return new Map(entries.map((entry) => [entry.id, { x: entry.x, y: entry.y }]));
   }
@@ -665,7 +666,18 @@ export function relaxFootprintPositions(
     }
     return keys;
   };
-  const passes = Math.max(1, Math.trunc(iterations));
+  // A repository-sized overview seeds thousands of bubbles; spending every pass
+  // on them costs more than the first paint is worth, so the pass count is
+  // bounded by the work it can do rather than by the iteration count alone.
+  const passes = Math.max(
+    1,
+    Math.min(Math.trunc(iterations), Math.max(8, Math.ceil(24_000 / entries.length)))
+  );
+  // Pair bookkeeping is numeric: a pair shares several grid cells, and building
+  // a string key for every candidate on every pass dominates the packing cost
+  // on a repository-sized overview.
+  const stride = entries.length;
+  const visited = new Set<number>();
   for (let pass = 0; pass < passes; pass += 1) {
     const cells = new Map<string, typeof entries>();
     for (const entry of entries) {
@@ -676,12 +688,12 @@ export function relaxFootprintPositions(
       }
     }
     let moved = 0;
-    const visited = new Set<string>();
+    visited.clear();
     for (const entry of entries) {
       for (const key of keysFor(entry)) {
         for (const other of cells.get(key) ?? []) {
-          if (other.id <= entry.id) continue;
-          const pair = `${entry.id}\u0000${other.id}`;
+          if (other.index <= entry.index) continue;
+          const pair = entry.index * stride + other.index;
           if (visited.has(pair)) continue;
           visited.add(pair);
           const dx = other.x - entry.x;

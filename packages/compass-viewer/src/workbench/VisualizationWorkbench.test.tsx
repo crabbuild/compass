@@ -166,11 +166,8 @@ describe("VisualizationWorkbench graph filters", () => {
   it("closes the filter panel with Escape and restores trigger focus", () => {
     const before = graph([{ id: "root", label: "Root", kind: "module", community: 1 }]);
     const after = graph([{ id: "root", label: "Root", kind: "module", community: 1 }]);
-    const history = (
-      hierarchyDiff: WorkbenchModel["views"][number] extends { hierarchyDiff?: infer D }
-        ? D | undefined
-        : never
-    ): WorkbenchModel => ({
+    type HistoryView = Extract<WorkbenchModel["views"][number], { kind: "history" }>;
+    const history = (hierarchyDiff: HistoryView["hierarchyDiff"]): WorkbenchModel => ({
       schema: "compass.viewer.workbench/1",
       title: "Fixture workbench",
       graphIdentity: "fixture-identity",
