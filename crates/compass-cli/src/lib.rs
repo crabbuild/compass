@@ -4532,6 +4532,7 @@ fn build_export_workbench(
                     history_commands::load_history_view_model_at(base, node_limit)?;
                 let (target_revision, _, after) =
                     history_commands::load_history_view_model_at(target, node_limit)?;
+                let hierarchy_diff = history_commands::load_history_hierarchy_diff(base, target)?;
                 let summarized = before.stats.aggregated || after.stats.aggregated;
                 let coverage = WorkbenchCoverage {
                     status: if summarized {
@@ -4566,6 +4567,7 @@ fn build_export_workbench(
                             target_revision,
                             before: Box::new(before),
                             after: Box::new(after),
+                            hierarchy_diff: hierarchy_diff.map(Box::new),
                         },
                     },
                 )

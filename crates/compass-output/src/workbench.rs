@@ -190,6 +190,10 @@ pub enum WorkbenchViewContent {
         target_revision: String,
         before: Box<GraphViewModel>,
         after: Box<GraphViewModel>,
+        /// Bounded comparison of the two generations' community hierarchies,
+        /// absent when either side published none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hierarchy_diff: Option<Box<compass_semantic_diff::HierarchyDiff>>,
     },
     Affected {
         root: String,
@@ -344,6 +348,126 @@ fn escape_html(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn empty_model(title: &str) -> GraphViewModel {
+        GraphViewModel {
+            schema: crate::GRAPH_VIEWER_SCHEMA,
+            title: title.to_owned(),
+            stats: crate::GraphViewStats {
+                nodes: 0,
+                edges: 0,
+                communities: 0,
+                aggregated: false,
+            },
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            communities: Vec::new(),
+            hyperedges: Vec::new(),
+            effective_graph: None,
+        }
+    }
+
+    #[test]
+    fn history_view_publishes_a_hierarchy_diff_only_when_one_exists() {
+        let level_signature = {
+            use sha2::{Digest, Sha256};
+            let digest = format!("{:x}", Sha256::digest(b"0123456789abcdef\0"));
+            digest.chars().take(16).collect::<String>()
+        };
+        let model = compass_graph::CommunityHierarchy::new(
+            "generation".to_owned(),
+            format!("sha256:{}", "0".repeat(64)),
+            compass_graph::CommunityHierarchyDraft {
+                identity: compass_graph::CommunityIdentity {
+                    algorithm: compass_graph::QUALITY_CLUSTER_ALGORITHM.to_owned(),
+                    topology: compass_graph::QUALITY_CLUSTER_TOPOLOGY.to_owned(),
+                    quality: compass_graph::QUALITY_CLUSTER_QUALITY.to_owned(),
+                    selector: compass_graph::QUALITY_CLUSTER_SELECTOR.to_owned(),
+                    seed: compass_graph::COMPATIBILITY_CLUSTER_SEED,
+                    limits: compass_graph::QUALITY_CLUSTER_LIMITS.to_owned(),
+                },
+                limits: compass_graph::CommunityLimits::default(),
+                budget_identity: compass_graph::COMMUNITY_HIERARCHY_BUDGET.to_owned(),
+                merge_policy: compass_graph::COMMUNITY_HIERARCHY_MERGE_POLICY.to_owned(),
+                signature_algorithm: compass_graph::COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM
+                    .to_owned(),
+                budget: compass_graph::HierarchyBudget::default(),
+                boundary_kinds: vec!["route".to_owned()],
+                finest_community_count: 1,
+                finest_signature: format!("sha256:{}", "1".repeat(64)),
+                budget_satisfied: true,
+                levels: vec![compass_graph::HierarchyLevel {
+                    level: 0,
+                    signature: level_signature.clone(),
+                    merge: compass_graph::LevelMerge::Relationship,
+                    resolution: Some(1.0),
+                    merge_evidence: BTreeMap::new(),
+                    group_count: 1,
+                    groups: vec![compass_graph::HierarchyGroup {
+                        index: 0,
+                        id: "h0-0123456789abcdef".to_owned(),
+                        signature: "0123456789abcdef".to_owned(),
+                        community: Some(0),
+                        label: compass_graph::HierarchyLabel {
+                            text: "src".to_owned(),
+                            rule: compass_graph::HierarchyLabelRule::DominantDirectory,
+                            generic: false,
+                            evidence: BTreeMap::from([(
+                                "value".to_owned(),
+                                serde_json::json!("src"),
+                            )]),
+                        },
+                        member_count: 1,
+                        child_indices: Vec::new(),
+                        quality: compass_graph::GroupQuality {
+                            cohesion: 1.0,
+                            conductance: 0.0,
+                            boundary_kinds: BTreeMap::new(),
+                        },
+                    }],
+                }],
+            },
+        )
+        .ok()
+        .expect("fixture hierarchy builds");
+        let communities = compass_graph::Communities::from([(0usize, vec!["a".to_owned()])]);
+        let diff = compass_semantic_diff::compare_hierarchies(
+            &model,
+            &communities,
+            &model,
+            &communities,
+            &compass_graph::ReconcilePolicy::default(),
+        )
+        .ok()
+        .expect("comparing a hierarchy with itself succeeds");
+
+        let view = WorkbenchViewContent::History {
+            base_revision: "aaa".to_owned(),
+            target_revision: "bbb".to_owned(),
+            before: Box::new(empty_model("before")),
+            after: Box::new(empty_model("after")),
+            hierarchy_diff: Some(Box::new(diff)),
+        };
+        let value = serde_json::to_value(&view).unwrap_or_default();
+        assert_eq!(value["kind"], "history");
+        assert_eq!(
+            value["hierarchyDiff"]["schema"],
+            "compass.community-hierarchy-diff/1"
+        );
+
+        let without = WorkbenchViewContent::History {
+            base_revision: "aaa".to_owned(),
+            target_revision: "bbb".to_owned(),
+            before: Box::new(empty_model("before")),
+            after: Box::new(empty_model("after")),
+            hierarchy_diff: None,
+        };
+        let value = serde_json::to_value(&without).unwrap_or_default();
+        assert!(
+            value.get("hierarchyDiff").is_none(),
+            "an unavailable comparison is absent, not empty"
+        );
+    }
 
     #[test]
     fn source_navigation_normalizes_recognized_forge_remotes() {

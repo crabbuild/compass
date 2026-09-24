@@ -2,6 +2,7 @@
 
 mod engine;
 mod error;
+mod hierarchy;
 mod history;
 mod logic;
 mod model;
@@ -10,6 +11,10 @@ mod verification;
 
 pub use engine::{compare, finding_id};
 pub use error::SemanticDiffError;
+pub use hierarchy::{
+    HIERARCHY_DIFF_SCHEMA, HierarchyDiff, HierarchyDiffEvent, HierarchyDiffSide,
+    MAX_HIERARCHY_DIFF_EVENTS, compare_hierarchies, compare_optional_hierarchies,
+};
 pub use history::compare_history_realizations;
 pub use model::{
     AffectedConsumer, CLASSIFIER_VERSION, ChangeDirection, CollapsedGroup, Comparison,

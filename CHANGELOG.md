@@ -9,6 +9,11 @@
   and the reconciliation reports what split, merged, appeared, disappeared, or
   was too close to call instead of guessing. The viewer lays levels out by that
   identity, so an untouched group keeps its place when its neighbours change.
+- Compare two history realizations' community structure:
+  `compass.community-hierarchy-diff/1` rides on the history workbench view and
+  reports the split, merged, appeared, disappeared, and ambiguous groups between
+  them with the member overlap that justifies each entry, bounded with an exact
+  omitted count. It is absent when either generation published no hierarchy.
 - Publish `community-hierarchy.json` (`compass.community-hierarchy/1`) beside
   `community-quality.json` on clustered typed builds: a bounded, nested
   overview of the same partition, with `childIndices` levels instead of

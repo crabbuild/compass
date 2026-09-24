@@ -25,7 +25,8 @@ pub use hierarchy::{
     HierarchyEvent, HierarchyEventKind, HierarchyGroup, HierarchyLabel, HierarchyLabelRule,
     HierarchyLevel, HierarchyReconciliation, HierarchyRequest, LABEL_COVERAGE_THRESHOLD,
     LevelMerge, MIN_LEVEL_RESOLUTION, ReconcilePolicy, boundary_kind_names,
-    build_community_hierarchy, group_id, is_group_id, is_group_signature, reconcile_hierarchy,
+    build_community_hierarchy, group_id, hierarchy_group_members, is_group_id, is_group_signature,
+    reconcile_hierarchy,
 };
 pub use identity::{
     COMPATIBILITY_CLUSTER_ALGORITHM, COMPATIBILITY_CLUSTER_LIMITS, COMPATIBILITY_CLUSTER_QUALITY,

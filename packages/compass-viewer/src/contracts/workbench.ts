@@ -3,7 +3,7 @@ import { CallGraphResponseSchema } from "./callGraph";
 import { ArchitectureViewModelSchema } from "./architecture";
 import { CodeQueryResponseSchema } from "./codeQuery";
 import { GraphViewModelSchema } from "./graph";
-import { CommunityHierarchyViewSchema } from "./hierarchy";
+import { CommunityHierarchyViewSchema, HierarchyDiffSchema } from "./hierarchy";
 
 export const WORKBENCH_SCHEMA = "compass.viewer.workbench/1" as const;
 
@@ -64,7 +64,9 @@ export const WorkbenchViewSchema = z.discriminatedUnion("kind", [
     baseRevision: z.string(),
     targetRevision: z.string(),
     before: GraphViewModelSchema,
-    after: GraphViewModelSchema
+    after: GraphViewModelSchema,
+    /** Absent when either generation published no community hierarchy. */
+    hierarchyDiff: HierarchyDiffSchema.optional()
   }),
   z.strictObject({
     ...ViewBase,

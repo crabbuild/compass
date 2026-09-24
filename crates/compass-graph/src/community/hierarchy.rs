@@ -872,7 +872,8 @@ pub fn build_community_hierarchy(
 /// community split: the successor communities are new communities whose
 /// signatures have nothing in common with their predecessor's. Levels are
 /// coarsest first, matching the artifact's order.
-fn level_community_sets(
+#[must_use]
+pub fn hierarchy_group_members(
     hierarchy: &CommunityHierarchy,
     communities: &Communities,
 ) -> Vec<Vec<BTreeSet<String>>> {
@@ -1006,8 +1007,8 @@ pub fn reconcile_hierarchy(
             "reconcile policy is outside its domain".to_owned(),
         ));
     }
-    let previous_sets = level_community_sets(previous, previous_communities);
-    let next_sets = level_community_sets(next, next_communities);
+    let previous_sets = hierarchy_group_members(previous, previous_communities);
+    let next_sets = hierarchy_group_members(next, next_communities);
     let previous_parents = level_parents(previous);
     let next_parents = level_parents(next);
     let mut events = Vec::new();

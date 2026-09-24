@@ -11,6 +11,8 @@ pub enum SemanticDiffError {
         resource: &'static str,
         limit: usize,
     },
+    #[error("community hierarchy diff is invalid: {0}")]
+    InvalidHierarchyDiff(String),
     #[error("semantic report serialization failed: {0}")]
     Serialize(#[from] serde_json::Error),
 }

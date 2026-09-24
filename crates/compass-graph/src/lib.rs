@@ -40,7 +40,7 @@ pub use community::{
     QUALITY_CLUSTER_SELECTOR, QUALITY_CLUSTER_TOPOLOGY, ReconcilePolicy, ResolutionPolicy,
     TopologyEvidence, adjusted_mutual_information, adjusted_rand_index, boundary_kind_names,
     build_communities, build_community_hierarchy, evaluate_partition_quality, group_id,
-    is_group_id, is_group_signature, reconcile_hierarchy,
+    hierarchy_group_members, is_group_id, is_group_signature, reconcile_hierarchy,
 };
 pub use compass_languages::{RawEdgeRecord, RawNodeRecord};
 use dedup::deduplicate_owned;

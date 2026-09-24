@@ -164,6 +164,79 @@ describe("VisualizationWorkbench graph filters", () => {
   });
 
   it("closes the filter panel with Escape and restores trigger focus", () => {
+    const before = graph([{ id: "root", label: "Root", kind: "module", community: 1 }]);
+    const after = graph([{ id: "root", label: "Root", kind: "module", community: 1 }]);
+    const history = (
+      hierarchyDiff: WorkbenchModel["views"][number] extends { hierarchyDiff?: infer D }
+        ? D | undefined
+        : never
+    ): WorkbenchModel => ({
+      schema: "compass.viewer.workbench/1",
+      title: "Fixture workbench",
+      graphIdentity: "fixture-identity",
+      defaultView: "history",
+      views: [{
+        id: "history",
+        kind: "history",
+        title: "History",
+        description: "Two generations",
+        coverage: {
+          status: "complete",
+          truncated: false,
+          nodes: 2,
+          edges: 0,
+          limitations: []
+        },
+        baseRevision: "aaa",
+        targetRevision: "bbb",
+        before,
+        after,
+        ...(hierarchyDiff === undefined ? {} : { hierarchyDiff })
+      }]
+    });
+    const diff = {
+      schema: "compass.community-hierarchy-diff/1" as const,
+      base: {
+        generation: "base",
+        graphDigest: `sha256:${"0".repeat(64)}`,
+        hierarchyDigest: `sha256:${"1".repeat(64)}`,
+        levels: 2,
+        groups: 7
+      },
+      target: {
+        generation: "target",
+        graphDigest: `sha256:${"2".repeat(64)}`,
+        hierarchyDigest: `sha256:${"3".repeat(64)}`,
+        levels: 2,
+        groups: 8
+      },
+      policy: { keepThreshold: 0.5, ambiguityMargin: 0.05, maxEvents: 256 },
+      stable: 6,
+      split: 1,
+      merged: 0,
+      appeared: 1,
+      disappeared: 0,
+      ambiguous: 1,
+      events: [],
+      omittedEvents: 2,
+      resultDigest: `sha256:${"4".repeat(64)}`
+    };
+    render(
+      <VisualizationWorkbench
+        workbench={history(diff)}
+        host={{ openSource: vi.fn() }}
+      />
+    );
+    expect(screen.getByText(/Community structure: 1 split · 1 new · 1 ambiguous · 2 more omitted/))
+      .toBeVisible();
+    cleanup();
+
+    render(
+      <VisualizationWorkbench workbench={history(undefined)} host={{ openSource: vi.fn() }} />
+    );
+    expect(document.querySelector("[data-hierarchy-diff]")).toBeNull();
+    cleanup();
+
     const overview = graph([
       { id: "root", label: "Root", kind: "module", community: 1 }
     ]);

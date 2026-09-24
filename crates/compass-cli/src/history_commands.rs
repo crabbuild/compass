@@ -138,6 +138,82 @@ pub(crate) fn load_history_view_model_at(
     Ok((commit.to_string(), preferred.id.to_string(), model))
 }
 
+/// Compare the community hierarchies published by two immutable realizations.
+///
+/// `None` when either side published none: absence means the comparison is
+/// unavailable, not that nothing changed.
+pub(crate) fn load_history_hierarchy_diff(
+    base: &str,
+    target: &str,
+) -> Result<Option<compass_semantic_diff::HierarchyDiff>, String> {
+    let repository =
+        Repository::discover(&std::env::current_dir().map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?;
+    let base_commit = repository
+        .resolve(base)
+        .map_err(|error| error.to_string())?;
+    let target_commit = repository
+        .resolve(target)
+        .map_err(|error| error.to_string())?;
+    let (base_history, base_version) = resolve_materialized(&repository, &base_commit)?;
+    let (target_history, target_version) = resolve_materialized(&repository, &target_commit)?;
+    let base_side = hierarchy_side(&base_history, &base_version)?;
+    let target_side = hierarchy_side(&target_history, &target_version)?;
+    compass_semantic_diff::compare_optional_hierarchies(
+        base_side
+            .as_ref()
+            .map(|(hierarchy, partition)| (hierarchy, partition)),
+        target_side
+            .as_ref()
+            .map(|(hierarchy, partition)| (hierarchy, partition)),
+        &compass_graph::ReconcilePolicy::default(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// The hierarchy a realization published, with the partition it describes.
+fn hierarchy_side(
+    history: &HistoryStore,
+    version: &PublishedVersion,
+) -> Result<
+    Option<(
+        compass_graph::CommunityHierarchy,
+        compass_graph::Communities,
+    )>,
+    String,
+> {
+    let completed = history
+        .artifacts(&version.id)
+        .map_err(|error| error.to_string())?;
+    let sidecars = completed.artifacts.export_sidecars();
+    let Some(bytes) = sidecars.get("community-hierarchy.json") else {
+        return Ok(None);
+    };
+    let hierarchy = match serde_json::from_slice::<compass_graph::CommunityHierarchy>(bytes) {
+        Ok(hierarchy) => hierarchy,
+        Err(_) => return Ok(None),
+    };
+    if hierarchy.validate().is_err() {
+        return Ok(None);
+    }
+    let reader = history
+        .reader(&version.id)
+        .map_err(|error| error.to_string())?;
+    let document = reader.graph_document().map_err(|error| error.to_string())?;
+    let mut partition = compass_graph::Communities::new();
+    for node in &document.nodes {
+        if let Some(community) = node.community.as_ref()
+            && let Ok(community) = usize::try_from(community.id)
+        {
+            partition
+                .entry(community)
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+    Ok(Some((hierarchy, partition)))
+}
+
 pub(crate) fn resolve_or_materialize(
     repository: &Repository,
     commit: CommitId,

@@ -76,3 +76,57 @@ export type LevelMerge = z.infer<typeof LevelMergeSchema>;
 export type HierarchyGroup = z.infer<typeof HierarchyGroupSchema>;
 export type HierarchyLevel = z.infer<typeof HierarchyLevelSchema>;
 export type CommunityHierarchyView = z.infer<typeof CommunityHierarchyViewSchema>;
+
+export const HIERARCHY_DIFF_SCHEMA = "compass.community-hierarchy-diff/1" as const;
+
+export const HierarchyDiffSideSchema = z.strictObject({
+  generation: z.string(),
+  graphDigest: z.string(),
+  hierarchyDigest: z.string(),
+  levels: z.number().int().nonnegative(),
+  groups: z.number().int().nonnegative()
+});
+
+export const HierarchyDiffEventSchema = z.strictObject({
+  kind: z.enum([
+    "stable",
+    "split",
+    "merged",
+    "appeared",
+    "disappeared",
+    "ambiguous"
+  ]),
+  level: z.number().int().nonnegative(),
+  baseIds: z.array(z.string()),
+  targetIds: z.array(z.string()),
+  overlap: z.number(),
+  memberCount: z.number().int().nonnegative()
+});
+
+/**
+ * The bounded comparison of two published hierarchies. `omittedEvents` is the
+ * exact number of entries the bound withheld: a reader never has to guess
+ * whether an empty-looking list means "nothing changed".
+ */
+export const HierarchyDiffSchema = z.strictObject({
+  schema: z.literal(HIERARCHY_DIFF_SCHEMA),
+  base: HierarchyDiffSideSchema,
+  target: HierarchyDiffSideSchema,
+  policy: z.strictObject({
+    keepThreshold: z.number(),
+    ambiguityMargin: z.number(),
+    maxEvents: z.number().int().positive()
+  }),
+  stable: z.number().int().nonnegative(),
+  split: z.number().int().nonnegative(),
+  merged: z.number().int().nonnegative(),
+  appeared: z.number().int().nonnegative(),
+  disappeared: z.number().int().nonnegative(),
+  ambiguous: z.number().int().nonnegative(),
+  events: z.array(HierarchyDiffEventSchema),
+  omittedEvents: z.number().int().nonnegative(),
+  resultDigest: z.string().min(1)
+});
+
+export type HierarchyDiffEvent = z.infer<typeof HierarchyDiffEventSchema>;
+export type HierarchyDiff = z.infer<typeof HierarchyDiffSchema>;

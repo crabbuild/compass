@@ -252,6 +252,26 @@ build restore identity when only the ledger survives. Reconciliation events are
 bounded and are not embedded in the artifact; consumers read them from the
 reconciliation report or the history comparison.
 
+### `compass.community-hierarchy-diff/1`
+
+Comparing two history realizations publishes a bounded diff of their community
+hierarchies on the history workbench view (`compass.viewer.workbench/1`,
+`kind: "history"`, `hierarchyDiff`). It names both sides (generation, graph
+digest, hierarchy digest, level and group counts) and the policy that produced
+it, then counts `stable`, `split`, `merged`, `appeared`, `disappeared`, and
+`ambiguous` entries with a bounded `events` list.
+
+An event carries the base and target group ids it involves, the member overlap
+that justifies it, and the members at stake. A group whose id survives is
+stable and is only listed when its membership moved underneath the same id;
+where an id does not survive, the members decide — one base group reappearing
+across several target groups is a split, several folding into one is a merge,
+and a base group with two candidates inside the ambiguity margin is reported as
+ambiguous with both named. `omittedEvents` counts the entries the bound
+withheld, and `resultDigest` covers the payload. Consumers must reject an
+unknown schema major, and absence means the comparison is unavailable because a
+side published no hierarchy — never "nothing changed".
+
 ### Inference levels
 
 Graph-building commands accept `--inference-level low|medium|high|max`. The

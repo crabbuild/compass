@@ -924,6 +924,14 @@ absence means identity can only be derived from the artifact's own signatures.
 Any change to the signature algorithm or the reconciliation thresholds is a
 compatibility-sensitive change and needs a version bump.
 
+`compass.community-hierarchy-diff/1` is the comparison surface for two
+generations. It is additive to the history workbench view
+(`compass.viewer.workbench/1`, `kind: "history"`), appears only when both
+realizations published a hierarchy, and must be rejected by consumers when its
+schema major is unknown. Absence means the comparison is unavailable, not that
+nothing changed; a present diff with zero change counts and no events is the
+"nothing structural changed" case.
+
 ## Compass Store release contract
 
 The first supported local store line is `0.3.x`. Its logical machine formats

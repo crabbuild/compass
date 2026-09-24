@@ -224,6 +224,11 @@ function WorkbenchView({
             <small>
               +{comparison.addedNodes} / −{comparison.removedNodes} / Δ{comparison.changedNodes} nodes
             </small>
+            {view.hierarchyDiff !== undefined ? (
+              <small data-hierarchy-diff="true">
+                {communityStructureChange(view.hierarchyDiff)}
+              </small>
+            ) : null}
           </span>
         </div>
         <FilteredGraph
@@ -261,6 +266,38 @@ function WorkbenchView({
       onThemePreferenceChange={onThemePreferenceChange}
     />
   );
+}
+
+/**
+ * One bounded line about the community structure between two generations.
+ * Absence of the diff means a side published no hierarchy, so the banner says
+ * nothing rather than "unchanged".
+ */
+function communityStructureChange(diff: NonNullable<
+  Extract<
+    Parameters<typeof VisualizationWorkbench>[0]["workbench"]["views"][number],
+    { kind: "history" }
+  >["hierarchyDiff"]
+>): string {
+  if (
+    diff.split === 0
+    && diff.merged === 0
+    && diff.appeared === 0
+    && diff.disappeared === 0
+    && diff.ambiguous === 0
+  ) {
+    return `${diff.stable} community groups unchanged`;
+  }
+  const parts = [
+    diff.split > 0 ? `${diff.split} split` : undefined,
+    diff.merged > 0 ? `${diff.merged} merged` : undefined,
+    diff.appeared > 0 ? `${diff.appeared} new` : undefined,
+    diff.disappeared > 0 ? `${diff.disappeared} gone` : undefined,
+    diff.ambiguous > 0 ? `${diff.ambiguous} ambiguous` : undefined
+  ].filter((part): part is string => part !== undefined);
+  return `Community structure: ${parts.join(" · ")}${
+    diff.omittedEvents > 0 ? ` · ${diff.omittedEvents} more omitted` : ""
+  }`;
 }
 
 function FilteredGraph({

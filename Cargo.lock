@@ -1519,6 +1519,7 @@ dependencies = [
  "compass-model",
  "compass-pr-intelligence",
  "compass-query",
+ "compass-semantic-diff",
  "rayon",
  "serde",
  "serde_json",
@@ -1677,6 +1678,7 @@ name = "compass-semantic-diff"
 version = "0.3.29"
 dependencies = [
  "compass-analysis",
+ "compass-graph",
  "compass-history",
  "compass-ir",
  "compass-languages",
