@@ -6,13 +6,9 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::html::{HtmlOptions, edge_value, node_values};
+use crate::palette::community_color;
 
 pub const GRAPH_VIEWER_SCHEMA: &str = "compass.viewer.graph/1";
-const COLORS: [&str; 10] = [
-    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7",
-    "#9C755F", "#BAB0AC",
-];
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GraphViewModel {
@@ -298,7 +294,7 @@ pub fn graph_view_model(
                 .and_then(|labels| labels.get(&id))
                 .cloned()
                 .unwrap_or_else(|| format!("Community {id}")),
-            color: COLORS[id % COLORS.len()].to_owned(),
+            color: community_color(id).to_owned(),
             hidden: false,
         })
         .collect::<Vec<_>>();

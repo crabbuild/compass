@@ -7,11 +7,7 @@ use compass_graph::Communities;
 use compass_model::GraphDocument;
 
 use crate::OutputError;
-
-const COMMUNITY_COLORS: [&str; 10] = [
-    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7",
-    "#9C755F", "#BAB0AC",
-];
+use crate::palette::community_color;
 
 #[derive(Clone, Debug)]
 pub struct SvgOptions<'a> {
@@ -189,7 +185,7 @@ pub fn svg_document(
             continue;
         };
         let community = node_community.get(node.id.as_str()).copied().unwrap_or(0);
-        let color = COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()];
+        let color = community_color(community);
         let value = degree.get(node.id.as_str()).copied().unwrap_or(1);
         let area = 300.0 + 1200.0 * value as f64 / max_degree as f64;
         let radius = (area / std::f64::consts::PI).sqrt() * 0.55;
@@ -207,7 +203,7 @@ pub fn svg_document(
         svg.push_str("\" fill=\"#2a2a4e\" fill-opacity=\"0.7\" rx=\"4\"/>\n");
         for (index, (community, label)) in labels.iter().enumerate() {
             let y = index * 18;
-            let color = COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()];
+            let color = community_color(*community);
             let count = communities.get(community).map(Vec::len).unwrap_or_default();
             let label = xml_escape(label);
             let _ = writeln!(

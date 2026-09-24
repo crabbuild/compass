@@ -10,11 +10,8 @@ use sha1::{Digest, Sha1};
 
 use crate::OutputError;
 use crate::json::escape_non_ascii;
+use crate::palette::community_color;
 
-const COMMUNITY_COLORS: [&str; 10] = [
-    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7",
-    "#9C755F", "#BAB0AC",
-];
 const MANIFEST: &str = "sync-manifest.json";
 
 #[derive(Clone, Debug, Default)]
@@ -313,7 +310,7 @@ pub fn export_obsidian(
     if let Some(labels) = options.community_labels {
         for (community, label) in labels {
             let rgb = u64::from_str_radix(
-                COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()].trim_start_matches('#'),
+                community_color(*community).trim_start_matches('#'),
                 16,
             )
             .unwrap_or_default();

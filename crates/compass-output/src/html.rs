@@ -9,16 +9,12 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::OutputError;
+use crate::palette::{community_border, community_color};
 use crate::viewer_model::GraphViewModel;
 
 const DEFAULT_NODE_LIMIT: isize = 5_000;
 const EMBEDDED_DETAIL_NODE_BUDGET: usize = 5_000;
 const EMBEDDED_DETAIL_EDGE_BUDGET: usize = 40_000;
-const COMMUNITY_COLORS: [&str; 10] = [
-    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7",
-    "#9C755F", "#BAB0AC",
-];
-
 #[derive(Clone, Debug, Default)]
 pub struct HtmlOptions<'a> {
     pub community_labels: Option<&'a BTreeMap<usize, String>>,
@@ -614,7 +610,7 @@ pub(crate) fn node_values(
     let mut nodes = Vec::new();
     for node in &document.nodes {
         let community = node_community.get(node.id.as_str()).copied().unwrap_or(0);
-        let color = COMMUNITY_COLORS[community % COMMUNITY_COLORS.len()];
+        let color = community_color(community);
         let label = sanitize_label(&node_label(node));
         let degree = degrees.get(node.id.as_str()).copied().unwrap_or(1);
         let (size, font_size) = if let Some(counts) = options.member_counts {
@@ -633,7 +629,7 @@ pub(crate) fn node_values(
         let mut output = Map::new();
         output.insert("id".into(), Value::String(node.id.clone()));
         output.insert("label".into(), Value::String(label.clone()));
-        output.insert("color".into(), node_color(color, color));
+        output.insert("color".into(), node_color(color, &community_border(community)));
         output.insert("size".into(), decimal_value(round_tenths(size)));
         output.insert(
             "font".into(),

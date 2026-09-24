@@ -14,6 +14,7 @@ mod html;
 mod json;
 mod lenses;
 mod obsidian;
+mod palette;
 mod report;
 mod review;
 mod svg;
