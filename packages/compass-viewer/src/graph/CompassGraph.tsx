@@ -269,6 +269,18 @@ export function CompassGraph({
     && derivedOverview !== undefined
     && scope === "communities";
   const showCommunityOverview = overviewOpen && derivedDetail === undefined;
+  // An aggregated export carries one node per community, so the node count is
+  // the community count; the symbols those nodes stand for are their members.
+  const symbolTotal = useMemo(() => {
+    if (!model.stats.aggregated) {
+      return model.nodes.length;
+    }
+    const members = model.nodes.reduce(
+      (sum, node) => sum + (node.memberCount ?? 1),
+      0
+    );
+    return Math.max(members, model.nodes.length);
+  }, [model]);
   const variantData = useMemo(
     () => showCommunityOverview
       ? communityVariantData(model, derivedOverview)
@@ -347,10 +359,10 @@ export function CompassGraph({
       overviewSummary={showCommunityOverview
         ? {
           communities: derivedOverview!.model.stats.communities,
-          symbols: model.nodes.length
+          symbols: symbolTotal
         }
         : hierarchyOpen
-          ? { communities: activeModel.nodes.length, symbols: model.nodes.length }
+          ? { communities: activeModel.nodes.length, symbols: symbolTotal }
           : undefined}
       communityImportance={showCommunityOverview ? derivedOverview!.importance : undefined}
       communityOrder={showCommunityOverview ? derivedOverview!.communityOrder : undefined}
