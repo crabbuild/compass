@@ -2785,7 +2785,7 @@ mod tests {
         let rendered = html_document(&graph, &communities, "graph.html", &HtmlOptions::default())?
             .ok_or("HTML unexpectedly skipped")?;
         assert!(
-            !rendered.html.contains("compass-viewer-hierarchy"),
+            !rendered.html.contains("id=\"compass-viewer-hierarchy\""),
             "a graph without a published hierarchy embeds none"
         );
 
@@ -2848,6 +2848,10 @@ mod tests {
         assert!(rendered.html.contains("compass.viewer.hierarchy/1"));
         assert!(
             rendered.html.contains("locationAffinity") || rendered.html.contains("relationship")
+        );
+        assert!(
+            rendered.html.contains("\"label\":\"src\""),
+            "a level names its groups from the hierarchy, not from community labels"
         );
         Ok(())
     }

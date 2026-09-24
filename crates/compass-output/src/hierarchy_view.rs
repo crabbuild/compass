@@ -90,15 +90,29 @@ pub fn community_hierarchy_view(
         .enumerate()
         .map(|(position, level)| {
             let level_communities = members_by_group.get(position).cloned().unwrap_or_default();
+            // A level's groups are not the published communities, so the
+            // projection names them from the hierarchy's own labels rather than
+            // from labels.json, where index 0 is an unrelated community.
+            let level_labels = level
+                .groups
+                .iter()
+                .map(|group| (group.index, group.label.text.clone()))
+                .collect::<BTreeMap<_, _>>();
+            let level_options = HtmlOptions {
+                community_labels: Some(&level_labels),
+                member_counts: options.member_counts,
+                node_limit: None,
+                learning_overlay: options.learning_overlay,
+            };
             let model = (level.groups.len() <= node_budget).then(|| {
                 let (meta, meta_communities, member_counts) =
-                    aggregate(document, &level_communities, options);
+                    aggregate(document, &level_communities, &level_options);
                 crate::viewer_model::graph_view_model(
                     &meta,
                     &meta_communities,
                     title.to_owned(),
                     &HtmlOptions {
-                        community_labels: options.community_labels,
+                        community_labels: Some(&level_labels),
                         member_counts: Some(&member_counts),
                         node_limit: None,
                         learning_overlay: options.learning_overlay,

@@ -11,6 +11,8 @@ import {
 } from "react";
 import { BoxesIcon, BracesIcon } from "lucide-react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
+import type { CommunityHierarchyView } from "../contracts/hierarchy";
+import { descendModel, scopeModel } from "./hierarchyLevels";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
 import {
   communityDetailModel,
@@ -157,6 +159,12 @@ export type CommunityGraphDetail = {
 export type CompassGraphProps = {
   model: GraphViewModel;
   host: GraphHost;
+  /**
+   * The published community hierarchy, when the export embedded one. Levels are
+   * the reader's overview: level 0 opens first and double-clicking a group
+   * descends one level instead of opening a community.
+   */
+  hierarchy?: CommunityHierarchyView | undefined;
   communityDetail?: CommunityGraphDetail | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
@@ -179,6 +187,7 @@ export type CompassGraphProps = {
 export function CompassGraph({
   model,
   host,
+  hierarchy,
   communityDetail,
   communityLoading,
   communityError,
@@ -212,7 +221,30 @@ export function CompassGraph({
     () => communityOverviewApplies(model) ? communityOverviewModel(model) : undefined,
     [model]
   );
-  const [scope, setScope] = useState<"communities" | "symbols">("communities");
+  const [scope, setScope] = useState<"hierarchy" | "communities" | "symbols">(
+    () => hierarchy ? "hierarchy" : "communities"
+  );
+  // Which published level the reader is reading, and the groups they descended
+  // through to reach it. Descending narrows the level below to one group's
+  // children, so the canvas reads as a zoom instead of a redraw.
+  const [activeLevel, setActiveLevel] = useState(0);
+  const [trail, setTrail] = useState<
+    ReadonlyArray<{ level: number; groupIndex: number; label: string }>
+  >([]);
+  const hierarchyModel = useMemo(() => {
+    if (!hierarchy || scope !== "hierarchy") {
+      return undefined;
+    }
+    const descended = trail[trail.length - 1];
+    if (descended === undefined) {
+      return scopeModel(hierarchy, { kind: "level", level: activeLevel });
+    }
+    return descendModel(hierarchy, descended.level, descended.groupIndex)
+      ?? scopeModel(hierarchy, { kind: "level", level: activeLevel });
+  }, [activeLevel, hierarchy, scope, trail]);
+  const hierarchyOpen = hierarchyModel !== undefined
+    && communityDetail === undefined
+    && scope === "hierarchy";
   // Design variants of the community overview. The canvas is one reading; the
   // matrix, area map, and tier map answer different questions about the same
   // communities, and the reader picks.
@@ -232,20 +264,23 @@ export function CompassGraph({
   const variantData = useMemo(
     () => showCommunityOverview
       ? communityVariantData(model, derivedOverview)
-      : !derivedDetail && model.stats.aggregated
-        ? communityVariantData(model)
-        : undefined,
-    [derivedDetail, derivedOverview, model, showCommunityOverview]
+      : hierarchyOpen && hierarchyModel
+        ? communityVariantData(hierarchyModel)
+        : !derivedDetail && model.stats.aggregated
+          ? communityVariantData(model)
+          : undefined,
+    [derivedDetail, derivedOverview, hierarchyModel, hierarchyOpen, model, showCommunityOverview]
   );
   const activeVariant: CommunityVariant = variantData ? variant : "bubbles";
   const activeModel = communityDetail?.model
     ?? derivedDetail?.model
+    ?? hierarchyModel
     ?? (showCommunityOverview ? derivedOverview!.model : model);
   const viewKey = communityDetail
     ? `community-${communityDetail.communityId}`
     : derivedDetail
       ? `community-${derivedCommunityId}`
-      : showCommunityOverview ? "communities" : "overview";
+      : hierarchyOpen ? `level-${activeLevel}-${trail.length}` : showCommunityOverview ? "communities" : "overview";
   const activeDetailCommunityId = communityDetail?.communityId
     ?? (derivedDetail ? derivedCommunityId ?? undefined : undefined);
   const activeBounded = communityDetail?.bounded
@@ -254,15 +289,36 @@ export function CompassGraph({
       : undefined);
   const backToOverview = useCallback(() => {
     setDerivedCommunityId(null);
+    setTrail((current) => current.slice(0, -1));
     onBackToOverview?.();
   }, [onBackToOverview]);
+  // Opening a group descends one level while it has children; the finest level
+  // has none, so it opens the community's symbols instead.
+  const openGroup = useCallback((groupIndex: number) => {
+    const level = hierarchy?.levels.find((entry) => entry.level === activeLevel);
+    const group = level?.groups.find((entry) => entry.index === groupIndex);
+    if (group && group.childIndices.length > 0) {
+      setTrail((current) => [
+        ...current,
+        { level: activeLevel, groupIndex, label: group.label }
+      ]);
+      setActiveLevel(activeLevel + 1);
+      return;
+    }
+    setDerivedCommunityId(group?.community ?? groupIndex);
+  }, [activeLevel, hierarchy]);
   // Community activation resolves inside the viewer whenever the overview was
   // derived locally; exported or host-provided details keep their own host.
   const viewHost = useMemo<GraphHost>(
-    () => derivedOverview && communityDetail === undefined
-      ? { ...host, openCommunity: (communityId) => setDerivedCommunityId(communityId) }
-      : host,
-    [communityDetail, derivedOverview, host]
+    () => {
+      if (hierarchy && scope === "hierarchy" && communityDetail === undefined) {
+        return { ...host, openCommunity: openGroup };
+      }
+      return derivedOverview && communityDetail === undefined
+        ? { ...host, openCommunity: (communityId) => setDerivedCommunityId(communityId) }
+        : host;
+    },
+    [communityDetail, derivedOverview, hierarchy, host, openGroup, scope]
   );
   useEffect(() => {
     setPendingFocusId(null);
@@ -275,7 +331,7 @@ export function CompassGraph({
       detailCommunityId={activeDetailCommunityId}
       communityLoading={communityLoading}
       communityError={communityError}
-      onBackToOverview={activeDetailCommunityId !== undefined
+      onBackToOverview={activeDetailCommunityId !== undefined || trail.length > 0
         ? backToOverview
         : undefined}
       bounded={activeBounded}
@@ -285,15 +341,75 @@ export function CompassGraph({
           communities: derivedOverview!.model.stats.communities,
           symbols: model.nodes.length
         }
-        : undefined}
+        : hierarchyOpen
+          ? { communities: activeModel.nodes.length, symbols: model.nodes.length }
+          : undefined}
       communityImportance={showCommunityOverview ? derivedOverview!.importance : undefined}
       communityOrder={showCommunityOverview ? derivedOverview!.communityOrder : undefined}
       edgeSemanticHints={showCommunityOverview ? derivedOverview!.edgeCategories : undefined}
+      breadcrumbTrail={hierarchy !== undefined && scope === "hierarchy"
+        ? [
+          {
+            label: "Repository",
+            onSelect: () => {
+              setTrail([]);
+              setActiveLevel(0);
+            }
+          },
+          ...trail.map((step, position) => ({
+            label: step.label,
+            onSelect: () => {
+              setTrail(trail.slice(0, position));
+              setActiveLevel(step.level + 1);
+            }
+          }))
+        ]
+        : undefined}
       variant={activeVariant}
       variantData={variantData}
       onVariantChange={setVariant}
       searchModel={showCommunityOverview ? model : undefined}
-      scopeControls={derivedOverview && communityDetail === undefined
+      scopeControls={hierarchy && communityDetail === undefined
+        ? (
+          <div
+            className="compass-scope-toggle compass-level-toggle"
+            role="group"
+            aria-label="Graph scope"
+          >
+            {hierarchy.levels.map((level) => (
+              <button
+                key={level.level}
+                type="button"
+                aria-label={`Level ${level.level}`}
+                aria-pressed={scope === "hierarchy" && activeLevel === level.level && trail.length === 0}
+                title={`${level.merge === "locationAffinity" ? "Grouped by shared location" : "Grouped by relationship evidence"} · ${
+                  level.groupCount.toLocaleString()} groups`}
+                onClick={() => {
+                  setScope("hierarchy");
+                  setTrail([]);
+                  setActiveLevel(level.level);
+                  setDerivedCommunityId(null);
+                }}
+              >
+                <span>{`Level ${level.level}`}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              aria-label="Symbols"
+              aria-pressed={scope === "symbols"}
+              title={`Show all ${model.nodes.length.toLocaleString()} symbols`}
+              onClick={() => {
+                setScope("symbols");
+                setDerivedCommunityId(null);
+              }}
+            >
+              <BracesIcon aria-hidden="true" />
+              <span>Symbols</span>
+            </button>
+          </div>
+        )
+        : derivedOverview && communityDetail === undefined
         ? (
           <div
             className="compass-scope-toggle"
@@ -366,6 +482,7 @@ function CompassGraphView({
   communityImportance,
   communityOrder,
   edgeSemanticHints,
+  breadcrumbTrail,
   variant,
   variantData,
   onVariantChange,
@@ -399,6 +516,11 @@ function CompassGraphView({
   communityImportance?: ReadonlyMap<string, number> | undefined;
   communityOrder?: readonly number[] | undefined;
   edgeSemanticHints?: ReadonlyMap<string, EdgeSemanticCategory> | undefined;
+  /**
+   * The path a reader descended through, rendered as the graph breadcrumb so
+   * stepping back up is one click instead of a remembered gesture.
+   */
+  breadcrumbTrail?: ReadonlyArray<{ label: string; onSelect: () => void }> | undefined;
   variant: CommunityVariant;
   variantData?: CommunityVariantData | undefined;
   onVariantChange(variant: CommunityVariant): void;
@@ -752,7 +874,9 @@ function CompassGraphView({
         <main
           className="compass-graph-stage"
           data-comparison={comparisonMode ? "true" : "false"}
-          data-breadcrumb={overviewSummary !== undefined || autoLayoutDetail
+          data-breadcrumb={overviewSummary !== undefined
+            || autoLayoutDetail
+            || (breadcrumbTrail !== undefined && breadcrumbTrail.length > 0)
             ? "true"
             : undefined}
         >
@@ -800,7 +924,29 @@ function CompassGraphView({
           />
           )}
           {stageOverlay}
-          {overviewSummary !== undefined || autoLayoutDetail ? (
+          {breadcrumbTrail !== undefined && breadcrumbTrail.length > 0 ? (
+            <nav
+              className="compass-graph-breadcrumb compass-glass-panel"
+              aria-label="Graph path"
+            >
+              {breadcrumbTrail.map((step, position) => (
+                <span key={`${position}-${step.label}`} className="compass-breadcrumb-step">
+                  {position > 0 ? (
+                    <span className="compass-breadcrumb-separator" aria-hidden="true">
+                      ▸
+                    </span>
+                  ) : null}
+                  {position + 1 === breadcrumbTrail.length ? (
+                    <span aria-current="page">{step.label}</span>
+                  ) : (
+                    <button type="button" onClick={step.onSelect}>
+                      {step.label}
+                    </button>
+                  )}
+                </span>
+              ))}
+            </nav>
+          ) : overviewSummary !== undefined || autoLayoutDetail ? (
             <nav
               className="compass-graph-breadcrumb compass-glass-panel"
               aria-label="Graph path"

@@ -4,6 +4,7 @@ import {
   type GraphViewModel
 } from "./contracts/graph";
 import { WorkbenchModelSchema } from "./contracts/workbench";
+import { CommunityHierarchyViewSchema } from "./contracts/hierarchy";
 import { CompassGraph } from "./graph/CompassGraph";
 import { VisualizationWorkbench } from "./workbench/VisualizationWorkbench";
 import {
@@ -55,6 +56,7 @@ function mount() {
     return;
   }
   const overview = GraphViewModelSchema.parse(untrusted);
+  const hierarchy = parseEmbeddedHierarchy();
   const detailCache = new Map<number, GraphViewModel>();
   let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
   let communityLoading: number | null = null;
@@ -64,6 +66,7 @@ function mount() {
     root.render(
       <CompassGraph
         model={overview}
+        hierarchy={hierarchy}
         themePreference={theme}
         onThemePreferenceChange={setTheme}
         communityDetail={communityDetail}
@@ -116,6 +119,19 @@ function mount() {
   };
   renderStandalone = render;
   render();
+}
+
+/**
+ * The published community hierarchy, when the export embedded one. An export
+ * from an older Compass or an unclustered build carries no script, and a level
+ * the export could not afford to draw has no model: both render the overview
+ * the export already had.
+ */
+function parseEmbeddedHierarchy() {
+  const element = document.getElementById("compass-viewer-hierarchy");
+  if (!element?.textContent) return undefined;
+  const parsed = CommunityHierarchyViewSchema.safeParse(JSON.parse(element.textContent));
+  return parsed.success ? parsed.data : undefined;
 }
 
 function parseSourceNavigation(): SourceNavigation | undefined {

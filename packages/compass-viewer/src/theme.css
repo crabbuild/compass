@@ -10580,6 +10580,12 @@ body.vscode-high-contrast-light .call-guide-completion-status {
   .compass-scope-toggle:not(.compass-variant-toggle) button span {
     display: none;
   }
+
+  /* Level buttons are numbers, not words: hiding them leaves identical icons
+     and no way to tell which level is which, so they keep their short label. */
+  .compass-scope-toggle.compass-level-toggle button span {
+    display: inline;
+  }
 }
 
 @container compass-stage (max-width: 900px) {
