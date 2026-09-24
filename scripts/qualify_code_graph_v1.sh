@@ -17,6 +17,7 @@ usage:
   $0 --fixtures-only
   $0 --community-quality [--report <path>]
   $0 --hierarchy [--report <path>]
+  $0 --hierarchy-stability [--report <path>]
   $0 --repositories <manifest> [--local-repository <path>]
 EOF
   exit 2
@@ -27,6 +28,7 @@ REPOSITORIES_MANIFEST=
 LOCAL_REPOSITORY=
 COMMUNITY_REPORT=
 HIERARCHY_REPORT=
+STABILITY_REPORT=
 case "${1:-}" in
   --fixtures-only)
     MODE=fixtures
@@ -47,6 +49,15 @@ case "${1:-}" in
     if [[ "${1:-}" == "--report" ]]; then
       HIERARCHY_REPORT="${2:-}"
       [[ -n "$HIERARCHY_REPORT" ]] || usage
+      shift 2
+    fi
+    ;;
+  --hierarchy-stability)
+    MODE=hierarchy-stability
+    shift
+    if [[ "${1:-}" == "--report" ]]; then
+      STABILITY_REPORT="${2:-}"
+      [[ -n "$STABILITY_REPORT" ]] || usage
       shift 2
     fi
     ;;
@@ -139,6 +150,49 @@ PY
   if [[ -n "$HIERARCHY_REPORT" ]]; then
     mkdir -p "$(dirname "$HIERARCHY_REPORT")"
     cp "$REPORT_A" "$HIERARCHY_REPORT"
+  fi
+  exit 0
+fi
+
+if [[ "$MODE" == hierarchy-stability ]]; then
+  cd "$QUALIFY_ROOT"
+  REPORT_A="$QUALIFY_TMP/community-hierarchy-stability-a.json"
+  REPORT_B="$QUALIFY_TMP/community-hierarchy-stability-b.json"
+  cargo run --quiet --locked -p compass-graph \
+    --example community_hierarchy_stability >"$REPORT_A"
+  cargo run --quiet --locked -p compass-graph \
+    --example community_hierarchy_stability >"$REPORT_B"
+  cmp "$REPORT_A" "$REPORT_B"
+  python3 - "$REPORT_A" <<'PY'
+import json
+import pathlib
+import sys
+
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+if report.get("schema") != "compass.community-hierarchy-stability/1":
+    raise SystemExit("unexpected community hierarchy stability schema")
+acceptance = report.get("acceptance", {})
+required = {
+    "rootBudgetSatisfied",
+    "completeTree",
+    "ariAtLeastThreshold",
+    "amiAtLeastThreshold",
+    "stableIdsForUntouchedGroups",
+    "splitMergeEventsMatchEdits",
+    "ambiguousEventsReportedNotResolved",
+    "deterministicDigest",
+}
+missing = sorted(required - set(acceptance))
+if missing:
+    raise SystemExit(f"community hierarchy stability acceptance is incomplete: {', '.join(missing)}")
+failed = [name for name, passed in acceptance.items() if passed is not True]
+if failed:
+    raise SystemExit(f"community hierarchy stability acceptance failed: {', '.join(failed)}")
+print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+PY
+  if [[ -n "$STABILITY_REPORT" ]]; then
+    mkdir -p "$(dirname "$STABILITY_REPORT")"
+    cp "$REPORT_A" "$STABILITY_REPORT"
   fi
   exit 0
 fi

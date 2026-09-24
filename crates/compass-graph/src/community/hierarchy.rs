@@ -618,6 +618,7 @@ impl Default for ReconcilePolicy {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HierarchyEventKind {
+    /// A group survived 1:1. Counted in `stable`, never listed as an event.
     Stable,
     Split,
     Merged,
@@ -1011,6 +1012,7 @@ pub fn reconcile_hierarchy(
     let next_parents = level_parents(next);
     let mut events = Vec::new();
     let mut matched = 0usize;
+    let mut stable = 0usize;
     let mut ambiguous = 0usize;
     let mut parent_matches = Vec::<HashMap<usize, usize>>::new();
     for position in 0..next.levels.len().min(previous.levels.len()) {
@@ -1049,6 +1051,7 @@ pub fn reconcile_hierarchy(
             continue;
         };
         let rows = overlap_matrix(previous_sets, next_sets, policy.keep_threshold);
+        matched += rows.iter().filter(|row| !row.is_empty()).count();
         let mut predecessors = vec![Vec::<usize>::new(); next_sets.len()];
         for (previous_index, row) in rows.iter().enumerate() {
             for (_, next_index) in row {
@@ -1075,7 +1078,7 @@ pub fn reconcile_hierarchy(
             };
             match row.as_slice() {
                 [] => {}
-                [(overlap, next_index)] => {
+                [(_, next_index)] => {
                     // Two predecessors for one successor is a merge, not a
                     // rename, so only an unshared successor inherits an id.
                     if predecessors.get(*next_index).map_or(0, Vec::len) > 1 {
@@ -1100,16 +1103,9 @@ pub fn reconcile_hierarchy(
                     {
                         group.id = previous_id.clone();
                     }
+                    let _ = next_id;
                     matched_here.insert(previous_index, *next_index);
-                    matched += 1;
-                    events.push(HierarchyEvent {
-                        kind: HierarchyEventKind::Stable,
-                        level: next_level_number,
-                        previous_ids: vec![previous_id.clone()],
-                        next_ids: vec![next_id.clone()],
-                        overlap: *overlap,
-                        member_count: next_members.get(*next_index).copied().unwrap_or_default(),
-                    });
+                    stable += 1;
                 }
                 [(best, best_index), (runner_up, _), ..] => {
                     // Two successors this close mean the evidence does not name
@@ -1235,10 +1231,7 @@ pub fn reconcile_hierarchy(
     Ok(HierarchyReconciliation {
         policy: *policy,
         matched,
-        stable: counts
-            .get(&HierarchyEventKind::Stable)
-            .copied()
-            .unwrap_or_default(),
+        stable,
         split: counts
             .get(&HierarchyEventKind::Split)
             .copied()
