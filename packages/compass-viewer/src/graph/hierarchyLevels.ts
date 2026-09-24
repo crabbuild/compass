@@ -1,0 +1,114 @@
+import type {
+  CommunityHierarchyView,
+  HierarchyGroup,
+  HierarchyLevel
+} from "../contracts/hierarchy";
+import type { GraphViewModel } from "../contracts/graph";
+
+/**
+ * A scope a reader can open: a published level, or the symbol canvas. The
+ * toggle reads `Repository | <level labels> | Symbols`, bounded by the
+ * artifact's levels.
+ */
+export type HierarchyScope =
+  | { kind: "level"; level: number }
+  | { kind: "symbols" };
+
+export const ROOT_SCOPE: HierarchyScope = { kind: "level", level: 0 };
+
+/** The model a scope draws, when the export embedded one for that level. */
+export function scopeModel(
+  hierarchy: CommunityHierarchyView,
+  scope: HierarchyScope
+): GraphViewModel | undefined {
+  if (scope.kind === "symbols") {
+    return undefined;
+  }
+  return hierarchy.levels.find((level) => level.level === scope.level)?.model;
+}
+
+/** The level a scope names, if the artifact publishes it. */
+export function scopeLevel(
+  hierarchy: CommunityHierarchyView,
+  scope: HierarchyScope
+): HierarchyLevel | undefined {
+  if (scope.kind === "symbols") {
+    return undefined;
+  }
+  return hierarchy.levels.find((level) => level.level === scope.level);
+}
+
+/** The group a scope narrowed to, for the breadcrumb and the inspector. */
+export function groupAt(
+  hierarchy: CommunityHierarchyView,
+  scope: HierarchyScope,
+  groupIndex: number | undefined
+): HierarchyGroup | undefined {
+  if (groupIndex === undefined) {
+    return undefined;
+  }
+  return scopeLevel(hierarchy, scope)?.groups.find((group) => group.index === groupIndex);
+}
+
+/**
+ * The children of one group inside the level below it, filtered from that
+ * level's own projection: only the nodes and edges the group owns, so
+ * descending reads as narrowing the canvas rather than redrawing it.
+ */
+export function descendModel(
+  hierarchy: CommunityHierarchyView,
+  level: number,
+  groupIndex: number
+): GraphViewModel | undefined {
+  const parent = hierarchy.levels.find((entry) => entry.level === level);
+  const child = hierarchy.levels.find((entry) => entry.level === level + 1);
+  const group = parent?.groups.find((entry) => entry.index === groupIndex);
+  if (!group || !child?.model) {
+    return undefined;
+  }
+  // A level's projection names each node after the group it stands for, so the
+  // children of a group are exactly the nodes it indexes.
+  const members = new Set(group.childIndices.map((index) => String(index)));
+  if (members.size === 0) {
+    return undefined;
+  }
+  return {
+    ...child.model,
+    nodes: child.model.nodes.filter((node) => members.has(node.id)),
+    edges: child.model.edges.filter(
+      (edge) => members.has(edge.source) && members.has(edge.target)
+    )
+  };
+}
+
+/**
+ * Whether the export published a drawable projection for every level, which is
+ * what level navigation needs. A repository larger than the export budget
+ * publishes some levels as groups only.
+ */
+export function hierarchyNavigable(hierarchy: CommunityHierarchyView): boolean {
+  return hierarchy.levels.every((level) => level.model !== undefined);
+}
+
+/**
+ * The labels a breadcrumb shows for a scope: the repository, then the group the
+ * reader descended through on each level above the active one.
+ */
+export function hierarchyTrail(
+  hierarchy: CommunityHierarchyView,
+  scope: HierarchyScope,
+  trail: ReadonlyArray<{ level: number; groupIndex: number }>
+): string[] {
+  if (scope.kind === "symbols") {
+    return ["Symbols"];
+  }
+  const labels = ["Repository"];
+  for (const entry of trail) {
+    const level = hierarchy.levels.find((candidate) => candidate.level === entry.level);
+    const group = level?.groups.find((candidate) => candidate.index === entry.groupIndex);
+    if (group) {
+      labels.push(group.label);
+    }
+  }
+  return labels;
+}
