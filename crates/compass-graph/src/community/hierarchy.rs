@@ -241,9 +241,55 @@ pub struct CommunityHierarchyDraft {
     pub levels: Vec<HierarchyLevel>,
 }
 
-/// The published, versioned community hierarchy artifact.
+/// The level data a renderer or reader consumes, borrowed from either the
+/// draft a build is still finishing or the published artifact.
+#[derive(Clone, Copy, Debug)]
+pub struct CommunityHierarchyLevels<'a> {
+    pub budget_identity: &'a str,
+    pub merge_policy: &'a str,
+    pub budget: HierarchyBudget,
+    pub boundary_kinds: &'a [String],
+    pub finest_community_count: usize,
+    pub finest_signature: &'a str,
+    pub budget_satisfied: bool,
+    pub levels: &'a [HierarchyLevel],
+}
+
+impl CommunityHierarchyDraft {
+    #[must_use]
+    pub fn levels_view(&self) -> CommunityHierarchyLevels<'_> {
+        CommunityHierarchyLevels {
+            budget_identity: &self.budget_identity,
+            merge_policy: &self.merge_policy,
+            budget: self.budget,
+            boundary_kinds: &self.boundary_kinds,
+            finest_community_count: self.finest_community_count,
+            finest_signature: &self.finest_signature,
+            budget_satisfied: self.budget_satisfied,
+            levels: &self.levels,
+        }
+    }
+}
+
+impl CommunityHierarchy {
+    #[must_use]
+    pub fn levels_view(&self) -> CommunityHierarchyLevels<'_> {
+        CommunityHierarchyLevels {
+            budget_identity: &self.budget_identity,
+            merge_policy: &self.merge_policy,
+            budget: self.budget,
+            boundary_kinds: &self.boundary_kinds,
+            finest_community_count: self.finest_community_count,
+            finest_signature: &self.finest_signature,
+            budget_satisfied: self.budget_satisfied,
+            levels: &self.levels,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+/// The published, versioned community hierarchy artifact.
 pub struct CommunityHierarchy {
     pub schema: String,
     pub graph_generation: String,

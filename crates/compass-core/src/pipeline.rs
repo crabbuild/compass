@@ -51,7 +51,7 @@ use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, GraphViewModel, HtmlOptions,
     OrientationHealth, OutputError, PublicationStatus, ReportOptions, TokenCost,
     agent_orientation_with_blind_spots, graph_view_model_document, render_agent_report_markdown,
-    render_orientation_json, write_html,
+    render_orientation_json, write_html_with_hierarchy,
 };
 use compass_resolve::{
     ResolutionAdmission, apply_program_projection, collect_program_projection_sites,
@@ -4124,7 +4124,8 @@ fn build_graph_inner_unscoped(
                 remove_if_exists(&html_path)?;
                 false
             } else {
-                let rendered = match write_html(
+                let hierarchy_levels = hierarchy_draft.levels_view();
+                let rendered = match write_html_with_hierarchy(
                     &document,
                     &communities,
                     &html_path,
@@ -4133,6 +4134,7 @@ fn build_graph_inner_unscoped(
                         node_limit: None,
                         ..HtmlOptions::default()
                     },
+                    Some(&hierarchy_levels),
                 ) {
                     Ok(rendered) => rendered,
                     Err(OutputError::HtmlTooLarge { .. }) => None,

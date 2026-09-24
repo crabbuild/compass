@@ -36,6 +36,8 @@ pub struct HtmlRender {
 pub struct GraphViewBundle {
     pub overview: GraphViewModel,
     pub community_details: BTreeMap<usize, GraphViewModel>,
+    /// Level navigation for the overview, when a build published a hierarchy.
+    pub hierarchy: Option<crate::hierarchy_view::CommunityHierarchyView>,
     pub truncated: bool,
 }
 
@@ -67,6 +69,7 @@ pub fn graph_view_model_bundle_document(
                 false,
             ),
             community_details: BTreeMap::new(),
+            hierarchy: None,
             truncated: false,
         });
     }
@@ -122,6 +125,7 @@ pub fn graph_view_model_bundle_document(
                 false,
             ),
             community_details: BTreeMap::new(),
+            hierarchy: None,
             truncated: true,
         });
     }
@@ -153,8 +157,35 @@ pub fn graph_view_model_bundle_document(
     Ok(GraphViewBundle {
         overview,
         community_details,
+        hierarchy: None,
         truncated: false,
     })
+}
+
+/// Project the published hierarchy for one overview, bounded by the export's
+/// node budget.
+pub fn graph_view_model_bundle_document_with_hierarchy(
+    document: &GraphDocument,
+    communities: &Communities,
+    output_path: impl AsRef<Path>,
+    options: &HtmlOptions<'_>,
+    hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
+) -> Result<GraphViewBundle, OutputError> {
+    let mut bundle = graph_view_model_bundle_document(document, communities, output_path, options)?;
+    if let Some(hierarchy) = hierarchy {
+        let title = sanitize_label(&bundle.overview.title);
+        bundle.hierarchy = Some(crate::hierarchy_view::community_hierarchy_view(
+            hierarchy,
+            document,
+            communities,
+            &bundle.community_details,
+            options,
+            &title,
+            usize::try_from(options.node_limit.unwrap_or_else(viz_node_limit))
+                .unwrap_or(EMBEDDED_DETAIL_NODE_BUDGET),
+        ));
+    }
+    Ok(bundle)
 }
 
 pub fn html_document(
@@ -162,6 +193,18 @@ pub fn html_document(
     communities: &Communities,
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
+) -> Result<Option<HtmlRender>, OutputError> {
+    html_document_with_hierarchy(document, communities, output_path, options, None)
+}
+
+/// Render the standalone page with the published community hierarchy embedded,
+/// so the viewer can navigate levels offline.
+pub fn html_document_with_hierarchy(
+    document: &GraphDocument,
+    communities: &Communities,
+    output_path: impl AsRef<Path>,
+    options: &HtmlOptions<'_>,
+    hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
 ) -> Result<Option<HtmlRender>, OutputError> {
     let limit = options.node_limit.unwrap_or_else(viz_node_limit);
     if document.nodes.len() as isize > limit {
@@ -191,6 +234,7 @@ pub fn html_document(
                 EMBEDDED_DETAIL_NODE_BUDGET,
                 EMBEDDED_DETAIL_EDGE_BUDGET,
             )),
+            hierarchy,
         )?;
         return Ok(Some(HtmlRender {
             nodes: meta.nodes.len(),
@@ -200,7 +244,14 @@ pub fn html_document(
         }));
     }
     Ok(Some(HtmlRender {
-        html: render(document, communities, output_path.as_ref(), options, None)?,
+        html: render(
+            document,
+            communities,
+            output_path.as_ref(),
+            options,
+            None,
+            hierarchy,
+        )?,
         aggregated: false,
         nodes: document.nodes.len(),
         edges: document.links.len(),
@@ -353,6 +404,18 @@ pub fn write_html(
     output_path: impl AsRef<Path>,
     options: &HtmlOptions<'_>,
 ) -> Result<Option<HtmlRender>, OutputError> {
+    write_html_with_hierarchy(document, communities, output_path, options, None)
+}
+
+/// Write the standalone page, embedding the published community hierarchy when
+/// the build published one.
+pub fn write_html_with_hierarchy(
+    document: &GraphDocument,
+    communities: &Communities,
+    output_path: impl AsRef<Path>,
+    options: &HtmlOptions<'_>,
+    hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
+) -> Result<Option<HtmlRender>, OutputError> {
     let output_path = output_path.as_ref();
     let owned_overlay;
     let effective = if options.learning_overlay.is_none() {
@@ -366,7 +429,8 @@ pub fn write_html(
     } else {
         options.clone()
     };
-    let rendered = html_document(document, communities, output_path, &effective)?;
+    let rendered =
+        html_document_with_hierarchy(document, communities, output_path, &effective, hierarchy)?;
     if let Some(rendered) = &rendered {
         write_text_atomic(output_path, &rendered.html)?;
     }
@@ -379,6 +443,7 @@ fn render(
     output_path: &Path,
     options: &HtmlOptions<'_>,
     drilldown: Option<(&GraphDocument, &Communities, usize, usize)>,
+    hierarchy: Option<&compass_graph::CommunityHierarchyLevels<'_>>,
 ) -> Result<String, OutputError> {
     let title = sanitize_label(&output_path.to_string_lossy());
     let mut model = crate::viewer_model::graph_view_model(
@@ -408,8 +473,28 @@ fn render(
             }
         }
     }
-    Ok(crate::viewer_model::shared_viewer_html_with_communities(
-        &model, &details,
+    // A hierarchy always describes the published partition, so it is projected
+    // from the full source document even when this render draws the aggregate.
+    let (hierarchy_document, hierarchy_communities) = drilldown
+        .map_or((document, communities), |(document, communities, _, _)| {
+            (document, communities)
+        });
+    let hierarchy_view = hierarchy.map(|hierarchy| {
+        crate::hierarchy_view::community_hierarchy_view(
+            hierarchy,
+            hierarchy_document,
+            hierarchy_communities,
+            &details,
+            options,
+            &title,
+            usize::try_from(options.node_limit.unwrap_or_else(viz_node_limit))
+                .unwrap_or(EMBEDDED_DETAIL_NODE_BUDGET),
+        )
+    });
+    Ok(crate::viewer_model::shared_viewer_html_with_hierarchy(
+        &model,
+        &details,
+        hierarchy_view.as_ref(),
     )?)
 }
 
@@ -1109,7 +1194,7 @@ fn add_learning_fields(
     );
 }
 
-fn aggregate(
+pub(crate) fn aggregate(
     document: &GraphDocument,
     communities: &Communities,
     options: &HtmlOptions<'_>,
@@ -2696,6 +2781,83 @@ mod tests {
             "nodes":[{"id":"a","label":"A"},{"id":"b","label":"B"}],
             "links":[{"source":"a","target":"b","relation":"calls"}]
         }))?;
+        let communities = Communities::from([(0usize, vec!["a".to_owned(), "b".to_owned()])]);
+        let rendered = html_document(&graph, &communities, "graph.html", &HtmlOptions::default())?
+            .ok_or("HTML unexpectedly skipped")?;
+        assert!(
+            !rendered.html.contains("compass-viewer-hierarchy"),
+            "a graph without a published hierarchy embeds none"
+        );
+
+        let identity = compass_graph::CommunityIdentity {
+            algorithm: compass_graph::QUALITY_CLUSTER_ALGORITHM.to_owned(),
+            topology: compass_graph::QUALITY_CLUSTER_TOPOLOGY.to_owned(),
+            quality: compass_graph::QUALITY_CLUSTER_QUALITY.to_owned(),
+            selector: compass_graph::QUALITY_CLUSTER_SELECTOR.to_owned(),
+            seed: compass_graph::COMPATIBILITY_CLUSTER_SEED,
+            limits: compass_graph::QUALITY_CLUSTER_LIMITS.to_owned(),
+        };
+        let limits = compass_graph::CommunityLimits::default();
+        let draft = compass_graph::CommunityHierarchyDraft {
+            identity,
+            limits,
+            budget_identity: compass_graph::COMMUNITY_HIERARCHY_BUDGET.to_owned(),
+            merge_policy: compass_graph::COMMUNITY_HIERARCHY_MERGE_POLICY.to_owned(),
+            budget: compass_graph::HierarchyBudget::default(),
+            boundary_kinds: vec!["route".to_owned()],
+            finest_community_count: 1,
+            finest_signature: format!("sha256:{}", "0".repeat(64)),
+            budget_satisfied: true,
+            levels: vec![compass_graph::HierarchyLevel {
+                level: 0,
+                merge: compass_graph::LevelMerge::Relationship,
+                resolution: Some(1.0),
+                merge_evidence: BTreeMap::new(),
+                group_count: 1,
+                groups: vec![compass_graph::HierarchyGroup {
+                    index: 0,
+                    community: Some(0),
+                    label: compass_graph::HierarchyLabel {
+                        text: "src".to_owned(),
+                        rule: compass_graph::HierarchyLabelRule::DominantDirectory,
+                        generic: false,
+                        evidence: BTreeMap::from([("value".to_owned(), serde_json::json!("src"))]),
+                    },
+                    member_count: 2,
+                    child_indices: Vec::new(),
+                    quality: compass_graph::GroupQuality {
+                        cohesion: 1.0,
+                        conductance: 0.0,
+                        boundary_kinds: BTreeMap::new(),
+                    },
+                }],
+            }],
+        };
+        let rendered = html_document_with_hierarchy(
+            &graph,
+            &communities,
+            "graph.html",
+            &HtmlOptions::default(),
+            Some(&draft.levels_view()),
+        )?
+        .ok_or("HTML unexpectedly skipped")?;
+        assert!(
+            rendered.html.contains("id=\"compass-viewer-hierarchy\""),
+            "the page must embed the published levels"
+        );
+        assert!(rendered.html.contains("compass.viewer.hierarchy/1"));
+        assert!(
+            rendered.html.contains("locationAffinity") || rendered.html.contains("relationship")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn html_renders_workbench_controls() -> Result<(), Box<dyn Error>> {
+        let graph: GraphDocument = serde_json::from_value(json!({
+            "nodes":[{"id":"a","label":"A"},{"id":"b","label":"B"}],
+            "links":[{"source":"a","target":"b","relation":"calls"}]
+        }))?;
         let rendered = html_document(
             &graph,
             &Communities::new(),
@@ -2853,6 +3015,7 @@ mod tests {
                 ..HtmlOptions::default()
             },
             Some((&graph, &communities, 2, 1)),
+            None,
         )?;
         assert!(rendered.contains("\"detailAvailable\":true"));
         assert!(rendered.contains("\"detailAvailable\":false"));

@@ -463,6 +463,16 @@ pub fn shared_viewer_html_with_communities(
     model: &GraphViewModel,
     community_details: &BTreeMap<usize, GraphViewModel>,
 ) -> Result<String, serde_json::Error> {
+    shared_viewer_html_with_hierarchy(model, community_details, None)
+}
+
+/// Render the shared offline graph workbench with optional community details and
+/// the published community hierarchy, which the viewer navigates by level.
+pub fn shared_viewer_html_with_hierarchy(
+    model: &GraphViewModel,
+    community_details: &BTreeMap<usize, GraphViewModel>,
+    hierarchy: Option<&crate::hierarchy_view::CommunityHierarchyView>,
+) -> Result<String, serde_json::Error> {
     let model_json = serde_json::to_string(model)?
         .replace('<', "\\u003c")
         .replace('>', "\\u003e")
@@ -480,6 +490,18 @@ pub fn shared_viewer_html_with_communities(
             })
         })
         .collect::<Result<String, _>>()?;
+    let hierarchy_json = match hierarchy {
+        Some(hierarchy) => {
+            let json = serde_json::to_string(hierarchy)?
+                .replace('<', "\\u003c")
+                .replace('>', "\\u003e")
+                .replace('&', "\\u0026");
+            format!(
+                r#"<script id="compass-viewer-hierarchy" type="application/json">{json}</script>"#
+            )
+        }
+        None => String::new(),
+    };
     Ok(format!(
         r#"<!doctype html>
 <html lang="en">
@@ -495,6 +517,7 @@ pub fn shared_viewer_html_with_communities(
 <div id="compass-viewer-root"></div>
 <script id="compass-viewer-model" type="application/json">{model_json}</script>
 {community_json}
+{hierarchy_json}
 <script>{javascript}</script>
 </body>
 </html>

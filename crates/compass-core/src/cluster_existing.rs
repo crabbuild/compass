@@ -19,7 +19,7 @@ use compass_output::{
     DetectionSummary, FreshnessBasis, FreshnessStatus, HtmlOptions, JsonExportOptions,
     OrientationHealth, ReportOptions, TokenCost, agent_orientation_with_blind_spots,
     backup_if_protected_to, graph_artifact_identity, render_agent_report_markdown,
-    render_orientation_json, write_html, write_json,
+    render_orientation_json, write_html_with_hierarchy, write_json,
 };
 use serde_json::{Value, json};
 
@@ -346,6 +346,7 @@ where
         )?;
         graph_artifact_identity(&graph_path)?
     };
+    let mut published_hierarchy = None;
     if let Some((generation, identity, quality, hierarchy)) = quality_evidence {
         let artifact = CommunityQualityArtifact::new(
             generation.clone(),
@@ -355,8 +356,10 @@ where
             quality,
         )?;
         write_json_atomic(staging.join("community-quality.json"), &artifact, true)?;
-        let hierarchy = CommunityHierarchy::new(generation, graph_identity.clone(), hierarchy)?;
-        write_json_atomic(staging.join("community-hierarchy.json"), &hierarchy, true)?;
+        let artifact = CommunityHierarchy::new(generation, graph_identity.clone(), hierarchy)?;
+        write_json_atomic(staging.join("community-hierarchy.json"), &artifact, true)?;
+        // The published page embeds the same levels the artifact describes.
+        published_hierarchy = Some(artifact);
     }
     orientation.evidence_status.artifact_set_identity = Some(graph_identity);
     let report = render_agent_report_markdown(&orientation, report_options.obsidian)?;
@@ -375,7 +378,7 @@ where
         remove_if_exists(&html_path)?;
         false
     } else {
-        let rendered = write_html(
+        let rendered = write_html_with_hierarchy(
             published_document,
             &communities,
             &html_path,
@@ -384,6 +387,10 @@ where
                 node_limit: Some(5_000),
                 ..HtmlOptions::default()
             },
+            published_hierarchy
+                .as_ref()
+                .map(compass_graph::CommunityHierarchy::levels_view)
+                .as_ref(),
         )?;
         if rendered.is_none() {
             remove_if_exists(&html_path)?;

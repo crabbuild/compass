@@ -8,6 +8,7 @@ mod canvas;
 mod cql;
 mod cypher;
 mod graphml;
+mod hierarchy_view;
 mod history_bundle;
 mod history_viewer;
 mod html;
@@ -62,6 +63,10 @@ pub use canvas::{CanvasOptions, canvas_document, write_canvas};
 pub use cql::{render_cql_json, render_cql_jsonl, render_cql_table};
 pub use cypher::{cypher_document, write_cypher};
 pub use graphml::{graphml_document, write_graphml};
+pub use hierarchy_view::{
+    CommunityHierarchyView, HIERARCHY_VIEW_SCHEMA, HierarchyGroupView, HierarchyLevelView,
+    community_hierarchy_view,
+};
 pub use history_bundle::{
     DerivedArtifactRequest, HistoricalPublicationEvidence, HistoryBundleInput,
     SUPPORTED_HISTORY_RENDERER, publish_history_bundle,
@@ -69,7 +74,9 @@ pub use history_bundle::{
 pub use history_viewer::{HistoricalViewError, historical_graph_document, historical_view_model};
 pub use html::{
     GraphViewBundle, HtmlOptions, HtmlRender, graph_community_view_model_document,
-    graph_view_model_bundle_document, graph_view_model_document, html_document, write_html,
+    graph_view_model_bundle_document, graph_view_model_bundle_document_with_hierarchy,
+    graph_view_model_document, html_document, html_document_with_hierarchy, write_html,
+    write_html_with_hierarchy,
 };
 pub use json::{JsonExportOptions, export_json_value, write_json};
 pub use lenses::{
@@ -103,7 +110,7 @@ pub use viewer_model::{
     EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewDocument,
     GraphViewEdge, GraphViewModel, GraphViewNode, GraphViewSource, GraphViewStats,
     effective_graph_view_model, graph_view_model, shared_viewer_html,
-    shared_viewer_html_with_communities,
+    shared_viewer_html_with_communities, shared_viewer_html_with_hierarchy,
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub use workbench::{
