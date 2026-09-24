@@ -102,6 +102,23 @@ query results, shares one deterministic renderer between CLI and MCP, exposes
 ambiguity, evidence, coverage, and truncation before graph details, and
 preserves discovery cursor version 2 by leaving its entry ledger intact.
 
+Plans 026–028 are a fourth, self-contained program for community-level graph
+navigation: the balance between how communities are built and how a code graph
+can be read. They were planned at Compass commit `3fd246dc` on 2026-09-23 from
+two real-repository measurements taken with the local binary —
+`pallets/flask` (118 files, 4,459 nodes, 174 communities) and
+`colinhacks/zod` (616 files, 58,670 nodes, 2,641 communities). At 174 units the
+community overview is readable; at 2,641 the community layer is nearly as
+complex as the symbol layer, labels stop being legible at fit scale, and the
+aggregated edges no longer say what binds two subsystems together. Plan 026
+improves the viewer-only overview (relationship mix, label ranking, breadcrumb,
+panel actions). Plan 027 adds the budgeted, provenance-carrying
+`compass.community-hierarchy/1` artifact and level navigation so the exporter
+picks a level instead of a flat aggregate. Plan 028 makes hierarchy group
+identity stable across builds, reports split/merge events, and adds a measured
+stability gate. None of the three changes `graph.json`, CompassQL, or MCP
+results.
+
 ## Execution order and status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -131,11 +148,22 @@ preserves discovery cursor version 2 by leaving its entry ledger intact.
 | 023 | Make Python framework graphs source-proven and production-qualified | P1 | XXL | —; final gate should consume 005 or equivalent | BLOCKED |
 | 024 | Harden Markdown graph-v1 intelligence | P1 | XL | 009; coordinate with 012 | IN PROGRESS |
 | 025 | Make query output answer-first for coding agents | P1 | L | —; land before 018 when both are selected | DONE |
+| 026 | Make the derived community overview answer coupling questions | P1 | M | — | DONE |
+| 027 | Publish a budgeted community hierarchy for navigation | P1 | L | — | TODO |
+| 028 | Keep community levels stable across builds and qualify them | P2 | L | 027 | TODO |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 
 ## Dependency notes
 
+- Plans 026 and 027 are independent; when both are selected, land 026 first
+  because it is viewer-only and its local label ranking is the fallback path
+  027 must keep working for exports without a hierarchy artifact.
+- Plan 028 requires 027: it reconciles group identity over the artifact 027
+  defines, and it must not invent a second hierarchy representation.
+- Plan 026's relationship-mix wording is superseded by typed per-category
+  weights once 027 lands; executors of 027 must either carry the typed field
+  into the derived path or record the divergence in that plan's status row.
 - Plan 001 establishes the exact upstream line and evidence vocabulary used by
   all later compatibility decisions.
 - Plan 002 is deliberately small and should land before the broader structured
