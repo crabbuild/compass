@@ -13,6 +13,12 @@
   level records that rule, its counts, and whether the root met its budget.
   Read it back with the new `compass export hierarchy-json`, which reproduces
   the artifact byte for byte and rejects any other schema major or graph.
+- Navigate those levels in the graph viewer: an export with a published
+  hierarchy opens on level 0, the toolbar scope reads `Level 0 … N | Symbols`,
+  double-clicking a group descends into its children inside the level below,
+  and the breadcrumb walks back up one group or to the repository. The four
+  overview designs read whichever level is open, and a narrowed scope lists
+  only the groups it draws.
 - Make large `graph.html` exports readable: the viewer opens a repository on a
   labelled community overview derived from the embedded model, weights
   cross-community relationships by the number of relationships they summarize,

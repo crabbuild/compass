@@ -225,6 +225,17 @@ absence of the artifact means unavailable navigation, not an empty hierarchy.
 `compass export hierarchy-json` reproduces the published artifact unchanged and
 refuses an unknown schema major or a mismatched graph.
 
+The standalone page embeds the same levels as
+`compass.viewer.hierarchy/1`, so an export with a published hierarchy opens on
+level 0 instead of a derived overview. The graph toolbar's scope reads
+`Level 0 | … | Symbols`: switching a level redraws the canvas, the coupling
+matrix, the area map, or the tiers from that level's projection, and the
+`Symbols` scope still shows the underlying node set. Double-clicking a group
+descends one level, narrowed to that group's children; the breadcrumb and the
+`Overview` control walk back up one group or to the repository. A level the
+export could not draw inside its node budget renders as the overview the export
+already had. Exports without the artifact keep the previous behaviour exactly.
+
 ### Inference levels
 
 Graph-building commands accept `--inference-level low|medium|high|max`. The

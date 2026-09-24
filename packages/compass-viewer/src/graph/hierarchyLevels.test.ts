@@ -19,7 +19,9 @@ function model(ids: string[], edges: Array<[string, string]> = []) {
     edges: edges.map(([source, target], position) => ({
       id: `edge-${position}`, source, target, relation: "calls"
     })),
-    communities: [],
+    communities: ids.map((id) => ({
+      id: Number(id), label: `group ${id}`, color: "#6688aa", hidden: false
+    })),
     hyperedges: []
   };
 }
@@ -109,7 +111,22 @@ describe("hierarchy level scopes", () => {
     const child = descendModel(view, 0, 0);
     expect(child?.nodes.map((node) => node.id)).toEqual(["0", "1"]);
     expect(child?.edges.map((edge) => edge.id)).toEqual(["edge-0"]);
+    expect(child?.communities.map((community) => community.id)).toEqual([0, 1]);
+    expect(child?.stats).toMatchObject({ nodes: 2, edges: 1, communities: 2 });
     expect(descendModel(view, 1, 0)).toBeUndefined();
+  });
+
+  it("publishes only the groups a narrowed scope draws", () => {
+    const view = hierarchy();
+    const root = view.levels[0];
+    const rootGroup = root?.groups[0];
+    if (rootGroup) {
+      rootGroup.childIndices = [0];
+    }
+    const child = descendModel(view, 0, 0);
+    expect(child?.nodes.map((node) => node.id)).toEqual(["0"]);
+    expect(child?.communities.map((community) => community.id)).toEqual([0]);
+    expect(child?.stats).toMatchObject({ nodes: 1, edges: 0, communities: 1 });
   });
 
   it("drops edges that leave the narrowed group", () => {

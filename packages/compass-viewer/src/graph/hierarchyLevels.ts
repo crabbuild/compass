@@ -72,11 +72,26 @@ export function descendModel(
   if (members.size === 0) {
     return undefined;
   }
+  const nodes = child.model.nodes.filter((node) => members.has(node.id));
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const edges = child.model.edges.filter(
+    (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+  );
+  // The panel, legend, and counts read `communities`, so a narrowed scope has
+  // to publish the groups it actually draws instead of the whole level.
+  const communityIds = new Set(nodes.map((node) => node.community));
   return {
     ...child.model,
-    nodes: child.model.nodes.filter((node) => members.has(node.id)),
-    edges: child.model.edges.filter(
-      (edge) => members.has(edge.source) && members.has(edge.target)
+    stats: {
+      ...child.model.stats,
+      nodes: nodes.length,
+      edges: edges.length,
+      communities: communityIds.size
+    },
+    nodes,
+    edges,
+    communities: child.model.communities.filter(
+      (community) => communityIds.has(community.id)
     )
   };
 }
