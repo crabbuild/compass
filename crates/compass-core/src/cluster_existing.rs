@@ -6,11 +6,11 @@ use std::time::{Duration, Instant};
 use compass_files::{BuildGuard, write_atomic_with_digest, write_json_atomic, write_text_atomic};
 use compass_graph::{
     ClusterOptions, Communities, CommunityHierarchy, CommunityLimits, CommunityProfile,
-    CommunityQualityArtifact, CommunityRequest, GodNode, HierarchyBudget, HierarchyRequest,
-    ResolutionPolicy, blind_spot_report, build_communities, build_community_hierarchy, cluster,
-    community_member_signatures, god_nodes, label_communities_by_hub,
-    remap_communities_to_previous, score_communities, suggest_questions, surprising_connections,
-    write_canonical_graph_json,
+    CommunityQualityArtifact, CommunityRequest, GodNode, HierarchyBudget, HierarchyReconciliation,
+    HierarchyRequest, ReconcilePolicy, ResolutionPolicy, blind_spot_report, build_communities,
+    build_community_hierarchy, cluster, community_member_signatures, god_nodes,
+    label_communities_by_hub, reconcile_hierarchy, remap_communities_to_previous,
+    score_communities, suggest_questions, surprising_connections, write_canonical_graph_json,
 };
 use compass_model::GraphDocument;
 use compass_model::GraphError;
@@ -39,11 +39,14 @@ pub struct ClusterExistingOptions {
     pub min_community_size: usize,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ClusterExistingResult {
     pub nodes: usize,
     pub edges: usize,
     pub communities: usize,
+    /// What changed between this build's hierarchy and the published one, when
+    /// a previous hierarchy was available to reconcile against.
+    pub hierarchy_reconciliation: Option<HierarchyReconciliation>,
     pub labels_reused: usize,
     pub html_written: bool,
     pub load_warning: Option<String>,
@@ -163,6 +166,29 @@ where
         .collect::<HashMap<_, _>>();
     let cluster_started = Instant::now();
     let community_limits = CommunityLimits::default();
+    // The previous build's hierarchy is the previous state reconciliation works
+    // from: the caller resolves the graph artifact being reclustered, and the
+    // hierarchy published with it sits beside it.
+    let previous_hierarchy = load_previous_hierarchy(&options.output_dir);
+    // A typed graph keeps its communities as typed metadata, so the legacy
+    // attribute fallback only serves schema-less graphs.
+    let previous_partition = typed_document.as_ref().map_or_else(
+        || invert_partition(&previous),
+        |typed| {
+            let mut partition = Communities::new();
+            for node in &typed.nodes {
+                if let Some(community) = node.community.as_ref()
+                    && let Ok(community) = usize::try_from(community.id)
+                {
+                    partition
+                        .entry(community)
+                        .or_default()
+                        .push(node.id.clone());
+                }
+            }
+            partition
+        },
+    );
     let (communities, quality_evidence) = if let Some(typed) = typed_document.as_ref() {
         let changed_sources = BTreeSet::new();
         let result = build_communities(
@@ -347,6 +373,7 @@ where
         graph_artifact_identity(&graph_path)?
     };
     let mut published_hierarchy = None;
+    let mut hierarchy_reconciliation = None;
     if let Some((generation, identity, quality, hierarchy)) = quality_evidence {
         let artifact = CommunityQualityArtifact::new(
             generation.clone(),
@@ -356,8 +383,24 @@ where
             quality,
         )?;
         write_json_atomic(staging.join("community-quality.json"), &artifact, true)?;
-        let artifact = CommunityHierarchy::new(generation, graph_identity.clone(), hierarchy)?;
+        let mut artifact = CommunityHierarchy::new(generation, graph_identity.clone(), hierarchy)?;
+        if let Some(previous_artifact) = previous_hierarchy.as_ref() {
+            // Identity only: a group that survives keeps the id a reader already
+            // learned, and the events say what split, merged, appeared, or went.
+            let reconciliation = reconcile_hierarchy(
+                previous_artifact,
+                &previous_partition,
+                &mut artifact,
+                &communities,
+                &ReconcilePolicy::default(),
+            )?;
+            hierarchy_reconciliation = Some(reconciliation);
+        }
         write_json_atomic(staging.join("community-hierarchy.json"), &artifact, true)?;
+        write_python_string_map(
+            staging.join("community-hierarchy.json.sig"),
+            &hierarchy_identity_ledger(&artifact),
+        )?;
         // The published page embeds the same levels the artifact describes.
         published_hierarchy = Some(artifact);
     }
@@ -413,6 +456,7 @@ where
     if publishes_quality {
         artifacts.push("community-quality.json");
         artifacts.push("community-hierarchy.json");
+        artifacts.push("community-hierarchy.json.sig");
     }
     guard.commit_with_artifacts(&artifacts)?;
     BuildGuard::publish_root_artifacts(
@@ -436,6 +480,7 @@ where
         nodes: published_document.nodes.len(),
         edges: published_document.links.len(),
         communities: communities.len(),
+        hierarchy_reconciliation,
         labels_reused: selection.labels_reused,
         html_written,
         load_warning,
@@ -498,6 +543,45 @@ fn normalize_recluster_document(document: &mut GraphDocument) {
     }
     document.multigraph = false;
     document.links = links;
+}
+
+/// The previous build's hierarchy, when this output directory has one.
+///
+/// Only self-consistency is required: the artifact is bound to the previous
+/// graph generation, which a rebuild is expected to replace. A file that does
+/// not validate is treated as unavailable rather than as a previous state.
+pub(crate) fn load_previous_hierarchy(output_dir: &Path) -> Option<CommunityHierarchy> {
+    let bytes = fs::read(output_dir.join("community-hierarchy.json")).ok()?;
+    let artifact = serde_json::from_slice::<CommunityHierarchy>(&bytes).ok()?;
+    artifact.validate().ok()?;
+    Some(artifact)
+}
+
+/// Turn a node-to-community map into the partition reconciliation compares.
+pub(crate) fn invert_partition(previous: &HashMap<String, usize>) -> Communities {
+    let mut communities = Communities::new();
+    for (node, community) in previous {
+        communities
+            .entry(*community)
+            .or_default()
+            .push(node.clone());
+    }
+    communities
+}
+
+/// The identity ledger persisted beside the artifact: flattened group ordinal to
+/// `"<id> <signature>"`, so a later build can reconcile from the sidecar alone
+/// when the artifact itself is gone.
+pub(crate) fn hierarchy_identity_ledger(artifact: &CommunityHierarchy) -> BTreeMap<usize, String> {
+    let mut ledger = BTreeMap::new();
+    let mut ordinal = 0usize;
+    for level in &artifact.levels {
+        for group in &level.groups {
+            ledger.insert(ordinal, format!("{} {}", group.id, group.signature));
+            ordinal = ordinal.saturating_add(1);
+        }
+    }
+    ledger
 }
 
 fn load_usize_string_map(path: &Path) -> BTreeMap<usize, String> {
@@ -642,7 +726,7 @@ mod tests {
     #[test]
     fn typed_cluster_only_publishes_graph_bound_fixed_quality_evidence()
     -> Result<(), Box<dyn Error>> {
-        let fixture = managed_typed_graph_fixture()?;
+        let mut fixture = managed_typed_graph_fixture()?;
         cluster_existing_graph(&fixture.options)?;
         let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
         let graph_bytes = fs::read(current.join("graph.json"))?;
@@ -666,6 +750,79 @@ mod tests {
             compass_graph::COMPATIBILITY_CLUSTER_SELECTOR
         );
         assert_eq!(quality.partition.candidate_summaries.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn an_unchanged_recluster_keeps_hierarchy_group_ids() -> Result<(), Box<dyn Error>> {
+        let mut fixture = managed_typed_graph_fixture()?;
+        let first = cluster_existing_graph(&fixture.options)?;
+        assert!(
+            first.hierarchy_reconciliation.is_none(),
+            "the first build has no previous hierarchy to reconcile against"
+        );
+        let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
+        let before: CommunityHierarchy =
+            serde_json::from_slice(&fs::read(current.join("community-hierarchy.json"))?)?;
+        let ledger = current.join("community-hierarchy.json.sig");
+        assert!(ledger.is_file(), "the identity ledger is published");
+        assert!(
+            fixture.output.join("community-hierarchy.json").is_file(),
+            "the root projection carries the hierarchy for the next build"
+        );
+        let published_bytes = fs::read(fixture.output.join("community-hierarchy.json"))?;
+        let published: CommunityHierarchy = serde_json::from_slice(&published_bytes)?;
+        published
+            .validate()
+            .map_err(|error| format!("published hierarchy does not validate: {error}"))?;
+        // A recluster resolves the requested artifact again, exactly as the CLI
+        // does, so the previous hierarchy is the one published beside it.
+        fixture.options.graph_path = current.join("graph.json");
+        fixture.options.output_dir = current.clone();
+        assert!(
+            load_previous_hierarchy(&fixture.options.output_dir).is_some(),
+            "the next build must find the published hierarchy at {}",
+            fixture.options.output_dir.display()
+        );
+
+        let second = cluster_existing_graph(&fixture.options)?;
+        let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
+        let after: CommunityHierarchy =
+            serde_json::from_slice(&fs::read(current.join("community-hierarchy.json"))?)?;
+        let ids = |hierarchy: &CommunityHierarchy| {
+            hierarchy
+                .levels
+                .iter()
+                .flat_map(|level| level.groups.iter().map(|group| group.id.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ids(&before),
+            ids(&after),
+            "an unchanged rebuild keeps every group id"
+        );
+        let reconciliation = second
+            .hierarchy_reconciliation
+            .ok_or("an unchanged rebuild reconciles against the published hierarchy")?;
+        eprintln!(
+            "before levels {:?} after levels {:?} events {:?}",
+            before
+                .levels
+                .iter()
+                .map(|level| level.groups.len())
+                .collect::<Vec<_>>(),
+            after
+                .levels
+                .iter()
+                .map(|level| level.groups.len())
+                .collect::<Vec<_>>(),
+            reconciliation.events,
+        );
+        assert_eq!(reconciliation.appeared, 0);
+        assert_eq!(reconciliation.disappeared, 0);
+        assert_eq!(reconciliation.split, 0);
+        assert_eq!(reconciliation.merged, 0);
+        assert!(reconciliation.stable > 0);
         Ok(())
     }
 

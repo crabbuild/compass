@@ -19,15 +19,16 @@ use compass_graph::{
     CommunityQualityArtifact, CommunityRequest, CommunityResult, EntityTiebreaker,
     GRAPH_DIAGNOSTICS_EXTENSION, GRAPH_JSON_DELTA_MAX_SOURCE_BYTES, GRAPH_SNAPSHOT_MAX_OBJECTS,
     GRAPH_SNAPSHOT_SELECTOR_SCHEMA_V1, GraphSnapshotBuilder, GraphSnapshotGcStats, HierarchyBudget,
-    HierarchyRequest, InferenceLevel, InventoryEvidence, PublicationOmissions, ResolutionPolicy,
-    SnapshotSelector, SourceDigest, apply_inference_level, build_communities,
+    HierarchyRequest, InferenceLevel, InventoryEvidence, PublicationOmissions, ReconcilePolicy,
+    ResolutionPolicy, SnapshotSelector, SourceDigest, apply_inference_level, build_communities,
     build_community_hierarchy, build_owned_with_tiebreaker_at_inference as build_document,
     canonical_edge_kind, canonical_raw_edge_sites, deduped_node_count, extraction_from_v1,
     garbage_collect_graph_snapshots, graph_insights_with_blind_spots, graph_snapshot_needs_gc,
     normalize_document_v1_with_evidence_best_effort_owned_at_inference,
     normalize_document_v1_with_inventory_and_source_digests_best_effort_owned_at_inference,
-    normalize_document_v1_with_inventory_best_effort_at_inference, score_communities,
-    write_canonical_graph_json, write_fact_neutral_graph_json_delta_prevalidated,
+    normalize_document_v1_with_inventory_best_effort_at_inference, reconcile_hierarchy,
+    score_communities, write_canonical_graph_json,
+    write_fact_neutral_graph_json_delta_prevalidated,
 };
 use compass_languages::{
     BindingFact, DeclarationFact, EXTRACTION_QUALITY_EXTENSION, EXTRACTION_QUALITY_PARTIAL,
@@ -2034,6 +2035,7 @@ fn publish_fact_neutral_incremental(
         remove_if_exists(&output_dir.join(GRAPH_OVERVIEW_FILE))?;
         remove_if_exists(&output_dir.join("community-quality.json"))?;
         remove_if_exists(&output_dir.join("community-hierarchy.json"))?;
+        remove_if_exists(&output_dir.join("community-hierarchy.json.sig"))?;
     }
     save_output_stats(
         &output_dir,
@@ -4264,14 +4266,33 @@ fn build_graph_inner_unscoped(
         &quality_artifact,
         true,
     )?;
-    let hierarchy_artifact = CommunityHierarchy::new(
+    let mut hierarchy_artifact = CommunityHierarchy::new(
         published_document.graph.build.generation_id.clone(),
         format!("sha256:{}", graph_seal_for_quality.sha256),
         hierarchy_draft,
     )?;
+    // A group that survives a rebuild keeps the id a reader already learned.
+    let previous_published = previous_communities(&output_dir.join("graph.json"));
+    if let Some(previous_artifact) = crate::cluster_existing::load_previous_hierarchy(&output_dir)
+        && !previous_published.is_empty()
+    {
+        let previous_partition = crate::cluster_existing::invert_partition(&previous_published);
+        let _ = reconcile_hierarchy(
+            &previous_artifact,
+            &previous_partition,
+            &mut hierarchy_artifact,
+            &communities,
+            &ReconcilePolicy::default(),
+        )?;
+    }
     write_json_atomic(
         output_dir.join("community-hierarchy.json"),
         &hierarchy_artifact,
+        true,
+    )?;
+    write_json_atomic(
+        output_dir.join("community-hierarchy.json.sig"),
+        &crate::cluster_existing::hierarchy_identity_ledger(&hierarchy_artifact),
         true,
     )?;
     if options.purpose == BuildPurpose::Update {
@@ -4637,6 +4658,7 @@ fn publish_build_state(
                     output_dir.join("orientation.json"),
                     output_dir.join("community-quality.json"),
                     output_dir.join("community-hierarchy.json"),
+                    output_dir.join("community-hierarchy.json.sig"),
                 ]);
             }
         }
@@ -4644,6 +4666,7 @@ fn publish_build_state(
             required.push(output_dir.join("analysis.json"));
             required.push(output_dir.join("community-quality.json"));
             required.push(output_dir.join("community-hierarchy.json"));
+            required.push(output_dir.join("community-hierarchy.json.sig"));
         }
         BuildPurpose::Extract => {}
     }

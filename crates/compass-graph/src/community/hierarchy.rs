@@ -726,14 +726,17 @@ pub fn build_community_hierarchy(
         .collect::<Vec<_>>();
     let community_signatures = community_member_signatures(communities);
 
+    let context = BuildContext {
+        communities,
+        community_signatures: &community_signatures,
+        legacy: &legacy,
+        nodes: &nodes,
+    };
     let mut levels = vec![finest_level(
         &graph,
         &assignments,
-        communities,
-        &community_signatures,
+        &context,
         &boundary_by_node,
-        &legacy,
-        &nodes,
         request.resolution,
     )];
     while levels.len() < budget.max_levels {
@@ -792,16 +795,7 @@ pub fn build_community_hierarchy(
             plan.groups.len(),
             &boundary_by_group,
         );
-        let next = build_level(
-            &group_graph,
-            &plan,
-            &metrics,
-            current,
-            communities,
-            &community_signatures,
-            &legacy,
-            &nodes,
-        )?;
+        let next = build_level(&group_graph, &plan, &metrics, current, &context)?;
         // Communities with no relationship evidence cannot be merged, so a
         // level that does not reduce the group count is the plateau: stop here
         // and record the achieved count rather than repeating one partition on
@@ -1312,16 +1306,28 @@ struct Metrics {
     boundary_kinds: BTreeMap<String, usize>,
 }
 
+/// The published partition and the document it came from, shared by every
+/// level the builder derives.
+struct BuildContext<'a> {
+    communities: &'a Communities,
+    community_signatures: &'a BTreeMap<usize, String>,
+    legacy: &'a compass_model::GraphDocument,
+    nodes: &'a HashMap<&'a str, &'a NodeRecord>,
+}
+
 fn finest_level(
     graph: &WeightedGraph,
     assignments: &[Option<usize>],
-    communities: &Communities,
-    community_signatures: &BTreeMap<usize, String>,
+    context: &BuildContext<'_>,
     boundary_by_node: &[BTreeMap<String, usize>],
-    legacy: &compass_model::GraphDocument,
-    nodes: &HashMap<&str, &NodeRecord>,
     resolution: f64,
 ) -> LevelState {
+    let BuildContext {
+        communities,
+        community_signatures,
+        legacy,
+        nodes,
+    } = *context;
     let metrics = aggregate_metrics(graph, assignments, communities.len(), boundary_by_node);
     let groups = communities
         .iter()
@@ -1371,11 +1377,14 @@ fn build_level(
     coarsening: &LevelPlan,
     metrics: &[Metrics],
     finer: &LevelState,
-    communities: &Communities,
-    community_signatures: &BTreeMap<usize, String>,
-    legacy: &compass_model::GraphDocument,
-    nodes: &HashMap<&str, &NodeRecord>,
+    context: &BuildContext<'_>,
 ) -> Result<LevelState, CommunityError> {
+    let BuildContext {
+        communities,
+        community_signatures,
+        legacy,
+        nodes,
+    } = *context;
     let mut groups = Vec::with_capacity(coarsening.groups.len());
     for (raw, children) in coarsening.groups.iter().enumerate() {
         let mut members = Vec::new();
