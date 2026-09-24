@@ -71,10 +71,10 @@ function levelModel(ids: string[], edges: Array<[string, string]>) {
     schema: "compass.viewer.graph/1" as const,
     title: "Fixture",
     stats: { nodes: ids.length, edges: edges.length, communities: ids.length, aggregated: true },
-    nodes: ids.map((id) => ({
+    nodes: ids.map((id, index) => ({
       id,
-      label: id === "0" ? "src/runtime" : `src/runtime/${id}`,
-      community: Number(id),
+      label: index === 0 ? "src/runtime" : `src/runtime/${index}`,
+      community: index,
       memberCount: 2,
       size: 40
     })),
@@ -123,6 +123,8 @@ function hierarchy() {
         memberCount: 4,
         groups: [{
           index: 0,
+          id: "h0-0000000000000001",
+          signature: "0000000000000001",
           label: "src/runtime",
           labelRule: "dominantDirectory" as const,
           labelGeneric: false,
@@ -133,7 +135,7 @@ function hierarchy() {
           boundaryKinds: { route: 1 },
           detailAvailable: false
         }],
-        model: levelModel(["0"], [])
+        model: levelModel(["h0-0000000000000001"], [])
       },
       {
         level: 1,
@@ -144,6 +146,8 @@ function hierarchy() {
         groups: [
           {
             index: 0,
+            id: "h0-0000000000000001",
+            signature: "0000000000000001",
             community: 0,
             label: "src/runtime/a",
             labelRule: "dominantDirectory" as const,
@@ -157,6 +161,8 @@ function hierarchy() {
           },
           {
             index: 1,
+            id: "h0-0000000000000002",
+            signature: "0000000000000002",
             community: 1,
             label: "src/runtime/b",
             labelRule: "dominantDirectory" as const,
@@ -169,7 +175,7 @@ function hierarchy() {
             detailAvailable: false
           }
         ],
-        model: levelModel(["0", "1"], [["0", "1"]])
+        model: levelModel(["h0-0000000000000001", "h0-0000000000000002"], [["h0-0000000000000001", "h0-0000000000000002"]])
       }
     ]
   });
@@ -236,7 +242,7 @@ describe("hierarchy level navigation", () => {
     expect(control("Level 0")).toBeDefined();
     expect(control("Level 1")).toBeDefined();
     expect(control("Symbols")).toBeDefined();
-    expect(latestNodes().map((node) => node.id)).toEqual(["0"]);
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
   });
 
   it("descends into a group's children and back out through the breadcrumb", () => {
@@ -247,13 +253,13 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity: () => undefined }}
       />
     );
-    doubleClickNode("0");
-    expect(latestNodes().map((node) => node.id)).toEqual(["0", "1"]);
+    doubleClickNode("h0-0000000000000001");
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001", "h0-0000000000000002"]);
     expect(breadcrumb()).toContain("Repository");
     expect(breadcrumb()).toContain("src/runtime");
 
     fireEvent.click(control("Repository"));
-    expect(latestNodes().map((node) => node.id)).toEqual(["0"]);
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
   });
 
   it("switches to the symbol canvas from any level", () => {
@@ -264,7 +270,7 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity: () => undefined }}
       />
     );
-    doubleClickNode("0");
+    doubleClickNode("h0-0000000000000001");
     fireEvent.click(control("Symbols"));
     expect(latestNodes().map((node) => node.id).sort())
       .toEqual(["a", "b", "c", "d"]);
@@ -279,7 +285,7 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity: () => undefined }}
       />
     );
-    expect(latestNodes().map((node) => node.id)).toEqual(["0", "1"]);
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001", "h0-0000000000000002"]);
   });
 
   it("falls back to the root when the requested level does not exist", () => {
@@ -291,7 +297,7 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity: () => undefined }}
       />
     );
-    expect(latestNodes().map((node) => node.id)).toEqual(["0"]);
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
   });
 
   it("keeps the derived community overview when the export has no hierarchy", () => {

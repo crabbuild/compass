@@ -67,8 +67,13 @@ export function descendModel(
     return undefined;
   }
   // A level's projection names each node after the group it stands for, so the
-  // children of a group are exactly the nodes it indexes.
-  const members = new Set(group.childIndices.map((index) => String(index)));
+  // children of a group are exactly the groups it indexes — by id, which
+  // survives a rebuild that renumbers the level.
+  const members = new Set(
+    group.childIndices
+      .map((index) => child.groups[index]?.id)
+      .filter((id): id is string => typeof id === "string")
+  );
   if (members.size === 0) {
     return undefined;
   }

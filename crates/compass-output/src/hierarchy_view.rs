@@ -57,6 +57,10 @@ pub struct HierarchyLevelView {
 #[serde(rename_all = "camelCase")]
 pub struct HierarchyGroupView {
     pub index: usize,
+    /// Durable identity, stable across rebuilds that keep the group.
+    pub id: String,
+    /// Digest of the group's member evidence in this build.
+    pub signature: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub community: Option<usize>,
     pub label: String,
@@ -128,7 +132,7 @@ pub fn community_hierarchy_view(
             let model = (level.groups.len() <= node_budget).then(|| {
                 let (meta, meta_communities, member_counts) =
                     aggregate(document, &level_communities, &level_options);
-                crate::viewer_model::graph_view_model(
+                let mut model = crate::viewer_model::graph_view_model(
                     &meta,
                     &meta_communities,
                     title.to_owned(),
@@ -139,7 +143,39 @@ pub fn community_hierarchy_view(
                         learning_overlay: options.learning_overlay,
                     },
                     true,
-                )
+                );
+                // The projection's nodes are the published groups, so they
+                // carry the durable group id: a reader's place in the map then
+                // survives a rebuild that renumbers the level.
+                let ids = level
+                    .groups
+                    .iter()
+                    .map(|group| (group.index, group.id.clone()))
+                    .collect::<BTreeMap<_, _>>();
+                for node in &mut model.nodes {
+                    if let Some(id) = ids.get(&node.community) {
+                        node.id = id.clone();
+                    }
+                }
+                for edge in &mut model.edges {
+                    if let Some(id) = edge
+                        .source
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|index| ids.get(&index))
+                    {
+                        edge.source = id.clone();
+                    }
+                    if let Some(id) = edge
+                        .target
+                        .parse::<usize>()
+                        .ok()
+                        .and_then(|index| ids.get(&index))
+                    {
+                        edge.target = id.clone();
+                    }
+                }
+                model
             });
             HierarchyLevelView {
                 level: level.level,
@@ -156,6 +192,8 @@ pub fn community_hierarchy_view(
                     .iter()
                     .map(|group| HierarchyGroupView {
                         index: group.index,
+                        id: group.id.clone(),
+                        signature: group.signature.clone(),
                         community: group.community,
                         label: group.label.text.clone(),
                         label_rule: group.label.rule,

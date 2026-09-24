@@ -385,28 +385,60 @@ export function seedCommunityOverviewPositions(
   const labelled = communityOverviewLabelledIds(ordered, importance);
   const footprints = ordered.map((node) =>
     communityBubbleFootprint(node, labelled.has(node.id)));
+  const seeded = communitySeedPositions(ordered, footprints);
+  return centerClusterPositions(
+    relaxCommunityOverviewPositions(ordered, seeded, importance),
+    footprints
+  );
+}
+
+/**
+ * The pre-packing seed positions.
+ *
+ * Rank sets the radius, so importance still anchors the centre, while an
+ * identity-derived bearing sets the direction: an untouched group keeps its
+ * bearing when a neighbour grows, appears, or disappears, and the packing pass
+ * only has to resolve overlaps from a stable starting point.
+ */
+export function communitySeedPositions(
+  ordered: readonly GraphNode[],
+  footprints: readonly ClusterFootprint[]
+): ReadonlyMap<string, { x: number; y: number }> {
   // Golden-angle spiral: the most important community anchors the centre and
   // each rank sits a little further out, so the tail lands outside the core
-  // instead of being packed into the same field.
+  // instead of being packed into the same field. The *bearing* comes from the
+  // node's identity rather than its rank, so a group that keeps its evidence
+  // keeps its direction when another group grows, shrinks, or appears.
   const meanArea = footprints.reduce(
     (sum, footprint) => sum + 4 * footprint.halfWidth * footprint.halfHeight,
     0
   ) / Math.max(1, footprints.length);
   const spacing = Math.sqrt(meanArea / Math.PI);
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   const seeded = new Map<string, { x: number; y: number }>(ordered.map((node, index) => [
     node.id,
     index === 0
       ? { x: 0, y: 0 }
       : {
-        x: Math.cos(index * goldenAngle) * spacing * Math.sqrt(index),
-        y: Math.sin(index * goldenAngle) * spacing * Math.sqrt(index)
+        x: Math.cos(stableBearing(node.id)) * spacing * Math.sqrt(index),
+        y: Math.sin(stableBearing(node.id)) * spacing * Math.sqrt(index)
       }
   ]));
-  return centerClusterPositions(
-    relaxCommunityOverviewPositions(ordered, seeded, importance),
-    footprints
-  );
+  return seeded;
+}
+
+/**
+ * A deterministic bearing in `[0, 2π)` derived from an identity.
+ *
+ * Position stability needs this: seeding by arrival order or rank means an
+ * unrelated group changing size rotates every bubble around it.
+ */
+export function stableBearing(id: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < id.length; index += 1) {
+    hash ^= id.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return ((hash >>> 0) % 4096) / 4096 * Math.PI * 2;
 }
 
 /**

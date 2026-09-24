@@ -15,12 +15,12 @@ function model(ids: string[], edges: Array<[string, string]> = []) {
     schema: "compass.viewer.graph/1" as const,
     title: "Fixture",
     stats: { nodes: ids.length, edges: edges.length, communities: ids.length, aggregated: true },
-    nodes: ids.map((id) => ({ id, label: id, community: Number(id), memberCount: 2 })),
+    nodes: ids.map((id, index) => ({ id, label: id, community: index, memberCount: 2 })),
     edges: edges.map(([source, target], position) => ({
       id: `edge-${position}`, source, target, relation: "calls"
     })),
-    communities: ids.map((id) => ({
-      id: Number(id), label: `group ${id}`, color: "#6688aa", hidden: false
+    communities: ids.map((id, index) => ({
+      id: index, label: `group ${id}`, color: "#6688aa", hidden: false
     })),
     hyperedges: []
   };
@@ -46,6 +46,8 @@ function hierarchy() {
         memberCount: 4,
         groups: [{
           index: 0,
+          id: "h0-0000000000000001",
+          signature: "0000000000000001",
           label: "src",
           labelRule: "dominantDirectory" as const,
           labelGeneric: false,
@@ -56,7 +58,7 @@ function hierarchy() {
           boundaryKinds: {},
           detailAvailable: false
         }],
-        model: model(["0"])
+        model: model(["h0-0000000000000001"])
       },
       {
         level: 1,
@@ -67,6 +69,8 @@ function hierarchy() {
         groups: [
           {
             index: 0,
+            id: "h0-0000000000000001",
+            signature: "0000000000000001",
             community: 0,
             label: "src/one",
             labelRule: "dominantDirectory" as const,
@@ -80,6 +84,8 @@ function hierarchy() {
           },
           {
             index: 1,
+            id: "h0-0000000000000002",
+            signature: "0000000000000002",
             community: 1,
             label: "Community 1",
             labelRule: "communityId" as const,
@@ -92,7 +98,7 @@ function hierarchy() {
             detailAvailable: true
           }
         ],
-        model: model(["0", "1"], [["0", "1"]])
+        model: model(["h0-0000000000000001", "h0-0000000000000002"], [["h0-0000000000000001", "h0-0000000000000002"]])
       }
     ]
   });
@@ -109,7 +115,7 @@ describe("hierarchy level scopes", () => {
   it("narrows to a group's children without redrawing the level", () => {
     const view = hierarchy();
     const child = descendModel(view, 0, 0);
-    expect(child?.nodes.map((node) => node.id)).toEqual(["0", "1"]);
+    expect(child?.nodes.map((node) => node.id)).toEqual(["h0-0000000000000001", "h0-0000000000000002"]);
     expect(child?.edges.map((edge) => edge.id)).toEqual(["edge-0"]);
     expect(child?.communities.map((community) => community.id)).toEqual([0, 1]);
     expect(child?.stats).toMatchObject({ nodes: 2, edges: 1, communities: 2 });
@@ -124,7 +130,7 @@ describe("hierarchy level scopes", () => {
       rootGroup.childIndices = [0];
     }
     const child = descendModel(view, 0, 0);
-    expect(child?.nodes.map((node) => node.id)).toEqual(["0"]);
+    expect(child?.nodes.map((node) => node.id)).toEqual(["h0-0000000000000001"]);
     expect(child?.communities.map((community) => community.id)).toEqual([0]);
     expect(child?.stats).toMatchObject({ nodes: 1, edges: 0, communities: 1 });
   });
@@ -133,7 +139,7 @@ describe("hierarchy level scopes", () => {
     const view = hierarchy();
     const level = view.levels[1];
     if (level?.model) {
-      level.model.edges.push({ id: "edge-out", source: "0", target: "9", relation: "calls" });
+      level.model.edges.push({ id: "edge-out", source: "h0-0000000000000001", target: "h0-0000000000000009", relation: "calls" });
     }
     const child = descendModel(view, 0, 0);
     expect(child?.edges.map((edge) => edge.id)).toEqual(["edge-0"]);

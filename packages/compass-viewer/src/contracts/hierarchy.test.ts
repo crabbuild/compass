@@ -34,6 +34,8 @@ function view() {
       memberCount: 2,
       groups: [{
         index: 0,
+        id: "h0-0000000000000001",
+        signature: "0000000000000001",
         community: 0,
         label: "src",
         labelRule: "dominantDirectory" as const,

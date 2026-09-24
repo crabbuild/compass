@@ -2821,6 +2821,7 @@ mod tests {
             limits,
             budget_identity: compass_graph::COMMUNITY_HIERARCHY_BUDGET.to_owned(),
             merge_policy: compass_graph::COMMUNITY_HIERARCHY_MERGE_POLICY.to_owned(),
+            signature_algorithm: compass_graph::COMMUNITY_HIERARCHY_SIGNATURE_ALGORITHM.to_owned(),
             budget: compass_graph::HierarchyBudget::default(),
             boundary_kinds: vec!["route".to_owned()],
             finest_community_count: 1,
@@ -2832,8 +2833,11 @@ mod tests {
                 resolution: Some(1.0),
                 merge_evidence: BTreeMap::new(),
                 group_count: 1,
+                signature: "0123456789abcdef".to_owned(),
                 groups: vec![compass_graph::HierarchyGroup {
                     index: 0,
+                    id: "h0-0123456789abcdef".to_owned(),
+                    signature: "0123456789abcdef".to_owned(),
                     community: Some(0),
                     label: compass_graph::HierarchyLabel {
                         text: "src".to_owned(),

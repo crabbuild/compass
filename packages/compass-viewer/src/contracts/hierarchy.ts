@@ -23,6 +23,10 @@ export const LevelMergeSchema = z.enum(["relationship", "locationAffinity"]);
 
 export const HierarchyGroupSchema = z.strictObject({
   index: z.number().int().nonnegative(),
+  /** Durable identity: `h<level>-<signature16>` over the group's evidence. */
+  id: z.string().min(1),
+  /** Digest of this build's member evidence for the group. */
+  signature: z.string().min(1),
   community: z.number().int().nonnegative().optional(),
   label: z.string().min(1),
   labelRule: HierarchyLabelRuleSchema,

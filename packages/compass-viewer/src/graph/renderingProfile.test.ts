@@ -10,6 +10,8 @@ import {
   seedStaticGraphPositions,
   STATIC_LAYOUT_EDGE_THRESHOLD,
   STATIC_LAYOUT_NODE_THRESHOLD,
+  communitySeedPositions,
+  stableBearing,
   visibleGraphEdges
 } from "./renderingProfile";
 import {
@@ -222,6 +224,49 @@ describe("relaxCommunityOverviewPositions", () => {
 });
 
 describe("seedCommunityOverviewPositions", () => {
+  it("seeds an untouched group's bearing from its identity, not its rank", () => {
+    const base: GraphNode[] = [
+      { id: "h0-aaaaaaaaaaaaaaaa", label: "A", community: 0, memberCount: 40, size: 30 },
+      { id: "h0-bbbbbbbbbbbbbbbb", label: "B", community: 1, memberCount: 20, size: 20 }
+    ];
+    const before = communitySeedPositions(base, base.map(() => ({
+      id: "", halfWidth: 12, halfHeight: 12
+    })));
+    const grown: GraphNode[] = [
+      ...base,
+      { id: "h0-cccccccccccccccc", label: "C", community: 2, memberCount: 3_000, size: 60 }
+    ];
+    const after = communitySeedPositions(grown, grown.map(() => ({
+      id: "", halfWidth: 12, halfHeight: 12
+    })));
+    const bearing = (position: { x: number; y: number }) => Math.atan2(position.y, position.x);
+    for (const id of ["h0-aaaaaaaaaaaaaaaa", "h0-bbbbbbbbbbbbbbbb"]) {
+      const earlier = before.get(id);
+      const later = after.get(id);
+      expect(earlier).toBeDefined();
+      expect(later).toBeDefined();
+      if (earlier && later && (earlier.x !== 0 || earlier.y !== 0)) {
+        expect(bearing(later)).toBeCloseTo(bearing(earlier), 10);
+        // The radius may grow when a larger group takes the centre.
+        expect(Math.hypot(later.x, later.y)).toBeGreaterThanOrEqual(
+          Math.hypot(earlier.x, earlier.y)
+        );
+      }
+    }
+  });
+
+  it("derives bearings deterministically from identity alone", () => {
+    expect(stableBearing("h0-0123456789abcdef"))
+      .toBe(stableBearing("h0-0123456789abcdef"));
+    expect(stableBearing("h0-0123456789abcdef"))
+      .not.toBe(stableBearing("h0-fedcba9876543210"));
+    for (const id of ["h0-1", "h0-abcdef0123456789", "level-2-group"]) {
+      const bearing = stableBearing(id);
+      expect(bearing).toBeGreaterThanOrEqual(0);
+      expect(bearing).toBeLessThan(Math.PI * 2);
+    }
+  });
+
   it("keeps bubble labels clear of every neighbouring bubble", () => {
     const labels = [
       "test_basic.py",

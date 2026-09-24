@@ -52,6 +52,8 @@ describe("WorkbenchModelSchema", () => {
               memberCount: 1,
               groups: [{
                 index: 0,
+                id: "h0-0000000000000001",
+                signature: "0000000000000001",
                 label: "src",
                 labelRule: "dominantDirectory" as const,
                 labelGeneric: false,
