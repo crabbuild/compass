@@ -1,0 +1,79 @@
+{
+  "schema": "compass.community-hierarchy-qualification/1",
+  "fixtureCount": 3,
+  "acceptance": {
+    "rootBudgetSatisfied": true,
+    "completeTree": true,
+    "labelsHaveProvenance": true,
+    "genericRootLabelsBounded": true,
+    "deterministicDigest": true,
+    "boundedLevels": true
+  },
+  "fixtures": [
+    {
+      "name": "directory-clusters",
+      "nodes": 36,
+      "edges": 35,
+      "communities": 12,
+      "levels": 2,
+      "rootGroups": 3,
+      "budgetSatisfied": true,
+      "budgetExpected": true,
+      "budgetMatchesExpectation": true,
+      "mergeRules": [
+        "relationship",
+        "relationship"
+      ],
+      "completeTree": true,
+      "labelsHaveProvenance": true,
+      "genericRootLabels": 0,
+      "genericRootShare": 0.0,
+      "deterministicDigest": true,
+      "boundedLevels": true,
+      "resultDigest": "sha256:0f9b9e0632c0e165d0c610556076fe2f141b179f944c1029c6f990de73c60510"
+    },
+    {
+      "name": "fragmented-communities",
+      "nodes": 48,
+      "edges": 24,
+      "communities": 24,
+      "levels": 2,
+      "rootGroups": 1,
+      "budgetSatisfied": true,
+      "budgetExpected": true,
+      "budgetMatchesExpectation": true,
+      "mergeRules": [
+        "locationAffinity",
+        "relationship"
+      ],
+      "completeTree": true,
+      "labelsHaveProvenance": true,
+      "genericRootLabels": 0,
+      "genericRootShare": 0.0,
+      "deterministicDigest": true,
+      "boundedLevels": true,
+      "resultDigest": "sha256:16b482981ade3561386dc3e461cf4eba181725e277c620f3a33204b399520cde"
+    },
+    {
+      "name": "locationless-groups",
+      "nodes": 24,
+      "edges": 0,
+      "communities": 24,
+      "levels": 1,
+      "rootGroups": 24,
+      "budgetSatisfied": false,
+      "budgetExpected": false,
+      "budgetMatchesExpectation": true,
+      "mergeRules": [
+        "relationship"
+      ],
+      "completeTree": true,
+      "labelsHaveProvenance": true,
+      "genericRootLabels": 0,
+      "genericRootShare": 0.0,
+      "deterministicDigest": true,
+      "boundedLevels": true,
+      "resultDigest": "sha256:5ffbddbc3bde9f64514a423e0ac8e8901d4f0e0d657c585513f690ad2881cf9a"
+    }
+  ]
+}

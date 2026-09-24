@@ -16,6 +16,7 @@ usage() {
 usage:
   $0 --fixtures-only
   $0 --community-quality [--report <path>]
+  $0 --hierarchy [--report <path>]
   $0 --repositories <manifest> [--local-repository <path>]
 EOF
   exit 2
@@ -25,6 +26,7 @@ MODE=
 REPOSITORIES_MANIFEST=
 LOCAL_REPOSITORY=
 COMMUNITY_REPORT=
+HIERARCHY_REPORT=
 case "${1:-}" in
   --fixtures-only)
     MODE=fixtures
@@ -36,6 +38,15 @@ case "${1:-}" in
     if [[ "${1:-}" == "--report" ]]; then
       COMMUNITY_REPORT="${2:-}"
       [[ -n "$COMMUNITY_REPORT" ]] || usage
+      shift 2
+    fi
+    ;;
+  --hierarchy)
+    MODE=hierarchy
+    shift
+    if [[ "${1:-}" == "--report" ]]; then
+      HIERARCHY_REPORT="${2:-}"
+      [[ -n "$HIERARCHY_REPORT" ]] || usage
       shift 2
     fi
     ;;
@@ -81,6 +92,53 @@ PY
   if [[ -n "$COMMUNITY_REPORT" ]]; then
     mkdir -p "$(dirname "$COMMUNITY_REPORT")"
     cp "$REPORT_A" "$COMMUNITY_REPORT"
+  fi
+  exit 0
+fi
+
+if [[ "$MODE" == hierarchy ]]; then
+  cd "$QUALIFY_ROOT"
+  REPORT_A="$QUALIFY_TMP/community-hierarchy-a.json"
+  REPORT_B="$QUALIFY_TMP/community-hierarchy-b.json"
+  cargo run --quiet --locked -p compass-graph \
+    --example community_hierarchy_qualification >"$REPORT_A"
+  cargo run --quiet --locked -p compass-graph \
+    --example community_hierarchy_qualification >"$REPORT_B"
+  cmp "$REPORT_A" "$REPORT_B"
+  python3 - "$REPORT_A" <<'PY'
+import json
+import pathlib
+import sys
+
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+if report.get("schema") != "compass.community-hierarchy-qualification/1":
+    raise SystemExit("unexpected community hierarchy qualification schema")
+acceptance = report.get("acceptance", {})
+required = {
+    "rootBudgetSatisfied",
+    "completeTree",
+    "labelsHaveProvenance",
+    "genericRootLabelsBounded",
+    "deterministicDigest",
+    "boundedLevels",
+}
+missing = sorted(required - set(acceptance))
+if missing:
+    raise SystemExit(f"community hierarchy acceptance is incomplete: {', '.join(missing)}")
+failed = [name for name, passed in acceptance.items() if passed is not True]
+if failed:
+    raise SystemExit(f"community hierarchy acceptance failed: {', '.join(failed)}")
+for fixture in report.get("fixtures", []):
+    if fixture.get("budgetMatchesExpectation") is not True:
+        raise SystemExit(
+            f"{fixture.get('name')}: root budget {fixture.get('budgetSatisfied')} "
+            f"does not match expectation {fixture.get('budgetExpected')}"
+        )
+print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+PY
+  if [[ -n "$HIERARCHY_REPORT" ]]; then
+    mkdir -p "$(dirname "$HIERARCHY_REPORT")"
+    cp "$REPORT_A" "$HIERARCHY_REPORT"
   fi
   exit 0
 fi

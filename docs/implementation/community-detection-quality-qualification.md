@@ -47,6 +47,34 @@ Run and byte-compare the report with:
   --report docs/implementation/community-detection-quality-qualification.json
 ```
 
+## Community hierarchy
+
+The budgeted hierarchy has its own report:
+
+```bash
+./scripts/qualify_code_graph_v1.sh --hierarchy \
+  --report docs/implementation/community-hierarchy-qualification.json
+```
+
+`compass.community-hierarchy-qualification/1` runs three shapes the real
+corpus publishes — clustered directories, communities that share no
+relationship at all, and groups that cite no location either — twice each and
+byte-compares the reports. Acceptance requires:
+
+| Entry | Meaning |
+| --- | --- |
+| `rootBudgetSatisfied` | every fixture's root count matches the budget its shape can support, and at least one fixture proves the budget is reachable |
+| `completeTree` | every level's children partition the level below exactly once with matching member counts, checked independently of the builder |
+| `labelsHaveProvenance` | every group label is non-empty, carries evidence, and marks itself generic exactly when it is a community id |
+| `genericRootLabelsBounded` | at most a quarter of the root groups are unnamed |
+| `deterministicDigest` | two builds of one fixture serialize identically with equal digests |
+| `boundedLevels` | no fixture exceeds its level budget and every coarser level merges groups |
+
+The fragmented fixture is the measured `colinhacks/zod` shape: it merges by
+shared location (`locationAffinity`) because relationship evidence alone cannot
+reduce it. The location-less fixture asserts the opposite: the artifact reports
+`budgetSatisfied: false` instead of merging groups nothing connects.
+
 ## Compact performance decision
 
 On 2026-09-12, an aarch64 macOS debug build at candidate commit `7e216079` ran
