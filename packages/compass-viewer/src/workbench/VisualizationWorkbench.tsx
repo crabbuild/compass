@@ -250,6 +250,7 @@ function WorkbenchView({
       preferredLayout={preferredLayout}
       communityDetails={view.kind === "code" ? view.communityDetails : undefined}
       hierarchy={view.kind === "code" ? view.hierarchy : undefined}
+      initialLevel={view.kind === "code" ? view.hierarchy?.initialLevel : undefined}
       communityDetail={view.kind === "code" ? communityDetail : undefined}
       communityLoading={view.kind === "code" ? communityLoading : undefined}
       communityError={view.kind === "code" ? communityError : undefined}
@@ -270,6 +271,7 @@ function FilteredGraph({
   preferredLayout,
   communityDetails,
   hierarchy,
+  initialLevel,
   communityDetail,
   communityLoading,
   communityError,
@@ -286,6 +288,7 @@ function FilteredGraph({
   preferredLayout: Parameters<typeof CompassGraph>[0]["preferredLayout"];
   communityDetails?: Record<string, GraphViewModel> | undefined;
   hierarchy?: Parameters<typeof CompassGraph>[0]["hierarchy"];
+  initialLevel?: number | undefined;
   communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
@@ -360,6 +363,7 @@ function FilteredGraph({
       <CompassGraph
         model={activeCommunityDetail ? model : filtered}
         hierarchy={hierarchy}
+        initialLevel={initialLevel}
         communityDetail={activeCommunityDetail ? {
           ...activeCommunityDetail,
           model: filtered
