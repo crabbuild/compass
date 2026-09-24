@@ -43,10 +43,15 @@ fn update_writes_to_compass_out_by_default() -> Result<(), Box<dyn Error>> {
 fn hierarchy_export_reproduces_the_published_artifact() -> Result<(), Box<dyn Error>> {
     let root = tempfile::tempdir()?;
     run_update(root.path(), |_| {})?;
-    let published = root.path().join("compass-out/community-hierarchy.json");
+    let output_dir = root.path().join("compass-out");
+    let published = BuildGuard::resolve_artifact(&output_dir, "community-hierarchy.json")?;
     assert!(
         published.is_file(),
         "a clustered build publishes the community hierarchy"
+    );
+    assert!(
+        output_dir.join("community-hierarchy.json").is_file(),
+        "the root projection carries the hierarchy too"
     );
 
     let export = |arguments: &[&str]| -> Result<std::process::Output, Box<dyn Error>> {
