@@ -75,9 +75,9 @@ use compass_output::{
     WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
     WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model,
     build_code_query_view, build_discovery_query_view, export_obsidian, export_wiki,
-    graph_artifact_identity, graph_community_view_model_document, graph_view_model_bundle_document,
-    graph_view_model_document, node_filenames, project_architecture,
-    render_agent_query_continuation_header, render_agent_query_header_lines,
+    graph_artifact_identity, graph_community_view_model_document,
+    graph_view_model_bundle_document_with_hierarchy, graph_view_model_document, node_filenames,
+    project_architecture, render_agent_query_continuation_header, render_agent_query_header_lines,
     render_agent_query_text, render_orientation_json, validate_orientation_graph_identity,
     write_callflow_html, write_canvas, write_cypher, write_graphml, write_svg, write_tree_html,
     write_workbench_html_with_source_navigation,
@@ -4286,11 +4286,16 @@ fn build_export_workbench(
     for request in requests {
         let (base_id, view) = match request {
             ExportViewRequest::Code => {
-                let bundle = graph_view_model_bundle_document(
+                let hierarchy = load_export_hierarchy(graph_path)?;
+                let bundle = graph_view_model_bundle_document_with_hierarchy(
                     &inputs.document,
                     &inputs.communities,
                     graph_path,
                     &html_options,
+                    hierarchy
+                        .as_ref()
+                        .map(CommunityHierarchy::levels_view)
+                        .as_ref(),
                 )
                 .map_err(|error| error.to_string())?;
                 let coverage = if bundle.truncated {
@@ -4301,6 +4306,10 @@ fn build_export_workbench(
                     )
                 } else {
                     WorkbenchCoverage::graph(&bundle.overview)
+                };
+                let coverage = match bundle.hierarchy.as_ref() {
+                    Some(hierarchy) => coverage.with_hierarchy_levels(hierarchy.levels.len()),
+                    None => coverage,
                 };
                 (
                     "code".to_owned(),
@@ -4313,6 +4322,7 @@ fn build_export_workbench(
                         content: WorkbenchViewContent::Code {
                             model: bundle.overview,
                             community_details: bundle.community_details,
+                            hierarchy: bundle.hierarchy,
                         },
                     },
                 )
@@ -4359,6 +4369,7 @@ fn build_export_workbench(
                     truncated: graph.truncated,
                     nodes: graph.nodes.len(),
                     edges: graph.edges.len(),
+                    hierarchy_levels: None,
                     limitations: graph.coverage.limitations.clone(),
                 };
                 (
@@ -4477,6 +4488,7 @@ fn build_export_workbench(
                     truncated: false,
                     nodes: before.stats.nodes.saturating_add(after.stats.nodes),
                     edges: before.stats.edges.saturating_add(after.stats.edges),
+                    hierarchy_levels: None,
                     limitations: if summarized {
                         vec!["At least one historical graph is aggregated by community.".to_owned()]
                     } else {
@@ -5331,6 +5343,40 @@ fn export_workbench_help(format: &str) -> String {
 /// Bounded read cap for the published hierarchy, which is a navigation artifact
 /// and must stay small even on repositories with thousands of communities.
 const MAX_HIERARCHY_JSON_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Load the hierarchy published beside a graph, bound to that exact graph.
+///
+/// A missing artifact is not an error — older graphs and unclustered builds
+/// have no levels — but a present artifact that describes another graph or an
+/// unknown schema major is.
+fn load_export_hierarchy(graph_path: &Path) -> Result<Option<CommunityHierarchy>, String> {
+    let path = graph_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("community-hierarchy.json");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let text =
+        hook_commands::read_text_bounded(&path, MAX_HIERARCHY_JSON_BYTES).map_err(|error| {
+            format!(
+                "community hierarchy is unreadable at {}: {error}",
+                path.display()
+            )
+        })?;
+    let hierarchy = serde_json::from_str::<CommunityHierarchy>(&text)
+        .map_err(|error| format!("invalid community hierarchy: {error}"))?;
+    let (graph, digest) =
+        compass_model::code_graph::GraphDocument::load_with_artifact_digest(graph_path)
+            .map_err(|error| format!("could not load selected graph: {error}"))?;
+    hierarchy
+        .validate_for_graph(
+            &graph.graph.build.generation_id,
+            &format!("sha256:{digest}"),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(Some(hierarchy))
+}
 
 fn command_export_hierarchy_json(args: &[String]) -> Outcome {
     if args

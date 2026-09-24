@@ -249,6 +249,7 @@ function WorkbenchView({
       host={host}
       preferredLayout={preferredLayout}
       communityDetails={view.kind === "code" ? view.communityDetails : undefined}
+      hierarchy={view.kind === "code" ? view.hierarchy : undefined}
       communityDetail={view.kind === "code" ? communityDetail : undefined}
       communityLoading={view.kind === "code" ? communityLoading : undefined}
       communityError={view.kind === "code" ? communityError : undefined}
@@ -268,6 +269,7 @@ function FilteredGraph({
   sourceRevisions,
   preferredLayout,
   communityDetails,
+  hierarchy,
   communityDetail,
   communityLoading,
   communityError,
@@ -283,6 +285,7 @@ function FilteredGraph({
   sourceRevisions?: Parameters<typeof CompassGraph>[0]["sourceRevisions"];
   preferredLayout: Parameters<typeof CompassGraph>[0]["preferredLayout"];
   communityDetails?: Record<string, GraphViewModel> | undefined;
+  hierarchy?: Parameters<typeof CompassGraph>[0]["hierarchy"];
   communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
   communityLoading?: number | null | undefined;
   communityError?: string | undefined;
@@ -356,6 +359,7 @@ function FilteredGraph({
     <div className="workbench-graph-lens">
       <CompassGraph
         model={activeCommunityDetail ? model : filtered}
+        hierarchy={hierarchy}
         communityDetail={activeCommunityDetail ? {
           ...activeCommunityDetail,
           model: filtered

@@ -290,6 +290,67 @@ fn canonical_json_exports_one_complete_community() -> Result<(), Box<dyn Error>>
 }
 
 #[test]
+fn workbench_code_view_carries_the_published_hierarchy() -> Result<(), Box<dyn Error>> {
+    let hierarchy_directory = tempfile::tempdir()?;
+    std::fs::create_dir_all(hierarchy_directory.path().join("src"))?;
+    std::fs::write(
+        hierarchy_directory.path().join("src/lib.rs"),
+        "pub fn caller() {\n    target();\n}\npub fn target() {}\npub fn helper() {}\n",
+    )?;
+    let build = support::compass_command()
+        .args(["update", ".", "--no-viz"])
+        .current_dir(hierarchy_directory.path())
+        .output()?;
+    assert_eq!(
+        build.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    let published = support::compass_command()
+        .args([
+            "export",
+            "workbench-json",
+            "--graph",
+            hierarchy_directory
+                .path()
+                .join("compass-out/graph.json")
+                .to_string_lossy()
+                .as_ref(),
+            "--code-graph",
+        ])
+        .current_dir(hierarchy_directory.path())
+        .output()?;
+    assert_eq!(
+        published.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&published.stderr)
+    );
+    let workbench: Value = serde_json::from_slice(&published.stdout)?;
+    let code = workbench["views"]
+        .as_array()
+        .and_then(|views| views.first())
+        .ok_or("missing code view")?;
+    assert_eq!(code["kind"], "code");
+    assert_eq!(code["coverage"]["hierarchyLevels"], 1);
+    let hierarchy = &code["hierarchy"];
+    assert_eq!(hierarchy["schema"], "compass.viewer.hierarchy/1");
+    assert_eq!(hierarchy["levels"][0]["level"], 0);
+    assert!(
+        hierarchy["levels"][0]["groups"]
+            .as_array()
+            .is_some_and(|groups| !groups.is_empty()),
+        "the code view carries the published groups"
+    );
+    assert_eq!(
+        hierarchy["levels"][0]["groups"][0]["labelRule"],
+        "dominantDirectory"
+    );
+    Ok(())
+}
+
+#[test]
 fn workbench_json_preserves_requested_view_order_and_contract() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = directory.path().join("graph.json");

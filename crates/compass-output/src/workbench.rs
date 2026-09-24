@@ -59,6 +59,9 @@ pub struct WorkbenchCoverage {
     pub truncated: bool,
     pub nodes: usize,
     pub edges: usize,
+    /// Published hierarchy levels the view carries, when a build published one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hierarchy_levels: Option<usize>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub limitations: Vec<String>,
 }
@@ -75,6 +78,7 @@ impl WorkbenchCoverage {
             truncated: false,
             nodes: model.stats.nodes,
             edges: model.stats.edges,
+            hierarchy_levels: None,
             limitations: if model.stats.aggregated {
                 vec!["The repository overview is aggregated by community.".to_owned()]
             } else {
@@ -94,12 +98,20 @@ impl WorkbenchCoverage {
             truncated,
             nodes,
             edges,
+            hierarchy_levels: None,
             limitations: if truncated {
                 vec!["The selected view reached its configured node or edge bound.".to_owned()]
             } else {
                 Vec::new()
             },
         }
+    }
+
+    /// Record how many published levels this view carries.
+    #[must_use]
+    pub fn with_hierarchy_levels(mut self, levels: usize) -> Self {
+        self.hierarchy_levels = Some(levels);
+        self
     }
 }
 
@@ -158,6 +170,9 @@ pub enum WorkbenchViewContent {
     Code {
         model: GraphViewModel,
         community_details: BTreeMap<usize, GraphViewModel>,
+        /// Published level navigation, when the build published a hierarchy.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hierarchy: Option<crate::hierarchy_view::CommunityHierarchyView>,
     },
     Call {
         root: String,
@@ -387,6 +402,7 @@ mod tests {
                         effective_graph: None,
                     },
                     community_details: BTreeMap::new(),
+                    hierarchy: None,
                 },
             }],
         );
