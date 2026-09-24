@@ -150,7 +150,7 @@ results.
 | 025 | Make query output answer-first for coding agents | P1 | L | —; land before 018 when both are selected | DONE |
 | 026 | Make the derived community overview answer coupling questions | P1 | M | — | DONE |
 | 027 | Publish a budgeted community hierarchy for navigation | P1 | L | — | DONE |
-| 028 | Keep community levels stable across builds and qualify them | P2 | L | 027 | TODO |
+| 028 | Keep community levels stable across builds and qualify them | P2 | L | 027 | DONE |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED`, or `REJECTED`.
 

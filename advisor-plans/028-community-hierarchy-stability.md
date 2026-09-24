@@ -28,6 +28,24 @@
 ## Status
 
 - **Priority**: P2 — required before anyone treats hierarchy levels as durable identities
+
+### Implementation status (2026-09-25)
+
+Steps 1–6 are implemented on `codex/community-hierarchy-stability`:
+evidence-derived group ids, reconciliation with a persisted identity ledger,
+the `compass.community-hierarchy-diff/1` comparison on the history workbench
+view, identity-keyed level layouts, and
+`./scripts/qualify_code_graph_v1.sh --hierarchy-stability` with every
+acceptance entry true and byte-identical reports.
+
+Two adaptations, both recorded in code and docs:
+
+- Reconciliation compares member nodes, but the artifact deliberately stores no
+  node lists, so the published partitions are supplied alongside the two
+  hierarchies rather than embedded in them.
+- The diff is exposed as an additive optional field on the history *workbench
+  view* instead of inside `compass.semantic_diff.report/1`. The frozen report
+  schema is unchanged, which the STOP conditions require.
 - **Effort**: L (reconciliation + events + layout stability + acceptance program)
 - **Risk**: MED-HIGH — semantics of group identity and cross-generation comparison
 - **Depends on**: `advisor-plans/027-community-hierarchy-artifact.md`
