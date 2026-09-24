@@ -735,6 +735,37 @@ silently substitutes the old detector for the new profile.
 
 ## Quality evidence publication
 
+### Hierarchy publication
+
+The same build publishes `community-hierarchy.json`
+(`compass.community-hierarchy/1`) beside the quality evidence. It is derived
+from the partition the build just published and the same typed topology
+projection, never re-read from the artifacts it describes, and it is bound to
+the identical `graphGeneration` and canonical `graphDigest`.
+
+Levels are defined over the level below: `childIndices` index the next finer
+level, the finest level pairs each group with its published community id (which
+the incremental remap can leave sparse), and `finestSignature` digests the
+partition's member signatures so a reader can prove the hierarchy describes
+that partition without storing per-node membership. The completeness proof
+runs before publication: children partition the level below exactly once and
+their member counts sum to the parent's, or the build fails with
+`IncompleteHierarchy` / `MemberCountMismatch` instead of publishing an
+inconsistent tree.
+
+Two merge rules fill the budget. Relationship levels run the seeded Leiden
+local moving on the level below at halved resolution and must remove a tenth of
+the level to be published. Location-affinity levels cut the directory tree the
+groups already cite, expanding the largest directory whose children still fit
+the budget; a group that cites no dominant directory stays its own group. Each
+level records its rule and counts, so a reader can tell evidence-backed merges
+from location-backed ones, and `budgetSatisfied` reports the achieved count
+rather than hiding an unmet budget.
+
+The artifact stays additive: no query path reads it, absence means navigation
+is unavailable, and `compass export hierarchy-json` reproduces it byte for byte
+after validating the schema major and graph identity.
+
 Phases 1 through 5 keep the richer quality result internal and in qualification
 reports while its meaning stabilizes. Existing `cohesion` output remains the
 compatibility density projection.
