@@ -423,12 +423,17 @@ body.vscode-high-contrast {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 49px minmax(0, 1fr);
+  /* The header grows with the graph control rail, which lives there so the
+     canvas keeps the whole stage instead of lending it a floating strip. */
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .visualization-context {
+  position: relative;
+  z-index: 7;
   display: flex;
   min-width: 0;
+  min-height: 49px;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
@@ -437,13 +442,13 @@ body.vscode-high-contrast {
   background: color-mix(in srgb, var(--background) 92%, var(--compass-panel));
 }
 
-.visualization-context > div:first-child {
+.visualization-context-title {
   display: grid;
   min-width: 0;
   gap: 1px;
 }
 
-.visualization-context > div:first-child span {
+.visualization-context-title span {
   color: var(--muted-foreground);
   font-size: 9px;
   font-weight: 650;
@@ -451,11 +456,58 @@ body.vscode-high-contrast {
   text-transform: uppercase;
 }
 
-.visualization-context > div:first-child strong {
+.visualization-context-title strong {
   overflow: hidden;
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * Header seat for the graph control rail. The rail is portalled here by the
+ * graph view, and the container name keeps the rail's own narrow-width rules
+ * answering to the room it actually has rather than to the canvas below.
+ */
+.visualization-controls {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  container-name: compass-stage;
+  container-type: inline-size;
+}
+
+.visualization-controls .compass-graph-toolbar {
+  position: relative;
+  z-index: auto;
+  inset: auto;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/*
+ * In the header every control stays reachable: the rail wraps instead of
+ * scrolling its trailing buttons out of the row.
+ */
+.visualization-controls .compass-toolbar-actions {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+.visualization-controls .compass-viewer-status-text {
+  max-width: min(320px, 100%);
+}
+
+/*
+ * The rail's own status line carries the scope counts, so a graph view keeps
+ * only the coverage status in the header rather than saying it twice.
+ */
+.visualization-context:has(.visualization-controls:not(:empty)) .visualization-coverage > span {
+  display: none;
 }
 
 .visualization-coverage {
@@ -1703,6 +1755,26 @@ button:not(:disabled),
 /* Keep the semantic legend clear of the repository path when both are shown. */
 .compass-graph-stage[data-breadcrumb="true"] .compass-semantic-legend {
   top: 96px;
+}
+
+/*
+ * The control rail moved to the workbench header, so the stage starts at the
+ * top edge and only the repository path needs room.
+ */
+.compass-graph-stage[data-controls="header"] .compass-graph-breadcrumb {
+  top: 12px;
+}
+
+.compass-graph-stage[data-controls="header"][data-breadcrumb="true"] .compass-semantic-legend {
+  top: 48px;
+}
+
+.compass-graph-stage[data-controls="header"] .compass-variant-stage {
+  inset: 52px 12px 12px;
+}
+
+.compass-graph-stage[data-controls="header"]:not([data-breadcrumb="true"]) .compass-variant-stage {
+  inset: 12px;
 }
 
 /* Community overview design variants: matrix, area map, and tier map. */
@@ -4616,6 +4688,11 @@ button.compass-code-evidence-source:focus-visible {
 .compass-community-panel[data-secondary="true"] {
   flex: 0 1 auto;
   padding-top: 12px;
+}
+
+/* A drill-down keeps the panel to its summary line for the inspector's sake. */
+.compass-community-panel[data-collapsed="true"] {
+  flex: 0 1 auto;
 }
 
 .compass-community-panel details > summary {

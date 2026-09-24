@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphEdge, GraphNode, GraphViewModel } from "../contracts/graph";
 import { COMMUNITY_OVERVIEW_NODE_THRESHOLD } from "./communityOverview";
 import { CompassGraph } from "./CompassGraph";
+import { GraphToolbarSlotContext } from "./GraphToolbarSlot";
 
 const mock = vi.hoisted(() => ({
   pendingDataSets: [] as Array<Array<Record<string, unknown>>>,
@@ -316,4 +318,83 @@ describe("CompassGraph community overview", () => {
     expect(screen.getByText("Most connected symbols first")).toBeInTheDocument();
     expect(screen.queryByText("Partial community comparison")).toBeNull();
   });
+
+  it("names the window of a standalone detail the export could only embed in part", () => {
+    const model = fixture();
+    render(
+      <CompassGraph
+        model={model}
+        host={{ openSource: vi.fn() }}
+        communityDetail={{
+          communityId: 1,
+          model: {
+            ...model,
+            stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+            nodes: model.nodes.slice(0, 2)
+          },
+          bounded: { limit: 2, parentMembers: 200, currentMembers: 2, scope: "export" }
+        }}
+        onBackToOverview={vi.fn()}
+      />
+    );
+    stabilize();
+
+    expect(screen.getByText("Bounded community detail")).toBeInTheDocument();
+    expect(screen.getByText(/most connected of 200 symbols/)).toBeInTheDocument();
+    expect(screen.getByText("compass export json --community 1")).toBeInTheDocument();
+  });
+
+  it("stands the community list down while one community is open", async () => {
+    render(<CompassGraph model={fixture()} host={{ openSource: vi.fn() }} />);
+    stabilize();
+
+    const panel = document.querySelector(".compass-community-panel");
+    expect(panel).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByText("Select all")).toBeInTheDocument();
+
+    doubleClickNode("community:0");
+    stabilize();
+    expect(document.querySelector(".compass-community-panel"))
+      .toHaveAttribute("data-collapsed", "true");
+
+    // The reader can still reach the list by hand.
+    fireEvent.click(screen.getByText("Communities", { selector: "summary" }));
+    await waitFor(() => {
+      expect(document.querySelector(".compass-community-panel"))
+        .toHaveAttribute("data-collapsed", "false");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to community overview" }));
+    stabilize();
+    expect(document.querySelector(".compass-community-panel"))
+      .toHaveAttribute("data-collapsed", "false");
+  });
+
+  it("renders the control rail in the header row a host offers", () => {
+    render(
+      <SlotHost>
+        <CompassGraph model={fixture()} host={{ openSource: vi.fn() }} />
+      </SlotHost>
+    );
+    stabilize();
+
+    const header = screen.getByTestId("host-controls");
+    expect(within(header).getByRole("toolbar", { name: "Graph controls" }))
+      .toBeInTheDocument();
+    expect(document.querySelector(".compass-graph-stage"))
+      .toHaveAttribute("data-controls", "header");
+  });
 });
+
+/** Host shape of the workbench: a header row the graph view renders into. */
+function SlotHost({ children }: { children: ReactNode }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  return (
+    <div>
+      <header ref={setSlot} data-testid="host-controls" />
+      <GraphToolbarSlotContext.Provider value={slot}>
+        {children}
+      </GraphToolbarSlotContext.Provider>
+    </div>
+  );
+}

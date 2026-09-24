@@ -156,11 +156,15 @@ export function GraphToolbar({
         data-state={physicsRunning ? "running" : "paused"}
         role="status"
         aria-live="polite"
+        title={status}
       >
         <span className="compass-viewer-status-dot" aria-hidden="true" />
         <span className="compass-viewer-status-text">{status}</span>
       </div>
       <div className="compass-toolbar-actions">
+        {leadingControls ? (
+          <div className="compass-toolbar-leading">{leadingControls}</div>
+        ) : null}
         {themeControls}
         {scopeControls}
         {scopeControls && variantControls ? (
@@ -271,9 +275,6 @@ export function GraphToolbar({
           <SettingsIcon />
         </button>
           </>
-        ) : null}
-        {leadingControls ? (
-          <div className="compass-toolbar-leading">{leadingControls}</div>
         ) : null}
       </div>
       {leadingPanel}

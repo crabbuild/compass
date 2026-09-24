@@ -31,6 +31,18 @@
   and the breadcrumb walks back up one group or to the repository. The four
   overview designs read whichever level is open, and a narrowed scope lists
   only the groups it draws.
+- Give every community a standalone detail: `graph.html` spends its bounded
+  detail budget on one shared window instead of the largest communities alone,
+  so small communities are embedded whole and large ones open on their most
+  connected symbols with a notice that names the window and points at VS Code or
+  `compass export json --community ID` for the complete community. Community
+  nodes no longer end in a dead "detail was omitted" message.
+- Move the graph control rail into the workbench header row beside the view
+  title, wrapping it when the header is narrow rather than scrolling its
+  trailing buttons out of reach, and stand the community list down to its
+  summary line while one community is open so the inspector keeps the room its
+  node detail needs. The list returns with the overview and the reader can open
+  it by hand meanwhile.
 - Make large `graph.html` exports readable: the viewer opens a repository on a
   labelled community overview derived from the embedded model, weights
   cross-community relationships by the number of relationships they summarize,

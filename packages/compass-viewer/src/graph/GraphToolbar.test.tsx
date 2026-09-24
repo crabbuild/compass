@@ -138,7 +138,7 @@ describe("GraphToolbar", () => {
     expect(callbacks.onTogglePhysics).toHaveBeenCalledOnce();
   });
 
-  it("removes depth layers and places filters after Lucide settings", () => {
+  it("removes depth layers and leads with the host filters", () => {
     renderToolbar({
       leadingControls: (
         <button type="button" aria-label="Graph filters">
@@ -151,8 +151,12 @@ describe("GraphToolbar", () => {
     const settings = screen.getByRole("button", { name: "Graph settings" });
     const filters = screen.getByRole("button", { name: "Graph filters" });
     expect(settings.querySelector(".lucide-settings")).not.toBeNull();
-    expect(settings.compareDocumentPosition(filters) & Node.DOCUMENT_POSITION_FOLLOWING)
+    // The rail can scroll or wrap in a narrow host, so the view's own control
+    // leads it instead of hiding behind the trailing canvas controls.
+    expect(filters.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING)
       .not.toBe(0);
+    expect(filters.closest(".compass-toolbar-actions")?.firstElementChild)
+      .toBe(filters.closest(".compass-toolbar-leading"));
   });
 
   it("opens the shortcut guide with question mark", () => {

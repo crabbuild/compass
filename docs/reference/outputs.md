@@ -499,9 +499,14 @@ removed, and changed graph evidence.
 Node-link graph views provide bounded 1–4-hop selection isolation with exact
 incoming, outgoing, or bidirectional traversal, adjustable layout spacing, and
 a navigable minimap based on the rendered graph coordinates. Workbench graph
-filters live in the top graph-control rail and open as a compact panel, leaving
-the canvas at full height. Filters and their result count follow the graph
-currently on screen when moving between an overview and community detail.
+filters live in the top graph-control rail, which shares the view header row
+instead of floating over the canvas, and open as a compact panel. In a narrow
+header the rail wraps rather than scrolling its trailing controls out of reach.
+Filters and their result count follow the graph currently on screen when moving
+between an overview and community detail, and the community list stands down to
+its summary line while one community is open so the inspector keeps the room
+its node detail needs; it returns with the overview, and the reader can open it
+by hand meanwhile.
 Neighborhood depth and direction can be prepared before selecting a node;
 isolation becomes available after selection and fits the resulting
 neighborhood. The graph-settings panel documents keyboard controls; press `?`
@@ -515,16 +520,21 @@ workbench schemas must be rejected. Plain `compass export json` remains
 `compass.viewer.graph/1` for existing consumers.
 
 When the node limit selects a community overview, the standalone document
-embeds a deterministic bounded set of complete community details: at most
-5,000 detail nodes and 40,000 internal detail edges across the export. Details
-are validated only when opened. Double-click an available community node (or
-use **Open community** in the inspector) to enter its member graph; use
-**Overview** to return. Communities outside the embedded budget remain visible
-and are marked as unavailable for standalone drilldown; use the VS Code graph
-or `compass export json --community ID` to inspect one without loading every
-community into the HTML page. Embedded details preserve internal edges, source
-anchors, and hyperedges, while cross-community edges remain represented only
-in the overview.
+embeds a deterministic bounded detail for every community it can size: the
+export spends at most 5,000 detail nodes and 40,000 internal detail edges on
+one shared window, so small communities are embedded whole and large ones open
+on their most connected symbols instead of being dropped. Members are ordered
+by connectivity first, and a bounded window names itself in the viewer — it
+states how many of the community's symbols it holds and points at the VS Code
+graph or `compass export json --community ID` for the complete community. Only
+an export whose budget cannot host a single member leaves communities marked as
+unavailable for standalone drilldown. Details are validated only when opened.
+Double-click a community node (or use **Open community** in the inspector) to
+enter its member graph; use **Overview** to return. On a page that also opens
+on a published hierarchy, the finest level's groups open the same details, so
+descending the levels and entering a community stay one path. Embedded details
+preserve internal edges, source anchors, and hyperedges, while cross-community
+edges remain represented only in the overview.
 
 Large community overviews use a deterministic hub-centered layout. Physics is
 paused, labels remain bounded, and at most 4,000 aggregate edges are rendered

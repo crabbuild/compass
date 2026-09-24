@@ -127,6 +127,79 @@ export default async function generate(): Promise<void> {
     path.join(output, "workbench.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass workbench fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(workbench)}</script><script>${viewerJs}</script></body></html>`
   );
+  // A standalone export of a repository too large to embed whole: the overview
+  // is aggregated by community and every community carries an embedded detail,
+  // bounded to its most connected symbols when the budget cannot hold it all.
+  const exportOverview = {
+    ...graph,
+    title: "Export overview",
+    stats: { nodes: 2, edges: 1, communities: 2, aggregated: true },
+    nodes: [
+      {
+        id: "community:0", label: "Core", kind: "community", community: 0,
+        degree: 1, memberCount: 1_200, detailAvailable: true
+      },
+      {
+        id: "community:1", label: "Data", kind: "community", community: 1,
+        degree: 1, memberCount: 2, detailAvailable: true
+      }
+    ],
+    edges: [{
+      id: "export-cross-community",
+      source: "community:0",
+      target: "community:1",
+      relation: "12 cross-community edges",
+      confidence: "aggregated"
+    }],
+    communities: [
+      { id: 0, label: "Core", color: "#4E79A7", hidden: false },
+      { id: 1, label: "Data", color: "#F28E2B", hidden: false }
+    ]
+  };
+  const exportWorkbench = {
+    ...workbench,
+    title: "Export workbench",
+    graphIdentity: "fixture-export",
+    views: [{
+      ...workbench.views[0],
+      coverage: {
+        status: "summary",
+        truncated: true,
+        nodes: exportOverview.nodes.length,
+        edges: exportOverview.edges.length,
+        limitations: ["The repository overview is aggregated by community."]
+      },
+      model: exportOverview,
+      communityDetails: {
+        "0": {
+          ...graph,
+          title: "Core detail",
+          stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+          nodes: [graph.nodes[0]!, graph.nodes[1]!],
+          edges: graph.edges.slice(0, 1),
+          communities: graph.communities.slice(0, 1)
+        },
+        "1": {
+          ...graph,
+          title: "Data detail",
+          stats: { nodes: 2, edges: 1, communities: 1, aggregated: false },
+          nodes: [graph.nodes[2]!, graph.nodes[3]!],
+          edges: [{
+            id: "detail-data-edge",
+            source: "file-only",
+            target: "store",
+            relation: "documents",
+            confidence: "extracted"
+          }],
+          communities: graph.communities.slice(1, 2)
+        }
+      }
+    }]
+  };
+  await writeFile(
+    path.join(output, "exportWorkbench.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass export workbench fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(exportWorkbench)}</script><script>${viewerJs}</script></body></html>`
+  );
   // Mirrors the prepared Django overview shape (3,376 communities and roughly
   // three cross-community relationships per community) without carrying the
   // original 281 MB graph fixture in the repository.
@@ -240,7 +313,9 @@ export default async function generate(): Promise<void> {
     title: "Community fixture",
     stats: { nodes: 2, edges: 1, communities: 2, aggregated: true },
     nodes: [
-      { id: "0", label: "Core", community: 0, memberCount: 2, degree: 1 },
+      // Core holds three symbols, so the two-symbol embedded detail below is a
+      // bounded window the standalone export has to name.
+      { id: "0", label: "Core", community: 0, memberCount: 3, degree: 1 },
       { id: "1", label: "Data", community: 1, memberCount: 1, degree: 1 }
     ],
     edges: [{

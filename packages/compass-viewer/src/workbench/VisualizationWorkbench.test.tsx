@@ -18,7 +18,11 @@ vi.mock("../graph/CompassGraph", () => ({
     preferredLayout
   }: {
     model: GraphViewModel;
-    communityDetail?: { communityId: number; model: GraphViewModel };
+    communityDetail?: {
+      communityId: number;
+      model: GraphViewModel;
+      bounded?: { scope?: string } | undefined;
+    };
     host: { openCommunity?(communityId: number): void };
     toolbarLeading?: ReactNode;
     toolbarLeadingPanel?: ReactNode;
@@ -33,8 +37,14 @@ vi.mock("../graph/CompassGraph", () => ({
         {stageOverlay}
         <output data-testid="visible-nodes">{active.nodes.length}</output>
         <output data-testid="preferred-layout">{preferredLayout}</output>
+        <output data-testid="detail-bound">
+          {communityDetail?.bounded?.scope ?? "none"}
+        </output>
         <button type="button" onClick={() => host.openCommunity?.(1)}>
           Open community fixture
+        </button>
+        <button type="button" onClick={() => host.openCommunity?.(2)}>
+          Open complete community fixture
         </button>
       </div>
     );
@@ -111,6 +121,66 @@ describe("VisualizationWorkbench graph filters", () => {
 
     expect(screen.getByTestId("visible-nodes")).toHaveTextContent("1");
     expect(screen.getByLabelText("Graph filters")).toHaveTextContent("1 / 2");
+  });
+
+  it("names the window of an embedded community detail the export bounded", async () => {
+    const overview: GraphViewModel = {
+      ...graph([
+        { id: "community:1", label: "Core", kind: "community", community: 1, memberCount: 200 },
+        { id: "community:2", label: "Fixtures", kind: "community", community: 2, memberCount: 2 }
+      ]),
+      stats: { nodes: 2, edges: 0, communities: 2, aggregated: true },
+      communities: [
+        { id: 1, label: "Core", color: "#4e79a7", hidden: false },
+        { id: 2, label: "Fixtures", color: "#f28e2b", hidden: false }
+      ]
+    };
+    const workbench: WorkbenchModel = {
+      schema: "compass.viewer.workbench/1",
+      title: "Fixture workbench",
+      graphIdentity: "fixture-identity",
+      defaultView: "code",
+      views: [{
+        id: "code",
+        kind: "code",
+        title: "Code graph",
+        description: "Fixture graph",
+        coverage: {
+          status: "summary",
+          truncated: false,
+          nodes: 2,
+          edges: 0,
+          limitations: []
+        },
+        model: overview,
+        communityDetails: {
+          "1": graph([
+            { id: "helper", label: "Helper", kind: "function", community: 1 },
+            { id: "store", label: "Store", kind: "type", community: 1 }
+          ]),
+          "2": graph([
+            { id: "one", label: "One", kind: "function", community: 2 },
+            { id: "two", label: "Two", kind: "function", community: 2 }
+          ])
+        }
+      }]
+    };
+
+    render(<VisualizationWorkbench workbench={workbench} host={{ openSource: vi.fn() }} />);
+    expect(screen.getByTestId("detail-bound")).toHaveTextContent("none");
+
+    fireEvent.click(screen.getByRole("button", { name: "Open community fixture" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("detail-bound")).toHaveTextContent("export");
+    });
+
+    // A community whose embedded detail holds every member carries no bound.
+    fireEvent.click(screen.getByRole("button", {
+      name: "Open complete community fixture"
+    }));
+    await waitFor(() => {
+      expect(screen.getByTestId("detail-bound")).toHaveTextContent("none");
+    });
   });
 
   it("uses a hierarchy for routes while keeping other artifacts on the grid", () => {

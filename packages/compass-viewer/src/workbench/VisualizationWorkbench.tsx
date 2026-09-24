@@ -21,8 +21,13 @@ import type { ThemePreference } from "../lib/theme";
 import { ArchitectureMap, type ArchitectureSelection } from "../architecture/ArchitectureMap";
 import { architectureOverview } from "../architecture/projection";
 import { CallGraph } from "../calls/CallGraph";
-import { CompassGraph, type GraphHost } from "../graph/CompassGraph";
+import {
+  CompassGraph,
+  type GraphHost
+} from "../graph/CompassGraph";
 import { codeQueryGraphViewModel } from "../graph/codeQueryGraph";
+import { embeddedCommunityBound } from "../graph/communityBound";
+import { GraphToolbarSlotContext } from "../graph/GraphToolbarSlot";
 import type { InspectorLayout } from "../graph/inspectorLayout";
 import { compareGraphs } from "../history/ComparisonOverlay";
 
@@ -56,6 +61,9 @@ export function VisualizationWorkbench({
 }) {
   const [activeViewId, setActiveViewId] = useState(() => hashView(workbench) ?? workbench.defaultView);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  // The graph control rail belongs to the header row here, so the canvas keeps
+  // the whole stage instead of lending its top strip to floating controls.
+  const [controlSlot, setControlSlot] = useState<HTMLElement | null>(null);
   const activeView = workbench.views.find((view) => view.id === activeViewId)
     ?? workbench.views[0];
 
@@ -131,10 +139,11 @@ export function VisualizationWorkbench({
       </aside>
       <main className="visualization-main">
         <header className="visualization-context">
-          <div>
+          <div className="visualization-context-title">
             <span>{viewEyebrow(activeView)}</span>
             <strong>{activeView.title}</strong>
           </div>
+          <div className="visualization-controls" ref={setControlSlot} />
           <div className="visualization-coverage" data-status={activeView.coverage.status}>
             {activeView.kind !== "call" && (
               <>
@@ -145,21 +154,26 @@ export function VisualizationWorkbench({
             <strong>{coverageLabel(activeView)}</strong>
           </div>
         </header>
-        <section className="visualization-stage" aria-label={`${activeView.title} visualization`}>
-          <WorkbenchView
-            key={activeView.id}
-            view={activeView}
-            host={host}
-            communityDetail={communityDetail}
-            communityLoading={communityLoading}
-            communityError={communityError}
-            onBackToOverview={onBackToOverview}
-            initialInspectorLayout={initialInspectorLayout}
-            onInspectorLayoutChange={onInspectorLayoutChange}
-            themePreference={themePreference}
-            onThemePreferenceChange={onThemePreferenceChange}
-          />
-        </section>
+        <GraphToolbarSlotContext.Provider value={controlSlot}>
+          <section
+            className="visualization-stage"
+            aria-label={`${activeView.title} visualization`}
+          >
+            <WorkbenchView
+              key={activeView.id}
+              view={activeView}
+              host={host}
+              communityDetail={communityDetail}
+              communityLoading={communityLoading}
+              communityError={communityError}
+              onBackToOverview={onBackToOverview}
+              initialInspectorLayout={initialInspectorLayout}
+              onInspectorLayoutChange={onInspectorLayoutChange}
+              themePreference={themePreference}
+              onThemePreferenceChange={onThemePreferenceChange}
+            />
+          </section>
+        </GraphToolbarSlotContext.Provider>
       </main>
     </div>
   );
@@ -344,9 +358,13 @@ function FilteredGraph({
   const filterPanelId = useId();
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const embeddedDetailModel = communityId === undefined
+    ? undefined
+    : communityDetails?.[String(communityId)];
   const embeddedCommunityDetail = communityId === undefined ? undefined : {
     communityId,
-    model: communityDetails?.[String(communityId)] ?? model
+    model: embeddedDetailModel ?? model,
+    bounded: embeddedCommunityBound(model, communityId, embeddedDetailModel)
   };
   const activeCommunityDetail = embeddedCommunityDetail ?? communityDetail;
   const activeModel = activeCommunityDetail?.model ?? model;

@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import {
   ArrowDownToLineIcon,
   ArrowUpFromLineIcon,
@@ -242,6 +242,7 @@ export function GraphInspector({
   searchSpansCommunities,
   communityOrder,
   hiddenCommunities,
+  communityDrilldown,
   comparisonMode,
   sourceRevisions,
   queryResult,
@@ -271,6 +272,12 @@ export function GraphInspector({
   /** Community ids ordered by reader importance, when the viewer derived them. */
   communityOrder?: readonly number[] | undefined;
   hiddenCommunities: ReadonlySet<number>;
+  /**
+   * Set while one community is open. The panel list then steps aside so the
+   * inspector keeps the room its node detail needs, and returns on the
+   * overview; the reader can still open it by hand.
+   */
+  communityDrilldown?: boolean | undefined;
   comparisonMode: boolean;
   sourceRevisions?: GraphSourceRevisions | undefined;
   queryResult?: CodeQueryResponse | undefined;
@@ -290,6 +297,15 @@ export function GraphInspector({
   onToggleCollapsed(): void;
 }) {
   const [activeResult, setActiveResult] = useState(0);
+  // The community list stands down while a community is open and comes back on
+  // the overview. A reader who opens it during a drill-down keeps it open until
+  // the next overview transition.
+  const [communitiesOpen, setCommunitiesOpen] = useState(!communityDrilldown);
+  useEffect(() => {
+    setCommunitiesOpen(!communityDrilldown);
+  }, [communityDrilldown]);
+  const communitiesCollapsed = (comparisonMode || Boolean(communityDrilldown))
+    && !communitiesOpen;
   const source = selected ? navigableSource(selected) : undefined;
   const range = selected ? lineRange(selected) : undefined;
   const sourceRange = selected ? sourceDisplayRange(selected) : undefined;
@@ -343,6 +359,18 @@ export function GraphInspector({
         .flatMap((edge) => edge.evidence)
       : connectedEdges.flatMap((edge) => edge.codeEvidence ?? []))
     : [];
+  const communityControls = (
+    <CommunityControls
+      model={model}
+      communityCounts={communityCounts}
+      hiddenCommunities={hiddenCommunities}
+      allVisible={allVisible}
+      onSetAllVisible={onSetAllVisible}
+      onToggleCommunity={onToggleCommunity}
+      communityOrder={communityOrder}
+      onOpenCommunity={onOpenCommunity}
+    />
+  );
 
   const choose = (node: GraphNode) => {
     onFocus(node.id);
@@ -752,37 +780,23 @@ export function GraphInspector({
         className="compass-community-panel"
         aria-labelledby="compass-communities-title"
         data-secondary={comparisonMode}
+        data-collapsed={String(communitiesCollapsed)}
       >
-        {comparisonMode ? (
-          <details>
+        {comparisonMode || communityDrilldown ? (
+          <details
+            open={communitiesOpen}
+            onToggle={(event) => setCommunitiesOpen(event.currentTarget.open)}
+          >
             <summary id="compass-communities-title">
               Communities
               <span>{model.communities.length}</span>
             </summary>
-            <CommunityControls
-              model={model}
-              communityCounts={communityCounts}
-              hiddenCommunities={hiddenCommunities}
-              allVisible={allVisible}
-              onSetAllVisible={onSetAllVisible}
-              onToggleCommunity={onToggleCommunity}
-              communityOrder={communityOrder}
-              onOpenCommunity={onOpenCommunity}
-            />
+            {communityControls}
           </details>
         ) : (
           <>
             <h2 id="compass-communities-title">Communities</h2>
-            <CommunityControls
-              model={model}
-              communityCounts={communityCounts}
-              hiddenCommunities={hiddenCommunities}
-              allVisible={allVisible}
-              onSetAllVisible={onSetAllVisible}
-              onToggleCommunity={onToggleCommunity}
-              communityOrder={communityOrder}
-              onOpenCommunity={onOpenCommunity}
-            />
+            {communityControls}
           </>
         )}
       </section>

@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type ReactNode
 } from "react";
+import { createPortal } from "react-dom";
 import { BoxesIcon, BracesIcon } from "lucide-react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type { CommunityHierarchyView } from "../contracts/hierarchy";
@@ -78,6 +79,7 @@ const COMMUNITY_VARIANTS: ReadonlyArray<{
 import { GraphInspector } from "./GraphInspector";
 import { GraphTransitionScreen } from "./GraphTransitionScreen";
 import { GraphToolbar } from "./GraphToolbar";
+import { useGraphToolbarSlot } from "./GraphToolbarSlot";
 import { GraphSemanticLegend } from "./GraphSemanticLegend";
 import { InspectorResizeHandle } from "./InspectorResizeHandle";
 import {
@@ -151,8 +153,9 @@ export type CommunityGraphDetail = {
     /**
      * `viewer` marks a bound the viewer chose for a drill-down it computed
      * itself; omitting it keeps the exported `compass.graphNodeLimit` wording.
+     * `export` marks a detail a standalone document could only embed in part.
      */
-    scope?: "viewer" | undefined;
+    scope?: "viewer" | "export" | undefined;
   } | undefined;
 };
 
@@ -301,7 +304,9 @@ export function CompassGraph({
     onBackToOverview?.();
   }, [onBackToOverview]);
   // Opening a group descends one level while it has children; the finest level
-  // has none, so it opens the community's symbols instead.
+  // has none, so it opens the community's symbols instead — through the viewer
+  // when it derived the overview, and through the host otherwise, which is how
+  // a standalone export reaches the community detail it embedded.
   const openGroup = useCallback((groupIndex: number) => {
     const level = hierarchy?.levels.find((entry) => entry.level === activeLevel);
     const group = level?.groups.find((entry) => entry.index === groupIndex);
@@ -313,8 +318,13 @@ export function CompassGraph({
       setActiveLevel(activeLevel + 1);
       return;
     }
-    setDerivedCommunityId(group?.community ?? groupIndex);
-  }, [activeLevel, hierarchy]);
+    const community = group?.community ?? groupIndex;
+    if (derivedOverview === undefined) {
+      host.openCommunity?.(community);
+      return;
+    }
+    setDerivedCommunityId(community);
+  }, [activeLevel, derivedOverview, hierarchy, host]);
   // Community activation resolves inside the viewer whenever the overview was
   // derived locally; exported or host-provided details keep their own host.
   const viewHost = useMemo<GraphHost>(
@@ -576,6 +586,8 @@ function CompassGraphView({
   const [hover, setHover] = useState<GraphHover | null>(null);
   const [edgeHover, setEdgeHover] = useState<GraphEdgeHover | null>(null);
   const canvasRef = useRef<GraphCanvasHandle>(null);
+  // A host that owns a header row takes the control rail out of the canvas.
+  const toolbarSlot = useGraphToolbarSlot();
   const hostRef = useRef(host);
   hostRef.current = host;
   const nodeById = useMemo(
@@ -882,6 +894,7 @@ function CompassGraphView({
         <main
           className="compass-graph-stage"
           data-comparison={comparisonMode ? "true" : "false"}
+          data-controls={toolbarSlot ? "header" : undefined}
           data-breadcrumb={overviewSummary !== undefined
             || autoLayoutDetail
             || (breadcrumbTrail !== undefined && breadcrumbTrail.length > 0)
@@ -976,126 +989,128 @@ function CompassGraphView({
               )}
             </nav>
           ) : null}
-          <GraphToolbar
-            status={status}
-            physicsRunning={state.physicsRunning && canvasVisible}
-            layoutStyle={state.layoutStyle}
-            forceLabels={state.forceLabels}
-            showEdgeLabels={state.showEdgeLabels}
-            hasSelection={selected !== undefined}
-            isolateSelection={state.isolateSelection}
-            neighborhoodDepth={state.neighborhoodDepth}
-            edgeDirection={state.edgeDirection}
-            layoutSpacing={state.layoutSpacing}
-            showMinimap={state.showMinimap}
-            themeControls={onThemePreferenceChange ? (
-              <div
-                className="compass-scope-toggle compass-theme-toggle"
-                role="group"
-                aria-label="Colour theme"
-              >
-                {THEME_PREFERENCES.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-label={option.label}
-                    aria-pressed={(themePreference ?? "auto") === option.value}
-                    title={option.hint}
-                    onClick={() => onThemePreferenceChange(option.value)}
-                  >
-                    {option.value === "auto"
-                      ? <MonitorIcon aria-hidden="true" />
-                      : option.value === "light"
-                        ? <SunIcon aria-hidden="true" />
-                        : <MoonIcon aria-hidden="true" />}
-                  </button>
-                ))}
-              </div>
-            ) : undefined}
-            scopeControls={scopeControls}
-            canvasControls={variant === "bubbles"}
-            variantControls={variantData ? (
-              <div
-                className="compass-scope-toggle compass-variant-toggle"
-                role="group"
-                aria-label="Overview design"
-              >
-                {COMMUNITY_VARIANTS.map(({ value, label, hint, Icon }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-label={label}
-                    aria-pressed={variant === value}
-                    title={`${label} — ${hint}`}
-                    onClick={() => onVariantChange(value)}
-                  >
-                    <Icon aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-            ) : undefined}
-            leadingControls={toolbarLeading}
-            leadingPanel={toolbarLeadingPanel}
-            leadingPanelOpen={toolbarLeadingOpen}
-            onLeadingPanelClose={onToolbarLeadingClose}
-            onTogglePhysics={() => dispatch({
-              type: "setPhysics",
-              running: !state.physicsRunning
-            })}
-            onLayoutChange={(layout: GraphLayoutStyle) => dispatch({
-              type: "setLayout",
-              layout,
-              runPhysics: false
-            })}
-            onZoomOut={() => canvasRef.current?.zoomOut()}
-            onResetZoom={() => canvasRef.current?.resetZoom()}
-            onZoomIn={() => canvasRef.current?.zoomIn()}
-            onFit={() => canvasRef.current?.fit()}
-            onFitSelection={() => {
-              if (selectedNeighborhood) {
-                canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
-              }
-            }}
-            onReset={() => {
-              clear();
-              dispatch({ type: "setIsolation", isolated: false });
-              canvasRef.current?.reset();
-            }}
-            onToggleLabels={() => dispatch({
-              type: "setLabels",
-              visible: !state.forceLabels
-            })}
-            onToggleEdgeLabels={() => dispatch({
-              type: "setEdgeLabels",
-              visible: !state.showEdgeLabels
-            })}
-            onToggleIsolation={() => {
-              const isolated = !state.isolateSelection;
-              dispatch({ type: "setIsolation", isolated });
-              if (isolated && selectedNeighborhood) {
-                window.requestAnimationFrame(() => {
+          <ToolbarOutlet slot={toolbarSlot}>
+            <GraphToolbar
+              status={status}
+              physicsRunning={state.physicsRunning && canvasVisible}
+              layoutStyle={state.layoutStyle}
+              forceLabels={state.forceLabels}
+              showEdgeLabels={state.showEdgeLabels}
+              hasSelection={selected !== undefined}
+              isolateSelection={state.isolateSelection}
+              neighborhoodDepth={state.neighborhoodDepth}
+              edgeDirection={state.edgeDirection}
+              layoutSpacing={state.layoutSpacing}
+              showMinimap={state.showMinimap}
+              themeControls={onThemePreferenceChange ? (
+                <div
+                  className="compass-scope-toggle compass-theme-toggle"
+                  role="group"
+                  aria-label="Colour theme"
+                >
+                  {THEME_PREFERENCES.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-label={option.label}
+                      aria-pressed={(themePreference ?? "auto") === option.value}
+                      title={option.hint}
+                      onClick={() => onThemePreferenceChange(option.value)}
+                    >
+                      {option.value === "auto"
+                        ? <MonitorIcon aria-hidden="true" />
+                        : option.value === "light"
+                          ? <SunIcon aria-hidden="true" />
+                          : <MoonIcon aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
+              ) : undefined}
+              scopeControls={scopeControls}
+              canvasControls={variant === "bubbles"}
+              variantControls={variantData ? (
+                <div
+                  className="compass-scope-toggle compass-variant-toggle"
+                  role="group"
+                  aria-label="Overview design"
+                >
+                  {COMMUNITY_VARIANTS.map(({ value, label, hint, Icon }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-label={label}
+                      aria-pressed={variant === value}
+                      title={`${label} — ${hint}`}
+                      onClick={() => onVariantChange(value)}
+                    >
+                      <Icon aria-hidden="true" />
+                    </button>
+                  ))}
+                </div>
+              ) : undefined}
+              leadingControls={toolbarLeading}
+              leadingPanel={toolbarLeadingPanel}
+              leadingPanelOpen={toolbarLeadingOpen}
+              onLeadingPanelClose={onToolbarLeadingClose}
+              onTogglePhysics={() => dispatch({
+                type: "setPhysics",
+                running: !state.physicsRunning
+              })}
+              onLayoutChange={(layout: GraphLayoutStyle) => dispatch({
+                type: "setLayout",
+                layout,
+                runPhysics: false
+              })}
+              onZoomOut={() => canvasRef.current?.zoomOut()}
+              onResetZoom={() => canvasRef.current?.resetZoom()}
+              onZoomIn={() => canvasRef.current?.zoomIn()}
+              onFit={() => canvasRef.current?.fit()}
+              onFitSelection={() => {
+                if (selectedNeighborhood) {
                   canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
-                });
-              }
-            }}
-            onNeighborhoodDepthChange={(depth) => dispatch({
-              type: "setNeighborhoodDepth",
-              depth
-            })}
-            onEdgeDirectionChange={(direction) => dispatch({
-              type: "setEdgeDirection",
-              direction
-            })}
-            onLayoutSpacingChange={(spacing) => dispatch({
-              type: "setLayoutSpacing",
-              spacing
-            })}
-            onToggleMinimap={() => dispatch({
-              type: "setMinimap",
-              visible: !state.showMinimap
-            })}
-            onBack={onBackToOverview}
-          />
+                }
+              }}
+              onReset={() => {
+                clear();
+                dispatch({ type: "setIsolation", isolated: false });
+                canvasRef.current?.reset();
+              }}
+              onToggleLabels={() => dispatch({
+                type: "setLabels",
+                visible: !state.forceLabels
+              })}
+              onToggleEdgeLabels={() => dispatch({
+                type: "setEdgeLabels",
+                visible: !state.showEdgeLabels
+              })}
+              onToggleIsolation={() => {
+                const isolated = !state.isolateSelection;
+                dispatch({ type: "setIsolation", isolated });
+                if (isolated && selectedNeighborhood) {
+                  window.requestAnimationFrame(() => {
+                    canvasRef.current?.fitSelection([...selectedNeighborhood.nodeIds]);
+                  });
+                }
+              }}
+              onNeighborhoodDepthChange={(depth) => dispatch({
+                type: "setNeighborhoodDepth",
+                depth
+              })}
+              onEdgeDirectionChange={(direction) => dispatch({
+                type: "setEdgeDirection",
+                direction
+              })}
+              onLayoutSpacingChange={(spacing) => dispatch({
+                type: "setLayoutSpacing",
+                spacing
+              })}
+              onToggleMinimap={() => dispatch({
+                type: "setMinimap",
+                visible: !state.showMinimap
+              })}
+              onBack={onBackToOverview}
+            />
+          </ToolbarOutlet>
           {comparisonMode && (
             <div className="compass-change-legend" aria-label="Graph change filters">
               {CHANGE_TYPES
@@ -1138,6 +1153,17 @@ function CompassGraphView({
                     This community holds {bounded.parentMembers.toLocaleString()} symbols;
                     the view shows the {bounded.currentMembers.toLocaleString()} most
                     connected. Search for a symbol to open it directly.
+                  </span>
+                </>
+              ) : bounded.scope === "export" ? (
+                <>
+                  <strong>Bounded community detail</strong>
+                  <span>
+                    This standalone document embeds the{" "}
+                    {bounded.currentMembers.toLocaleString()} most connected of{" "}
+                    {bounded.parentMembers.toLocaleString()} symbols. Open the graph in VS Code or
+                    run <code>compass export json --community {detailCommunityId}</code> to inspect
+                    every symbol.
                   </span>
                 </>
               ) : (
@@ -1186,6 +1212,7 @@ function CompassGraphView({
           matches={matches}
           communityOrder={communityOrder}
           hiddenCommunities={state.hiddenCommunities}
+          communityDrilldown={detailCommunityId !== undefined}
           comparisonMode={comparisonMode}
           sourceRevisions={sourceRevisions}
           queryResult={queryResult}
@@ -1222,4 +1249,18 @@ function CompassGraphView({
       ) : null}
     </div>
   );
+}
+
+/**
+ * Hosts the control rail in the header row the host offers. Without a slot the
+ * rail stays where it is drawn: floating over the canvas.
+ */
+function ToolbarOutlet({
+  slot,
+  children
+}: {
+  slot: HTMLElement | null;
+  children: ReactNode;
+}) {
+  return slot ? createPortal(children, slot) : children;
 }

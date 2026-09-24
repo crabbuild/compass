@@ -5,7 +5,8 @@ import {
 } from "./contracts/graph";
 import { WorkbenchModelSchema } from "./contracts/workbench";
 import { CommunityHierarchyViewSchema } from "./contracts/hierarchy";
-import { CompassGraph } from "./graph/CompassGraph";
+import { CompassGraph, type CommunityGraphDetail } from "./graph/CompassGraph";
+import { embeddedCommunityBound } from "./graph/communityBound";
 import { VisualizationWorkbench } from "./workbench/VisualizationWorkbench";
 import {
   openExportSource,
@@ -58,7 +59,7 @@ function mount() {
   const overview = GraphViewModelSchema.parse(untrusted);
   const hierarchy = parseEmbeddedHierarchy();
   const detailCache = new Map<number, GraphViewModel>();
-  let communityDetail: { communityId: number; model: GraphViewModel } | undefined;
+  let communityDetail: CommunityGraphDetail | undefined;
   let communityLoading: number | null = null;
   let communityError: string | undefined;
 
@@ -102,7 +103,13 @@ function mount() {
                   );
                   detailCache.set(communityId, model);
                 }
-                communityDetail = { communityId, model };
+                // The overview names the community's full size, so a detail the
+                // export could only embed in part says so in the view.
+                communityDetail = {
+                  communityId,
+                  model,
+                  bounded: embeddedCommunityBound(overview, communityId, model)
+                };
                 window.dispatchEvent(new CustomEvent("compass:open-community", {
                   detail: { communityId }
                 }));

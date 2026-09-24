@@ -262,6 +262,23 @@ describe("hierarchy level navigation", () => {
     expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
   });
 
+  it("opens the community a finest-level group names through its host", () => {
+    const openCommunity = vi.fn();
+    render(
+      <CompassGraph
+        model={baseModel()}
+        hierarchy={hierarchy()}
+        initialLevel={1}
+        host={{ openSource: () => undefined, openCommunity }}
+      />
+    );
+    doubleClickNode("h0-0000000000000002");
+
+    // The export owns the symbols of a leaf group, so the viewer hands the
+    // community over instead of keeping a derived detail to itself.
+    expect(openCommunity).toHaveBeenCalledWith(1);
+  });
+
   it("switches to the symbol canvas from any level", () => {
     render(
       <CompassGraph

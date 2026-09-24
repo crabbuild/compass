@@ -516,6 +516,147 @@ fn render(
     )?)
 }
 
+fn community_membership(communities: &Communities) -> HashMap<&str, usize> {
+    communities
+        .iter()
+        .flat_map(|(community, members)| {
+            members
+                .iter()
+                .map(move |member| (member.as_str(), *community))
+        })
+        .collect()
+}
+
+/// Member nodes of every community, most connected first. The viewer's own
+/// drill-down orders members the same way, so an embedded detail and a
+/// viewer-computed one open on the same symbols.
+fn ordered_community_members<'a>(
+    document: &'a GraphDocument,
+    communities: &Communities,
+) -> Result<BTreeMap<usize, Vec<&'a NodeRecord>>, OutputError> {
+    let node_community = community_membership(communities);
+    let degrees = degrees(document);
+    let mut grouped = BTreeMap::<usize, Vec<&NodeRecord>>::new();
+    for node in &document.nodes {
+        if let Some(community) = node_community.get(node.id.as_str()) {
+            grouped.entry(*community).or_default().push(node);
+        }
+    }
+    for (community, members) in communities.iter() {
+        let missing = members
+            .len()
+            .saturating_sub(grouped.get(community).map_or(0, Vec::len));
+        if missing > 0 {
+            return Err(OutputError::IncompleteCommunity {
+                community: *community,
+                missing,
+            });
+        }
+    }
+    for nodes in grouped.values_mut() {
+        nodes.sort_by(|left, right| {
+            degrees
+                .get(right.id.as_str())
+                .copied()
+                .unwrap_or_default()
+                .cmp(&degrees.get(left.id.as_str()).copied().unwrap_or_default())
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    }
+    Ok(grouped)
+}
+
+/// What one uniform window size costs the whole export: how many member nodes
+/// it publishes and how many internal edges stay complete inside the window.
+struct WindowCost {
+    members: Vec<usize>,
+    /// `internal_edges[community][cap]` counts complete internal edges once the
+    /// window reaches `cap` members, so a candidate size is costed without
+    /// rebuilding any detail.
+    internal_edges: Vec<Vec<usize>>,
+}
+
+impl WindowCost {
+    fn new(ordered: &BTreeMap<usize, Vec<&NodeRecord>>, document: &GraphDocument) -> Self {
+        let mut position = HashMap::<&str, (usize, usize)>::with_capacity(document.nodes.len());
+        let mut members = Vec::with_capacity(ordered.len());
+        for nodes in ordered.values() {
+            let index = members.len();
+            members.push(nodes.len());
+            for (member, node) in nodes.iter().enumerate() {
+                position.insert(node.id.as_str(), (index, member));
+            }
+        }
+        let mut internal_edges = members
+            .iter()
+            .map(|count| vec![0_usize; count + 1])
+            .collect::<Vec<_>>();
+        for edge in &document.links {
+            let (Some(source), Some(target)) = (
+                position.get(edge.source.as_str()),
+                position.get(edge.target.as_str()),
+            ) else {
+                continue;
+            };
+            if source.0 != target.0 {
+                continue;
+            }
+            // An internal edge is complete only once the window covers both
+            // endpoints; the farther member decides that step.
+            let reached = source.1.max(target.1) + 1;
+            internal_edges[source.0][reached] += 1;
+        }
+        for prefix in &mut internal_edges {
+            for index in 1..prefix.len() {
+                prefix[index] += prefix[index - 1];
+            }
+        }
+        Self {
+            members,
+            internal_edges,
+        }
+    }
+
+    fn fits(&self, cap: usize, node_budget: usize, edge_budget: usize) -> bool {
+        let mut nodes = 0_usize;
+        let mut edges = 0_usize;
+        for (index, count) in self.members.iter().enumerate() {
+            let window = cap.min(*count);
+            nodes += window;
+            edges += self.internal_edges[index][window];
+            if nodes > node_budget || edges > edge_budget {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Largest shared window size that keeps the export inside both budgets.
+    /// Zero means no community fits, which leaves every overview bubble
+    /// explicitly unavailable for standalone drilldown.
+    fn largest_window(&self, node_budget: usize, edge_budget: usize) -> usize {
+        let mut low = 0_usize;
+        let mut high = self.members.iter().copied().max().unwrap_or_default();
+        while low < high {
+            let candidate = low + (high - low).div_ceil(2);
+            if self.fits(candidate, node_budget, edge_budget) {
+                low = candidate;
+            } else {
+                high = candidate - 1;
+            }
+        }
+        low
+    }
+}
+
+/// One embedded detail per community, each bounded by the same window size.
+///
+/// A standalone document cannot publish every symbol of a large repository, so
+/// the budget is spent fairly rather than on the largest communities alone: the
+/// window grows until the next step would exceed the export's node or internal
+/// edge budget, which keeps every community openable and complete communities
+/// complete. Members are ordered by connectivity first, so a bounded community
+/// still opens on its most important symbols.
 fn community_view_models(
     document: &GraphDocument,
     communities: &Communities,
@@ -524,90 +665,32 @@ fn community_view_models(
     node_budget: usize,
     edge_budget: usize,
 ) -> Result<BTreeMap<usize, GraphViewModel>, OutputError> {
-    let node_community = communities
-        .iter()
-        .flat_map(|(community, members)| {
-            members
-                .iter()
-                .map(move |member| (member.as_str(), *community))
-        })
-        .collect::<HashMap<_, _>>();
-    let mut internal_edge_counts = BTreeMap::<usize, usize>::new();
-    for edge in &document.links {
-        let (Some(source), Some(target)) = (
-            node_community.get(edge.source.as_str()),
-            node_community.get(edge.target.as_str()),
-        ) else {
-            continue;
-        };
-        if source == target {
-            *internal_edge_counts.entry(*source).or_default() += 1;
-        }
-    }
-    let mut candidates = communities
-        .iter()
-        .map(|(community, members)| {
-            (
-                *community,
-                members.len(),
-                internal_edge_counts
-                    .get(community)
-                    .copied()
-                    .unwrap_or_default(),
-            )
-        })
+    let ordered = ordered_community_members(document, communities)?;
+    let window = WindowCost::new(&ordered, document);
+    let cap = window.largest_window(node_budget, edge_budget);
+    let nodes_by_community = ordered
+        .into_iter()
+        .map(|(community, nodes)| (community, nodes.into_iter().take(cap)))
         .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| {
-        right
-            .1
-            .cmp(&left.1)
-            .then_with(|| right.2.cmp(&left.2))
-            .then_with(|| left.0.cmp(&right.0))
-    });
-    let mut remaining_nodes = node_budget;
-    let mut remaining_edges = edge_budget;
-    let mut selected = HashSet::new();
-    for (community, nodes, edges) in candidates {
-        if nodes == 0 || nodes > remaining_nodes || edges > remaining_edges {
-            continue;
+    let mut windowed_nodes = BTreeMap::<usize, Vec<NodeRecord>>::new();
+    let mut selected = HashMap::<String, usize>::new();
+    for (community, nodes) in nodes_by_community {
+        let mut windowed = Vec::new();
+        for node in nodes {
+            selected.insert(node.id.clone(), community);
+            windowed.push(node.clone());
         }
-        selected.insert(community);
-        remaining_nodes -= nodes;
-        remaining_edges -= edges;
-    }
-    let mut grouped_nodes = BTreeMap::<usize, Vec<NodeRecord>>::new();
-    for node in &document.nodes {
-        if let Some(community) = node_community
-            .get(node.id.as_str())
-            .filter(|community| selected.contains(community))
-        {
-            grouped_nodes
-                .entry(*community)
-                .or_default()
-                .push(node.clone());
-        }
-    }
-    for (community, members) in communities
-        .iter()
-        .filter(|(community, _)| selected.contains(community))
-    {
-        let found = grouped_nodes.get(community).map_or(0, Vec::len);
-        if found != members.len() {
-            return Err(OutputError::IncompleteCommunity {
-                community: *community,
-                missing: members.len().saturating_sub(found),
-            });
-        }
+        windowed_nodes.insert(community, windowed);
     }
     let mut grouped_links = BTreeMap::<usize, Vec<EdgeRecord>>::new();
     for edge in &document.links {
         let (Some(source), Some(target)) = (
-            node_community.get(edge.source.as_str()),
-            node_community.get(edge.target.as_str()),
+            selected.get(edge.source.as_str()),
+            selected.get(edge.target.as_str()),
         ) else {
             continue;
         };
-        if source == target && selected.contains(source) {
+        if source == target {
             grouped_links.entry(*source).or_default().push(edge.clone());
         }
     }
@@ -629,7 +712,7 @@ fn community_view_models(
                 complete = false;
                 break;
             };
-            let Some(community) = node_community.get(id).copied() else {
+            let Some(community) = selected.get(id).copied() else {
                 complete = false;
                 break;
             };
@@ -639,8 +722,7 @@ fn community_view_models(
             }
             owner = Some(community);
         }
-        if complete && let Some(community) = owner.filter(|community| selected.contains(community))
-        {
+        if complete && let Some(community) = owner {
             grouped_hyperedges
                 .entry(community)
                 .or_default()
@@ -654,7 +736,10 @@ fn community_view_models(
         learning_overlay: options.learning_overlay,
     };
     let mut models = BTreeMap::new();
-    for (community, nodes) in grouped_nodes {
+    for (community, nodes) in windowed_nodes {
+        if nodes.is_empty() {
+            continue;
+        }
         let mut graph = Map::new();
         match grouped_hyperedges.remove(&community) {
             Some(hyperedges) if !hyperedges.is_empty() => {
@@ -3012,7 +3097,60 @@ mod tests {
     }
 
     #[test]
-    fn standalone_detail_models_obey_total_node_and_edge_budgets() -> Result<(), Box<dyn Error>> {
+    fn standalone_details_share_one_window_across_every_community() -> Result<(), Box<dyn Error>> {
+        // A hub community and a pair share one window size, so the budget buys
+        // every community a detail instead of one community the whole budget.
+        let graph: GraphDocument = serde_json::from_value(json!({
+            "nodes":[
+                {"id":"h","label":"H"},{"id":"x","label":"X"},{"id":"y","label":"Y"},
+                {"id":"p","label":"P"},{"id":"q","label":"Q"}
+            ],
+            "links":[
+                {"source":"h","target":"x","relation":"calls"},
+                {"source":"h","target":"y","relation":"calls"},
+                {"source":"p","target":"q","relation":"calls"}
+            ]
+        }))?;
+        let communities = BTreeMap::from([
+            (0, vec!["h".into(), "x".into(), "y".into()]),
+            (1, vec!["p".into(), "q".into()]),
+        ]);
+        let options = HtmlOptions::default();
+
+        let details = community_view_models(&graph, &communities, "graph.html", &options, 3, 10)?;
+        assert_eq!(details.keys().copied().collect::<Vec<_>>(), [0, 1]);
+        // One shared window of one member each: two nodes, no complete edge.
+        assert!(details.values().all(|detail| detail.stats.nodes == 1));
+        assert_eq!(
+            details[&0]
+                .nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["h"],
+            "the most connected member must lead a bounded detail",
+        );
+
+        // The internal edge budget bounds the window before the node budget does.
+        let details = community_view_models(&graph, &communities, "graph.html", &options, 4, 1)?;
+        let nodes = details
+            .values()
+            .map(|detail| detail.stats.nodes)
+            .sum::<usize>();
+        let edges = details
+            .values()
+            .map(|detail| detail.stats.edges)
+            .sum::<usize>();
+        assert_eq!((nodes, edges), (2, 0));
+
+        // A budget that cannot host one member leaves the export without details.
+        let details = community_view_models(&graph, &communities, "graph.html", &options, 0, 10)?;
+        assert!(details.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn standalone_details_mark_every_embedded_community_available() -> Result<(), Box<dyn Error>> {
         let graph: GraphDocument = serde_json::from_value(json!({
             "nodes":[
                 {"id":"a","label":"A"},{"id":"b","label":"B"},
@@ -3028,12 +3166,9 @@ mod tests {
             (1, vec!["c".into(), "d".into()]),
         ]);
         let options = HtmlOptions::default();
-        let details = community_view_models(&graph, &communities, "graph.html", &options, 2, 1)?;
-        assert_eq!(details.keys().copied().collect::<Vec<_>>(), [0]);
-
         let (overview, overview_communities, member_counts) =
             aggregate(&graph, &communities, &options);
-        let rendered = render(
+        let embedded = render(
             &overview,
             &overview_communities,
             Path::new("graph.html"),
@@ -3045,10 +3180,26 @@ mod tests {
             None,
             None,
         )?;
-        assert!(rendered.contains("\"detailAvailable\":true"));
-        assert!(rendered.contains("\"detailAvailable\":false"));
-        assert!(rendered.contains("data-compass-community=\"0\""));
-        assert!(!rendered.contains("data-compass-community=\"1\""));
+        assert!(embedded.contains("\"detailAvailable\":true"));
+        assert!(!embedded.contains("\"detailAvailable\":false"));
+        assert!(embedded.contains("data-compass-community=\"0\""));
+        assert!(embedded.contains("data-compass-community=\"1\""));
+
+        let omitted = render(
+            &overview,
+            &overview_communities,
+            Path::new("graph.html"),
+            &HtmlOptions {
+                member_counts: Some(&member_counts),
+                ..HtmlOptions::default()
+            },
+            Some((&graph, &communities, 0, 1)),
+            None,
+            None,
+        )?;
+        assert!(!omitted.contains("\"detailAvailable\":true"));
+        assert!(omitted.contains("\"detailAvailable\":false"));
+        assert!(!omitted.contains("data-compass-community=\"0\""));
         Ok(())
     }
 
