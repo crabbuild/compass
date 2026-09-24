@@ -5,8 +5,9 @@ use std::time::{Duration, Instant};
 
 use compass_files::{BuildGuard, write_atomic_with_digest, write_json_atomic, write_text_atomic};
 use compass_graph::{
-    ClusterOptions, Communities, CommunityLimits, CommunityProfile, CommunityQualityArtifact,
-    CommunityRequest, GodNode, ResolutionPolicy, blind_spot_report, build_communities, cluster,
+    ClusterOptions, Communities, CommunityHierarchy, CommunityLimits, CommunityProfile,
+    CommunityQualityArtifact, CommunityRequest, GodNode, HierarchyBudget, HierarchyRequest,
+    ResolutionPolicy, blind_spot_report, build_communities, build_community_hierarchy, cluster,
     community_member_signatures, god_nodes, label_communities_by_hub,
     remap_communities_to_previous, score_communities, suggest_questions, surprising_connections,
     write_canonical_graph_json,
@@ -176,12 +177,26 @@ where
                 limits: community_limits,
             },
         )?;
+        // The hierarchy is derived from the published partition and the same
+        // typed topology projection, so it is built here rather than re-read
+        // from the artifacts it describes.
+        let hierarchy = build_community_hierarchy(
+            typed,
+            &result.communities,
+            &HierarchyRequest {
+                identity: &result.identity,
+                limits: &community_limits,
+                resolution: result.quality.resolution,
+                budget: HierarchyBudget::default(),
+            },
+        )?;
         (
             result.communities,
             Some((
                 typed.graph.build.generation_id.clone(),
                 result.identity,
                 result.quality,
+                hierarchy,
             )),
         )
     } else {
@@ -331,15 +346,17 @@ where
         )?;
         graph_artifact_identity(&graph_path)?
     };
-    if let Some((generation, identity, quality)) = quality_evidence {
+    if let Some((generation, identity, quality, hierarchy)) = quality_evidence {
         let artifact = CommunityQualityArtifact::new(
-            generation,
+            generation.clone(),
             graph_identity.clone(),
             identity,
             community_limits,
             quality,
         )?;
         write_json_atomic(staging.join("community-quality.json"), &artifact, true)?;
+        let hierarchy = CommunityHierarchy::new(generation, graph_identity.clone(), hierarchy)?;
+        write_json_atomic(staging.join("community-hierarchy.json"), &hierarchy, true)?;
     }
     orientation.evidence_status.artifact_set_identity = Some(graph_identity);
     let report = render_agent_report_markdown(&orientation, report_options.obsidian)?;
@@ -387,6 +404,7 @@ where
     }
     if publishes_quality {
         artifacts.push("community-quality.json");
+        artifacts.push("community-hierarchy.json");
     }
     guard.commit_with_artifacts(&artifacts)?;
     BuildGuard::publish_root_artifacts(
@@ -401,6 +419,7 @@ where
             "graph.html",
             "graph.json",
             "community-quality.json",
+            "community-hierarchy.json",
         ],
         true,
     )?;
@@ -639,6 +658,54 @@ mod tests {
             compass_graph::COMPATIBILITY_CLUSTER_SELECTOR
         );
         assert_eq!(quality.partition.candidate_summaries.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn typed_cluster_only_publishes_a_graph_bound_hierarchy() -> Result<(), Box<dyn Error>> {
+        let fixture = managed_typed_graph_fixture()?;
+        cluster_existing_graph(&fixture.options)?;
+        let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
+        let graph_bytes = fs::read(current.join("graph.json"))?;
+        let graph: V1GraphDocument = serde_json::from_slice(&graph_bytes)?;
+        let hierarchy_bytes = fs::read(current.join("community-hierarchy.json"))?;
+        assert_eq!(
+            hierarchy_bytes,
+            fs::read(fixture.output.join("community-hierarchy.json"))?,
+            "the root projection must carry the hierarchy"
+        );
+        let hierarchy: CommunityHierarchy = serde_json::from_slice(&hierarchy_bytes)?;
+        hierarchy.validate_for_graph(
+            &graph.graph.build.generation_id,
+            &format!("sha256:{:x}", Sha256::digest(&graph_bytes)),
+        )?;
+        let published_communities = graph
+            .nodes
+            .iter()
+            .filter_map(|node| node.community.as_ref().map(|community| community.id))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        assert_eq!(
+            hierarchy.finest_community_count, published_communities,
+            "the finest level is the published partition"
+        );
+        let finest = hierarchy.finest().ok_or("missing finest level")?;
+        assert!(
+            finest
+                .groups
+                .iter()
+                .all(|group| group.label.evidence.contains_key("rule")),
+            "every group label carries provenance"
+        );
+
+        // An unchanged rebuild republishes the same bytes rather than a new
+        // hierarchy derived from a different partition.
+        cluster_existing_graph(&fixture.options)?;
+        let current = BuildGuard::resolve_current_snapshot_directory(&fixture.output)?;
+        assert_eq!(
+            fs::read(current.join("community-hierarchy.json"))?,
+            hierarchy_bytes
+        );
         Ok(())
     }
 
