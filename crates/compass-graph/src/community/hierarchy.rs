@@ -34,6 +34,14 @@ pub const COMMUNITY_HIERARCHY_SCHEMA: &str = "compass.community-hierarchy/1";
 /// Identity of the budget rule that produced a hierarchy.
 pub const COMMUNITY_HIERARCHY_BUDGET: &str = "community-hierarchy-budget/v1";
 
+/// Identity of the merge rule that produced a hierarchy.
+///
+/// Relationship evidence decides a level first. When a repository has
+/// communities that share no relationship at all, the remaining levels group
+/// them by shared source location instead, and every such level records that
+/// rule so a reader can tell the two apart.
+pub const COMMUNITY_HIERARCHY_MERGE_POLICY: &str = "relationship-then-location-affinity/v1";
+
 /// Root groups a hierarchy aims for.
 pub const DEFAULT_ROOT_TARGET: usize = 24;
 
@@ -51,6 +59,11 @@ pub const LABEL_COVERAGE_THRESHOLD: f64 = 0.6;
 
 /// Coarsening attempts per level, bounding the resolution schedule.
 const COARSEN_ATTEMPT_LIMIT: usize = 16;
+
+/// Share of a level a relationship pass must remove to be worth publishing.
+/// A pass that merges 2% of a partition produces a level a reader cannot tell
+/// from the one below it, and pays for that in artifact size on every level.
+const MIN_LEVEL_REDUCTION: f64 = 0.9;
 
 /// Deepest directory prefix a label may cite.
 const MAX_LABEL_PREFIX_DEPTH: usize = 6;
@@ -189,10 +202,25 @@ pub struct HierarchyGroup {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HierarchyLevel {
     pub level: usize,
-    /// Resolution that produced this level from the level below.
-    pub resolution: f64,
+    /// Rule that grouped this level's children into its groups.
+    pub merge: LevelMerge,
+    /// Resolution that produced this level, for relationship levels only.
+    pub resolution: Option<f64>,
+    /// The counts that justify an affinity level, empty for relationship levels.
+    pub merge_evidence: BTreeMap<String, Value>,
     pub group_count: usize,
     pub groups: Vec<HierarchyGroup>,
+}
+
+/// How a level's groups were derived from the level below.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LevelMerge {
+    /// Groups merged on the projected relationship evidence clustering uses.
+    Relationship,
+    /// Groups merged on shared source location, after relationship evidence
+    /// stopped reducing the level.
+    LocationAffinity,
 }
 
 /// Everything a hierarchy knows before it is bound to a graph generation.
@@ -202,6 +230,7 @@ pub struct CommunityHierarchyDraft {
     pub identity: CommunityIdentity,
     pub limits: CommunityLimits,
     pub budget_identity: String,
+    pub merge_policy: String,
     pub budget: HierarchyBudget,
     /// Exact boundary kind set used for group accounting, sorted.
     pub boundary_kinds: Vec<String>,
@@ -222,6 +251,7 @@ pub struct CommunityHierarchy {
     pub identity: CommunityIdentity,
     pub limits: CommunityLimits,
     pub budget_identity: String,
+    pub merge_policy: String,
     pub budget: HierarchyBudget,
     pub boundary_kinds: Vec<String>,
     pub finest_community_count: usize,
@@ -262,6 +292,7 @@ impl CommunityHierarchy {
             identity: draft.identity,
             limits: draft.limits,
             budget_identity: draft.budget_identity,
+            merge_policy: draft.merge_policy,
             budget: draft.budget,
             boundary_kinds: draft.boundary_kinds,
             finest_community_count: draft.finest_community_count,
@@ -322,6 +353,9 @@ impl CommunityHierarchy {
         if self.budget_identity != COMMUNITY_HIERARCHY_BUDGET {
             return Err(invalid("unexpected budget identity"));
         }
+        if self.merge_policy != COMMUNITY_HIERARCHY_MERGE_POLICY {
+            return Err(invalid("unexpected merge policy"));
+        }
         if self.budget.max_levels == 0
             || self.budget.root_target == 0
             || self.budget.level_target == 0
@@ -346,8 +380,20 @@ impl CommunityHierarchy {
             if level.group_count != level.groups.len() || level.groups.is_empty() {
                 return Err(invalid("level group count does not match its groups"));
             }
-            if !level.resolution.is_finite() || level.resolution <= 0.0 {
-                return Err(invalid("level resolution must be finite and positive"));
+            match (level.merge, level.resolution) {
+                (LevelMerge::Relationship, Some(resolution))
+                    if resolution.is_finite() && resolution > 0.0 => {}
+                (LevelMerge::Relationship, _) => {
+                    return Err(invalid(
+                        "relationship levels must record the resolution that produced them",
+                    ));
+                }
+                (LevelMerge::LocationAffinity, None) if !level.merge_evidence.is_empty() => {}
+                (LevelMerge::LocationAffinity, _) => {
+                    return Err(invalid(
+                        "affinity levels record their evidence and no resolution",
+                    ));
+                }
             }
             for (index, group) in level.groups.iter().enumerate() {
                 if group.index != index {
@@ -532,23 +578,41 @@ pub fn build_community_hierarchy(
         } else {
             budget.level_target
         };
-        let coarsening = coarsen(
+        let previous_resolution = current.resolution.unwrap_or(budget.min_level_resolution);
+        let mut plan = coarsen(
             &group_graph,
-            current.resolution,
+            previous_resolution,
             target,
             level_index,
             request.limits,
             budget.min_level_resolution,
         )?;
+        let reduced = plan.groups.len() < current.groups.len();
+        let worth_publishing = plan.groups.len() <= target
+            || (plan.groups.len() as f64) <= (current.groups.len() as f64) * MIN_LEVEL_REDUCTION;
+        if !reduced || !worth_publishing {
+            // Relationship evidence stopped reducing the level. Group the rest
+            // by the source location they already cite, and record that rule.
+            let keys = current
+                .groups
+                .iter()
+                .map(|group| location_key(&group_member_ids(group, communities), &nodes))
+                .collect::<Vec<_>>();
+            let affinity = affinity_plan(&current.groups, &keys, target, level_index);
+            if affinity.groups.len() >= current.groups.len() {
+                break;
+            }
+            plan = affinity;
+        }
         let metrics = aggregate_metrics(
             &group_graph,
-            &coarsening.assignments,
-            coarsening.groups.len(),
+            &plan.assignments,
+            plan.groups.len(),
             &boundary_by_group,
         );
         let next = build_level(
             &group_graph,
-            &coarsening,
+            &plan,
             &metrics,
             current,
             communities,
@@ -566,16 +630,22 @@ pub fn build_community_hierarchy(
     }
 
     // `levels` accumulates finest first, so the coarsest level is the last one.
-    let budget_satisfied = levels
+    // The cut never merges a group it cannot name, so meeting the root budget
+    // is the whole condition: groups with no location evidence stay singletons
+    // and simply keep the root larger than the target.
+    let root_fits = levels
         .last()
         .is_some_and(|level| level.groups.len() <= budget.root_target);
+    let budget_satisfied = root_fits;
     let mut ordered = levels
         .into_iter()
         .rev()
         .enumerate()
         .map(|(level, state)| HierarchyLevel {
             level,
+            merge: state.merge,
             resolution: state.resolution,
+            merge_evidence: state.merge_evidence,
             group_count: state.groups.len(),
             groups: state
                 .groups
@@ -602,6 +672,7 @@ pub fn build_community_hierarchy(
         identity: request.identity.clone(),
         limits: *request.limits,
         budget_identity: COMMUNITY_HIERARCHY_BUDGET.to_owned(),
+        merge_policy: COMMUNITY_HIERARCHY_MERGE_POLICY.to_owned(),
         budget,
         boundary_kinds: boundary_kind_names(),
         finest_community_count,
@@ -619,7 +690,9 @@ struct LevelState {
     /// Group index per graph node, in graph node order.
     assignments: Vec<Option<usize>>,
     groups: Vec<GroupState>,
-    resolution: f64,
+    merge: LevelMerge,
+    resolution: Option<f64>,
+    merge_evidence: BTreeMap<String, Value>,
 }
 
 #[derive(Clone)]
@@ -636,8 +709,11 @@ struct GroupState {
     label: HierarchyLabel,
 }
 
-struct Coarsening {
-    resolution: f64,
+struct LevelPlan {
+    merge: LevelMerge,
+    resolution: Option<f64>,
+    /// Counts that justify an affinity level.
+    evidence: BTreeMap<String, Value>,
     /// Child group indices per new group, ascending.
     groups: Vec<Vec<usize>>,
     /// New group index per graph node.
@@ -688,14 +764,16 @@ fn finest_level(
         graph: graph.clone(),
         assignments: assignments.to_vec(),
         groups,
-        resolution,
+        merge: LevelMerge::Relationship,
+        resolution: Some(resolution),
+        merge_evidence: BTreeMap::new(),
     }
 }
 
 /// Coarsen one level over the finer level's group graph.
 fn build_level(
     group_graph: &WeightedGraph,
-    coarsening: &Coarsening,
+    coarsening: &LevelPlan,
     metrics: &[Metrics],
     finer: &LevelState,
     communities: &Communities,
@@ -719,11 +797,7 @@ fn build_level(
             member_count = member_count.saturating_add(child_group.member_count);
             leaf_communities.extend(child_group.communities.iter().copied());
             merge_counts(&mut boundary_kinds, &child_group.quality.boundary_kinds);
-            for community in &child_group.communities {
-                if let Some(group_members) = communities.get(community) {
-                    members.extend(group_members.iter().cloned());
-                }
-            }
+            members.extend(group_member_ids(child_group, communities));
             keep_smallest(&mut smallest_member, &child_group.smallest_member);
         }
         members.sort();
@@ -750,7 +824,7 @@ fn build_level(
 fn finalise_level(
     group_graph: &WeightedGraph,
     groups: Vec<GroupState>,
-    coarsening: &Coarsening,
+    coarsening: &LevelPlan,
 ) -> LevelState {
     let mut order = (0..groups.len()).collect::<Vec<_>>();
     order.sort_by(|left, right| {
@@ -791,7 +865,9 @@ fn finalise_level(
         graph: group_graph.clone(),
         assignments,
         groups: ordered,
+        merge: coarsening.merge,
         resolution: coarsening.resolution,
+        merge_evidence: coarsening.evidence.clone(),
     }
 }
 
@@ -805,7 +881,7 @@ fn coarsen(
     level: usize,
     limits: &CommunityLimits,
     min_resolution: f64,
-) -> Result<Coarsening, CommunityError> {
+) -> Result<LevelPlan, CommunityError> {
     let mut resolution = (previous_resolution / 2.0).max(min_resolution);
     let mut best = coarsening_at(graph, resolution, level, limits)?;
     let mut attempts = 1usize;
@@ -828,7 +904,7 @@ fn coarsening_at(
     resolution: f64,
     level: usize,
     limits: &CommunityLimits,
-) -> Result<Coarsening, CommunityError> {
+) -> Result<LevelPlan, CommunityError> {
     let raw = leiden(graph, resolution, limits.max_levels, limits.max_moves)?;
     let positions = graph
         .ids
@@ -854,14 +930,211 @@ fn coarsening_at(
     if missing > 0 {
         return Err(CommunityError::IncompleteHierarchy { level, missing });
     }
-    Ok(Coarsening {
-        resolution,
+    Ok(LevelPlan {
+        merge: LevelMerge::Relationship,
+        resolution: Some(resolution),
+        evidence: BTreeMap::new(),
         groups,
         assignments,
     })
 }
 
 /// Aggregate the projection into a graph whose nodes are a level's groups.
+/// Group the level above by shared source location.
+///
+/// A repository can publish thousands of communities that share no relationship
+/// at all — 98% of `colinhacks/zod`'s 2,781 communities have no cross-community
+/// edge — and relationship evidence can never merge them. This cut walks the
+/// directory tree those groups already cite: it starts at the repository root
+/// and repeatedly expands the largest directory whose children still fit the
+/// budget, so every merged group is a real directory the members share, and a
+/// group without a dominant directory is only ever merged when it is named by
+/// one. Nothing here invents a relationship: the rule, the key, and the
+/// coverage counts are recorded on the level.
+fn affinity_plan(groups: &[GroupState], keys: &[String], target: usize, level: usize) -> LevelPlan {
+    #[derive(Default)]
+    struct Node {
+        children: BTreeMap<String, usize>,
+        /// Group indices this node holds itself; only leaf holders use it.
+        leaves: Vec<usize>,
+        count: usize,
+        parent: Option<usize>,
+        name: Option<String>,
+    }
+
+    /// The node that holds the leaves of one directory. A directory can be a
+    /// group's own key *and* the prefix of deeper keys, so its own leaves live
+    /// in a holder that expands with the directory instead of being dropped by
+    /// it.
+    fn leaf_holder(nodes: &mut Vec<Node>, parent: usize) -> usize {
+        if let Some(existing) = nodes
+            .get(parent)
+            .and_then(|node| node.children.get(""))
+            .copied()
+        {
+            return existing;
+        }
+        nodes.push(Node {
+            parent: Some(parent),
+            name: None,
+            ..Node::default()
+        });
+        let created = nodes.len().saturating_sub(1);
+        if let Some(node) = nodes.get_mut(parent) {
+            node.children.insert(String::new(), created);
+        }
+        created
+    }
+
+    fn node_path(nodes: &[Node], node: usize) -> String {
+        let mut components = Vec::new();
+        let mut current = node;
+        while let Some(entry) = nodes.get(current) {
+            if let Some(name) = &entry.name {
+                components.push(name.clone());
+            }
+            let Some(parent) = entry.parent else {
+                break;
+            };
+            current = parent;
+        }
+        components.reverse();
+        components.join("/")
+    }
+
+    fn collect_node_leaves(nodes: &[Node], node: usize, leaves: &mut Vec<usize>) {
+        if let Some(entry) = nodes.get(node) {
+            leaves.extend(entry.leaves.iter().copied());
+            for child in entry.children.values() {
+                collect_node_leaves(nodes, *child, leaves);
+            }
+        }
+    }
+
+    // A group that cites no dominant directory has no location evidence, so it
+    // stays a group of its own: this cut never merges what it cannot name.
+    let mut pinned = Vec::new();
+    let mut keyed = Vec::new();
+    for (index, key) in keys.iter().enumerate() {
+        if key.is_empty() {
+            pinned.push(index);
+        } else {
+            keyed.push(index);
+        }
+    }
+    let mut nodes = vec![Node::default()];
+    for index in &keyed {
+        let Some(key) = keys.get(*index) else {
+            continue;
+        };
+        let mut node = 0usize;
+        for component in key.split('/').filter(|part| !part.is_empty()) {
+            let next = match nodes[node].children.get(component) {
+                Some(existing) => *existing,
+                None => {
+                    nodes.push(Node {
+                        parent: Some(node),
+                        name: Some(component.to_owned()),
+                        ..Node::default()
+                    });
+                    let created = nodes.len().saturating_sub(1);
+                    if let Some(parent) = nodes.get_mut(node) {
+                        parent.children.insert(component.to_owned(), created);
+                    }
+                    created
+                }
+            };
+            node = next;
+        }
+        let holder = leaf_holder(&mut nodes, node);
+        if let Some(entry) = nodes.get_mut(holder) {
+            entry.leaves.push(*index);
+        }
+    }
+    for node in (0..nodes.len()).rev() {
+        let mut count = nodes[node].leaves.len();
+        for child in nodes[node].children.values() {
+            count = count.saturating_add(nodes[*child].count);
+        }
+        nodes[node].count = count;
+    }
+    // Pinned groups occupy slots the cut cannot win back. When they already
+    // exceed the target the budget is unreachable, so the cut still spends the
+    // full target on the keyed groups: a bounded, directory-shaped root that
+    // reports the overflow beats one bucket holding every named group.
+    let budget = if target > pinned.len() {
+        target.saturating_sub(pinned.len())
+    } else {
+        target.max(1)
+    };
+    let mut cut = vec![0usize];
+    loop {
+        let mut best: Option<(usize, usize, String)> = None;
+        for node in &cut {
+            let children = nodes[*node].children.len();
+            if children == 0 || cut.len().saturating_sub(1).saturating_add(children) > budget {
+                continue;
+            }
+            let candidate = (nodes[*node].count, *node, node_path(&nodes, *node));
+            let better = match &best {
+                None => true,
+                Some((count, _, path)) => {
+                    candidate.0 > *count || (candidate.0 == *count && candidate.2 < *path)
+                }
+            };
+            if better {
+                best = Some(candidate);
+            }
+        }
+        let Some((_, node, _)) = best else {
+            break;
+        };
+        cut.retain(|entry| *entry != node);
+        cut.extend(nodes[node].children.values().copied());
+        cut.sort_unstable();
+    }
+    let mut buckets = Vec::with_capacity(cut.len().saturating_add(pinned.len()));
+    for node in &cut {
+        let mut children = Vec::new();
+        collect_node_leaves(&nodes, *node, &mut children);
+        if !children.is_empty() {
+            children.sort_unstable();
+            buckets.push(children);
+        }
+    }
+    for index in &pinned {
+        buckets.push(vec![*index]);
+    }
+    let merged_groups = buckets
+        .iter()
+        .filter(|bucket| bucket.len() > 1)
+        .map(Vec::len)
+        .sum::<usize>();
+    let singleton_groups = buckets.iter().filter(|bucket| bucket.len() == 1).count();
+    let mut assignments = vec![None; groups.len()];
+    for (bucket, children) in buckets.iter().enumerate() {
+        for child in children {
+            if let Some(slot) = assignments.get_mut(*child) {
+                *slot = Some(bucket);
+            }
+        }
+    }
+    let mut evidence = BTreeMap::new();
+    evidence.insert("rule".to_owned(), json!("location-affinity"));
+    evidence.insert("mergedGroups".to_owned(), json!(merged_groups));
+    evidence.insert("singletonGroups".to_owned(), json!(singleton_groups));
+    evidence.insert("unkeyedGroups".to_owned(), json!(pinned.len()));
+    evidence.insert("target".to_owned(), json!(target));
+    evidence.insert("level".to_owned(), json!(level));
+    LevelPlan {
+        merge: LevelMerge::LocationAffinity,
+        resolution: None,
+        evidence,
+        groups: buckets,
+        assignments,
+    }
+}
+
 fn aggregate_graph(
     graph: &WeightedGraph,
     assignments: &[Option<usize>],
@@ -983,30 +1256,7 @@ fn dominant_directory_label(
     nodes: &HashMap<&str, &NodeRecord>,
     members: &[String],
 ) -> Option<HierarchyLabel> {
-    let mut prefixes = BTreeMap::<String, usize>::new();
-    let mut sourced = 0usize;
-    for member in members {
-        let Some(node) = nodes.get(member.as_str()) else {
-            continue;
-        };
-        let Some(file) = node.source_file() else {
-            continue;
-        };
-        sourced = sourced.saturating_add(1);
-        let parts = file
-            .split(['/', '\\'])
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>();
-        let limit = parts.len().saturating_sub(1).min(MAX_LABEL_PREFIX_DEPTH);
-        for depth in 1..=limit {
-            let Some(directory) = parts.get(..depth) else {
-                continue;
-            };
-            let prefix = directory.join("/");
-            let entry = prefixes.entry(prefix).or_default();
-            *entry = entry.saturating_add(1);
-        }
-    }
+    let (prefixes, sourced) = directory_prefix_counts(nodes, members);
     if sourced == 0 {
         return None;
     }
@@ -1083,6 +1333,79 @@ fn module_prefix_label(
         generic: false,
         evidence,
     })
+}
+
+/// Directory prefixes cited by a group's member source files, with the number
+/// of members that cite each one.
+fn directory_prefix_counts(
+    nodes: &HashMap<&str, &NodeRecord>,
+    members: &[String],
+) -> (BTreeMap<String, usize>, usize) {
+    let mut prefixes = BTreeMap::<String, usize>::new();
+    let mut sourced = 0usize;
+    for member in members {
+        let Some(node) = nodes.get(member.as_str()) else {
+            continue;
+        };
+        let Some(file) = node.source_file() else {
+            continue;
+        };
+        sourced = sourced.saturating_add(1);
+        let parts = file
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let limit = parts.len().saturating_sub(1).min(MAX_LABEL_PREFIX_DEPTH);
+        for depth in 1..=limit {
+            let Some(directory) = parts.get(..depth) else {
+                continue;
+            };
+            let prefix = directory.join("/");
+            let entry = prefixes.entry(prefix).or_default();
+            *entry = entry.saturating_add(1);
+        }
+    }
+    (prefixes, sourced)
+}
+
+/// The most specific directory that covers most of a group's members, or the
+/// empty key when no directory does. This is the affinity key: two groups may
+/// only be merged by location when they cite the same directory.
+fn location_key(members: &[String], nodes: &HashMap<&str, &NodeRecord>) -> String {
+    let (prefixes, sourced) = directory_prefix_counts(nodes, members);
+    if sourced == 0 {
+        return String::new();
+    }
+    let threshold = LABEL_COVERAGE_THRESHOLD * sourced as f64;
+    let mut best: Option<(&String, usize)> = None;
+    for (prefix, covered) in &prefixes {
+        if (*covered as f64) < threshold {
+            continue;
+        }
+        let depth = prefix.matches('/').count();
+        let better = match best {
+            None => true,
+            Some((current, current_depth)) => {
+                depth > current_depth || (depth == current_depth && prefix < current)
+            }
+        };
+        if better {
+            best = Some((prefix, depth));
+        }
+    }
+    best.map_or_else(String::new, |(prefix, _)| prefix.clone())
+}
+
+/// Every leaf member of a group, sorted.
+fn group_member_ids(group: &GroupState, communities: &Communities) -> Vec<String> {
+    let mut members = Vec::new();
+    for community in &group.communities {
+        if let Some(group_members) = communities.get(community) {
+            members.extend(group_members.iter().cloned());
+        }
+    }
+    members.sort();
+    members
 }
 
 fn hub_member_label(
@@ -1422,14 +1745,20 @@ mod tests {
         assert_eq!(artifact.boundary_kinds, boundary_kind_names());
         let finest = artifact.finest().ok_or("missing finest level")?;
         assert_eq!(
-            finest.resolution, 1.0,
+            finest.resolution,
+            Some(1.0),
             "the finest level carries the published resolution"
         );
         for pair in artifact.levels.windows(2) {
             let (Some(coarser), Some(finer)) = (pair.first(), pair.get(1)) else {
                 continue;
             };
-            assert!(coarser.resolution <= finer.resolution);
+            let (Some(coarser_resolution), Some(finer_resolution)) =
+                (coarser.resolution, finer.resolution)
+            else {
+                continue;
+            };
+            assert!(coarser_resolution <= finer_resolution);
         }
         Ok(())
     }
@@ -1487,7 +1816,10 @@ mod tests {
     fn artifact_digest_detects_mutation() -> TestResult {
         let mut artifact = artifact(4, HierarchyBudget::default())?;
         let first = artifact.levels.first_mut().ok_or("missing level")?;
-        first.resolution = 0.5;
+        first.resolution = first
+            .resolution
+            .map(|resolution| resolution / 2.0)
+            .or(Some(0.5));
         assert!(matches!(
             artifact.validate(),
             Err(CommunityHierarchyArtifactError::DigestMismatch)
@@ -1557,6 +1889,59 @@ mod tests {
             error.to_string().contains("not covered exactly once"),
             "unexpected error: {error}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn affinity_cut_partitions_every_level() -> TestResult {
+        let group = |index: usize| GroupState {
+            communities: vec![index],
+            member_count: 1,
+            children: vec![index],
+            community: None,
+            smallest_member: format!("n{index}"),
+            quality: GroupQuality {
+                cohesion: 1.0,
+                conductance: 0.0,
+                boundary_kinds: BTreeMap::new(),
+            },
+            label: community_id_label(index, 1),
+        };
+        let keys = [
+            "src/flask".to_owned(),
+            "src".to_owned(),
+            "src/flask".to_owned(),
+            "tests".to_owned(),
+            "tests/unit".to_owned(),
+            String::new(),
+            "docs".to_owned(),
+            "src/flask/app".to_owned(),
+            "tests".to_owned(),
+            String::new(),
+        ];
+        let groups = (0..keys.len()).map(group).collect::<Vec<_>>();
+        for target in 1..=keys.len() {
+            let plan = affinity_plan(&groups, &keys, target, 0);
+            let mut covered = vec![0usize; groups.len()];
+            for bucket in &plan.groups {
+                for child in bucket {
+                    covered[*child] += 1;
+                }
+            }
+            assert!(
+                covered.iter().all(|count| *count == 1),
+                "target {target} produced buckets that do not partition the level: {:?}",
+                plan.groups
+            );
+            // Groups with no location key stay singletons, so a small target
+            // can only ever be met up to the number of pinned groups.
+            let pinned = keys.iter().filter(|key| key.is_empty()).count();
+            assert!(
+                plan.groups.len() <= target || plan.groups.len() <= pinned.saturating_add(1),
+                "target {target} produced {} buckets for {pinned} pinned groups",
+                plan.groups.len(),
+            );
+        }
         Ok(())
     }
 

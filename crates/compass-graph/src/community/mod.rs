@@ -18,11 +18,12 @@ pub use build::{
     build_communities,
 };
 pub use hierarchy::{
-    BOUNDARY_KINDS, COMMUNITY_HIERARCHY_BUDGET, COMMUNITY_HIERARCHY_SCHEMA, CommunityHierarchy,
-    CommunityHierarchyArtifactError, CommunityHierarchyDraft, DEFAULT_LEVEL_TARGET,
-    DEFAULT_MAX_LEVELS, DEFAULT_ROOT_TARGET, GroupQuality, HierarchyBudget, HierarchyGroup,
-    HierarchyLabel, HierarchyLabelRule, HierarchyLevel, HierarchyRequest, LABEL_COVERAGE_THRESHOLD,
-    MIN_LEVEL_RESOLUTION, boundary_kind_names, build_community_hierarchy,
+    BOUNDARY_KINDS, COMMUNITY_HIERARCHY_BUDGET, COMMUNITY_HIERARCHY_MERGE_POLICY,
+    COMMUNITY_HIERARCHY_SCHEMA, CommunityHierarchy, CommunityHierarchyArtifactError,
+    CommunityHierarchyDraft, DEFAULT_LEVEL_TARGET, DEFAULT_MAX_LEVELS, DEFAULT_ROOT_TARGET,
+    GroupQuality, HierarchyBudget, HierarchyGroup, HierarchyLabel, HierarchyLabelRule,
+    HierarchyLevel, HierarchyRequest, LABEL_COVERAGE_THRESHOLD, LevelMerge, MIN_LEVEL_RESOLUTION,
+    boundary_kind_names, build_community_hierarchy,
 };
 pub use identity::{
     COMPATIBILITY_CLUSTER_ALGORITHM, COMPATIBILITY_CLUSTER_LIMITS, COMPATIBILITY_CLUSTER_QUALITY,

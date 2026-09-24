@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use compass_graph::{
     Communities, CommunityError, CommunityHierarchy, CommunityLimits, CommunityProfile,
     CommunityRequest, CommunityResult, HierarchyBudget, HierarchyLabelRule, HierarchyRequest,
-    ResolutionPolicy, build_communities, build_community_hierarchy,
+    LevelMerge, ResolutionPolicy, build_communities, build_community_hierarchy,
 };
 use compass_model::code_graph::{
     BuildMetadata, EdgeKind, EdgeRecord, GraphDocument, NodeKind, NodeRecord,
@@ -96,6 +96,29 @@ fn clustered_document(clusters: usize, per_cluster: usize, bridges: bool) -> Gra
             let previous = format!("cluster{}_symbol0", cluster - 1);
             let current = format!("cluster{cluster}_symbol0");
             links.push(edge(links.len(), &previous, &current, EdgeKind::References));
+        }
+    }
+    document(nodes, links)
+}
+
+/// The same shape without any source anchors: nothing here can cite a location,
+/// so no rule may merge these groups.
+fn sourceless_document(clusters: usize, per_cluster: usize) -> GraphDocument {
+    let mut nodes = Vec::new();
+    let mut links = Vec::new();
+    for cluster in 0..clusters {
+        for index in 0..per_cluster {
+            let id = format!("cluster{cluster}_symbol{index}");
+            nodes.push(node(
+                &id,
+                None,
+                &format!("app::group{cluster}::symbol{index}"),
+            ));
+        }
+        for index in 1..per_cluster {
+            let previous = format!("cluster{cluster}_symbol{}", index - 1);
+            let current = format!("cluster{cluster}_symbol{index}");
+            links.push(edge(links.len(), &previous, &current, EdgeKind::Calls));
         }
     }
     document(nodes, links)
@@ -233,20 +256,33 @@ fn budgeted_hierarchy_stays_inside_its_budget_and_covers_every_community() -> Te
             .iter()
             .all(|group| group.child_indices.is_empty())
     );
-    assert!(
-        hierarchy
-            .levels
-            .iter()
-            .all(|level| level.resolution.is_finite() && level.resolution > 0.0)
-    );
+    assert!(hierarchy.levels.iter().all(|level| {
+        match level.merge {
+            LevelMerge::Relationship => level
+                .resolution
+                .is_some_and(|resolution| resolution.is_finite() && resolution > 0.0),
+            LevelMerge::LocationAffinity => {
+                level.resolution.is_none()
+                    && level
+                        .merge_evidence
+                        .get("rule")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("location-affinity")
+            }
+        }
+    }));
     for pair in hierarchy.levels.windows(2) {
         let (Some(coarser), Some(finer)) = (pair.first(), pair.get(1)) else {
             continue;
         };
-        assert!(
-            coarser.resolution <= finer.resolution,
-            "coarsening may not raise the resolution"
-        );
+        if let (Some(coarser_resolution), Some(finer_resolution)) =
+            (coarser.resolution, finer.resolution)
+        {
+            assert!(
+                coarser_resolution <= finer_resolution,
+                "coarsening may not raise the resolution"
+            );
+        }
         assert!(
             coarser.groups.len() < finer.groups.len(),
             "every coarser level must merge groups: {} is not smaller than {}",
@@ -362,9 +398,9 @@ fn a_group_without_evidence_falls_back_to_a_generic_label() -> TestResult {
 
 #[test]
 fn hierarchy_reports_an_unmet_budget_instead_of_truncating() -> TestResult {
-    // Without cross-community evidence the group graph has no edges to merge
-    // on, so coarsening cannot reach the root target.
-    let document = clustered_document(12, 3, false);
+    // These groups share neither a relationship nor a source location, so no
+    // rule may merge them and the root stays larger than its target.
+    let document = sourceless_document(12, 3);
     let hierarchy = hierarchy(
         &document,
         HierarchyBudget {
@@ -379,7 +415,7 @@ fn hierarchy_reports_an_unmet_budget_instead_of_truncating() -> TestResult {
     assert_eq!(
         hierarchy.levels.len(),
         1,
-        "a plateau publishes one honest level instead of repeating it"
+        "a group with no evidence keeps its own level instead of being merged"
     );
     assert!(
         root.groups.len() > 2,
@@ -393,6 +429,59 @@ fn hierarchy_reports_an_unmet_budget_instead_of_truncating() -> TestResult {
         36,
         "no member is dropped when the budget cannot be met"
     );
+    Ok(())
+}
+
+/// Twelve communities that never call each other, all under `src`: the
+/// relationship pass cannot merge them, so the level is cut by the directory
+/// they cite and records that rule as its evidence.
+#[test]
+fn location_affinity_groups_communities_that_share_no_relationship() -> TestResult {
+    let document = clustered_document(12, 3, false);
+    let hierarchy = hierarchy(
+        &document,
+        HierarchyBudget {
+            root_target: 5,
+            level_target: 8,
+            max_levels: 4,
+            ..HierarchyBudget::default()
+        },
+    )?;
+    let root = hierarchy.root().ok_or("missing root level")?;
+    assert_eq!(root.merge, LevelMerge::LocationAffinity);
+    assert_eq!(
+        root.merge_evidence
+            .get("rule")
+            .and_then(serde_json::Value::as_str),
+        Some("location-affinity")
+    );
+    assert!(
+        root.groups.len() <= 5,
+        "the affinity cut must meet the root budget, found {}",
+        root.groups.len()
+    );
+    assert!(hierarchy.budget_satisfied);
+    assert_eq!(
+        root.groups
+            .iter()
+            .map(|group| group.member_count)
+            .sum::<usize>(),
+        36,
+        "affinity merging keeps every member"
+    );
+    assert!(
+        root.groups.iter().all(|group| {
+            group.label.rule == HierarchyLabelRule::DominantDirectory
+                && group
+                    .label
+                    .evidence
+                    .get("value")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| value.starts_with("src"))
+        }),
+        "every affinity group is named by the directory it shares"
+    );
+    cover_every_child_once(&hierarchy)?;
     Ok(())
 }
 
