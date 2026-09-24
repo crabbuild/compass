@@ -26,10 +26,19 @@
 
 ### Implementation status (2026-09-24)
 
-Steps 1–4 and the `hierarchy-json` export are implemented on
-`codex/community-hierarchy-artifact`; Steps 5–7 (workbench contract, viewer
-level navigation, qualification, and docs beyond the artifact reference) are
-outstanding.
+Steps 1–7 are implemented on `codex/community-hierarchy-artifact`: the artifact
+and its builder, publication beside `community-quality.json`, the
+`hierarchy-json` export, the embedded viewer payload with level navigation, the
+workbench code-view payload, `--hierarchy-level`, and
+`./scripts/qualify_code_graph_v1.sh --hierarchy` with every acceptance entry
+true and byte-identical reports across two runs.
+
+Known gap, deliberately deferred: at relationship levels the dominant-directory
+rule can name sibling groups identically (`pallets/flask` publishes 23 groups
+labelled `tests` at level 1) because neither group's members concentrate in one
+subdirectory. Disambiguating them means appending a qualifier whose coverage is
+below the label threshold, which is a label-policy decision rather than a
+defect in the artifact.
 
 Measured on real repositories, relationship-only coarsening cannot bound a
 root: 86 of `pallets/flask`'s 112 communities and 2,725 of
