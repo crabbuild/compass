@@ -164,6 +164,21 @@ pub enum CommunityError {
         limit: usize,
         processed: usize,
     },
+    #[error("invalid community hierarchy budget: {reason}")]
+    InvalidHierarchyBudget { reason: &'static str },
+    #[error(
+        "community hierarchy level {level} is incomplete: {missing} groups are not covered exactly once"
+    )]
+    IncompleteHierarchy { level: usize, missing: usize },
+    #[error(
+        "community hierarchy level {level} group {group} counts {children} members but its parent counts {parent}"
+    )]
+    MemberCountMismatch {
+        level: usize,
+        group: usize,
+        children: usize,
+        parent: usize,
+    },
 }
 
 /// Build the complete compatibility community result from the typed Base Graph
