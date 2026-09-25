@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import type { ArchitectureLens, ArchitectureOverview, ArchitectureViewModel } from "../contracts/architecture";
 import type { GraphViewModel } from "../contracts/graph";
-import type { WorkbenchModel, WorkbenchView } from "../contracts/workbench";
+import type { GraphSearchIndex, WorkbenchModel, WorkbenchView } from "../contracts/workbench";
 import type { ThemePreference } from "../lib/theme";
 import { ArchitectureMap, type ArchitectureSelection } from "../architecture/ArchitectureMap";
 import { architectureOverview } from "../architecture/projection";
@@ -147,10 +147,12 @@ export function VisualizationWorkbench({
       </aside>
       <main className="visualization-main">
         <header className="visualization-context">
-          <div className="visualization-context-title">
-            <span>{viewEyebrow(activeView)}</span>
-            <strong>{activeView.title}</strong>
-          </div>
+          {activeView.kind !== "code" && (
+            <div className="visualization-context-title">
+              <span>{viewEyebrow(activeView)}</span>
+              <strong>{activeView.title}</strong>
+            </div>
+          )}
           <div className="visualization-controls" ref={setControlSlot} />
           <div className="visualization-coverage" data-status={activeView.coverage.status}>
             {activeView.kind !== "call" && (
@@ -276,6 +278,7 @@ function WorkbenchView({
       host={host}
       preferredLayout={preferredLayout}
       communityDetails={view.kind === "code" ? view.communityDetails : undefined}
+      searchIndex={view.kind === "code" ? view.searchIndex : undefined}
       hierarchy={view.kind === "code" ? view.hierarchy : undefined}
       initialLevel={view.kind === "code" ? view.hierarchy?.initialLevel : undefined}
       communityDetail={view.kind === "code" ? communityDetail : undefined}
@@ -329,6 +332,7 @@ function FilteredGraph({
   sourceRevisions,
   preferredLayout,
   communityDetails,
+  searchIndex,
   hierarchy,
   initialLevel,
   communityDetail,
@@ -346,6 +350,7 @@ function FilteredGraph({
   sourceRevisions?: Parameters<typeof CompassGraph>[0]["sourceRevisions"];
   preferredLayout: Parameters<typeof CompassGraph>[0]["preferredLayout"];
   communityDetails?: Record<string, GraphViewModel> | undefined;
+  searchIndex?: GraphSearchIndex | undefined;
   hierarchy?: Parameters<typeof CompassGraph>[0]["hierarchy"];
   initialLevel?: number | undefined;
   communityDetail?: { communityId: number; model: GraphViewModel } | undefined;
@@ -425,6 +430,8 @@ function FilteredGraph({
     <div className="workbench-graph-lens">
       <CompassGraph
         model={activeCommunityDetail ? model : filtered}
+        searchIndex={searchIndex}
+        onClearSearchFilters={clearFilters}
         hierarchy={hierarchy}
         initialLevel={initialLevel}
         communityDetail={activeCommunityDetail ? {

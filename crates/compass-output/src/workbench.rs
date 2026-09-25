@@ -170,6 +170,8 @@ pub enum WorkbenchViewContent {
     Code {
         model: GraphViewModel,
         community_details: BTreeMap<usize, GraphViewModel>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        search_index: Option<crate::viewer_model::GraphSearchIndex>,
         /// Published level navigation, when the build published a hierarchy.
         #[serde(skip_serializing_if = "Option::is_none")]
         hierarchy: Option<crate::hierarchy_view::CommunityHierarchyView>,
@@ -526,6 +528,7 @@ mod tests {
                         effective_graph: None,
                     },
                     community_details: BTreeMap::new(),
+                    search_index: None,
                     hierarchy: None,
                 },
             }],

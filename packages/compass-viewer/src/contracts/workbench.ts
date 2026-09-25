@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CallGraphResponseSchema } from "./callGraph";
 import { ArchitectureViewModelSchema } from "./architecture";
 import { CodeQueryResponseSchema } from "./codeQuery";
-import { GraphViewModelSchema } from "./graph";
+import { GraphViewModelSchema, SourceLocationSchema } from "./graph";
 import { CommunityHierarchyViewSchema, HierarchyDiffSchema } from "./hierarchy";
 
 export const WORKBENCH_SCHEMA = "compass.viewer.workbench/1" as const;
@@ -33,12 +33,31 @@ export const ArtifactLensSchema = z.enum([
   "provenance"
 ]);
 
+export const GraphSearchNodeSchema = z.strictObject({
+  id: z.string().min(1),
+  label: z.string(),
+  kind: z.string().optional(),
+  community: z.number().int(),
+  communityName: z.string().optional(),
+  degree: z.number().int().nonnegative().optional(),
+  source: SourceLocationSchema.optional(),
+  previewAvailable: z.boolean()
+});
+
+export const GraphSearchIndexSchema = z.strictObject({
+  totalNodes: z.number().int().nonnegative(),
+  nodes: z.array(GraphSearchNodeSchema).max(100_000)
+}).refine((index) => index.nodes.length <= index.totalNodes, {
+  message: "search index cannot contain more nodes than the full graph"
+});
+
 export const WorkbenchViewSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...ViewBase,
     kind: z.literal("code"),
     model: GraphViewModelSchema,
     communityDetails: z.record(z.string(), GraphViewModelSchema).default({}),
+    searchIndex: GraphSearchIndexSchema.optional(),
     hierarchy: CommunityHierarchyViewSchema.optional()
   }),
   z.strictObject({
@@ -116,3 +135,5 @@ export type ArtifactLens = z.infer<typeof ArtifactLensSchema>;
 export type WorkbenchCoverage = z.infer<typeof WorkbenchCoverageSchema>;
 export type WorkbenchView = z.infer<typeof WorkbenchViewSchema>;
 export type WorkbenchModel = z.infer<typeof WorkbenchModelSchema>;
+export type GraphSearchNode = z.infer<typeof GraphSearchNodeSchema>;
+export type GraphSearchIndex = z.infer<typeof GraphSearchIndexSchema>;

@@ -107,10 +107,11 @@ pub use review::{
 pub use svg::{SvgOptions, spring_layout, svg_document, write_svg};
 pub use tree::{TreeNode, TreeOptions, build_tree, tree_html_document, write_tree_html};
 pub use viewer_model::{
-    EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphViewCommunity, GraphViewDocument,
-    GraphViewEdge, GraphViewModel, GraphViewNode, GraphViewSource, GraphViewStats,
-    effective_graph_view_model, graph_view_model, shared_viewer_html,
-    shared_viewer_html_with_communities, shared_viewer_html_with_hierarchy,
+    EffectiveGraphViewContext, GRAPH_VIEWER_SCHEMA, GraphSearchIndex, GraphSearchNode,
+    GraphViewCommunity, GraphViewDocument, GraphViewEdge, GraphViewModel, GraphViewNode,
+    GraphViewSource, GraphViewStats, MAX_GRAPH_SEARCH_NODES, effective_graph_view_model,
+    graph_search_index, graph_view_model, shared_viewer_html, shared_viewer_html_with_communities,
+    shared_viewer_html_with_hierarchy,
 };
 pub use wiki::{WikiExport, WikiOptions, export_wiki};
 pub use workbench::{

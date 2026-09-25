@@ -536,6 +536,13 @@ the current graph identity and exposes hash links such as `#view=impact-run`.
 Both the navigation rail and graph inspector can collapse independently, and
 the repository title appears once in the navigation header so inspector space
 starts with search and node details.
+Code-graph exports embed a bounded search directory drawn from the full graph,
+so node and source-file search reaches beyond the currently open community and
+its embedded preview. Selecting an indexed node that has a preview opens its
+community and focuses it. If its detail was omitted from the export, the
+Inspector shows its source and explicitly marks relationship detail unavailable.
+The directory includes at most 100,000 nodes; when the graph is larger, the
+search control shows how many nodes were indexed.
 Graph lenses share relationship, evidence, node-kind, and language filters;
 call, impact, and affected views start in a deterministic depth-layer layout.
 Architecture views use subsystem routes, while history views overlay added,
@@ -548,10 +555,18 @@ filters live in the top graph-control rail, which shares the view header row
 instead of floating over the canvas, and open as a compact panel. In a narrow
 header the rail wraps rather than scrolling its trailing controls out of reach.
 Filters and their result count follow the graph currently on screen when moving
-between an overview and community detail, and the community list stands down to
-its summary line while one community is open so the inspector keeps the room
-its node detail needs; it returns with the overview, and the reader can open it
-by hand meanwhile.
+between an overview and community detail. Selecting a community bubble removes
+the Communities panel and graph stats footer, and lets the Inspector fill the
+side column, including in comparison views. The panel returns when the selection
+is cleared or the community detail is closed. Selecting any node has the same
+focused layout. The code graph view
+leaves its redundant header title out of the control row so the graph controls
+have more room.
+The Relationships section uses Incoming and Outgoing tabs. The tab with visible
+relationships opens first, and its full list scrolls with the Inspector instead
+of inside a short nested list. A selected hierarchy group offers **Open subgraph**
+when its child projection is published; a community offers **Open community**
+when its member detail is available.
 Neighborhood depth and direction can be prepared before selecting a node;
 isolation becomes available after selection and fits the resulting
 neighborhood. The graph-settings panel documents keyboard controls; press `?`
