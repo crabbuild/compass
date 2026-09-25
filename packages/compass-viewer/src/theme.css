@@ -3037,6 +3037,23 @@ button:not(:disabled),
   box-shadow: 0 4px 12px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.28));
 }
 
+.compass-search-coverage {
+  display: block;
+  margin-top: 7px;
+  color: var(--compass-faint);
+  font-size: 10px;
+}
+
+.compass-search-only-notice {
+  margin: 12px 0;
+  padding: 10px;
+  border-left: 3px solid var(--compass-warning);
+  background: var(--workbench-hover);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .compass-search-item {
   display: block;
   width: 100%;

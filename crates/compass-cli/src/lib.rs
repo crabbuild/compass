@@ -75,7 +75,7 @@ use compass_output::{
     WorkbenchCoverage, WorkbenchCoverageStatus, WorkbenchModel, WorkbenchView,
     WorkbenchViewContent, affected_lens_view_model, artifact_lens_view_model,
     build_code_query_view, build_discovery_query_view, export_obsidian, export_wiki,
-    graph_artifact_identity, graph_community_view_model_document,
+    graph_artifact_identity, graph_community_view_model_document, graph_search_index,
     graph_view_model_bundle_document_with_hierarchy, graph_view_model_document, node_filenames,
     project_architecture, render_agent_query_continuation_header, render_agent_query_header_lines,
     render_agent_query_text, render_orientation_json, validate_orientation_graph_identity,
@@ -4352,6 +4352,24 @@ fn build_export_workbench(
                     hierarchy_level,
                 )
                 .map_err(|error| error.to_string())?;
+                let preview_ids = bundle
+                    .overview
+                    .nodes
+                    .iter()
+                    .chain(
+                        bundle
+                            .community_details
+                            .values()
+                            .flat_map(|detail| detail.nodes.iter()),
+                    )
+                    .map(|node| node.id.clone())
+                    .collect::<BTreeSet<_>>();
+                let search_index = graph_search_index(
+                    &inputs.document,
+                    &inputs.communities,
+                    &html_options,
+                    &preview_ids,
+                );
                 let coverage = if bundle.truncated {
                     WorkbenchCoverage::bounded(
                         bundle.overview.stats.nodes,
@@ -4376,6 +4394,7 @@ fn build_export_workbench(
                         content: WorkbenchViewContent::Code {
                             model: bundle.overview,
                             community_details: bundle.community_details,
+                            search_index: Some(search_index),
                             hierarchy: bundle.hierarchy,
                         },
                     },

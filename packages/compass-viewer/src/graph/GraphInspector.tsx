@@ -363,6 +363,8 @@ export function GraphInspector({
   query,
   matches,
   searchSpansCommunities,
+  searchCoverage,
+  searchOnly,
   communityOrder,
   hiddenCommunities,
   communityDrilldown,
@@ -392,12 +394,14 @@ export function GraphInspector({
   neighbors: GraphNode[];
   connectedEdges: GraphEdge[];
   query: string;
-  matches: GraphNode[];
+  matches: Array<GraphNode & { previewAvailable?: boolean }>;
   /**
    * Set when matches come from every community rather than only the graph on
    * screen, so a result names the community that holds it.
    */
   searchSpansCommunities?: boolean | undefined;
+  searchCoverage?: { indexed: number; total: number } | undefined;
+  searchOnly?: boolean | undefined;
   /** Community ids ordered by reader importance, when the viewer derived them. */
   communityOrder?: readonly number[] | undefined;
   hiddenCommunities: ReadonlySet<number>;
@@ -472,7 +476,7 @@ export function GraphInspector({
     const community = node.communityName
       ?? model.communities.find((item) => item.id === node.community)?.label
       ?? `Community ${node.community}`;
-    return `${community} · ${base}`;
+    return `${community} · ${base}${node.previewAvailable === false ? " · not in preview" : ""}`;
   };
   const communityColors = useMemo(
     () => new Map(model.communities.map((community) => [community.id, community.color])),
@@ -636,6 +640,13 @@ export function GraphInspector({
             ))}
           </div>
         )}
+        {searchCoverage && (
+          <small className="compass-search-coverage" role="status">
+            {searchCoverage.indexed === searchCoverage.total
+              ? `Search all ${searchCoverage.total.toLocaleString()} graph nodes and files`
+              : `Search indexes ${searchCoverage.indexed.toLocaleString()} of ${searchCoverage.total.toLocaleString()} graph nodes`}
+          </small>
+        )}
       </div>
 
       <section className="compass-info-panel" aria-labelledby="compass-info-title">
@@ -663,6 +674,13 @@ export function GraphInspector({
                 </span>
               )}
             </div>
+            {searchOnly && (
+              <p className="compass-search-only-notice" role="status">
+                Found in the full graph. This node is outside the bounded preview, so its
+                relationships are unavailable here. Open the source when a link is available,
+                or export its community for complete details.
+              </p>
+            )}
             <dl className="compass-metadata-grid">
               <div>
                 <dt>Community</dt>
@@ -694,14 +712,18 @@ export function GraphInspector({
                     <dt>Degree</dt>
                     <dd>{selected.degree ?? neighbors.length}</dd>
                   </div>
-                  <div>
-                    <dt>Incoming</dt>
-                    <dd>{relationshipGroups.incoming.length}</dd>
-                  </div>
-                  <div>
-                    <dt>Outgoing</dt>
-                    <dd>{relationshipGroups.outgoing.length}</dd>
-                  </div>
+                  {!searchOnly && (
+                    <>
+                      <div>
+                        <dt>Incoming</dt>
+                        <dd>{relationshipGroups.incoming.length}</dd>
+                      </div>
+                      <div>
+                        <dt>Outgoing</dt>
+                        <dd>{relationshipGroups.outgoing.length}</dd>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
               {selected.language && <div><dt>Language</dt><dd>{selected.language}</dd></div>}
@@ -907,7 +929,7 @@ export function GraphInspector({
                   Open the graph in VS Code or export this community as JSON for full inspection.
                 </p>
               )}
-            {comparisonMode ? (
+            {searchOnly ? null : comparisonMode ? (
               <ChangeEvidence
                 node={selected}
                 edges={connectedEdges}

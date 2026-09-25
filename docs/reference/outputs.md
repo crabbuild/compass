@@ -536,6 +536,13 @@ the current graph identity and exposes hash links such as `#view=impact-run`.
 Both the navigation rail and graph inspector can collapse independently, and
 the repository title appears once in the navigation header so inspector space
 starts with search and node details.
+Code-graph exports embed a bounded search directory drawn from the full graph,
+so node and source-file search reaches beyond the currently open community and
+its embedded preview. Selecting an indexed node that has a preview opens its
+community and focuses it. If its detail was omitted from the export, the
+Inspector shows its source and explicitly marks relationship detail unavailable.
+The directory includes at most 100,000 nodes; when the graph is larger, the
+search control shows how many nodes were indexed.
 Graph lenses share relationship, evidence, node-kind, and language filters;
 call, impact, and affected views start in a deterministic depth-layer layout.
 Architecture views use subsystem routes, while history views overlay added,
