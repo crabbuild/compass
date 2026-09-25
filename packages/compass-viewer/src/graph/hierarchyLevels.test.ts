@@ -5,6 +5,7 @@ import {
   descendModel,
   groupAt,
   hierarchyNavigable,
+  hierarchyOpeningLevel,
   hierarchyTrail,
   scopeLevel,
   scopeModel
@@ -164,5 +165,73 @@ describe("hierarchy level scopes", () => {
       levels: view.levels.map((level) => ({ ...level, model: undefined }))
     });
     expect(hierarchyNavigable(withoutModel)).toBe(false);
+  });
+});
+
+describe("hierarchy opening level", () => {
+  function rootGroup(index: number, label: string, children: number[]) {
+    const signature = `${index + 1}`.padStart(16, "0");
+    return {
+      index,
+      id: `h0-${signature}`,
+      signature,
+      label,
+      labelRule: "dominantDirectory" as const,
+      labelGeneric: false,
+      memberCount: 2,
+      childIndices: children,
+      cohesion: 1,
+      conductance: 0,
+      boundaryKinds: {},
+      detailAvailable: false
+    };
+  }
+
+  function withRoot(groups: Array<ReturnType<typeof rootGroup>>, model?: unknown) {
+    const view = hierarchy();
+    const root = view.levels[0];
+    if (!root) throw new Error("fixture root level is missing");
+    return CommunityHierarchyViewSchema.parse({
+      ...view,
+      levels: [
+        { ...root, groupCount: groups.length, groups, model },
+        ...view.levels.slice(1)
+      ]
+    });
+  }
+
+  it("skips a published root that holds a single group", () => {
+    const view = hierarchy();
+    expect(view.levels[0]?.groups).toHaveLength(1);
+    expect(hierarchyOpeningLevel(view)).toBe(1);
+  });
+
+  it("opens on the coarsest level that decomposes the repository", () => {
+    const view = withRoot(
+      [rootGroup(0, "src/runtime/a", [0]), rootGroup(1, "src/runtime/b", [1])],
+      model(["h0-0000000000000001", "h0-0000000000000002"])
+    );
+    expect(hierarchyOpeningLevel(view)).toBe(0);
+  });
+
+  it("skips a level the export could not draw", () => {
+    const view = withRoot([
+      rootGroup(0, "src/runtime/a", [0]),
+      rootGroup(1, "src/runtime/b", [1])
+    ]);
+    expect(hierarchyOpeningLevel(view)).toBe(1);
+  });
+
+  it("has no opening level when every published level holds one group", () => {
+    // A partition with one community publishes one level with one group: there
+    // is nothing for a reader to open, so the canvas keeps the reading.
+    const root = hierarchy().levels[0];
+    if (!root) throw new Error("fixture root level is missing");
+    const view = CommunityHierarchyViewSchema.parse({
+      ...hierarchy(),
+      finestCommunityCount: 1,
+      levels: [root]
+    });
+    expect(hierarchyOpeningLevel(view)).toBeUndefined();
   });
 });

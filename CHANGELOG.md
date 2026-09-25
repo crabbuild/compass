@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+- Read the exported graph as a graph. A standalone export that publishes one
+  view no longer renders a one-item "Code graph" menu: the navigation rail folds
+  to the brand and the snapshot identity, and the canvas takes the width. Every
+  projection names its communities with the repository's own words — a build
+  without `labels.json` used to label them `Community 0`, `Community 1`, … and
+  the embedded hierarchy's finest level now supplies `tests`, `src/flask`, and
+  the rest; a label the export published is never replaced. Selecting a node or
+  opening a community hides the community list entirely and hands the column to
+  the inspector, which now reports a selected community's own evidence: symbols,
+  sub-groups, cohesion, conductance, boundary kinds, durable group id, and the
+  couplings the level projection draws. Escape returns to the overview, where
+  the list comes back. A history comparison keeps the list as a disclosure
+  because both sides stay reachable while one is read. A group of a coarser
+  level no longer offers to open the community whose *number* it happens to
+  share — only the community the finest level pairs with the group can be
+  opened.
+- Stop the hierarchy from publishing a one-group level, and stop the location
+  cut from hiding a repository behind one bucket. A coarsening step that merged
+  a level into a single group was published as the root, so a real export
+  opened on one node; a repository whose top-level layout is wider than
+  `rootTarget` published one bucket holding every named group, which is why
+  `TheAlgorithms/Python` showed 3 root communities, one of them named after a
+  hub member and holding 16,637 of its 16,858 symbols. The builder now keeps
+  the smallest cut that still decomposes the level, and the location cut
+  escapes a single bucket once into the repository's own directories — the same
+  repository now opens with 49 named directory communities — recording
+  `escapedSingleBucket` and the unmet budget instead. `compass export html`
+  opens on the coarsest published level that decomposes the repository, and a
+  hierarchy whose levels all hold one group leaves the reader on the symbol
+  canvas, with every published level still selectable, instead of drawing the
+  repository as a single node.
 - Stop a self-referential edge from failing a clustered build. Cohesion and the
   `density` it projects count a community's *member pairs*, so a symbol that
   references, calls, or contains itself is now an internal edge in the edge and

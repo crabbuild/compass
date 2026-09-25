@@ -120,9 +120,12 @@ graph identity mismatch.
 
 `compass export html` and `compass export workbench-json` embed that hierarchy
 for the selected graph, so the page navigates levels instead of one flat
-partition. `--hierarchy-level N` opens the page on level `N` (default `0`); an
-unknown level, or a graph whose build published no hierarchy, fails with a
-bounded error rather than rendering a different page.
+partition. The page opens on the coarsest level that decomposes the repository;
+a hierarchy whose every level holds one group — the whole repository as a
+single node — leaves the reader on the symbol canvas with every published level
+still selectable. `--hierarchy-level N` opens the page on level `N` whatever
+that level holds; an unknown level, or a graph whose build published no
+hierarchy, fails with a bounded error rather than rendering a different page.
 
 ### `extract`
 

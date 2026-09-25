@@ -60,7 +60,11 @@ export function VisualizationWorkbench({
   onThemePreferenceChange?: ((next: ThemePreference) => void) | undefined;
 }) {
   const [activeViewId, setActiveViewId] = useState(() => hashView(workbench) ?? workbench.defaultView);
-  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  // A workbench that publishes one view has nothing to navigate between, so the
+  // rail starts folded to the stage: an export reads as the graph, not as a
+  // one-item menu. Hosts that publish several views keep the rail open.
+  const singleView = workbench.views.length <= 1;
+  const [navigationCollapsed, setNavigationCollapsed] = useState(singleView);
   // The graph control rail belongs to the header row here, so the canvas keeps
   // the whole stage instead of lending its top strip to floating controls.
   const [controlSlot, setControlSlot] = useState<HTMLElement | null>(null);
@@ -115,23 +119,27 @@ export function VisualizationWorkbench({
               : <PanelLeftCloseIcon aria-hidden="true" />}
           </button>
         </header>
-        <nav aria-label="Graph views">
-          {workbench.views.map((view) => (
-            <button
-              key={view.id}
-              type="button"
-              aria-current={view.id === activeView.id ? "page" : undefined}
-              onClick={() => selectView(view.id)}
-            >
-              <ViewIcon view={view} />
-              <span>
-                <strong>{view.title}</strong>
-                <small>{view.description}</small>
-              </span>
-              <i data-status={view.coverage.status} title={`${view.coverage.status} view`} />
-            </button>
-          ))}
-        </nav>
+        {singleView ? (
+          <nav aria-label="Graph views" />
+        ) : (
+          <nav aria-label="Graph views">
+            {workbench.views.map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                aria-current={view.id === activeView.id ? "page" : undefined}
+                onClick={() => selectView(view.id)}
+              >
+                <ViewIcon view={view} />
+                <span>
+                  <strong>{view.title}</strong>
+                  <small>{view.description}</small>
+                </span>
+                <i data-status={view.coverage.status} title={`${view.coverage.status} view`} />
+              </button>
+            ))}
+          </nav>
+        )}
         <footer>
           <span>Snapshot</span>
           <code>{shortIdentity(workbench.graphIdentity)}</code>

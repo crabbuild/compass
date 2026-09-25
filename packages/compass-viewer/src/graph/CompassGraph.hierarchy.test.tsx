@@ -119,23 +119,42 @@ function hierarchy() {
       {
         level: 0,
         merge: "locationAffinity" as const,
-        groupCount: 1,
+        groupCount: 2,
         memberCount: 4,
-        groups: [{
-          index: 0,
-          id: "h0-0000000000000001",
-          signature: "0000000000000001",
-          label: "src/runtime",
-          labelRule: "dominantDirectory" as const,
-          labelGeneric: false,
-          memberCount: 4,
-          childIndices: [0, 1],
-          cohesion: 0,
-          conductance: 0,
-          boundaryKinds: { route: 1 },
-          detailAvailable: false
-        }],
-        model: levelModel(["h0-0000000000000001"], [])
+        groups: [
+          {
+            index: 0,
+            id: "h0-0000000000000001",
+            signature: "0000000000000001",
+            label: "src/runtime/a",
+            labelRule: "dominantDirectory" as const,
+            labelGeneric: false,
+            memberCount: 2,
+            childIndices: [0],
+            cohesion: 1,
+            conductance: 0,
+            boundaryKinds: { route: 1 },
+            detailAvailable: false
+          },
+          {
+            index: 1,
+            id: "h0-0000000000000002",
+            signature: "0000000000000002",
+            label: "src/runtime/b",
+            labelRule: "dominantDirectory" as const,
+            labelGeneric: false,
+            memberCount: 2,
+            childIndices: [1],
+            cohesion: 0,
+            conductance: 0.5,
+            boundaryKinds: {},
+            detailAvailable: false
+          }
+        ],
+        model: levelModel(
+          ["h0-0000000000000001", "h0-0000000000000002"],
+          [["h0-0000000000000001", "h0-0000000000000002"]]
+        )
       },
       {
         level: 1,
@@ -146,7 +165,7 @@ function hierarchy() {
         groups: [
           {
             index: 0,
-            id: "h0-0000000000000001",
+            id: "h1-0000000000000001",
             signature: "0000000000000001",
             community: 0,
             label: "src/runtime/a",
@@ -161,7 +180,7 @@ function hierarchy() {
           },
           {
             index: 1,
-            id: "h0-0000000000000002",
+            id: "h1-0000000000000002",
             signature: "0000000000000002",
             community: 1,
             label: "src/runtime/b",
@@ -175,7 +194,36 @@ function hierarchy() {
             detailAvailable: false
           }
         ],
-        model: levelModel(["h0-0000000000000001", "h0-0000000000000002"], [["h0-0000000000000001", "h0-0000000000000002"]])
+        model: levelModel(
+          ["h1-0000000000000001", "h1-0000000000000002"],
+          [["h1-0000000000000001", "h1-0000000000000002"]]
+        )
+      }
+    ]
+  });
+}
+
+/**
+ * The shape a tiny repository publishes, and the shape older artifacts publish
+ * after a coarsening step collapsed every named group into one bucket: one
+ * level holding the whole repository as a single node.
+ */
+function singleGroupHierarchy() {
+  const view = hierarchy();
+  const root = view.levels[0];
+  const group = root?.groups[0];
+  if (!root || !group) throw new Error("fixture root level is missing");
+  return CommunityHierarchyViewSchema.parse({
+    ...view,
+    finestCommunityCount: 1,
+    budgetSatisfied: false,
+    levels: [
+      {
+        ...root,
+        groupCount: 1,
+        memberCount: 4,
+        groups: [{ ...group, childIndices: [] }],
+        model: levelModel(["h0-0000000000000001"], [])
       }
     ]
   });
@@ -242,7 +290,10 @@ describe("hierarchy level navigation", () => {
     expect(control("Level 0")).toBeDefined();
     expect(control("Level 1")).toBeDefined();
     expect(control("Symbols")).toBeDefined();
-    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
+    expect(latestNodes().map((node) => node.id)).toEqual([
+      "h0-0000000000000001",
+      "h0-0000000000000002"
+    ]);
   });
 
   it("descends into a group's children and back out through the breadcrumb", () => {
@@ -254,12 +305,15 @@ describe("hierarchy level navigation", () => {
       />
     );
     doubleClickNode("h0-0000000000000001");
-    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001", "h0-0000000000000002"]);
+    expect(latestNodes().map((node) => node.id)).toEqual(["h1-0000000000000001"]);
     expect(breadcrumb()).toContain("Repository");
-    expect(breadcrumb()).toContain("src/runtime");
+    expect(breadcrumb()).toContain("src/runtime/a");
 
     fireEvent.click(control("Repository"));
-    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
+    expect(latestNodes().map((node) => node.id)).toEqual([
+      "h0-0000000000000001",
+      "h0-0000000000000002"
+    ]);
   });
 
   it("opens the community a finest-level group names through its host", () => {
@@ -272,7 +326,7 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity }}
       />
     );
-    doubleClickNode("h0-0000000000000002");
+    doubleClickNode("h1-0000000000000002");
 
     // The export owns the symbols of a leaf group, so the viewer hands the
     // community over instead of keeping a derived detail to itself.
@@ -302,7 +356,10 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity: () => undefined }}
       />
     );
-    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001", "h0-0000000000000002"]);
+    expect(latestNodes().map((node) => node.id)).toEqual([
+      "h1-0000000000000001",
+      "h1-0000000000000002"
+    ]);
   });
 
   it("falls back to the root when the requested level does not exist", () => {
@@ -314,7 +371,10 @@ describe("hierarchy level navigation", () => {
         host={{ openSource: () => undefined, openCommunity: () => undefined }}
       />
     );
-    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
+    expect(latestNodes().map((node) => node.id)).toEqual([
+      "h0-0000000000000001",
+      "h0-0000000000000002"
+    ]);
   });
 
   it("keeps the derived community overview when the export has no hierarchy", () => {
@@ -325,5 +385,59 @@ describe("hierarchy level navigation", () => {
       />
     );
     expect(document.querySelector('[aria-label="Level 0"]')).toBeNull();
+  });
+
+  it("keeps the symbol canvas when every published level holds one group", () => {
+    render(
+      <CompassGraph
+        model={baseModel()}
+        hierarchy={singleGroupHierarchy()}
+        host={{ openSource: () => undefined, openCommunity: () => undefined }}
+      />
+    );
+    // Opening on the single published group would draw the whole repository as
+    // one node, so the canvas keeps the reading and the level stays reachable.
+    expect(control("Symbols").getAttribute("aria-pressed")).toBe("true");
+    expect(latestNodes().map((node) => node.id).sort())
+      .toEqual(["a", "b", "c", "d"]);
+
+    fireEvent.click(control("Level 0"));
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
+  });
+
+  it("opens on the coarsest level that decomposes a single-group root", () => {
+    const view = hierarchy();
+    const [root, finest] = view.levels;
+    const group = root?.groups[0];
+    if (!root || !finest || !group) throw new Error("fixture levels are missing");
+    const singleRoot = CommunityHierarchyViewSchema.parse({
+      ...view,
+      finestCommunityCount: 2,
+      budgetSatisfied: false,
+      levels: [
+        {
+          ...root,
+          groupCount: 1,
+          memberCount: 4,
+          groups: [{ ...group, childIndices: [0, 1] }],
+          model: levelModel(["h0-0000000000000001"], [])
+        },
+        finest
+      ]
+    });
+    render(
+      <CompassGraph
+        model={baseModel()}
+        hierarchy={singleRoot}
+        host={{ openSource: () => undefined, openCommunity: () => undefined }}
+      />
+    );
+    expect(latestNodes().map((node) => node.id)).toEqual([
+      "h1-0000000000000001",
+      "h1-0000000000000002"
+    ]);
+    // The collapsed level is still selectable, it is just not an opening view.
+    fireEvent.click(control("Level 0"));
+    expect(latestNodes().map((node) => node.id)).toEqual(["h0-0000000000000001"]);
   });
 });

@@ -380,13 +380,18 @@ test("community failure preserves the overview and permits retry", async ({
   )).toBe(1);
 
   await expect(page.getByRole("alert")).toContainText("Community detail failed");
-  await expect(
-    page.getByRole("complementary", { name: "Graph inspector" })
-      .getByText("Core", { exact: true })
-      .last()
-  ).toBeVisible();
+  // The failed open leaves the overview untouched. The list steps aside while a
+  // node is inspected, so the reader steps back to see both communities.
+  const communities = page.locator(".compass-community-panel");
+  await expect(communities).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(communities).toHaveCount(1);
+  await expect(communities.getByText("Core", { exact: true })).toBeVisible();
+  await expect(communities.getByText("Data", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Back to community overview" })).toHaveCount(0);
 
+  await search.fill("Data");
+  await page.getByRole("option", { name: /Data/i }).click();
   await openCommunity.click();
   await expect.poll(() => page.evaluate(
     () => (window as typeof window & { communityRequestCount?: number }).communityRequestCount

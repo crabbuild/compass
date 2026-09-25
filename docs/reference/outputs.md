@@ -198,7 +198,12 @@ The budget tuple is `rootTarget` (24), `levelTarget` (300), `maxLevels` (4), and
 `minLevelResolution` (0.05), published with the identity
 `community-hierarchy-budget/v1`. `budgetSatisfied` is a recorded fact, not a
 promise: a repository can publish communities that share no evidence at all,
-and the artifact keeps the achieved count instead of merging them.
+and the artifact keeps the achieved count instead of merging them. A level that
+holds one group is the whole repository drawn as a single node, so the builder
+never publishes one: when a coarsening step would collapse the level below, the
+hierarchy stops there and the achieved level becomes the root. Every derived
+level therefore decomposes the level below it into at least two groups; only the
+published partition a hierarchy ends on may hold one.
 
 Each level records the rule that produced it. A `relationship` level comes from
 the same seeded Leiden local moving clustering uses, at the resolution in
@@ -208,8 +213,15 @@ groups already cite: the cut starts at the repository root and repeatedly
 expands the largest directory whose children still fit the budget, so every
 merged group is a real directory its members share, and a group that cites no
 dominant directory stays a group of its own. `mergeEvidence` records the
-counts, including `unkeyedGroups`. The policy identity is published as
-`mergePolicy`.
+counts, including `unkeyedGroups`, plus `escapedSingleBucket`, which is true
+when the exact cut could not expand at all and the level took one bounded step
+instead. That escape exists because a repository whose top-level layout is
+wider than the target — 49 top-level directories against a `rootTarget` of 24,
+as `TheAlgorithms/Python` publishes — otherwise leaves the cut with one bucket
+holding every named group, a bucket whose directory labels do not even apply.
+Escaping shows the repository's own directories, and `budgetSatisfied` records
+the overshoot instead of hiding the structure. The policy identity is published
+as `mergePolicy`.
 
 Group labels carry their provenance in a fixed order: `dominantDirectory`
 (longest common directory prefix covering at least 60% of members),
@@ -219,6 +231,13 @@ Group labels carry their provenance in a fixed order: `dominantDirectory`
 partitions, plus `boundaryKinds` counted from the exact kind set recorded in
 `boundaryKinds`.
 
+A level's projection draws the relationships that cross its own groups, so a
+reader must expect a coarse level to show fewer couplings than the level below
+it: coarsening on relationship evidence deliberately merges groups that are
+connected, which internalizes the edges between them. `pallets/flask` publishes
+51 cross-community relationships at its finest level and none between the 24
+groups of its root, and no level invents a relationship to fill the gap.
+
 Level membership is a navigation aid derived from the same evidence as the
 communities themselves. It never changes nodes, edges, or query results, and
 absence of the artifact means unavailable navigation, not an empty hierarchy.
@@ -227,7 +246,11 @@ refuses an unknown schema major or a mismatched graph.
 
 The standalone page embeds the same levels as
 `compass.viewer.hierarchy/1`, so an export with a published hierarchy opens on
-level 0 instead of a derived overview. The graph toolbar's scope reads
+the coarsest level that decomposes the repository instead of a derived
+overview. A hierarchy whose every level holds one group — a partition with one
+community publishes exactly that — is not an opening view, so the page keeps
+the canvas the export already published and the level toggle still reaches
+every published level. The graph toolbar's scope reads
 `Level 0 | … | Symbols`: switching a level redraws the canvas, the coupling
 matrix, the area map, or the tiers from that level's projection, and the
 `Symbols` scope still shows the underlying node set. Double-clicking a group
@@ -235,6 +258,28 @@ descends one level, narrowed to that group's children; the breadcrumb and the
 `Overview` control walk back up one group or to the repository. A level the
 export could not draw inside its node budget renders as the overview the export
 already had. Exports without the artifact keep the previous behaviour exactly.
+
+A workbench that publishes a single view carries no view menu: the reader sees
+the graph, and the navigation rail folds to the brand, the snapshot identity,
+and its disclosure. Every projection names its communities with the repository's
+own words — when a build published no `labels.json`, the viewer takes the names
+from the finest level of the embedded hierarchy, because one group per community
+is exactly what that level holds, and it never replaces a label the export
+already published. Selecting a node or opening a community hides the community
+list entirely, so the inspector keeps the whole column; the list returns with
+the overview, which is also where the reader picks the next community, and
+Escape steps back out of a node selection. A history comparison is the
+exception: it keeps the list as a disclosure because both sides of the change
+stay reachable while one of them is read.
+
+A selected community reports the evidence the hierarchy holds for it rather
+than the bubble's own drawn degree: the symbols it stands for, its sub-groups,
+cohesion and conductance, the boundary kinds its members carry, its durable
+group id, and the couplings it keeps with the groups beside it in the level
+projection that drew it. The community that a detail can be opened for is the
+one the finest level pairs with the group: a group of a coarser level names no
+published community, so the reader descends instead of opening a community the
+group does not represent.
 
 ### Group identity and the identity ledger
 

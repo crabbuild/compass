@@ -132,6 +132,14 @@ function doubleClickNode(id: string): void {
   });
 }
 
+function clickNode(id: string): void {
+  act(() => {
+    for (const handler of mock.eventHandlers.get("click") ?? []) {
+      handler({ nodes: [id], edges: [], pointer: { DOM: { x: 0, y: 0 } } });
+    }
+  });
+}
+
 /** Finish the one-shot arrangement a derived community detail starts with. */
 function stabilize(): void {
   act(() => {
@@ -354,20 +362,28 @@ describe("CompassGraph community overview", () => {
 
     doubleClickNode("community:0");
     stabilize();
-    expect(document.querySelector(".compass-community-panel"))
-      .toHaveAttribute("data-collapsed", "true");
-
-    // The reader can still reach the list by hand.
-    fireEvent.click(screen.getByText("Communities", { selector: "summary" }));
-    await waitFor(() => {
-      expect(document.querySelector(".compass-community-panel"))
-        .toHaveAttribute("data-collapsed", "false");
-    });
+    // The list is not just folded: the inspector takes the whole column while a
+    // community is open, and the overview is where the reader picks the next.
+    expect(document.querySelector(".compass-community-panel")).toBeNull();
+    expect(screen.queryByText("Select all")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Back to community overview" }));
     stabilize();
     expect(document.querySelector(".compass-community-panel"))
       .toHaveAttribute("data-collapsed", "false");
+  });
+
+  it("stands the community list down while a node is selected", () => {
+    render(<CompassGraph model={fixture()} host={{ openSource: vi.fn() }} />);
+    stabilize();
+    fireEvent.click(screen.getByRole("button", { name: "Symbols" }));
+    expect(document.querySelector(".compass-community-panel"))
+      .toHaveAttribute("data-collapsed", "false");
+
+    // Selecting a node is an inspection too: the evidence about it needs the
+    // room the list was using.
+    clickNode("symbol-1");
+    expect(document.querySelector(".compass-community-panel")).toBeNull();
   });
 
   it("renders the control rail in the header row a host offers", () => {

@@ -4458,6 +4458,50 @@ button.compass-code-evidence-source:focus-visible {
   margin-top: 16px;
 }
 
+.compass-community-evidence {
+  margin-top: 16px;
+}
+
+.compass-community-evidence .compass-metadata-grid {
+  margin: 9px 0 0;
+}
+
+.compass-community-couplings {
+  display: grid;
+  gap: 1px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--compass-line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.compass-community-couplings li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  background: var(--workbench-hover);
+}
+
+.compass-community-couplings li + li {
+  border-top: 1px solid var(--compass-line);
+}
+
+.compass-community-couplings span {
+  overflow: hidden;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compass-community-couplings small {
+  color: var(--compass-faint);
+  font: 10px/1 var(--compass-font-mono);
+}
+
 .compass-relationship-directions {
   display: grid;
   gap: 10px;

@@ -111,6 +111,27 @@ export function hierarchyNavigable(hierarchy: CommunityHierarchyView): boolean {
 }
 
 /**
+ * The level a reader opens on: the coarsest level that decomposes the
+ * repository into more than one group and that the export could draw.
+ *
+ * A level holding one group is the whole repository drawn as a single node — a
+ * tiny repository whose partition has one community, or an older artifact whose
+ * coarsening collapsed every named group into one bucket. Opening on that node
+ * shows a reader nothing, so the page falls back to the coarsest level that
+ * actually splits the graph; only a hierarchy with no such level leaves the
+ * reader on the symbol canvas. The level toggle still offers every published
+ * level, so an explicit request for a single-group level is honoured.
+ */
+export function hierarchyOpeningLevel(
+  hierarchy: CommunityHierarchyView
+): number | undefined {
+  const level = hierarchy.levels.find(
+    (candidate) => candidate.groups.length > 1 && candidate.model !== undefined
+  );
+  return level?.level;
+}
+
+/**
  * The labels a breadcrumb shows for a scope: the repository, then the group the
  * reader descended through on each level above the active one.
  */

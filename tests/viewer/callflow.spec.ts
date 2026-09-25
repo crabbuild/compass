@@ -41,7 +41,9 @@ test("architecture and call graph have separate purpose-built views", async ({ p
 
   await page.goto("/calls.html");
   await expect(page.getByText("depth 1")).toBeVisible();
-  await expect(page.getByTitle("Calls from run", { exact: true })).toBeVisible();
+  // The workbench publishes one view here, so its rail is folded: the graph
+  // names itself in the inspector header a reader sees.
+  await expect(page.locator(".compass-inspector-title small")).toHaveText("Calls from run");
   const callGraphSummary = page.locator(".call-graph-summary");
   await expect(callGraphSummary.getByText("2 nodes", { exact: true })).toBeVisible();
   await expect(callGraphSummary.getByText("1 edge", { exact: true })).toBeVisible();
@@ -130,7 +132,9 @@ test("call graph uses a balanced cursor-resolution state and recoverable error",
   expect(Math.abs(
     (content!.x + content!.width / 2) - (shell!.x + shell!.width / 2)
   )).toBeLessThan(2);
-  await expect(page.getByTitle("Calls from run", { exact: true })).toBeVisible();
+  // The workbench publishes one view here, so its rail is folded: the graph
+  // names itself in the inspector header a reader sees.
+  await expect(page.locator(".compass-inspector-title small")).toHaveText("Calls from run");
   await page.getByRole("combobox", { name: "Search graph nodes" }).fill("helper");
   await page.getByRole("option", { name: /helper/i }).click();
   const source = page.getByRole("button", {

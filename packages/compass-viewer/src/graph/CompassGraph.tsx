@@ -13,7 +13,8 @@ import { createPortal } from "react-dom";
 import { BoxesIcon, BracesIcon } from "lucide-react";
 import type { GraphViewModel, SourceLocation } from "../contracts/graph";
 import type { CommunityHierarchyView } from "../contracts/hierarchy";
-import { descendModel, scopeModel } from "./hierarchyLevels";
+import { descendModel, hierarchyOpeningLevel, scopeModel } from "./hierarchyLevels";
+import { communityFacts, hierarchyCommunityNames, withCommunityNames } from "./communityFacts";
 import type { CodeQueryResponse } from "../contracts/codeQuery";
 import {
   communityDetailModel,
@@ -220,15 +221,39 @@ export function CompassGraph({
     setInspectorLayout(normalized);
     onInspectorLayoutChange?.(normalized);
   }, [onInspectorLayoutChange]);
+  // A build without `labels.json` names its communities `Community 7` in every
+  // projection it publishes. The hierarchy carries the repository's own words
+  // for the same communities, so the reader sees those instead of numbers.
+  const communityNames = useMemo(
+    () => hierarchyCommunityNames(hierarchy),
+    [hierarchy]
+  );
+  const namedModel = useMemo(
+    () => withCommunityNames(model, communityNames),
+    [communityNames, model]
+  );
   // A large unaggregated graph opens on a community overview the viewer derives
   // from the same model, so one screen shows readable, labelled communities
   // instead of thousands of unreadable symbols.
   const derivedOverview = useMemo(
-    () => communityOverviewApplies(model) ? communityOverviewModel(model) : undefined,
-    [model]
+    () => communityOverviewApplies(namedModel)
+      ? communityOverviewModel(namedModel)
+      : undefined,
+    [namedModel]
+  );
+  // A hierarchy that cannot decompose the repository — every published level
+  // holds one group, which a tiny partition or an older artifact can publish —
+  // is not an overview: opening on it would draw the whole repository as a
+  // single node, so the reader starts on the canvas the export published and
+  // the level toggle still reaches the published levels.
+  const openingLevel = useMemo(
+    () => hierarchy ? hierarchyOpeningLevel(hierarchy) : undefined,
+    [hierarchy]
   );
   const [scope, setScope] = useState<"hierarchy" | "communities" | "symbols">(
-    () => hierarchy ? "hierarchy" : "communities"
+    () => hierarchy === undefined
+      ? "communities"
+      : openingLevel !== undefined ? "hierarchy" : "symbols"
   );
   // Which published level the reader is reading, and the groups they descended
   // through to reach it. Descending narrows the level below to one group's
@@ -237,7 +262,7 @@ export function CompassGraph({
     initialLevel !== undefined
     && hierarchy?.levels.some((level) => level.level === initialLevel)
       ? initialLevel
-      : 0
+      : openingLevel ?? 0
   );
   const [trail, setTrail] = useState<
     ReadonlyArray<{ level: number; groupIndex: number; label: string }>
@@ -264,9 +289,9 @@ export function CompassGraph({
   const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
   const derivedDetail = useMemo(
     () => derivedOverview && derivedCommunityId !== null
-      ? communityDetailModel(model, derivedCommunityId)
+      ? communityDetailModel(namedModel, derivedCommunityId)
       : undefined,
-    [derivedCommunityId, derivedOverview, model]
+    [derivedCommunityId, derivedOverview, namedModel]
   );
   const overviewOpen = !communityDetail
     && derivedOverview !== undefined
@@ -274,19 +299,26 @@ export function CompassGraph({
   const showCommunityOverview = overviewOpen && derivedDetail === undefined;
   const variantData = useMemo(
     () => showCommunityOverview
-      ? communityVariantData(model, derivedOverview)
+      ? communityVariantData(namedModel, derivedOverview)
       : hierarchyOpen && hierarchyModel
         ? communityVariantData(hierarchyModel)
-        : !derivedDetail && model.stats.aggregated
-          ? communityVariantData(model)
+        : !derivedDetail && namedModel.stats.aggregated
+          ? communityVariantData(namedModel)
           : undefined,
-    [derivedDetail, derivedOverview, hierarchyModel, hierarchyOpen, model, showCommunityOverview]
+    [
+      derivedDetail,
+      derivedOverview,
+      hierarchyModel,
+      hierarchyOpen,
+      namedModel,
+      showCommunityOverview
+    ]
   );
   const activeVariant: CommunityVariant = variantData ? variant : "bubbles";
   const activeModel = communityDetail?.model
     ?? derivedDetail?.model
     ?? hierarchyModel
-    ?? (showCommunityOverview ? derivedOverview!.model : model);
+    ?? (showCommunityOverview ? derivedOverview!.model : namedModel);
   const viewKey = communityDetail
     ? `community-${communityDetail.communityId}`
     : derivedDetail
@@ -345,6 +377,8 @@ export function CompassGraph({
     <CompassGraphView
       key={viewKey}
       model={activeModel}
+      hierarchy={hierarchy}
+      communityKeyed={!hierarchyOpen}
       host={viewHost}
       detailCommunityId={activeDetailCommunityId}
       communityLoading={communityLoading}
@@ -357,10 +391,10 @@ export function CompassGraph({
       overviewSummary={showCommunityOverview
         ? {
           communities: derivedOverview!.model.stats.communities,
-          symbols: model.nodes.length
+          symbols: namedModel.nodes.length
         }
         : hierarchyOpen
-          ? { communities: activeModel.nodes.length, symbols: model.nodes.length }
+          ? { communities: activeModel.nodes.length, symbols: namedModel.nodes.length }
           : undefined}
       communityImportance={showCommunityOverview ? derivedOverview!.importance : undefined}
       communityOrder={showCommunityOverview ? derivedOverview!.communityOrder : undefined}
@@ -386,7 +420,7 @@ export function CompassGraph({
       variant={activeVariant}
       variantData={variantData}
       onVariantChange={setVariant}
-      searchModel={showCommunityOverview ? model : undefined}
+      searchModel={showCommunityOverview ? namedModel : undefined}
       scopeControls={hierarchy && communityDetail === undefined
         ? (
           <div
@@ -416,7 +450,7 @@ export function CompassGraph({
               type="button"
               aria-label="Symbols"
               aria-pressed={scope === "symbols"}
-              title={`Show all ${model.nodes.length.toLocaleString()} symbols`}
+              title={`Show all ${namedModel.nodes.length.toLocaleString()} symbols`}
               onClick={() => {
                 setScope("symbols");
                 setDerivedCommunityId(null);
@@ -451,7 +485,7 @@ export function CompassGraph({
               type="button"
               aria-label="Symbols"
               aria-pressed={scope === "symbols"}
-              title={`Show all ${model.nodes.length.toLocaleString()} symbols`}
+              title={`Show all ${namedModel.nodes.length.toLocaleString()} symbols`}
               onClick={() => {
                 setScope("symbols");
                 setDerivedCommunityId(null);
@@ -489,6 +523,8 @@ export function CompassGraph({
 
 function CompassGraphView({
   model,
+  hierarchy,
+  communityKeyed,
   host,
   detailCommunityId,
   communityLoading,
@@ -523,6 +559,13 @@ function CompassGraphView({
   showInspectorHeader
 }: {
   model: GraphViewModel;
+  /**
+   * The published hierarchy, when the export embedded one. The inspector reads
+   * a community's own evidence from it instead of guessing from the drawing.
+   */
+  hierarchy?: CommunityHierarchyView | undefined;
+  /** True while the drawn model is keyed by published community ids. */
+  communityKeyed: boolean;
   host: GraphHost;
   detailCommunityId?: number | undefined;
   communityLoading?: number | null | undefined;
@@ -634,6 +677,14 @@ function CompassGraphView({
   const selected = state.focusedNodeId
     ? nodeById.get(state.focusedNodeId)
     : undefined;
+  // A bubble is a community, not a symbol: the inspector answers what the
+  // community holds and how it couples instead of reporting a degree of zero.
+  const selectedCommunity = useMemo(
+    () => selected
+      ? communityFacts(hierarchy, model, selected, { communityKeyed })
+      : undefined,
+    [communityKeyed, hierarchy, model, selected]
+  );
   const selectedNeighborhood = useMemo(
     () => selected
       ? graphNeighborhood(
@@ -776,6 +827,10 @@ function CompassGraphView({
         else dispatch({ type: "setLabels", visible: !state.forceLabels });
       } else if (key === "escape" && onBackToOverview) {
         onBackToOverview();
+      } else if (key === "escape" && selected) {
+        // Inspecting a node hides the community list, so Escape steps back out
+        // of the selection the same way it steps back out of a drill-down.
+        clear();
       } else {
         handled = false;
       }
@@ -784,6 +839,7 @@ function CompassGraphView({
     document.addEventListener("keydown", handleKeyDown, { capture: true });
     return () => document.removeEventListener("keydown", handleKeyDown, { capture: true });
   }, [
+    clear,
     onBackToOverview,
     selected,
     selectedNeighborhood,
@@ -1206,6 +1262,7 @@ function CompassGraphView({
         <GraphInspector
           model={model}
           selected={selected}
+          communityFacts={selectedCommunity}
           neighbors={neighbors}
           connectedEdges={connectedEdges}
           query={state.query}

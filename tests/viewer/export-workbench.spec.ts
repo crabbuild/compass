@@ -42,14 +42,12 @@ test("every community opens, and a bounded window says so", async ({ page }) => 
   await expect(page.locator(".compass-viewer-status-text"))
     .toHaveText("Community Core · 2 symbols");
 
-  // The community list stands down for the inspector while one is open.
-  await expect(communities).toHaveAttribute("data-collapsed", "true");
-  await expect(page.getByText("Select all")).toBeHidden();
-  await communities.locator("summary").click();
-  await expect(page.getByText("Select all")).toBeVisible();
+  // The community list gives the inspector the whole column while one is open.
+  await expect(communities).toHaveCount(0);
+  await expect(page.getByText("Select all")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Back to community overview" }).click();
-  await expect(communities).toHaveAttribute("data-collapsed", "false");
+  await expect(communities).toHaveCount(1);
   await expect(page.getByText("Select all")).toBeVisible();
 
   // Data is complete in the export, so it opens without a bound.

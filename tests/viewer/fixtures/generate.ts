@@ -200,6 +200,61 @@ export default async function generate(): Promise<void> {
     path.join(output, "exportWorkbench.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass export workbench fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(exportWorkbench)}</script><script>${viewerJs}</script></body></html>`
   );
+  // A standalone export of a clustered repository, in the two shapes a reader
+  // meets first: a published hierarchy whose root splits the repository, and
+  // the edge case where its only level holds the whole repository as one group.
+  for (const [name, hierarchy, clusteredGraph] of [
+    [
+      "hierarchyWorkbench",
+      publishedHierarchy(),
+      {
+        ...graph,
+        // A build without `labels.json` publishes placeholder names; the
+        // hierarchy carries the repository's own words for the same communities.
+        communities: graph.communities.map((community) => ({
+          ...community,
+          label: `Community ${community.id}`
+        }))
+      }
+    ],
+    [
+      "singleGroupHierarchyWorkbench",
+      singleGroupHierarchy(),
+      {
+        ...graph,
+        stats: { ...graph.stats, communities: 1 },
+        nodes: graph.nodes.map((node) => ({ ...node, community: 0 })),
+        communities: graph.communities.slice(0, 1)
+      }
+    ]
+  ] as const) {
+    const clustered = {
+      ...workbench,
+      title: "Clustered workbench",
+      graphIdentity: `fixture-${name}`,
+      views: [{
+        ...workbench.views[0]!,
+        coverage: {
+          ...workbench.views[0]!.coverage,
+          hierarchyLevels: hierarchy.levels.length
+        },
+        model: clusteredGraph,
+        hierarchy
+      }]
+    };
+    await writeFile(
+      path.join(output, `${name}.html`),
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass hierarchy fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(clustered)}</script><script>${viewerJs}</script></body></html>`
+    );
+  }
+  // A three-level export: the reader descends from the root into a group whose
+  // children are groups of the published partition, not communities
+  // themselves, which is where a level's own numbering stops naming anything.
+  const drilldown = drilldownWorkbenchModel();
+  await writeFile(
+    path.join(output, "hierarchyDrilldownWorkbench.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Compass hierarchy drilldown fixture</title><style>${viewerCss}</style></head><body><div id="compass-viewer-root"></div><script id="compass-viewer-model" type="application/json">${JSON.stringify(drilldown)}</script><script>${viewerJs}</script></body></html>`
+  );
   // Mirrors the prepared Django overview shape (3,376 communities and roughly
   // three cross-community relationships per community) without carrying the
   // original 281 MB graph fixture in the repository.
@@ -641,6 +696,250 @@ export default async function generate(): Promise<void> {
   );
   await writeFile(path.join(output, "query.html"), queryHarness());
   await writeFile(path.join(output, "initialize.html"), initializationHarness());
+}
+
+/**
+ * One node per published group: the bounded projection `compass export html`
+ * embeds for a level so the viewer can draw it without the symbol canvas.
+ */
+function hierarchyLevelModel(
+  groups: Array<{ id: string; label: string; memberCount: number }>,
+  edges: Array<[string, string]>
+) {
+  return {
+    schema: "compass.viewer.graph/1" as const,
+    title: "Clustered workbench",
+    stats: {
+      nodes: groups.length,
+      edges: edges.length,
+      communities: groups.length,
+      aggregated: true
+    },
+    nodes: groups.map((group, index) => ({
+      id: group.id,
+      label: group.label,
+      community: index,
+      memberCount: group.memberCount
+    })),
+    edges: edges.map(([source, target], position) => ({
+      id: `level-edge-${position}`,
+      source,
+      target,
+      relation: "calls",
+      weight: 2
+    })),
+    communities: [],
+    hyperedges: []
+  };
+}
+
+function hierarchyGroup(
+  index: number,
+  label: string,
+  memberCount: number,
+  community?: number
+) {
+  const signature = `${index + 1}`.padStart(16, "0");
+  return {
+    index,
+    id: `h0-${signature}`,
+    signature,
+    ...(community === undefined ? {} : { community }),
+    label,
+    labelRule: "dominantDirectory" as const,
+    labelGeneric: false,
+    memberCount,
+    childIndices: [] as number[],
+    cohesion: 1,
+    conductance: 0,
+    boundaryKinds: {},
+    detailAvailable: false
+  };
+}
+
+/** Two published communities: the root a reader opens on. */
+function publishedHierarchy() {
+  const groups = [
+    hierarchyGroup(0, "src/runtime", 2, 0),
+    hierarchyGroup(1, "docs", 2, 1)
+  ];
+  return {
+    schema: "compass.viewer.hierarchy/1" as const,
+    budgetIdentity: "community-hierarchy-budget/v1",
+    mergePolicy: "relationship-then-location-affinity/v1",
+    rootTarget: 24,
+    levelTarget: 300,
+    maxLevels: 4,
+    budgetSatisfied: true,
+    finestCommunityCount: 2,
+    finestSignature: `sha256:${"0".repeat(64)}`,
+    boundaryKinds: [] as string[],
+    levels: [
+      {
+        level: 0,
+        merge: "relationship" as const,
+        resolution: 1,
+        groupCount: groups.length,
+        memberCount: 4,
+        groups,
+        model: hierarchyLevelModel(groups, [[groups[0]!.id, groups[1]!.id]])
+      }
+    ]
+  };
+}
+
+/**
+ * A partition with one community publishes one level holding one group: the
+ * whole repository as a single node. Opening there shows a reader nothing.
+ */
+function singleGroupHierarchy() {
+  const groups = [hierarchyGroup(0, "src/runtime", 4, 0)];
+  return {
+    schema: "compass.viewer.hierarchy/1" as const,
+    budgetIdentity: "community-hierarchy-budget/v1",
+    mergePolicy: "relationship-then-location-affinity/v1",
+    rootTarget: 24,
+    levelTarget: 300,
+    maxLevels: 4,
+    budgetSatisfied: true,
+    finestCommunityCount: 1,
+    finestSignature: `sha256:${"1".repeat(64)}`,
+    boundaryKinds: [] as string[],
+    levels: [
+      {
+        level: 0,
+        merge: "relationship" as const,
+        resolution: 1,
+        groupCount: 1,
+        memberCount: 4,
+        groups,
+        model: hierarchyLevelModel(groups, [])
+      }
+    ]
+  };
+}
+
+/**
+ * Six communities under two roots, cut again into four "middle" groups: the
+ * level a reader descends into holds groups that are not communities, so a
+ * bubble there names no published community and offers no detail to open.
+ */
+function drilldownWorkbenchModel() {
+  const communities = Array.from({ length: 6 }, (_, index) =>
+    hierarchyGroup(index, `area${index % 2}/module${index}`, 10, index));
+  const middleGroups = Array.from({ length: 4 }, (_, index) => {
+    const signature = `${index + 1}`.padStart(16, "0");
+    const members = index < 2 ? 20 : 10;
+    return {
+      ...hierarchyGroup(index, `area0/part${index}`, members),
+      id: `h1-${signature}`,
+      childIndices: index < 2 ? [index * 2, index * 2 + 1] : [index + 2]
+    };
+  });
+  const rootGroups = Array.from({ length: 2 }, (_, index) => {
+    const signature = `${index + 1}`.padStart(16, "0");
+    return {
+      ...hierarchyGroup(index, `area${index}`, 30),
+      id: `h0-${signature}`,
+      childIndices: index === 0 ? [0, 1] : [2, 3]
+    };
+  });
+  const levelModel = (
+    groups: Array<{ id: string; label: string; memberCount: number }>,
+    edges: Array<[string, string]>
+  ) => hierarchyLevelModel(groups, edges);
+  const hierarchy = {
+    schema: "compass.viewer.hierarchy/1" as const,
+    budgetIdentity: "community-hierarchy-budget/v1",
+    mergePolicy: "relationship-then-location-affinity/v1",
+    rootTarget: 24,
+    levelTarget: 300,
+    maxLevels: 4,
+    budgetSatisfied: true,
+    finestCommunityCount: 6,
+    finestSignature: `sha256:${"2".repeat(64)}`,
+    boundaryKinds: [] as string[],
+    levels: [
+      {
+        level: 0,
+        merge: "locationAffinity" as const,
+        groupCount: rootGroups.length,
+        memberCount: 60,
+        groups: rootGroups,
+        model: levelModel(rootGroups, [[rootGroups[0]!.id, rootGroups[1]!.id]])
+      },
+      {
+        level: 1,
+        merge: "relationship" as const,
+        resolution: 0.5,
+        groupCount: middleGroups.length,
+        memberCount: 60,
+        groups: middleGroups,
+        model: levelModel(middleGroups, [
+          [middleGroups[0]!.id, middleGroups[1]!.id],
+          [middleGroups[1]!.id, middleGroups[2]!.id]
+        ])
+      },
+      {
+        level: 2,
+        merge: "relationship" as const,
+        resolution: 1,
+        groupCount: communities.length,
+        memberCount: 60,
+        groups: communities,
+        model: levelModel(communities, [])
+      }
+    ]
+  };
+  const model = {
+    schema: "compass.viewer.graph/1" as const,
+    title: "Drilldown workbench",
+    stats: { nodes: 6, edges: 2, communities: 6, aggregated: false },
+    nodes: communities.map((group, index) => ({
+      id: group.id,
+      label: `symbol${index}`,
+      community: index,
+      memberCount: 10,
+      source: { file: `${group.label}/file${index}.rs` }
+    })),
+    edges: [{
+      id: "drilldown-edge",
+      source: communities[0]!.id,
+      target: communities[3]!.id,
+      relation: "calls",
+      confidence: "extracted" as const
+    }],
+    communities: communities.map((group, index) => ({
+      id: index,
+      label: `Community ${index}`,
+      color: "#4E79A7",
+      hidden: false
+    })),
+    hyperedges: []
+  };
+  return {
+    schema: "compass.viewer.workbench/1" as const,
+    title: "Drilldown workbench",
+    graphIdentity: "fixture-drilldown",
+    defaultView: "code",
+    views: [{
+      id: "code",
+      kind: "code" as const,
+      title: "Code graph",
+      description: "Fixture graph",
+      coverage: {
+        status: "complete" as const,
+        truncated: false,
+        nodes: model.nodes.length,
+        edges: model.edges.length,
+        hierarchyLevels: hierarchy.levels.length,
+        limitations: [] as string[]
+      },
+      model,
+      communityDetails: {},
+      hierarchy
+    }]
+  };
 }
 
 function semanticDiffGraphHarness(): string {
