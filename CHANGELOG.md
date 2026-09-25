@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.30 - 2026-09-25
+
 - Read the exported graph as a graph. A standalone export that publishes one
   view no longer renders a one-item "Code graph" menu: the navigation rail folds
   to the brand and the snapshot identity, and the canvas takes the width. Every
