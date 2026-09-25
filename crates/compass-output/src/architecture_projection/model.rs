@@ -1,9 +1,74 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
 pub const ARCHITECTURE_VIEWER_SCHEMA: &str = "compass.viewer.architecture/1";
 pub const ARCHITECTURE_OVERLAY_SCHEMA: &str = "compass.architecture-overlay/1";
+pub const ARCHITECTURE_SUMMARY_SCHEMA: &str = "compass.architecture.summary/1";
+pub const ARCHITECTURE_SUMMARY_MAX_COMMUNITIES: usize = 12;
+pub const ARCHITECTURE_SUMMARY_MAX_NODES_PER_COMMUNITY: usize = 3;
+pub const ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES: usize = 64;
+pub const ARCHITECTURE_SUMMARY_MAX_KIND_BYTES: usize = 512;
+pub const ARCHITECTURE_SUMMARY_MAX_SAMPLE_SCALAR_CHARS: usize = 512;
+pub const ARCHITECTURE_SUMMARY_MAX_SAMPLE_NODE_ID_BYTES: usize = 1_024;
+pub const ARCHITECTURE_SUMMARY_SAMPLE_POLICY: &str =
+    "largest_communities_then_ascending_community_id_then_node_id";
+pub const ARCHITECTURE_SUMMARY_KIND_COUNT_POLICY: &str =
+    "ascending_safe_kind_name_up_to_64_entries_other_counts_aggregated";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureSummary {
+    pub schema: &'static str,
+    pub title: String,
+    pub statistics: ArchitectureSummaryStatistics,
+    pub limit_hit: ArchitectureProjectionLimitHit,
+    pub sample_policy: &'static str,
+    pub kind_count_policy: &'static str,
+    pub sampled_communities: Vec<ArchitectureSummaryCommunity>,
+    pub details_omitted: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureSummaryStatistics {
+    pub nodes: usize,
+    pub relationships: usize,
+    pub communities: usize,
+    pub node_kinds: BTreeMap<String, usize>,
+    pub other_nodes: usize,
+    pub relationship_kinds: BTreeMap<String, usize>,
+    pub other_relationships: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureSummaryCommunity {
+    pub id: usize,
+    pub label: String,
+    pub bounded_fields: Vec<&'static str>,
+    pub member_count: usize,
+    pub sampled_nodes: Vec<ArchitectureSummaryNode>,
+    pub omitted_sample_nodes: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureSummaryNode {
+    pub id: String,
+    pub label: String,
+    pub kind: String,
+    pub source_file: Option<String>,
+    pub bounded_fields: Vec<&'static str>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchitectureProjectionLimitHit {
+    pub name: &'static str,
+    pub required: usize,
+    pub limit: usize,
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]

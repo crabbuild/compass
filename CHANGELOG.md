@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Resolve `compass path` file endpoints through unique source-backed modules
+  when a graph publishes no standalone file nodes. Workspace import paths can
+  now connect the same modules found by `search` and `callers`; ambiguous source
+  files still require an exact node ID.
+- Include digest-verified declaration source in `compass explain` by default
+  for uniquely resolved source-backed nodes. `--no-source` opts out; the
+  existing `--source` flag remains accepted.
+- Keep `compass architecture` useful when a declared detail-projection limit is
+  exceeded: JSON now returns a separate `compass.architecture.summary/1` with
+  exact graph totals, exact counts for listed kinds, aggregate counts for
+  omitted kinds, the bound that prevented detail output, and a deterministic
+  sample of the 12 largest communities (up to 3 nodes each).
+  Kind maps, identifiers, labels, and paths have explicit output bounds; any
+  omitted kind counts are aggregated into exact `otherNodes` and
+  `otherRelationships` totals.
+
 ## 0.3.30 - 2026-09-25
 
 - Read the exported graph as a graph. A standalone export that publishes one

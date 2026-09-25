@@ -387,7 +387,16 @@ fn rendered_path_endpoint(graph: &Graph, index: NodeIndex, note: Option<&str>) -
 }
 
 fn resolve_exact_path_endpoint(graph: &Graph, query: &str) -> Result<PathEndpoint, String> {
-    let matches = find_exact_nodes(graph, query);
+    if (query.contains('/') || query.contains('\\')) && query.len() > MAX_PATH_SOURCE_QUERY_BYTES {
+        return Err(format!(
+            "path endpoint exceeds the {}-byte source-path limit",
+            MAX_PATH_SOURCE_QUERY_BYTES
+        ));
+    }
+    let mut matches = find_exact_nodes(graph, query);
+    if matches.is_empty() && (query.contains('/') || query.contains('\\')) {
+        matches = source_path_endpoint_nodes(graph, query);
+    }
     match matches.as_slice() {
         [node] => Ok(file_content_endpoint(graph, *node)
             .map(|(index, note)| PathEndpoint {
@@ -429,6 +438,43 @@ fn resolve_exact_path_endpoint(graph: &Graph, query: &str) -> Result<PathEndpoin
             Err(lines.join("\n"))
         }
     }
+}
+
+/// Resolve a repository-relative source path when the graph has no separate
+/// file node for it. Prefer one module that carries the file's content; when
+/// there is no module owner, keep all source-backed nodes as ambiguity
+/// evidence instead of picking a declaration by iteration order.
+fn source_path_endpoint_nodes(graph: &Graph, query: &str) -> Vec<NodeIndex> {
+    let normalized_query = normalize_source_path(query);
+    let mut modules = graph
+        .nodes()
+        .filter(|(_, node)| {
+            node.kind_name() == "module"
+                && normalize_source_path(&node.string("source_file")) == normalized_query
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    modules.sort_by(|left, right| graph.node(*left).id.cmp(&graph.node(*right).id));
+    modules.dedup();
+    if !modules.is_empty() {
+        return modules;
+    }
+    let mut nodes = graph
+        .nodes()
+        .filter(|(_, node)| normalize_source_path(&node.string("source_file")) == normalized_query)
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    nodes.sort_by(|left, right| graph.node(*left).id.cmp(&graph.node(*right).id));
+    nodes.dedup();
+    nodes
+}
+
+fn normalize_source_path(path: &str) -> String {
+    let mut normalized = path.replace('\\', "/");
+    while let Some(relative) = normalized.strip_prefix("./") {
+        normalized = relative.to_owned();
+    }
+    normalized
 }
 
 /// Resolve one file-path endpoint to the node that carries the file's content.
@@ -477,6 +523,7 @@ struct PathEndpoint {
 
 /// Bound for listing ambiguous path endpoints in one error message.
 const MAX_PATH_AMBIGUITY_CANDIDATES: usize = 8;
+const MAX_PATH_SOURCE_QUERY_BYTES: usize = 4_096;
 
 #[derive(Clone, Copy)]
 enum PathRanking {

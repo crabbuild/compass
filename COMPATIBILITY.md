@@ -171,6 +171,18 @@ endpoint remains identifiable. Languages that already connect their file nodes
 (for example Go, Python, and Rust) keep the existing behavior, and an ambiguous
 or multi-module file still fails closed.
 
+When a graph publishes no separate `file` node, a repository-relative source
+path now resolves through the source-backed node index: one module owner is
+selected when unique, while multiple modules or declarations remain an explicit
+ambiguity. This lets path traversal follow the same stored workspace import
+edges used by `callers`.
+
+`compass explain` now includes a bounded source excerpt by default when the
+selected node has a unique source-backed declaration whose file matches the
+recorded symbol digest. `--no-source` restores a metadata-only answer; the
+existing `--source` flag remains accepted. Ambiguous, unsourced, or changed
+files do not produce source text.
+
 ### Typed query deadlines
 
 `ask`, `search`, `callers`, `callees`, `impact`, `explore`, and `node` accept
@@ -489,6 +501,23 @@ consumers must migrate.
 Membership records are compact validated indexes into the deterministic node
 and per-projection group arrays. Documentation is a first-class All-code source
 scope and cannot influence Production architecture.
+
+`compass architecture --format json` may return
+`compass.architecture.summary/1` when a declared detail-projection limit is
+exceeded. Detailed output is capped at 5,000 nodes and 20,000 relationships.
+The summary contains exact graph totals, exact counts for listed kinds,
+aggregate counts for omitted kinds, the exceeded limit, and a deterministic
+sample of up to 12 largest communities with at most 3 nodes each; ties use
+ascending community IDs and node IDs. `kindCountPolicy` orders each kind map by
+ascending name and caps it at 64 safe names; counts for omitted kinds are
+aggregated exactly as `otherNodes` and `otherRelationships`. Sampled IDs are at
+most 1,024 bytes. Sample text fields
+are bounded to 512 characters, escape control and bidi characters, and list
+changed fields in `boundedFields`; unrepresentable sampled IDs are counted in
+`omittedSampleNodes`. It sets `detailsOmitted` and does not reuse the viewer
+schema for incomplete data. Agent JSON reports
+`compass.architecture.summary-agent-view/1` and includes the underlying schema
+as `summarySchema`.
 
 Before the first compatibility-stable release, Compass hard-resets active
 internal extraction, cache, publication, store-index, query-index/ranker,

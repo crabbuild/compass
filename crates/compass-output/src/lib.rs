@@ -42,17 +42,24 @@ pub use agent_query::{
     render_agent_query_text, render_code_query_text_page,
 };
 pub use architecture_projection::{
-    ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA, ArchitectureClassCounts,
-    ArchitectureCoverage, ArchitectureDiagnosticSeverity, ArchitectureEvidenceCounts,
-    ArchitectureGroup, ArchitectureGroupKind, ArchitectureGroupName, ArchitectureLens,
-    ArchitectureMembership, ArchitectureNameProvenance, ArchitectureNode, ArchitectureOmissions,
-    ArchitectureOverlay, ArchitectureOverlayGroup, ArchitectureOverlaySourceRule,
-    ArchitectureProjectionError, ArchitectureProjectionInput, ArchitectureProjectionLimits,
-    ArchitectureProjectionOptions, ArchitectureProvenance, ArchitectureQuality,
+    ARCHITECTURE_OVERLAY_SCHEMA, ARCHITECTURE_SUMMARY_KIND_COUNT_POLICY,
+    ARCHITECTURE_SUMMARY_MAX_COMMUNITIES, ARCHITECTURE_SUMMARY_MAX_KIND_BYTES,
+    ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES, ARCHITECTURE_SUMMARY_MAX_NODES_PER_COMMUNITY,
+    ARCHITECTURE_SUMMARY_MAX_SAMPLE_NODE_ID_BYTES, ARCHITECTURE_SUMMARY_MAX_SAMPLE_SCALAR_CHARS,
+    ARCHITECTURE_SUMMARY_SAMPLE_POLICY, ARCHITECTURE_SUMMARY_SCHEMA, ARCHITECTURE_VIEWER_SCHEMA,
+    ArchitectureClassCounts, ArchitectureCoverage, ArchitectureDiagnosticSeverity,
+    ArchitectureEvidenceCounts, ArchitectureGroup, ArchitectureGroupKind, ArchitectureGroupName,
+    ArchitectureLens, ArchitectureMembership, ArchitectureNameProvenance, ArchitectureNode,
+    ArchitectureOmissions, ArchitectureOverlay, ArchitectureOverlayGroup,
+    ArchitectureOverlaySourceRule, ArchitectureProjectionError, ArchitectureProjectionInput,
+    ArchitectureProjectionLimitHit, ArchitectureProjectionLimits, ArchitectureProjectionOptions,
+    ArchitectureProjectionOutput, ArchitectureProvenance, ArchitectureQuality,
     ArchitectureQualityDiagnostic, ArchitectureQualityMetrics, ArchitectureQualityStatus,
     ArchitectureRelationClass, ArchitectureRelationship, ArchitectureRoute, ArchitectureRouteLevel,
     ArchitectureScope, ArchitectureScopeProjection, ArchitectureSourceCounts,
-    ArchitectureSourceScope, ArchitectureStatistics, ArchitectureViewModel, project_architecture,
+    ArchitectureSourceScope, ArchitectureStatistics, ArchitectureSummary,
+    ArchitectureSummaryCommunity, ArchitectureSummaryNode, ArchitectureSummaryStatistics,
+    ArchitectureViewModel, project_architecture, project_architecture_or_summary,
 };
 pub use backup::{BackupResult, backup_if_protected, backup_if_protected_to};
 pub use callflow::{
