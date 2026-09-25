@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GraphEdge, GraphNode, GraphViewModel } from "../contracts/graph";
@@ -384,6 +384,65 @@ describe("CompassGraph community overview", () => {
     // room the list was using.
     clickNode("symbol-1");
     expect(document.querySelector(".compass-community-panel")).toBeNull();
+    expect(document.querySelector(".compass-graph-inspector"))
+      .toHaveAttribute("data-focused", "true");
+    expect(document.querySelector(".compass-graph-stats")).toBeNull();
+  });
+
+  it("dismisses the community list when a community bubble is selected", () => {
+    render(<CompassGraph model={fixture()} host={{ openSource: vi.fn() }} />);
+    stabilize();
+
+    clickNode("community:0");
+
+    expect(screen.getByRole("heading", { name: "Inspector" })).toBeInTheDocument();
+    expect(screen.getByText("Core runtime", { selector: "dd" })).toBeInTheDocument();
+    expect(document.querySelector(".compass-community-panel")).toBeNull();
+    expect(document.querySelector(".compass-graph-inspector"))
+      .toHaveAttribute("data-focused", "true");
+    expect(document.querySelector(".compass-graph-stats")).toBeNull();
+  });
+
+  it("dismisses Communities for selected comparison bubbles with missing membership facts", () => {
+    const model = fixture();
+    model.stats = { ...model.stats, nodes: 3, edges: 0, aggregated: false };
+    model.edges = [];
+    model.nodes = model.communities.map((community) => ({
+      id: `community:${community.id}`,
+      label: community.label,
+      kind: "community",
+      community: community.id,
+      change: "changed"
+    }));
+    render(<CompassGraph model={model} host={{ openSource: vi.fn() }} />);
+    stabilize();
+
+    clickNode("community:0");
+
+    expect(document.querySelector(".compass-graph-stage"))
+      .toHaveAttribute("data-comparison", "true");
+    expect(screen.getByRole("heading", { name: "Inspector" })).toBeInTheDocument();
+    expect(document.querySelector(".compass-community-panel")).toBeNull();
+  });
+
+  it("dismisses Communities when a comparison symbol is selected", () => {
+    const model = fixture();
+    model.stats = { ...model.stats, nodes: 3, edges: 0 };
+    model.edges = [];
+    model.nodes = model.nodes.slice(0, 3).map((node, index) => ({
+      ...node,
+      change: index === 0 ? "changed" : "unchanged"
+    }));
+    render(<CompassGraph model={model} host={{ openSource: vi.fn() }} />);
+    stabilize();
+
+    clickNode("symbol-0");
+
+    expect(document.querySelector(".compass-graph-stage"))
+      .toHaveAttribute("data-comparison", "true");
+    expect(document.querySelector(".compass-community-panel")).toBeNull();
+    expect(document.querySelector(".compass-graph-inspector"))
+      .toHaveAttribute("data-focused", "true");
   });
 
   it("renders the control rail in the header row a host offers", () => {

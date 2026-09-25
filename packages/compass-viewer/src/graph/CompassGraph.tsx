@@ -1270,6 +1270,10 @@ function CompassGraphView({
           communityOrder={communityOrder}
           hiddenCommunities={state.hiddenCommunities}
           communityDrilldown={detailCommunityId !== undefined}
+          subgraphAvailable={hierarchy !== undefined
+            && selected !== undefined
+            && selectedCommunity?.level !== undefined
+            && descendModel(hierarchy, selectedCommunity.level, selected.community) !== undefined}
           comparisonMode={comparisonMode}
           sourceRevisions={sourceRevisions}
           queryResult={queryResult}

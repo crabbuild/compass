@@ -28,7 +28,7 @@ const model: GraphViewModel = {
 };
 
 describe("GraphInspector selected node details", () => {
-  it("shows directional relationships and exposes icon-led node actions", () => {
+  it("switches directional relationships with accessible tabs and exposes node actions", () => {
     const onFocus = vi.fn();
     const onQueryNode = vi.fn();
     const selected = model.nodes[1];
@@ -57,14 +57,30 @@ describe("GraphInspector selected node details", () => {
       />
     );
 
-    expect(screen.getByText("Incoming", { selector: "strong" })).toBeInTheDocument();
-    expect(screen.getByText("Outgoing", { selector: "strong" })).toBeInTheDocument();
-    expect(screen.getByRole("button", {
-      name: "Focus Caller; incoming; calls"
-    })).toBeInTheDocument();
+    const incoming = screen.getByRole("tab", { name: /Incoming/ });
+    const outgoing = screen.getByRole("tab", { name: /Outgoing/ });
+    expect(document.getElementById(incoming.getAttribute("aria-controls") ?? ""))
+      .toHaveAttribute("hidden");
+    expect(outgoing).toHaveAttribute("aria-selected", "true");
+    expect(incoming).toHaveAttribute("aria-selected", "false");
+    expect(screen.queryByRole("button", { name: "Focus Caller; incoming; calls" }))
+      .toBeNull();
     expect(screen.getByRole("button", {
       name: "Focus Callee; outgoing; calls"
     })).toBeInTheDocument();
+
+    fireEvent.click(incoming);
+    expect(incoming).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: "Focus Caller; incoming; calls" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Focus Callee; outgoing; calls" }))
+      .toBeNull();
+    fireEvent.keyDown(incoming, { key: "ArrowRight" });
+    expect(outgoing).toHaveAttribute("aria-selected", "true");
+    expect(outgoing).toHaveFocus();
+    fireEvent.keyDown(outgoing, { key: "Home" });
+    expect(incoming).toHaveAttribute("aria-selected", "true");
+    expect(incoming).toHaveFocus();
 
     const actions = screen.getByLabelText("Code graph queries");
     for (const action of ["Callers", "Callees", "Impact"]) {
@@ -77,5 +93,34 @@ describe("GraphInspector selected node details", () => {
       name: "Focus Caller; incoming; calls"
     }));
     expect(onFocus).toHaveBeenCalledWith("caller");
+  });
+
+  it("opens a published child subgraph and hides the action when it is unavailable", () => {
+    const onOpenCommunity = vi.fn();
+    const selected = {
+      id: "group:0", label: "Core", kind: "community", community: 0,
+      memberCount: 42, detailAvailable: false
+    };
+    const props = {
+      model: { ...model, stats: { ...model.stats, aggregated: true } },
+      selected,
+      communityFacts: {
+        label: "Core", symbols: 42, groupId: "group:0", level: 0,
+        childGroups: 2, boundaryKinds: [], couplings: [], couplingCount: 0,
+        couplingsComplete: true
+      },
+      neighbors: [], connectedEdges: [], query: "", matches: [],
+      hiddenCommunities: new Set<number>(), comparisonMode: false,
+      renderedEdgeCount: 0, showHeader: false, onQueryChange: vi.fn(),
+      onFocus: vi.fn(), onOpenSource: vi.fn(), onOpenCommunity,
+      onToggleCommunity: vi.fn(), onSetAllVisible: vi.fn(), collapsed: false,
+      onToggleCollapsed: vi.fn()
+    };
+    const view = render(<GraphInspector {...props} subgraphAvailable />);
+    fireEvent.click(screen.getByRole("button", { name: /Open subgraph/ }));
+    expect(onOpenCommunity).toHaveBeenCalledWith(0);
+    view.rerender(<GraphInspector {...props} subgraphAvailable={false} />);
+    expect(screen.queryByRole("button", { name: /Open subgraph/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Open community/ })).toBeNull();
   });
 });

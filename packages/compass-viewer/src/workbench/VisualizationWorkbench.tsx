@@ -147,10 +147,12 @@ export function VisualizationWorkbench({
       </aside>
       <main className="visualization-main">
         <header className="visualization-context">
-          <div className="visualization-context-title">
-            <span>{viewEyebrow(activeView)}</span>
-            <strong>{activeView.title}</strong>
-          </div>
+          {activeView.kind !== "code" && (
+            <div className="visualization-context-title">
+              <span>{viewEyebrow(activeView)}</span>
+              <strong>{activeView.title}</strong>
+            </div>
+          )}
           <div className="visualization-controls" ref={setControlSlot} />
           <div className="visualization-coverage" data-status={activeView.coverage.status}>
             {activeView.kind !== "call" && (

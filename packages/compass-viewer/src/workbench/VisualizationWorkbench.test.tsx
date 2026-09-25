@@ -107,6 +107,7 @@ describe("VisualizationWorkbench graph filters", () => {
     // stage and carries no view card: an export reads as the graph.
     expect(screen.getByLabelText("Compass navigation")).toHaveAttribute("data-collapsed", "true");
     expect(screen.queryByLabelText("Graph views")?.children ?? []).toHaveLength(0);
+    expect(document.querySelector(".visualization-context-title")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expand graph navigation" }));
     expect(screen.getByLabelText("Compass navigation")).toHaveTextContent("Fixture workbench");
     expect(screen.getByLabelText("Compass navigation")).toHaveAttribute("data-collapsed", "false");
@@ -233,6 +234,8 @@ describe("VisualizationWorkbench graph filters", () => {
 
     render(<VisualizationWorkbench workbench={workbench} host={{ openSource: vi.fn() }} />);
     expect(screen.getByTestId("preferred-layout")).toHaveTextContent("hierarchical");
+    expect(document.querySelector(".visualization-context-title"))
+      .toHaveTextContent("Routes and handlers");
 
     fireEvent.click(screen.getByRole("button", { name: /Dependencies/ }));
     expect(screen.getByTestId("preferred-layout")).toHaveTextContent("grid");

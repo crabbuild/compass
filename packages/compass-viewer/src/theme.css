@@ -3082,6 +3082,13 @@ button:not(:disabled),
   border-bottom: 1px solid var(--compass-line);
 }
 
+.compass-graph-inspector[data-focused="true"] > .compass-info-panel:first-of-type {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  border-bottom: 0;
+}
+
 .compass-document-evidence {
   --compass-ocr-accent: #e2a94b;
   --compass-ocr-preview-surface: color-mix(in srgb, var(--compass-focus) 7%, var(--background));
@@ -4508,6 +4515,52 @@ button.compass-code-evidence-source:focus-visible {
   margin-top: 9px;
 }
 
+.compass-relationship-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-bottom: 1px solid var(--compass-line);
+}
+
+.compass-relationship-tabs button {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 7px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.compass-relationship-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--compass-focus);
+  color: var(--foreground);
+}
+
+.compass-relationship-tabs button[data-direction="outgoing"][aria-selected="true"] {
+  border-bottom-color: var(--compass-warning);
+}
+
+.compass-relationship-tabs button:focus-visible {
+  outline: 2px solid var(--compass-focus);
+  outline-offset: -2px;
+}
+
+.compass-relationship-tabs svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.compass-relationship-tabs small {
+  color: var(--compass-faint);
+  font: 10px/1 var(--compass-font-mono);
+}
+
 .compass-direction-group {
   overflow: hidden;
   border: 1px solid var(--compass-line);
@@ -4594,8 +4647,6 @@ button.compass-code-evidence-source:focus-visible {
 }
 
 .compass-direction-list {
-  max-height: 150px;
-  overflow-y: auto;
   border-top: 1px solid var(--compass-line);
 }
 
@@ -4734,7 +4785,7 @@ button.compass-code-evidence-source:focus-visible {
   padding-top: 12px;
 }
 
-/* A drill-down keeps the panel to its summary line for the inspector's sake. */
+/* An unopened comparison list can stay as a compact disclosure. */
 .compass-community-panel[data-collapsed="true"] {
   flex: 0 1 auto;
 }

@@ -32,17 +32,21 @@ test("VS Code graph mirrors Compass export structure and exposes source metadata
   await expect(source).toBeVisible();
   await expect(source.locator(".compass-source-path")).toHaveText("src/lib.rs");
   await expect(source.locator(".compass-source-range")).toHaveText("Lines 5–7");
-  const incoming = page.locator('.compass-direction-group[data-direction="incoming"]');
+  const incomingTab = page.getByRole("tab", { name: /Incoming/ });
+  const outgoingTab = page.getByRole("tab", { name: /Outgoing/ });
   const outgoing = page.locator('.compass-direction-group[data-direction="outgoing"]');
-  await expect(incoming).toContainText("Incoming");
-  await expect(incoming).toContainText("run");
-  await expect(incoming).toContainText("calls");
+  await expect(outgoingTab).toHaveAttribute("aria-selected", "true");
   await expect(outgoing).toContainText("Outgoing");
   await expect(outgoing).toContainText("Store");
   await expect(outgoing).toContainText("uses");
+  await incomingTab.click();
+  const incoming = page.locator('.compass-direction-group[data-direction="incoming"]');
+  await expect(incoming).toContainText("Incoming");
+  await expect(incoming).toContainText("run");
+  await expect(incoming).toContainText("calls");
   const relationships = page.locator(".compass-direction-link");
-  await expect(relationships).toHaveCount(2);
-  await expect(relationships.locator(".compass-neighbor-dot")).toHaveCount(2);
+  await expect(relationships).toHaveCount(1);
+  await expect(relationships.locator(".compass-neighbor-dot")).toHaveCount(1);
 
   await page.evaluate(() => {
     window.addEventListener("compass:open-source", ((event: CustomEvent) => {
@@ -355,7 +359,9 @@ test("self-contained HTML export double-clicks from community overview into exac
     () => (window as typeof window & { openedCommunity?: unknown }).openedCommunity
   )).toEqual({ communityId: 0 });
   await expect(page.getByRole("button", { name: "Back to community overview" })).toBeVisible();
-  await expect(page.locator(".compass-graph-stats")).toContainText("2 nodes");
+  await expect(page.locator(".compass-graph-stats")).toHaveCount(0);
+  await expect(page.locator(".compass-graph-inspector"))
+    .toHaveAttribute("data-focused", "true");
   await expect(page.getByRole("complementary", { name: "Graph visual legend" })).toBeVisible();
 
   await page.getByRole("button", { name: "Back to community overview" }).click();
