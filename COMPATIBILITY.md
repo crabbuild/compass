@@ -918,6 +918,15 @@ hierarchy. Levels describe the same partition the quality artifact describes;
 `finestSignature` binds the two. `compass export hierarchy-json` emits the
 artifact unchanged and fails for an unknown major or a mismatched graph.
 
+The levels themselves are data, not schema: a build publishes the levels the
+evidence supports and records the achieved counts, so no consumer may assume a
+level count or a group count. Two rules older artifacts can violate and new
+builds cannot: a level never holds one group (the whole repository as a single
+node) and the location cut may publish a bounded overshoot of its target —
+recorded as `mergeEvidence.escapedSingleBucket` — instead of one bucket holding
+every named group. Readers that ignore `mergeEvidence` behave exactly as
+before, and exports still open on a level an older artifact published.
+
 Group ids inside that artifact are durable: `h<level>-<signature16>` over the
 group's member signatures. Reconciliation rewrites an id to the previous
 build's when a group survives, so consumers may key on `id` across rebuilds, but

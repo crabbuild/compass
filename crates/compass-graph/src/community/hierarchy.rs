@@ -71,6 +71,31 @@ const COARSEN_ATTEMPT_LIMIT: usize = 16;
 /// from the one below it, and pays for that in artifact size on every level.
 const MIN_LEVEL_REDUCTION: f64 = 0.9;
 
+/// Groups a level must publish to be worth publishing at all.
+///
+/// A level that holds one group is the whole repository as a single node: it
+/// tells a reader nothing the level below it does not, and an export that opens
+/// on it draws one blob instead of a decomposition. Coarsening stops at the
+/// achieved level instead, so the root a reader opens is always a real
+/// partition of the repository.
+const MIN_LEVEL_GROUPS: usize = 2;
+
+/// Widest cut an affinity level may reach while escaping a cut that cannot be
+/// expanded inside its target, as a multiple of that target.
+///
+/// A repository whose top-level layout is wider than the target — 49 top-level
+/// directories against a root target of 24, as TheAlgorithms/Python publishes —
+/// leaves the exact cut with one bucket holding every named group. Expanding
+/// that single bucket once shows the repository's own directories, and a
+/// bounded overshoot is a better overview than one unreadable blob. The bound
+/// stays relative to the target so a pathologically flat repository still keeps
+/// the exact cut rather than publishing thousands of root groups.
+const AFFINITY_ESCAPE_FACTOR: usize = 3;
+
+/// Smallest bound the affinity escape may use, so a level with a small target
+/// still escapes into the repository's own top-level layout.
+const MIN_AFFINITY_ESCAPE_GROUPS: usize = 2 * DEFAULT_ROOT_TARGET;
+
 /// Deepest directory prefix a label may cite.
 const MAX_LABEL_PREFIX_DEPTH: usize = 6;
 
@@ -776,7 +801,12 @@ pub fn build_community_hierarchy(
         let reduced = plan.groups.len() < current.groups.len();
         let worth_publishing = plan.groups.len() <= target
             || (plan.groups.len() as f64) <= (current.groups.len() as f64) * MIN_LEVEL_REDUCTION;
-        if !reduced || !worth_publishing {
+        // One group is the whole level below as a single node. It satisfies a
+        // target without telling a reader anything, so it is never published:
+        // the affinity cut below, which can still name real directories, gets
+        // the level instead.
+        let decomposes = plan.groups.len() >= MIN_LEVEL_GROUPS;
+        if !reduced || !worth_publishing || !decomposes {
             // Relationship evidence stopped reducing the level. Group the rest
             // by the source location they already cite, and record that rule.
             let keys = current
@@ -800,8 +830,9 @@ pub fn build_community_hierarchy(
         // Communities with no relationship evidence cannot be merged, so a
         // level that does not reduce the group count is the plateau: stop here
         // and record the achieved count rather than repeating one partition on
-        // every remaining level.
-        if next.groups.len() >= current.groups.len() {
+        // every remaining level. A level that holds one group is the same
+        // plateau in a different shape: the achieved level below it is the root.
+        if next.groups.len() >= current.groups.len() || next.groups.len() < MIN_LEVEL_GROUPS {
             break;
         }
         levels.push(next);
@@ -1283,6 +1314,7 @@ struct GroupState {
     label: HierarchyLabel,
 }
 
+#[derive(Clone)]
 struct LevelPlan {
     merge: LevelMerge,
     resolution: Option<f64>,
@@ -1475,6 +1507,12 @@ fn finalise_level(
 /// Deterministic coarsening schedule: halve the resolution until the level fits
 /// its target, keeping the smallest level achieved if the floor is reached
 /// first. The artifact records the achieved count instead of truncating.
+///
+/// A schedule can overshoot: the resolution that first fits the target may merge
+/// the whole level into one group. The smallest cut that still decomposes the
+/// level is published in that case, so a level never reads as the repository in
+/// a single node, and the count a caller receives is never below
+/// [`MIN_LEVEL_GROUPS`] unless every resolution collapsed the level.
 fn coarsen(
     graph: &WeightedGraph,
     previous_resolution: f64,
@@ -1485,19 +1523,31 @@ fn coarsen(
 ) -> Result<LevelPlan, CommunityError> {
     let mut resolution = (previous_resolution / 2.0).max(min_resolution);
     let mut best = coarsening_at(graph, resolution, level, limits)?;
+    let mut best_decomposed = (best.groups.len() >= MIN_LEVEL_GROUPS).then(|| best.clone());
     let mut attempts = 1usize;
-    while best.groups.len() > target
-        && attempts < COARSEN_ATTEMPT_LIMIT
-        && resolution > min_resolution
-    {
+    while attempts < COARSEN_ATTEMPT_LIMIT && resolution > min_resolution {
+        if best.groups.len() <= target && best.groups.len() >= MIN_LEVEL_GROUPS {
+            break;
+        }
         resolution = (resolution / 2.0).max(min_resolution);
-        let candidate = coarsening_at(graph, resolution, level, limits)?;
         attempts = attempts.saturating_add(1);
+        let candidate = coarsening_at(graph, resolution, level, limits)?;
+        if candidate.groups.len() >= MIN_LEVEL_GROUPS
+            && best_decomposed
+                .as_ref()
+                .is_none_or(|plan| candidate.groups.len() < plan.groups.len())
+        {
+            best_decomposed = Some(candidate.clone());
+        }
         if candidate.groups.len() < best.groups.len() {
             best = candidate;
         }
     }
-    Ok(best)
+    Ok(if best.groups.len() >= MIN_LEVEL_GROUPS {
+        best
+    } else {
+        best_decomposed.unwrap_or(best)
+    })
 }
 
 fn coarsening_at(
@@ -1668,31 +1718,57 @@ fn affinity_plan(groups: &[GroupState], keys: &[String], target: usize, level: u
     } else {
         target.max(1)
     };
-    let mut cut = vec![0usize];
-    loop {
-        let mut best: Option<(usize, usize, String)> = None;
-        for node in &cut {
-            let children = nodes[*node].children.len();
-            if children == 0 || cut.len().saturating_sub(1).saturating_add(children) > budget {
-                continue;
-            }
-            let candidate = (nodes[*node].count, *node, node_path(&nodes, *node));
-            let better = match &best {
-                None => true,
-                Some((count, _, path)) => {
-                    candidate.0 > *count || (candidate.0 == *count && candidate.2 < *path)
+    /// Expand the largest cut node whose children still fit the budget.
+    fn expand_within(nodes: &[Node], budget: usize) -> Vec<usize> {
+        let mut cut = vec![0usize];
+        loop {
+            let mut best: Option<(usize, usize, String)> = None;
+            for node in &cut {
+                let children = nodes[*node].children.len();
+                if children == 0 || cut.len().saturating_sub(1).saturating_add(children) > budget {
+                    continue;
                 }
-            };
-            if better {
-                best = Some(candidate);
+                let candidate = (nodes[*node].count, *node, node_path(nodes, *node));
+                let better = match &best {
+                    None => true,
+                    Some((count, _, path)) => {
+                        candidate.0 > *count || (candidate.0 == *count && candidate.2 < *path)
+                    }
+                };
+                if better {
+                    best = Some(candidate);
+                }
             }
+            let Some((_, node, _)) = best else {
+                break;
+            };
+            cut.retain(|entry| *entry != node);
+            cut.extend(nodes[node].children.values().copied());
+            cut.sort_unstable();
         }
-        let Some((_, node, _)) = best else {
-            break;
-        };
-        cut.retain(|entry| *entry != node);
-        cut.extend(nodes[node].children.values().copied());
-        cut.sort_unstable();
+        cut
+    }
+    let mut cut = expand_within(&nodes, budget);
+    // A repository whose top-level layout is wider than the target cannot be
+    // expanded inside the budget, so the exact cut publishes one bucket holding
+    // every named group — and that bucket falls back from the directory label
+    // rules to a hub member, so it does not even say what it holds. Escape that
+    // single bucket once, so the level shows the repository's own directories,
+    // as long as the escape stays inside its bound.
+    let mut escaped = false;
+    if cut.len() <= 1
+        && let Some(bucket) = cut.first().copied()
+        && let Some(node) = nodes.get(bucket)
+        && node.children.len() >= MIN_LEVEL_GROUPS
+    {
+        let bound = target
+            .saturating_mul(AFFINITY_ESCAPE_FACTOR)
+            .max(MIN_AFFINITY_ESCAPE_GROUPS);
+        if node.children.len().saturating_add(pinned.len()) <= bound {
+            cut = node.children.values().copied().collect();
+            cut.sort_unstable();
+            escaped = true;
+        }
     }
     let mut buckets = Vec::with_capacity(cut.len().saturating_add(pinned.len()));
     for node in &cut {
@@ -1727,6 +1803,7 @@ fn affinity_plan(groups: &[GroupState], keys: &[String], target: usize, level: u
     evidence.insert("unkeyedGroups".to_owned(), json!(pinned.len()));
     evidence.insert("target".to_owned(), json!(target));
     evidence.insert("level".to_owned(), json!(level));
+    evidence.insert("escapedSingleBucket".to_owned(), json!(escaped));
     LevelPlan {
         merge: LevelMerge::LocationAffinity,
         resolution: None,
@@ -2556,13 +2633,15 @@ mod tests {
 
     #[test]
     fn artifact_rejects_a_level_that_does_not_cover_its_children() -> TestResult {
-        let budget = HierarchyBudget {
-            root_target: 2,
-            level_target: 3,
-            max_levels: 3,
-            ..HierarchyBudget::default()
-        };
-        let mut artifact = artifact(4, budget)?;
+        let mut artifact = artifact(
+            12,
+            HierarchyBudget {
+                root_target: 2,
+                level_target: 3,
+                max_levels: 3,
+                ..HierarchyBudget::default()
+            },
+        )?;
         assert!(artifact.levels.len() >= 2, "the fixture must coarsen");
         let dropped = artifact
             .levels
@@ -2637,11 +2716,31 @@ mod tests {
             // Groups with no location key stay singletons, so a small target
             // can only ever be met up to the number of pinned groups.
             let pinned = keys.iter().filter(|key| key.is_empty()).count();
-            assert!(
-                plan.groups.len() <= target || plan.groups.len() <= pinned.saturating_add(1),
-                "target {target} produced {} buckets for {pinned} pinned groups",
-                plan.groups.len(),
-            );
+            let escaped = plan
+                .evidence
+                .get("escapedSingleBucket")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true);
+            if escaped {
+                // The cut could not be expanded inside its target, so it took
+                // the one bounded step that shows real directories instead of
+                // one bucket holding every named group.
+                let bound = target
+                    .saturating_mul(AFFINITY_ESCAPE_FACTOR)
+                    .max(MIN_AFFINITY_ESCAPE_GROUPS);
+                assert!(
+                    plan.groups.len() <= bound,
+                    "target {target} escaped to {} buckets, above its bound {bound}",
+                    plan.groups.len(),
+                );
+                assert!(plan.groups.len() > 1);
+            } else {
+                assert!(
+                    plan.groups.len() <= target || plan.groups.len() <= pinned.saturating_add(1),
+                    "target {target} produced {} buckets for {pinned} pinned groups",
+                    plan.groups.len(),
+                );
+            }
         }
         Ok(())
     }

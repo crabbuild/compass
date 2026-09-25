@@ -125,6 +125,36 @@ fn sourceless_document(clusters: usize, per_cluster: usize) -> GraphDocument {
     document(nodes, links)
 }
 
+/// `directories` areas of `clusters` disjoint symbol chains, each chain under
+/// `src/area<area>/group<cluster>`. Chains share no relationship, so the
+/// location cut is the only rule that can merge them, and every named group
+/// sits under one of a bounded number of real directories.
+fn shared_directory_document(
+    directories: usize,
+    clusters: usize,
+    per_cluster: usize,
+) -> GraphDocument {
+    let mut nodes = Vec::new();
+    let mut links = Vec::new();
+    for cluster in 0..clusters {
+        let area = cluster % directories;
+        for index in 0..per_cluster {
+            let id = format!("area{area}_cluster{cluster}_symbol{index}");
+            nodes.push(node(
+                &id,
+                Some(&format!("src/area{area}/group{cluster}/file{index}.rs")),
+                &format!("app::area{area}::group{cluster}::symbol{index}"),
+            ));
+        }
+        for index in 1..per_cluster {
+            let previous = format!("area{area}_cluster{cluster}_symbol{}", index - 1);
+            let current = format!("area{area}_cluster{cluster}_symbol{index}");
+            links.push(edge(links.len(), &previous, &current, EdgeKind::Calls));
+        }
+    }
+    document(nodes, links)
+}
+
 fn partition(document: &GraphDocument) -> Result<CommunityResult, CommunityError> {
     let changed = BTreeSet::new();
     build_communities(
@@ -505,12 +535,12 @@ fn hierarchy_reports_an_unmet_budget_instead_of_truncating() -> TestResult {
     Ok(())
 }
 
-/// Twelve communities that never call each other, all under `src`: the
-/// relationship pass cannot merge them, so the level is cut by the directory
-/// they cite and records that rule as its evidence.
+/// Twelve communities that never call each other, four to an area directory:
+/// the relationship pass cannot merge them, so the level is cut by the
+/// directory they cite and records that rule as its evidence.
 #[test]
 fn location_affinity_groups_communities_that_share_no_relationship() -> TestResult {
-    let document = clustered_document(12, 3, false);
+    let document = shared_directory_document(4, 12, 3);
     let hierarchy = hierarchy(
         &document,
         HierarchyBudget {
@@ -533,13 +563,14 @@ fn location_affinity_groups_communities_that_share_no_relationship() -> TestResu
         "the affinity cut must meet the root budget, found {}",
         root.groups.len()
     );
+    assert_eq!(root.groups.len(), 4, "each area directory is one group");
     assert!(hierarchy.budget_satisfied);
     assert_eq!(
         root.groups
             .iter()
             .map(|group| group.member_count)
             .sum::<usize>(),
-        36,
+        12 * 3,
         "affinity merging keeps every member"
     );
     assert!(
@@ -550,9 +581,112 @@ fn location_affinity_groups_communities_that_share_no_relationship() -> TestResu
                     .evidence
                     .get("value")
                     .and_then(serde_json::Value::as_str)
-                    .is_some_and(|value| value.starts_with("src"))
+                    .is_some_and(|value| value.starts_with("src/area"))
         }),
         "every affinity group is named by the directory it shares"
+    );
+    cover_every_child_once(&hierarchy)?;
+    Ok(())
+}
+
+/// Forty communities that share twelve directories: the exact location budget
+/// can only hold one bucket for all of them, so the level escapes that bucket
+/// once and shows the directories they actually share instead of a single node
+/// that names nothing.
+#[test]
+fn location_affinity_escapes_a_single_bucket_into_shared_directories() -> TestResult {
+    let document = shared_directory_document(12, 40, 3);
+    let hierarchy = hierarchy(
+        &document,
+        HierarchyBudget {
+            root_target: 5,
+            level_target: 8,
+            max_levels: 4,
+            ..HierarchyBudget::default()
+        },
+    )?;
+    let finest = hierarchy.finest().ok_or("missing finest level")?;
+    assert_eq!(
+        finest.groups.len(),
+        40,
+        "the fixture publishes 40 communities"
+    );
+    let root = hierarchy.root().ok_or("missing root level")?;
+    assert_eq!(root.level, 0);
+    assert_eq!(root.merge, LevelMerge::LocationAffinity);
+    assert_eq!(
+        root.merge_evidence
+            .get("escapedSingleBucket")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "the level records that it escaped a single-bucket cut"
+    );
+    assert_eq!(
+        root.groups.len(),
+        12,
+        "the root shows the twelve shared directories, not one bucket"
+    );
+    assert!(
+        root.groups.iter().all(|group| {
+            group.label.rule == HierarchyLabelRule::DominantDirectory
+                && group
+                    .label
+                    .evidence
+                    .get("value")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|value| value.starts_with("src/area"))
+        }),
+        "every escaped group is named by the directory it shares"
+    );
+    assert!(
+        root.groups
+            .iter()
+            .map(|group| group.member_count)
+            .sum::<usize>()
+            == 40 * 3,
+        "the escape keeps every member"
+    );
+    cover_every_child_once(&hierarchy)?;
+    Ok(())
+}
+
+/// A coarsening step can collapse a level into one group — the whole repository
+/// drawn as a single node. The builder refuses that level instead of publishing
+/// it, so the root a reader opens is the achieved partition below it.
+#[test]
+fn a_level_that_collapses_to_one_group_is_never_published() -> TestResult {
+    let document = shared_directory_document(40, 40, 3);
+    let hierarchy = hierarchy(
+        &document,
+        HierarchyBudget {
+            root_target: 5,
+            level_target: 8,
+            max_levels: 4,
+            ..HierarchyBudget::default()
+        },
+    )?;
+    for level in &hierarchy.levels {
+        assert!(
+            level.groups.len() >= 2,
+            "level {} holds {} group(s): a one-group level is the repository as one node",
+            level.level,
+            level.groups.len()
+        );
+    }
+    let root = hierarchy.root().ok_or("missing root level")?;
+    assert_eq!(
+        hierarchy.levels.len(),
+        1,
+        "no coarser level reduces this fixture"
+    );
+    assert_eq!(
+        root.groups.len(),
+        40,
+        "the achieved partition stays the root"
+    );
+    assert!(
+        !hierarchy.budget_satisfied,
+        "the root is larger than its target and says so"
     );
     cover_every_child_once(&hierarchy)?;
     Ok(())

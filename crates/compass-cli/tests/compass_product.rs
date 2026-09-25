@@ -73,6 +73,21 @@ fn hierarchy_export_reproduces_the_published_artifact() -> Result<(), Box<dyn Er
         "the export reproduces the published artifact byte for byte"
     );
 
+    // A level that holds one group is the whole repository as a single node, so
+    // only the published partition the hierarchy ends on may be that small: a
+    // reader opening the export never lands on one blob.
+    let artifact: Value = serde_json::from_slice(&std::fs::read(&published)?)?;
+    let levels = artifact["levels"].as_array().ok_or("missing levels")?;
+    for level in levels.iter().take(levels.len().saturating_sub(1)) {
+        let groups = level["groups"].as_array().ok_or("missing groups")?;
+        assert!(
+            groups.len() >= 2,
+            "derived level {} holds {} group(s)",
+            level["level"],
+            groups.len()
+        );
+    }
+
     let mut artifact: Value = serde_json::from_slice(&std::fs::read(&published)?)?;
     artifact["schema"] = Value::String("compass.community-hierarchy/2".to_owned());
     std::fs::write(&published, serde_json::to_vec_pretty(&artifact)?)?;

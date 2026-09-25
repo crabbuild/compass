@@ -1,6 +1,7 @@
 //! Qualify the budgeted community hierarchy on the shapes real repositories
 //! publish: clustered directories, communities that share no relationship at
-//! all, and groups that cite no location either.
+//! all, a layout wider than the root budget, and groups that cite no location
+//! either.
 //!
 //! The report is the evidence the release gate consumes: every acceptance entry
 //! must be true, and two runs must produce identical bytes.
@@ -39,6 +40,8 @@ struct Acceptance {
     complete_tree: bool,
     labels_have_provenance: bool,
     generic_root_labels_bounded: bool,
+    levels_decompose: bool,
+    location_escape_qualified: bool,
     deterministic_digest: bool,
     bounded_levels: bool,
 }
@@ -60,6 +63,8 @@ struct FixtureReport {
     labels_have_provenance: bool,
     generic_root_labels: usize,
     generic_root_share: f64,
+    escaped_location_cut: bool,
+    levels_decompose: bool,
     deterministic_digest: bool,
     bounded_levels: bool,
     result_digest: String,
@@ -90,6 +95,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             generic_root_labels_bounded: reports
                 .iter()
                 .all(|fixture| fixture.generic_root_share <= GENERIC_ROOT_SHARE_LIMIT),
+            levels_decompose: reports.iter().all(|fixture| fixture.levels_decompose),
+            // The escape is the rule that turns a bucket holding every named
+            // group into the repository's own directories, so the gate proves
+            // the path is exercised and stays bounded and labelled.
+            location_escape_qualified: {
+                let escaped = reports
+                    .iter()
+                    .filter(|fixture| fixture.escaped_location_cut)
+                    .collect::<Vec<_>>();
+                !escaped.is_empty()
+                    && escaped.iter().all(|fixture| {
+                        fixture.budget_matches_expectation
+                            && fixture.labels_have_provenance
+                            && fixture.levels_decompose
+                            && fixture.generic_root_share <= GENERIC_ROOT_SHARE_LIMIT
+                    })
+            },
             deterministic_digest: reports.iter().all(|fixture| fixture.deterministic_digest),
             bounded_levels: reports.iter().all(|fixture| fixture.bounded_levels),
         },
@@ -175,6 +197,16 @@ fn qualify(fixture: Fixture) -> Result<FixtureReport, Box<dyn Error>> {
         } else {
             generic_root_labels as f64 / root_groups as f64
         },
+        escaped_location_cut: first.levels.iter().any(|level| {
+            level
+                .merge_evidence
+                .get("escapedSingleBucket")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        }),
+        // A level holding one group is the whole repository as a single node:
+        // an export that opens on it draws one blob instead of a decomposition.
+        levels_decompose: first.levels.iter().all(|level| level.groups.len() >= 2),
         deterministic_digest: first.result_digest == second.result_digest
             && serde_json::to_vec(&first)? == serde_json::to_vec(&second)?,
         bounded_levels: first.levels.len() <= fixture.budget.max_levels
@@ -222,32 +254,99 @@ fn complete_tree(hierarchy: &CommunityHierarchy) -> bool {
 
 fn fixtures() -> Vec<Fixture> {
     vec![
-        clustered_fixture("directory-clusters", 12, 3, true, 4, 8, true),
-        clustered_fixture("fragmented-communities", 24, 2, false, 4, 8, true),
+        clustered_fixture(
+            "directory-clusters",
+            ClusterShape {
+                directories: 12,
+                clusters: 12,
+                per_cluster: 3,
+                bridges: true,
+            },
+            4,
+            8,
+            true,
+        ),
+        clustered_fixture(
+            "fragmented-communities",
+            ClusterShape {
+                directories: 4,
+                clusters: 24,
+                per_cluster: 2,
+                bridges: false,
+            },
+            4,
+            8,
+            true,
+        ),
+        // 24 groups in 24 directories against a root target of 4: no cut inside
+        // the budget can name them, so the level shows the directories the
+        // repository actually publishes and records the unmet budget.
+        clustered_fixture(
+            "wider-than-budget",
+            ClusterShape {
+                directories: 24,
+                clusters: 24,
+                per_cluster: 2,
+                bridges: false,
+            },
+            4,
+            8,
+            false,
+        ),
+        // 24 groups in 12 directories: the exact cut cannot expand at all
+        // inside either target, so the level escapes its single bucket into the
+        // directories the repository publishes.
+        clustered_fixture(
+            "escaped-location-cut",
+            ClusterShape {
+                directories: 12,
+                clusters: 24,
+                per_cluster: 2,
+                bridges: false,
+            },
+            4,
+            8,
+            false,
+        ),
         locationless_fixture("locationless-groups", 12),
     ]
+}
+
+/// The shape a clustered fixture publishes: how many area directories the
+/// clusters spread over, how many clusters they form, and whether the clusters
+/// cite each other.
+struct ClusterShape {
+    directories: usize,
+    clusters: usize,
+    per_cluster: usize,
+    bridges: bool,
 }
 
 /// Clusters of symbols in their own directory. Bridges are the only cross-cluster
 /// evidence, so a fixture without them can only be grouped by location.
 fn clustered_fixture(
     name: &'static str,
-    clusters: usize,
-    per_cluster: usize,
-    bridges: bool,
+    shape: ClusterShape,
     root_target: usize,
     level_target: usize,
     expect_budget_satisfied: bool,
 ) -> Fixture {
+    let ClusterShape {
+        directories,
+        clusters,
+        per_cluster,
+        bridges,
+    } = shape;
     let mut nodes = Vec::new();
     let mut links = Vec::new();
     for cluster in 0..clusters {
+        let area = cluster % directories;
         for index in 0..per_cluster {
             let id = format!("cluster{cluster}_symbol{index}");
             nodes.push(node(
                 &id,
-                Some(&format!("src/group{cluster}/file{index}.rs")),
-                Some(&format!("app::group{cluster}::symbol{index}")),
+                Some(&format!("src/area{area}/group{cluster}/file{index}.rs")),
+                Some(&format!("app::area{area}::group{cluster}::symbol{index}")),
             ));
         }
         for index in 1..per_cluster {
