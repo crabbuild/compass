@@ -661,9 +661,24 @@ information. Light and dark operating-system themes, VS Code themes, and
 high-contrast themes all drive the same tokens, so a standalone export and the
 editor extension stay visually identical.
 
+The toolbar places **Overview** before **Filters**, whose panel opens below its
+button and stays within the viewport as the window resizes. Layout spacing offers
+Compact (75%), Default (100%), Airy (150%), Wide (200%), and Extra wide (300%).
+These five levels use the roomier baseline (twice the original distances) for
+automatic and fixed layouts, including large seeded graphs. The toolbar uses
+its full available width and wraps related controls together in narrow windows;
+the coverage badge shares the status row. Compact controls respond to the host
+width, including embedded panes on wide screens; toolbar icons stay at 16px
+rather than shrinking to fit button padding.
+Connections use thinner strokes while preserving evidence dashes and relative
+aggregate weights.
+The layout picker follows the active light, dark, or editor theme. Each option
+has its own icon, which also appears beside the selected layout; arrow keys
+navigate the menu, Enter selects, and Escape closes it.
+
 **Automatic** layout arranges itself when a view opens: the canvas starts from
 its deterministic seeded map, runs the force simulation until it settles, and
-stops by itself — symbol canvases, community overviews, and community
+fits the settled graph into the viewport and stops by itself — symbol canvases, community overviews, and community
 drill-downs all benefit, and the arranging screen offers "Show graph now" if a
 graph takes longer than expected. Once settled, a deterministic separation pass
 removes any bubble and label collisions the simulation left behind, so the

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Theme the layout picker and its options consistently in light and dark mode,
+  with a matching icon for each layout and keyboard-accessible selection.
+- Use the Compass app brand mark in the HTML viewer's navigation rail.
+- Double the HTML viewer's spacing baseline with five presets labelled 75%,
+  100%, 150%, 200%, and 300%. Place Overview before Filters, anchor the filter
+  panel below its button, and wrap toolbar controls using the full header width.
+  Keep toolbar icons at 16px and adapt compact controls to their host width.
+  Automatic code graphs
+  start from deterministic community positions and fit the settled layout before
+  display; large seeded graphs also honor spacing. Thinner connections retain
+  their evidence styles and aggregate weights.
+
 ## 0.3.30 - 2026-09-25
 
 - Read the exported graph as a graph. A standalone export that publishes one

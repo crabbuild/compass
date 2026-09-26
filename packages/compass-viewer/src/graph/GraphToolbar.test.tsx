@@ -32,7 +32,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = 
     isolateSelection={false}
     neighborhoodDepth={1}
     edgeDirection="both"
-    layoutSpacing={1}
+    layoutSpacing={2}
     showMinimap={true}
     {...callbacks}
     {...overrides}
@@ -104,14 +104,14 @@ describe("GraphToolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "2 hops" }));
     fireEvent.click(screen.getByRole("button", { name: "Outgoing edges" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Layout spacing" }), {
-      target: { value: "1.25" }
+      target: { value: "3" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Show minimap" }));
 
     expect(callbacks.onToggleIsolation).toHaveBeenCalledOnce();
     expect(callbacks.onNeighborhoodDepthChange).toHaveBeenCalledWith(2);
     expect(callbacks.onEdgeDirectionChange).toHaveBeenCalledWith("outgoing");
-    expect(callbacks.onLayoutSpacingChange).toHaveBeenCalledWith(1.25);
+    expect(callbacks.onLayoutSpacingChange).toHaveBeenCalledWith(3);
     expect(callbacks.onToggleMinimap).toHaveBeenCalledOnce();
   });
 
@@ -157,6 +157,19 @@ describe("GraphToolbar", () => {
       .not.toBe(0);
     expect(filters.closest(".compass-toolbar-actions")?.firstElementChild)
       .toBe(filters.closest(".compass-toolbar-leading"));
+  });
+
+  it("puts Overview before Filters and offers five spacing levels on the roomier baseline", () => {
+    renderToolbar({ onBack: vi.fn(), leadingControls: <button>Filters</button> });
+    const back = screen.getByRole("button", { name: "Back to community overview" });
+    expect(back.closest(".compass-toolbar-actions")?.firstElementChild).toBe(back);
+    fireEvent.click(screen.getByRole("button", { name: "Graph settings" }));
+    const spacing = screen.getByRole("combobox", { name: "Layout spacing" }) as HTMLSelectElement;
+    expect([...spacing.options].map((option) => [option.value, option.text])).toEqual([
+      ["1.5", "Compact · 75%"], ["2", "Default · 100%"],
+      ["3", "Airy · 150%"], ["4", "Wide · 200%"], ["6", "Extra wide · 300%"]
+    ]);
+    expect(spacing.value).toBe("2");
   });
 
   it("opens the shortcut guide with question mark", () => {
