@@ -306,6 +306,13 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
         .call_tool(CallToolRequestParams::new("graph_stats"))
         .await?;
     assert!(!call.content.is_empty());
+    let hubs = client
+        .call_tool(CallToolRequestParams::new("god_nodes"))
+        .await?;
+    assert!(!hubs.content.is_empty());
+    let structured = hubs.structured_content.ok_or("missing structured hubs")?;
+    assert_eq!(structured["result"]["schema"], "compass.mcp.hubs/1");
+    assert!(structured["result"]["nodes"].as_array().is_some());
     assert!(
         client
             .read_resource(ReadResourceRequestParams::new("compass://report"))

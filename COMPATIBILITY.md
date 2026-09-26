@@ -94,6 +94,21 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+### MCP hub identities
+
+MCP `god_nodes` adds `structuredContent` using the existing
+`compass.mcp.tool-result/1` envelope and the result schema
+`compass.mcp.hubs/1`. The ranked records preserve exact IDs, kinds, degrees,
+and available source anchors. Text and the `compass://god-nodes` resource add
+an ID/source/location line beneath each entry; string values are JSON-escaped
+so IDs remain recoverable without injecting extra lines. Missing anchors are
+null. Inputs, eligibility, degree calculation, and ranking are unchanged.
+Exact node lookup checks the original ID before the existing whitespace-trimmed
+fallback, preserving distinct legacy IDs that differ by surrounding whitespace.
+The non-transport `CompassMcp::invoke` compatibility helper still returns text
+for this tool. Machine consumers should use the structured projection rather
+than parse display labels. See [output contracts](docs/reference/outputs.md#mcp-hub-results).
+
 ### MCP community and neighbor lookup
 
 The disposable traversal cache now retains a labeled community's numeric ID

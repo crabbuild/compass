@@ -625,14 +625,109 @@ extraction or performance claim follows. Replay `mcp-paired-03` completes all
 `mcp-paired-02` for both tools. The separate Flask diagnostic is the evidence
 for the additional filter correction.
 
+### Hub identity and direct navigation
+
+The first hub responses omitted the exact IDs already retained by Compass's
+analysis layer. MCP now adds ID/source/location text and the versioned
+`compass.mcp.hubs/1` structured result inside its existing transport envelope.
+It preserves ranking and degree semantics. Labels are sanitized for display;
+exact IDs are JSON-escaped in text and retained unchanged in structured data.
+Missing source fields remain null. The public description now describes
+topology candidates rather than asserting that connectivity proves a core
+abstraction or design defect.
+
+A failed-before native regression covers duplicate labels, legacy source
+locations, typed anchors, and an ID containing quotes, a backslash, and a
+newline. Its follow-up also exposed lookup trimming an ID before checking exact
+identity. Exact lookup now precedes the existing trimmed fallback; a separate
+query-layer test verifies IDs distinguished by surrounding whitespace.
+The transport regression checks that clients receive structured hub results.
+
+`mcp-paired-04` repeats all 58 original RPCs. All previous graph-consistency
+checks remain passing for both tools. All 50 Compass hub IDs now resolve to
+unique graph nodes, with independently matching degrees and source anchors.
+Graphify's MCP result still provides label-only identity: 37/50 entries can be
+identified uniquely from their display labels. Its CLI JSON interface supplies
+IDs, so this is specifically a finding about these MCP responses. Neither
+count proves complete top-N eligibility, source precision, or design quality.
+
+Commit `7c554c2f` adds a separate development diagnostic before its follow-up
+requests: use each returned hub ID when available, otherwise the returned
+label, for exactly one `get_neighbors` request. The graph may be read by the
+oracle but never to substitute a request ID. Explicit ambiguity is safe and
+is not counted as completed direct navigation. The same full-enumeration
+bounds apply to both tools. Additional disambiguation steps and the alternative
+Graphify CLI workflow are outside this diagnostic.
+
+| Repository | Compass before IDs | Compass with IDs | Graphify in both runs |
+| --- | ---: | ---: | ---: |
+| Cobra | 2/10 | 10/10 | 7/10 |
+| Flask | 2/10 | 10/10 | 5/10 |
+| Gson | 0/10 | 10/10 | 7/10 |
+| Zod | 0/10 | 10/10 | 4/10 |
+| Axum | 0/10 | 10/10 | 5/10 |
+| Total | 4/50 | 50/50 | 28/50 |
+
+Runs `hub-navigation-02` and `hub-navigation-03` each capture all 100 follow-up
+RPCs without execution failures. The oracle checks seed identity, response
+headline, and the multiset of displayed direction/neighbor-label pairs after
+grouping by distinct neighbor. It does not validate individual neighbor IDs,
+all parallel relations, source occurrences, or source accuracy. Both products'
+broader name matching can be ambiguous even when a case-sensitive display
+label is unique. The initial `hub-navigation-01` attempt stopped before
+follow-up RPCs because the collector resolved Python's virtual-environment
+symlink, losing its package environment. Commit `e3652ae3` fixes that harness
+error; it is not counted as a product failure.
+
+The five hub responses plus 50 follow-ups total 593,962 text bytes / 626,338
+wire-response bytes for corrected Compass, versus 265,393 / 272,996 for
+Graphify. These totals include different completion counts and different
+returned hub sets, and are not an efficiency win. Initialization/setup
+transcripts are retained separately. A separate transcript integrity pass
+checks all 200 follow-up requests and responses against their recorded
+arguments, text, and byte counts. Timings remain unsuitable for speed claims.
+
+The frozen executable in `mcp-hubs-provenance` has SHA256
+`0c54260eb380c08c18a14c7044a1abce932ede56114d6a515223ab19e1b7be93`.
+Verification passes 1,198 native tests, zero failed, two ignored, including
+the broader `coverage_paths` suites and the new identity regressions.
+Workspace and `coverage_paths` Clippy pass with warnings denied. All 72 Python
+benchmark tests, formatting, diff checks, and product boundary pass. Full
+extraction fixture qualification remains the receiver checkpoint; this change
+adds query/MCP presentation and exact-ID lookup verification on retained graphs.
+
+### Source-role diagnostics from the returned hubs
+
+Two post-output reductions in `hub-source-diagnostics-01.json` retain pinned
+source excerpts, file and graph hashes, node records, and selected edges:
+
+- Compass's Zod `to-json-schema.test` module spans the test suite, not a
+  production object. Its distinct-pair degree is 789. Its 1,156 incident edge
+  records include 789 containment, 321 reference, and 46 call records, with
+  overlap between endpoint pairs. Containment-driven degree does not establish
+  excessive responsibility.
+- Graphify's Axum hubs `S` at `src/service_ext.rs:47` and `T` at
+  `src/handler/mod.rs:272` are generic implementation subjects. Their degrees
+  are 153 and 87, predominantly reference edges. Two reviewed edges target
+  the ServiceExt implementation's `S` from `Router<S>` and the separate
+  `Handler<..., S> for T` implementation. Each source declaration binds its
+  own `S`; those references do not identify the independently bound `S` in
+  `service_ext.rs`. This establishes two wrong reference targets, not that all
+  150 references to that hub are wrong or a representative precision rate.
+
+These diagnostics motivate role-aware explanations and independent edge
+review. They are not folded into the original graph-consistency scores, and
+do not establish that Compass already diagnoses god objects reliably.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
-2. Add unambiguous hub identities and source anchors, then expand hub review
-   to source-reviewed design judgments. Evaluate cluster responsibilities and
-   cross-community connections separately from graph consistency.
+2. Expand the now-identifiable hubs into source-reviewed role and design
+   judgments, including containment-dominated modules and generic reference
+   targets. Evaluate cluster responsibilities and cross-community connections
+   separately from graph consistency.
 3. Add independent edge/path judgments: ordered adjacent edges, relation kinds,
    traversal direction, source occurrences, ambiguity, unreachable nodes, and
    bound exhaustion. A negative or limit outcome must never count as a path.

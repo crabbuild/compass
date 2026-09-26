@@ -424,7 +424,10 @@ pub fn pick_seeds(
 
 #[must_use]
 pub fn find_node(graph: &Graph, label: &str) -> Vec<NodeIndex> {
-    if let Some(index) = graph.node_index(label.trim()) {
+    if let Some(index) = graph
+        .node_index(label)
+        .or_else(|| graph.node_index(label.trim()))
+    {
         return vec![index];
     }
     let term = search_tokens(label).join(" ");
@@ -703,6 +706,25 @@ mod tests {
         BestSeed, QueryScores, ScoredNode, TextRankProfile, pick_seeds, query_match_tier,
         score_nodes, score_nodes_with_profile, singleton_score,
     };
+
+    #[test]
+    fn exact_node_id_precedes_whitespace_normalization() -> Result<(), Box<dyn Error>> {
+        let graph = Graph::from_document(serde_json::from_value(json!({
+            "directed":true,
+            "nodes":[{"id":" A\n","label":"run"},{"id":"A","label":"run"}],
+            "links":[]
+        }))?)?;
+        for query in [" A\n", "A"] {
+            let matches = super::find_node(&graph, query);
+            assert_eq!(matches.len(), 1);
+            assert_eq!(graph.node(matches[0]).id, query);
+        }
+        let padded = super::find_node(&graph, " A ");
+        assert_eq!(padded.len(), 1);
+        assert_eq!(graph.node(padded[0]).id, "A");
+        assert_eq!(super::find_node(&graph, "run").len(), 2);
+        Ok(())
+    }
 
     fn seed(score: f64, degree: usize, label_len: usize, id: &str) -> BestSeed {
         BestSeed {

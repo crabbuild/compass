@@ -822,6 +822,45 @@ When exact automation is required, use:
 - diff JSON;
 - direct graph JSON.
 
+### MCP hub results
+
+MCP `god_nodes` returns human-readable text and a structured projection in
+`structuredContent.result`, inside `compass.mcp.tool-result/1`:
+
+```json
+{
+  "schema": "compass.mcp.hubs/1",
+  "ranking": "distinct-directed-endpoint-degree",
+  "interpretation": "topology-candidates",
+  "requested": 10,
+  "nodes": [{
+    "rank": 1,
+    "id": "exact-node-id",
+    "label": "dispatch()",
+    "degree": 12,
+    "kind": "method",
+    "sourceFile": "src/service.rs",
+    "sourceLocation": "L5",
+    "startLine": 5,
+    "endLine": null
+  }]
+}
+```
+
+Ranks are one-based. Degree counts distinct stored directed endpoint pairs;
+parallel occurrences collapse and a self-loop contributes two. Eligible hubs
+are ordered by descending degree, then exact ID. Eligibility remains the
+existing hub-analysis policy; file/concept/JSON-key nodes and isolates are
+excluded. This is a topology ranking, not a diagnosis of excessive
+responsibility. Review source responsibilities and relationship evidence
+before making a design judgment.
+
+Use `id` as the next `get_neighbors.label` input. Source fields are null when
+not present in the graph. A legacy textual location can exist without numeric
+line fields; the result preserves it without inventing a line number. The
+existing 16 MiB structured-response bound applies and fails explicitly rather
+than silently dropping entries. Consumers must check the schema version.
+
 ### Agent Query View
 
 The focused query commands and MCP query tools also expose the strict,

@@ -369,6 +369,10 @@ impl CompassMcp {
     pub fn invoke(&self, name: &str, mut arguments: Map<String, Value>) -> String {
         self.invoke_result(name, &mut arguments)
             .map(|result| {
+                // Keep this legacy text helper stable; MCP carries both projections.
+                if name == "god_nodes" {
+                    return result.text;
+                }
                 result
                     .structured_content
                     .map_or(result.text, |value| value.to_string())
@@ -580,6 +584,9 @@ impl CompassMcp {
         }
         if typed_query {
             return invoke_typed_tool(&self.store, name, arguments, &context.path, Some(&context));
+        }
+        if name == "god_nodes" {
+            return invoke_hub_tool(arguments, &context);
         }
         Ok(ToolInvocation {
             text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
@@ -1360,7 +1367,7 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "god_nodes",
-            "Return the most connected nodes - the core abstractions of the knowledge graph.",
+            "Return connected hub candidates with exact IDs, source anchors, and degree. Connectivity is a topology observation, not proof of excessive responsibility.",
             json!({"type":"object","properties":{"top_n":{"type":"integer","default":10}}}),
         ),
         tool(
@@ -2331,16 +2338,59 @@ fn tool_god_nodes(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
+    invoke_hub_tool(arguments, context)
+        .map(|result| result.text)
+        .map_err(|error| error.to_string())
+}
+
+fn invoke_hub_tool(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
     let top_n =
         usize::try_from(integer_argument(arguments, "top_n", 10).max(0)).unwrap_or_default();
-    let nodes = god_nodes(&context.document()?, top_n);
+    let document = context.document()?;
+    let nodes = god_nodes(&document, top_n);
+    let records = document
+        .nodes
+        .iter()
+        .map(|node| (node.id.as_str(), node))
+        .collect::<BTreeMap<_, _>>();
     let mut lines = vec!["God nodes (most connected):".to_owned()];
-    lines.extend(
-        nodes.iter().enumerate().map(|(index, node)| {
-            format!("  {}. {} - {} edges", index + 1, node.label, node.degree)
-        }),
-    );
-    Ok(lines.join("\n"))
+    let mut identities = Vec::with_capacity(nodes.len());
+    for (index, node) in nodes.iter().enumerate() {
+        let record = records.get(node.id.as_str()).ok_or_else(|| {
+            InvocationError::Internal("hub identity is absent from the selected graph".to_owned())
+        })?;
+        let location = record.string("source_location");
+        let source_location = (!location.is_empty()).then_some(location.as_str());
+        lines.push(format!(
+            "  {}. {} - {} edges",
+            index + 1,
+            sanitize_label(&node.label),
+            node.degree
+        ));
+        lines.push(format!(
+            "    id: {} | source: {} | location: {}",
+            json!(node.id),
+            json!(record.source_file()),
+            json!(source_location)
+        ));
+        identities.push(json!({
+            "rank":index + 1, "id":node.id, "label":node.label, "degree":node.degree,
+            "kind":record.kind_name(), "sourceFile":record.source_file(),
+            "sourceLocation":source_location, "startLine":record.unsigned("line_start"),
+            "endLine":record.unsigned("line_end")
+        }));
+    }
+    let structured = transport_envelope(json!({
+        "schema":"compass.mcp.hubs/1", "ranking":"distinct-directed-endpoint-degree",
+        "interpretation":"topology-candidates", "requested":top_n, "nodes":identities
+    }))?;
+    Ok(ToolInvocation {
+        text: lines.join("\n"),
+        structured_content: Some(structured),
+    })
 }
 
 fn tool_graph_stats(context: &GraphContext) -> String {
@@ -2885,6 +2935,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hub_results_preserve_exact_identity_and_source_anchors()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        let unusual_id = "A\"\\\n";
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,
+                "nodes":[
+                    {"id":unusual_id,"name":"run()","kind":"function",
+                        "source":{"file":"src/a.rs","startLine":7,"endLine":9}},
+                    {"id":"b","name":"run()","kind":"function",
+                        "source":{"file":"src/b.rs","startLine":12}},
+                    {"id":"legacy","label":"Legacy","source_file":"legacy.rs",
+                        "source_location":"L20"}
+                ],
+                "links":[{"source":unusual_id,"target":"b","kind":"calls"},
+                    {"source":"legacy","target":"b","relation":"calls"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        let output = server
+            .invoke_result("god_nodes", &mut Map::new())
+            .map_err(|error| error.to_string())?;
+        let content = output
+            .structured_content
+            .ok_or("missing structured hub identities")?;
+        assert_eq!(content["schema"], MCP_TOOL_RESULT_SCHEMA);
+        assert_eq!(content["transportTruncation"]["truncated"], false);
+        assert_eq!(content["result"]["schema"], "compass.mcp.hubs/1");
+        let nodes = content["result"]["nodes"]
+            .as_array()
+            .ok_or("missing hub nodes")?;
+        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes[0]["id"], "b");
+        assert_eq!(nodes[0]["degree"], 2);
+        let unusual = nodes
+            .iter()
+            .find(|node| node["id"] == unusual_id)
+            .ok_or("lost exact ID")?;
+        assert_eq!(unusual["sourceFile"], "src/a.rs");
+        assert_eq!(unusual["startLine"], 7);
+        assert_eq!(unusual["endLine"], 9);
+        let legacy = nodes
+            .iter()
+            .find(|node| node["id"] == "legacy")
+            .ok_or("lost legacy hub")?;
+        assert_eq!(legacy["sourceLocation"], "L20");
+        assert_eq!(legacy["startLine"], Value::Null);
+        assert!(output.text.contains(&format!("id: {}", json!(unusual_id))));
+        assert!(!output.text.contains(unusual_id));
+        for node in nodes {
+            let id = node["id"].as_str().ok_or("ID not a string")?;
+            let neighbors = server.invoke(
+                "get_neighbors",
+                Map::from_iter([("label".into(), json!(id))]),
+            );
+            assert!(neighbors.starts_with("Neighbors of "), "{neighbors}");
+        }
+        Ok(())
+    }
+
+    #[test]
     fn mcp_neighbor_filter_precedes_neighbor_grouping() -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
         for reverse in [false, true] {
@@ -3326,12 +3440,12 @@ mod tests {
         let server = CompassMcp::new(&graph);
         assert_eq!(
             server.invoke("god_nodes", Map::new()),
-            "God nodes (most connected):\n  1. Counter - 1 edges\n  2. Path - 1 edges"
+            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null\n  2. Path - 1 edges\n    id: \"z\" | source: \"src/path.rs\" | location: null"
         );
         let arguments = Map::from_iter([("top_n".to_owned(), json!(1))]);
         assert_eq!(
             server.invoke("god_nodes", arguments),
-            "God nodes (most connected):\n  1. Counter - 1 edges"
+            "God nodes (most connected):\n  1. Counter - 1 edges\n    id: \"a\" | source: \"src/counter.rs\" | location: null"
         );
         Ok(())
     }
@@ -3357,7 +3471,7 @@ mod tests {
         let server = CompassMcp::new(&graph);
         assert_eq!(
             server.invoke("god_nodes", Map::new()),
-            "God nodes (most connected):\n  1. .dispatch() - 1 edges"
+            "God nodes (most connected):\n  1. .dispatch() - 1 edges\n    id: \"method\" | source: \"src/service.rs\" | location: \"L5\""
         );
         Ok(())
     }
@@ -3383,7 +3497,7 @@ mod tests {
         let server = CompassMcp::new(&graph);
         assert_eq!(
             server.invoke("god_nodes", Map::new()),
-            "God nodes (most connected):\n  1. helper() - 1 edges\n  2. prepare() - 1 edges"
+            "God nodes (most connected):\n  1. helper() - 1 edges\n    id: \"helper\" | source: \"src/support.sh\" | location: \"L1\"\n  2. prepare() - 1 edges\n    id: \"prepare\" | source: \"bin/launch\" | location: \"L2\""
         );
         Ok(())
     }

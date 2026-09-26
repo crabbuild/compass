@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Include exact node IDs and source locations in MCP hub results, with a
+  versioned structured projection for follow-up navigation. Describe hubs as
+  topology candidates rather than established design defects.
+
 - Preserve community IDs alongside labels in traversal caches, restoring MCP
   community membership and statistics on typed graphs. Older disposable
   traversal caches rebuild automatically.
