@@ -1,5 +1,7 @@
 import {
   ArrowLeftIcon,
+  ArrowRightIcon,
+  ChevronDownIcon,
   FocusIcon,
   KeyboardIcon,
   MapIcon,
@@ -14,7 +16,8 @@ import {
   ZoomInIcon,
   ZoomOutIcon
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { GraphEdgeDirection } from "./neighborhood";
 import type { GraphLayoutStyle } from "./renderingProfile";
 import type { GraphLayoutSpacing } from "./state";
@@ -106,6 +109,9 @@ export function GraphToolbar({
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const explorationId = useId();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const hasSettings = canvasControls || Boolean(themeControls);
+  const settingsPanelRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
   const restoreSettingsFocusRef = useRef(false);
@@ -119,7 +125,7 @@ export function GraphToolbar({
   }, [settingsOpen]);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!canvasControls) return;
+      if (!hasSettings) return;
       if (event.key === "Escape") {
         if (settingsOpen) {
           restoreSettingsFocusRef.current = true;
@@ -131,9 +137,11 @@ export function GraphToolbar({
       event.preventDefault();
       onLeadingPanelClose?.();
       setSettingsOpen(true);
+      setShortcutsOpen(true);
     };
     const handlePointerDown = (event: PointerEvent) => {
       if (panelRef.current?.contains(event.target as Node)) return;
+      if (settingsPanelRef.current?.contains(event.target as Node)) return;
       setSettingsOpen(false);
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -142,7 +150,33 @@ export function GraphToolbar({
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [canvasControls, onLeadingPanelClose, settingsOpen]);
+  }, [hasSettings, onLeadingPanelClose, settingsOpen]);
+
+  useLayoutEffect(() => {
+    if (!settingsOpen) return;
+    const placePanel = () => {
+      const button = settingsButtonRef.current;
+      const panel = settingsPanelRef.current;
+      if (!button || !panel) return;
+      const anchor = button.getBoundingClientRect();
+      const width = Math.min(330, window.innerWidth - 24);
+      const top = Math.min(anchor.bottom + 8, window.innerHeight - 24);
+      panel.style.width = `${width}px`;
+      panel.style.left = `${Math.max(12, Math.min(anchor.right - width, window.innerWidth - width - 12))}px`;
+      panel.style.top = `${top}px`;
+      panel.style.maxHeight = `${Math.max(0, window.innerHeight - top - 12)}px`;
+    };
+    placePanel();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(placePanel);
+    if (panelRef.current) observer?.observe(panelRef.current);
+    window.addEventListener("resize", placePanel);
+    document.addEventListener("scroll", placePanel, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", placePanel);
+      document.removeEventListener("scroll", placePanel, true);
+    };
+  }, [settingsOpen]);
 
   return (
     <div
@@ -181,7 +215,6 @@ export function GraphToolbar({
           <span className="compass-toolbar-separator" aria-hidden="true" />
         ) : null}
         {variantControls}
-        {themeControls}
         {canvasControls ? (
           <>
         <div className="compass-toolbar-group" role="group" aria-label="Graph arrangement">
@@ -254,6 +287,10 @@ export function GraphToolbar({
         >
           <Maximize2Icon />
         </button>
+        </div>
+          </>
+        ) : null}
+        {hasSettings ? (
         <button
           ref={settingsButtonRef}
           className="compass-tool-button compass-tool-icon-button"
@@ -270,13 +307,12 @@ export function GraphToolbar({
         >
           <SettingsIcon />
         </button>
-        </div>
-          </>
         ) : null}
       </div>
       {leadingPanel}
-      {settingsOpen && canvasControls ? (
+      {settingsOpen && hasSettings ? createPortal(
         <div
+          ref={settingsPanelRef}
           id={explorationId}
           className="compass-explore-panel compass-glass-panel"
           role="region"
@@ -285,13 +321,106 @@ export function GraphToolbar({
           <div className="compass-explore-heading">
             <div>
               <strong>Graph settings</strong>
-              <span>{hasSelection
-                ? "Tune the selected neighborhood and canvas"
-                : "Set the next neighborhood, then select a node"}</span>
+              <span>Customize the view and explore connections</span>
             </div>
             <kbd>?</kbd>
           </div>
 
+          <section className="compass-settings-section" aria-label="Appearance">
+            <h3>Appearance</h3>
+            {themeControls ? (
+              <div className="compass-settings-theme">
+                <span>Theme</span>
+                {themeControls}
+              </div>
+            ) : null}
+            {canvasControls ? (<>
+          <button
+            className="compass-explore-toggle"
+            type="button"
+            aria-label={forceLabels ? "Hide labels" : "Show labels"}
+            aria-pressed={forceLabels}
+            onClick={onToggleLabels}
+          >
+            <TagsIcon aria-hidden="true" />
+            <span>
+              <strong>Show node labels</strong>
+              <small>Label every symbol, not only the ranked set</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+          <button
+            className="compass-explore-toggle"
+            type="button"
+            aria-label={showEdgeLabels
+              ? "Hide relationship labels"
+              : "Show relationship labels"}
+            aria-pressed={showEdgeLabels}
+            onClick={onToggleEdgeLabels}
+          >
+            <RouteIcon aria-hidden="true" />
+            <span>
+              <strong>Show relationship labels</strong>
+              <small>Print the relationship kind on every edge</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+            </>) : null}
+          </section>
+          {canvasControls ? (<>
+          <section className="compass-settings-section" aria-label="Layout and view">
+            <h3>Layout &amp; view</h3>
+          <label className="compass-explore-select">
+            <span>Layout spacing</span>
+            <select
+              aria-label="Layout spacing"
+              value={layoutSpacing}
+              onChange={(event) => onLayoutSpacingChange(
+                Number(event.target.value) as GraphLayoutSpacing
+              )}
+            >
+              <option value={2.25}>Compact · 75%</option>
+              <option value={3}>Default · 100%</option>
+              <option value={4.5}>Airy · 150%</option>
+              <option value={6}>Wide · 200%</option>
+              <option value={9}>Extra wide · 300%</option>
+            </select>
+          </label>
+
+          <button
+            className="compass-explore-toggle"
+            type="button"
+            aria-label="Show minimap"
+            aria-pressed={showMinimap}
+            onClick={onToggleMinimap}
+          >
+            <MapIcon aria-hidden="true" />
+            <span>
+              <strong>Show minimap</strong>
+              <small>Track and reposition the visible viewport</small>
+            </span>
+            <i aria-hidden="true" />
+          </button>
+
+          <button
+            className="compass-explore-toggle compass-explore-action"
+            type="button"
+            aria-label="Reset graph view"
+            onClick={onReset}
+          >
+            <RotateCcwIcon aria-hidden="true" />
+            <span>
+              <strong>Reset graph view</strong>
+              <small>Return to the opening camera and clear selection</small>
+            </span>
+            <ArrowRightIcon aria-hidden="true" />
+          </button>
+
+          </section>
+          <section className="compass-settings-section" aria-label="Selection and neighborhood">
+            <h3>Selection &amp; neighborhood</h3>
           {!hasSelection ? (
             <div className="compass-selection-prompt" role="note">
               <ScanSearchIcon aria-hidden="true" />
@@ -356,28 +485,10 @@ export function GraphToolbar({
             </div>
           </fieldset>
 
-          <label className="compass-explore-select">
-            <span>Layout spacing</span>
-            <select
-              aria-label="Layout spacing"
-              value={layoutSpacing}
-              onChange={(event) => onLayoutSpacingChange(
-                Number(event.target.value) as GraphLayoutSpacing
-              )}
-            >
-              <option value={1.5}>Compact · 75%</option>
-              <option value={2}>Default · 100%</option>
-              <option value={3}>Airy · 150%</option>
-              <option value={4}>Wide · 200%</option>
-              <option value={6}>Extra wide · 300%</option>
-            </select>
-          </label>
-
           <button
-            className="compass-explore-toggle"
+            className="compass-explore-toggle compass-explore-action"
             type="button"
             aria-label="Fit selected neighborhood"
-            aria-pressed={false}
             title={hasSelection
               ? `Fit the selected node and its ${neighborhoodDepth}-hop neighborhood`
               : "Select a node to fit its neighborhood"}
@@ -389,76 +500,16 @@ export function GraphToolbar({
               <strong>Fit selection</strong>
               <small>Zoom to the selected node and its neighborhood</small>
             </span>
-            <i aria-hidden="true" />
+            <ArrowRightIcon aria-hidden="true" />
           </button>
 
-          <button
-            className="compass-explore-toggle"
-            type="button"
-            aria-label="Reset graph view"
-            aria-pressed={false}
-            onClick={onReset}
-          >
-            <RotateCcwIcon aria-hidden="true" />
-            <span>
-              <strong>Reset graph view</strong>
-              <small>Return to the opening camera and clear selection</small>
-            </span>
-            <i aria-hidden="true" />
-          </button>
-
-          <button
-            className="compass-explore-toggle"
-            type="button"
-            aria-label="Show minimap"
-            aria-pressed={showMinimap}
-            onClick={onToggleMinimap}
-          >
-            <MapIcon aria-hidden="true" />
-            <span>
-              <strong>Show minimap</strong>
-              <small>Track and reposition the visible viewport</small>
-            </span>
-            <i aria-hidden="true" />
-          </button>
-
-          <button
-            className="compass-explore-toggle"
-            type="button"
-            aria-label={forceLabels ? "Hide labels" : "Show labels"}
-            aria-pressed={forceLabels}
-            onClick={onToggleLabels}
-          >
-            <TagsIcon aria-hidden="true" />
-            <span>
-              <strong>Show node labels</strong>
-              <small>Label every symbol, not only the ranked set</small>
-            </span>
-            <i aria-hidden="true" />
-          </button>
-
-          <button
-            className="compass-explore-toggle"
-            type="button"
-            aria-label={showEdgeLabels
-              ? "Hide relationship labels"
-              : "Show relationship labels"}
-            aria-pressed={showEdgeLabels}
-            onClick={onToggleEdgeLabels}
-          >
-            <RouteIcon aria-hidden="true" />
-            <span>
-              <strong>Show relationship labels</strong>
-              <small>Print the relationship kind on every edge</small>
-            </span>
-            <i aria-hidden="true" />
-          </button>
-
-          <div className="compass-shortcut-guide" aria-label="Graph keyboard shortcuts">
-            <div className="compass-shortcut-title">
+          </section>
+          <details className="compass-shortcut-guide" aria-label="Graph keyboard shortcuts" open={shortcutsOpen} onToggle={(event) => setShortcutsOpen(event.currentTarget.open)}>
+            <summary className="compass-shortcut-title">
               <KeyboardIcon aria-hidden="true" />
-              <strong>Keyboard</strong>
-            </div>
+              <strong>Keyboard shortcuts</strong>
+              <ChevronDownIcon aria-hidden="true" />
+            </summary>
             <dl>
               <div><dt><kbd>F</kbd></dt><dd>Fit graph</dd></div>
               <div><dt><kbd>⇧ F</kbd></dt><dd>Fit selection</dd></div>
@@ -474,8 +525,9 @@ export function GraphToolbar({
                 <div><dt><kbd>Esc</kbd></dt><dd>Back to overview</dd></div>
               ) : null}
             </dl>
-          </div>
-        </div>
+          </details>
+          </>) : null}
+        </div>, document.body
       ) : null}
     </div>
   );

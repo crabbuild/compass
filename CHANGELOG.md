@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Move theme selection into Graph settings, grouped with appearance controls.
+  Separate layout and selection settings, collapse keyboard shortcuts, and keep
+  theme settings available in every community overview design.
 - Resolve `compass path` file endpoints through unique source-backed modules
   when a graph publishes no standalone file nodes. Workspace import paths can
   now connect the same modules found by `search` and `callers`; ambiguous source
@@ -20,7 +23,7 @@
 - Theme the layout picker and its options consistently in light and dark mode,
   with a matching icon for each layout and keyboard-accessible selection.
 - Use the Compass app brand mark in the HTML viewer's navigation rail.
-- Double the HTML viewer's spacing baseline with five presets labelled 75%,
+- Triple the HTML viewer's original spacing baseline with five presets labelled 75%,
   100%, 150%, 200%, and 300%. Place Overview before Filters, anchor the filter
   panel below its button, and wrap toolbar controls using the full header width.
   Keep toolbar icons at 16px and adapt compact controls to their host width.

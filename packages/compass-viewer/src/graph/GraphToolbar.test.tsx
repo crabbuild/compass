@@ -32,7 +32,7 @@ function renderToolbar(overrides: Partial<Parameters<typeof GraphToolbar>[0]> = 
     isolateSelection={false}
     neighborhoodDepth={1}
     edgeDirection="both"
-    layoutSpacing={2}
+    layoutSpacing={3}
     showMinimap={true}
     {...callbacks}
     {...overrides}
@@ -104,14 +104,14 @@ describe("GraphToolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "2 hops" }));
     fireEvent.click(screen.getByRole("button", { name: "Outgoing edges" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Layout spacing" }), {
-      target: { value: "3" }
+      target: { value: "4.5" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Show minimap" }));
 
     expect(callbacks.onToggleIsolation).toHaveBeenCalledOnce();
     expect(callbacks.onNeighborhoodDepthChange).toHaveBeenCalledWith(2);
     expect(callbacks.onEdgeDirectionChange).toHaveBeenCalledWith("outgoing");
-    expect(callbacks.onLayoutSpacingChange).toHaveBeenCalledWith(3);
+    expect(callbacks.onLayoutSpacingChange).toHaveBeenCalledWith(4.5);
     expect(callbacks.onToggleMinimap).toHaveBeenCalledOnce();
   });
 
@@ -166,10 +166,10 @@ describe("GraphToolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Graph settings" }));
     const spacing = screen.getByRole("combobox", { name: "Layout spacing" }) as HTMLSelectElement;
     expect([...spacing.options].map((option) => [option.value, option.text])).toEqual([
-      ["1.5", "Compact · 75%"], ["2", "Default · 100%"],
-      ["3", "Airy · 150%"], ["4", "Wide · 200%"], ["6", "Extra wide · 300%"]
+      ["2.25", "Compact · 75%"], ["3", "Default · 100%"],
+      ["4.5", "Airy · 150%"], ["6", "Wide · 200%"], ["9", "Extra wide · 300%"]
     ]);
-    expect(spacing.value).toBe("2");
+    expect(spacing.value).toBe("3");
   });
 
   it("opens the shortcut guide with question mark", () => {

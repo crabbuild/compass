@@ -33,7 +33,7 @@ import {
 import { blendColor, isDarkColor } from "../lib/color";
 import { cssColor, useThemeRevision } from "../lib/theme";
 import type { GraphChangeType } from "./state";
-import type { GraphLayoutSpacing } from "./state";
+import { DEFAULT_GRAPH_LAYOUT_SPACING, type GraphLayoutSpacing } from "./state";
 import {
   GraphMinimap,
   type GraphMinimapSnapshot
@@ -523,7 +523,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     showEdgeLabels = false,
     isolatedNodeIds,
     isolatedEdgeIds,
-    layoutSpacing = 2,
+    layoutSpacing = DEFAULT_GRAPH_LAYOUT_SPACING,
     showMinimap = false,
     semanticDetail = false,
     communityImportance,
@@ -768,7 +768,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       [comparisonMode, model.nodes]
     );
     const fixedLayoutSpacing = layoutStyle === "automatic" && renderingProfile !== "static"
-      ? 2
+      ? DEFAULT_GRAPH_LAYOUT_SPACING
       : layoutSpacing;
     const selectedLayoutPositions = useMemo(
       () => layoutStyle === "automatic"
