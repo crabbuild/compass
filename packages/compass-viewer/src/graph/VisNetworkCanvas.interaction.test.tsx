@@ -258,6 +258,10 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     />);
     expect(mock.dataSets[0]?.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y)))
       .toBe(true);
+    // Canvas arrow bindings must not consume keyboard input in toolbar menus.
+    expect(mock.networkOptions.at(-1)).toMatchObject({
+      interaction: { keyboard: { enabled: true, bindToWindow: false, autoFocus: false } }
+    });
     expect(mock.dataSets[1]).toMatchObject([
       { id: "exact", width: 1, dashes: false },
       { id: "ambiguous", width: 1, dashes: [3, 4] },

@@ -371,6 +371,7 @@ function FilteredGraph({
   const filterPanelId = useId();
   const filterButtonRef = useRef<HTMLButtonElement>(null);
   const filterPanelRef = useRef<HTMLDivElement>(null);
+  const restoreFilterFocusRef = useRef(false);
   const embeddedDetailModel = communityId === undefined
     ? undefined
     : communityDetails?.[String(communityId)];
@@ -397,11 +398,16 @@ function FilteredGraph({
     setFiltersOpen(false);
   }, [activeGraphKey]);
   useEffect(() => {
+    if (filtersOpen || !restoreFilterFocusRef.current) return;
+    restoreFilterFocusRef.current = false;
+    filterButtonRef.current?.focus();
+  }, [filtersOpen]);
+  useEffect(() => {
     if (!filtersOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      restoreFilterFocusRef.current = true;
       setFiltersOpen(false);
-      filterButtonRef.current?.focus();
     };
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;

@@ -195,7 +195,7 @@ const defaultOptions: Options = {
     tooltipDelay: 100,
     hideEdgesOnDrag: true,
     navigationButtons: false,
-    keyboard: { enabled: true }
+    keyboard: { enabled: true, bindToWindow: false, autoFocus: false }
   },
   layout: { improvedLayout: false, randomSeed: 17 },
   nodes: {
@@ -234,7 +234,7 @@ const communityOverviewOptions: Options = {
     tooltipDelay: 100,
     hideEdgesOnDrag: true,
     navigationButtons: false,
-    keyboard: { enabled: true }
+    keyboard: { enabled: true, bindToWindow: false, autoFocus: false }
   },
   layout: {
     improvedLayout: false,
@@ -275,7 +275,7 @@ const comparisonOptions: Options = {
     tooltipDelay: 100,
     hideEdgesOnDrag: true,
     navigationButtons: false,
-    keyboard: { enabled: true }
+    keyboard: { enabled: true, bindToWindow: false, autoFocus: false }
   },
   layout: {
     improvedLayout: true,
@@ -318,7 +318,7 @@ const staticOptions: Options = {
     hoverConnectedEdges: false,
     selectConnectedEdges: false,
     navigationButtons: false,
-    keyboard: { enabled: true }
+    keyboard: { enabled: true, bindToWindow: false, autoFocus: false }
   },
   layout: {
     improvedLayout: false,

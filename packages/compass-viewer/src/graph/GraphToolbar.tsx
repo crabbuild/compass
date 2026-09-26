@@ -2,7 +2,6 @@ import {
   ArrowLeftIcon,
   FocusIcon,
   KeyboardIcon,
-  LayoutGridIcon,
   MapIcon,
   Maximize2Icon,
   PauseIcon,
@@ -19,6 +18,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { GraphEdgeDirection } from "./neighborhood";
 import type { GraphLayoutStyle } from "./renderingProfile";
 import type { GraphLayoutSpacing } from "./state";
+import { GraphLayoutPicker } from "./GraphLayoutPicker";
 
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLElement
@@ -185,21 +185,14 @@ export function GraphToolbar({
         {canvasControls ? (
           <>
         <div className="compass-toolbar-group" role="group" aria-label="Graph arrangement">
-        <label className="compass-layout-picker">
-          <LayoutGridIcon aria-hidden="true" />
-          <span className="sr-only">Graph layout</span>
-          <select
-            aria-label="Graph layout"
-            value={layoutStyle}
-            onChange={(event) => onLayoutChange(event.target.value as GraphLayoutStyle)}
-          >
-            <option value="automatic">Automatic</option>
-            <option value="circle">Circle</option>
-            <option value="concentric">Concentric</option>
-            <option value="spiral">Spiral</option>
-            <option value="grid">Square grid</option>
-          </select>
-        </label>
+        <GraphLayoutPicker
+          value={layoutStyle}
+          onChange={onLayoutChange}
+          onOpen={() => {
+            setSettingsOpen(false);
+            onLeadingPanelClose?.();
+          }}
+        />
         <button
           className="compass-tool-button compass-physics-button"
           type="button"

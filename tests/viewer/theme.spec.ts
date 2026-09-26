@@ -212,6 +212,62 @@ test("a standalone export pins light or dark on request", async ({ page }) => {
   await expect(page.locator("html")).not.toHaveAttribute("data-compass-theme", /.+/);
 });
 
+for (const preference of ["Light", "Dark"] as const) {
+  test(`layout menu follows the ${preference} override and shows layout icons`, async ({ page }) => {
+    // Force the opposite OS palette to reproduce the native popup mismatch.
+    await page.emulateMedia({ colorScheme: preference === "Dark" ? "light" : "dark" });
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto("/exportCommunity.html");
+    await page.getByRole("group", { name: "Colour theme" })
+      .getByRole("button", { name: preference, exact: true }).click();
+    const trigger = page.getByRole("combobox", { name: "Graph layout", exact: true });
+    await trigger.click();
+    const menu = page.getByRole("listbox", { name: "Graph layout" });
+    await expect(menu).toBeVisible();
+    const palette = await menu.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const luminance = (color: string) => {
+        const [r, g, b] = color.match(/[\d.]+/g)!.slice(0, 3).map((value) => {
+          const channel = Number(value) / 255;
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+      };
+      const background = luminance(style.backgroundColor);
+      const foreground = luminance(style.color);
+      const rect = element.getBoundingClientRect();
+      return { background, contrast: (Math.max(background, foreground) + 0.05)
+        / (Math.min(background, foreground) + 0.05),
+      contained: rect.left >= 0 && rect.right <= window.innerWidth && rect.bottom <= window.innerHeight };
+    });
+    expect(palette.contrast).toBeGreaterThanOrEqual(4.5);
+    expect(palette.background < 0.1).toBe(preference === "Dark");
+    expect(palette.contained).toBe(true);
+    for (const [label, icon] of [
+      ["Automatic", "network"], ["Circle", "circle"], ["Concentric", "target"],
+      ["Spiral", "shell"], ["Square grid", "grid-2x2"]
+    ]) {
+      await expect(menu.getByRole("option", { name: label, exact: true })
+        .locator(`svg.lucide-${icon}`)).toBeVisible();
+    }
+    await expect(menu.getByRole("option", { name: "Automatic", exact: true })
+      .locator(".lucide-check")).toBeVisible();
+    await page.keyboard.press("End");
+    await expect(menu.getByRole("option", { name: "Square grid", exact: true })).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(trigger).toContainText("Square grid");
+    await expect(trigger.locator(".lucide-grid-2x2")).toBeVisible();
+    await expect(trigger).toBeFocused();
+    await expect(menu).toHaveCount(0);
+    await trigger.press("ArrowDown");
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await expect(trigger).toContainText("Square grid");
+  });
+}
+
 test("narrow Architecture, Ask Codebase, and Evolution views preserve core actions", async ({
   page
 }) => {

@@ -161,6 +161,9 @@ body.vscode-high-contrast {
   --card: var(--vscode-sideBar-background, #ffffff);
   --card-foreground: var(--vscode-sideBar-foreground, #0e1319);
   --popover: var(--vscode-menu-background, #ffffff);
+  --popover-foreground: var(--vscode-menu-foreground, #0e1319);
+  --accent: var(--vscode-list-activeSelectionBackground, #e2eafd);
+  --accent-foreground: var(--vscode-list-activeSelectionForeground, #0e1319);
   --muted: var(--vscode-list-inactiveSelectionBackground, #f0f2f5);
   --muted-foreground: var(--vscode-descriptionForeground, #56616d);
   --border: var(--vscode-panel-border, #e2e6eb);
@@ -186,6 +189,9 @@ body.vscode-high-contrast {
   --card: var(--vscode-sideBar-background, #0e1014);
   --card-foreground: var(--vscode-sideBar-foreground, #e6eaf0);
   --popover: var(--vscode-menu-background, #121419);
+  --popover-foreground: var(--vscode-menu-foreground, #e6eaf0);
+  --accent: var(--vscode-list-activeSelectionBackground, #264f78);
+  --accent-foreground: var(--vscode-list-activeSelectionForeground, #ffffff);
   --muted: var(--vscode-list-inactiveSelectionBackground, #15181d);
   --muted-foreground: var(--vscode-descriptionForeground, #97a2af);
   --border: var(--vscode-panel-border, #20242b);
@@ -2112,35 +2118,79 @@ button:not(:disabled),
 
 .compass-layout-picker {
   display: inline-flex;
+  box-sizing: border-box;
+  min-width: 158px;
   min-height: 30px;
   align-items: center;
   gap: 6px;
-  padding-left: 8px;
+  padding: 0 8px;
   border: 1px solid var(--compass-line);
   border-radius: 3px;
-  color: var(--muted-foreground);
-  background: var(--vscode-dropdown-background, transparent);
-}
-
-.compass-layout-picker svg {
-  width: 15px;
-  height: 15px;
-  flex: 0 0 auto;
-}
-
-.compass-layout-picker select {
-  min-height: 28px;
-  padding: 0 24px 0 0;
-  border: 0;
-  outline: 0;
   color: var(--vscode-dropdown-foreground, var(--foreground));
-  background: transparent;
+  background: var(--vscode-dropdown-background, transparent);
   font: inherit;
+}
+
+.compass-layout-picker > span:first-of-type {
+  flex: 1;
+  text-align: left;
+}
+
+.compass-layout-picker svg,
+.compass-layout-menu svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 
 .compass-layout-picker:focus-within {
   outline: 1px solid var(--vscode-focusBorder, var(--compass-focus));
   outline-offset: 1px;
+}
+
+.compass-layout-menu {
+  z-index: 50;
+  box-sizing: border-box;
+  min-width: var(--radix-select-trigger-width);
+  max-width: calc(100vw - 24px);
+  max-height: var(--radix-select-content-available-height);
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--vscode-contrastBorder, var(--compass-line));
+  border-radius: 5px;
+  background: var(--vscode-menu-background, var(--popover));
+  color: var(--vscode-menu-foreground, var(--popover-foreground));
+  box-shadow: 0 6px 20px #0003;
+  font: 13px/1.4 var(--compass-font-sans);
+}
+
+.compass-layout-option {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.compass-layout-option[data-highlighted] {
+  outline: 1px solid var(--vscode-focusBorder, var(--compass-focus));
+  outline-offset: -1px;
+  background: var(--vscode-menu-selectionBackground, var(--accent));
+  color: var(--vscode-menu-selectionForeground, var(--accent-foreground));
+}
+
+.compass-layout-check {
+  display: flex;
+  margin-left: auto;
+}
+
+.compass-layout-menu-scroll {
+  display: flex;
+  justify-content: center;
+  padding: 4px;
 }
 
 /* Community overview ⇄ symbol canvas scope switch on the graph toolbar. */

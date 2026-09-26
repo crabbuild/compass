@@ -103,6 +103,7 @@ for (const width of [1440, 768, 390]) {
     await page.keyboard.press("Escape");
     await expect(panel).toHaveCount(0);
     await expect(trigger).toBeFocused();
+    await expect(back).toBeVisible();
   });
 }
 

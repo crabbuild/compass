@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Theme the layout picker and its options consistently in light and dark mode,
+  with a matching icon for each layout and keyboard-accessible selection.
 - Use the Compass app brand mark in the HTML viewer's navigation rail.
 - Double the HTML viewer's spacing baseline with five presets labelled 75%,
   100%, 150%, 200%, and 300%. Place Overview before Filters, anchor the filter

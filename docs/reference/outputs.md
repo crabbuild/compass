@@ -672,6 +672,9 @@ width, including embedded panes on wide screens; toolbar icons stay at 16px
 rather than shrinking to fit button padding.
 Connections use thinner strokes while preserving evidence dashes and relative
 aggregate weights.
+The layout picker follows the active light, dark, or editor theme. Each option
+has its own icon, which also appears beside the selected layout; arrow keys
+navigate the menu, Enter selects, and Escape closes it.
 
 **Automatic** layout arranges itself when a view opens: the canvas starts from
 its deterministic seeded map, runs the force simulation until it settles, and
