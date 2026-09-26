@@ -23,6 +23,7 @@ from benchmarks.agent_query.runner import (
     graph_metrics,
     judge,
     load_suite,
+    render_report,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +51,38 @@ def question(**overrides) -> Question:
 
 
 class SuiteTests(unittest.TestCase):
+    def test_fd_source_first_inputs_remain_distinct_and_pinned(self) -> None:
+        suite = load_suite(ROOT / "suite_fd.toml")
+        self.assertEqual(len(suite.repositories), 1)
+        repository = suite.repository("fd")
+        self.assertEqual(len(repository.questions), 12)
+        self.assertEqual(len(repository.anchors), 5)
+        manifest = json.loads((ROOT / "edge_witnesses_fd.json").read_text())
+        self.assertEqual(manifest["schema"], "compass.agent-edge-witnesses/1")
+        self.assertEqual(manifest["repository"], repository.name)
+        self.assertEqual(manifest["commit"], repository.commit)
+        witnesses = manifest["witnesses"]
+        self.assertEqual(len({row["id"] for row in witnesses}), 12)
+        self.assertEqual(sum(row["expected"] == "present" for row in witnesses), 10)
+        self.assertEqual(sum(len(row["occurrences"]) for row in witnesses), 16)
+        for row in witnesses:
+            self.assertEqual(bool(row["occurrences"]), row["expected"] == "present")
+            self.assertTrue(row["judgment"])
+        for question in repository.questions:
+            self.assertNotIn("--brief", question.compass)
+            if question.kind in {"path", "file_path"}:
+                self.assertIn("--undirected", question.graphify)
+
+    def test_report_describes_the_actual_repository_count(self) -> None:
+        run = {"runId": "test", "suiteDigest": "digest", "startedAt": "date",
+               "tools": [], "graphMetrics": [], "observations": [], "questions": [],
+               "summaries": {}, "paired": {}, "repositories": [{"repository": "fd"}],
+               "verdict": {key: "unmeasured" for key in
+                           ("correctness", "tokens", "pairedTokens", "split", "graphQuality")}}
+        self.assertIn("sample of 1 repository", render_report(run))
+        run["repositories"].append({"repository": "second"})
+        self.assertIn("sample of 2 repositories", render_report(run))
+
     def test_checked_in_suite_covers_five_languages(self) -> None:
         suite = load_suite(ROOT / "suite.toml")
         self.assertEqual(len(suite.digest), 64)

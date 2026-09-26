@@ -912,7 +912,9 @@ def render_report(run: dict) -> str:
     lines.append("  not an independent precision oracle.")
     lines.append("- `graphify` prints an installation warning on stderr; the report counts stdout")
     lines.append("  only and records stderr separately in `run.json`.")
-    lines.append("- The suite is a focused sample of five repositories and does not estimate")
+    count = len(run["repositories"])
+    noun = "repository" if count == 1 else "repositories"
+    lines.append(f"- The suite is a focused sample of {count} {noun} and does not estimate")
     lines.append("  population-wide accuracy.")
     lines.append("")
     return "\n".join(lines)

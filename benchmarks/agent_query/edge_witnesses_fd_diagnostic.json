@@ -1,0 +1,127 @@
+{
+  "schema": "compass.agent-edge-witnesses/1",
+  "repository": "fd",
+  "commit": "b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5",
+  "scope": "Post-output diagnostic added after the first fd run exposed an unresolved loop receiver and a wrong constructor owner. Kept separate from preregistered edge witnesses; not held-out accuracy or whole-graph precision/recall.",
+  "witnesses": [
+    {
+      "id": "batch-builder-finish",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 191,
+        "symbol": "finish",
+        "text": "fn finish("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 111,
+          "text": "builder.finish()"
+        }
+      ],
+      "judgment": "Post-output source review of execute_batch: CommandBuilder::new at 97 constructs the values collected into builders; the successful match arm iterates them and calls the reviewed methods. No CommandTemplate::new call appears in this body."
+    },
+    {
+      "id": "batch-builder-push",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 173,
+        "symbol": "push",
+        "text": "fn push("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 104,
+          "text": "builder.push("
+        }
+      ],
+      "judgment": "Post-output source review of execute_batch: CommandBuilder::new at 97 constructs the values collected into builders; the successful match arm iterates them and calls the reviewed methods. No CommandTemplate::new call appears in this body."
+    },
+    {
+      "id": "batch-builder-exit-code",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 205,
+        "symbol": "exit_code",
+        "text": "fn exit_code("
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 116,
+          "text": "b.exit_code()"
+        }
+      ],
+      "judgment": "Post-output source review of execute_batch: CommandBuilder::new at 97 constructs the values collected into builders; the successful match arm iterates them and calls the reviewed methods. No CommandTemplate::new call appears in this body."
+    },
+    {
+      "id": "batch-builder-new",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 136,
+        "symbol": "new",
+        "text": "fn new(template:"
+      },
+      "relation": "calls",
+      "expected": "present",
+      "occurrences": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 97,
+          "text": "CommandBuilder::new(c, limit)"
+        }
+      ],
+      "judgment": "Post-output source review of execute_batch: CommandBuilder::new at 97 constructs the values collected into builders; the successful match arm iterates them and calls the reviewed methods. No CommandTemplate::new call appears in this body."
+    },
+    {
+      "id": "batch-not-template-new",
+      "source": {
+        "file": "src/exec/mod.rs",
+        "line": 90,
+        "symbol": "execute_batch",
+        "text": "pub fn execute_batch<"
+      },
+      "target": {
+        "file": "src/exec/mod.rs",
+        "line": 220,
+        "symbol": "new",
+        "text": "fn new<I, S>"
+      },
+      "relation": "calls",
+      "expected": "absent",
+      "occurrences": [],
+      "judgment": "Post-output source review of execute_batch: CommandBuilder::new at 97 constructs the values collected into builders; the successful match arm iterates them and calls the reviewed methods. No CommandTemplate::new call appears in this body."
+    }
+  ]
+}

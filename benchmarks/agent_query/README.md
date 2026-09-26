@@ -4,12 +4,13 @@
 in its suites compared with Graphify on the same pinned checkouts. It is
 developer-side tooling: Compass never runs it, and it never installs Graphify.
 
-Two suites share the harness:
+Three suites share the harness:
 
 | Suite | Questions | Shape |
 | --- | ---: | --- |
 | `suite.toml` | 47 | The first five-repository suite, including Compass's compact and paged projections |
 | `suite_v2.toml` | 50 | A blackbox-fair extension: same questions for both tools, default output forms, no tool-specific projections |
+| `suite_fd.toml` | 12 | Separate pinned `sharkdp/fd` sample, recorded from source before either tool's first extraction/query run |
 
 `suite_v2.toml` states its fairness contract inline and keeps it in the rows:
 both tools are blackboxes over the same pinned checkout, every oracle is read
@@ -37,7 +38,7 @@ The suite covers five real repositories in five languages:
 | `colinhacks/zod` | TypeScript | schema parse and safe-parse helpers |
 | `tokio-rs/axum` | Rust | routing and service dispatch |
 
-Both suites contribute source-reviewed questions across `explain`,
+The first two suites contribute source-reviewed questions across `explain`,
 `explain_source`, `callers`, `callees`, `impact`, `path`, `file_path`,
 `ambiguity`, `negative`, and `broad` (the first suite adds the `brief`,
 `brief_callers`, and `paged_callers` projections). Every question declares the
@@ -165,11 +166,48 @@ route proves navigation only. Neither is automatically credited as a call path.
 The auditor currently requires successful, single-response executions of these
 positive rows; it does not score negative or truncated path outcomes.
 
+### Source-first direct-call sample
+
+`suite_fd.toml` and `edge_witnesses_fd.json` were committed together before the
+first run on `sharkdp/fd` at `b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5`.
+The 12 questions and 10 positive direct-call pairs were selected by source
+inspection. The positive pairs contain 16 call occurrences; two additional
+pairs must be absent. This is a selected sample, not a representative held-out
+corpus or an estimate of whole-repository precision/recall.
+
+```bash
+python3 benchmarks/agent_query/runner.py run \
+  --suite benchmarks/agent_query/suite_fd.toml \
+  --workspace /path/to/evaluations --run-id fd-fresh \
+  --compass-binary /path/to/compass --graphify-binary /path/to/graphify \
+  --source fd=/path/to/pinned-clean-fd
+
+python3 -m benchmarks.agent_query.edge_audit \
+  --run /path/to/evaluations/runs/fd-fresh \
+  --witnesses benchmarks/agent_query/edge_witnesses_fd.json \
+  --output /path/to/new-edge-audit.json
+```
+
+The edge auditor requires both exact declaration identities even for negative
+pairs, checks semantic direction and relation, and separately scores relationship
+presence and occurrence coverage. A duplicate at one line cannot recover a
+missing occurrence at another. Source files, captured suite/graph digests,
+pinned checkout state, and auditor code identity are checked. Reports record
+missing and unexpected occurrences and require a new output path. Occurrence
+matching covers start lines, not column accuracy or runtime execution.
+
+`edge_witnesses_fd_diagnostic.json` adds five **post-output** checks for the
+missing loop calls and constructor-owner mistake discovered in that run. Keep
+those results separate from the preregistered sample. `path_witnesses_fd.json`
+likewise audits the two positive path responses after output review using the
+existing path auditor's `--witnesses` option. It verifies a compatible graph
+occurrence; the text path does not identify a particular parallel edge.
+
 ### Interpretation
 
 Anchor matching is a deterministic text-recall proxy over bounded output, not
-an independent precision oracle. The suite is a focused five-repository
-sample; it does not estimate population-wide accuracy. Graphify prints an
+an independent precision oracle. The suites are focused source-reviewed
+samples; they do not estimate population-wide accuracy. Graphify prints an
 installation warning on stderr, which `run.json` records separately and the
 token metric excludes.
 

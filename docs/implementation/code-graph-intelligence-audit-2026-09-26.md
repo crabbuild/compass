@@ -9,9 +9,9 @@ finding. A focused text-recall score cannot establish all of those properties.
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
 | Reliable hub analysis | Declaration-aware candidates, stable rankings, source-reviewed false positives and negatives | Five hub defects fixed; no reviewed god-object corpus yet |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Anchor scorer repaired; relationship accuracy not measured by that scorer |
-| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Existing five-repository suites are development samples with text oracles |
-| Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Prior query changes exist; fresh paired evidence still needed |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Source-first fd pair/occurrence audit added; loop recall and shadowed-receiver precision defects remain open |
+| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-repository development suites plus a separately selected source-first fd sample; neither establishes representative accuracy |
+| Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Fresh paired fd answers expose a Compass callees miss and a Graphify wrong-owner edge hidden by the text oracle |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | Existing path tests/suites are useful but do not prove real-repository path precision |
 | Fair efficiency comparison | Same successful questions, repeated timings, token methodology and complete environment provenance | Paired token aggregation exists; bytes/4 remains an estimate |
 
@@ -292,9 +292,105 @@ Graphify exposes no documented hop-bound option. A one-hop request correctly
 returns a bounded no-path result; the two-hop request reproduced the third
 navigation defect above. These are not extra head-to-head accuracy wins.
 
+## Separate source-first fd sample
+
+The inputs in `benchmarks/agent_query/suite_fd.toml` and
+`edge_witnesses_fd.json` were committed at `fe1a1fb5` before either tool was
+run on this checkout. Source selection used `sharkdp/fd` at
+`b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5`, with a separate clean working
+checkout because the existing repository was bare. The sources stayed pinned
+and clean before/after extraction. This is a source-first selected sample,
+not a representative held-out corpus. It becomes development evidence once
+used to guide fixes.
+
+The fresh run `fd-source-first-01` uses the frozen debug Compass executable
+with all eight preceding fixes. It records both graph digests, executable
+identities, build logs and every query response. It is not performance evidence.
+
+| Measured item | Compass | Graphify 0.9.67 |
+| --- | ---: | ---: |
+| Predeclared text-oracle passes | 11/12 | 9/12 |
+| Non-excerpt passes | 10/11 | 9/11 |
+| Exact reviewed declaration anchors | 5/5 | 5/5 |
+| Predeclared positive direct-call pairs present | 10/10 | 10/10 |
+| Reviewed line-level call occurrences preserved | 16/16 | 10/16 |
+| Predeclared wrong-target pairs correctly absent | 2/2 | 2/2 |
+| Post-output positive path witnesses | 2/2 | 2/2 |
+| Median estimated tokens on eight shared passes | 227 | 88 |
+
+Relationship presence and occurrence preservation are different measurements.
+Graphify retains one occurrence for each reviewed pair, losing six repeated
+sites across four pairs. These are selected-pair results, not whole-graph
+precision or recall. The positive path review confirms an adjacent directed
+call and a compatible source occurrence in each graph; neither rendered path
+names a particular parallel edge or proves runtime execution.
+
+The Compass failure is real: the `execute_batch` callees answer omits
+`CommandBuilder::finish` at `src/exec/mod.rs:111`. The graph also lacks that
+method's calls to `CommandBuilder::push` at line 104 and `exit_code` at line
+116. The enclosing function maps constructors into a collected result,
+destructures its success case, then iterates the builders. Graphify finds all
+three method targets. Compass's Rust value-type collector handles function
+parameters and local lets, but does not establish the loop/match/iterator
+binding chain needed here. This is an extraction/resolution gap, not an
+answer-rendering error.
+
+The same answer exposes a Graphify precision error: its call at line 97 targets
+`CommandTemplate::new` (declaration line 220), although the source explicitly
+calls `CommandBuilder::new` (declaration line 136). Compass targets the correct
+constructor. The post-output manifest `edge_witnesses_fd_diagnostic.json`
+records those five checks separately. Graphify's text-oracle pass is retained;
+it does not prove every returned edge correct.
+
+Graphify's other text failures are the source-excerpt feature gap, a file
+lookup resolving `src/exec/mod.rs` to the `Exec` declaration in
+`src/cli.rs:858`, and a broad question that never returns `handle_cmd_error`
+within its three budget increases. Compass needs two follow-up pages for
+that broad question (1,769 estimated total tokens), so its pass also identifies
+room to improve ranking and answer size. The lower paired token median remains
+a Graphify advantage.
+
+The first generated report incorrectly describes every suite as containing
+five repositories. Its original report is retained. The renderer now uses the
+recorded repository count, with singular/plural regression coverage; this
+wording correction changes no scores or raw observations.
+
+### Open Rust receiver correctness defect
+
+Reducing the loop miss uncovered false-positive calls in Compass. The frozen
+eight-fix executable emits `Decoy::finish` for both calls below, although the
+loop call is on `Actual`:
+
+```rust
+struct Actual;
+impl Actual { fn finish(&self) {} }
+struct Decoy;
+impl Decoy { fn finish(&self) {} }
+fn run(builder: &Decoy, builders: &[Actual]) {
+    for builder in builders { builder.finish(); }
+    builder.finish();
+}
+```
+
+A nested `let builder = factory();` also inherits the outer parameter's
+type when the local initializer does not yield a producer-known type.
+Unknown local types currently fall through the value-type lookup, while the
+parameter's alias remains available to call resolution. These are open
+precision defects, not acceptable substitutes for unresolved evidence.
+Retained reductions are under `rust-loop-diagnostic-01` and
+`rust-shadow-diagnostic-02`; the latter uses a source-defined factory returning
+a different declared type. Scope blocking and native negative regressions
+must precede broader iterator inference.
+
+The new edge auditor and report/input regression coverage pass 48 Python
+tests. No production Rust change is included in this evaluation checkpoint;
+the prior native verification ledger still describes the eight-fix executable.
+
 ## Next evidence to collect
 
-1. Keep exact build/source provenance for subsequent release comparisons;
+1. Fix and qualify Rust receiver shadowing before extending source-proven
+   loop/result/iterator inference to recover the fd callees miss. Keep exact
+   build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
 2. Expand hub review beyond candidate eligibility to source-reviewed design
    judgments, separating connectivity from responsibility/cohesion defects.

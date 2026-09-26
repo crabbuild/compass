@@ -1,0 +1,80 @@
+{
+  "schema": "compass.agent-path-witnesses/1",
+  "scope": "Post-output development audit of two predeclared fd path questions. Checks printed direction, exact declaration identity and at least one compatible source occurrence in the captured graph; the rendered path does not identify a particular parallel edge or prove runtime execution. Not representative held-out accuracy.",
+  "witnesses": [
+    {
+      "repository": "fd",
+      "commit": "b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5",
+      "question": "fd-path-command-error",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/exec/command.rs",
+          "line": 60,
+          "text": "pub fn execute_commands<",
+          "labels": [
+            "execute_commands()"
+          ]
+        },
+        {
+          "file": "src/exec/command.rs",
+          "line": 101,
+          "text": "pub fn handle_cmd_error(",
+          "labels": [
+            "handle_cmd_error()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/exec/command.rs",
+            "line": 68,
+            "text": "handle_cmd_error(None, e)"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "fd",
+      "commit": "b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5",
+      "question": "fd-path-batch-exitcodes",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/exec/mod.rs",
+          "line": 90,
+          "text": "pub fn execute_batch<",
+          "labels": [
+            ".execute_batch()"
+          ]
+        },
+        {
+          "file": "src/exit_codes.rs",
+          "line": 46,
+          "text": "pub fn merge_exitcodes(",
+          "labels": [
+            "merge_exitcodes()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/exec/mod.rs",
+            "line": 116,
+            "text": "merge_exitcodes(builders.iter()"
+          }
+        }
+      ]
+    }
+  ]
+}
