@@ -2318,10 +2318,9 @@ button:not(:disabled),
 }
 
 .compass-explore-panel {
-  position: absolute;
+  position: fixed;
+  box-sizing: border-box;
   z-index: 8;
-  top: calc(100% + 7px);
-  right: 0;
   display: grid;
   width: min(330px, calc(100vw - 24px));
   max-height: calc(100vh - 84px);
@@ -2330,6 +2329,54 @@ button:not(:disabled),
   padding: 12px;
   border-radius: 5px;
   color: var(--foreground);
+}
+
+.compass-settings-section {
+  display: grid;
+  gap: 8px;
+}
+
+.compass-settings-section + .compass-settings-section {
+  border-top: 1px solid var(--compass-line);
+  padding-top: 12px;
+}
+
+.compass-settings-section h3 {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.compass-settings-theme {
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.compass-settings-theme .compass-theme-toggle {
+  display: flex;
+  width: 100%;
+}
+
+.compass-settings-theme .compass-theme-toggle button {
+  flex: 1;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+}
+
+.compass-settings-theme svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+.compass-explore-action > svg:last-child {
+  width: 14px;
+  height: 14px;
 }
 
 .compass-explore-heading {
@@ -2546,10 +2593,26 @@ button:not(:disabled),
 }
 
 .compass-shortcut-guide {
-  display: grid;
-  gap: 9px;
   padding-top: 10px;
   border-top: 1px solid var(--compass-line);
+}
+
+.compass-shortcut-guide summary {
+  cursor: pointer;
+  list-style: none;
+  min-height: 28px;
+}
+
+.compass-shortcut-guide summary::-webkit-details-marker {
+  display: none;
+}
+
+.compass-shortcut-guide summary > svg:last-child {
+  margin-left: auto;
+}
+
+.compass-shortcut-guide[open] summary > svg:last-child {
+  transform: rotate(180deg);
 }
 
 .compass-shortcut-title {
@@ -2568,7 +2631,7 @@ button:not(:disabled),
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px 14px;
-  margin: 0;
+  margin: 9px 0 0;
 }
 
 .compass-shortcut-guide dl > div {
