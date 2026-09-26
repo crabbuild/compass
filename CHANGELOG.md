@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fix bounded weighted node trails: retain shorter prefixes when a cheaper
+  route exhausts the hop limit, and never admit a previously rejected node
+  without charging the traversal budget.
+
+- Respect explicit graph node kinds in topology analysis: method-shaped labels
+  remain callable candidates, and explicitly typed files stay out of hub lists.
+
+- Make god-node ranking stable for equal-degree nodes, retain project
+  declarations whose names overlap library names, and omit isolated nodes.
 - Move theme selection into Graph settings, grouped with appearance controls.
   Separate layout and selection settings, collapse keyboard shortcuts, and keep
   theme settings available in every community overview design.

@@ -3186,6 +3186,62 @@ mod tests {
     }
 
     #[test]
+    fn god_nodes_tool_keeps_project_names_and_orders_equal_degrees_by_id()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "nodes": [
+                    {"id":"z", "label":"Path", "source_file":"src/path.rs"},
+                    {"id":"a", "label":"Counter", "source_file":"src/counter.rs"},
+                    {"id":"isolated", "label":"Unused", "source_file":"src/unused.rs"}
+                ],
+                "links": [{"source":"z", "target":"a", "relation":"uses"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&graph);
+        assert_eq!(
+            server.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):\n  1. Counter - 1 edges\n  2. Path - 1 edges"
+        );
+        let arguments = Map::from_iter([("top_n".to_owned(), json!(1))]);
+        assert_eq!(
+            server.invoke("god_nodes", arguments),
+            "God nodes (most connected):\n  1. Counter - 1 edges"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn god_nodes_tool_respects_explicit_method_and_file_kinds()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "nodes": [
+                    {"id":"method", "kind":"method", "name":".dispatch()",
+                        "source":{"file":"src/service.rs", "startLine":5}},
+                    {"id":"file", "kind":"file", "name":"Service implementation",
+                        "source":{"file":"src/service.rs", "startLine":1}}
+                ],
+                "links": [{"source":"file", "target":"method", "relation":"contains"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&graph);
+        assert_eq!(
+            server.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):\n  1. .dispatch() - 1 edges"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn every_local_tool_and_resource_handles_success_missing_and_filter_shapes()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;

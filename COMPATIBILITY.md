@@ -94,6 +94,29 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+### Bounded node trails
+
+Typed `node`/node-trail queries keep nondominated arrivals by node and depth,
+so a cheaper but longer prefix cannot hide a valid trail within `max_depth`.
+Rejected nodes are not considered admitted on a later visit. Existing cost
+weights, direction, deterministic tie rules, work limits and response schema
+remain unchanged. Previously missing trails can now be returned; incomplete
+responses no longer include nodes admitted after their budget was exhausted.
+
+### Hub ranking
+
+New god-node analyses order equal-degree candidates by stable node ID instead
+of input record order. Source-located declarations named `Path`, `Counter`,
+`Enum`, or other names also used by libraries are no longer suppressed by name
+alone. Explicit canonical node kinds take precedence over display-label
+heuristics throughout topology analysis: a `.method()` label does not turn a
+method into a file, and file nodes remain excluded even with descriptive labels.
+Legacy records without a recognized kind retain the existing label fallback.
+Isolated declarations are omitted. The serialized `id`, `label`, and
+`degree` fields and degree calculation are unchanged; the candidate list can
+change. Published historical artifacts are not rewritten. Hub rank describes
+connectivity, not a verified god-object design defect.
+
 
 Rust structural evidence now uses producer version 2. The evidence and graph
 schema majors are unchanged, but Rust extraction caches from producer version

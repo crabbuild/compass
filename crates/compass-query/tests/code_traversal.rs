@@ -3,13 +3,15 @@ mod support;
 use std::collections::HashSet;
 use std::fs;
 
+use compass_graph::GraphSnapshotBuilder;
 use compass_model::code_graph::{EdgeKind, GraphDocument};
 use compass_model::identity::{edge_id, file_id};
 use compass_model::provenance::{OccurrenceRule, SourceAnchor};
 use compass_model::query_contract::{
     CallRequest, CodeQueryLimits, ImpactRequest, NodeTrailRequest, QueryDiagnosticCode,
 };
-use compass_query::open;
+use compass_query::{open, open_with_store};
+use compass_store::SqliteStore;
 
 #[test]
 fn callers_include_calls_and_route_bindings_while_callees_follow_calls()
@@ -462,6 +464,136 @@ fn node_trail_never_exceeds_node_or_edge_budgets() -> Result<(), Box<dyn std::er
     assert!(trail.nodes.len() <= 2);
     assert!(trail.edges.len() <= 1);
     assert!(trail.paths.is_empty());
+    Ok(())
+}
+
+fn write_weighted_trail_fixture(
+    path: &std::path::Path,
+    edges: &[(&str, EdgeKind, &str)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    support::write_graph(path)?;
+    let mut graph = GraphDocument::load(path)?;
+    let template = graph
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Calls)
+        .cloned()
+        .ok_or("missing call template")?;
+    graph.nodes = ["n:s", "n:a", "n:b", "n:t"]
+        .into_iter()
+        .map(|id| support::node(id, compass_model::code_graph::NodeKind::Function, id, id))
+        .collect();
+    graph.links = edges
+        .iter()
+        .map(|(source, kind, target)| {
+            let mut edge = template.clone();
+            edge.source = (*source).to_owned();
+            edge.target = (*target).to_owned();
+            edge.kind = *kind;
+            edge.occurrence_rule = None;
+            edge.id = edge_id(source, *kind, target, edge.relationship_site.as_ref(), None);
+            edge.key.clone_from(&edge.id);
+            edge
+        })
+        .collect();
+    fs::write(path, serde_json::to_vec(&graph)?)?;
+    Ok(())
+}
+
+#[test]
+fn node_trail_keeps_a_costlier_shorter_prefix_that_can_reach_the_target()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    write_weighted_trail_fixture(
+        &graph_path,
+        &[
+            ("n:s", EdgeKind::Calls, "n:a"),
+            ("n:a", EdgeKind::Calls, "n:b"),
+            ("n:a", EdgeKind::Calls, "n:s"),
+            ("n:s", EdgeKind::References, "n:b"),
+            ("n:b", EdgeKind::Calls, "n:t"),
+        ],
+    )?;
+    for (max_depth, expected) in [
+        (2, vec!["n:s", "n:b", "n:t"]),
+        (3, vec!["n:s", "n:a", "n:b", "n:t"]),
+    ] {
+        for reverse in [false, true] {
+            if reverse {
+                let mut graph = GraphDocument::load(&graph_path)?;
+                graph.nodes.reverse();
+                graph.links.reverse();
+                fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+            }
+            let graph = GraphDocument::load(&graph_path)?;
+            let store = SqliteStore::open(
+                directory
+                    .path()
+                    .join(format!("store-{max_depth}-{reverse}.db")),
+            )?;
+            let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+            GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+            for engine in [
+                open(&graph_path, None, &directory.path().join("cache"))?,
+                open_with_store(
+                    &store,
+                    &graph_path,
+                    None,
+                    &directory.path().join("store-cache"),
+                )?,
+            ] {
+                let response = engine.node_trail(NodeTrailRequest {
+                    source: "n:s".to_owned(),
+                    target: "n:t".to_owned(),
+                    include_heuristic: false,
+                    limits: CodeQueryLimits {
+                        max_depth,
+                        max_edges: 5,
+                        ..CodeQueryLimits::default()
+                    },
+                })?;
+                assert_eq!(response.paths.len(), 1);
+                assert_eq!(response.paths[0].node_ids, expected);
+                assert_eq!(response.paths[0].edge_ids.len(), expected.len() - 1);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn node_trail_does_not_readmit_a_rejected_node_without_paying_its_budget()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    write_weighted_trail_fixture(
+        &graph_path,
+        &[
+            ("n:s", EdgeKind::Calls, "n:a"),
+            ("n:s", EdgeKind::Calls, "n:b"),
+            ("n:a", EdgeKind::Calls, "n:b"),
+        ],
+    )?;
+    let engine = open(&graph_path, None, &directory.path().join("cache"))?;
+    let response = engine.node_trail(NodeTrailRequest {
+        source: "n:s".to_owned(),
+        target: "n:b".to_owned(),
+        include_heuristic: false,
+        limits: CodeQueryLimits {
+            max_nodes: 2,
+            ..CodeQueryLimits::default()
+        },
+    })?;
+    assert!(response.truncated);
+    assert!(
+        response.paths.is_empty(),
+        "a budget-rejected node was admitted on a second visit"
+    );
+    assert!(
+        !response.nodes.iter().any(|node| node.id == "n:b"),
+        "a budget-rejected node leaked into the response on a second visit"
+    );
     Ok(())
 }
 

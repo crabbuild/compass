@@ -421,6 +421,11 @@ compass explore "<symbol>" ... [--format text|agent-json|json]
 compass node "<source>" "<target>" [--format text|agent-json|json]
 ```
 
+`node` searches directed, weighted trails within `--max-depth`. It retains
+shorter and cheaper prefixes when either can affect reachability within that
+hop limit. Node and edge work limits still apply: a truncated result is not
+proof that no path exists.
+
 `explore --format text` closes its bounded page with a `SOURCE` section: the
 recorded line range of each primary anchor, rendered from the digest-verified
 file the command already reads below `--root`. Blocks are bounded per anchor

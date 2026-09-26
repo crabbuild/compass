@@ -43,6 +43,104 @@ fn edge(source: &str, target: &str, relation: &str, confidence: &str) -> Value {
 }
 
 #[test]
+fn god_nodes_preserve_project_declarations_named_like_builtins() {
+    let graph = document(
+        vec![
+            node("path", "Path", "src/path.rs"),
+            node("counter", "Counter", "src/counter.py"),
+            node("service", "Service", "src/service.rs"),
+            node("external", "Path", ""),
+        ],
+        vec![
+            edge("path", "counter", "uses", "EXTRACTED"),
+            edge("path", "service", "calls", "EXTRACTED"),
+            edge("path", "external", "references", "EXTRACTED"),
+        ],
+        true,
+    );
+    let ranked = god_nodes(&graph, 10);
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["path", "counter", "service"]
+    );
+    assert_eq!(ranked[0].degree, 3);
+    assert!(god_nodes(&graph, 0).is_empty());
+}
+
+#[test]
+fn god_nodes_use_explicit_kinds_instead_of_method_label_heuristics() {
+    let graph = document(
+        vec![
+            json!({"id":"method", "kind":"method", "name":".dispatch()",
+                "source":{"file":"src/service.rs", "startLine":5}}),
+            json!({"id":"function", "kind":"function", "name":"helper()",
+                "source":{"file":"src/service.rs", "startLine":20}}),
+            json!({"id":"file", "kind":"file", "name":"Service implementation",
+                "source":{"file":"src/service.rs", "startLine":1}}),
+            json!({"id":"caller", "kind":"class", "name":"Caller",
+                "source":{"file":"src/caller.rs", "startLine":1}}),
+        ],
+        vec![
+            edge("method", "function", "calls", "EXTRACTED"),
+            edge("method", "caller", "references", "EXTRACTED"),
+            edge("file", "method", "contains", "EXTRACTED"),
+            edge("file", "caller", "references", "EXTRACTED"),
+        ],
+        true,
+    );
+    let ranked = god_nodes(&graph, 10);
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["method", "caller", "function"]
+    );
+    assert_eq!(ranked[0].degree, 3);
+}
+
+#[test]
+fn god_nodes_do_not_label_isolated_declarations_as_hubs() {
+    let graph = document(
+        vec![node("isolated", "Service", "src/service.rs")],
+        Vec::new(),
+        true,
+    );
+    assert!(god_nodes(&graph, 10).is_empty());
+}
+
+#[test]
+fn god_nodes_ties_are_stable_under_graph_record_permutations() {
+    let mut graph = document(
+        vec![
+            node("z", "Zulu", "src/z.rs"),
+            node("a", "Alpha", "src/a.rs"),
+            node("b", "Beta", "src/b.rs"),
+        ],
+        vec![
+            edge("z", "a", "calls", "EXTRACTED"),
+            edge("a", "b", "calls", "EXTRACTED"),
+            edge("b", "z", "calls", "EXTRACTED"),
+        ],
+        true,
+    );
+    let first = god_nodes(&graph, 2);
+    graph.nodes.reverse();
+    graph.links.reverse();
+    assert_eq!(first, god_nodes(&graph, 2));
+    assert_eq!(
+        first
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
+}
+
+#[test]
 fn questions_cover_no_signal_isolation_inference_ambiguity_bridge_and_low_cohesion()
 -> Result<(), Box<dyn Error>> {
     let empty = document(Vec::new(), Vec::new(), true);

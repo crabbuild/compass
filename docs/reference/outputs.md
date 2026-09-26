@@ -396,7 +396,8 @@ The report can include:
 
 - corpus and graph summary;
 - freshness/build metadata;
-- god nodes;
+- god nodes (connected source-located hub candidates, ordered by degree and
+  then stable node ID; a high rank is not proof of a god-object design defect);
 - communities;
 - surprising connections;
 - cycles/diagnostics;

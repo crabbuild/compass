@@ -34,6 +34,9 @@ use crate::text::{canonical_query_token, query_recall_terms, strip_diacritics};
 
 type GraphPath = (Vec<String>, Vec<String>);
 type BoundedPathResult = (Option<GraphPath>, bool);
+// A cheaper arrival at a node may consume more hops. Retain separate states
+// so it cannot erase a costlier arrival that still fits the remaining depth.
+type TrailState = (String, usize);
 const MAX_CODE_QUERY_CANDIDATES: u32 = 256;
 const MAX_RECALL_FUZZY_VARIANTS_PER_TERM: usize = 192;
 const MAX_RECALL_FUZZY_VARIANTS_TOTAL: usize = 256;
@@ -3458,28 +3461,37 @@ impl CodeQueryEngine {
             source.to_owned(),
             source.to_owned(),
         ))]);
-        let mut best = HashMap::from([(source.to_owned(), (0_u32, 0_usize, source.to_owned()))]);
+        let mut best = HashMap::from([(
+            source.to_owned(),
+            BTreeMap::from([(0_usize, (0_u32, source.to_owned()))]),
+        )]);
         let mut admitted = HashSet::from([source.to_owned()]);
-        let mut predecessor = HashMap::<String, (String, String)>::new();
+        let mut predecessor = HashMap::<TrailState, (TrailState, String)>::new();
         let mut truncated = false;
         while let Some(Reverse((cost, depth, path_key, node))) = queue.pop() {
             self.check_deadline()?;
-            if best.get(&node).is_none_or(|current| {
-                current.0 != cost || current.1 != depth || current.2 != path_key
-            }) {
+            let state = (node.clone(), depth);
+            let Some(labels) = best.get(&node) else {
+                continue;
+            };
+            if labels
+                .get(&depth)
+                .is_none_or(|current| current.0 != cost || current.1 != path_key)
+                || labels.range(..depth).any(|(_, current)| current.0 <= cost)
+            {
                 continue;
             }
             if node == target {
                 let mut nodes = vec![target.to_owned()];
                 let mut edges = Vec::new();
-                let mut cursor = target;
-                while cursor != source {
-                    let Some((previous, edge)) = predecessor.get(cursor) else {
+                let mut cursor = state;
+                while cursor.0 != source || cursor.1 != 0 {
+                    let Some((previous, edge)) = predecessor.get(&cursor) else {
                         return Ok((None, truncated));
                     };
                     edges.push(edge.clone());
-                    nodes.push(previous.clone());
-                    cursor = previous;
+                    nodes.push(previous.0.clone());
+                    cursor = previous.clone();
                 }
                 nodes.reverse();
                 edges.reverse();
@@ -3524,19 +3536,32 @@ impl CodeQueryEngine {
                 let next_depth = depth.saturating_add(1);
                 let next_cost = cost.saturating_add(code_relation_weight(edge.kind));
                 let next_key = format!("{path_key}\0{}\0{next}", edge.id);
-                let candidate = (next_cost, next_depth, next_key.clone());
-                if best
-                    .get(&next)
-                    .is_some_and(|current| candidate >= current.clone())
-                {
+                let next_state = (next.clone(), next_depth);
+                let candidate = (next_cost, next_key.clone());
+                // A route can dominate another only if it is no deeper and
+                // no costlier. In particular, reject positive-cost cycles.
+                if best.get(&next).is_some_and(|labels| {
+                    labels.range(..=next_depth).any(|(known_depth, current)| {
+                        current.0 < next_cost
+                            || (current.0 == next_cost
+                                && (*known_depth < next_depth || current.1 <= next_key))
+                    })
+                }) {
                     continue;
                 }
-                if admitted.insert(next.clone()) && !budget.consume_node() {
-                    truncated = true;
-                    continue;
+                if !admitted.contains(&next) {
+                    if !budget.consume_node() {
+                        truncated = true;
+                        continue;
+                    }
+                    admitted.insert(next.clone());
                 }
-                best.insert(next.clone(), candidate);
-                predecessor.insert(next.clone(), (node.clone(), edge.id.clone()));
+                // Every new state comes from an examined edge, so the shared
+                // edge budget also bounds the queue and predecessor storage.
+                best.entry(next.clone())
+                    .or_default()
+                    .insert(next_depth, candidate);
+                predecessor.insert(next_state, (state.clone(), edge.id.clone()));
                 queue.push(Reverse((next_cost, next_depth, next_key, next)));
             }
         }

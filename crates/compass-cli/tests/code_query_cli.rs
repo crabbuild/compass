@@ -102,6 +102,79 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
 }
 
 #[test]
+fn node_command_retains_the_route_that_fits_the_requested_depth() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let node = graph
+        .nodes
+        .first()
+        .cloned()
+        .ok_or("missing node template")?;
+    let edge = graph
+        .links
+        .first()
+        .cloned()
+        .ok_or("missing edge template")?;
+    graph.nodes = ["s", "a", "b", "t"]
+        .into_iter()
+        .map(|name| {
+            let mut record = node.clone();
+            record.id = format!("n:{name}");
+            record.name = name.to_owned();
+            record.qualified_name = name.to_owned();
+            record
+        })
+        .collect();
+    graph.links = [
+        ("n:s", EdgeKind::Calls, "n:a"),
+        ("n:a", EdgeKind::Calls, "n:b"),
+        ("n:s", EdgeKind::References, "n:b"),
+        ("n:b", EdgeKind::Calls, "n:t"),
+    ]
+    .into_iter()
+    .map(|(source, kind, target)| {
+        let mut record = edge.clone();
+        record.source = source.to_owned();
+        record.target = target.to_owned();
+        record.kind = kind;
+        record.id = compass_model::identity::edge_id(
+            source,
+            kind,
+            target,
+            record.relationship_site.as_ref(),
+            None,
+        );
+        record.key.clone_from(&record.id);
+        record
+    })
+    .collect();
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("node"),
+            OsString::from("n:s"),
+            OsString::from("n:t"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+            OsString::from("--cache"),
+            directory.path().join("cache").into_os_string(),
+            OsString::from("--max-depth"),
+            OsString::from("2"),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    let response: compass_model::query_contract::CodeQueryResponse =
+        serde_json::from_str(&outcome.stdout)?;
+    assert_eq!(response.paths.len(), 1);
+    assert_eq!(response.paths[0].node_ids, ["n:s", "n:b", "n:t"]);
+    Ok(())
+}
+
+#[test]
 fn affected_typed_graph_uses_shared_relationship_output_contract() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;

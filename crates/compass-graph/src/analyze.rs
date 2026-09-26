@@ -3,59 +3,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 use std::path::Path;
 
-use compass_model::{EdgeRecord, GraphDocument, NodeRecord};
+use compass_model::{EdgeRecord, GraphDocument, NodeRecord, code_graph::NodeKind};
 use rayon::prelude::*;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::cluster::{Communities, PythonRandom, score_communities};
-
-const BUILTIN_NOISE_LABELS: &[&str] = &[
-    "str",
-    "int",
-    "float",
-    "bool",
-    "bytes",
-    "bytearray",
-    "complex",
-    "object",
-    "True",
-    "False",
-    "MagicMock",
-    "Mock",
-    "AsyncMock",
-    "NonCallableMock",
-    "NonCallableMagicMock",
-    "PropertyMock",
-    "patch",
-    "sentinel",
-    "Path",
-    "Any",
-    "Optional",
-    "List",
-    "Dict",
-    "Set",
-    "Tuple",
-    "Union",
-    "Callable",
-    "Type",
-    "ClassVar",
-    "Final",
-    "Literal",
-    "Protocol",
-    "Counter",
-    "defaultdict",
-    "OrderedDict",
-    "datetime",
-    "Enum",
-    "os",
-    "sys",
-    "re",
-    "json",
-    "io",
-    "abc",
-    "typing",
-];
 
 const JSON_NOISE_LABELS: &[&str] = &[
     "start",
@@ -255,6 +208,11 @@ pub struct ImportCycle {
 }
 
 #[must_use]
+/// Return connected, source-located hub candidates, ordered by degree then ID.
+///
+/// This is a topology ranking, not proof of a god-object design problem. A
+/// project's declaration must not be discarded just because its name is also
+/// used by a standard library or test framework.
 pub fn god_nodes(document: &GraphDocument, top_n: usize) -> Vec<GodNode> {
     let graph = AnalysisGraph::new(document);
     god_nodes_in(&graph, top_n)
@@ -267,14 +225,19 @@ fn god_nodes_in(graph: &AnalysisGraph<'_>, top_n: usize) -> Vec<GodNode> {
         .enumerate()
         .map(|(position, node)| (position, node, graph.degree(position)))
         .collect::<Vec<_>>();
-    ranked.sort_by(|left, right| right.2.cmp(&left.2).then_with(|| left.0.cmp(&right.0)));
+    ranked.sort_by(|left, right| {
+        right
+            .2
+            .cmp(&left.2)
+            .then_with(|| left.1.id.cmp(&right.1.id))
+    });
     ranked
         .into_iter()
-        .filter(|(position, node, _)| {
-            !graph.is_file_node(*position)
+        .filter(|(position, node, degree)| {
+            *degree > 0
+                && !graph.is_file_node(*position)
                 && !is_concept_node(node)
                 && !is_json_key_node(node)
-                && !BUILTIN_NOISE_LABELS.contains(&node.label())
         })
         .take(top_n)
         .map(|(_, node, degree)| GodNode {
@@ -1773,6 +1736,11 @@ impl<'a> AnalysisGraph<'a> {
     }
     fn is_file_node(&self, node: usize) -> bool {
         let record = self.nodes[node];
+        // Canonical kinds are stronger evidence than display labels. In
+        // particular, `.method()` is a callable label, not a file identity.
+        if let Some(kind) = explicit_node_kind(record) {
+            return kind == NodeKind::File;
+        }
         let label = record.label();
         if label.is_empty() {
             return false;
@@ -1825,6 +1793,13 @@ fn invert_communities(communities: &Communities) -> HashMap<String, usize> {
         .iter()
         .flat_map(|(community, nodes)| nodes.iter().map(move |node| (node.clone(), *community)))
         .collect()
+}
+
+fn explicit_node_kind(node: &NodeRecord) -> Option<NodeKind> {
+    serde::Deserialize::deserialize(
+        serde::de::value::StrDeserializer::<serde::de::value::Error>::new(node.kind_name()),
+    )
+    .ok()
 }
 
 fn is_concept_node(node: &NodeRecord) -> bool {
