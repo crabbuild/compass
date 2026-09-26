@@ -133,6 +133,15 @@ evaluating local macro inputs can publish newly recovered exact calls.
 Unsupported macro shapes, non-evaluating inputs, and ambiguous receiver owners
 remain unresolved rather than being guessed.
 
+Rust receiver lookup now respects local shadowing in lets, loops, closures,
+match arms/guards, and conditional lets. An unknown inner type cannot inherit
+an outer parameter's alias. A let initializer still sees the previous binding;
+an `else` branch does not see bindings from a failed condition. Previously
+incorrect call edges can disappear and remain unresolved until the receiver
+type is proven. The advertised producer capabilities and evidence/graph schemas
+are unchanged. AST cache semantics advance from 2 to 3, rebuilding prior AST
+facts automatically across languages. Published historical graphs are unchanged.
+
 ### Agent Query View
 
 Compass adds the additive strict projection `compass.query.agent-view/1` for

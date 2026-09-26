@@ -9,7 +9,7 @@ finding. A focused text-recall score cannot establish all of those properties.
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
 | Reliable hub analysis | Declaration-aware candidates, stable rankings, source-reviewed false positives and negatives | Five hub defects fixed; no reviewed god-object corpus yet |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Source-first fd pair/occurrence audit added; loop recall and shadowed-receiver precision defects remain open |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Source-first fd pair/occurrence audit added; receiver-shadowing correction has native regressions; fd loop recall remains open |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-repository development suites plus a separately selected source-first fd sample; neither establishes representative accuracy |
 | Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Fresh paired fd answers expose a Compass callees miss and a Graphify wrong-owner edge hidden by the text oracle |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | Existing path tests/suites are useful but do not prove real-repository path precision |
@@ -355,7 +355,7 @@ five repositories. Its original report is retained. The renderer now uses the
 recorded repository count, with singular/plural regression coverage; this
 wording correction changes no scores or raw observations.
 
-### Open Rust receiver correctness defect
+### Rust receiver correctness defect and correction
 
 Reducing the loop miss uncovered false-positive calls in Compass. The frozen
 eight-fix executable emits `Decoy::finish` for both calls below, although the
@@ -375,21 +375,47 @@ fn run(builder: &Decoy, builders: &[Actual]) {
 A nested `let builder = factory();` also inherits the outer parameter's
 type when the local initializer does not yield a producer-known type.
 Unknown local types currently fall through the value-type lookup, while the
-parameter's alias remains available to call resolution. These are open
+parameter's alias remains available to call resolution. These are
 precision defects, not acceptable substitutes for unresolved evidence.
 Retained reductions are under `rust-loop-diagnostic-01` and
 `rust-shadow-diagnostic-02`; the latter uses a source-defined factory returning
-a different declared type. Scope blocking and native negative regressions
-must precede broader iterator inference.
+a different declared type.
 
 The new edge auditor and report/input regression coverage pass 48 Python
 tests. No production Rust change is included in this evaluation checkpoint;
 the prior native verification ledger still describes the eight-fix executable.
 
+The subsequent correction is in the Rust evidence producer. Value lookup now
+distinguishes an absent binding from an existing binding of unknown type.
+Local bindings suppress stale parameter aliases, including loop and closure
+patterns, match arms/guards, conditional lets, and let-chain guards. Binding
+visibility is bounded by lexical scope and source range; initializers and else
+branches keep their proper outer bindings. Destructuring records the bound
+names without assigning the whole container's type to each field. If an inner
+receiver's type remains unknown, its source occurrence and unresolved candidate
+remain visible; no target is invented.
+
+A native regression failed before the fix by returning two calls to `Decoy`
+where only the unshadowed outer call is valid. The expanded regression covers
+ten scope/pattern forms, initializer timing, preserved typed inner calls, and
+else-branch visibility. The current targeted checks pass 27 Rust language
+tests, all 206 universal resolver integration tests, and 33 filesystem
+contracts. Workspace and changed integration-test Clippy pass with warnings
+denied. An existing needless borrow in the touched filesystem test was also
+removed to allow that test target's Clippy check.
+
+AST cache semantics advance from 2 to 3 so warm builds cannot keep previously
+incorrect relationships. A cache regression checks that version-2 facts are
+discarded. This is a correction to the existing producer contract, not a new
+advertised capability or a new universal-pipeline promotion. Evidence/graph
+schema majors and the Rust producer capability identity remain unchanged;
+historical graphs are not rewritten. Full baseline, fixture, and fresh binary
+replay evidence for this correction is recorded below as it completes.
+
 ## Next evidence to collect
 
-1. Fix and qualify Rust receiver shadowing before extending source-proven
-   loop/result/iterator inference to recover the fd callees miss. Keep exact
+1. Complete qualification and fresh binary replay of receiver shadowing, then
+   extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
 2. Expand hub review beyond candidate eligibility to source-reviewed design

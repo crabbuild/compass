@@ -972,7 +972,8 @@ struct RustImplContext {
 #[derive(Clone)]
 struct RustValueTypeVersion {
     raw: Option<String>,
-    active_from: usize,
+    active_range: std::ops::Range<usize>,
+    shadows_alias: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -4847,7 +4848,8 @@ impl<'source> DirectEvidenceState<'source> {
         scope_id: &str,
         name: &str,
         raw: Option<String>,
-        active_from: usize,
+        active_range: std::ops::Range<usize>,
+        shadows_alias: bool,
     ) {
         if name.is_empty() || name == "_" || name == "self" {
             return;
@@ -4857,7 +4859,11 @@ impl<'source> DirectEvidenceState<'source> {
             .or_default()
             .entry(name.to_owned())
             .or_default()
-            .push(RustValueTypeVersion { raw, active_from });
+            .push(RustValueTypeVersion {
+                raw,
+                active_range,
+                shadows_alias,
+            });
     }
 
     fn rust_value_type_for<'a>(
@@ -4867,12 +4873,23 @@ impl<'source> DirectEvidenceState<'source> {
         use_start: usize,
         use_node: Option<Node<'_>>,
     ) -> Option<&'a str> {
+        self.rust_value_binding_for(owner, name, use_start, use_node)
+            .and_then(|version| version.raw.as_deref())
+    }
+
+    fn rust_value_binding_for<'a>(
+        &'a self,
+        owner: &DeclarationContext,
+        name: &str,
+        use_start: usize,
+        use_node: Option<Node<'_>>,
+    ) -> Option<&'a RustValueTypeVersion> {
         let mut node = use_node;
         while let Some(current) = node {
             if rust_is_lexical_scope_node(current.kind()) {
                 let scope_id = format!("rust-lexical:{}", current.id());
-                if let Some(raw) = self.rust_value_type_in_scope(&scope_id, name, use_start) {
-                    return Some(raw);
+                if let Some(version) = self.rust_value_type_in_scope(&scope_id, name, use_start) {
+                    return Some(version);
                 }
             }
             node = current.parent();
@@ -4880,8 +4897,8 @@ impl<'source> DirectEvidenceState<'source> {
         let mut scope_id = Some(owner.scope_id.as_str());
         for _ in 0..64 {
             let current = scope_id?;
-            if let Some(raw) = self.rust_value_type_in_scope(current, name, use_start) {
-                return Some(raw);
+            if let Some(version) = self.rust_value_type_in_scope(current, name, use_start) {
+                return Some(version);
             }
             scope_id = self.scope_parents.get(current).map(String::as_str);
         }
@@ -4893,17 +4910,16 @@ impl<'source> DirectEvidenceState<'source> {
         scope_id: &str,
         name: &str,
         use_start: usize,
-    ) -> Option<&'a str> {
+    ) -> Option<&'a RustValueTypeVersion> {
         self.rust_value_types
             .get(scope_id)
             .and_then(|values| values.get(name))
             .and_then(|versions| {
                 versions
                     .iter()
-                    .filter(|version| version.active_from <= use_start)
-                    .max_by_key(|version| version.active_from)
+                    .filter(|version| version.active_range.contains(&use_start))
+                    .max_by_key(|version| version.active_range.start)
             })
-            .and_then(|version| version.raw.as_deref())
     }
 
     fn ensure_rust_lexical_scope(&mut self, node: Node<'_>, parent: &str) -> String {
@@ -4991,22 +5007,34 @@ impl<'source> DirectEvidenceState<'source> {
         None
     }
 
-    fn collect_rust_parameter_value_types(&mut self, parameters: Node<'_>, scope_id: &str) {
+    fn collect_rust_parameter_value_types(
+        &mut self,
+        parameters: Node<'_>,
+        scope_id: &str,
+        shadows_alias: bool,
+    ) {
         let mut cursor = parameters.walk();
         for parameter in parameters
             .children(&mut cursor)
             .filter(|child| child.is_named())
         {
-            let Some(pattern) = parameter.child_by_field_name("pattern") else {
-                continue;
-            };
+            let pattern = parameter
+                .child_by_field_name("pattern")
+                .unwrap_or(parameter);
             let raw = parameter
                 .child_by_field_name("type")
+                .filter(|_| rust_pattern_binds_whole_value(pattern))
                 .map(|type_node| self.text(type_node));
             let mut names = Vec::new();
             collect_rust_pattern_names(pattern, &mut names, self.source);
             for name in names {
-                self.record_rust_value_type(scope_id, &name, raw.clone(), parameter.start_byte());
+                self.record_rust_value_type(
+                    scope_id,
+                    &name,
+                    raw.clone(),
+                    parameter.start_byte()..usize::MAX,
+                    shadows_alias,
+                );
             }
         }
     }
@@ -5014,7 +5042,7 @@ impl<'source> DirectEvidenceState<'source> {
     fn collect_rust_value_types(&mut self, callable: Node<'_>, owner: &DeclarationContext) {
         let scope_id = owner.scope_id.clone();
         if let Some(parameters) = callable.child_by_field_name("parameters") {
-            self.collect_rust_parameter_value_types(parameters, &scope_id);
+            self.collect_rust_parameter_value_types(parameters, &scope_id, false);
         }
         let Some(body) = callable.child_by_field_name("body") else {
             return;
@@ -5040,22 +5068,87 @@ impl<'source> DirectEvidenceState<'source> {
         if node.kind() == "closure_expression"
             && let Some(parameters) = node.child_by_field_name("parameters")
         {
-            self.collect_rust_parameter_value_types(parameters, &scope_id);
+            self.collect_rust_parameter_value_types(parameters, &scope_id, true);
         }
         if node.kind() == "let_declaration"
             && let Some(pattern) = node.child_by_field_name("pattern")
         {
-            let raw = node
-                .child_by_field_name("type")
-                .map(|type_node| self.text(type_node))
-                .or_else(|| {
-                    node.child_by_field_name("value")
-                        .and_then(|value| self.rust_inferred_value_type(value, owner))
-                });
+            let raw = rust_pattern_binds_whole_value(pattern)
+                .then(|| {
+                    node.child_by_field_name("type")
+                        .map(|type_node| self.text(type_node))
+                        .or_else(|| {
+                            node.child_by_field_name("value")
+                                .and_then(|value| self.rust_inferred_value_type(value, owner))
+                        })
+                })
+                .flatten();
             let mut names = Vec::new();
             collect_rust_pattern_names(pattern, &mut names, self.source);
             for name in names {
-                self.record_rust_value_type(&scope_id, &name, raw.clone(), pattern.start_byte());
+                // A let binding starts after its initializer; the previous
+                // binding remains visible while the initializer is evaluated.
+                self.record_rust_value_type(
+                    &scope_id,
+                    &name,
+                    raw.clone(),
+                    node.end_byte()..usize::MAX,
+                    true,
+                );
+            }
+        }
+        if matches!(node.kind(), "for_expression" | "match_arm")
+            && let Some(pattern) = node.child_by_field_name("pattern")
+        {
+            let active_from = if node.kind() == "for_expression" {
+                node.child_by_field_name("body")
+                    .map(|body| body.start_byte())
+            } else {
+                pattern.named_child(0).map(|pattern| pattern.end_byte())
+            };
+            if let Some(active_from) = active_from {
+                let mut names = Vec::new();
+                collect_rust_pattern_names(pattern, &mut names, self.source);
+                for name in names {
+                    // An unknown inner receiver still shadows an outer alias.
+                    // Do not invent an element type from a method's spelling.
+                    self.record_rust_value_type(
+                        &scope_id,
+                        &name,
+                        None,
+                        active_from..node.end_byte(),
+                        true,
+                    );
+                }
+            }
+        }
+        if node.kind() == "let_condition"
+            && let Some(pattern) = node.child_by_field_name("pattern")
+        {
+            let mut enclosing = node.parent();
+            while let Some(conditional) = enclosing {
+                if matches!(conditional.kind(), "if_expression" | "while_expression") {
+                    let body = conditional
+                        .child_by_field_name("consequence")
+                        .or_else(|| conditional.child_by_field_name("body"));
+                    if let Some(body) = body {
+                        let mut names = Vec::new();
+                        collect_rust_pattern_names(pattern, &mut names, self.source);
+                        for name in names {
+                            // Let-chain guards and the success body see this
+                            // binding; its initializer and else branch do not.
+                            self.record_rust_value_type(
+                                &scope_id,
+                                &name,
+                                None,
+                                node.end_byte()..body.end_byte(),
+                                true,
+                            );
+                        }
+                    }
+                    break;
+                }
+                enclosing = conditional.parent();
             }
         }
         let mut cursor = node.walk();
@@ -5600,8 +5693,11 @@ impl<'source> DirectEvidenceState<'source> {
         if import_binding_is_ambiguous && platform_reexport_bindings.is_none() {
             return Ok(());
         }
-        let direct_binding = platform_reexport_bindings
-            .is_none()
+        let shadows_alias = function.kind() == "field_expression"
+            && self
+                .rust_value_binding_for(owner, binding_name, function.start_byte(), Some(function))
+                .is_some_and(|version| version.shadows_alias);
+        let direct_binding = (platform_reexport_bindings.is_none() && !shadows_alias)
             .then(|| {
                 if uses_type_namespace {
                     self.import_binding_version_at(owner, binding_name, function.start_byte(), true)
@@ -5831,6 +5927,20 @@ impl<'source> DirectEvidenceState<'source> {
                 rust_qualify_evidence_path(self, owner, &nominal_type, use_start)
         {
             return Some(rust_join_qualified(&receiver_type, spelling));
+        }
+        if use_node.kind() == "field_expression"
+            && self
+                .rust_value_binding_for(
+                    owner,
+                    qualified_binding_head(qualifier),
+                    use_start,
+                    Some(use_node),
+                )
+                .is_some_and(|version| version.shadows_alias)
+        {
+            // A local with no proven receiver type must not fall back to a
+            // same-named parameter/import binding from the enclosing scope.
+            return None;
         }
         if let Some(target) = self.local_target_for(owner, qualifier) {
             if let Some(method) = self.rust_receiver_method_target(target, spelling) {
@@ -11518,7 +11628,7 @@ fn qualified_binding_head(qualifier: &str) -> &str {
 }
 
 fn collect_rust_pattern_names(node: Node<'_>, names: &mut Vec<String>, source: &[u8]) {
-    if node.kind() == "identifier" {
+    if matches!(node.kind(), "identifier" | "shorthand_field_identifier") {
         let name = source
             .get(node.start_byte()..node.end_byte())
             .map_or_else(String::new, |bytes| {
@@ -11530,15 +11640,49 @@ fn collect_rust_pattern_names(node: Node<'_>, names: &mut Vec<String>, source: &
         return;
     }
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor).filter(|child| child.is_named()) {
+    for (index, child) in node
+        .children(&mut cursor)
+        .enumerate()
+        .filter(|(_, child)| child.is_named())
+    {
+        if matches!(
+            node.field_name_for_child(index as u32),
+            Some("type" | "condition")
+        ) {
+            continue;
+        }
         collect_rust_pattern_names(child, names, source);
     }
+}
+
+fn rust_pattern_binds_whole_value(mut node: Node<'_>) -> bool {
+    for _ in 0..16 {
+        match node.kind() {
+            "identifier" => return true,
+            "mut_pattern" | "ref_pattern" | "reference_pattern" => {
+                let mut cursor = node.walk();
+                let Some(child) = node.named_children(&mut cursor).last() else {
+                    return false;
+                };
+                node = child;
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 fn rust_is_lexical_scope_node(kind: &str) -> bool {
     matches!(
         kind,
-        "block" | "match_block" | "unsafe_block" | "closure_expression"
+        "block"
+            | "match_block"
+            | "unsafe_block"
+            | "closure_expression"
+            | "for_expression"
+            | "match_arm"
+            | "if_expression"
+            | "while_expression"
     )
 }
 

@@ -193,6 +193,15 @@ proves that ownership. Unshadowed `Option` and `Result` use their canonical
 standard-library identities; other unproven spellings remain unresolved
 rather than becoming crate-qualified placeholders.
 
+Rust value lookup preserves unknown local bindings as shadowing boundaries.
+Loop patterns, closure parameters, match patterns/guards, and conditional-let
+bindings cannot reuse an outer parameter alias. Let initializers retain the
+previous binding, and condition bindings end before an else branch. An unknown
+inner receiver retains its source occurrence and unresolved candidate instead
+of acquiring an invented target. This correctness correction keeps the existing
+producer capability contract; AST cache semantics version 3 prevents reuse of
+facts produced before it.
+
 Rust producer version 2 follows fields through source-proven standard-library
 `Arc`, `Rc`, and `Box` dereference wrappers and carries a unique source-visible
 call-result type into the next member call. It also inspects a local

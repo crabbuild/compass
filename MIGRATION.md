@@ -42,6 +42,14 @@ accept the shared `--format text|json|agent-json` contract where applicable.
 Use `compass architecture --format agent-json` for a bounded repository
 overview with omission counts and witness IDs.
 
+## Rebuild cached AST facts after receiver corrections
+
+AST cache semantics version 3 invalidates older cached extractions, including
+Rust calls incorrectly attributed to an outer variable shadowed by a local
+binding. The next extraction rebuilds these facts automatically and can take
+longer. Re-extract existing graphs to receive the correction; historical
+realizations remain immutable. No source or configuration migration is needed.
+
 ## Rebuild SQLite adjacency sidecars
 
 Store snapshots now declare edge-ID-ordered directional adjacency so bounded

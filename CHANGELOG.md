@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Prevent Rust local receiver bindings from inheriting shadowed outer parameter
+  types in lets, loops, closures, match arms/guards, and conditional lets.
+  Preserve initializer and else-branch scope, and rebuild older AST caches.
+
 - Fix weighted `path --max-depth` searches losing a feasible shorter prefix.
   Search work exhaustion now fails explicitly instead of appearing disconnected.
 
