@@ -67,3 +67,8 @@ class PathAuditTests(unittest.TestCase):
         row=self.row('Shortest path (1 hops):\n  Alpha --calls [EXTRACTED]--> Beta')
         row['tool']='graphify'
         self.assertTrue(audit(row,graph,{'expected':{'outcome':'path'}})['matched'])
+
+    def test_label_requests_keep_independent_expected_endpoint_ids(self):
+        row=self.row('Shortest path (1 hops):\n  Alpha --calls--> Beta',source='Alpha',target='Beta')
+        question={'expected':{'outcome':'path','endpointIds':{'compass':['a','b']}}}
+        self.assertTrue(audit(row,self.graph,question)['matched'])

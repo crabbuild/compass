@@ -72,14 +72,15 @@ def audit(row, graph, question):
         result['matched'] = not positive and 'ambig' in text.lower()
         result['selectedDespiteAmbiguity'] = positive
         return result
-    distance = shortest_distance(graph, args['source'], args['target'])
+    source_id, target_id = question['expected'].get('endpointIds', {}).get(tool, [args['source'], args['target']])
+    distance = shortest_distance(graph, source_id, target_id)
     result['storedShortestHops'] = distance
     if expected == 'depth-limit':
         result['matched'] = distance is not None and distance > args['max_hops'] and not positive and 'max_hops' in text
         return result
     if expected == 'disconnected':
         nodes = {n['id']: n for n in graph['nodes']}
-        expected_text = f"No path found between '{label(nodes[args['source']],tool)}' and '{label(nodes[args['target']],tool)}'."
+        expected_text = f"No path found between '{label(nodes[source_id],tool)}' and '{label(nodes[target_id],tool)}'."
         result['matched'] = distance is None and text == expected_text
         return result
     try:
@@ -95,7 +96,7 @@ def audit(row, graph, question):
     ids = [n['id'] for n in nodes]
     result['nodeIds'] = ids
     failures = []
-    if ids[0] != args['source'] or ids[-1] != args['target']:
+    if ids[0] != source_id or ids[-1] != target_id:
         failures.append('wrong endpoint identity')
     if len(steps) != distance or len(steps) > args['max_hops']:
         failures.append('path is not minimum-hop within the requested bound')
