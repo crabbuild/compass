@@ -96,6 +96,12 @@ history profiles, and cache identities.
 
 ### Bounded node trails
 
+The undirected `path` command also retains nondominated cost/depth states.
+Each weighted or alternative search is bounded to 1,000,000 adjacency entries
+and 16 MiB of cumulative path-key bytes. Exceeding either returns a nonzero
+work-limit error, never `NO PATH FOUND`. Previously expensive requests may now
+need a smaller depth or graph. Relation weights and output schemas are unchanged.
+
 Typed `node`/node-trail queries keep nondominated arrivals by node and depth,
 so a cheaper but longer prefix cannot hide a valid trail within `max_depth`.
 Rejected nodes are not considered admitted on a later visit. Existing cost

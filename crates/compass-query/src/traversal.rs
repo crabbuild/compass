@@ -324,7 +324,8 @@ pub fn render_shortest_path_with_limit(
         target.index,
         max_depth,
         PathRanking::Weighted,
-    );
+        PathSearchBudget::default(),
+    )?;
     let Some(path) = weighted.path else {
         return Ok(format!(
             "Source resolved: {}\nTarget resolved: {}\nNO PATH FOUND to resolved target (depth limit {max_depth}, {} nodes visited)",
@@ -355,7 +356,8 @@ pub fn render_shortest_path_with_limit(
         target.index,
         max_depth,
         PathRanking::Hops,
-    );
+        PathSearchBudget::default(),
+    )?;
     if let Some(alternative) = shorter.path
         && alternative.edges != path.edges
         && alternative.nodes.len() < path.nodes.len()
@@ -542,76 +544,128 @@ struct WeightedGraphPath {
     weight: u32,
 }
 
+// Depth-aware search keeps multiple arrivals per node. Bound both the graph
+// work and the cumulative string allocation used for deterministic tie keys.
+// Exhaustion is an error, never evidence that the endpoints are disconnected.
+struct PathSearchBudget {
+    adjacency_entries: usize,
+    key_bytes: usize,
+}
+
+impl Default for PathSearchBudget {
+    fn default() -> Self {
+        Self {
+            adjacency_entries: 1_000_000,
+            key_bytes: 16 * 1024 * 1024,
+        }
+    }
+}
+
+fn path_work_limit() -> String {
+    "path search work limit exceeded; reduce --max-depth or use a smaller graph".to_owned()
+}
+
 fn ranked_path_undirected(
     graph: &Graph,
     source: NodeIndex,
     target: NodeIndex,
     max_depth: usize,
     ranking: PathRanking,
-) -> GraphPathResult {
+    mut budget: PathSearchBudget,
+) -> Result<GraphPathResult, String> {
+    type State = (NodeIndex, u32);
     let source_id = graph.node(source).id.clone();
+    budget.key_bytes = budget
+        .key_bytes
+        .checked_sub(source_id.len())
+        .ok_or_else(path_work_limit)?;
     let mut queue = BinaryHeap::from([Reverse((0_u32, 0_u32, source_id.clone(), source))]);
-    let mut best = BTreeMap::from([(source, (0_u32, 0_u32, source_id))]);
-    let mut predecessor = BTreeMap::<NodeIndex, (NodeIndex, EdgeIndex)>::new();
+    let mut best = BTreeMap::from([(source, BTreeMap::from([(0_u32, (0_u32, source_id))]))]);
+    let mut predecessor = BTreeMap::<State, (State, EdgeIndex)>::new();
     let mut visited = BTreeSet::new();
+    let mut target_state = None;
     while let Some(Reverse((primary, secondary, path_key, node))) = queue.pop() {
-        if best.get(&node).is_none_or(|current| {
-            current.0 != primary || current.1 != secondary || current.2 != path_key
-        }) {
+        let (weight, hops) = match ranking {
+            PathRanking::Weighted => (primary, secondary),
+            PathRanking::Hops => (secondary, primary),
+        };
+        let Some(labels) = best.get(&node) else {
+            continue;
+        };
+        if labels
+            .get(&hops)
+            .is_none_or(|current| current.0 != weight || current.1 != path_key)
+            || labels.range(..hops).any(|(_, current)| current.0 <= weight)
+        {
             continue;
         }
+        let state = (node, hops);
         visited.insert(node);
         if node == target {
+            target_state = Some(state);
             break;
         }
-        let hops = match ranking {
-            PathRanking::Weighted => secondary,
-            PathRanking::Hops => primary,
-        };
         if usize::try_from(hops).unwrap_or(usize::MAX) >= max_depth {
             continue;
         }
-        for (neighbor, edge_index, weight, edge_key) in graph_adjacency(graph, node) {
+        for (neighbor, edge_index, edge_weight, edge_key) in
+            graph_adjacency(graph, node, &mut budget)?
+        {
             let next_hops = hops.saturating_add(1);
-            let current_weight = match ranking {
-                PathRanking::Weighted => primary,
-                PathRanking::Hops => secondary,
-            };
-            let next_weight = current_weight.saturating_add(weight);
+            let next_weight = weight.saturating_add(edge_weight);
+            // Reject dominated arrivals (including positive-cost cycles)
+            // before allocating a path key. Only equal-cost/depth ties need
+            // the lexical comparison below.
+            if best.get(&neighbor).is_some_and(|labels| {
+                labels.range(..=next_hops).any(|(depth, current)| {
+                    current.0 < next_weight || (current.0 == next_weight && *depth < next_hops)
+                })
+            }) {
+                continue;
+            }
             let (next_primary, next_secondary) = match ranking {
                 PathRanking::Weighted => (next_weight, next_hops),
                 PathRanking::Hops => (next_hops, next_weight),
             };
+            let next_length = path_key
+                .len()
+                .checked_add(edge_key.len())
+                .and_then(|length| length.checked_add(graph.node(neighbor).id.len()))
+                .and_then(|length| length.checked_add(2))
+                .ok_or_else(path_work_limit)?;
+            budget.key_bytes = budget
+                .key_bytes
+                .checked_sub(next_length)
+                .ok_or_else(path_work_limit)?;
             let next_key = format!("{path_key}\0{edge_key}\0{}", graph.node(neighbor).id);
-            let candidate = (next_primary, next_secondary, next_key.clone());
             if best
                 .get(&neighbor)
-                .is_none_or(|current| candidate < current.clone())
+                .and_then(|labels| labels.get(&next_hops))
+                .is_some_and(|current| current.0 == next_weight && current.1 <= next_key)
             {
-                best.insert(neighbor, candidate);
-                predecessor.insert(neighbor, (node, edge_index));
-                queue.push(Reverse((next_primary, next_secondary, next_key, neighbor)));
+                continue;
             }
+            best.entry(neighbor)
+                .or_default()
+                .insert(next_hops, (next_weight, next_key.clone()));
+            predecessor.insert((neighbor, next_hops), (state, edge_index));
+            queue.push(Reverse((next_primary, next_secondary, next_key, neighbor)));
         }
     }
-    if !best.contains_key(&target) || !visited.contains(&target) {
-        return GraphPathResult {
+    let Some(mut cursor) = target_state else {
+        return Ok(GraphPathResult {
             path: None,
             visited_nodes: visited.len(),
-        };
-    }
+        });
+    };
     let mut nodes = vec![target];
     let mut edges = Vec::new();
-    let mut cursor = target;
-    while cursor != source {
+    while cursor != (source, 0) {
         let Some((previous, edge)) = predecessor.get(&cursor).copied() else {
-            return GraphPathResult {
-                path: None,
-                visited_nodes: visited.len(),
-            };
+            return Err("path predecessor state is missing".to_owned());
         };
         edges.push(edge);
-        nodes.push(previous);
+        nodes.push(previous.0);
         cursor = previous;
     }
     nodes.reverse();
@@ -620,21 +674,31 @@ fn ranked_path_undirected(
         .iter()
         .map(|edge| relation_weight(&graph.edge(*edge).string("relation")))
         .fold(0_u32, u32::saturating_add);
-    GraphPathResult {
+    Ok(GraphPathResult {
         path: Some(WeightedGraphPath {
             nodes,
             edges,
             weight,
         }),
         visited_nodes: visited.len(),
-    }
+    })
 }
 
-fn graph_adjacency(graph: &Graph, node: NodeIndex) -> Vec<(NodeIndex, EdgeIndex, u32, String)> {
-    let edge_indices = graph
-        .outgoing_edges(node)
-        .chain(graph.incoming_edges(node))
-        .collect::<BTreeSet<_>>();
+type PathAdjacency = (NodeIndex, EdgeIndex, u32, String);
+
+fn graph_adjacency(
+    graph: &Graph,
+    node: NodeIndex,
+    budget: &mut PathSearchBudget,
+) -> Result<Vec<PathAdjacency>, String> {
+    let mut edge_indices = BTreeSet::new();
+    for edge in graph.outgoing_edges(node).chain(graph.incoming_edges(node)) {
+        budget.adjacency_entries = budget
+            .adjacency_entries
+            .checked_sub(1)
+            .ok_or_else(path_work_limit)?;
+        edge_indices.insert(edge);
+    }
     let mut adjacent = Vec::with_capacity(edge_indices.len());
     for edge_index in edge_indices.iter().copied() {
         let Some((source, target)) = graph.edge_endpoints(edge_index) else {
@@ -657,7 +721,7 @@ fn graph_adjacency(graph: &Graph, node: NodeIndex) -> Vec<(NodeIndex, EdgeIndex,
             .then_with(|| graph.node(left.0).id.cmp(&graph.node(right.0).id))
             .then_with(|| left.3.cmp(&right.3))
     });
-    adjacent
+    Ok(adjacent)
 }
 
 fn relation_weight(relation: &str) -> u32 {
@@ -1548,6 +1612,42 @@ mod tests {
     use serde_json::json;
 
     use super::dfs;
+
+    #[test]
+    fn path_work_exhaustion_is_an_error_not_a_disconnected_result()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let graph = Graph::from_document(serde_json::from_value::<GraphDocument>(json!({
+            "directed": true,
+            "nodes": [{"id":"seed", "label":"Seed"}, {"id":"target", "label":"Target"}],
+            "links": [{"source":"seed", "target":"target", "relation":"calls"}]
+        }))?)?;
+        let seed = graph.node_index("seed").ok_or("missing seed")?;
+        let target = graph.node_index("target").ok_or("missing target")?;
+        for budget in [
+            super::PathSearchBudget {
+                adjacency_entries: 0,
+                ..Default::default()
+            },
+            super::PathSearchBudget {
+                key_bytes: 4,
+                ..Default::default()
+            },
+        ] {
+            let error = super::ranked_path_undirected(
+                &graph,
+                seed,
+                target,
+                2,
+                super::PathRanking::Weighted,
+                budget,
+            )
+            .err()
+            .ok_or("expected work-limit error")?;
+            assert!(error.contains("path search work limit exceeded"));
+            assert!(!error.contains("NO PATH FOUND"));
+        }
+        Ok(())
+    }
 
     #[test]
     fn dfs_edges_always_reference_visited_nodes_at_depth_cap()

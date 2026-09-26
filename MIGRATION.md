@@ -20,8 +20,14 @@ with a suggested exact ID when exact identity is required. `compass path` no
 longer promotes a fuzzy symbol candidate into an endpoint; it is
 weighted toward structural relations, defaults to an eight-hop bound, and
 reports `NO PATH FOUND` separately when both endpoints exist but are
-unreachable. Consumers that parsed the prior human path prose should migrate to
-these explicit signals; machine-query schema versions are unchanged.
+unreachable within the requested hop bound. Consumers that parsed the prior
+human path prose should migrate to these explicit signals; machine-query schema
+versions are unchanged.
+
+`path` now fails with a nonzero work-limit error if either its weighted or
+alternative search exceeds 1,000,000 adjacency entries or 16 MiB of cumulative
+path-key bytes. Treat this as an incomplete search, not proof of disconnection;
+reduce `--max-depth` or query a smaller graph before retrying.
 
 Typed relationship commands now share source-backed import/reference
 resolution. `callers`, `impact`, and typed `affected` may therefore return

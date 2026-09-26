@@ -102,7 +102,8 @@ fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dy
 }
 
 #[test]
-fn node_command_retains_the_route_that_fits_the_requested_depth() -> Result<(), Box<dyn Error>> {
+fn node_and_path_commands_retain_the_route_that_fits_the_requested_depth()
+-> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = support::write_typed_graph(directory.path())?;
     let mut graph = GraphDocument::load(&graph_path)?;
@@ -157,7 +158,7 @@ fn node_command_retains_the_route_that_fits_the_requested_depth() -> Result<(), 
             OsString::from("n:s"),
             OsString::from("n:t"),
             OsString::from("--graph"),
-            graph_path.into_os_string(),
+            graph_path.clone().into_os_string(),
             OsString::from("--cache"),
             directory.path().join("cache").into_os_string(),
             OsString::from("--max-depth"),
@@ -171,6 +172,74 @@ fn node_command_retains_the_route_that_fits_the_requested_depth() -> Result<(), 
         serde_json::from_str(&outcome.stdout)?;
     assert_eq!(response.paths.len(), 1);
     assert_eq!(response.paths[0].node_ids, ["n:s", "n:b", "n:t"]);
+    let legacy = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("n:s"),
+            OsString::from("n:t"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+            OsString::from("--max-depth"),
+            OsString::from("2"),
+        ],
+    );
+    assert_eq!(legacy.code, 0, "{}", legacy.stderr);
+    assert!(
+        legacy
+            .stdout
+            .contains("Best path (weighted, 2 hops, weight 5)"),
+        "{}",
+        legacy.stdout
+    );
+    assert!(!legacy.stdout.contains("NO PATH FOUND"));
+    Ok(())
+}
+
+#[test]
+fn path_work_limit_is_a_failed_command_not_a_no_path_answer() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    let ids = (0..96)
+        .map(|index| format!("node-{index}-{}", "x".repeat(4096)))
+        .collect::<Vec<_>>();
+    let nodes = ids
+        .iter()
+        .enumerate()
+        .map(|(index, id)| {
+            serde_json::json!({
+                "id": id, "label": format!("Node{index}")
+            })
+        })
+        .collect::<Vec<_>>();
+    let links = ids.windows(2).enumerate().map(|(index, pair)| serde_json::json!({
+        "id": format!("edge-{index}"), "source": pair[0], "target": pair[1], "relation": "calls"
+    })).collect::<Vec<_>>();
+    std::fs::write(
+        &graph_path,
+        serde_json::to_vec(&serde_json::json!({
+            "directed":true, "nodes": nodes, "links": links
+        }))?,
+    )?;
+    let outcome = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("Node0"),
+            OsString::from("Node95"),
+            OsString::from("--graph"),
+            graph_path.into_os_string(),
+            OsString::from("--max-depth"),
+            OsString::from("95"),
+        ],
+    );
+    assert_ne!(outcome.code, 0);
+    assert!(
+        outcome.stderr.contains("path search work limit exceeded"),
+        "{}",
+        outcome.stderr
+    );
+    assert!(outcome.stdout.is_empty(), "{}", outcome.stdout);
     Ok(())
 }
 

@@ -73,6 +73,23 @@ budget. Positive-cost cycles are dominated rather than repeatedly expanded.
 All search labels and predecessor records remain bounded by examined edges.
 The CLI contract regression also passed, within the 34-test CLI query suite.
 
+A third navigation defect was then reproduced in the separate undirected
+`path` implementation: it retained only one arrival per node and made the same
+incorrect no-path claim under a two-hop bound. The release CLI and a native
+regression both reproduced it. That implementation now also keeps cost/depth
+states and reconstructs their exact predecessors. Its two ranking passes each
+cap adjacency work at 1,000,000 entries and cumulative path keys at 16 MiB;
+exhaustion is a command error, not a no-path claim.
+
+An independent oracle enumerates all simple paths through 729 four-node graphs,
+where each of six pairs is absent, a cost-1 call, or a cost-4 reference. Both
+engines are checked at depths one through three (4,374 queries). The directed
+engine sees DAGs; the undirected engine also sees cycles. The oracle compares
+reachability, minimum cost and hop count, and validates rendered/native edge
+chains and directions. It reproduced the legacy defect at graph 113, depth 2.
+This is exhaustive coverage of that small family, not a general graph proof or
+independent real-source extraction evaluation.
+
 ## Evaluation corrections
 
 The v1 graph-anchor scorer ignored the requested symbol. For Compass, any
@@ -123,21 +140,29 @@ available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c
 
 - Graph analysis integration suite: 12/12 passed after all five hub fixes.
 - Benchmark Python unit suite: 38/38 passed, including ten path-auditor tests.
-- CLI query contract suite: 34/34 passed; product suite: 9/9 passed.
+- CLI query contract suite: 35/35 passed; product suite: 9/9 passed.
+- After the separate legacy `path` fix: query library 178/178, exhaustive oracle
+  1/1 (4,374 queries), traversal integration 11/11, legacy query coverage 6/6,
+  CLI query suite 35/35 and product suite 9/9 passed. This includes an actual
+  work-limit CLI failure with empty stdout. These graph/path regressions and
+  the competitor-free Python scorer tests are now explicitly wired into CI.
 - Query relevance qualification: 5/5 passed, including the 500 synthetic cases.
 - Workspace Clippy (`--workspace --lib --bins --locked -- -D warnings`): passed
-  after all seven production corrections.
+  after all eight production corrections. The new query integration tests also
+  pass a dedicated Clippy run with warnings denied.
 - Rust formatting check: passed.
 - Product boundary script: passed; competitor tooling stays outside production.
-- Workspace native tests (`--workspace --lib --bins --locked`): 1,082 passed,
-  zero failed, two ignored after all seven production corrections, including
+- Workspace native tests (`--workspace --lib --bins --locked`): 1,083 passed,
+  zero failed, two ignored after all eight production corrections, including
   the three new MCP regressions.
 - Code-graph fixture qualification: initial native stages passed; the React
   oracle then failed because locked TypeScript dependencies were absent.
   After `npm ci --ignore-scripts`, the complete final gate passed (exit 0),
   including deterministic production updates, semantic/topology assertions,
   Markdown quality, and independent React source-anchor checks at the six-defect
-  checkpoint. The gate is running again after the extensionless-source fix.
+  checkpoint. The complete gate also passed at the seven-defect checkpoint
+  after the extensionless-source fix. The built release binary still reproduces
+  the separate legacy `path` defect; that run is not evidence for the eighth fix.
 - First v2 replay: complete but invalidated for comparative scoring (see below).
 - Corrected v2 replay `v2-corrected-02`: complete, after all three evaluation
   corrections. It uses the debug binary and recorded source patch from before
@@ -148,6 +173,11 @@ available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c
   source-grounded path audit passes 5/5 per tool. All 92 previously recorded
   Graphify source/data file hashes remain unchanged after the run; this does not
   pin every transitive dependency.
+- Explicit fixed-graph regression replay `query-only-04`: the current debug
+  query binary passes all 50 text oracles on the retained `v2-release-03`
+  Compass graphs and all five source-grounded path witnesses. Source state and
+  graph hashes were verified before/after querying. This checks query
+  compatibility; it is not a new extraction or comparative performance run.
 
 ## Findings from the first fresh replay
 
@@ -240,10 +270,32 @@ and captured responses. It currently audits successful positive path rows;
 unreachable, ambiguous, truncated and limit outcomes still need a broader
 source-reviewed corpus.
 
+## Synthetic boundary diagnostics
+
+Separate shared-graph cases were recorded before executing either tool, with
+raw outputs and exact arguments retained under `path-boundary-diagnostic` in
+the evaluation workspace. These isolate query behavior from extraction quality.
+
+| Case | Compass release checkpoint | Graphify 0.9.67 |
+| --- | --- | --- |
+| Two disconnected components | Explicit no path | Explicit no path |
+| Absent endpoint | Nonzero no-match error | Nonzero no-match error |
+| Two `Worker` nodes in different components | Lists both IDs and refuses a path | Warns on stderr, selects one, returns its path |
+| Exact ID in the disconnected component | Explicit no path | Explicit no path |
+| Reverse traversal of a stored call | Preserves reverse arrow | Preserves reverse arrow |
+| Both endpoints resolve to the same node | Explicit refusal | Explicit refusal |
+
+The ambiguity row records a policy difference: Graphify does disclose the
+ambiguity, but still picks an endpoint. It must not be described as hiding the
+warning. The two hop-limit cases are Compass-only contract checks because
+Graphify exposes no documented hop-bound option. A one-hop request correctly
+returns a bounded no-path result; the two-hop request reproduced the third
+navigation defect above. These are not extra head-to-head accuracy wins.
+
 ## Next evidence to collect
 
-1. Finish the fixture gate for the extensionless-source correction; keep the
-   production build and exact source provenance with each comparison checkpoint.
+1. Keep exact build/source provenance for subsequent release comparisons;
+   the latest query correction has native and fixed-graph regression evidence.
 2. Expand hub review beyond candidate eligibility to source-reviewed design
    judgments, separating connectivity from responsibility/cohesion defects.
 3. Add independent edge/path judgments: ordered adjacent edges, relation kinds,

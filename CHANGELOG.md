@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fix weighted `path --max-depth` searches losing a feasible shorter prefix.
+  Search work exhaustion now fails explicitly instead of appearing disconnected.
+
 - Fix bounded weighted node trails: retain shorter prefixes when a cheaper
   route exhausts the hop limit, and never admit a previously rejected node
   without charging the traversal budget.

@@ -550,11 +550,18 @@ any graph search; missing and ambiguous endpoints fail explicitly. The text path
 search is bounded to eight hops by default and ranks structural relationships
 such as calls, containment, imports, and dependencies ahead of weak references
 or documentation links. When a meaningfully weaker route is up to two hops
-shorter, Compass shows it separately. Output names the resolved target ID, and
+shorter, Compass shows it separately. Output names the resolved target, and
 an unreachable target is reported as `NO PATH FOUND` with the depth bound and
 visited-node count. Relationship arrows always preserve their stored direction.
 Traversal may follow a relationship in either direction; the arrows make that
 choice visible rather than rewriting the graph.
+
+Costlier, shorter prefixes are retained when they can reach the target within
+`--max-depth`. Each weighted or alternative search permits at most 1,000,000
+adjacency entries and 16 MiB of cumulative path-key bytes. Work exhaustion
+returns a nonzero error; it is not reported as `NO PATH FOUND`. Retry with a
+smaller depth or graph. A depth-bounded no-path result does not prove that no
+longer path exists.
 
 Both endpoints accept a file path as well as a symbol. When a language
 publishes an isolated metadata `file` node beside the `module` node that
