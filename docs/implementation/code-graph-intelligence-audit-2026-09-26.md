@@ -126,18 +126,18 @@ available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c
 - CLI query contract suite: 34/34 passed; product suite: 9/9 passed.
 - Query relevance qualification: 5/5 passed, including the 500 synthetic cases.
 - Workspace Clippy (`--workspace --lib --bins --locked -- -D warnings`): passed
-  after the explicit-kind and bounded-trail corrections.
+  after all seven production corrections.
 - Rust formatting check: passed.
 - Product boundary script: passed; competitor tooling stays outside production.
-- Workspace native tests (`--workspace --lib --bins --locked`): 1,081 passed,
-  zero failed, two ignored at the six-defect checkpoint, including both MCP
-  regressions. Workspace tests/Clippy are being rerun after the extensionless
-  source correction and its additional MCP regression.
+- Workspace native tests (`--workspace --lib --bins --locked`): 1,082 passed,
+  zero failed, two ignored after all seven production corrections, including
+  the three new MCP regressions.
 - Code-graph fixture qualification: initial native stages passed; the React
   oracle then failed because locked TypeScript dependencies were absent.
   After `npm ci --ignore-scripts`, the complete final gate passed (exit 0),
   including deterministic production updates, semantic/topology assertions,
-  Markdown quality, and independent React source-anchor checks.
+  Markdown quality, and independent React source-anchor checks at the six-defect
+  checkpoint. The gate is running again after the extensionless-source fix.
 - First v2 replay: complete but invalidated for comparative scoring (see below).
 - Corrected v2 replay `v2-corrected-02`: complete, after all three evaluation
   corrections. It uses the debug binary and recorded source patch from before
@@ -242,7 +242,7 @@ source-reviewed corpus.
 
 ## Next evidence to collect
 
-1. Finish the native rerun for the extensionless-source correction; keep the
+1. Finish the fixture gate for the extensionless-source correction; keep the
    production build and exact source provenance with each comparison checkpoint.
 2. Expand hub review beyond candidate eligibility to source-reviewed design
    judgments, separating connectivity from responsibility/cohesion defects.
