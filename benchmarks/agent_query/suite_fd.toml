@@ -1,0 +1,168 @@
+# Source-first diagnostic sample, registered before querying either tool on fd.
+# This is one additional Rust repository, not a representative held-out corpus.
+# Text matching remains a recall proxy; edge_witnesses_fd.json separately
+# records relationship identity and every reviewed occurrence for selected calls.
+# Default query forms are used on both tools. Undirected path semantics match.
+# Source excerpts are reported separately as a feature capability.
+schema = "compass.agent-query-suite/1"
+
+[[repository]]
+name = "fd"
+language = "Rust"
+url = "https://github.com/sharkdp/fd.git"
+commit = "b422e5d8c9cffaa1ae43ba68e7b97a60fb3e8ae5"
+
+[[repository.anchor]]
+file = "src/exec/command.rs"
+line = 60
+symbol = "execute_commands"
+judgment = "The generic free function is declared at line 60."
+
+[[repository.anchor]]
+file = "src/exec/mod.rs"
+line = 51
+symbol = "new_batch"
+judgment = "CommandSet::new_batch begins at line 51."
+
+[[repository.anchor]]
+file = "src/exec/command.rs"
+line = 101
+symbol = "handle_cmd_error"
+judgment = "The free error handler is declared at line 101."
+
+[[repository.anchor]]
+file = "src/filter/size.rs"
+line = 28
+symbol = "from_string"
+judgment = "SizeFilter::from_string starts at line 28; OwnerFilter has another method with this name."
+
+[[repository.anchor]]
+file = "src/exec/mod.rs"
+line = 191
+symbol = "finish"
+judgment = "CommandBuilder::finish begins at line 191."
+
+[[repository.question]]
+id = "fd-explain-execute-commands"
+kind = "explain"
+subject = "execute_commands declaration"
+compass = ["explain", "execute_commands"]
+graphify = ["explain", "execute_commands()"]
+expect = "answer"
+required = ["src/exec/command.rs", "60"]
+judgment = "src/exec/command.rs:60 declares execute_commands."
+
+[[repository.question]]
+id = "fd-explain-new-batch"
+kind = "explain"
+subject = "CommandSet::new_batch declaration"
+compass = ["explain", "new_batch"]
+graphify = ["explain", ".new_batch()"]
+expect = "answer"
+required = ["src/exec/mod.rs", "51"]
+judgment = "src/exec/mod.rs:51 declares the unique new_batch method."
+
+[[repository.question]]
+id = "fd-source-handle-error"
+kind = "explain_source"
+subject = "handle_cmd_error declaration source"
+compass = ["explain", "handle_cmd_error", "--source", "--root", "."]
+graphify = ["explain", "handle_cmd_error()"]
+expect = "answer"
+required = ["pub fn handle_cmd_error(cmd: Option<&Command>, err: io::Error) -> ExitCode"]
+judgment = "The requested declaration text is src/exec/command.rs:101."
+
+[[repository.question]]
+id = "fd-callers-execute-commands"
+kind = "callers"
+subject = "direct callers of execute_commands"
+compass = ["callers", "execute_commands"]
+graphify = ["affected", "execute_commands()", "--depth", "1"]
+expect = "answer"
+required = ["execute", "src/exec/mod.rs"]
+judgment = "CommandSet::execute at mod.rs:76 calls execute_commands at mod.rs:87."
+
+[[repository.question]]
+id = "fd-callees-execute-commands"
+kind = "callees"
+subject = "internal callees of execute_commands"
+compass = ["callees", "execute_commands"]
+graphify = ["explain", "execute_commands()"]
+expect = "answer"
+required = ["handle_cmd_error", "write"]
+judgment = "execute_commands calls handle_cmd_error at lines 68 and 93, and OutputBuffer::write at lines 87, 92, 97 of command.rs."
+
+[[repository.question]]
+id = "fd-callees-execute-batch"
+kind = "callees"
+subject = "internal callees of CommandSet::execute_batch"
+compass = ["callees", "execute_batch"]
+graphify = ["explain", ".execute_batch()"]
+expect = "answer"
+required = ["handle_cmd_error", "merge_exitcodes", "finish"]
+judgment = "mod.rs:90-120 calls handle_cmd_error at 105/112/118, CommandBuilder::finish at 111, and merge_exitcodes at 116."
+
+[[repository.question]]
+id = "fd-path-command-error"
+kind = "path"
+subject = "execute_commands to handle_cmd_error"
+compass = ["path", "execute_commands", "handle_cmd_error"]
+graphify = ["path", "execute_commands()", "handle_cmd_error()", "--undirected"]
+expect = "answer"
+required = ["execute_commands", "handle_cmd_error"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "Direct calls occur at command.rs:68 and 93; a valid source-supported one-hop relationship exists."
+
+[[repository.question]]
+id = "fd-path-batch-exitcodes"
+kind = "path"
+subject = "execute_batch to merge_exitcodes"
+compass = ["path", "execute_batch", "merge_exitcodes"]
+graphify = ["path", ".execute_batch()", "merge_exitcodes()", "--undirected"]
+expect = "answer"
+required = ["execute_batch", "merge_exitcodes"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "CommandSet::execute_batch calls merge_exitcodes at mod.rs:116; the target is declared at exit_codes.rs:46."
+
+[[repository.question]]
+id = "fd-ambiguous-new"
+kind = "ambiguity"
+subject = "new constructor ambiguity"
+compass = ["search", "new"]
+graphify = ["explain", "new"]
+expect = "pick_list"
+required_one_of = ["src/exec/mod.rs", "src/exec/command.rs"]
+min_one_of = 1
+judgment = "CommandSet::new, CommandBuilder::new and CommandTemplate::new occur at mod.rs:36/136/220; OutputBuffer::new is command.rs:19."
+
+[[repository.question]]
+id = "fd-negative"
+kind = "negative"
+subject = "absent symbol CompassAuditAbsentFdSymbol9021"
+compass = ["search", "CompassAuditAbsentFdSymbol9021"]
+graphify = ["explain", "CompassAuditAbsentFdSymbol9021"]
+expect = "no_match"
+judgment = "The exact identifier is absent from all tracked files at the pinned commit."
+
+[[repository.question]]
+id = "fd-file-exec-exitcodes"
+kind = "file_path"
+subject = "src/exec/mod.rs to src/exit_codes.rs"
+compass = ["path", "src/exec/mod.rs", "src/exit_codes.rs"]
+graphify = ["path", "src/exec/mod.rs", "src/exit_codes.rs", "--undirected"]
+expect = "answer"
+required = ["mod.rs", "exit_codes"]
+forbidden = ["NO PATH FOUND", "No path found"]
+judgment = "mod.rs:14 imports ExitCode and merge_exitcodes; the latter is called at 116 and declared in exit_codes.rs:46."
+
+[[repository.question]]
+id = "fd-broad-command-errors"
+kind = "broad"
+subject = "how are command errors handled"
+compass = ["query", "how are command errors handled"]
+graphify = ["query", "how are command errors handled"]
+expect = "answer"
+budget_tokens = 600
+max_follow_ups = 3
+required = ["handle_cmd_error"]
+judgment = "handle_cmd_error at command.rs:101 branches on command-not-found and reports other execution errors."
