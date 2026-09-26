@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use compass_cli::{Frontend, run};
 use compass_files::BuildGuard;
 use compass_graph::GraphSnapshotBuilder;
-use compass_model::code_graph::{EdgeKind, GraphDocument};
+use compass_model::code_graph::{EdgeKind, GraphDocument, NodeKind};
 use compass_output::{AgentOperation, AgentQueryView};
 use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
@@ -152,6 +152,52 @@ fn architecture_command_is_bounded_and_agent_readable() -> Result<(), Box<dyn Er
     let value: Value = serde_json::from_str(&output.stdout)?;
     assert_eq!(value["schema"], "compass.architecture.agent-view/1");
     assert!(value["answer"].as_str().is_some());
+    Ok(())
+}
+
+#[test]
+fn architecture_command_returns_a_sampled_summary_above_its_detail_budget()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_module_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    let template = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "n:a")
+        .cloned()
+        .ok_or("missing module node")?;
+    for index in 0..5_001 {
+        let mut node = template.clone();
+        node.id = format!("n:summary-node-{index:05}");
+        node.kind = NodeKind::Function;
+        node.name = format!("summary_node_{index}");
+        node.qualified_name = format!("fixture::summary_node_{index}");
+        graph.nodes.push(node);
+    }
+    graph.nodes.sort_by(|left, right| left.id.cmp(&right.id));
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+
+    let output = run(
+        Frontend::Compass,
+        [
+            OsString::from("architecture"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let value: Value = serde_json::from_str(&output.stdout)?;
+    assert_eq!(value["schema"], "compass.architecture.summary/1");
+    assert_eq!(value["detailsOmitted"], true);
+    assert_eq!(value["limitHit"]["name"], "max_nodes");
+    assert_eq!(value["limitHit"]["required"], 5_005);
+    assert_eq!(value["limitHit"]["limit"], 5_000);
+    assert_eq!(value["statistics"]["nodes"], 5_005);
+    assert!(value["sampledCommunities"].is_array());
+    assert!(value.get("nodes").is_none());
     Ok(())
 }
 
@@ -1114,6 +1160,197 @@ fn path_accepts_file_shaped_input_when_modules_carry_the_file_content() -> Resul
 }
 
 #[test]
+fn path_resolves_workspace_source_paths_like_search_and_callers() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = support::write_typed_module_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&graph_path)?;
+    graph.nodes.retain(|node| node.kind != NodeKind::File);
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&graph)?)?;
+    let graph_arg = graph_path.as_os_str().to_owned();
+
+    let search = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("b"),
+            OsString::from("--graph"),
+            graph_arg.clone(),
+        ],
+    );
+    assert_eq!(search.code, 0, "{}", search.stderr);
+    assert!(search.stdout.contains("b"), "{}", search.stdout);
+
+    let callers = run(
+        Frontend::Compass,
+        [
+            OsString::from("callers"),
+            OsString::from("b"),
+            OsString::from("--graph"),
+            graph_arg.clone(),
+        ],
+    );
+    assert_eq!(callers.code, 0, "{}", callers.stderr);
+    assert!(callers.stdout.contains("a"), "{}", callers.stdout);
+
+    let path = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("src/a.ts"),
+            OsString::from("src/b.ts"),
+            OsString::from("--graph"),
+            graph_arg,
+        ],
+    );
+    assert_eq!(path.code, 0, "{}", path.stderr);
+    assert!(path.stdout.contains("Best path"), "{}", path.stdout);
+
+    let mut ambiguous_graph = GraphDocument::load(&graph_path)?;
+    let mut second_module = ambiguous_graph
+        .nodes
+        .iter()
+        .find(|node| node.id == "n:a")
+        .cloned()
+        .ok_or("missing source module")?;
+    second_module.id = "n:a-duplicate".to_owned();
+    second_module.name = "a-alias".to_owned();
+    second_module.qualified_name = "a-alias".to_owned();
+    ambiguous_graph.nodes.push(second_module);
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&ambiguous_graph)?)?;
+    let ambiguous = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("src/a.ts"),
+            OsString::from("src/b.ts"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+        ],
+    );
+    assert_ne!(ambiguous.code, 0);
+    assert!(
+        ambiguous.stderr.contains("AMBIGUOUS EXACT MATCH"),
+        "{}",
+        ambiguous.stderr
+    );
+
+    let oversized_path = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from(format!("src/{}.ts", "x".repeat(4_100))),
+            OsString::from("src/b.ts"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+        ],
+    );
+    assert_ne!(oversized_path.code, 0);
+    assert!(
+        oversized_path.stderr.contains("source-path limit"),
+        "{}",
+        oversized_path.stderr
+    );
+    Ok(())
+}
+
+#[test]
+fn configured_typescript_path_alias_agrees_across_search_callers_and_path()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let root = directory.path().join("project");
+    let app = root.join("apps/web");
+    std::fs::create_dir_all(app.join("src"))?;
+    std::fs::write(
+        app.join("tsconfig.json"),
+        r#"{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}},"include":["src/**/*.ts"]}"#,
+    )?;
+    std::fs::write(
+        app.join("src/api.ts"),
+        "export function Widget() { return 1; }\n",
+    )?;
+    std::fs::write(
+        app.join("src/consumer.ts"),
+        "import { Widget } from \"@/api\";\nexport function useWidget() { return Widget(); }\n",
+    )?;
+    let output_root = directory.path().join("generated");
+    let ensured = run(
+        Frontend::Compass,
+        [
+            OsString::from("ensure"),
+            root.as_os_str().to_owned(),
+            OsString::from("--out"),
+            output_root.as_os_str().to_owned(),
+            OsString::from("--store"),
+            OsString::from("json"),
+            OsString::from("--no-cluster"),
+            OsString::from("--no-viz"),
+        ],
+    );
+    assert_eq!(ensured.code, 0, "{}", ensured.stderr);
+
+    let graph_path = output_root.join("compass-out/graph.json");
+    let mut graph = GraphDocument::load(&graph_path)?;
+    graph.nodes.retain(|node| node.kind != NodeKind::File);
+    std::fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+
+    let search = run(
+        Frontend::Compass,
+        [
+            OsString::from("search"),
+            OsString::from("Widget"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+            OsString::from("--format"),
+            OsString::from("json"),
+        ],
+    );
+    assert_eq!(search.code, 0, "{}", search.stderr);
+    let search_value: Value = serde_json::from_str(&search.stdout)?;
+    let target = search_value["nodes"]
+        .as_array()
+        .and_then(|nodes| {
+            nodes.iter().find(|node| {
+                node["kind"] == "function"
+                    && node["source"]["file"] == "apps/web/src/api.ts"
+                    && node["name"]
+                        .as_str()
+                        .is_some_and(|name| name.starts_with("Widget"))
+            })
+        })
+        .and_then(|node| node["id"].as_str())
+        .ok_or("search did not return the path-mapped Widget declaration")?
+        .to_owned();
+
+    let callers = run(
+        Frontend::Compass,
+        [
+            OsString::from("callers"),
+            OsString::from(target),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(callers.code, 0, "{}", callers.stderr);
+    assert!(callers.stdout.contains("useWidget"), "{}", callers.stdout);
+    assert!(callers.stdout.contains("consumer.ts"), "{}", callers.stdout);
+
+    let path = run(
+        Frontend::Compass,
+        [
+            OsString::from("path"),
+            OsString::from("apps/web/src/consumer.ts"),
+            OsString::from("apps/web/src/api.ts"),
+            OsString::from("--graph"),
+            graph_path.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(path.code, 0, "{}", path.stderr);
+    assert!(path.stdout.contains("Best path"), "{}", path.stdout);
+    assert!(path.stdout.contains("imports"), "{}", path.stdout);
+    Ok(())
+}
+
+#[test]
 fn typed_text_paging_continues_the_same_result_with_a_cursor() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
@@ -1389,7 +1626,6 @@ fn explain_source_returns_digest_verified_declaration_text() -> Result<(), Box<d
         [
             OsString::from("explain"),
             OsString::from("run"),
-            OsString::from("--source"),
             OsString::from("--root"),
             directory.path().as_os_str().to_owned(),
             OsString::from("--graph"),
@@ -1410,6 +1646,25 @@ fn explain_source_returns_digest_verified_declaration_text() -> Result<(), Box<d
         explained.stdout
     );
     assert!(explained.stdout.contains("3: }"), "{}", explained.stdout);
+
+    let omitted = run(
+        Frontend::Compass,
+        [
+            OsString::from("explain"),
+            OsString::from("run"),
+            OsString::from("--no-source"),
+            OsString::from("--root"),
+            directory.path().as_os_str().to_owned(),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+        ],
+    );
+    assert_eq!(omitted.code, 0, "{}", omitted.stderr);
+    assert!(
+        !omitted.stdout.contains("SOURCE src/lib.rs"),
+        "{}",
+        omitted.stdout
+    );
 
     std::fs::write(&source_path, "fn run() {\n    other();\n}\n")?;
     let stale = run(

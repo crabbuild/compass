@@ -18,6 +18,7 @@ use names::{
 use relation::classify_relation;
 use scope::{classify_source, generated_paths, normalized_path, path_matches_prefix};
 
+#[derive(Clone, Copy)]
 pub struct ArchitectureProjectionInput<'a> {
     pub document: &'a GraphDocument,
     pub communities: &'a Communities,
@@ -26,6 +27,12 @@ pub struct ArchitectureProjectionInput<'a> {
     pub project_name: &'a str,
     pub built_at_commit: Option<&'a str>,
     pub generated_at: Option<&'a str>,
+}
+
+#[derive(Clone, Debug)]
+pub enum ArchitectureProjectionOutput {
+    Detailed(Box<ArchitectureViewModel>),
+    Summary(Box<ArchitectureSummary>),
 }
 
 #[derive(Debug, Error)]
@@ -48,6 +55,290 @@ pub enum ArchitectureProjectionError {
     },
     #[error("architecture projection invariant failed: {0}")]
     Invariant(String),
+}
+
+/// Build the detailed architecture view, or a typed bounded summary when
+/// a declared projection bound prevents that view from being materialized.
+/// Other validation and invariant errors remain errors; a summary never turns
+/// malformed input into a success-shaped result.
+pub fn project_architecture_or_summary(
+    input: ArchitectureProjectionInput<'_>,
+    options: &ArchitectureProjectionOptions,
+) -> Result<ArchitectureProjectionOutput, ArchitectureProjectionError> {
+    validate_options(options)?;
+    match project_architecture(input, options) {
+        Ok(model) => Ok(ArchitectureProjectionOutput::Detailed(Box::new(model))),
+        Err(ArchitectureProjectionError::LimitExceeded {
+            name,
+            required,
+            limit,
+        }) => Ok(ArchitectureProjectionOutput::Summary(Box::new(
+            architecture_summary(input, name, required, limit)?,
+        ))),
+        Err(error) => Err(error),
+    }
+}
+
+fn architecture_summary(
+    input: ArchitectureProjectionInput<'_>,
+    limit_name: &'static str,
+    required: usize,
+    limit: usize,
+) -> Result<ArchitectureSummary, ArchitectureProjectionError> {
+    validate_summary_input(input)?;
+
+    let mut top_communities = Vec::<(usize, usize, Vec<&str>)>::new();
+    for (community, members) in input.communities {
+        if members.is_empty() {
+            continue;
+        }
+        top_communities.push((*community, members.len(), Vec::new()));
+        top_communities
+            .sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        top_communities.truncate(ARCHITECTURE_SUMMARY_MAX_COMMUNITIES);
+    }
+    let top_communities = top_communities
+        .into_iter()
+        .map(|(community, member_count, _)| {
+            let sampled_ids = input
+                .communities
+                .get(&community)
+                .map_or_else(Vec::new, |members| smallest_member_ids(members));
+            (community, member_count, sampled_ids)
+        })
+        .collect::<Vec<_>>();
+
+    let mut selected_member_ids = BTreeSet::<&str>::new();
+    for (_, _, sampled_ids) in &top_communities {
+        selected_member_ids.extend(sampled_ids.iter().copied());
+    }
+    let mut raw_node_kinds = BTreeMap::<&str, usize>::new();
+    let mut sampled_nodes = BTreeMap::<&str, ArchitectureSummaryNode>::new();
+    for node in &input.document.nodes {
+        let count = raw_node_kinds.entry(node.kind_name()).or_default();
+        *count = count.saturating_add(1);
+        if selected_member_ids.contains(node.id.as_str())
+            && node.id.len() <= ARCHITECTURE_SUMMARY_MAX_SAMPLE_NODE_ID_BYTES
+        {
+            let (label, label_bounded) = bounded_summary_scalar(summary_node_label(node));
+            let (kind, kind_bounded) = bounded_summary_scalar(node.kind_name());
+            let source_file = node.source_file().filter(|value| !value.is_empty());
+            let (source_file, source_file_bounded) = source_file
+                .map(|value| {
+                    let (bounded, changed) = bounded_summary_scalar(value);
+                    (Some(bounded), changed)
+                })
+                .unwrap_or((None, false));
+            let mut bounded_fields = Vec::new();
+            if label_bounded {
+                bounded_fields.push("label");
+            }
+            if kind_bounded {
+                bounded_fields.push("kind");
+            }
+            if source_file_bounded {
+                bounded_fields.push("sourceFile");
+            }
+            sampled_nodes.insert(
+                node.id.as_str(),
+                ArchitectureSummaryNode {
+                    id: node.id.clone(),
+                    label,
+                    kind,
+                    source_file,
+                    bounded_fields,
+                },
+            );
+        }
+    }
+    let mut raw_relationship_kinds = BTreeMap::<&str, usize>::new();
+    for edge in &input.document.links {
+        let count = raw_relationship_kinds.entry(edge.relation()).or_default();
+        *count = count.saturating_add(1);
+    }
+    let (node_kinds, other_nodes) = bounded_kind_counts(raw_node_kinds);
+    let (relationship_kinds, other_relationships) = bounded_kind_counts(raw_relationship_kinds);
+    let sampled_communities = top_communities
+        .into_iter()
+        .map(|(id, member_count, sampled_ids)| {
+            let fallback_label;
+            let label_source =
+                if let Some(label) = input.community_labels.and_then(|labels| labels.get(&id)) {
+                    label.as_str()
+                } else {
+                    fallback_label = format!("Community {id}");
+                    fallback_label.as_str()
+                };
+            let (label, label_bounded) = bounded_summary_scalar(label_source);
+            ArchitectureSummaryCommunity {
+                id,
+                label,
+                bounded_fields: if label_bounded {
+                    vec!["label"]
+                } else {
+                    Vec::new()
+                },
+                member_count,
+                sampled_nodes: sampled_ids
+                    .iter()
+                    .filter_map(|node_id| sampled_nodes.get(node_id).cloned())
+                    .collect(),
+                omitted_sample_nodes: sampled_ids
+                    .iter()
+                    .filter(|node_id| !sampled_nodes.contains_key(*node_id))
+                    .count(),
+            }
+        })
+        .collect();
+
+    let (title, _) = bounded_summary_scalar(&format!("{} — Architecture", input.project_name));
+
+    Ok(ArchitectureSummary {
+        schema: ARCHITECTURE_SUMMARY_SCHEMA,
+        title,
+        statistics: ArchitectureSummaryStatistics {
+            nodes: input.document.nodes.len(),
+            relationships: input.document.links.len(),
+            communities: input.communities.len(),
+            node_kinds,
+            other_nodes,
+            relationship_kinds,
+            other_relationships,
+        },
+        limit_hit: ArchitectureProjectionLimitHit {
+            name: limit_name,
+            required,
+            limit,
+        },
+        sample_policy: ARCHITECTURE_SUMMARY_SAMPLE_POLICY,
+        kind_count_policy: ARCHITECTURE_SUMMARY_KIND_COUNT_POLICY,
+        sampled_communities,
+        details_omitted: true,
+    })
+}
+
+fn validate_summary_input(
+    input: ArchitectureProjectionInput<'_>,
+) -> Result<(), ArchitectureProjectionError> {
+    let mut node_ids = BTreeSet::new();
+    for node in &input.document.nodes {
+        if !node_ids.insert(node.id.as_str()) {
+            return Err(ArchitectureProjectionError::Invariant(
+                "node IDs must be unique".to_owned(),
+            ));
+        }
+    }
+    for edge in &input.document.links {
+        if !node_ids.contains(edge.source.as_str()) || !node_ids.contains(edge.target.as_str()) {
+            return Err(ArchitectureProjectionError::Invariant(format!(
+                "relationship endpoint is outside the graph: {} -> {}",
+                edge.source, edge.target
+            )));
+        }
+    }
+
+    let mut node_communities = BTreeMap::<&str, usize>::new();
+    for (community, members) in input.communities {
+        for member in members {
+            if let Some(previous) = node_communities.insert(member.as_str(), *community)
+                && previous != *community
+            {
+                return Err(ArchitectureProjectionError::DuplicateCommunity {
+                    node: member.clone(),
+                    first: previous,
+                    second: *community,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn smallest_member_ids(members: &[String]) -> Vec<&str> {
+    let mut sample = Vec::<&str>::new();
+    for member in members {
+        if sample.iter().any(|existing| *existing == member) {
+            continue;
+        }
+        if sample.len() < ARCHITECTURE_SUMMARY_MAX_NODES_PER_COMMUNITY {
+            sample.push(member);
+        } else if let Some((largest_index, largest)) = sample
+            .iter()
+            .enumerate()
+            .max_by(|left, right| left.1.cmp(right.1))
+            && member.as_str() < *largest
+        {
+            sample[largest_index] = member;
+        }
+    }
+    sample.sort();
+    sample
+}
+
+fn bounded_kind_counts(counts: BTreeMap<&str, usize>) -> (BTreeMap<String, usize>, usize) {
+    let mut retained = BTreeMap::new();
+    let mut other_count = 0_usize;
+    for (kind, count) in counts {
+        if retained.len() < ARCHITECTURE_SUMMARY_MAX_KIND_ENTRIES && safe_summary_kind_name(kind) {
+            retained.insert(kind.to_owned(), count);
+        } else {
+            other_count = other_count.saturating_add(count);
+        }
+    }
+    (retained, other_count)
+}
+
+fn safe_summary_kind_name(value: &str) -> bool {
+    value.len() <= ARCHITECTURE_SUMMARY_MAX_KIND_BYTES
+        && !value.chars().any(summary_character_needs_escape)
+}
+
+fn summary_node_label(node: &NodeRecord) -> &str {
+    [
+        "label",
+        "name",
+        "qualifiedName",
+        "qualified_name",
+        "signature",
+    ]
+    .iter()
+    .filter_map(|key| {
+        node.attributes
+            .get(*key)
+            .and_then(serde_json::Value::as_str)
+    })
+    .map(str::trim)
+    .find(|value| !value.is_empty())
+    .or_else(|| node.source_file().filter(|value| !value.is_empty()))
+    .unwrap_or(&node.id)
+}
+
+fn bounded_summary_scalar(value: &str) -> (String, bool) {
+    let mut output = String::new();
+    let mut changed = false;
+    let mut characters = value.chars();
+    for character in characters
+        .by_ref()
+        .take(ARCHITECTURE_SUMMARY_MAX_SAMPLE_SCALAR_CHARS)
+    {
+        if summary_character_needs_escape(character) {
+            output.push_str(&format!("\\u{{{:x}}}", u32::from(character)));
+            changed = true;
+        } else {
+            output.push(character);
+        }
+    }
+    if characters.next().is_some() {
+        output.push('…');
+        changed = true;
+    }
+    (output, changed)
+}
+
+fn summary_character_needs_escape(character: char) -> bool {
+    let code = u32::from(character);
+    character.is_control()
+        || matches!(code, 0x061c | 0x200e..=0x200f | 0x202a..=0x202e | 0x2066..=0x2069)
 }
 
 #[derive(Clone, Debug)]
