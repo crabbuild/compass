@@ -516,7 +516,22 @@ The text form is answer-first and names the graph totals, groups, routes,
 diagnostics, and any omitted groups. `agent-json` adds the versioned
 `compass.architecture.agent-view/1` envelope while preserving coverage counts
 and witness group IDs, so an empty displayed section cannot be mistaken for an
-empty architecture.
+empty architecture. If a declared projection limit prevents the detailed view,
+the command returns exact graph totals and the exceeded bound as a summary
+instead of failing. JSON uses `compass.architecture.summary/1`; agent JSON uses
+`compass.architecture.summary-agent-view/1`. The summary explicitly marks
+details as omitted and does not claim groups or routes are empty. Detailed
+output is capped at 5,000 nodes or 20,000 relationships. The bounded summary
+includes node-kind and relationship-kind counts, then samples at most 12
+communities ranked by descending member count and ascending community ID, with
+up to 3 nodes per community in ascending node-ID order. Each kind map has at
+most 64 safe names in ascending order as described by `kindCountPolicy`;
+`otherNodes` and `otherRelationships` give the exact counts for kinds outside
+those maps. Sample IDs are limited to 1,024 bytes. Sample
+labels, kinds, paths, and community labels are limited to 512 characters and
+escape control and bidirectional-text characters; `boundedFields` records
+which sample fields were changed, and `omittedSampleNodes` counts selected IDs
+that could not be included.
 
 ### `path`
 
@@ -544,13 +559,19 @@ module that owns the same source file and the answer names both
 candidate modules, or a name that matches several declarations, still fails
 closed with the candidate list instead of guessing.
 
+A repository-relative source path also resolves directly to a unique
+source-backed module when the graph has no separate `file` node. Multiple
+modules or declarations for that path remain explicit ambiguous candidates.
+Source-path endpoint matching is bounded to 4096 input bytes; longer paths
+return a limit error.
+
 ### `explain`
 
 ```text
 compass explain "<node>"
   [--budget N]
   [--page N]
-  [--source]
+  [--source | --no-source]
   [--root PATH]
   [--max-source-bytes N]
   [--format text|json|agent-json]
@@ -569,18 +590,17 @@ Connections and ambiguous candidates use the same bounded, deterministic
 pagination contract as natural-language queries instead of silently cutting off
 after the first group.
 
-`--source` appends the declaration text for a uniquely resolved, source-backed
-node. The excerpt is read below `--root` (default: the current directory),
-limited to `--max-source-bytes` (default: 4096), and verified against the
-symbol digest recorded in the graph before it is printed. A rewritten file
-fails closed with `SOURCE unavailable: ... does not match ...`; an ambiguous or
-unsourced target keeps the candidate list instead of guessing. The declaration
-is what a `--source` request is for, so the connection list beside it is
-bounded to its strongest entries by default: the `Pagination:` footer still
-reports the list's true total and `--page 2` continues it, while an explicit
-`--budget` lists as much of the list as that budget reaches. On the reviewed
-corpora this removes about a third of a source answer without putting any
-connection out of reach.
+Source is included by default for a uniquely resolved, source-backed node;
+`--source` keeps that behavior explicit and `--no-source` omits the excerpt.
+The excerpt is read below `--root` (default: the current directory), limited to
+`--max-source-bytes` (default: 4096), and verified against the symbol digest
+recorded in the graph before it is printed. A rewritten file fails closed with
+`SOURCE unavailable: ... does not match ...`; an ambiguous or unsourced target
+keeps the candidate list instead of guessing. When source is included, the
+connection list is bounded to its strongest entries by default: the
+`Pagination:` footer still reports the list's true total and `--page 2`
+continues it, while an explicit `--budget` lists as much of the list as that
+budget reaches.
 
 ### `affected`
 

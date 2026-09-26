@@ -457,6 +457,20 @@ to keep large payloads bounded without discarding drill-down data. Extraction
 completeness, overview omissions, and architecture quality are separate
 signals.
 
+When a declared detailed-projection limit is exceeded, `compass architecture`
+returns `compass.architecture.summary/1` with exact node, relationship, and
+community totals, kind counts, the specific exceeded limit, and a deterministic
+sample of up to 12 largest communities with at most 3 ascending-ID nodes each.
+Each kind map includes up to 64 safe names in ascending-name order, described
+by `kindCountPolicy`; exact remainder counts are aggregated in `otherNodes` and
+`otherRelationships`. Sample IDs are bounded to
+1,024 bytes, and sample text fields are bounded to 512 characters with control
+and bidi characters escaped. `boundedFields` and `omittedSampleNodes` disclose
+these bounds. Its `detailsOmitted` field is true; no architecture groups or
+routes are implied by that summary. The agent-facing variant is
+`compass.architecture.summary-agent-view/1` and retains the summary schema in
+`summarySchema`.
+
 The Architecture Map and Community Directory omit communities made entirely
 of Markdown table navigation records. Those communities count toward the
 report's omitted-community coverage and their source-backed nodes remain in
@@ -1125,6 +1139,9 @@ First-party editor and offline-viewer contracts are versioned independently:
 - `compass.program.call_graph/1` — bounded symbol-centered caller/callee graph;
 - `compass.viewer.architecture/1` — source-scoped subsystem architecture with
   typed relationships, hierarchy, omissions, and quality diagnostics;
+- `compass.architecture.summary/1` — exact graph totals, bounded kind maps
+  with aggregate remainder counts, a bounded community sample, and the declared
+  detailed-projection limit when the full architecture view cannot be built;
 - `compass.history.timeline/1` — commit and materialization states;
 - `compass.history.change_counts/1` — lazy structural counts between existing
   realizations;

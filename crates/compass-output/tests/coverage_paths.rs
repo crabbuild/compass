@@ -96,11 +96,16 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
     }
     let graph = document(json!({
         "directed":true,
-        "graph":{"hyperedges":[
-            {"label":"Pipeline","nodes":["n0","n1"],"confidence":"INFERRED","confidence_score":0.75},
-            {"id":"Fallback","nodes":["n2"],"confidence":"EXTRACTED"},
-            {"nodes":"invalid"}
-        ]},
+        "graph":{
+            "hyperedges":[
+                {"label":"Pipeline","nodes":["n0","n1"],"confidence":"INFERRED","confidence_score":0.75},
+                {"id":"Fallback","nodes":["n2"],"confidence":"EXTRACTED"},
+                {"nodes":"invalid"}
+            ],
+            "diagnostics":[
+                {"severity":"warning","code":"publication_fixture","message":"Publication fixture evidence","relatedIds":["n0"]}
+            ]
+        },
         "nodes":nodes,
         "links":[
             {"source":"file_a","target":"file_b","relation":"imports_from","confidence":"EXTRACTED","source_file":"src/a.rs"},
@@ -224,11 +229,18 @@ fn reports_cover_navigation_quality_learning_hyperedges_and_questions() -> Resul
         "semantically＿similar＿to",
         "shared contract",
         "Import Cycles",
+        "src/a.rs, src/b.rs",
         "Hyperedges",
         "Pipeline",
         "Ambiguous Edge Evidence",
+        "n1 -> n2 · relation: uses",
+        "Publication Diagnostic Evidence",
+        "Code: publication＿fixture",
+        "message: Publication fixture evidence",
         "Work-Memory Observations",
+        "preferred＿source",
         "code changed; re-verify",
+        "## Community Directory",
         "known＿dead＿end",
         "Suggested Compass Queries",
         "How does runtime flow?",
