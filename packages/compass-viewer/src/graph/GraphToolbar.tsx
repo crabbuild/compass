@@ -365,11 +365,11 @@ export function GraphToolbar({
                 Number(event.target.value) as GraphLayoutSpacing
               )}
             >
-              <option value={1.5}>Compact · 75%</option>
-              <option value={2}>Default · 100%</option>
-              <option value={3}>Airy · 150%</option>
-              <option value={4}>Wide · 200%</option>
-              <option value={6}>Extra wide · 300%</option>
+              <option value={2.25}>Compact · 75%</option>
+              <option value={3}>Default · 100%</option>
+              <option value={4.5}>Airy · 150%</option>
+              <option value={6}>Wide · 200%</option>
+              <option value={9}>Extra wide · 300%</option>
             </select>
           </label>
 

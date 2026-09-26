@@ -187,7 +187,7 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       focusedNodeId={null}
       physicsRunning={false}
       layoutStyle="automatic"
-      layoutSpacing={3}
+      layoutSpacing={4.5}
       forceLabels={false}
       hiddenCommunities={new Set()}
       hiddenChanges={new Set()}
@@ -212,9 +212,9 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       onFocus: vi.fn(), onOpenSource: vi.fn(), onOpenRelationshipSource: vi.fn(),
       onHover: vi.fn(), onHoverEdge: vi.fn(), onClear: vi.fn(), onStabilized: vi.fn()
     };
-    const { rerender } = render(<VisNetworkCanvas {...props} layoutSpacing={2} />);
+    const { rerender } = render(<VisNetworkCanvas {...props} layoutSpacing={3} />);
     mock.updates.length = 0;
-    rerender(<VisNetworkCanvas {...props} layoutSpacing={3} />);
+    rerender(<VisNetworkCanvas {...props} layoutSpacing={4.5} />);
     expect(mock.updates).toContainEqual([
       { id: "caller", x: 0, y: 0 }, { id: "callee", x: 15, y: 0 }
     ]);
@@ -232,9 +232,9 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       onFocus: vi.fn(), onOpenSource: vi.fn(), onOpenRelationshipSource: vi.fn(),
       onHover: vi.fn(), onHoverEdge: vi.fn(), onClear: vi.fn(), onStabilized: vi.fn()
     };
-    const { rerender } = render(<VisNetworkCanvas {...props} layoutSpacing={1.5} />);
+    const { rerender } = render(<VisNetworkCanvas {...props} layoutSpacing={2.25} />);
     const before = mock.dataSets.at(-2)!;
-    rerender(<VisNetworkCanvas {...props} layoutSpacing={3} />);
+    rerender(<VisNetworkCanvas {...props} layoutSpacing={4.5} />);
     const after = mock.dataSets.at(-2)!;
     expect(before.some((node) => Number(node.x) !== 0)).toBe(true);
     after.forEach((node, index) => {
@@ -570,8 +570,8 @@ describe("VisNetworkCanvas hover lifecycle", () => {
 
     expect(mock.dataSets[0]?.[0]).toMatchObject({
       id: "caller",
-      x: -80,
-      y: 24
+      x: -120,
+      y: 36
     });
   });
 

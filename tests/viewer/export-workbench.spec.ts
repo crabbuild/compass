@@ -137,12 +137,12 @@ for (const width of [320, 390, 558, 768, 1440]) {
     }
     await page.getByRole("button", { name: "Graph settings", exact: true }).click();
     const spacing = page.getByRole("combobox", { name: "Layout spacing" });
-    await expect(spacing).toHaveValue("2");
+    await expect(spacing).toHaveValue("3");
     await expect(spacing.locator("option")).toHaveText([
       "Compact · 75%", "Default · 100%", "Airy · 150%", "Wide · 200%", "Extra wide · 300%"
     ]);
     await spacing.selectOption({ label: "Extra wide · 300%" });
-    await expect(page.getByRole("region", { name: "Interactive Compass code graph" })).toHaveAttribute("data-layout-spacing", "6");
+    await expect(page.getByRole("region", { name: "Interactive Compass code graph" })).toHaveAttribute("data-layout-spacing", "9");
   });
 }
 

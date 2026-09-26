@@ -664,7 +664,7 @@ editor extension stay visually identical.
 The toolbar places **Overview** before **Filters**, whose panel opens below its
 button and stays within the viewport as the window resizes. Layout spacing offers
 Compact (75%), Default (100%), Airy (150%), Wide (200%), and Extra wide (300%).
-These five levels use the roomier baseline (twice the original distances) for
+These five levels use the roomier baseline (three times the original distances) for
 automatic and fixed layouts, including large seeded graphs. The toolbar uses
 its full available width and wraps related controls together in narrow windows;
 the coverage badge shares the status row. Compact controls respond to the host
