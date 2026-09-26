@@ -1,0 +1,209 @@
+{
+  "schema": "compass.agent-path-witnesses/1",
+  "scope": "Development witnesses reviewed after observing output; not held-out accuracy estimates. Containment proves navigation, not execution flow. Gson accepts either source-supported instantiation or a return-type reference, recording their different relations and occurrences.",
+  "witnesses": [
+    {
+      "repository": "cobra",
+      "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "question": "cobra2-path-find-legacyargs",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "command.go",
+          "line": 757,
+          "text": "func (c *Command) Find(",
+          "labels": [
+            ".Find()"
+          ]
+        },
+        {
+          "file": "args.go",
+          "line": 28,
+          "text": "func legacyArgs(",
+          "labels": [
+            "legacyArgs()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "command.go",
+            "line": 776,
+            "text": "legacyArgs(commandFound, stripFlags(a, commandFound))"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "flask",
+      "commit": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+      "question": "flask2-path-fulldispatch-finalize",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/flask/app.py",
+          "line": 995,
+          "text": "def full_dispatch_request(",
+          "labels": [
+            ".full_dispatch_request()"
+          ]
+        },
+        {
+          "file": "src/flask/app.py",
+          "line": 1024,
+          "text": "def finalize_request(",
+          "labels": [
+            ".finalize_request()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/flask/app.py",
+            "line": 1022,
+            "text": "self.finalize_request(ctx, rv)"
+          }
+        }
+      ]
+    },
+    {
+      "repository": "gson",
+      "commit": "15ca7360379cf3c1502b59981569050489f2d73e",
+      "question": "gson2-path-newjsonwriter-jsonwriter",
+      "category": "construction-reference",
+      "nodes": [
+        {
+          "file": "gson/src/main/java/com/google/gson/Gson.java",
+          "line": 797,
+          "text": "public JsonWriter newJsonWriter(",
+          "labels": [
+            ".newJsonWriter()"
+          ]
+        },
+        {
+          "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+          "line": 162,
+          "text": "public class JsonWriter",
+          "labels": [
+            "JsonWriter"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "instantiates",
+            "references"
+          ],
+          "direction": "forward",
+          "sitesByRelation": {
+            "instantiates": {
+              "file": "gson/src/main/java/com/google/gson/Gson.java",
+              "line": 801,
+              "text": "new JsonWriter(writer)"
+            },
+            "references": {
+              "file": "gson/src/main/java/com/google/gson/Gson.java",
+              "line": 797,
+              "text": "public JsonWriter newJsonWriter("
+            }
+          }
+        }
+      ]
+    },
+    {
+      "repository": "zod",
+      "commit": "d2b135cfb7a3582b9eb515756b9166bcb9521f4a",
+      "question": "zod2-path-detectversion-convertschema",
+      "category": "file-containment",
+      "nodes": [
+        {
+          "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+          "line": 105,
+          "text": "function detectVersion(",
+          "labels": [
+            "detectVersion()"
+          ]
+        },
+        {
+          "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+          "line": 1,
+          "text": "",
+          "labels": [
+            "from-json-schema",
+            "from-json-schema.ts"
+          ]
+        },
+        {
+          "file": "packages/zod/src/v4/classic/from-json-schema.ts",
+          "line": 808,
+          "text": "function convertSchema(",
+          "labels": [
+            "convertSchema()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "contains"
+          ],
+          "direction": "reverse"
+        },
+        {
+          "relations": [
+            "contains"
+          ],
+          "direction": "forward"
+        }
+      ]
+    },
+    {
+      "repository": "axum",
+      "commit": "af1345b53a259b0990be1ff853f9b56c05040ef7",
+      "question": "axum2-path-validate-v07",
+      "category": "call",
+      "nodes": [
+        {
+          "file": "src/routing/path_router.rs",
+          "line": 22,
+          "text": "fn validate_path(",
+          "labels": [
+            "validate_path()"
+          ]
+        },
+        {
+          "file": "src/routing/path_router.rs",
+          "line": 36,
+          "text": "fn validate_v07_paths(",
+          "labels": [
+            "validate_v07_paths()"
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "relations": [
+            "calls"
+          ],
+          "direction": "forward",
+          "site": {
+            "file": "src/routing/path_router.rs",
+            "line": 30,
+            "text": "validate_v07_paths(path)?"
+          }
+        }
+      ]
+    }
+  ]
+}

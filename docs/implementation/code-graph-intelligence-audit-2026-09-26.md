@@ -1,0 +1,237 @@
+# Code graph intelligence audit: 2026-09-26
+
+## Status and acceptance criteria
+
+Broad superiority over Graphify is **unproven**. The objective covers hub
+analysis, code graph correctness, queries, explanations, and navigation/path
+finding. A focused text-recall score cannot establish all of those properties.
+
+| Requirement | Evidence needed | Current evidence |
+| --- | --- | --- |
+| Reliable hub analysis | Declaration-aware candidates, stable rankings, source-reviewed false positives and negatives | Four hub defects fixed; two bounded-trail defects fixed; no reviewed god-object corpus yet |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Anchor scorer repaired; relationship accuracy not measured by that scorer |
+| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Existing five-repository suites are development samples with text oracles |
+| Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Prior query changes exist; fresh paired evidence still needed |
+| Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | Existing path tests/suites are useful but do not prove real-repository path precision |
+| Fair efficiency comparison | Same successful questions, repeated timings, token methodology and complete environment provenance | Paired token aggregation exists; bytes/4 remains an estimate |
+
+“God mode” is interpreted here as the existing `god_nodes` hub analysis.
+It orders connected candidates by degree; it does not measure responsibility,
+cohesion, or whether a high-degree declaration needs refactoring.
+
+## Reproduced production defects
+
+`crates/compass-graph/src/analyze.rs` previously discarded names such as
+`Path` and `Counter` even when they were project declarations with source
+locations. It also used graph input order to break degree ties, and returned
+isolated declarations when enough results were requested.
+
+The fix retains those source-located declarations, breaks ties by stable node
+ID, and omits degree-zero candidates. Two regression tests failed before the
+fix; all ten tests in `analyze_coverage` passed afterward. An MCP regression
+checks the rendered ordering and top-N behavior. Public fields and degree
+semantics are unchanged; candidate lists can change.
+
+A fourth defect treated every `.method()` label as a file even when the node
+had canonical kind `method`, and allowed explicitly typed files with descriptive
+labels into the hub list. The regression returned `[caller, file]` where the
+source-located candidates were `[method, caller, function]`. Recognized canonical
+kinds now take precedence; the label heuristic remains for legacy unknown kinds.
+The updated graph-analysis integration suite passes all eleven tests.
+
+Remaining limitation: legacy file/concept/JSON-noise eligibility still uses heuristics.
+Degree combines relationship kinds and counts directed endpoint pairs, not
+responsibilities or call-site occurrences. A popular infrastructure type may
+be a legitimate hub. A separate design diagnosis requires reviewed evidence
+and an explicit metric contract before it can be claimed.
+
+## Reproduced navigation defects
+
+Two adversarial native regressions exposed problems in the typed `node` search:
+
+1. Keeping only the cheapest arrival at each node loses feasible paths under a
+   hop limit. For `s -> a -> b -> t` (cheap calls) and `s -> b` (costlier
+   reference), a two-hop request incorrectly returned no path. The search now
+   retains nondominated cost/depth states and reconstructs the exact state path.
+2. A node rejected by the node budget was inserted into the admitted set before
+   the budget check. A second visit could admit it without paying, leaking that
+   rejected node into a truncated response. Admission now happens only after
+   successful budget consumption.
+
+Both tests failed before the changes and passed afterward. The full traversal
+integration suite passes 11/11, including JSON and SQLite checks, record-order
+permutations, two/three-hop expectations and a cycle under a five-edge work
+budget. Positive-cost cycles are dominated rather than repeatedly expanded.
+All search labels and predecessor records remain bounded by examined edges.
+The CLI contract regression also passed, within the 34-test CLI query suite.
+
+## Evaluation corrections
+
+The v1 graph-anchor scorer ignored the requested symbol. For Compass, any
+node span covering a reviewed line could earn credit, including a whole
+module. For Graphify, any name at that line could earn credit. Fourteen
+negative subcases reproduced false positives in the old scorer.
+
+Run schema v2 records `exact-file-start-terminal-symbol/1`: exact file,
+exact declaration start, and case-sensitive terminal name on both tools.
+Qualification/signature text is stripped symmetrically; this does not verify
+owner identity or parameter types. Missing anchors are listed for review.
+Source-located ratios are metadata counts, not verified source correctness.
+
+The runner also previously reused graph files by directory existence and
+reported the current executable identity. A changed tool could be credited
+with an old graph. Runs now build fresh artifacts beneath their own run
+directory and refuse existing run IDs/artifact directories. They check clean
+pinned Git state before extraction and after querying, retain graph digests
+and build logs, and compare executable identities before/after the run.
+Executable-file hashes do not cover Python imports or the full environment.
+
+A response containing the requested strings could pass even if its process
+failed or timed out. Such executions now fail independently of text matching.
+Capture now enforces a 16 MiB per-stream disk cap during execution; limit
+failures cannot pass. An invalid snapshot pointer cannot silently select an
+unpublished graph. Unpaired token medians no longer produce a cost-winner claim.
+The existing text oracle remains a recall proxy: mentioning both endpoints
+does not prove a valid path, and mentioning a caller does not prove its edge.
+
+The historical report is annotated and its unsupported graph-quality conclusion
+withdrawn. Its original raw artifact directories are unavailable on this host,
+so the historical graph scores have not been recalculated. Do not substitute
+newer tool outputs for that missing historical evidence.
+
+## Available comparison inputs
+
+Cobra, Flask, Gson and Zod have clean working checkouts at the suite commits.
+The old `doctor` accepted Axum's bare Git repository merely because HEAD matched;
+that directory has no source tree to extract. The runner and doctor now reject
+bare repositories. A separate Axum working checkout was created and verified at the suite commit.
+Existing checkouts remain read-only.
+The installed Compass reports 0.3.29 and cannot represent this working branch.
+Installed Graphify reports 0.9.67; the old report used 0.9.36. The separately
+available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c48`
+(version 0.9.63), so its implementation is not assumed identical to 0.9.67.
+
+## Verification ledger
+
+- Graph analysis integration suite: 11/11 passed after all four production fixes.
+- Benchmark Python unit suite: 38/38 passed, including ten path-auditor tests.
+- CLI query contract suite: 34/34 passed; product suite: 9/9 passed.
+- Query relevance qualification: 5/5 passed, including the 500 synthetic cases.
+- Workspace Clippy (`--workspace --lib --bins --locked -- -D warnings`): passed
+  after the explicit-kind and bounded-trail corrections.
+- Rust formatting check: passed.
+- Product boundary script: passed; competitor tooling stays outside production.
+- Workspace native tests (`--workspace --lib --bins --locked`): 1,081 passed,
+  zero failed, two ignored after all production fixes, including both MCP
+  regressions.
+- Code-graph fixture qualification: initial native stages passed; the React
+  oracle then failed because locked TypeScript dependencies were absent.
+  After `npm ci --ignore-scripts`, the complete final gate passed (exit 0),
+  including deterministic production updates, semantic/topology assertions,
+  Markdown quality, and independent React source-anchor checks.
+- First v2 replay: complete but invalidated for comparative scoring (see below).
+- Corrected v2 replay `v2-corrected-02`: complete, after all three evaluation
+  corrections. It uses the debug binary and recorded source patch from before
+  the explicit-kind hub and typed-trail fixes, with Graphify 0.9.67.
+
+## Findings from the first fresh replay
+
+The raw evidence is retained under the `code-graph-audit-20260926` evaluation
+workspace, run `v2-fresh-01`, with a separate invalidation record. Before scoring
+it as a comparison, three issues required correction (now implemented):
+
+- Graphify 0.9.67 deliberately exits 1 when `explain` returns an ambiguity list.
+  Its installed `cli.py` and the captured Cobra, Flask and Gson responses confirm
+  this. The new blanket nonzero-exit rejection wrongly penalizes a correct
+  pick-list outcome. The scorer now permits this explicit contract only when the
+  candidate oracle passes; actual command failures and timeouts still fail.
+- Gson's `JsonWriter.value(String)` annotation starts at line 526; its method
+  header is line 527. Both tools correctly locate the declaration at 526.
+  The reviewed anchor now uses the annotation start. These were not extraction
+  failures; the matching policy remains exact.
+- Axum's suite uses paths relative to the `axum/` package, while the separate
+  checkout is the monorepo root. The corrected replay uses that package as the
+  source root, and preflight now rejects roots missing reviewed files.
+
+The source patch and Graphify distribution file hashes were retained alongside
+this run. Timings from the debug Compass executable are not release-performance
+evidence. Preliminary score totals must not be presented as accuracy results.
+
+## Corrected focused comparison
+
+The corrected replay uses the exact source roots and reviewed declaration starts
+and accepts Graphify's documented ambiguity exit status. Both executable
+identities remained unchanged and all five source roots remained clean/pinned.
+Its suite and runner copies, tool hashes, graphs, logs and raw responses are
+retained under `runs/v2-corrected-02` in the evaluation workspace.
+
+| Measured item | Compass | Graphify 0.9.67 |
+| --- | ---: | ---: |
+| Text-oracle passes, all rows | 50/50 | 44/50 |
+| Non-excerpt rows | 45/45 | 44/45 |
+| Source-excerpt rows | 5/5 | 0/5 |
+| Exact reviewed declaration anchors | 15/15 | 14/15 |
+| Median estimated tokens on 44 shared passes | 308 | 111.5 |
+
+The largest difference is a source-excerpt feature gap: Graphify's `explain`
+returns metadata rather than the requested declaration text. Those five rows
+are separated above instead of treating them as five independent relationship
+accuracy wins. Among the other 45 rows, the difference is one Axum file-path
+lookup. Both path inputs resolve to the same unrelated test module. A follow-up
+using the full `src/routing/...` paths produced the same failure; the raw retry
+is retained as `axum-exact-path.stdout`/`.stderr`. This is evidence of that file
+lookup failure, not proof that Graphify cannot traverse an explicit-ID path.
+Its missing Zod anchor is the implementation at `classic/schemas.ts:303`; its
+graph retains the interface declaration at line 72 instead.
+
+Graphify has the lower paired token estimate. These are bytes/4 estimates, not
+measured model tokens. No speed comparison is claimed: Compass used a debug
+binary, other native checks ran concurrently, and timings were single samples.
+All 50 questions are an existing development suite. The six extra passes do
+not establish held-out precision, execution-path accuracy or overall superiority.
+The subsequent native trail defects demonstrate gaps this text suite misses.
+The separate 500-query relevance qualification runs AI-reviewed synthetic
+phrasing-equivalence cases over the shared fixture graph, as its test and
+corpus notes explicitly state. It is useful regression coverage, not 500
+independent real-repository judgments or production telemetry.
+
+## Source-grounded path review
+
+The five positive path responses from `v2-corrected-02` were audited separately
+against the printed ordered hops, unique graph node identities, semantic edge
+direction, relation, declaration anchors, and reviewed source occurrences.
+Both tools pass all five navigation witnesses in `path-audit-02.json`.
+This is post-output development review, not held-out precision or recall.
+
+The first diagnostic incorrectly required Gson's construction line 801 even
+when allowing the coarse `references` relation. Graphify's actual edge is a
+valid return-type reference at line 797. The corrected witness accepts that
+site for `references` and line 801 for `instantiates`; Compass returns the
+latter. The report preserves this specificity difference. The earlier
+`path-audit-01.json` remains as an oracle-error diagnostic, not a competitor
+failure. Zod's route uses reverse/forward file containment in both tools;
+it supports navigation but proves no runtime call chain.
+
+The checked-in auditor rejects missing/reversed edges, wrong occurrences,
+wrong declarations, ambiguous labels, invalid identities, endpoint-only text,
+and inconsistent hop counts. It checks recorded graph/suite digests and pinned
+source state, bounds inputs, and records hashes for its own code, witnesses,
+and captured responses. It currently audits successful positive path rows;
+unreachable, ambiguous, truncated and limit outcomes still need a broader
+source-reviewed corpus.
+
+## Next evidence to collect
+
+1. Finish native checks and build the current branch executable on the workspace
+   volume. Record the binary digest, source revision and local patch state.
+2. Replay both tools in a fresh run under the corrected policy. Review missing
+   declaration anchors against pinned source before attributing extraction gaps.
+3. Add independent edge/path judgments: ordered adjacent edges, relation kinds,
+   traversal direction, source occurrences, ambiguity, unreachable nodes, and
+   bound exhaustion. A negative or limit outcome must never count as a path.
+4. Use held-out repositories/questions and publish all failures, including
+   competitor wins. Separate extraction gaps, resolution gaps, retrieval gaps,
+   rendering gaps and oracle mistakes using actual source evidence.
+5. Improve the owning production layer for reproduced failures, retain native
+   regressions, then rerun equivalent questions. Report category-level evidence
+   and uncertainty rather than claiming universal dominance.

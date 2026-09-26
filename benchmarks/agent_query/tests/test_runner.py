@@ -3,10 +3,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tempfile
+import sys
+import subprocess
 import unittest
+from unittest.mock import patch
 
 from benchmarks.agent_query.runner import (
     Anchor,
+    CommandResult,
+    _compass_graph,
+    _verify_source,
+    prepare_repository,
+    run_question,
+    run_bounded,
     Question,
     Repository,
     _paired_summary,
@@ -166,6 +175,170 @@ class PairedSummaryTests(unittest.TestCase):
         self.assertEqual(summary["medianGraphifyTokens"], 0)
 
 
+class ExecutionEvidenceTests(unittest.TestCase):
+    def test_source_root_must_contain_the_reviewed_anchor_files(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            responses = [subprocess.CompletedProcess([], 0, stdout=value) for value in (
+                "false\n", repository.commit + "\n", "",
+            )]
+            with patch("benchmarks.agent_query.runner.subprocess.run", side_effect=responses):
+                with self.assertRaisesRegex(RuntimeError, "reviewed source file"):
+                    _verify_source(repository, Path(temporary))
+
+    def test_bare_repository_is_not_accepted_as_source(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            subprocess.run(("git", "init", "--bare", "--quiet", str(source)), check=True)
+            with self.assertRaisesRegex(RuntimeError, "working checkout"):
+                _verify_source(repository, source)
+
+    def test_capture_limits_both_streams_without_unbounded_disk_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for stream in ("stdout", "stderr"):
+                with self.subTest(stream=stream):
+                    with patch("benchmarks.agent_query.runner.MAX_OUTPUT_BYTES", 4096):
+                        result = run_bounded(
+                            (sys.executable, "-c", f"import sys; sys.{stream}.write('x' * 100000)"),
+                            cwd=root, timeout_seconds=5,
+                            stdout_path=root / "stdout", stderr_path=root / "stderr",
+                        )
+                    self.assertTrue(result.output_limited)
+                    self.assertLessEqual((root / "stdout").stat().st_size, 4096)
+                    self.assertLessEqual((root / "stderr").stat().st_size, 4096)
+
+    def test_capture_preserves_success_and_reports_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = run_bounded(
+                (sys.executable, "-c", "import sys; print('answer'); print('notice', file=sys.stderr)"),
+                cwd=root, timeout_seconds=5,
+                stdout_path=root / "stdout", stderr_path=root / "stderr",
+            )
+            self.assertEqual(result.stdout, "answer\n")
+            self.assertEqual(result.stderr, "notice\n")
+            self.assertEqual(result.exit_code, 0)
+            self.assertFalse(result.timed_out or result.output_limited)
+            result = run_bounded(
+                (sys.executable, "-c", "import time; time.sleep(10)"),
+                cwd=root, timeout_seconds=0.05,
+                stdout_path=root / "stdout", stderr_path=root / "stderr",
+            )
+            self.assertTrue(result.timed_out)
+            self.assertFalse(result.output_limited)
+            self.assertNotEqual(result.exit_code, 0)
+
+    def test_graphify_ambiguity_exit_one_is_a_valid_pick_list_only(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        output = "Ambiguous: 'sample' matches 2 nodes in different files.\n  sample.go\n    id: a\n  other.go\n    id: b\n"
+        oracle = question(
+            kind="ambiguity", expect="pick_list", required_one_of=("sample.go",),
+            min_one_of=1, min_candidates=2,
+        )
+        result = CommandResult((), 1, False, 1, len(output), 0, output, "")
+        with patch("benchmarks.agent_query.runner.run_bounded", return_value=result):
+            observation = run_question(
+                repository, oracle, tool="graphify", binary=Path("tool"),
+                graph=Path("graph.json"), cwd=ROOT, raw_dir=ROOT, timeout_seconds=1,
+            )
+        self.assertTrue(observation.passed)
+        self.assertEqual(observation.exit_code, 1)
+
+    def test_graphify_exit_one_exception_does_not_accept_other_outcomes(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        output = "Ambiguous: 'sample' matches 2 nodes in different files.\n  sample.go\n    id: a\n  other.go\n    id: b\n"
+        base = dict(kind="ambiguity", expect="pick_list", required_one_of=("sample.go",), min_one_of=1, min_candidates=2)
+        cases = (
+            (question(**base), output.replace("Ambiguous:", "Error:")),
+            (question(**base), output.replace("    id: b", "")),
+            (question(**base, graphify=("query", "sample")), output),
+            (question(), output),
+            (question(**{**base, "required_one_of": ("missing.go",)}), output),
+        )
+        for oracle, stdout in cases:
+            with self.subTest(oracle=oracle, stdout=stdout):
+                result = CommandResult((), 1, False, 1, len(stdout), 0, stdout, "")
+                with patch("benchmarks.agent_query.runner.run_bounded", return_value=result):
+                    observation = run_question(
+                        repository, oracle, tool="graphify", binary=Path("tool"),
+                        graph=Path("graph.json"), cwd=ROOT, raw_dir=ROOT, timeout_seconds=1,
+                    )
+                self.assertFalse(observation.passed)
+
+    def test_failed_or_timed_out_output_cannot_pass(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        for tool in ("compass", "graphify"):
+            for exit_code, timed_out, output_limited in ((1, False, False), (0, True, False), (0, False, True)):
+                with self.subTest(tool=tool, exit_code=exit_code, timed_out=timed_out):
+                    result = CommandResult((), exit_code, timed_out, 1, 9, 0, "sample.go", "", output_limited)
+                    with patch("benchmarks.agent_query.runner.run_bounded", return_value=result):
+                        observation = run_question(
+                            repository, question(), tool=tool, binary=Path("tool"),
+                            graph=Path("graph.json"), cwd=ROOT, raw_dir=ROOT,
+                            timeout_seconds=1,
+                        )
+                    self.assertFalse(observation.passed)
+                    self.assertFalse(observation.first_page_pass)
+                    self.assertTrue(observation.failures)
+
+    def test_snapshot_pointer_cannot_fall_back_to_an_unpublished_graph(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            snapshot = root / "compass-out" / "snapshots" / "snapshot-other"
+            snapshot.mkdir(parents=True)
+            (snapshot / "graph.json").write_text("{}")
+            (root / "compass-out" / "current-snapshot").write_text("snapshot-missing")
+            with self.assertRaisesRegex(RuntimeError, "published Compass snapshot"):
+                _compass_graph(root)
+
+    def test_each_new_run_builds_both_graphs_and_retains_build_arguments(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        def build(argv, **kwargs):
+            output = Path(argv[-1])
+            if argv[0] == "compass":
+                snapshot = output / "compass-out" / "snapshots" / "snapshot-current"
+                snapshot.mkdir(parents=True)
+                (snapshot / "graph.json").write_text("{}")
+                (output / "compass-out" / "current-snapshot").write_text("snapshot-current")
+            else:
+                (output / "graphify-out").mkdir(parents=True)
+                (output / "graphify-out" / "graph.json").write_text("{}")
+            return CommandResult(argv, 0, False, 1, 0, 0, "", "")
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("benchmarks.agent_query.runner.run_bounded", side_effect=build) as run:
+                for name in ("first", "second"):
+                    record = prepare_repository(
+                        repository, ROOT, Path(temporary) / name,
+                        compass_binary=Path("compass"), graphify_binary=Path("graphify"),
+                        timeout_seconds=1,
+                    )
+                    self.assertEqual(record["commit"], repository.commit)
+                    for tool in ("compass", "graphify"):
+                        self.assertEqual(record[f"{tool}BuildArgv"][:2], [tool, "extract"])
+                        self.assertEqual(len(record[f"{tool}GraphSha256"]), 64)
+                self.assertEqual(run.call_count, 4)
+
+    def test_existing_artifacts_are_never_silently_reused_or_removed(self) -> None:
+        repository = load_suite(ROOT / "suite.toml").repositories[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            artifacts = Path(temporary)
+            root = artifacts / repository.name
+            root.mkdir()
+            marker = root / "prior-graph.json"
+            marker.write_text("prior evidence")
+            with patch("benchmarks.agent_query.runner.run_bounded") as run:
+                with self.assertRaises(FileExistsError):
+                    prepare_repository(
+                        repository, ROOT, artifacts,
+                        compass_binary=Path("compass"), graphify_binary=Path("graphify"),
+                        timeout_seconds=1,
+                    )
+                run.assert_not_called()
+            self.assertEqual(marker.read_text(), "prior evidence")
+
+
 class EstimateTests(unittest.TestCase):
     def test_tokens_round_up_by_four_bytes(self) -> None:
         self.assertEqual(estimate_tokens(0), 0)
@@ -278,6 +451,61 @@ class JudgeTests(unittest.TestCase):
 
 
 class GraphMetricTests(unittest.TestCase):
+    def metric_for_node(self, tool: str, node: dict, symbol: str = "parse") -> dict:
+        repository = Repository(
+            name="sample",
+            language="TypeScript",
+            url="https://example.invalid/sample.git",
+            commit="0" * 40,
+            questions=(),
+            anchors=(Anchor(file="sample.ts", line=42, symbol=symbol, judgment="reviewed"),),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            graph = Path(directory) / "graph.json"
+            graph.write_text(json.dumps({"nodes": [node], "links": []}), encoding="utf-8")
+            return graph_metrics(repository, tool, graph)
+
+    def test_enclosing_module_does_not_prove_a_declaration_anchor(self) -> None:
+        metrics = self.metric_for_node("compass", {
+            "id": "module",
+            "name": "sample",
+            "kind": "module",
+            "source": {"file": "sample.ts", "startLine": 1, "endLine": 100},
+        })
+        self.assertEqual(metrics["anchorHits"], 0)
+
+    def test_anchor_requires_symbol_identity_for_both_tools(self) -> None:
+        for tool in ("compass", "graphify"):
+            for name in ("safeParse", "parseOther", "Parse", "", "unrelated"):
+                with self.subTest(tool=tool, name=name):
+                    node = {"id": "wrong", "name": name, "label": name}
+                    if tool == "compass":
+                        node["source"] = {"file": "sample.ts", "startLine": 42, "endLine": 50}
+                    else:
+                        node.update(source_file="sample.ts", source_location="L42")
+                    self.assertEqual(self.metric_for_node(tool, node)["anchorHits"], 0)
+
+    def test_anchor_uses_exact_declaration_start_not_an_overlapping_span(self) -> None:
+        for start in (1, 41, 43, True):
+            with self.subTest(start=start):
+                metrics = self.metric_for_node("compass", {
+                    "id": "wrong-overload",
+                    "name": "parse",
+                    "source": {"file": "sample.ts", "startLine": start, "endLine": 90},
+                })
+                self.assertEqual(metrics["anchorHits"], 0)
+
+    def test_qualified_names_and_signature_labels_use_the_same_rule(self) -> None:
+        for tool in ("compass", "graphify"):
+            for name in ("parse", "Schema.parse", "Schema::parse", "parse(Input)"):
+                with self.subTest(tool=tool, name=name):
+                    node = {"id": "declaration", "name": name, "label": name}
+                    if tool == "compass":
+                        node["source"] = {"file": "sample.ts", "startLine": 42, "endLine": 50}
+                    else:
+                        node.update(source_file="sample.ts", source_location="L42")
+                    self.assertEqual(self.metric_for_node(tool, node, "Schema.parse(Input)")["anchorHits"], 1)
+
     def test_compass_metrics_find_dangling_and_duplicate_records(self) -> None:
         repository = Repository(
             name="sample",
@@ -294,10 +522,12 @@ class GraphMetricTests(unittest.TestCase):
             "nodes": [
                 {
                     "id": "one",
-                    "source": {"file": "a.go", "startLine": 1, "endLine": 5},
+                    "name": "A",
+                    "source": {"file": "a.go", "startLine": 3, "endLine": 5},
                 },
                 {
                     "id": "one",
+                    "name": "B",
                     "source": {"file": "b.go", "startLine": 9, "endLine": 12},
                 },
             ],
@@ -324,8 +554,8 @@ class GraphMetricTests(unittest.TestCase):
         )
         document = {
             "nodes": [
-                {"id": "one", "source_file": "a.go", "source_location": "L42"},
-                {"id": "two", "source_file": "a.go", "source_location": "L7"},
+                {"id": "one", "label": "A", "source_file": "a.go", "source_location": "L42"},
+                {"id": "two", "label": "A", "source_file": "a.go", "source_location": "L7"},
             ],
             "links": [],
         }

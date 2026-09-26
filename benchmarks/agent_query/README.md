@@ -1,6 +1,6 @@
 # Agent query evaluation
 
-`benchmarks/agent-query` measures how well Compass answers the agent questions
+`benchmarks/agent_query` measures how well Compass answers the agent questions
 in its suites compared with Graphify on the same pinned checkouts. It is
 developer-side tooling: Compass never runs it, and it never installs Graphify.
 
@@ -43,22 +43,22 @@ Both suites contribute source-reviewed questions across `explain`,
 `brief_callers`, and `paged_callers` projections). Every question declares the
 exact per-tool argument vector, the expected outcome, and the file, line, or
 symbol anchors the reviewer read in the pinned checkout. Every repository also
-declares graph anchors that both graphs must contain as source-backed nodes.
+declares reviewed declarations to look for in each graph.
 
 ## Run
 
 ```bash
-python3 benchmarks/agent-query/runner.py doctor \
+python3 benchmarks/agent_query/runner.py doctor \
   --compass-binary /path/to/compass \
   --graphify-binary /path/to/graphify \
   --source cobra=/Volumes/Workspace/Github/spf13/cobra \
   --source flask=/Volumes/Workspace/Github/pallets/flask \
   --source gson=/Volumes/Workspace/Github/google/gson \
   --source zod=/Volumes/Workspace/Github/colinhacks/zod \
-  --source axum=/Volumes/Workspace/Github/tokio-rs/axum
+  --source axum=/Volumes/Workspace/Github/tokio-rs/axum/axum
 
-python3 benchmarks/agent-query/runner.py run \
-  --suite benchmarks/agent-query/suite_v2.toml \
+python3 benchmarks/agent_query/runner.py run \
+  --suite benchmarks/agent_query/suite_v2.toml \
   --workspace /Volumes/Workspace/CrabData/compass-evaluations/agent-query \
   --compass-binary /Volumes/Workspace/crabbuild-target/compass/release/compass \
   --graphify-binary "$(command -v graphify)" \
@@ -66,22 +66,37 @@ python3 benchmarks/agent-query/runner.py run \
   --source flask=/Volumes/Workspace/Github/pallets/flask \
   --source gson=/Volumes/Workspace/Github/google/gson \
   --source zod=/Volumes/Workspace/Github/colinhacks/zod \
-  --source axum=/Volumes/Workspace/Github/tokio-rs/axum
+  --source axum=/Volumes/Workspace/Github/tokio-rs/axum/axum
 ```
 
 `--suite` defaults to `suite.toml` beside the runner. Passing
 `suite_v2.toml` runs the 50 blackbox questions instead.
 
-`doctor` fails when a checkout is not at the suite's pinned commit. `run`
+`doctor` fails unless the source is a clean working checkout at the suite's
+pinned commit and contains the reviewed files. Axum's suite uses its `axum/`
+package as the source root, not the monorepo root. `run`
 builds `compass extract --code-only --no-viz --store sqlite` and
 `graphify extract --code-only` once per repository under
-`WORKSPACE/artifacts`, then writes `run.json` and `REPORT.md` under
+`WORKSPACE/runs/<run-id>/artifacts`, then writes `run.json` and `REPORT.md` under
 `WORKSPACE/runs/<run-id>/`.
+
+Every run builds fresh graphs and refuses an existing run ID. The retained
+`--force` flag is a compatibility no-op. Prior artifact directories are never
+silently reused or removed. The runner checks the pinned commit and clean Git
+status before extraction and after queries, records graph digests and build
+logs, and checks executable identity before and after the run. The executable
+hash covers only that file: a Python launcher hash does not pin its imported
+packages. Use an immutable environment when comparing installations.
 
 ## Metrics
 
-- **Correctness**: bounded stdout is judged against the suite's anchors. A
-  `negative` question passes only with an explicit no-match signal, and a
+- **Correctness**: stdout with an accepted exit status and without timeout or
+  output-limit failure is judged against the suite's anchors.
+  Graphify `explain` deliberately returns exit 1 for ambiguity: that status is
+  accepted only for a pick-list question with its explicit ambiguity header and
+  at least two candidate IDs; the source-anchor oracle must still pass. Other
+  nonzero exits fail. A `negative` question passes only with an explicit
+  no-match signal, and a
   `pick_list` question passes only when the answer shows at least two distinct
   candidates and at least one reviewed candidate for the name; it deliberately
   does not require a specific pair, because a bounded page can only show part
@@ -110,13 +125,55 @@ builds `compass extract --code-only --no-viz --store sqlite` and
   Graphify-only, and neither.
 - **Latency**: wall-clock milliseconds per tool invocation, including
   follow-ups.
-- **Graph quality**: node and edge counts, source-backed node ratio, dangling
-  edges, duplicate IDs, and how many reviewed anchors the graph contains.
+- **Graph coverage metadata**: node and edge counts, source-located node ratio,
+  dangling edges, duplicate IDs, and reviewed declaration anchors. Metadata
+  presence does not verify that the source or relationship is correct.
+  `compass.agent-query-run/2` uses `exact-file-start-terminal-symbol/1` on
+  both tools: exact repository-relative file, exact declaration start line,
+  and case-sensitive terminal symbol name. Qualification separators and
+  parameter lists are removed symmetrically; the pinned line distinguishes
+  overloads. This metric does not verify owner or parameter-type accuracy.
+  Enclosing module spans and unrelated names at the right line do not count.
+  Each graph metric records `anchorPolicy` and `missingAnchors` for review.
+  Historical v1 scores used file/line coverage without symbol identity and
+  must be recalculated before comparison with v2 scores.
 
 ## Limits
+
+### Source-grounded path diagnostics
+
+The five positive `path` rows have a separate, stricter audit:
+
+```bash
+python3 -m benchmarks.agent_query.path_audit \
+  --run /path/to/workspace/runs/run-id \
+  --output /path/to/new-path-audit.json
+```
+
+`path_witnesses.json` records reviewed declaration and occurrence lines in the
+pinned source. The auditor checks the printed hop chain, unique node identity,
+relation, direction, captured graph edge, and source occurrence. It refuses
+ambiguous display labels instead of using the expected answer to select a node.
+It verifies source state, suite and graph digests, and records response, witness,
+and auditor hashes. The output must be new; earlier reports are retained.
+
+These witnesses were reviewed after observing output, so they are development
+diagnostics, not held-out accuracy estimates. Gson accepts either an
+instantiation at its construction line or a reference at its return-type line;
+the report preserves the relation and reviewed site. Zod's file-containment
+route proves navigation only. Neither is automatically credited as a call path.
+The auditor currently requires successful, single-response executions of these
+positive rows; it does not score negative or truncated path outcomes.
+
+### Interpretation
 
 Anchor matching is a deterministic text-recall proxy over bounded output, not
 an independent precision oracle. The suite is a focused five-repository
 sample; it does not estimate population-wide accuracy. Graphify prints an
 installation warning on stderr, which `run.json` records separately and the
 token metric excludes.
+
+Each subprocess stream is capped at 16 MiB during capture. Exceeding either
+cap terminates the process group and fails the observation; truncated text is
+never scored as a successful response. An invalid Compass snapshot pointer
+fails preparation instead of selecting an arbitrary unpublished snapshot.
