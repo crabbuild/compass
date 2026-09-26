@@ -117,24 +117,29 @@ test("automatic layout settles itself and fixed styles never start physics", asy
   await page.waitForTimeout(250);
   await expect(canvas.evaluate((element) => element.toDataURL())).resolves.toBe(staticFrame);
 
-  await layout.selectOption("circle");
+  await layout.click();
+  await page.getByRole("option", { name: "Circle", exact: true }).click();
   await expect(graph).toHaveAttribute("data-layout-style", "circle");
   await expect(page.getByRole("status")).toContainText("Circle layout");
   await expect(page.getByRole("button", { name: "Fixed layout" })).toBeDisabled();
 
-  await layout.selectOption("concentric");
+  await layout.click();
+  await page.getByRole("option", { name: "Concentric", exact: true }).click();
   await expect(graph).toHaveAttribute("data-layout-style", "concentric");
   await expect(page.getByRole("status")).toContainText("Concentric layout");
 
-  await layout.selectOption("spiral");
+  await layout.click();
+  await page.getByRole("option", { name: "Spiral", exact: true }).click();
   await expect(graph).toHaveAttribute("data-layout-style", "spiral");
   await expect(page.getByRole("status")).toContainText("Spiral layout");
 
-  await layout.selectOption("grid");
+  await layout.click();
+  await page.getByRole("option", { name: "Square grid", exact: true }).click();
   await expect(graph).toHaveAttribute("data-layout-style", "grid");
   await expect(page.getByRole("status")).toContainText("Square grid layout");
 
-  await layout.selectOption("automatic");
+  await layout.click();
+  await page.getByRole("option", { name: "Automatic", exact: true }).click();
   await expect(graph).toHaveAttribute("data-layout-style", "automatic");
   await expect(page.getByRole("button", { name: "Run layout" })).toBeEnabled();
 });
@@ -189,8 +194,8 @@ test("graph exploration controls isolate directed neighborhoods and expose short
   await expect(graph).toHaveAttribute("data-isolated", "true");
   await expect(page.getByRole("status")).toContainText("2 hops");
 
-  await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("1.25");
-  await expect(graph).toHaveAttribute("data-layout-spacing", "1.25");
+  await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("3");
+  await expect(graph).toHaveAttribute("data-layout-spacing", "3");
   await page.getByRole("button", { name: "Graph settings" }).click();
   await page.keyboard.press("]");
   await page.getByRole("button", { name: "Graph settings" }).click();

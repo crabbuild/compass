@@ -32,12 +32,12 @@ import { CommunityTreemap } from "./CommunityTreemap";
 import { CommunityLanes } from "./CommunityLanes";
 import type { EdgeSemanticCategory } from "./semanticAppearance";
 import {
+  BubblesIcon,
   Grid3x3Icon,
   LayoutDashboardIcon,
   MonitorIcon,
   MoonIcon,
   Rows3Icon,
-  ScatterChartIcon,
   SunIcon
 } from "lucide-react";
 
@@ -51,13 +51,13 @@ const COMMUNITY_VARIANTS: ReadonlyArray<{
   value: CommunityVariant;
   label: string;
   hint: string;
-  Icon: typeof ScatterChartIcon;
+  Icon: typeof BubblesIcon;
 }> = [
   {
     value: "bubbles",
     label: "Bubbles",
     hint: "Packed community map on the canvas",
-    Icon: ScatterChartIcon
+    Icon: BubblesIcon
   },
   {
     value: "matrix",
@@ -136,7 +136,8 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
     && (target.isContentEditable
       || target.tagName === "INPUT"
       || target.tagName === "TEXTAREA"
-      || target.tagName === "SELECT");
+      || target.tagName === "SELECT"
+      || target.closest('[role="combobox"], [role="listbox"]') !== null);
 }
 
 export type GraphHost = {
@@ -837,6 +838,7 @@ function CompassGraphView({
         event.metaKey
         || event.ctrlKey
         || event.altKey
+        || toolbarLeadingOpen
         || isEditableKeyboardTarget(event.target)
       ) return;
       const key = event.key.toLocaleLowerCase();
@@ -900,6 +902,7 @@ function CompassGraphView({
     selectedNeighborhood,
     state.edgeDirection,
     state.forceLabels,
+    toolbarLeadingOpen,
     state.isolateSelection,
     state.neighborhoodDepth,
     state.showEdgeLabels,

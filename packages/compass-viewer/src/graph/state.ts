@@ -3,7 +3,8 @@ import type { GraphLayoutStyle } from "./renderingProfile";
 import type { GraphEdgeDirection } from "./neighborhood";
 
 export type GraphChangeType = NonNullable<GraphNode["change"]>;
-export type GraphLayoutSpacing = 0.75 | 1 | 1.25 | 1.5;
+/** Geometry multipliers: the displayed 100% preset uses the doubled baseline. */
+export type GraphLayoutSpacing = 1.5 | 2 | 3 | 4 | 6;
 
 export type GraphState = {
   focusedNodeId: string | null;
@@ -51,7 +52,7 @@ export const initialGraphState: GraphState = {
   isolateSelection: false,
   neighborhoodDepth: 1,
   edgeDirection: "both",
-  layoutSpacing: 1,
+  layoutSpacing: 2,
   showMinimap: true,
   hiddenCommunities: new Set<number>(),
   hiddenChanges: new Set<GraphChangeType>(),
