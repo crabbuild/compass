@@ -30,6 +30,18 @@ def selectors(row):
             re.findall(r'^  (\d+)\. (.*) - \d+ edges$', row['text'], re.M)]
 
 
+def server_paths(run):
+    # A venv's Python symlink must not be replaced with its resolved interpreter:
+    # doing so discards that environment's site-packages.
+    paths = {}
+    for tool in ['compass', 'graphify']:
+        choices = {r['argv'][0] for r in run['results'] if r['tool'] == tool}
+        if len(choices) != 1:
+            raise ValueError('capture uses inconsistent server launch paths')
+        paths[tool] = next(iter(choices))
+    return paths
+
+
 def check_navigation(text, graph, tool, seed):
     """Seed is oracle identity, never a substituted request selector."""
     nodes = {n['id']: n for n in graph['nodes']}
@@ -59,13 +71,14 @@ def main(args):
     # Verify the source capture, graphs, and complete raw RPC transcripts first.
     audit_capture(SimpleNamespace(run=args.run, output=args.output/'input-audit.json'))
     run = json.loads(read_bounded(args.run/'run.json'))
+    binaries = server_paths(run)
     source_run = Path(run['sourceRun'])
     source = json.loads(read_bounded(source_run/'run.json'))
     suite = load_suite(source_run/'suite.toml')
     if suite.digest != source['suiteDigest']:
         raise ValueError('source suite changed')
     environment = SimpleNamespace(
-        graphify_python=Path(run['servers']['graphify']['executable']),
+        graphify_python=Path(binaries['graphify']),
         graphify_environment=args.run/'graphify-environment.json')
     verify_environment(environment)
     for record in run['servers'].values():
@@ -101,7 +114,7 @@ def main(args):
         choices = selectors(row)
         if len(choices) != 10 or len(checked['hubs']) != 10:
             raise ValueError('expected ten captured hubs; input workflow incomplete')
-        binary = run['servers'][tool]['executable']
+        binary = binaries[tool]
         argv = [binary, 'serve'] if tool == 'compass' else [binary, '-m', 'graphify.serve']
         argv += ['--graph', str(graph_path), '--transport', 'stdio']
         failure = None

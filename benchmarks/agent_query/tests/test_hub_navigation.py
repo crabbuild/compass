@@ -1,9 +1,15 @@
 import unittest
 
-from benchmarks.agent_query.hub_navigation import check_navigation, selectors
+from benchmarks.agent_query.hub_navigation import check_navigation, selectors, server_paths
 
 
 class HubNavigationTests(unittest.TestCase):
+    def test_server_launch_preserves_the_captured_virtual_environment(self):
+        run={'servers':{'graphify':{'executable':'/global/python'}},
+             'results':[{'tool':'graphify','argv':['/isolated/env/bin/python']},
+                        {'tool':'compass','argv':['/frozen/compass']}]}
+        self.assertEqual(server_paths(run)['graphify'],'/isolated/env/bin/python')
+
     def test_legacy_selector_is_the_returned_label(self):
         row={'response':{'result':{}},'text':'God nodes (most connected):\n  1. run() - 9 edges'}
         self.assertEqual(selectors(row),[(1,'run()','display-label')])
