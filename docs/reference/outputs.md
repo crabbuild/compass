@@ -675,6 +675,11 @@ aggregate weights.
 The layout picker follows the active light, dark, or editor theme. Each option
 has its own icon, which also appears beside the selected layout; arrow keys
 navigate the menu, Enter selects, and Escape closes it.
+The gear opens Graph settings, grouped into Appearance, Layout & view, and
+Selection & neighborhood, with collapsible keyboard shortcuts. Standalone
+exports offer Auto, Light, and Dark under Appearance, including in Matrix,
+Area, and Tiers views. Reset and fit are actions; persistent display options
+use toggles.
 
 **Automatic** layout arranges itself when a view opens: the canvas starts from
 its deterministic seeded map, runs the force simulation until it settles, and

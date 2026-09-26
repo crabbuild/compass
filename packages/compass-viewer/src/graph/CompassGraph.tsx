@@ -839,6 +839,7 @@ function CompassGraphView({
         || event.ctrlKey
         || event.altKey
         || toolbarLeadingOpen
+        || (event.key === "Escape" && document.querySelector(".compass-explore-panel"))
         || isEditableKeyboardTarget(event.target)
       ) return;
       const key = event.key.toLocaleLowerCase();
@@ -1138,6 +1139,7 @@ function CompassGraphView({
                         : option.value === "light"
                           ? <SunIcon aria-hidden="true" />
                           : <MoonIcon aria-hidden="true" />}
+                      <span>{option.label}</span>
                     </button>
                   ))}
                 </div>

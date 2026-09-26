@@ -194,6 +194,7 @@ test("a standalone export pins light or dark on request", async ({ page }) => {
   const canvasToken = () => canvas.evaluate((element) =>
     getComputedStyle(element).getPropertyValue("--compass-canvas").trim());
 
+  await page.getByRole("button", { name: "Graph settings", exact: true }).click();
   const theme = page.getByRole("group", { name: "Colour theme" });
   await expect(theme.getByRole("button", { name: "Auto" }))
     .toHaveAttribute("aria-pressed", "true");
@@ -218,6 +219,7 @@ for (const preference of ["Light", "Dark"] as const) {
     await page.emulateMedia({ colorScheme: preference === "Dark" ? "light" : "dark" });
     await page.setViewportSize({ width: 390, height: 780 });
     await page.goto("/exportCommunity.html");
+    await page.getByRole("button", { name: "Graph settings", exact: true }).click();
     await page.getByRole("group", { name: "Colour theme" })
       .getByRole("button", { name: preference, exact: true }).click();
     const trigger = page.getByRole("combobox", { name: "Graph layout", exact: true });
@@ -267,6 +269,43 @@ for (const preference of ["Light", "Dark"] as const) {
     await expect(trigger).toContainText("Square grid");
   });
 }
+
+test("settings group appearance and exploration while keeping themes available in every overview", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.goto("/exportCommunity.html");
+  const gear = page.getByRole("button", { name: "Graph settings", exact: true });
+  const panel = page.getByRole("region", { name: "Graph exploration controls" });
+  const theme = page.getByRole("group", { name: "Colour theme" });
+  await expect(theme).toHaveCount(0);
+  await gear.click();
+  await expect(panel.getByRole("group", { name: "Colour theme" })).toBeVisible();
+  await expect(panel.locator("h3")).toHaveText([
+    "Appearance", "Layout & view", "Selection & neighborhood"
+  ]);
+  await expect(panel.getByRole("button", { name: "Reset graph view" }))
+    .not.toHaveAttribute("aria-pressed");
+  await expect(panel.getByRole("button", { name: "Fit selected neighborhood" }))
+    .not.toHaveAttribute("aria-pressed");
+  const shortcuts = panel.getByLabel("Graph keyboard shortcuts");
+  await expect(shortcuts).not.toHaveAttribute("open");
+  await shortcuts.locator("summary").click();
+  await expect(shortcuts.locator("dl")).toBeVisible();
+  expect(await panel.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight;
+  })).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(gear).toBeFocused();
+  for (const variant of ["Matrix", "Area", "Tiers"]) {
+    await page.getByRole("button", { name: variant, exact: true }).click();
+    await gear.click();
+    await expect(theme).toBeVisible();
+    await expect(panel.getByRole("combobox", { name: "Layout spacing" })).toHaveCount(0);
+    await theme.getByRole("button", { name: "Dark", exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-compass-theme", "dark");
+    await page.keyboard.press("Escape");
+  }
+});
 
 test("narrow Architecture, Ask Codebase, and Evolution views preserve core actions", async ({
   page

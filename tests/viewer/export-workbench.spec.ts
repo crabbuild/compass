@@ -83,6 +83,11 @@ for (const width of [1440, 768, 390]) {
     const back = page.getByRole("button", { name: "Back to community overview" });
     await expect(back).toBeVisible();
     expect(await back.evaluate((element) => element.parentElement?.firstElementChild === element)).toBe(true);
+    const settings = page.getByRole("button", { name: "Graph settings", exact: true });
+    await settings.click();
+    await page.keyboard.press("Escape");
+    await expect(settings).toBeFocused();
+    await expect(back).toBeVisible();
     const trigger = page.getByRole("button", { name: "Graph filters", exact: true });
     await trigger.click();
     const panel = page.getByRole("region", { name: "Graph filter options" });

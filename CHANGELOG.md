@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Move theme selection into Graph settings, grouped with appearance controls.
+  Separate layout and selection settings, collapse keyboard shortcuts, and keep
+  theme settings available in every community overview design.
 - Theme the layout picker and its options consistently in light and dark mode,
   with a matching icon for each layout and keyboard-accessible selection.
 - Use the Compass app brand mark in the HTML viewer's navigation rail.
