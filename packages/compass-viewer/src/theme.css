@@ -303,16 +303,11 @@ body.vscode-high-contrast {
   width: 34px;
   height: 34px;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--compass-focus) 48%, var(--border));
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--compass-focus) 12%, transparent);
-  color: var(--compass-focus);
-  box-shadow: inset 0 0 0 4px color-mix(in srgb, var(--compass-focus) 5%, transparent);
 }
 
 .visualization-bearing svg {
-  width: 18px;
-  height: 18px;
+  width: 100%;
+  height: 100%;
 }
 
 .visualization-rail header > span:nth-child(2),
@@ -420,6 +415,7 @@ body.vscode-high-contrast {
 }
 
 .visualization-main {
+  container: compass-workbench / inline-size;
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -494,6 +490,7 @@ body.vscode-high-contrast {
  * scrolling its trailing buttons out of the row.
  */
 .visualization-controls .compass-toolbar-actions {
+  max-width: none;
   flex-wrap: wrap;
   overflow-x: visible;
 }
@@ -667,10 +664,8 @@ body.vscode-high-contrast {
 }
 
 .workbench-filter-popover {
-  position: absolute;
+  position: fixed;
   z-index: 12;
-  top: calc(100% + 8px);
-  right: 6px;
   display: grid;
   box-sizing: border-box;
   width: min(310px, 100%);
@@ -2066,6 +2061,13 @@ button:not(:disabled),
   scrollbar-width: none;
 }
 
+.compass-toolbar-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .compass-physics-button {
   border-color: var(--compass-line);
   background: var(--vscode-dropdown-background, transparent);
@@ -2214,12 +2216,16 @@ button:not(:disabled),
   transition: none;
 }
 
-.compass-tool-button svg {
-  width: 15px;
-  height: 15px;
+/* Keep glyphs legible when a narrow toolbar wraps. Flex must never compress
+   an icon to make room for button padding. */
+.compass-graph-toolbar .compass-toolbar-actions svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 
-.compass-tool-icon-button {
+.compass-tool-button.compass-tool-icon-button {
+  box-sizing: border-box;
   width: 30px;
   flex: 0 0 30px;
   justify-content: center;
@@ -2231,7 +2237,7 @@ button:not(:disabled),
   justify-content: center;
   padding: 0 7px;
   color: var(--compass-faint);
-  font: 9px/1 var(--compass-font-mono);
+  font: 11px/1 var(--compass-font-mono);
   letter-spacing: 0.02em;
 }
 
@@ -5219,7 +5225,7 @@ body.vscode-high-contrast-light .compass-load-logo {
   color: var(--vscode-contrastBorder, currentColor);
 }
 
-@media (max-width: 980px) {
+@container compass-stage (max-width: 980px) {
   .compass-tool-button span {
     display: none;
   }
@@ -5229,10 +5235,6 @@ body.vscode-high-contrast-light .compass-load-logo {
     display: none;
   }
 
-
-  .compass-tool-button {
-    padding: 0 11px;
-  }
 }
 
 @media (max-width: 760px) {
@@ -10780,5 +10782,31 @@ body.vscode-high-contrast-light .call-guide-completion-status {
 @container compass-stage (max-width: 900px) {
   .compass-viewer-status-text {
     max-width: 190px;
+  }
+}
+
+/* In narrow export headers, coverage shares the status row rather than taking
+   a column away from every row of graph controls. */
+@container compass-workbench (max-width: 980px) {
+  .visualization-context:has(.visualization-controls:not(:empty)) {
+    gap: 0;
+  }
+
+  .visualization-context:has(.visualization-controls:not(:empty)) .visualization-coverage {
+    position: absolute;
+    top: 7px;
+    right: 14px;
+  }
+
+  .visualization-controls .compass-viewer-status {
+    max-width: calc(100% - 110px);
+  }
+
+  .visualization-controls .compass-toolbar-actions {
+    width: 100%;
+  }
+
+  .visualization-controls .compass-toolbar-separator {
+    display: none;
   }
 }

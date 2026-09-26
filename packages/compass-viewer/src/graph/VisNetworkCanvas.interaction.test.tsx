@@ -187,7 +187,7 @@ describe("VisNetworkCanvas hover lifecycle", () => {
       focusedNodeId={null}
       physicsRunning={false}
       layoutStyle="automatic"
-      layoutSpacing={1.25}
+      layoutSpacing={3}
       forceLabels={false}
       hiddenCommunities={new Set()}
       hiddenChanges={new Set()}
@@ -203,6 +203,66 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     expect(mock.optionUpdates.some((options) => (
       (options.physics as { enabled?: boolean } | undefined)?.enabled === false
     ))).toBe(true);
+  });
+
+  it("changes settled automatic spacing without restarting layout or rebuilding the canvas", () => {
+    const props = {
+      model, focusedNodeId: null, physicsRunning: false, layoutStyle: "automatic" as const,
+      forceLabels: false, hiddenCommunities: new Set<number>(), hiddenChanges: new Set<never>(),
+      onFocus: vi.fn(), onOpenSource: vi.fn(), onOpenRelationshipSource: vi.fn(),
+      onHover: vi.fn(), onHoverEdge: vi.fn(), onClear: vi.fn(), onStabilized: vi.fn()
+    };
+    const { rerender } = render(<VisNetworkCanvas {...props} layoutSpacing={2} />);
+    mock.updates.length = 0;
+    rerender(<VisNetworkCanvas {...props} layoutSpacing={3} />);
+    expect(mock.updates).toContainEqual([
+      { id: "caller", x: 0, y: 0 }, { id: "callee", x: 15, y: 0 }
+    ]);
+    expect(mock.networks).toBe(1);
+    expect(mock.simulationStarts).toBe(0);
+  });
+
+  it.each(["automatic", "grid"] as const)("applies spacing to a large %s graph", (layoutStyle) => {
+    const large = { ...model, nodes: Array.from({ length: 1_000 }, (_, index) => ({
+      id: `node-${index}`, label: `Node ${index}`, community: 0
+    })), edges: [] };
+    const props = {
+      model: large, focusedNodeId: null, physicsRunning: false, layoutStyle,
+      forceLabels: false, hiddenCommunities: new Set<number>(), hiddenChanges: new Set<never>(),
+      onFocus: vi.fn(), onOpenSource: vi.fn(), onOpenRelationshipSource: vi.fn(),
+      onHover: vi.fn(), onHoverEdge: vi.fn(), onClear: vi.fn(), onStabilized: vi.fn()
+    };
+    const { rerender } = render(<VisNetworkCanvas {...props} layoutSpacing={1.5} />);
+    const before = mock.dataSets.at(-2)!;
+    rerender(<VisNetworkCanvas {...props} layoutSpacing={3} />);
+    const after = mock.dataSets.at(-2)!;
+    expect(before.some((node) => Number(node.x) !== 0)).toBe(true);
+    after.forEach((node, index) => {
+      expect(node.x).toBeCloseTo(Number(before[index]!.x) * 2);
+      expect(node.y).toBeCloseTo(Number(before[index]!.y) * 2);
+    });
+    expect(mock.networkOptions.at(-1)?.physics).toMatchObject({ enabled: false });
+  });
+
+  it("seeds automatic code graphs and renders thin evidence-preserving connections", () => {
+    render(<VisNetworkCanvas
+      model={{ ...model, edges: [
+        { ...model.edges[0]!, id: "exact", confidence: "extracted" },
+        { ...model.edges[0]!, id: "ambiguous", confidence: "ambiguous" },
+        { ...model.edges[0]!, id: "aggregate", confidence: "aggregated", weight: 1000 }
+      ] }}
+      focusedNodeId={null} physicsRunning={true} forceLabels={false}
+      hiddenCommunities={new Set()} hiddenChanges={new Set()}
+      onFocus={vi.fn()} onOpenSource={vi.fn()} onOpenRelationshipSource={vi.fn()}
+      onHover={vi.fn()} onHoverEdge={vi.fn()} onClear={vi.fn()} onStabilized={vi.fn()}
+    />);
+    expect(mock.dataSets[0]?.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y)))
+      .toBe(true);
+    expect(mock.dataSets[1]).toMatchObject([
+      { id: "exact", width: 1, dashes: false },
+      { id: "ambiguous", width: 1, dashes: [3, 4] },
+      { id: "aggregate", width: 2.5, dashes: false }
+    ]);
   });
 
   it("uses semantic node shapes and relationship colors in community detail", () => {
@@ -409,6 +469,7 @@ describe("VisNetworkCanvas hover lifecycle", () => {
     }
 
     expect(mock.simulationStops).toBeGreaterThan(stopsBeforeStabilizing);
+    expect(mock.fits.at(-1)).toEqual({ animation: false });
     expect(onStabilized).toHaveBeenCalledTimes(1);
   });
 
@@ -505,8 +566,8 @@ describe("VisNetworkCanvas hover lifecycle", () => {
 
     expect(mock.dataSets[0]?.[0]).toMatchObject({
       id: "caller",
-      x: -40,
-      y: 12
+      x: -80,
+      y: 24
     });
   });
 

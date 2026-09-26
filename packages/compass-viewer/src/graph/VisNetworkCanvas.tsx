@@ -197,7 +197,7 @@ const defaultOptions: Options = {
     navigationButtons: false,
     keyboard: { enabled: true }
   },
-  layout: { improvedLayout: true },
+  layout: { improvedLayout: false, randomSeed: 17 },
   nodes: {
     borderWidth: 1.5,
     shape: "dot"
@@ -390,8 +390,8 @@ function comparisonColor(
 }
 
 function edgeAppearance(confidence: string | undefined, weight?: number | undefined) {
-  if (confidence === "extracted") return { dashes: false, width: 2, opacity: 0.7 };
-  if (confidence === "ambiguous") return { dashes: [3, 4], width: 2, opacity: 0.62 };
+  if (confidence === "extracted") return { dashes: false, width: 1, opacity: 0.7 };
+  if (confidence === "ambiguous") return { dashes: [3, 4], width: 1, opacity: 0.62 };
   if (confidence === "aggregated") {
     // Aggregated relationships carry the exact number of crossed relationships
     // as their weight: heavier community routes read thicker and darker.
@@ -399,11 +399,11 @@ function edgeAppearance(confidence: string | undefined, weight?: number | undefi
     const presence = Math.log2(1 + crossings);
     return {
       dashes: false,
-      width: Math.min(5, 1 + 1.5 * presence),
+      width: Math.min(2.5, 0.5 + 0.75 * presence),
       opacity: Math.min(0.5, 0.16 + 0.09 * presence)
     };
   }
-  return { dashes: true, width: 1, opacity: 0.35 };
+  return { dashes: true, width: 0.5, opacity: 0.35 };
 }
 
 function comparisonEdgeAppearance(
@@ -523,7 +523,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     showEdgeLabels = false,
     isolatedNodeIds,
     isolatedEdgeIds,
-    layoutSpacing = 1,
+    layoutSpacing = 2,
     showMinimap = false,
     semanticDetail = false,
     communityImportance,
@@ -767,7 +767,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       () => comparisonMode ? seedComparisonPositions(model.nodes) : new Map(),
       [comparisonMode, model.nodes]
     );
-    const fixedLayoutSpacing = layoutStyle === "automatic" ? 1 : layoutSpacing;
+    const fixedLayoutSpacing = layoutStyle === "automatic" && renderingProfile !== "static"
+      ? 2
+      : layoutSpacing;
     const selectedLayoutPositions = useMemo(
       () => layoutStyle === "automatic"
         ? new Map<string, { x: number; y: number }>()
@@ -777,7 +779,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
     const staticPositions = useMemo(
       () => communityOverview
         ? seedCommunityOverviewPositions(model.nodes, communityImportance)
-        : renderingProfile === "static" && !comparisonMode
+        : !comparisonMode
         ? seedStaticGraphPositions(model.nodes, model.stats.aggregated)
         : new Map(),
       [
@@ -910,6 +912,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
       const container = containerRef.current;
       if (!container) return;
       initialViewRef.current = null;
+      previousLayoutSpacingRef.current = fixedLayoutSpacing;
       const options = communityOverview
         ? communityOverviewOptions
         : renderingProfile === "static"
@@ -955,8 +958,9 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             y: position.y
           })));
           network.redraw();
-          if (physicsRunningRef.current) network.fit({ animation: false });
         }
+        // Fit the final positions before revealing any automatically arranged graph.
+        if (physicsRunningRef.current) network.fit({ animation: false });
         initialViewRef.current = {
           position: network.getViewPosition(),
           scale: network.getScale()
@@ -1042,7 +1046,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
             }
           : {
               enabled: physicsRunning,
-              forceAtlas2Based: { springLength: 120 * layoutSpacing }
+              forceAtlas2Based: { springLength: (communityOverview ? 96 : 120) * layoutSpacing }
             }
       });
       if (!physicsRunning && previousSpacing !== layoutSpacing) {
@@ -1057,6 +1061,7 @@ export const VisNetworkCanvas = forwardRef<GraphCanvasHandle, Props>(
         refreshMinimap();
       }
     }, [
+      communityOverview,
       comparisonMode,
       layoutSpacing,
       layoutStyle,

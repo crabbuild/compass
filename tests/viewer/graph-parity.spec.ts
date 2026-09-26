@@ -189,8 +189,8 @@ test("graph exploration controls isolate directed neighborhoods and expose short
   await expect(graph).toHaveAttribute("data-isolated", "true");
   await expect(page.getByRole("status")).toContainText("2 hops");
 
-  await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("1.25");
-  await expect(graph).toHaveAttribute("data-layout-spacing", "1.25");
+  await page.getByRole("combobox", { name: "Layout spacing" }).selectOption("3");
+  await expect(graph).toHaveAttribute("data-layout-spacing", "3");
   await page.getByRole("button", { name: "Graph settings" }).click();
   await page.keyboard.press("]");
   await page.getByRole("button", { name: "Graph settings" }).click();

@@ -162,15 +162,6 @@ export function GraphToolbar({
         <span className="compass-viewer-status-text">{status}</span>
       </div>
       <div className="compass-toolbar-actions">
-        {leadingControls ? (
-          <div className="compass-toolbar-leading">{leadingControls}</div>
-        ) : null}
-        {themeControls}
-        {scopeControls}
-        {scopeControls && variantControls ? (
-          <span className="compass-toolbar-separator" aria-hidden="true" />
-        ) : null}
-        {variantControls}
         {onBack && (
           <button
             className="compass-tool-button"
@@ -182,8 +173,18 @@ export function GraphToolbar({
             <span>Overview</span>
           </button>
         )}
+        {leadingControls ? (
+          <div className="compass-toolbar-leading">{leadingControls}</div>
+        ) : null}
+        {scopeControls}
+        {scopeControls && variantControls ? (
+          <span className="compass-toolbar-separator" aria-hidden="true" />
+        ) : null}
+        {variantControls}
+        {themeControls}
         {canvasControls ? (
           <>
+        <div className="compass-toolbar-group" role="group" aria-label="Graph arrangement">
         <label className="compass-layout-picker">
           <LayoutGridIcon aria-hidden="true" />
           <span className="sr-only">Graph layout</span>
@@ -219,7 +220,9 @@ export function GraphToolbar({
             ? "Stop"
             : layoutStyle === "automatic" ? "Layout" : "Fixed"}</span>
         </button>
+        </div>
         <span className="compass-toolbar-separator" aria-hidden="true" />
+        <div className="compass-toolbar-group" role="group" aria-label="Graph camera">
         <div className="compass-zoom-controls" role="group" aria-label="Zoom controls">
           <button
             className="compass-tool-button compass-tool-icon-button"
@@ -274,6 +277,7 @@ export function GraphToolbar({
         >
           <SettingsIcon />
         </button>
+        </div>
           </>
         ) : null}
       </div>
@@ -368,10 +372,11 @@ export function GraphToolbar({
                 Number(event.target.value) as GraphLayoutSpacing
               )}
             >
-              <option value={0.75}>Compact · 75%</option>
-              <option value={1}>Default · 100%</option>
-              <option value={1.25}>Airy · 125%</option>
-              <option value={1.5}>Wide · 150%</option>
+              <option value={1.5}>Compact · 75%</option>
+              <option value={2}>Default · 100%</option>
+              <option value={3}>Airy · 150%</option>
+              <option value={4}>Wide · 200%</option>
+              <option value={6}>Extra wide · 300%</option>
             </select>
           </label>
 
