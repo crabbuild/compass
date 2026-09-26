@@ -44,6 +44,14 @@ def prepare_questions(graph, tool, witness):
     return queries
 
 
+def skipped_results(repository, tool, questions, graph_digest, argv):
+    return [{'repository':repository, 'tool':tool, 'question':identifier,
+             'method':method, 'arguments':params, 'graphSha256':graph_digest,
+             'argv':argv, 'executionSucceeded':False,
+             'captureError':'not executed after the MCP connection failed'}
+            for identifier,method,params in questions]
+
+
 def verify_environment(args):
     manifest = json.loads(read_bounded(args.graphify_environment))
     roots = list(args.graphify_python.parent.parent.glob('lib/python*/site-packages/graphify'))
@@ -73,7 +81,8 @@ def execute(args):
         shutil.copy2(Path(__file__).with_name(name), args.output/name)
     report = {'schema':'compass.mcp-comparison-capture/1', 'sourceRunSha256':_sha256_file(args.run/'run.json'),
               'inputSha256':_sha256_file(args.inputs), 'sourceRun':str(args.run.resolve()),
-              'collectorSha256':_sha256_file(Path(__file__)), 'servers':{}, 'results':[]}
+              'collectorSha256':_sha256_file(Path(__file__)),
+              'transportSha256':_sha256_file(Path(__file__).with_name('mcp_transport.py')), 'servers':{}, 'results':[]}
     for tool, binary in [('compass',args.compass),('graphify',args.graphify_python)]:
         report['servers'][tool] = {'executable':str(binary.resolve()), 'executableSha256':_sha256_file(binary)}
     for witness in manifest['repositories']:
@@ -99,7 +108,7 @@ def execute(args):
                 session.initialize()
                 listing = session.send('tools/list',{})
                 advertised = {t['name'] for t in listing.get('result',{}).get('tools',[])}
-                for identifier, method, params in questions:
+                for position, (identifier, method, params) in enumerate(questions):
                     if method not in advertised:
                         raise ValueError(f'{tool} did not advertise {method}')
                     started = time.monotonic()
@@ -119,6 +128,7 @@ def execute(args):
                     (args.output/'run.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
                     print(name,tool,identifier,row['executionSucceeded'],row.get('textBytes'),flush=True)
                     if 'captureError' in row:
+                        report['results'].extend(skipped_results(name,tool,questions[position+1:],digest,argv))
                         break  # A desynchronized connection cannot be reused.
             if _sha256_file(graph_path) != digest:
                 raise ValueError('graph changed during MCP questions')

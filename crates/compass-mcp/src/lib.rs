@@ -2209,13 +2209,42 @@ fn tool_get_neighbors(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
-    let query = string_argument(arguments, "label")?.to_lowercase();
+    let query = string_argument(arguments, "label")?;
     let filter = optional_string(arguments, "relation_filter")
         .unwrap_or_default()
         .to_lowercase();
-    let Some(&index) = find_node(&context.graph, &query).first() else {
+    let matches = find_node(&context.graph, query);
+    let Some(&index) = matches.first() else {
         return Ok(format!("No node matching '{query}' found."));
     };
+    if matches.len() > 1 {
+        const MAX_CANDIDATES: usize = 20;
+        let mut candidates = matches
+            .iter()
+            .map(|index| context.graph.node(*index))
+            .collect::<Vec<_>>();
+        candidates.sort_by(|left, right| left.id.cmp(&right.id));
+        let mut lines = vec![format!(
+            "Ambiguous: '{}' matches {} nodes. Retry with an exact node ID.",
+            sanitize_label(query),
+            candidates.len()
+        )];
+        lines.extend(candidates.iter().take(MAX_CANDIDATES).map(|node| {
+            format!(
+                "  {} [{}] id: {}",
+                sanitize_label(node.label()),
+                sanitize_label(&node.string("source_file")),
+                sanitize_label(&node.id)
+            )
+        }));
+        if candidates.len() > MAX_CANDIDATES {
+            lines.push(format!(
+                "{} additional candidates omitted; narrow the symbol or source path.",
+                candidates.len() - MAX_CANDIDATES
+            ));
+        }
+        return Ok(lines.join("\n"));
+    }
     let mut lines = vec![format!(
         "Neighbors of {}:",
         sanitize_label(context.graph.node(index).label())
@@ -2854,6 +2883,61 @@ fn read_bounded_resource(path: &Path) -> Result<String, InvocationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_reports_stored_typed_communities() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            r#"{"nodes":[
+            {"id":"a","name":"Alpha","kind":"function","community":{"id":2,"label":"Core"},"source":{"file":"a.rs","startLine":1}},
+            {"id":"b","name":"Beta","kind":"function","community":{"id":2,"label":"Core"},"source":{"file":"b.rs","startLine":1}}],"links":[]}"#,
+        )?;
+        let server = CompassMcp::new(&path);
+        assert!(
+            server
+                .invoke("graph_stats", Map::new())
+                .contains("Communities: 1")
+        );
+        let members = server.invoke(
+            "get_community",
+            json!({"community_id":2}).as_object().ok_or("args")?.clone(),
+        );
+        assert!(members.contains("Core (2 nodes)"), "{members}");
+        assert!(members.contains("Alpha [a.rs]"));
+        assert!(members.contains("Beta [b.rs]"));
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_require_unique_identity() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            r#"{"directed":true,"nodes":[
+            {"id":"A","label":"run()","qualifiedName":"First.run","source_file":"first.rs"},
+            {"id":"b","label":"run()","qualifiedName":"Second.run","source_file":"second.rs"},
+            {"id":"c","label":"OnlyFirst"}],"links":[{"source":"A","target":"c","relation":"calls"}]}"#,
+        )?;
+        let server = CompassMcp::new(&path);
+        let ambiguous = server.invoke(
+            "get_neighbors",
+            json!({"label":"run"}).as_object().ok_or("args")?.clone(),
+        );
+        assert!(ambiguous.contains("Ambiguous"), "{ambiguous}");
+        assert!(!ambiguous.contains("-->"));
+        assert!(ambiguous.contains("first.rs") && ambiguous.contains("second.rs"));
+        for exact in ["A", "First.run"] {
+            let output = server.invoke(
+                "get_neighbors",
+                json!({"label":exact}).as_object().ok_or("args")?.clone(),
+            );
+            assert!(output.contains("--> OnlyFirst"), "{exact}: {output}");
+        }
+        Ok(())
+    }
 
     #[test]
     fn invocation_errors_preserve_json_rpc_taxonomy() {

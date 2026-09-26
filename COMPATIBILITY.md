@@ -94,6 +94,19 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+### MCP community and neighbor lookup
+
+The disposable traversal cache now retains a labeled community's numeric ID
+as well as its name. Cache magic advances from `TRAILT04` to `TRAILT05` so old
+projections rebuild from their unchanged graph. MCP membership, statistics,
+and other traversal consumers can now observe those stored communities.
+Graph schemas and published historical graphs are unchanged.
+
+MCP `get_neighbors` returns an explicit ambiguity list when multiple nodes
+match, ordered by exact ID with at most 20 displayed candidates and an omission
+count. Retry with an exact ID to choose a declaration. Exact IDs retain their
+case. The tool's input schema and the MCP result envelope are unchanged.
+
 ### Bounded node trails
 
 The undirected `path` command also retains nondominated cost/depth states.

@@ -2,11 +2,21 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from benchmarks.agent_query.mcp_transport import StdioMcp
 
 
 class McpTransportTests(unittest.TestCase):
+    def test_unsupported_platform_fails_before_starting_a_process(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            client = StdioMcp([sys.executable], root, root/'capture')
+            with patch('benchmarks.agent_query.mcp_transport.os.name', 'nt'):
+                with self.assertRaisesRegex(OSError, 'POSIX'):
+                    client.__enter__()
+            self.assertFalse((root/'capture').exists())
+
     def invoke(self, body, *, timeout=1, max_bytes=4096):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

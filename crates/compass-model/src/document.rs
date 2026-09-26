@@ -959,7 +959,7 @@ impl GraphDocument {
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG01";
 const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA02";
-const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT04";
+const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT05";
 const QUERY_CACHE_HEADER_LEN: usize = 28;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -1388,12 +1388,11 @@ impl TraversalRawNode {
                     .map(|label| Value::String(label.to_owned()))
             })
             .or(community_name);
-        let community = community.filter(|value| {
-            value
-                .as_object()
-                .and_then(|community| community.get("label"))
-                .and_then(Value::as_str)
-                .is_none()
+        // Compact labeled communities to their identity rather than dropping
+        // the whole record after extracting the display name.
+        let community = community.and_then(|value| match value {
+            Value::Object(mut fields) => fields.remove("id"),
+            scalar => Some(scalar),
         });
         let label = label
             .filter(|value| value_as_python_string(value).is_some())
@@ -1889,6 +1888,39 @@ mod tests {
     use super::{
         GraphDocument, NodeRecord, affected_cache_path, query_cache_path, traversal_cache_path,
     };
+
+    #[test]
+    fn traversal_cache_preserves_labeled_community_ids() -> Result<(), Box<dyn std::error::Error>> {
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("graph.json");
+        fs::create_dir(directory.path().join("cache"))?;
+        fs::write(
+            &path,
+            r#"{"nodes":[
+            {"id":"a","name":"A","community":{"id":4,"label":"Core"}},
+            {"id":"b","name":"B","community":{"id":7}},
+            {"id":"c","label":"C","community":9}],"links":[]}"#,
+        )?;
+        for _ in 0..2 {
+            let graph = GraphDocument::load_for_traversal(&path)?;
+            assert_eq!(graph.nodes[0].unsigned("community"), Some(4));
+            assert_eq!(graph.nodes[0].string("community_name"), "Core");
+            assert_eq!(graph.nodes[1].unsigned("community"), Some(7));
+            assert_eq!(graph.nodes[2].unsigned("community"), Some(9));
+        }
+        // Old disposable caches can contain the label but lack its ID.
+        let mut stale = super::load_traversal_projection(&path)?.into_cache();
+        stale.2[0].8 = None;
+        let signature = super::graph_signature(&path).ok_or("missing graph signature")?;
+        super::write_traversal_cache(&path, signature, &stale)?;
+        let cache = traversal_cache_path(&path);
+        let mut bytes = fs::read(&cache)?;
+        bytes[..8].copy_from_slice(b"TRAILT04");
+        fs::write(cache, bytes)?;
+        let graph = GraphDocument::load_for_traversal(&path)?;
+        assert_eq!(graph.nodes[0].unsigned("community"), Some(4));
+        Ok(())
+    }
 
     #[test]
     fn omitted_multigraph_uses_networkx_legacy_default() {

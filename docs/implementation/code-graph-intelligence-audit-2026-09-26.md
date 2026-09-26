@@ -522,13 +522,88 @@ debug executable during concurrent qualification; timings are not speed
 comparisons. The new ask failures demonstrate why that earlier suite is
 insufficient to establish the requested superiority.
 
+## Shared MCP comparison across five languages
+
+Commit `152efdd7` records `suite_mcp.json` and the bounded stdio collector before
+execution. There are 29 questions per tool on the retained five-repository
+panel: graph counts, top-ten hubs, largest-community enumeration, missing
+communities, calls adjacent to reviewed declarations, and four ambiguous
+neighbor names. Both products expose the same MCP operations. Input node IDs
+and community IDs are prepared symmetrically from the graphs and are not
+counted as successful node retrieval. Sources and graph hashes are checked
+before and after use.
+
+Graphify runs in the isolated 0.9.67 MCP environment described in the coverage
+plan. Its optional SDK dependencies are separately recorded, and all 227
+compared Graphify package files match the original installation. This avoids
+counting an absent optional SDK as a product failure. Full-enumeration requests
+use its explicit 262,144-token allowance; Compass exposes whole-result output.
+The external limits are 60 seconds per RPC, 16 MiB per response/stderr, and
+64 MiB per session. These are complete-enumeration tasks, not an equal
+2,000-token arm. Text bytes and actual response-wire bytes are reported
+separately. Concurrent debug timings are not performance comparisons.
+
+All 58 RPCs completed in `mcp-paired-01`. The original run exposed two production
+defects: the compact traversal projection retained community names but dropped
+labeled community IDs, and `get_neighbors` selected the first ambiguous match.
+The independent auditor checks source-run/graph/input/collector hashes and
+captured responses against raw JSON-RPC transcripts. Its checks implement the
+preregistered graph-consistency policies; these are not complete source-precision
+or functional-clustering oracles.
+
+| Graph-consistency check | Initial Compass | Corrected Compass | Graphify in both runs |
+| --- | ---: | ---: | ---: |
+| Node/edge/community totals | 0/5 | 5/5 | 5/5 |
+| Largest-community member multiset and count | 0/5 | 5/5 | 5/5 |
+| Absent community is reported absent | 5/5 | 5/5 | 5/5 |
+| Filtered neighbor direction/label/relation triples | 5/5 | 5/5 | 5/5 |
+| Ambiguous neighbor lookup preserves ambiguity | 0/4 | 4/4 | 4/4 |
+
+The first two failures share one cache defect; they are not ten independent
+implementation bugs. Native regressions failed before both corrections.
+The model now retains the community ID and display name in its compact cache,
+and advances cache magic to `TRAILT05` so previously deficient `TRAILT04`
+projections rebuild. Cold, warm, and stale-cache regression cases pass.
+MCP now returns a stable candidate list (at most 20 plus an omission count)
+with source paths and exact IDs. Exact IDs preserve case. Graph schemas and
+historical artifacts remain unchanged.
+
+Replay `mcp-paired-02` uses the same questions, source graphs, and Graphify
+environment. It rebuilds the old Compass traversal caches automatically and
+passes the graph-consistency checks above. The corrected debug binary SHA256
+is `4b3b755fd8a3e8d74c4eac8c336f719506dcfee9f8ac89cea2eafbe181042efb`;
+source/file hashes are under `mcp-corrections-provenance`. No oracle was retuned
+to replace the initial failures. Reports and transcripts for both runs remain.
+
+The hub outputs expose another unresolved limitation. Only 29/50 Compass and
+37/50 Graphify entries have labels that uniquely identify a graph node.
+All of those identifiable entries have matching independently computed degree;
+the remaining entries are unverified because their labels collide. Matching a
+label plus its expected degree to choose a convenient identity would conceal
+this limitation. Both MCP outputs need stronger identity presentation for
+reliable navigation. These counts do not verify ranking eligibility or source
+correctness, and high degree does not establish excessive responsibility or
+poor cohesion. Zod's highly connected module nodes also need explicit role
+interpretation before any design conclusion.
+
+Verification after the two corrections: 1,148 native tests passed (1,086
+workspace lib/bin tests plus 36 CLI query, 9 product, and 17 output tests),
+zero failed, two ignored. Workspace Clippy passes with warnings denied.
+The benchmark/transport/auditor suite passes 65 Python tests, including
+membership mismatches, ambiguous labels, direction errors, parallel edges,
+self-loops, transport timeouts/byte limits, and unsupported-platform handling.
+Formatting, diff checks, and the native product boundary pass. Full extraction
+fixture qualification remains the preceding receiver checkpoint; this change
+is verified through native cache/MCP regressions and the retained-graph replay.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
-2. Expand hub review beyond candidate eligibility to source-reviewed design
-   judgments, separating connectivity from responsibility/cohesion defects.
+2. Add unambiguous hub identities and source anchors, then expand hub review
+   to source-reviewed design judgments. Evaluate cluster responsibilities and
+   cross-community connections separately from graph consistency.
 3. Add independent edge/path judgments: ordered adjacent edges, relation kinds,
    traversal direction, source occurrences, ambiguity, unreachable nodes, and
    bound exhaustion. A negative or limit outcome must never count as a path.

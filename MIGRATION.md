@@ -7,6 +7,11 @@ layout remains visible and clearly owned.
 
 ## Query text and path resolution
 
+MCP callers of `get_neighbors` must handle an `Ambiguous` candidate list and
+retry with a returned exact node ID. Earlier versions silently chose one match.
+Labeled community IDs are restored by automatic traversal-cache rebuilding;
+existing graph files can be queried directly.
+
 `ask` agent output now records parsed operands in `request.operands` and the
 original question in `request.question`. Consumers needing the question should
 read that dedicated field. If an existing text cursor fails its prefix check

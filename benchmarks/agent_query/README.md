@@ -6,7 +6,8 @@ developer-side tooling: Compass never runs it, and it never installs Graphify.
 
 [`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
 question/evidence matrix, including ask, communities, clusters, and god nodes.
-Those planned surfaces must not be described as already evaluated.
+The audit report distinguishes completed checks from surfaces still awaiting
+source or design-quality judgments.
 
 Four suites share the harness:
 
@@ -226,3 +227,44 @@ Each subprocess stream is capped at 16 MiB during capture. Exceeding either
 cap terminates the process group and fails the observation; truncated text is
 never scored as a successful response. An invalid Compass snapshot pointer
 fails preparation instead of selecting an arbitrary unpublished snapshot.
+
+## Shared MCP comparison
+
+`suite_mcp.json` preregisters 29 questions per tool across the same five-language
+panel: graph statistics, top-ten hubs, largest-community enumeration, absent
+communities, call neighbors of a reviewed declaration, and four ambiguous
+neighbor lookups. These use public MCP tools on both sides. Exact input IDs and
+community IDs are prepared symmetrically from retained graphs; this preparation
+is not scored as node retrieval.
+
+```bash
+python3 -m benchmarks.agent_query.mcp_compare \
+  --run /path/to/captured/five-repository-run \
+  --output /path/to/new-mcp-run \
+  --compass /path/to/frozen/compass \
+  --graphify-python /path/to/isolated-graphify-mcp-env/bin/python \
+  --graphify-environment /path/to/graphify-mcp-environment.json
+python3 -m benchmarks.agent_query.mcp_audit \
+  --run /path/to/new-mcp-run --output /path/to/new-audit.json
+```
+
+The stdio collector currently requires POSIX pipe selectors (macOS/Linux); it
+fails explicitly before starting a server on unsupported platforms.
+
+The environment manifest records `files` with package-relative `file` and
+`mcpEnvironmentSha256` entries plus the installed package/version list. The
+collector validates package hashes before and after collection. It records
+executable, graph, input, and collector hashes, JSON-RPC transcripts, errors,
+text bytes, and timing. The auditor verifies captured answers against those
+transcripts and reports actual response-wire bytes separately from text bytes.
+The original collector's `protocolBytes` field estimates JSON serialization
+size; use the auditor's `wireResponseBytes` for captured transport size.
+
+Full-enumeration questions use Graphify's large explicit token allowance and
+Compass's whole-result interface with common external byte/time limits. This
+arm does not claim equal 2,000-token answers. Community membership is compared
+with each tool's own partition, not an arbitrary shared cluster number.
+Neighbor checks cover displayed direction/label/relation triples and report
+ambiguous labels separately. Hub checks recompute displayed degrees for
+uniquely identified labels; they do not prove complete ranking eligibility,
+source correctness, functional cohesion, or god-object design quality.

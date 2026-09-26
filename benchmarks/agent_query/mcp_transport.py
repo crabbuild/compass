@@ -22,6 +22,8 @@ class StdioMcp:
         self.buffer = b""
 
     def __enter__(self):
+        if os.name != "posix":
+            raise OSError("MCP comparison transport requires POSIX pipe selectors")
         self.directory.mkdir(parents=True, exist_ok=False)
         self.process = subprocess.Popen(self.argv, cwd=self.cwd, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -39,11 +41,17 @@ class StdioMcp:
         try:
             self.process.wait(timeout=1)
         except subprocess.TimeoutExpired:
-            os.killpg(self.process.pid, signal.SIGTERM)
+            try:
+                os.killpg(self.process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 self.process.wait(timeout=1)
             except subprocess.TimeoutExpired:
-                os.killpg(self.process.pid, signal.SIGKILL)
+                try:
+                    os.killpg(self.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 self.process.wait(timeout=2)
         self.selector.close()
         self.error_file.close()

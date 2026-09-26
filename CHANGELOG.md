@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve community IDs alongside labels in traversal caches, restoring MCP
+  community membership and statistics on typed graphs. Older disposable
+  traversal caches rebuild automatically.
+- Return candidate paths and IDs for ambiguous MCP neighbor lookups instead
+  of silently selecting one declaration.
+
 - Preserve parsed `ask` operands in agent and text answers so headlines,
   answer evidence, path endpoints, and follow-up actions describe the requested
   symbols.

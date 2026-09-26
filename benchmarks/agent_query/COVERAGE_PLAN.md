@@ -52,8 +52,9 @@ lacks the optional `mcp` SDK. An isolated `graphifyy[mcp]==0.9.67` environment
 now provides it; all 227 compared Graphify package files match the original
 installation. The environment manifest pins its separate dependencies. Actual
 MCP initialize/tools-list handshakes succeeded for both tools on the retained
-Cobra graphs, confirming all four named tools. This is interface availability
-evidence; the cross-language community/hub questions still need execution.
+Cobra graphs, confirming all four named tools. The subsequent `suite_mcp.json` runs exercise these interfaces across all five
+languages. Their graph-consistency results are recorded in the audit report;
+source-level cluster quality and god-object design judgments remain pending.
 Graphify community lookup accepts an
 explicit token budget; account for that bound and any truncation separately.
 Lack of one CLI command name does not establish lack of the capability.
