@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Preserve parsed `ask` operands in agent and text answers so headlines,
+  answer evidence, path endpoints, and follow-up actions describe the requested
+  symbols.
+- Match agent-answer subjects using the query engine's existing case and
+  function-label normalization, including names such as `convertSchema()`.
+
 - Prevent Rust local receiver bindings from inheriting shadowed outer parameter
   types in lets, loops, closures, match arms/guards, and conditional lets.
   Preserve initializer and else-branch scope, and rebuild older AST caches.

@@ -409,13 +409,122 @@ incorrect relationships. A cache regression checks that version-2 facts are
 discarded. This is a correction to the existing producer contract, not a new
 advertised capability or a new universal-pipeline promotion. Evidence/graph
 schema majors and the Rust producer capability identity remain unchanged;
-historical graphs are not rewritten. Full baseline, fixture, and fresh binary
-replay evidence for this correction is recorded below as it completes.
+historical graphs are not rewritten.
+
+The full workspace native baseline passes 1,083 tests with zero failures and
+two ignored tests. The qualifying debug executable was copied and hashed after
+its successful native build; its source snapshot, patch, and committed Rust
+file hashes are retained under `shadow-fix-provenance`. The replay in
+`rust-shadow-corrected-03` removes the wrong `Decoy` edge in both source
+reductions while preserving exactly one valid outer call in each. The still
+unproven inner receiver remains unresolved.
+
+Fresh extraction/query run `fd-shadow-02` preserves all 12 query outcomes,
+all 16 reviewed Compass call occurrences, and both source-grounded path
+witnesses. The paired token medians remain 227 versus 88 on eight shared
+passes. The separate diagnostic still records the three missing Compass
+loop/callback calls and Graphify's wrong constructor target. All 92 recorded
+Graphify distribution-file hashes remained unchanged; this does not pin every
+transitive dependency. The Compass executable is a debug build and native
+qualification ran concurrently, so these timings are not performance evidence.
+
+Fixture qualification initially stopped at preflight because the default
+parser-source bundle directory was absent. It was restarted using the complete
+bundle already present in this checkout's build directory, whose language
+definition hash matches the vendored manifest. The full fixture gate completed
+successfully, including independent Markdown and React frontend qualification.
+The release executable is frozen under `shadow-fix-provenance/compass-release`
+with SHA256 `6baa1cabccdea6357ad5e9653a008efa1b384250557c1ce27278402e85399719`.
+
+## Natural-language interface comparison
+
+The preregistered `suite_ask.toml` sends identical caller/callee questions and
+2,000-token budgets through Compass `ask` and Graphify `query`, with no
+continuations. The ten questions reuse reviewed facts from the five-language
+panel; they are interface checks, not ten independent source judgments.
+Captured run `ask-paired-01` passes 9/10 selected-fact text checks for Compass
+and 10/10 for Graphify. Compass's Cobra callees page omits `Find` before its
+12-primary-result projection bound, even though the requested token budget
+has room. Graphify wins that preregistered row. Do not change its oracle or
+silently add a follow-up to erase this failure.
+
+Review beyond the text oracle finds seven Compass relationship headlines
+attributing the answer to the wrong subject: Cobra callers, both Flask rows,
+both Gson rows, Zod callees, and Axum callees. Their correct fact anchors do
+not make these answers fully correct. The CLI executes parsed operands but
+supplies the whole natural-language question as a query operand to the
+renderer; the first node by ID then substitutes for the requested subject.
+This also affects answer basis, primary ordering, and suggested next actions.
+The native CLI regression reproduced the wrong subject before correction.
+The CLI now passes the planner operands with their symbol/source/target roles
+and retains the original question separately. The first correction passes
+36 CLI query and 9 product tests, workspace Clippy, and the 1,083-test native
+baseline. The expanded regression also checks a missing subject and follow-up
+actions. Python benchmark tests pass 49 cases.
+
+Graphify exceeds the requested 2,000-token budget on four answers (Cobra
+callers: 2,854; Gson callers and callees: 2,773 each; Axum callees: 3,160),
+using the recorded stdout bytes/4 estimate. Each explicitly discloses the
+overrun. The original selected-fact scores remain recorded; they are not
+hard-budget success scores or complete precision judgments. On the nine
+shared text passes, median output is 291 versus 1,210 estimated tokens.
+This does not establish equal-budget correctness or performance superiority.
+
+The diagnostic query-only replay `ask-operands-replay-02` uses retained,
+digest-checked graphs from `ask-paired-01`. Both tools now pass 10/10 text
+checks, including Cobra: correct subject ordering puts its missing fact on
+page one without changing the budget or oracle. Median text output is 279.5
+versus 1,439.5 estimated tokens on the ten shared passes. Additional JSON
+requests compare all ten Compass ask projections with their direct commands;
+those diagnostic requests are excluded from paired workflow costs.
+
+All ten agree with direct commands, but source review still finds two wrong
+headlines in both interfaces (Zod callees and Axum callees): function labels
+such as `convertSchema()` and `validate_path()` carry trailing parentheses,
+and the renderer's exact-string lookup does not share the query engine's
+symbol normalization. Consequently Zod still names `convertBaseSchema` and Axum still names
+`validate_v07_paths` as their subjects. The first correction resolves five of
+seven observed headline failures; direct-command equivalence alone cannot prove source correctness.
+A separate renderer regression failed before correction. The renderer now
+shares the query engine's existing normalization for case, leading dots, and
+trailing empty parentheses, while exact IDs and uniqueness remain explicit.
+The original run, intermediate replay, and their scores remain retained
+independently.
+
+Final query-only replay `ask-operands-replay-03` passes 10/10 text checks for
+both tools. A separate post-output subject diagnostic verifies all ten Compass
+headlines and node bases against exact reviewed declaration labels, files,
+and start lines (including Zod and Axum). Those witnesses are retained as
+`ask-subject-witnesses.json`; they do not replace the original text oracle.
+The frozen final debug executable has SHA256
+`a748d0fa8eb08fec09a43647e29be0b056a706eb986d70c47049463c9dbb123c`.
+The source patch and file hashes are retained under
+`ask-normalization-provenance`. Output medians remain 279.5 versus 1,439.5
+estimated tokens on the same ten passing text questions.
+
+The complete native run passes 1,145 tests: 1,083 workspace lib/bin tests,
+36 CLI query tests, 9 CLI product tests, and 17 output integration tests;
+two existing tests remain ignored. Workspace and changed integration-target
+Clippy pass with warnings denied. The first expanded Clippy run found an
+existing `expect_err` in the touched output test; it now returns the failed
+assertion as an error. The 17-test output suite was rerun after that test-only
+cleanup. Formatting, diff checks, product boundary, and 49 Python benchmark
+tests pass. The full extraction fixture gate passed at the preceding receiver
+checkpoint; these presentation corrections use native query/CLI tests and
+retained real graphs rather than claiming a new extraction qualification.
+
+The fresh `v2-shadow-05` run remains 50/50 versus 44/50, with five source
+excerpt availability differences and one Axum file-resolution difference.
+Its five source-grounded path witnesses pass for both tools in
+`path-audit-v2-shadow-05.json`. Graphify uses less output on its 44 shared
+passes (112 versus 308 estimated tokens). All of these runs use a frozen
+debug executable during concurrent qualification; timings are not speed
+comparisons. The new ask failures demonstrate why that earlier suite is
+insufficient to establish the requested superiority.
 
 ## Next evidence to collect
 
-1. Complete qualification and fresh binary replay of receiver shadowing, then
-   extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
+1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
 2. Expand hub review beyond candidate eligibility to source-reviewed design

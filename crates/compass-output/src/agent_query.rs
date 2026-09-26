@@ -11,7 +11,7 @@ use compass_model::query_contract::{
 };
 use compass_query::{
     CursorTokenError, code_query_response_digest, decode_cursor_token, discovery_response_digest,
-    encode_cursor_token,
+    encode_cursor_token, normalize_code_query_symbol,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -2211,9 +2211,13 @@ fn unique_node_id(value: &str, nodes: &BTreeMap<String, &QueryNode>) -> Option<S
     if nodes.contains_key(value) {
         return Some(value.to_owned());
     }
+    let normalized = normalize_code_query_symbol(value);
     let mut matches = nodes
         .values()
-        .filter(|node| node.name == value || node.qualified_name == value)
+        .filter(|node| {
+            normalize_code_query_symbol(&node.name) == normalized
+                || normalize_code_query_symbol(&node.qualified_name) == normalized
+        })
         .map(|node| node.id.clone())
         .collect::<Vec<_>>();
     matches.sort();

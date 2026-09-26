@@ -7,6 +7,11 @@ layout remains visible and clearly owned.
 
 ## Query text and path resolution
 
+`ask` agent output now records parsed operands in `request.operands` and the
+original question in `request.question`. Consumers needing the question should
+read that dedicated field. If an existing text cursor fails its prefix check
+after the corrected subject ordering, reissue the question to start a new page.
+
 Plain `compass query` output is now concise by default and its page budget is
 8,000 approximate tokens. Scripts or review workflows that need the previous
 expanded provenance should pass `--evidence`. Existing

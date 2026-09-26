@@ -64,6 +64,58 @@ fn context(operation: AgentOperation) -> AgentQueryContext {
 }
 
 #[test]
+fn relationship_subject_uses_the_query_engines_symbol_normalization() -> Result<(), Box<dyn Error>>
+{
+    let source = anchor("src/lib.rs", 1);
+    for (operation, agent_operation) in [
+        (CodeQueryOperation::Callers, AgentOperation::Callers),
+        (CodeQueryOperation::Callees, AgentOperation::Callees),
+    ] {
+        let mut response = response(operation);
+        response.nodes = vec![
+            node("a:neighbor", "Neighbor", &source),
+            node("z:subject", ".Subject()", &source),
+        ];
+        response.nodes[1].qualified_name = "Fixture.Subject".to_owned();
+        let (from, to) = if operation == CodeQueryOperation::Callers {
+            ("a:neighbor", "z:subject")
+        } else {
+            ("z:subject", "a:neighbor")
+        };
+        response.edges.push(QueryEdge {
+            id: "e:call".to_owned(),
+            source: from.to_owned(),
+            target: to.to_owned(),
+            kind: EdgeKind::Calls,
+            relationship_site: Some(source.clone()),
+            details: None,
+            evidence: vec![evidence(&source)],
+        });
+        for query in [
+            "Subject",
+            "subject()",
+            ".SUBJECT()",
+            " Fixture.Subject ",
+            "z:subject",
+        ] {
+            let view = build_code_query_view(
+                &response,
+                context(agent_operation)
+                    .with_operand(compass_output::AgentOperandRole::Symbol, query),
+            )?;
+            assert!(
+                view.answer.headline.ends_with("for Fixture.Subject."),
+                "{query}: {}",
+                view.answer.headline
+            );
+            assert_eq!(view.answer.basis[0].id, "z:subject");
+            assert_eq!(view.primary_results[0].id, "z:subject");
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn direct_usage_survives_the_projection_bound_ahead_of_owner_references()
 -> Result<(), Box<dyn Error>> {
     let target_anchor = anchor("src/target.rs", 20);
@@ -790,7 +842,8 @@ fn legacy_page_cursor_encoding_is_rejected_with_a_version_error() -> Result<(), 
         let checksum = format!("{:x}", Sha256::digest(payload.as_bytes()));
         let cursor = format!("{payload}.{checksum}");
         let error = compass_output::decode_agent_text_page_cursor(&cursor)
-            .expect_err("a legacy cursor must not be reinterpreted");
+            .err()
+            .ok_or("a legacy cursor must not be reinterpreted")?;
         let message = error.to_string();
         assert!(
             message.contains("cursor"),

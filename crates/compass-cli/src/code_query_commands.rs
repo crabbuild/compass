@@ -11,8 +11,8 @@ use compass_output::{
     render_code_query_text_page,
 };
 use compass_query::{
-    EngineSelection, NaturalQueryRequest, QueryError, QueryErrorKind, open_with_engine,
-    open_with_verified_document,
+    EngineSelection, NaturalQueryIntent, NaturalQueryRequest, QueryError, QueryErrorKind,
+    open_with_engine, open_with_verified_document, plan_natural_query,
 };
 
 use crate::{Outcome, SharedOutputFormat, parse_shared_output_format};
@@ -222,6 +222,30 @@ fn execute(
     let (response, question, operands) = match operation {
         "ask" => {
             let question = required(&positional, 0, "ask <QUESTION>")?.to_owned();
+            let plan = plan_natural_query(&question).map_err(query_error)?;
+            // The renderer needs the same operands the query engine executes.
+            // The full question is retained separately as request metadata.
+            let operands = if plan.routes_to_typed_query() {
+                plan.operands()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| {
+                        let role = match plan.intent() {
+                            NaturalQueryIntent::Callers
+                            | NaturalQueryIntent::Callees
+                            | NaturalQueryIntent::Impact => AgentOperandRole::Symbol,
+                            NaturalQueryIntent::NodeTrail if index == 0 => AgentOperandRole::Source,
+                            NaturalQueryIntent::NodeTrail => AgentOperandRole::Target,
+                            NaturalQueryIntent::Search | NaturalQueryIntent::Fallback => {
+                                AgentOperandRole::Query
+                            }
+                        };
+                        (role, value.clone())
+                    })
+                    .collect()
+            } else {
+                vec![(AgentOperandRole::Query, question.clone())]
+            };
             let response = engine
                 .query_natural(NaturalQueryRequest {
                     question: question.clone(),
@@ -229,11 +253,7 @@ fn execute(
                     limits,
                 })
                 .map_err(query_error)?;
-            (
-                response,
-                Some(question.clone()),
-                vec![(AgentOperandRole::Query, question)],
-            )
+            (response, Some(question), operands)
         }
         "search" => {
             let query = required(&positional, 0, "search <QUERY>")?.to_owned();

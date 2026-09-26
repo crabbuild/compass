@@ -44,9 +44,19 @@ Compass exposes natural `ask`, typed `search`, `architecture`, and the MCP
 tools `get_neighbors`, `get_community`, `god_nodes`, and `graph_stats`.
 Graphify 0.9.67 exposes CLI `god-nodes --top N --json`; its inspected CLI help
 does not advertise dedicated `ask` or community-membership commands.
-Its natural `query` and explanation/export workflows must be checked as the
-closest available operations before declaring a task unsupported. Lack of one
-command name alone does not establish lack of the capability.
+Further installed-source inspection and `python -m graphify.serve --help`
+confirm a public MCP server in `graphify.serve`, including `get_neighbors`,
+`get_community`, `god_nodes`, and `graph_stats`. These can be compared directly
+with the matching Compass MCP tools. The currently pinned Graphify environment
+lacks the optional `mcp` SDK. An isolated `graphifyy[mcp]==0.9.67` environment
+now provides it; all 227 compared Graphify package files match the original
+installation. The environment manifest pins its separate dependencies. Actual
+MCP initialize/tools-list handshakes succeeded for both tools on the retained
+Cobra graphs, confirming all four named tools. This is interface availability
+evidence; the cross-language community/hub questions still need execution.
+Graphify community lookup accepts an
+explicit token budget; account for that bound and any truncation separately.
+Lack of one CLI command name does not establish lack of the capability.
 
 Where the available workflows use different interfaces, retain all requests,
 startup/setup work, output bytes, follow-ups, and errors. Report protocol

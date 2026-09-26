@@ -3751,7 +3751,10 @@ fn path_record(nodes: &[String], edges: &[String], selected: &[EdgeRecord]) -> Q
     }
 }
 
-pub(crate) fn normalize_symbol(value: &str) -> String {
+/// Canonical name comparison shared by typed resolution and its projections.
+/// Node IDs are matched exactly before this normalization is applied to names.
+#[must_use]
+pub fn normalize_symbol(value: &str) -> String {
     value
         .trim()
         .trim_end_matches("()")

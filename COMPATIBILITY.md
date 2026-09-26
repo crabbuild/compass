@@ -658,7 +658,16 @@ realizations of the backend-neutral `compass-store` contract, not a stable SQL
 schema or pointer format that consumers may query directly.
 
 The additive `compass ask` command continues to route bounded questions to the
-typed `compass.query/1` operations. Plain `compass query` against a typed graph
+typed `compass.query/1` operations. Its agent projections now retain the parsed
+symbol/source/target operands used by that operation, with the original question
+in `request.question`. This corrects headlines, evidence basis, and follow-up
+actions that previously treated the whole question as a symbol. Agent-answer
+subject lookup shares the query engine's existing name normalization (case,
+leading dots, and trailing empty parentheses), retaining exact node-ID lookup
+and requiring a unique normalized name. Existing schema
+majors and raw query responses are unchanged. Text cursors whose primary ordering
+changed are rejected by the existing prefix check; reissue the question.
+Plain `compass query` against a typed graph
 now defaults to `compass.query.discovery/1`; `--dfs` and `--context` compose
 with discovery. Explicit `--traverse` or legacy-only `--budget`/`--page`
 preserve the established text traversal and reject discovery controls.

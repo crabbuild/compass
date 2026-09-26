@@ -12,6 +12,69 @@ use compass_store::{STORE_FILE_NAME, STORE_REF_FILE_NAME, SqliteStore};
 use serde_json::Value;
 
 #[test]
+fn ask_preserves_typed_operands_in_agent_and_text_answers() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    for (question, command, operands) in [
+        ("who calls Target?", "callers", vec!["Target"]),
+        ("who calls Missing?", "callers", vec!["Missing"]),
+        ("what does Caller call?", "callees", vec!["Caller"]),
+        ("what is impacted by Target?", "impact", vec!["Target"]),
+        (
+            "path from Caller to Target",
+            "node",
+            vec!["Caller", "Target"],
+        ),
+        ("where is Target defined?", "search", vec!["Target"]),
+    ] {
+        for format in ["agent-json", "text"] {
+            let execute = |command: &str, operands: &[&str]| {
+                let mut args = vec![OsString::from(command)];
+                args.extend(operands.iter().map(OsString::from));
+                args.extend([
+                    OsString::from("--graph"),
+                    graph.as_os_str().to_owned(),
+                    OsString::from("--format"),
+                    OsString::from(format),
+                ]);
+                run(Frontend::Compass, args)
+            };
+            let asked = execute("ask", &[question]);
+            let direct = execute(command, &operands);
+            assert_eq!(asked.code, 0, "{question}: {}", asked.stderr);
+            assert_eq!(direct.code, 0, "{}", direct.stderr);
+            if format == "agent-json" {
+                let asked = AgentQueryView::from_json(asked.stdout.as_bytes())?;
+                let direct = AgentQueryView::from_json(direct.stdout.as_bytes())?;
+                assert_eq!(asked.answer, direct.answer, "{question}");
+                assert_eq!(
+                    asked.request.operands, direct.request.operands,
+                    "{question}"
+                );
+                assert_eq!(asked.primary_results, direct.primary_results, "{question}");
+                assert_eq!(asked.paths, direct.paths, "{question}");
+                assert_eq!(asked.next_actions, direct.next_actions, "{question}");
+                assert_eq!(asked.request.question.as_deref(), Some(question));
+            } else {
+                // Compare the answer separately from pagination metadata.
+                let headline = direct
+                    .stdout
+                    .lines()
+                    .skip_while(|line| *line != "ANSWER")
+                    .nth(1)
+                    .ok_or("missing direct answer")?;
+                assert!(
+                    asked.stdout.contains(headline),
+                    "{question}: {}",
+                    asked.stdout
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn typed_query_commands_share_the_versioned_json_contract() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph = support::write_typed_graph(directory.path())?;
