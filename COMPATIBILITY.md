@@ -106,6 +106,10 @@ MCP `get_neighbors` returns an explicit ambiguity list when multiple nodes
 match, ordered by exact ID with at most 20 displayed candidates and an omission
 count. Retry with an exact ID to choose a declaration. Exact IDs retain their
 case. The tool's input schema and the MCP result envelope are unchanged.
+Relationship filters apply before repeated neighbors are grouped, so a stored
+call remains visible when a containment/reference edge precedes it. The tool
+continues to return distinct neighbors; typed call-query tools carry occurrence
+and source-site detail.
 
 ### Bounded node trails
 

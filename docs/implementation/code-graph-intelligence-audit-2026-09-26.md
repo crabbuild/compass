@@ -596,6 +596,35 @@ Formatting, diff checks, and the native product boundary pass. Full extraction
 fixture qualification remains the preceding receiver checkpoint; this change
 is verified through native cache/MCP regressions and the retained-graph replay.
 
+### Neighbor filtering diagnostic
+
+The five selected neighbor questions missed another defect: MCP grouped each
+neighbor before applying the relation filter. A preceding containment or
+reference edge could therefore hide a later call between the same endpoints.
+Both incoming and outgoing lookups were affected. A post-output source review
+of Flask `tests/test_helpers.py:275–281` establishes the nested `index` to
+`generate` call. The retained graph contains both containment and call edges,
+but both filtered MCP lookups returned empty adjacency before correction.
+This diagnostic is separate from the preregistered comparison scores.
+
+The filter now precedes grouping. Native regression coverage exercises both
+directions, both edge orders, and duplicate calls. The tool continues to return
+distinct neighbors; it does not promise call-site multiplicity. The unchanged
+Flask source and graph now produce the correct outgoing and incoming call in
+`mcp-filter-diagnostic-02`, with original failures retained in
+`mcp-filter-diagnostic-01`. Similar edge-order candidates exist elsewhere in
+the panel, but their presence alone is not source-accuracy evidence.
+
+The final filter executable is retained under `mcp-filter-provenance`, SHA256
+`367dfd78301d9c3914049b8c134933dce91934003eafbc2c144d9abd760a7e1a`.
+Native verification passes 1,149 tests, zero failed, two ignored; workspace
+Clippy passes with warnings denied. Formatting, diff checks, and the product
+boundary also pass. This is a query correction on retained graphs; no new
+extraction or performance claim follows. Replay `mcp-paired-03` completes all
+58 RPCs; `mcp-audit-03.json` confirms the same graph-consistency results as
+`mcp-paired-02` for both tools. The separate Flask diagnostic is the evidence
+for the additional filter correction.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact

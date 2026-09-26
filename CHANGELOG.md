@@ -7,6 +7,8 @@
   traversal caches rebuild automatically.
 - Return candidate paths and IDs for ambiguous MCP neighbor lookups instead
   of silently selecting one declaration.
+- Apply MCP neighbor relationship filters before grouping repeated neighbors,
+  preserving matching calls when another relation shares the same endpoints.
 
 - Preserve parsed `ask` operands in agent and text answers so headlines,
   answer evidence, path endpoints, and follow-up actions describe the requested

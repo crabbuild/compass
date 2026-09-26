@@ -2255,11 +2255,11 @@ fn tool_get_neighbors(
         let Some(neighbor) = context.graph.node_index(&edge.target) else {
             continue;
         };
-        if !outgoing.insert(neighbor) {
-            continue;
-        }
         let relation = edge.string("relation");
         if !filter.is_empty() && !relation.to_lowercase().contains(&filter) {
+            continue;
+        }
+        if !outgoing.insert(neighbor) {
             continue;
         }
         lines.push(format!(
@@ -2275,11 +2275,11 @@ fn tool_get_neighbors(
         let Some(neighbor) = context.graph.node_index(&edge.source) else {
             continue;
         };
-        if !incoming.insert(neighbor) {
-            continue;
-        }
         let relation = edge.string("relation");
         if !filter.is_empty() && !relation.to_lowercase().contains(&filter) {
+            continue;
+        }
+        if !incoming.insert(neighbor) {
             continue;
         }
         lines.push(format!(
@@ -2883,6 +2883,43 @@ fn read_bounded_resource(path: &Path) -> Result<String, InvocationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_neighbor_filter_precedes_neighbor_grouping() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        for reverse in [false, true] {
+            let path = temp.path().join(format!("graph-{reverse}.json"));
+            let mut links = vec![
+                json!({"source":"a","target":"b","relation":"contains"}),
+                json!({"source":"a","target":"b","relation":"calls"}),
+                json!({"source":"a","target":"b","relation":"calls"}),
+            ];
+            if reverse {
+                links.reverse();
+            }
+            fs::write(
+                &path,
+                serde_json::to_vec(&json!({
+                    "directed":true,"multigraph":true,
+                    "nodes":[{"id":"a","label":"Alpha"},{"id":"b","label":"Beta"}],
+                    "links":links
+                }))?,
+            )?;
+            let server = CompassMcp::new(&path);
+            for (id, expected) in [("a", "--> Beta [calls]"), ("b", "<-- Alpha [calls]")] {
+                let output = server.invoke(
+                    "get_neighbors",
+                    json!({"label":id,"relation_filter":"calls"})
+                        .as_object()
+                        .ok_or("args")?
+                        .clone(),
+                );
+                assert_eq!(output.matches(expected).count(), 1, "{output}");
+                assert!(!output.contains("[contains]"));
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn mcp_reports_stored_typed_communities() -> Result<(), Box<dyn std::error::Error>> {
