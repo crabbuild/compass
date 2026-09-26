@@ -111,6 +111,8 @@ of input record order. Source-located declarations named `Path`, `Counter`,
 alone. Explicit canonical node kinds take precedence over display-label
 heuristics throughout topology analysis: a `.method()` label does not turn a
 method into a file, and file nodes remain excluded even with descriptive labels.
+Typed structural nodes with nonempty source paths are not classified as concepts
+merely because their source filename has no extension.
 Legacy records without a recognized kind retain the existing label fallback.
 Isolated declarations are omitted. The serialized `id`, `label`, and
 `degree` fields and degree calculation are unchanged; the candidate list can

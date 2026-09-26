@@ -1804,7 +1804,12 @@ fn explicit_node_kind(node: &NodeRecord) -> Option<NodeKind> {
 
 fn is_concept_node(node: &NodeRecord) -> bool {
     let source = attribute(node, "source_file").unwrap_or_default();
-    source.is_empty() || !source.rsplit('/').next().unwrap_or_default().contains('.')
+    // Canonical structural records can come from extensionless scripts or
+    // configuration files. Retain the filename heuristic for legacy records
+    // without a recognized kind, and still exclude nodes lacking a source.
+    source.is_empty()
+        || (explicit_node_kind(node).is_none()
+            && !source.rsplit('/').next().unwrap_or_default().contains('.'))
 }
 fn is_json_key_node(node: &NodeRecord) -> bool {
     attribute(node, "source_file").is_some_and(|source| source.to_lowercase().ends_with(".json"))

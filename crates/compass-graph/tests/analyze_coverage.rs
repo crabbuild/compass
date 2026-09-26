@@ -103,6 +103,35 @@ fn god_nodes_use_explicit_kinds_instead_of_method_label_heuristics() {
 }
 
 #[test]
+fn god_nodes_preserve_typed_declarations_in_extensionless_sources() {
+    let graph = document(
+        vec![
+            json!({"id":"prepare", "kind":"function", "name":"prepare()",
+                "source":{"file":"bin/launch", "startLine":2}}),
+            json!({"id":"helper", "kind":"function", "name":"helper()",
+                "source":{"file":"src/support.sh", "startLine":1}}),
+            json!({"id":"external", "kind":"function", "name":"external()"}),
+            json!({"id":"concept", "label":"Idea", "source_file":"conversation"}),
+        ],
+        vec![
+            edge("prepare", "helper", "calls", "EXTRACTED"),
+            edge("prepare", "external", "calls", "EXTRACTED"),
+            edge("prepare", "concept", "references", "EXTRACTED"),
+        ],
+        true,
+    );
+    let ranked = god_nodes(&graph, 10);
+    assert_eq!(
+        ranked
+            .iter()
+            .map(|node| node.id.as_str())
+            .collect::<Vec<_>>(),
+        ["prepare", "helper"]
+    );
+    assert_eq!(ranked[0].degree, 3);
+}
+
+#[test]
 fn god_nodes_do_not_label_isolated_declarations_as_hubs() {
     let graph = document(
         vec![node("isolated", "Service", "src/service.rs")],

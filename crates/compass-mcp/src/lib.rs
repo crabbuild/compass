@@ -3242,6 +3242,32 @@ mod tests {
     }
 
     #[test]
+    fn god_nodes_tool_retains_extensionless_typed_source() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let temp = tempfile::tempdir()?;
+        let graph = temp.path().join("graph.json");
+        fs::write(
+            &graph,
+            serde_json::to_vec(&json!({
+                "directed": true,
+                "nodes": [
+                    {"id":"prepare", "kind":"function", "name":"prepare()",
+                        "source":{"file":"bin/launch", "startLine":2}},
+                    {"id":"helper", "kind":"function", "name":"helper()",
+                        "source":{"file":"src/support.sh", "startLine":1}}
+                ],
+                "links": [{"source":"prepare", "target":"helper", "relation":"calls"}]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&graph);
+        assert_eq!(
+            server.invoke("god_nodes", Map::new()),
+            "God nodes (most connected):\n  1. helper() - 1 edges\n  2. prepare() - 1 edges"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn every_local_tool_and_resource_handles_success_missing_and_filter_shapes()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;

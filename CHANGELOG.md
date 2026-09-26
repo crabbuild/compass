@@ -7,7 +7,8 @@
   without charging the traversal budget.
 
 - Respect explicit graph node kinds in topology analysis: method-shaped labels
-  remain callable candidates, and explicitly typed files stay out of hub lists.
+  and extensionless source files retain their structural candidates, and
+  explicitly typed files stay out of hub lists.
 
 - Make god-node ranking stable for equal-degree nodes, retain project
   declarations whose names overlap library names, and omit isolated nodes.

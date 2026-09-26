@@ -8,7 +8,7 @@ finding. A focused text-recall score cannot establish all of those properties.
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis | Declaration-aware candidates, stable rankings, source-reviewed false positives and negatives | Four hub defects fixed; two bounded-trail defects fixed; no reviewed god-object corpus yet |
+| Reliable hub analysis | Declaration-aware candidates, stable rankings, source-reviewed false positives and negatives | Five hub defects fixed; no reviewed god-object corpus yet |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Anchor scorer repaired; relationship accuracy not measured by that scorer |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Existing five-repository suites are development samples with text oracles |
 | Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Prior query changes exist; fresh paired evidence still needed |
@@ -38,6 +38,14 @@ labels into the hub list. The regression returned `[caller, file]` where the
 source-located candidates were `[method, caller, function]`. Recognized canonical
 kinds now take precedence; the label heuristic remains for legacy unknown kinds.
 The updated graph-analysis integration suite passes all eleven tests.
+
+A fifth defect excluded typed functions whose source filename has no extension.
+An MCP diagnostic using the release binary omitted `prepare()` in `bin/launch`,
+but included the identical node when its source was `bin/launch.sh`. A native
+regression reproduced the failure. Canonical structural kinds now take
+precedence over the concept filename heuristic when the source path is nonempty.
+Nodes without a source remain excluded, and unknown legacy kinds retain the
+existing fallback. The graph-analysis integration suite passes all twelve tests.
 
 Remaining limitation: legacy file/concept/JSON-noise eligibility still uses heuristics.
 Degree combines relationship kinds and counts directed endpoint pairs, not
@@ -113,7 +121,7 @@ available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c
 
 ## Verification ledger
 
-- Graph analysis integration suite: 11/11 passed after all four production fixes.
+- Graph analysis integration suite: 12/12 passed after all five hub fixes.
 - Benchmark Python unit suite: 38/38 passed, including ten path-auditor tests.
 - CLI query contract suite: 34/34 passed; product suite: 9/9 passed.
 - Query relevance qualification: 5/5 passed, including the 500 synthetic cases.
@@ -122,8 +130,9 @@ available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c
 - Rust formatting check: passed.
 - Product boundary script: passed; competitor tooling stays outside production.
 - Workspace native tests (`--workspace --lib --bins --locked`): 1,081 passed,
-  zero failed, two ignored after all production fixes, including both MCP
-  regressions.
+  zero failed, two ignored at the six-defect checkpoint, including both MCP
+  regressions. Workspace tests/Clippy are being rerun after the extensionless
+  source correction and its additional MCP regression.
 - Code-graph fixture qualification: initial native stages passed; the React
   oracle then failed because locked TypeScript dependencies were absent.
   After `npm ci --ignore-scripts`, the complete final gate passed (exit 0),
@@ -133,6 +142,12 @@ available Graphify source checkout is at `26b02b5e3430e4ab85dd7e72c7b98836d8e65c
 - Corrected v2 replay `v2-corrected-02`: complete, after all three evaluation
   corrections. It uses the debug binary and recorded source patch from before
   the explicit-kind hub and typed-trail fixes, with Graphify 0.9.67.
+- Release replay `v2-release-03`: complete at source commit `8a13928e`, including
+  the six original production fixes, before the extensionless-source correction.
+  Scores and paired token estimates match the corrected debug replay. Its
+  source-grounded path audit passes 5/5 per tool. All 92 previously recorded
+  Graphify source/data file hashes remain unchanged after the run; this does not
+  pin every transitive dependency.
 
 ## Findings from the first fresh replay
 
@@ -187,6 +202,11 @@ graph retains the interface declaration at line 72 instead.
 Graphify has the lower paired token estimate. These are bytes/4 estimates, not
 measured model tokens. No speed comparison is claimed: Compass used a debug
 binary, other native checks ran concurrently, and timings were single samples.
+The later release checkpoint reproduced every score and paired token median
+in the table. Its single-run paired median latency was 259.5 ms for Compass and
+216 ms for Graphify; this also does not establish a repeatable speed advantage.
+The release executable and build log were retained with a source-commit record
+and SHA-256, and both tool identities were unchanged across the replay.
 All 50 questions are an existing development suite. The six extra passes do
 not establish held-out precision, execution-path accuracy or overall superiority.
 The subsequent native trail defects demonstrate gaps this text suite misses.
@@ -222,10 +242,10 @@ source-reviewed corpus.
 
 ## Next evidence to collect
 
-1. Finish native checks and build the current branch executable on the workspace
-   volume. Record the binary digest, source revision and local patch state.
-2. Replay both tools in a fresh run under the corrected policy. Review missing
-   declaration anchors against pinned source before attributing extraction gaps.
+1. Finish the native rerun for the extensionless-source correction; keep the
+   production build and exact source provenance with each comparison checkpoint.
+2. Expand hub review beyond candidate eligibility to source-reviewed design
+   judgments, separating connectivity from responsibility/cohesion defects.
 3. Add independent edge/path judgments: ordered adjacent edges, relation kinds,
    traversal direction, source occurrences, ambiguity, unreachable nodes, and
    bound exhaustion. A negative or limit outcome must never count as a path.
