@@ -51,6 +51,19 @@ def question(**overrides) -> Question:
 
 
 class SuiteTests(unittest.TestCase):
+    def test_ask_suite_uses_identical_questions_and_budgets(self) -> None:
+        suite = load_suite(ROOT / "suite_ask.toml")
+        self.assertEqual({r.language for r in suite.repositories},
+                         {"Go", "Python", "Java", "TypeScript", "Rust"})
+        for repository in suite.repositories:
+            self.assertEqual({q.kind for q in repository.questions}, {"callers", "callees"})
+            self.assertEqual(len(repository.questions), 2)
+            for question in repository.questions:
+                self.assertEqual(question.compass, ("ask", question.subject, "--text-budget", "2000"))
+                self.assertEqual(question.graphify, ("query", question.subject, "--budget", "2000"))
+                self.assertEqual(question.max_follow_ups, 0)
+                self.assertIn("Same source fact", question.judgment)
+
     def test_fd_source_first_inputs_remain_distinct_and_pinned(self) -> None:
         suite = load_suite(ROOT / "suite_fd.toml")
         self.assertEqual(len(suite.repositories), 1)

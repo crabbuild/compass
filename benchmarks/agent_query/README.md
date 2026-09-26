@@ -4,13 +4,18 @@
 in its suites compared with Graphify on the same pinned checkouts. It is
 developer-side tooling: Compass never runs it, and it never installs Graphify.
 
-Three suites share the harness:
+[`COVERAGE_PLAN.md`](COVERAGE_PLAN.md) tracks the broader real-repository
+question/evidence matrix, including ask, communities, clusters, and god nodes.
+Those planned surfaces must not be described as already evaluated.
+
+Four suites share the harness:
 
 | Suite | Questions | Shape |
 | --- | ---: | --- |
 | `suite.toml` | 47 | The first five-repository suite, including Compass's compact and paged projections |
 | `suite_v2.toml` | 50 | A blackbox-fair extension: same questions for both tools, default output forms, no tool-specific projections |
 | `suite_fd.toml` | 12 | Separate pinned `sharkdp/fd` sample, recorded from source before either tool's first extraction/query run |
+| `suite_ask.toml` | 10 | Same natural-language caller/callee questions and 2,000-token budget for Compass `ask` and Graphify `query` across five languages |
 
 `suite_v2.toml` states its fairness contract inline and keeps it in the rows:
 both tools are blackboxes over the same pinned checkout, every oracle is read
@@ -27,6 +32,12 @@ matched node. `broad` rows use a 600-token page budget on both sides: below
 that, one tool's fixed metadata can consume the whole page. No v2 row repeats a
 question from the first suite; the audit compares repository, kind and addressed
 symbol across both files.
+
+`suite_ask.toml` reuses reviewed caller/callee facts from v2 to compare the
+natural-language interface. These are ten interface checks, not ten additional
+independent source judgments. Both sides receive identical question text and
+one 2,000-token response budget, with no continuations. The initial scorer checks
+selected-fact recall; extra statements still need source review for precision.
 
 The suite covers five real repositories in five languages:
 
