@@ -53,15 +53,41 @@ def audit(row, graph):
         for a,b in {(e['source'],e['target']) for e in graph['links']}:
             degree[a]+=1;degree[b]+=1
         hubs=[]
-        for rank,name,count in re.findall(r'^  (\d+)\. (.*) - (\d+) edges$',text,re.M):
+        displayed=re.findall(r'^  (\d+)\. (.*) - (\d+) edges$',text,re.M)
+        structured=row.get('response',{}).get('result',{}).get('structuredContent')
+        records=None
+        if structured is not None:
+            if structured.get('schema')!='compass.mcp.tool-result/1' or structured.get('result',{}).get('schema')!='compass.mcp.hubs/1':
+                raise ValueError('unsupported structured hub result')
+            records=structured['result']['nodes']
+            if not isinstance(records,list) or len(records)!=len(displayed):
+                raise ValueError('structured and displayed hub counts disagree')
+        used_ids=set()
+        for position,(rank,name,count) in enumerate(displayed):
             matches=names.get(name,[])
             entry={'rank':int(rank),'label':name,'degree':int(count),'identityCandidates':len(matches)}
+            if records is not None:
+                record=records[position]
+                identifier=record.get('id')
+                entry['explicitId']=identifier
+                valid=(isinstance(identifier,str) and identifier in nodes and identifier not in used_ids
+                       and label(nodes[identifier],tool)==record.get('label')
+                       and record.get('label')==name and record.get('degree')==int(count)
+                       and type(record.get('degree')) is int
+                       and type(record.get('rank')) is int and record.get('rank')==int(rank)==position+1)
+                matches=[nodes[identifier]] if valid else []
+                entry['identityCandidates']=len(matches)
+                if valid:used_ids.add(identifier)
             if len(matches)==1:
                 n=matches[0];file,line,_=_node_anchor(n,tool)
                 entry.update(id=n['id'],file=file,line=line,expectedDegree=degree[n['id']],degreeMatches=degree[n['id']]==int(count))
+                if records is not None:
+                    entry['sourceAnchorMatches']=(record.get('sourceFile')==file and record.get('startLine')==line)
             hubs.append(entry)
         result.update(hubs=hubs,returned=len(hubs),verifiedIdentities=sum(x['identityCandidates']==1 for x in hubs),
-                      matchingDegrees=sum(x.get('degreeMatches',False) for x in hubs))
+                      matchingDegrees=sum(x.get('degreeMatches',False) for x in hubs),
+                      explicitIdentities=sum('explicitId' in x and x['identityCandidates']==1 for x in hubs),
+                      matchingSourceAnchors=sum(x.get('sourceAnchorMatches',False) for x in hubs))
     elif kind == 'neighbors':
         seed=row['arguments']['label']
         actual=set(re.findall(r'^  (-->|<--) (.*?) \[([^\]]*)\] \[[^\]]*\]',text,re.M))

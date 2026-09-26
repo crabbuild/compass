@@ -39,6 +39,29 @@ class McpAuditTests(unittest.TestCase):
         r=audit(self.row('hubs','God nodes (most connected):\n  1. Alpha - 3 edges'),self.graph)
         self.assertEqual(r['matchingDegrees'],1)
 
+    def test_explicit_hub_identity_must_exist_and_match_source(self):
+        self.graph['nodes'][1]['name']='Alpha'
+        row=self.row('hubs','God nodes (most connected):\n  1. Alpha - 1 edges')
+        record={'id':'a','label':'Alpha','degree':1,'rank':1,'sourceFile':'a.rs','startLine':1}
+        row['response']={'result':{'structuredContent':{'schema':'compass.mcp.tool-result/1',
+            'result':{'schema':'compass.mcp.hubs/1','nodes':[record]}}}}
+        checked=audit(row,self.graph)
+        self.assertEqual(checked['explicitIdentities'],1)
+        self.assertEqual(checked['matchingSourceAnchors'],1)
+        record['sourceFile']='b.rs'
+        self.assertEqual(audit(row,self.graph)['matchingSourceAnchors'],0)
+        record['id']='missing'
+        self.assertEqual(audit(row,self.graph)['verifiedIdentities'],0)
+
+    def test_structured_hubs_cannot_hide_missing_or_duplicate_rows(self):
+        row=self.row('hubs','God nodes (most connected):\n  1. Alpha - 1 edges\n  2. Alpha - 1 edges')
+        nodes=[{'id':'a','label':'Alpha','degree':1,'rank':rank,'sourceFile':'a.rs','startLine':1} for rank in (1,2)]
+        row['response']={'result':{'structuredContent':{'schema':'compass.mcp.tool-result/1',
+            'result':{'schema':'compass.mcp.hubs/1','nodes':nodes}}}}
+        self.assertEqual(audit(row,self.graph)['verifiedIdentities'],1)
+        nodes.pop()
+        with self.assertRaises(ValueError):audit(row,self.graph)
+
     def test_silent_selection_is_not_ambiguity(self):
         r=audit(self.row('ambiguous-neighbors','Neighbors of ambiguous_name:\n  --> Alpha [calls] [EXTRACTED]'),self.graph)
         self.assertFalse(r['ambiguityPreserved'])

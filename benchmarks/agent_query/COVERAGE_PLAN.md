@@ -73,6 +73,26 @@ Do not compare one tool's model-assisted output with the other's native output.
 
 ## Scoring and acceptance
 
+### Hub navigation diagnostic
+
+The label-identity gap found in the first MCP run motivates a separate
+development diagnostic. Preserve that run and its label-only results. For
+each of the ten hubs returned on each of the five repositories, issue one
+`get_neighbors` follow-up using only the returned exact ID when available,
+otherwise its returned label. Do not read a graph to substitute an ID for
+either product. Both products get the same one-follow-up allowance and the
+existing full-enumeration bounds. Explicit ambiguity is safe but does not
+complete direct navigation. This diagnostic does not measure workflows with
+additional disambiguation steps or Graphify's separate CLI JSON hub workflow.
+
+The independent oracle may use the captured graph to verify exact identity,
+degree, source anchors, and the multiset of displayed direction/neighbor-label
+pairs after grouping by distinct neighbor. It must not resolve identity using
+the expected degree. Unfiltered neighbors may select one relation per neighbor;
+this diagnostic does not score complete parallel-relation or occurrence recall.
+Capture every response, failure, and output byte. Source-based design quality,
+complete top-N eligibility, and ranking correctness remain separate questions.
+
 - Publish category-level results and every failure, including competitor wins.
 - Keep source correctness, graph consistency, task availability, and output
   efficiency separate. No single combined score may hide a precision failure.
