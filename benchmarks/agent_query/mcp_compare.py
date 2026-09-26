@@ -23,6 +23,20 @@ def community(node, tool):
 
 
 def prepare_questions(graph, tool, witness):
+    if 'pathQuestions' in witness:
+        queries = []
+        for question in witness['pathQuestions']:
+            arguments = question['arguments'][tool]
+            if set(arguments) - {'source', 'target', 'max_hops', 'undirected'}:
+                raise ValueError('unexpected prepared path argument')
+            if not all(isinstance(arguments.get(key), str) and arguments[key] for key in ['source', 'target']):
+                raise ValueError('invalid prepared path endpoints')
+            if type(arguments.get('max_hops')) is not int or not 0 <= arguments['max_hops'] <= 64:
+                raise ValueError('invalid prepared hop bound')
+            if tool == 'graphify' and arguments.get('undirected') is not True:
+                raise ValueError('shared navigation tasks require explicit undirected Graphify search')
+            queries.append((question['id'], 'shortest_path', arguments))
+        return queries
     matches = [n for n in graph['nodes'] if _node_anchor(n, tool)[:2] == (witness['file'], witness['line'])
                and witness['symbol'] in _node_anchor(n, tool)[2]]
     if len(matches) != 1:
@@ -94,11 +108,17 @@ def execute(args):
         source = Path(repo['source'])
         _verify_source(pinned,source)
         check_source(source, {'file':witness['file'],'line':witness['line'],'text':witness['sourceText']})
+        if witness.get('commit', repo['commit']) != repo['commit']:
+            raise ValueError('prepared source commit differs')
+        for anchor in witness.get('anchors', []):
+            check_source(source, anchor)
         for tool in ['compass','graphify']:
             graph_path = Path(repo[tool+'Graph'])
             digest = _sha256_file(graph_path)
             if digest != repo[tool+'GraphSha256']:
                 raise ValueError('captured graph changed')
+            if witness.get('graphSha256', {}).get(tool, digest) != digest:
+                raise ValueError('prepared path graph differs')
             graph = json.loads(read_bounded(graph_path,MAX_GRAPH_BYTES))
             questions = prepare_questions(graph,tool,witness)
             argv = [str(args.compass),'serve'] if tool == 'compass' else [str(args.graphify_python),'-m','graphify.serve']
