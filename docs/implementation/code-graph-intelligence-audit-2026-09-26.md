@@ -3,17 +3,29 @@
 ## Status and acceptance criteria
 
 Broad superiority over Graphify is **unproven**. The objective covers hub
-analysis, code graph correctness, queries, explanations, and navigation/path
-finding. A focused text-recall score cannot establish all of those properties.
+analysis, code graph correctness, queries, explanations, navigation/path
+finding, clusters and communities. A focused text-recall score cannot establish all of those properties.
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis | Declaration-aware candidates, stable rankings, source-reviewed false positives and negatives | Five hub defects fixed; eight externally rated Java Blob classes now source-reviewed; classifier quality remains unproven |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Source-first fd pair/occurrence audit added; receiver-shadowing correction has native regressions; fd loop recall remains open |
-| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-repository development suites plus a separately selected source-first fd sample; neither establishes representative accuracy |
-| Better explanations | Correct target, source provenance, callers/callees and explicit uncertainty | Fresh paired fd answers expose a Compass callees miss and a Graphify wrong-owner edge hidden by the text oracle |
-| Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | Five registered real-source directed call chains yield 2/5 source-supported answers per tool; ambiguity, relationship restrictions and broader path quality remain open |
-| Fair efficiency comparison | Same successful questions, repeated timings, token methodology and complete environment provenance | Paired token aggregation exists; bytes/4 remains an estimate |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. Eight externally rated Java Blob classes are source-reviewed; original Compass ranking captures are unavailable under registered limits, and Graphify retrieves 0/4 positives. Larger-artifact follow-up is pending; classifier quality remains unproven. |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The compiler-backed jsoup census verifies 3,047/3,785 ordinary field occurrences for Compass versus 0 for Graphify; both miss all 529 enum-constant occurrences. This one-configuration result does not establish whole-graph or cross-language precision. |
+| Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. Previously inspected or tuned questions cannot confirm final-branch representative superiority. |
+| Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
+| Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
+| Useful clusters and communities | Reviewed functional responsibilities, membership and boundary correctness, useful cross-community navigation | Membership, co-location and partition-change diagnostics exist. They do not establish functional cohesion, responsibility boundaries or superior communities. |
+| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. Matched SQL timings are unoptimized development diagnostics; neither study establishes a general efficiency win. |
+| Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Existing panels informed later changes. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
+
+Current evidence summaries are in the
+[Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
+[Java field census](../../benchmarks/agent_query/java_real_field_review.json),
+[paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
+[shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json)
+and [SQL diagnosis](../../benchmarks/agent_query/sql_prefix_scan_review.json).
+The chronological sections below retain earlier checkpoints; their counts and
+claims apply to the stated binary, graph and protocol rather than the latest
+branch automatically.
 
 “God mode” is interpreted here as the existing `god_nodes` hub analysis.
 It orders connected candidates by degree; it does not measure responsibility,
