@@ -94,6 +94,27 @@ history profiles, and cache identities.
 
 ## Evolving contracts
 
+### MCP paths
+
+`shortest_path` resolves exact node IDs or normalized symbol/qualified names.
+It no longer substitutes a scored fuzzy endpoint. Ambiguous matches return at
+most 20 candidates, ordered by ID, with an omission count; callers choose an
+exact ID before requesting a path. Both endpoints resolving to the same node
+continues to produce a diagnostic rather than a positive path.
+
+Search remains undirected and minimum-hop. Among equal-hop routes it now uses
+the query engine's structural relation costs and deterministic path keys.
+`max_hops` is enforced during traversal, accepts 0–64, and defaults to 8.
+The same 1,000,000-adjacency-entry and 16 MiB cumulative path-key budgets as
+the CLI path engine apply. Exhaustion fails explicitly. A depth-limited miss
+does not assert global disconnection or the length of an unsearched route.
+
+Uniquely resolved, distinct endpoints add `compass.mcp.path/1` in the existing
+structured transport envelope. It distinguishes `found`, `depth_limit`, and
+`disconnected` and retains exact ordered node/edge identities. Resolution
+diagnostics retain their text form. Legacy text is still available, including
+through the non-transport `invoke` helper. Graph schemas are unchanged.
+
 ### MCP hub identities
 
 MCP `god_nodes` adds `structuredContent` using the existing

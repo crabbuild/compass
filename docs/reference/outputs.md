@@ -822,6 +822,32 @@ When exact automation is required, use:
 - diff JSON;
 - direct graph JSON.
 
+### MCP navigation paths
+
+After uniquely resolving two distinct endpoints, MCP `shortest_path` adds
+`structuredContent.result` with schema `compass.mcp.path/1` inside the existing
+`compass.mcp.tool-result/1` transport envelope. Common fields are `source` and
+`target` (exact IDs), `direction: "undirected"`, `maxHops`, and
+`ranking: "hops-then-structural-cost"`.
+
+- `status: "found"` adds `hops`, ordered `nodes`, and ordered `steps`.
+  Nodes carry `id`, `label`, `sourceFile`, `startLine`, and `sourceLocation`.
+  Each step retains traversal `from`/`to`, stored `source`/`target`, `edgeId`
+  (null for legacy edges without an ID), `relation`, `confidence`, and
+  `direction` (`forward` or `reverse`). An absent relation is displayed as
+  `related`, not invented as a call.
+- `status: "depth_limit"` means no path was found before the hop bound left
+  part of the search unexpanded. `visitedNodes` reports explored identities.
+- `status: "disconnected"` means the reachable component was exhausted without
+  reaching the target; it also includes `visitedNodes`.
+
+Unresolved, ambiguous, and same-node endpoint diagnostics retain their text
+form. No positive path is produced by guessing an endpoint. Work or transport
+exhaustion is an explicit error, not a disconnected result. Numeric source
+fields and source files can be null; absent textual source locations are empty.
+This tool explores undirected graph navigation across stored relation kinds;
+it does not establish directed call flow or execution feasibility.
+
 ### MCP hub results
 
 MCP `god_nodes` returns human-readable text and a structured projection in

@@ -5,7 +5,7 @@ mod transport;
 
 pub use transport::{HttpOptions, serve_http, serve_stdio, serve_stdio_configured};
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read as _, Write as _};
@@ -43,7 +43,8 @@ use compass_prs::{
     fetch_prs, fetch_worktrees, format_prs_text, parse_ci,
 };
 use compass_query::{
-    TraversalMode, find_node, pick_scored_endpoint, query_graph_text, sanitize_label, score_nodes,
+    HopPathResult, TraversalMode, find_exact_nodes, find_node, query_graph_text, sanitize_label,
+    shortest_hop_path,
 };
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ErrorData, Implementation,
@@ -370,7 +371,7 @@ impl CompassMcp {
         self.invoke_result(name, &mut arguments)
             .map(|result| {
                 // Keep this legacy text helper stable; MCP carries both projections.
-                if name == "god_nodes" {
+                if matches!(name, "god_nodes" | "shortest_path") {
                     return result.text;
                 }
                 result
@@ -587,6 +588,9 @@ impl CompassMcp {
         }
         if name == "god_nodes" {
             return invoke_hub_tool(arguments, &context);
+        }
+        if name == "shortest_path" {
+            return invoke_path_tool(arguments, &context);
         }
         Ok(ToolInvocation {
             text: invoke_tool(name, arguments, &context).map_err(InvocationError::InvalidParams)?,
@@ -1377,8 +1381,8 @@ fn tool_specs() -> Vec<Tool> {
         ),
         tool(
             "shortest_path",
-            "Find the shortest path between two concepts in the knowledge graph.",
-            json!({"type":"object","properties":{"source":{"type":"string","description":"Source concept label or keyword"},"target":{"type":"string","description":"Target concept label or keyword"},"max_hops":{"type":"integer","default":8,"description":"Maximum hops to consider"}},"required":["source","target"]}),
+            "Find a bounded minimum-hop undirected navigation path between exact node identities. Ambiguous names require disambiguation. Structured results retain node and edge identities; equal-hop routes prefer structural relations.",
+            json!({"type":"object","properties":{"source":{"type":"string","description":"Source exact node ID, symbol, or qualified name"},"target":{"type":"string","description":"Target exact node ID, symbol, or qualified name"},"max_hops":{"type":"integer","minimum":0,"maximum":64,"default":8,"description":"Maximum hops explored"}},"required":["source","target"]}),
         ),
         tool(
             "list_prs",
@@ -2428,159 +2432,173 @@ fn python_percent(count: usize, total: usize) -> usize {
     }
 }
 
+fn resolve_mcp_path_endpoint(graph: &Graph, query: &str, role: &str) -> Result<NodeIndex, String> {
+    let matches = find_exact_nodes(graph, query);
+    match matches.as_slice() {
+        [index] => Ok(*index),
+        [] => Err(format!(
+            "No node matching {role} '{}' found.",
+            sanitize_label(query)
+        )),
+        _ => {
+            let mut candidates = matches
+                .iter()
+                .map(|index| graph.node(*index))
+                .collect::<Vec<_>>();
+            candidates.sort_by(|left, right| left.id.cmp(&right.id));
+            let mut lines = vec![format!(
+                "Ambiguous {role}: {} matches {} nodes. Retry with an exact node ID.",
+                json!(query),
+                candidates.len()
+            )];
+            lines.extend(candidates.iter().take(20).map(|node| {
+                format!(
+                    "  {} [{}] id: {}",
+                    sanitize_label(node.label()),
+                    sanitize_label(&node.string("source_file")),
+                    json!(node.id)
+                )
+            }));
+            if candidates.len() > 20 {
+                lines.push(format!(
+                    "{} additional candidates omitted.",
+                    candidates.len() - 20
+                ));
+            }
+            Err(lines.join("\n"))
+        }
+    }
+}
+
 fn tool_shortest_path(
     arguments: &Map<String, Value>,
     context: &GraphContext,
 ) -> Result<String, String> {
+    invoke_path_tool(arguments, context)
+        .map(|result| result.text)
+        .map_err(|error| error.to_string())
+}
+
+fn invoke_path_tool(
+    arguments: &Map<String, Value>,
+    context: &GraphContext,
+) -> Result<ToolInvocation, InvocationError> {
     let source_query = string_argument(arguments, "source")?;
     let target_query = string_argument(arguments, "target")?;
-    let source_scores = score_nodes(
-        &context.graph,
-        &source_query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>(),
-        false,
-    );
-    let target_scores = score_nodes(
-        &context.graph,
-        &target_query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect::<Vec<_>>(),
-        false,
-    );
-    if source_scores.ranked.is_empty() {
-        return Ok(format!("No node matching source '{source_query}' found."));
-    }
-    if target_scores.ranked.is_empty() {
-        return Ok(format!("No node matching target '{target_query}' found."));
-    }
-    let source = pick_scored_endpoint(&context.graph, &source_scores.ranked, source_query);
-    let target = pick_scored_endpoint(&context.graph, &target_scores.ranked, target_query);
+    let max_hops = match arguments.get("max_hops") {
+        None => 8,
+        Some(value) => value
+            .as_u64()
+            .or_else(|| value.as_str()?.parse().ok())
+            .filter(|value| *value <= 64)
+            .ok_or_else(|| "max_hops must be between 0 and 64".to_owned())?,
+    };
+    let max_hops = usize::try_from(max_hops).map_err(|error| error.to_string())?;
+    // Select and project from one full snapshot: the compact traversal cache
+    // omits source lines and edge IDs, including parallel-edge identities.
+    let mut document = context.document()?;
+    document.directed = true;
+    let graph = Graph::from_traversal_document(document)
+        .map_err(|error| InvocationError::Internal(error.to_string()))?;
+    let source = match resolve_mcp_path_endpoint(&graph, source_query, "source") {
+        Ok(index) => index,
+        Err(text) => {
+            return Ok(ToolInvocation {
+                text,
+                structured_content: None,
+            });
+        }
+    };
+    let target = match resolve_mcp_path_endpoint(&graph, target_query, "target") {
+        Ok(index) => index,
+        Err(text) => {
+            return Ok(ToolInvocation {
+                text,
+                structured_content: None,
+            });
+        }
+    };
     if source == target {
-        return Ok(format!(
-            "'{source_query}' and '{target_query}' both resolved to the same node '{}'. Use a more specific label or the exact node ID.",
-            context.graph.node(source).id
-        ));
+        return Ok(ToolInvocation {
+            text: format!(
+                "'{}' and '{}' both resolved to the same node {}. Use a more specific label or the exact node ID.",
+                sanitize_label(source_query),
+                sanitize_label(target_query),
+                json!(graph.node(source).id)
+            ),
+            structured_content: None,
+        });
     }
-    let Some(path) = shortest_path(&context.graph, source, target) else {
-        return Ok(format!(
-            "No path found between '{}' and '{}'.",
-            context.graph.node(source).label(),
-            context.graph.node(target).label()
-        ));
-    };
-    let hops = path.len().saturating_sub(1);
-    let max_hops =
-        usize::try_from(integer_argument(arguments, "max_hops", 8).max(0)).unwrap_or_default();
-    if hops > max_hops {
-        return Ok(format!(
-            "Path exceeds max_hops={max_hops} ({hops} hops found)."
-        ));
-    }
-    let mut warnings = Vec::new();
-    ambiguity_warning("source", &source_scores.ranked, source, &mut warnings);
-    ambiguity_warning("target", &target_scores.ranked, target, &mut warnings);
-    let mut segments = vec![context.graph.node(path[0]).label().to_owned()];
-    for pair in path.windows(2) {
-        let left = pair[0];
-        let right = pair[1];
-        if let Some(edge_index) = context.graph.edge_between(left, right) {
-            let edge = context.graph.edge(edge_index);
-            let confidence = edge.string("confidence");
-            let suffix = if confidence.is_empty() {
-                String::new()
+    let mut result = json!({"schema":"compass.mcp.path/1", "direction":"undirected",
+        "ranking":"hops-then-structural-cost", "maxHops":max_hops,
+        "source":graph.node(source).id, "target":graph.node(target).id});
+    let text = match shortest_hop_path(&graph, source, target, max_hops)? {
+        HopPathResult::NoPath {
+            visited_nodes,
+            depth_limited,
+        } => {
+            result["status"] = json!(if depth_limited {
+                "depth_limit"
             } else {
-                format!(" [{confidence}]")
-            };
-            segments.push(format!(
-                "--{}{suffix}--> {}",
-                edge.string("relation"),
-                context.graph.node(right).label()
-            ));
-        } else if let Some(edge_index) = context.graph.edge_between(right, left) {
-            let edge = context.graph.edge(edge_index);
-            let confidence = edge.string("confidence");
-            let suffix = if confidence.is_empty() {
-                String::new()
+                "disconnected"
+            });
+            result["visitedNodes"] = json!(visited_nodes);
+            if depth_limited {
+                format!(
+                    "No path found within max_hops={max_hops}; search stopped at the hop bound."
+                )
             } else {
-                format!(" [{confidence}]")
-            };
-            segments.push(format!(
-                "<--{}{suffix}-- {}",
-                edge.string("relation"),
-                context.graph.node(right).label()
-            ));
-        }
-    }
-    let prefix = if warnings.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", warnings.join("\n"))
-    };
-    Ok(format!(
-        "{prefix}Shortest path ({hops} hops):\n  {}",
-        segments.join(" ")
-    ))
-}
-
-fn ambiguity_warning(
-    name: &str,
-    scores: &[compass_query::ScoredNode],
-    chosen: NodeIndex,
-    warnings: &mut Vec<String>,
-) {
-    if scores.len() < 2 || scores[0].node != chosen || scores[0].score <= 0.0 {
-        return;
-    }
-    let top = scores[0].score;
-    let runner = scores[1].score;
-    if (top - runner) / top < 0.10 {
-        warnings.push(format!(
-            "warning: {name} match was ambiguous (top score {}, runner-up {})",
-            format_score(top),
-            format_score(runner)
-        ));
-    }
-}
-
-fn format_score(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        format!("{value:.6}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_owned()
-    }
-}
-
-fn shortest_path(graph: &Graph, source: NodeIndex, target: NodeIndex) -> Option<Vec<NodeIndex>> {
-    let mut queue = VecDeque::from([source]);
-    let mut parent = HashMap::<NodeIndex, NodeIndex>::new();
-    parent.insert(source, source);
-    while let Some(node) = queue.pop_front() {
-        if node == target {
-            break;
-        }
-        for neighbor in graph.successors(node).chain(graph.predecessors(node)) {
-            if let std::collections::hash_map::Entry::Vacant(entry) = parent.entry(neighbor) {
-                entry.insert(node);
-                queue.push_back(neighbor);
+                format!(
+                    "No path found between '{}' and '{}'.",
+                    sanitize_label(graph.node(source).label()),
+                    sanitize_label(graph.node(target).label())
+                )
             }
         }
-    }
-    if !parent.contains_key(&target) {
-        return None;
-    }
-    let mut path = vec![target];
-    while path.last().copied() != Some(source) {
-        let next = parent.get(path.last()?).copied()?;
-        path.push(next);
-    }
-    path.reverse();
-    Some(path)
+        HopPathResult::Found { nodes, edges } => {
+            let hops = edges.len();
+            result["status"] = json!("found");
+            result["hops"] = json!(hops);
+            result["nodes"] = json!(nodes.iter().map(|index| {
+                let node = graph.node(*index);
+                json!({"id":node.id,"label":node.label(),"sourceFile":node.source_file(),
+                    "startLine":node.unsigned("line_start"),"sourceLocation":node.string("source_location")})
+            }).collect::<Vec<_>>());
+            let mut steps = Vec::with_capacity(edges.len());
+            let mut segments = vec![sanitize_label(graph.node(source).label())];
+            for (pair, edge_index) in nodes.windows(2).zip(edges) {
+                let edge = graph.edge(edge_index);
+                let forward = edge.source == graph.node(pair[0]).id;
+                let relation = edge.string("relation");
+                let relation = if relation.is_empty() {
+                    "related"
+                } else {
+                    &relation
+                };
+                let confidence = edge.string("confidence");
+                let suffix = if confidence.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", sanitize_label(&confidence))
+                };
+                let next = sanitize_label(graph.node(pair[1]).label());
+                segments.push(if forward {
+                    format!("--{}{suffix}--> {next}", sanitize_label(relation))
+                } else {
+                    format!("<--{}{suffix}-- {next}", sanitize_label(relation))
+                });
+                steps.push(json!({"from":graph.node(pair[0]).id,"to":graph.node(pair[1]).id,
+                    "source":edge.source,"target":edge.target,"edgeId":edge.attributes.get("id"),
+                    "relation":relation,"confidence":confidence,"direction":if forward {"forward"} else {"reverse"}}));
+            }
+            result["steps"] = json!(steps);
+            format!("Shortest path ({hops} hops):\n  {}", segments.join(" "))
+        }
+    };
+    Ok(ToolInvocation {
+        text,
+        structured_content: Some(transport_envelope(result)?),
+    })
 }
 
 fn tool_list_prs(arguments: &Map<String, Value>) -> Result<String, String> {
@@ -2933,6 +2951,89 @@ fn read_bounded_resource(path: &Path) -> Result<String, InvocationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_paths_require_unique_exact_endpoints() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("graph.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "directed":true,"multigraph":true,
+                "nodes":[
+                    {"id":"MiXeD","label":"run()","qualified_name":"First.run","source":{"file":"a.rs","startLine":9}},
+                    {"id":"b","label":"run()","qualified_name":"Second.run","source_file":"b.rs"},
+                    {"id":"target","label":"Finish","source_file":"target.rs"}
+                ],
+                "links":[
+                    {"id":"edge-b","source":"MiXeD","target":"target","relation":"calls"},
+                    {"id":"edge-a","source":"MiXeD","target":"target","relation":"calls"}
+                ]
+            }))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        for (source, target, role) in [("run", "target", "source"), ("target", "run", "target")] {
+            let text = server.invoke(
+                "shortest_path",
+                Map::from_iter([
+                    ("source".into(), json!(source)),
+                    ("target".into(), json!(target)),
+                ]),
+            );
+            assert!(text.contains(&format!("Ambiguous {role}")), "{text}");
+            assert!(text.contains("MiXeD") && text.contains("b.rs"), "{text}");
+            assert!(!text.contains("Shortest path"), "{text}");
+        }
+        for source in ["MiXeD", "First.run"] {
+            let text = server.invoke(
+                "shortest_path",
+                Map::from_iter([
+                    ("source".into(), json!(source)),
+                    ("target".into(), json!("target")),
+                ]),
+            );
+            assert!(text.contains("Shortest path (1 hops)"), "{text}");
+        }
+        let missing = server.invoke(
+            "shortest_path",
+            Map::from_iter([
+                ("source".into(), json!("ru")),
+                ("target".into(), json!("target")),
+            ]),
+        );
+        assert!(missing.contains("No node matching source"), "{missing}");
+        for (hops, status) in [(0, "depth_limit"), (1, "found")] {
+            let result = server
+                .invoke_result(
+                    "shortest_path",
+                    &mut Map::from_iter([
+                        ("source".into(), json!("MiXeD")),
+                        ("target".into(), json!("target")),
+                        ("max_hops".into(), json!(hops)),
+                    ]),
+                )
+                .map_err(|error| error.to_string())?;
+            let content = result.structured_content.ok_or("missing path identity")?;
+            assert_eq!(content["result"]["status"], status);
+            assert_eq!(content["result"]["source"], "MiXeD");
+            if hops == 1 {
+                assert_eq!(content["result"]["nodes"][0]["id"], "MiXeD");
+                assert_eq!(content["result"]["nodes"][0]["startLine"], 9);
+                assert_eq!(content["result"]["steps"][0]["target"], "target");
+                assert_eq!(content["result"]["steps"][0]["edgeId"], "edge-a");
+            }
+        }
+        let invalid = server.invoke_result(
+            "shortest_path",
+            &mut Map::from_iter([
+                ("source".into(), json!("MiXeD")),
+                ("target".into(), json!("target")),
+                ("max_hops".into(), json!(65)),
+            ]),
+        );
+        assert!(invalid.is_err());
+        Ok(())
+    }
 
     #[test]
     fn hub_results_preserve_exact_identity_and_source_anchors()
@@ -3569,7 +3670,7 @@ mod tests {
                 "shortest_path",
                 json!({"source":"Alpha","target":"Gamma","max_hops":0})
             )
-            .contains("exceeds max_hops")
+            .contains("within max_hops")
         );
         assert!(
             invoke("shortest_path", json!({"source":"Delta","target":"Alpha"}))
@@ -3642,8 +3743,6 @@ mod tests {
             expand_home(Path::new("plain/path")),
             PathBuf::from("plain/path")
         );
-        assert_eq!(format_score(2.0), "2");
-        assert_eq!(format_score(1.234_567_89), "1.234568");
         assert_eq!(python_percent(1, 3), 33);
         assert_eq!(python_percent(2, 3), 67);
         for (index, status) in [
@@ -3706,39 +3805,6 @@ mod tests {
             "Unknown tool: not-real"
         );
 
-        let a = context.graph.node_index("a").ok_or("node a")?;
-        let b = context.graph.node_index("b").ok_or("node b")?;
-        let c = context.graph.node_index("c").ok_or("node c")?;
-        assert_eq!(shortest_path(&context.graph, a, a), Some(vec![a]));
-        assert_eq!(shortest_path(&context.graph, c, a), Some(vec![c, b, a]));
-        let mut warnings = Vec::new();
-        ambiguity_warning(
-            "source",
-            &[
-                compass_query::ScoredNode {
-                    score: 10.0,
-                    node: a,
-                },
-                compass_query::ScoredNode {
-                    score: 9.5,
-                    node: b,
-                },
-            ],
-            a,
-            &mut warnings,
-        );
-        assert_eq!(warnings.len(), 1);
-        ambiguity_warning(
-            "source",
-            &[compass_query::ScoredNode {
-                score: 0.0,
-                node: a,
-            }],
-            a,
-            &mut warnings,
-        );
-        assert_eq!(warnings.len(), 1);
-
         let reverse = tool_shortest_path(
             json!({"source":"Tail","target":"Twin"})
                 .as_object()
@@ -3746,7 +3812,7 @@ mod tests {
             &context,
         )?;
         assert!(reverse.contains("<--uses"));
-        assert!(reverse.contains("<----"));
+        assert!(reverse.contains("<--related--"));
         assert!(expand_home(Path::new("~/compass-cache")).ends_with("compass-cache"));
 
         fs::write(&graph_path, "not json")?;

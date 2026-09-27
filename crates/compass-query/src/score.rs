@@ -498,8 +498,12 @@ pub fn find_node(graph: &Graph, label: &str) -> Vec<NodeIndex> {
     source_exact
 }
 
-pub(crate) fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
-    if let Some(index) = graph.node_index(label.trim()) {
+/// Resolve an exact ID or normalized symbol/qualified name without fuzzy fallback.
+pub fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
+    if let Some(index) = graph
+        .node_index(label)
+        .or_else(|| graph.node_index(label.trim()))
+    {
         return vec![index];
     }
     let term = search_tokens(label).join(" ");
@@ -718,6 +722,7 @@ mod tests {
             let matches = super::find_node(&graph, query);
             assert_eq!(matches.len(), 1);
             assert_eq!(graph.node(matches[0]).id, query);
+            assert_eq!(super::find_exact_nodes(&graph, query), matches);
         }
         let padded = super::find_node(&graph, " A ");
         assert_eq!(padded.len(), 1);

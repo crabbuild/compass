@@ -1,4 +1,4 @@
-"""Capture preregistered, public MCP operations on existing paired graphs.
+"""Capture prepared, public MCP operations on existing paired graphs.
 
 This collector does not synthesize tool answers. Input IDs/community IDs are
 prepared symmetrically from captured graphs; that preparation is not scored as
@@ -24,8 +24,15 @@ def community(node, tool):
 
 def prepare_questions(graph, tool, witness):
     if 'pathQuestions' in witness:
+        if not isinstance(witness['pathQuestions'], list) or not 1 <= len(witness['pathQuestions']) <= 32:
+            raise ValueError('prepared path questions must contain 1 to 32 entries')
         queries = []
+        identifiers = set()
         for question in witness['pathQuestions']:
+            identifier = question['id']
+            if not isinstance(identifier, str) or not identifier or identifier in identifiers:
+                raise ValueError('prepared question IDs must be nonempty and unique')
+            identifiers.add(identifier)
             arguments = question['arguments'][tool]
             if set(arguments) - {'source', 'target', 'max_hops', 'undirected'}:
                 raise ValueError('unexpected prepared path argument')
@@ -35,6 +42,8 @@ def prepare_questions(graph, tool, witness):
                 raise ValueError('invalid prepared hop bound')
             if tool == 'graphify' and arguments.get('undirected') is not True:
                 raise ValueError('shared navigation tasks require explicit undirected Graphify search')
+            if tool == 'compass' and 'undirected' in arguments:
+                raise ValueError('Compass path comparison must use its advertised implicit undirected mode')
             queries.append((question['id'], 'shortest_path', arguments))
         return queries
     matches = [n for n in graph['nodes'] if _node_anchor(n, tool)[:2] == (witness['file'], witness['line'])

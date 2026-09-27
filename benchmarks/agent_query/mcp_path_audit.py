@@ -64,6 +64,8 @@ def audit(row, graph, question):
               'expected': expected, 'matched': False, 'executionSucceeded': row['executionSucceeded']}
     if 'captureError' in row:
         result['failure'] = row['captureError']; return result
+    if not row['executionSucceeded']:
+        result['failure'] = 'RPC execution did not succeed'; return result
     positive = 'Shortest path (' in text
     if expected == 'unresolved':
         result['matched'] = not positive and 'No node matching source' in text and args['source'] in text
@@ -73,26 +75,57 @@ def audit(row, graph, question):
         result['selectedDespiteAmbiguity'] = positive
         return result
     source_id, target_id = question['expected'].get('endpointIds', {}).get(tool, [args['source'], args['target']])
+    structured = row.get('response', {}).get('result', {}).get('structuredContent')
+    payload = None
+    if structured is not None:
+        payload = structured.get('result', {})
+        if structured.get('schema') != 'compass.mcp.tool-result/1' or payload.get('schema') != 'compass.mcp.path/1':
+            raise ValueError('unsupported structured path response')
+        if (payload.get('source'), payload.get('target'), payload.get('maxHops')) != (source_id, target_id, args['max_hops']):
+            result['failure'] = 'structured request identity or bound differs'; return result
     distance = shortest_distance(graph, source_id, target_id)
     result['storedShortestHops'] = distance
     if expected == 'depth-limit':
         result['matched'] = distance is not None and distance > args['max_hops'] and not positive and 'max_hops' in text
+        if payload is not None and payload.get('status') != 'depth_limit':
+            result['matched'] = False
+            result['failure'] = 'structured status does not establish the required depth limit'
         return result
     if expected == 'disconnected':
         nodes = {n['id']: n for n in graph['nodes']}
         expected_text = f"No path found between '{label(nodes[source_id],tool)}' and '{label(nodes[target_id],tool)}'."
         result['matched'] = distance is None and text == expected_text
+        if payload is not None and payload.get('status') != 'disconnected':
+            result['matched'] = False
+            result['failure'] = 'structured status does not establish global disconnection'
         return result
     try:
         labels, steps = parse_path(text)
     except ValueError as error:
         result['failure'] = str(error); return result
-    names = {}
+    names = {}; by_id = {}
     for node in graph['nodes']:
         names.setdefault(label(node, tool), []).append(node)
-    if any(len(names.get(name, [])) != 1 for name in labels):
-        result['failure'] = 'path contains an unverified display identity'; return result
-    nodes = [names[name][0] for name in labels]
+        by_id[node['id']] = node
+    if payload is not None:
+        records = payload.get('nodes', [])
+        if payload.get('status') != 'found' or payload.get('hops') != len(steps) or len(records) != len(labels):
+            result['failure'] = 'structured path shape differs from text'; return result
+        nodes = []
+        for record, displayed in zip(records, labels):
+            node = by_id.get(record.get('id'))
+            if node is None or record.get('label') != label(node, tool):
+                result['failure'] = 'unknown or mislabeled structured node identity'; return result
+            if displayed != re.sub(r'[\x00-\x1f\x7f-\x9f]', '', label(node,tool))[:256]:
+                result['failure'] = 'display label differs from structured identity'; return result
+            if (record.get('sourceFile'), record.get('startLine')) != _node_anchor(node,tool)[:2]:
+                result['failure'] = 'structured source anchor differs from graph'; return result
+            nodes.append(node)
+        result['explicitIdentities'] = len(nodes)
+    else:
+        if any(len(names.get(name, [])) != 1 for name in labels):
+            result['failure'] = 'path contains an unverified display identity'; return result
+        nodes = [names[name][0] for name in labels]
     ids = [n['id'] for n in nodes]
     result['nodeIds'] = ids
     failures = []
@@ -100,17 +133,27 @@ def audit(row, graph, question):
         failures.append('wrong endpoint identity')
     if len(steps) != distance or len(steps) > args['max_hops']:
         failures.append('path is not minimum-hop within the requested bound')
-    for left, right, step in zip(ids, ids[1:], steps):
+    if payload is not None and len(payload.get('steps', [])) != len(steps):
+        result['failure'] = 'structured edge count differs'; return result
+    for position, (left, right, step) in enumerate(zip(ids, ids[1:], steps)):
         source, target = (left, right) if step['direction'] == 'forward' else (right, left)
-        relations = set()
+        relations = set(); edge_ids = set()
         for edge in graph['links']:
             a, b = edge['source'], edge['target']
             if tool == 'graphify':
                 a, b = edge.get('_src', a), edge.get('_tgt', b)
             if (a, b) == (source, target):
-                relations.add(edge.get('kind' if tool == 'compass' else 'relation', 'related'))
+                relations.add(edge.get('kind' if tool == 'compass' else 'relation') or 'related')
+                if (edge.get('kind' if tool == 'compass' else 'relation') or 'related') in step['relations']:
+                    edge_ids.add(edge.get('id'))
         if not set(step['relations']) <= relations:
             failures.append('printed relation/direction lacks a stored witness')
+        if payload is not None:
+            record = payload['steps'][position]
+            if ((record.get('from'),record.get('to'),record.get('source'),record.get('target'),record.get('direction'))
+                    != (left,right,source,target,step['direction']) or record.get('relation') not in step['relations']
+                    or record.get('edgeId') not in edge_ids):
+                failures.append('structured edge identity or direction differs from graph/text')
     result.update(matched=not failures, failures=failures, steps=steps)
     witness = question['expected'].get('sourceWitness')
     if witness:
@@ -136,7 +179,7 @@ def main(args):
         spec = next(r for r in inputs['repositories'] if r['name'] == key[0])
         question = next(q for q in spec['pathQuestions'] if q['id'] == row['question'])
         if row['arguments'] != question['arguments'][key[1]]:
-            raise ValueError('request arguments differ from preregistration')
+            raise ValueError('request arguments differ from captured inputs')
         checked = audit(row, graphs[key], question); results.append(checked)
         print(key, row['question'], checked['matched'], checked.get('failure', checked.get('failures', [])))
     report = {'scope': __doc__, 'runSha256': _sha256_file(args.run/'run.json'),

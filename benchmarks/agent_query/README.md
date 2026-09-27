@@ -268,3 +268,30 @@ Neighbor checks cover displayed direction/label/relation triples and report
 ambiguous labels separately. Hub checks recompute displayed degrees for
 uniquely identified labels; they do not prove complete ranking eligibility,
 source correctness, functional cohesion, or god-object design quality.
+
+### MCP path diagnostics
+
+Pass `--inputs benchmarks/agent_query/suite_mcp_paths.json` to the same collector
+for 28 questions per tool: forward/reverse minimum-hop routes, hop bounds,
+missing and ambiguous endpoints, and disconnected pairs. Use
+`python3 -m benchmarks.agent_query.mcp_path_audit --run /path/to/new-mcp-run
+--output /path/to/new-path-audit.json` to check actual ordered identities,
+relations, directions, and minimum hops against the stored graphs. Structured
+Compass results must also preserve node source anchors and edge identities.
+Reviewed source-route witnesses are reported separately from graph consistency.
+
+Run `suite_mcp_path_labels.json` as a separate input for the same positive
+endpoints and bounds using display labels (15 questions per tool). This arm
+was added after the ID diagnostic exposed Graphify endpoint substitution;
+Graphify's public tool describes label/keyword inputs. Report both arms,
+including competitor wins. Neither is held-out evaluation. All comparisons
+request undirected navigation explicitly for Graphify; these are not evidence
+of directed call-flow quality.
+
+The first ID diagnostic was captured before its planned registration commit
+because a preliminary test command failed. Its archived input incorrectly says
+preregistered; the development designation in the current manifest and audit
+report supersedes that claim. Preserve original artifacts. Disconnected pairs
+include source files/modules as well as declarations. A search that reaches
+its depth or work bound has not proved global disconnection and must remain an
+incomplete answer to that question.

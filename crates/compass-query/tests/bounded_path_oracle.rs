@@ -5,7 +5,9 @@ use std::error::Error;
 use compass_model::code_graph::{EdgeKind, GraphDocument, NodeKind};
 use compass_model::identity::edge_id;
 use compass_model::query_contract::{CodeQueryLimits, NodeTrailRequest};
-use compass_query::{open_with_document, render_shortest_path_with_limit};
+use compass_query::{
+    HopPathResult, open_with_document, render_shortest_path_with_limit, shortest_hop_path,
+};
 
 const PAIRS: [(usize, usize); 6] = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
 type Matrix = [[Option<u32>; 4]; 4];
@@ -33,8 +35,28 @@ fn oracle(matrix: &Matrix, max_depth: usize) -> Option<(u32, usize)> {
     visit(matrix, 0, max_depth, 1)
 }
 
+fn hop_oracle(matrix: &Matrix, max_depth: usize) -> Option<(usize, u32)> {
+    fn visit(matrix: &Matrix, node: usize, remaining: usize, visited: u8) -> Option<(usize, u32)> {
+        if node == 3 {
+            return Some((0, 0));
+        }
+        if remaining == 0 {
+            return None;
+        }
+        (0..4)
+            .filter(|next| visited & (1 << next) == 0)
+            .filter_map(|next| {
+                let edge = matrix[node][next]?;
+                let (hops, cost) = visit(matrix, next, remaining - 1, visited | (1 << next))?;
+                Some((hops + 1, cost + edge))
+            })
+            .min()
+    }
+    visit(matrix, 0, max_depth, 1)
+}
+
 #[test]
-fn both_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn Error>> {
+fn all_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
     let graph_path = directory.path().join("graph.json");
     support::write_graph(&graph_path)?;
@@ -103,6 +125,55 @@ fn both_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn 
         let engine = open_with_document(graph.clone(), &graph_path, None, cache.path())?;
         for depth in 1..=3 {
             let context = format!("graph={encoding}, depth={depth}");
+            let start = legacy.node_index("n:0").ok_or("start")?;
+            let end = legacy.node_index("n:3").ok_or("end")?;
+            match (
+                hop_oracle(&undirected, depth),
+                shortest_hop_path(&legacy, start, end, depth)?,
+            ) {
+                (Some((hops, cost)), HopPathResult::Found { nodes, edges }) => {
+                    assert_eq!(nodes.first(), Some(&start), "{context}");
+                    assert_eq!(nodes.last(), Some(&end), "{context}");
+                    assert_eq!(nodes.len(), hops + 1, "{context}");
+                    assert_eq!(edges.len(), hops, "{context}");
+                    let mut actual_cost = 0;
+                    for (pair, edge) in nodes.windows(2).zip(edges) {
+                        let edge = legacy.edge(edge);
+                        let weight = match edge.string("relation").as_str() {
+                            "calls" => 1,
+                            "references" => 4,
+                            _ => return Err("unknown path relation".into()),
+                        };
+                        let source = edge
+                            .source
+                            .strip_prefix("n:")
+                            .ok_or("edge source")?
+                            .parse::<usize>()?;
+                        let target = edge
+                            .target
+                            .strip_prefix("n:")
+                            .ok_or("edge target")?
+                            .parse::<usize>()?;
+                        assert_eq!(directed[source][target], Some(weight), "{context}");
+                        let endpoints = (&legacy.node(pair[0]).id, &legacy.node(pair[1]).id);
+                        assert!(
+                            endpoints == (&edge.source, &edge.target)
+                                || endpoints == (&edge.target, &edge.source),
+                            "{context}"
+                        );
+                        actual_cost += weight;
+                    }
+                    assert_eq!(actual_cost, cost, "{context}");
+                }
+                (None, HopPathResult::NoPath { depth_limited, .. }) => {
+                    if !depth_limited {
+                        assert!(hop_oracle(&undirected, 3).is_none(), "{context}");
+                    }
+                }
+                (expected, actual) => {
+                    return Err(format!("{context}: expected {expected:?}, got {actual:?}").into());
+                }
+            }
             let output = render_shortest_path_with_limit(&legacy, "n:0", "n:3", depth)?;
             if let Some((cost, hops)) = oracle(&undirected, depth) {
                 assert!(

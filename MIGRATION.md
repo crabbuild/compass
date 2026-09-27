@@ -7,6 +7,14 @@ layout remains visible and clearly owned.
 
 ## Query text and path resolution
 
+For MCP `shortest_path`, replace partial keywords with exact IDs or complete
+symbol/qualified names. Handle ambiguity candidates before retrying. Use
+`structuredContent.result` (`compass.mcp.path/1`) for ordered identities and
+statuses. `depth_limit` and work-limit errors are incomplete searches, not
+proof of disconnection. `max_hops` is limited to 0–64. Equal-hop routes may
+change because structural relation cost now breaks ties; the operation remains
+undirected navigation.
+
 MCP callers of `get_neighbors` must handle an `Ambiguous` candidate list and
 retry with a returned exact node ID. Earlier versions silently chose one match.
 Labeled community IDs are restored by automatic traversal-cache rebuilding;

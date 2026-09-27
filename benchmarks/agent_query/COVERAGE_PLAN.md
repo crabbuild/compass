@@ -73,6 +73,25 @@ Do not compare one tool's model-assisted output with the other's native output.
 
 ## Scoring and acceptance
 
+### MCP path diagnostics
+
+`suite_mcp_paths.json` covers prepared exact-ID navigation, reverse traversal,
+hop cutoffs, missing/ambiguous endpoints, and disconnected pairs. The initial
+capture occurred before its planned registration commit; its archived
+preregistration claim is superseded by the development designation in the
+audit report. `suite_mcp_path_labels.json` is a separate post-diagnostic arm
+using the same positive endpoints and bounds with each tool's display labels.
+Graphify's public path input description advertises labels/keywords, so the
+label arm is necessary context for the ID failures and must be reported.
+
+Both arms use undirected navigation with identical external bounds. Audit
+actual ordered identities, relations, direction, minimum distance, and source
+anchors; distinguish topology consistency from reviewed source-route evidence.
+Do not substitute expected IDs for ambiguous returned labels. A depth-limited
+miss remains incomplete for a global-disconnection question. These development
+arms do not complete directed call-flow, representative edge precision, path
+occurrence recall, or held-out confirmation requirements.
+
 ### Hub navigation diagnostic
 
 The label-identity gap found in the first MCP run motivates a separate

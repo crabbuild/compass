@@ -719,6 +719,159 @@ These diagnostics motivate role-aware explanations and independent edge
 review. They are not folded into the original graph-consistency scores, and
 do not establish that Compass already diagnoses god objects reliably.
 
+## MCP path identity, bounds, and source-route diagnostics
+
+The next development arm uses the same retained Cobra (Go), Flask (Python),
+Gson (Java), Zod (TypeScript), and Axum (Rust) graphs. There are 28 questions per
+tool: five forward paths, five reverse paths, five one-hop-too-small bounds,
+five nonexistent source IDs, four ambiguous source names, and four disconnected
+pairs. Exact IDs are prepared symmetrically from source anchors and are not
+scored as retrieval. Each side has the same external 60-second/16-MiB RPC and
+64-MiB session bounds. Graphify receives `undirected=true`; Compass's public
+MCP operation is undirected navigation. These results do not establish directed
+call-flow accuracy.
+
+Disconnected pairs are selected from common source-anchored nodes in different
+components in each graph. They include files/modules/configuration as well as
+function declarations. Preparation examined at most 2,048 common anchors;
+no Cobra pair was selected, which does not prove none exists. Positive source
+witnesses reuse development witnesses reviewed after earlier path outputs.
+
+**Registration correction:** inputs were written before the first requests,
+but a transient Python runner cleanup `PermissionError` prevented the intended
+pre-execution commit. The initial capture was launched before that command
+failure was noticed. Its retained manifest's preregistration claim is wrong;
+this report and the current input scope supersede it. This is a development
+diagnostic. The original log is `mcp-path-python-01.log`; the child process was
+subsequently absent and the full 81-test rerun passed. The runner was not changed
+for an unreproduced failure.
+
+### Baseline findings and the separate label arm
+
+All 56 requests execute in `mcp-path-paired-01`. The independent auditor checks
+transcript/input/graph hashes, actual path bodies, exact endpoint identity,
+minimum distance, each ordered edge's relation and direction, and source-route
+witnesses separately. It never resolves an ambiguous displayed intermediate
+node using the expected answer.
+
+| ID-input diagnostic | Baseline Compass | Graphify 0.9.67 |
+| --- | ---: | ---: |
+| Verifiable minimum-hop path | 8/10 | 0/10 |
+| Explicit hop-bound outcome | 5/5 | 3/5 |
+| Missing source stays unresolved | 5/5 | 0/5 |
+| Ambiguous source is not selected | 0/4 | 0/4 |
+| Correct global disconnection | 4/4 | 1/4 |
+
+Compass's two positive misses use a Zod intermediate label shared by several
+nodes; the text does not identify the selected node. This does not prove the
+route itself wrong. Graphify's exact-ID inputs frequently select other nodes:
+Cobra `.Find()` becomes `Command`, Axum `validate_path` becomes `routing()`,
+and some pairs resolve to the same node. Its missing-ID sentinel also resolves
+to fuzzy candidates. These are strict identity diagnostics, not a general
+claim about Graphify's advertised label/keyword interface.
+
+A separate label-input arm was committed before its requests, after the ID
+failures were observed. It uses the same positive source endpoints and bounds,
+with each tool's actual display labels: 15 questions per tool, all 30 executed.
+**Graphify wins this baseline comparison:** 10/10 verifiable paths versus
+Compass's 8/10; both give 5/5 explicit hop-limit outcomes. Graphify matches all
+five reviewed source routes; Compass verifies four of five, with Zod's identity
+unverified. This arm is development evidence, not held-out confirmation.
+Artifacts are `mcp-path-labels-01` and `mcp-path-labels-audit-01.json`.
+
+### Production corrections and the intermediate failure
+
+MCP path endpoints now require an exact ID or uniquely matching normalized
+symbol/qualified name. Ambiguity returns stable candidates and exact IDs;
+missing names remain unresolved. The public hop bound is validated from zero
+to 64. Search uses the query crate's shared bounded engine, minimizing hops,
+then structural relation cost, then a stable tie key. Its one-million-adjacency
+and 16-MiB cumulative path-key budgets fail explicitly. Reaching a depth
+frontier is distinguished from proving disconnection; conservative depth
+reports may remain incomplete even when the full stored graph is disconnected.
+
+The versioned `compass.mcp.path/1` structured result preserves ordered node IDs,
+source anchors, and selected edges with their stored and traversal directions.
+Legacy text remains available. Equal-hop routes can change under the structural
+tie rule, and callers relying on fuzzy endpoint selection must migrate; the
+compatibility reference and migration guide document both changes.
+
+The first corrected binary (`3fc64bc00f1f47e36fb2158c9dfbfb360cf81915c6b81f588c84f5f29b023ed1`)
+failed every positive structured-anchor check: compact traversal nodes omit
+numeric source lines, so projection emitted null. Both `*-02` captures and
+audits preserve this failure. Projection now reads the full stored node
+records, as hub projection does, and a native regression requires line 9 to
+survive actual structured invocation. The oracle was not relaxed.
+
+The intermediate ID run already refused all four ambiguous endpoints. It
+reported global disconnection for only two of four disconnected pairs; Gson
+and Axum reached the depth bound. Those two remain incomplete answers rather
+than being credited as proven disconnections.
+
+The next frozen binary (`78e2a3528ef864937b7160fb523826b621218e05e14ccad51faba6dc8caf1082`)
+restored all node source anchors, but `*-03` audits exposed null edge IDs:
+the compact cache omits these too. All positive results therefore still failed
+the structured-edge checks. The implementation now selects and renders paths
+from one full bounded document snapshot, retaining parallel-edge IDs during
+the search itself. It does not attach an arbitrary full-record edge after
+traversing a lossy projection. The native regression uses two parallel calls
+and requires the stable selected ID (`edge-a`), as well as the source line.
+This full-snapshot load can cost more than compact traversal; no timing or
+memory improvement is claimed.
+
+### Final path replay at this checkpoint
+
+The frozen executable in `mcp-path-identities-provenance` has SHA256
+`b16d7f755a81bf68110737a445701158ee541a4cc0f070b9e4e800cff693c988`.
+Its base commit, full source patch, and changed-file hashes are retained.
+`mcp-path-paired-04` completes all 56 RPCs and `mcp-path-labels-04` completes
+all 30. Corresponding `mcp-path-audit-04.json` and
+`mcp-path-labels-audit-04.json` validate raw transcripts and stored graph
+identities. The current auditor also rechecks both baseline captures in
+`mcp-path-baseline-current-audit.json` and
+`mcp-path-labels-baseline-current-audit.json`; all 86 original outcomes remain
+unchanged. Errors cannot pass from error text, and structured negative statuses
+must agree with the required outcome.
+
+| ID-input diagnostic | Baseline Compass | Corrected Compass | Graphify |
+| --- | ---: | ---: | ---: |
+| Verifiable minimum-hop path | 8/10 | 10/10 | 0/10 |
+| Explicit hop-bound outcome | 5/5 | 5/5 | 3/5 |
+| Missing source stays unresolved | 5/5 | 5/5 | 0/5 |
+| Ambiguous source is not selected | 0/4 | 4/4 | 0/4 |
+| Correct global disconnection | 4/4 | 2/4 | 1/4 |
+
+The corrected label arm **ties Graphify**: each returns 10/10 verifiable
+minimum-hop paths and 5/5 hop-bound outcomes. Each matches all five reviewed
+source routes. Compass also matches those five routes in the ID arm; Graphify
+matches none of the five with ID inputs. Failure to establish identity remains
+unverified source-route evidence, not evidence that every underlying edge is
+wrong. These short selected navigation routes do not establish representative
+path precision, source occurrence recall, execution feasibility, or broad
+superiority.
+
+Compass's two lost global-disconnection completions are explicit depth-limit
+outcomes for Gson and Axum at eight hops. The original implementation searched
+the whole component before applying the requested hop limit. The corrected
+one stops at the bound; neither this report nor the auditor credits those
+incomplete answers as disconnections. Retain that completion tradeoff alongside
+the identity and ambiguity improvements.
+
+Verification: 1,212 native tests pass, zero fail, two are ignored. This includes
+workspace library/binary tests, CLI query/product contracts, output agent-query
+contracts, MCP coverage, typed traversal, and the three-engine independent
+path oracle (729 four-node graphs × three depth bounds × three engines =
+6,561 queries). The small oracle covers hop/cost optimality and actual edge
+chains; it does not establish large-graph performance or source extraction
+accuracy. Workspace and changed integration-target Clippy pass with warnings
+denied. All 86 Python benchmark tests, formatting, diff checks, and the product
+boundary gate pass. Logs are `mcp-path-corrections-tests-04.log`,
+`mcp-path-corrections-clippy-04.log`, and `mcp-path-python-07.log`.
+The test build emits existing core `unused_mut` and macOS linker unwind
+warnings. Full extraction fixture qualification remains the earlier receiver
+checkpoint: this correction changes query/MCP behavior on retained graphs,
+not extraction. Concurrent debug replays are not timing evidence.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
@@ -728,9 +881,10 @@ do not establish that Compass already diagnoses god objects reliably.
    judgments, including containment-dominated modules and generic reference
    targets. Evaluate cluster responsibilities and cross-community connections
    separately from graph consistency.
-3. Add independent edge/path judgments: ordered adjacent edges, relation kinds,
-   traversal direction, source occurrences, ambiguity, unreachable nodes, and
-   bound exhaustion. A negative or limit outcome must never count as a path.
+3. Extend the development navigation-path judgments to directed call paths,
+   longer walks, parallel source occurrences, broader ambiguity/unreachable
+   cases, and real-repository work exhaustion. A negative or limit outcome
+   must never count as a path or proof of global disconnection.
 4. Use held-out repositories/questions and publish all failures, including
    competitor wins. Separate extraction gaps, resolution gaps, retrieval gaps,
    rendering gaps and oracle mistakes using actual source evidence.

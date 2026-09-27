@@ -61,7 +61,8 @@ pub use relevance::{
 };
 pub use score::{
     ProfiledQueryScores, QueryScores, ScoredNode, TEXT_RANKER_BM25_V1, TEXT_RANKER_FULL_SCAN_V1,
-    TextRankProfile, find_node, pick_scored_endpoint, score_nodes, score_nodes_with_profile,
+    TextRankProfile, find_exact_nodes, find_node, pick_scored_endpoint, score_nodes,
+    score_nodes_with_profile,
 };
 pub use telemetry::{
     ProfiledCodeQueryResponse, QUERY_EXECUTION_PROFILE_V1, QueryExecutionProfile,
@@ -74,10 +75,10 @@ pub use text_cursor::{
 };
 pub use traversal::{
     DEFAULT_PATH_DEPTH_LIMIT, DEFAULT_TEXT_TOKEN_BUDGET, ExplainedSource, ExplanationSourceError,
-    ProfiledTextPageOptions, TextPageOptions, TextPaginationError, TraversalMode,
+    HopPathResult, ProfiledTextPageOptions, TextPageOptions, TextPaginationError, TraversalMode,
     explanation_source, query_graph_text, query_graph_text_page,
     query_graph_text_page_with_profile, render_explanation, render_explanation_page,
-    render_shortest_path, render_shortest_path_with_limit,
+    render_shortest_path, render_shortest_path_with_limit, shortest_hop_path,
 };
 
 /// Return the canonical semantic-result digest for a typed code query.

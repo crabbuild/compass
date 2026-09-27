@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Require unique exact endpoints for MCP paths and return ambiguity candidates
+  instead of choosing by score. Explore within the requested hop bound using
+  shared work limits, prefer structural relations among equal-hop paths, and
+  include exact node/edge identities in structured responses.
+
 - Include exact node IDs and source locations in MCP hub results, with a
   versioned structured projection for follow-up navigation. Describe hubs as
   topology candidates rather than established design defects.

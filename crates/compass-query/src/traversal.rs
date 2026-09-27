@@ -536,6 +536,54 @@ enum PathRanking {
 struct GraphPathResult {
     path: Option<WeightedGraphPath>,
     visited_nodes: usize,
+    depth_limited: bool,
+}
+
+/// A bounded, undirected minimum-hop search over exact graph node identities.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HopPathResult {
+    Found {
+        nodes: Vec<NodeIndex>,
+        edges: Vec<EdgeIndex>,
+    },
+    NoPath {
+        visited_nodes: usize,
+        depth_limited: bool,
+    },
+}
+
+/// Minimize hops, then structural relation cost, then the existing stable path key.
+/// Uses the same adjacency and allocation budgets as the public weighted path query.
+pub fn shortest_hop_path(
+    graph: &Graph,
+    source: NodeIndex,
+    target: NodeIndex,
+    max_hops: usize,
+) -> Result<HopPathResult, String> {
+    if source >= graph.node_count() || target >= graph.node_count() {
+        return Err("path endpoint index is outside the selected graph".to_owned());
+    }
+    if max_hops > 64 {
+        return Err("max_hops must be between 0 and 64".to_owned());
+    }
+    let result = ranked_path_undirected(
+        graph,
+        source,
+        target,
+        max_hops,
+        PathRanking::Hops,
+        PathSearchBudget::default(),
+    )?;
+    Ok(match result.path {
+        Some(path) => HopPathResult::Found {
+            nodes: path.nodes,
+            edges: path.edges,
+        },
+        None => HopPathResult::NoPath {
+            visited_nodes: result.visited_nodes,
+            depth_limited: result.depth_limited,
+        },
+    })
 }
 
 struct WeightedGraphPath {
@@ -547,6 +595,7 @@ struct WeightedGraphPath {
 // Depth-aware search keeps multiple arrivals per node. Bound both the graph
 // work and the cumulative string allocation used for deterministic tie keys.
 // Exhaustion is an error, never evidence that the endpoints are disconnected.
+#[derive(Clone, Copy)]
 struct PathSearchBudget {
     adjacency_entries: usize,
     key_bytes: usize,
@@ -562,7 +611,7 @@ impl Default for PathSearchBudget {
 }
 
 fn path_work_limit() -> String {
-    "path search work limit exceeded; reduce --max-depth or use a smaller graph".to_owned()
+    "path search work limit exceeded; reduce the hop bound or use a smaller graph".to_owned()
 }
 
 fn ranked_path_undirected(
@@ -584,6 +633,7 @@ fn ranked_path_undirected(
     let mut predecessor = BTreeMap::<State, (State, EdgeIndex)>::new();
     let mut visited = BTreeSet::new();
     let mut target_state = None;
+    let mut depth_limited = false;
     while let Some(Reverse((primary, secondary, path_key, node))) = queue.pop() {
         let (weight, hops) = match ranking {
             PathRanking::Weighted => (primary, secondary),
@@ -606,6 +656,10 @@ fn ranked_path_undirected(
             break;
         }
         if usize::try_from(hops).unwrap_or(usize::MAX) >= max_depth {
+            // Conservative: an unexpanded boundary with incident edges cannot
+            // establish global disconnection, even if those edges form cycles.
+            depth_limited |= graph.outgoing_edges(node).next().is_some()
+                || graph.incoming_edges(node).next().is_some();
             continue;
         }
         for (neighbor, edge_index, edge_weight, edge_key) in
@@ -656,6 +710,7 @@ fn ranked_path_undirected(
         return Ok(GraphPathResult {
             path: None,
             visited_nodes: visited.len(),
+            depth_limited,
         });
     };
     let mut nodes = vec![target];
@@ -681,6 +736,7 @@ fn ranked_path_undirected(
             weight,
         }),
         visited_nodes: visited.len(),
+        depth_limited,
     })
 }
 
@@ -1614,6 +1670,68 @@ mod tests {
     use super::dfs;
 
     #[test]
+    fn hop_paths_preserve_bounds_identity_and_structural_ties()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for reverse in [false, true] {
+            let mut links = vec![
+                json!({"source":"s","target":"a","relation":"references"}),
+                json!({"source":"a","target":"t","relation":"references"}),
+                json!({"source":"s","target":"b","relation":"contains"}),
+                json!({"source":"b","target":"t","relation":"contains"}),
+            ];
+            if reverse {
+                links.reverse();
+            }
+            let graph = Graph::from_document(serde_json::from_value::<GraphDocument>(json!({
+                "directed":true,
+                "nodes":[{"id":"s"},{"id":"a","label":"Middle"},
+                    {"id":"b","label":"Middle"},{"id":"t"},{"id":"isolated"}],
+                "links":links
+            }))?)?;
+            let s = graph.node_index("s").ok_or("s")?;
+            let b = graph.node_index("b").ok_or("b")?;
+            let t = graph.node_index("t").ok_or("t")?;
+            let isolated = graph.node_index("isolated").ok_or("isolated")?;
+            let super::HopPathResult::Found { nodes, edges } =
+                super::shortest_hop_path(&graph, s, t, 2)?
+            else {
+                return Err("missing path".into());
+            };
+            assert_eq!(nodes, vec![s, b, t]);
+            assert_eq!(edges.len(), 2);
+            assert!(
+                edges
+                    .iter()
+                    .all(|edge| graph.edge(*edge).string("relation") == "contains")
+            );
+            assert_eq!(
+                super::shortest_hop_path(&graph, s, t, 0)?,
+                super::HopPathResult::NoPath {
+                    visited_nodes: 1,
+                    depth_limited: true
+                }
+            );
+            assert!(matches!(
+                super::shortest_hop_path(&graph, s, t, 1)?,
+                super::HopPathResult::NoPath {
+                    depth_limited: true,
+                    ..
+                }
+            ));
+            assert!(matches!(
+                super::shortest_hop_path(&graph, s, isolated, 8)?,
+                super::HopPathResult::NoPath {
+                    depth_limited: false,
+                    ..
+                }
+            ));
+            assert!(super::shortest_hop_path(&graph, s, t, 65).is_err());
+            assert!(super::shortest_hop_path(&graph, usize::MAX, t, 8).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
     fn path_work_exhaustion_is_an_error_not_a_disconnected_result()
     -> Result<(), Box<dyn std::error::Error>> {
         let graph = Graph::from_document(serde_json::from_value::<GraphDocument>(json!({
@@ -1633,18 +1751,13 @@ mod tests {
                 ..Default::default()
             },
         ] {
-            let error = super::ranked_path_undirected(
-                &graph,
-                seed,
-                target,
-                2,
-                super::PathRanking::Weighted,
-                budget,
-            )
-            .err()
-            .ok_or("expected work-limit error")?;
-            assert!(error.contains("path search work limit exceeded"));
-            assert!(!error.contains("NO PATH FOUND"));
+            for ranking in [super::PathRanking::Weighted, super::PathRanking::Hops] {
+                let error = super::ranked_path_undirected(&graph, seed, target, 2, ranking, budget)
+                    .err()
+                    .ok_or("expected work-limit error")?;
+                assert!(error.contains("path search work limit exceeded"));
+                assert!(!error.contains("NO PATH FOUND"));
+            }
         }
         Ok(())
     }

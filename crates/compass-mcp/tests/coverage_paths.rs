@@ -174,7 +174,7 @@ fn tool_contract_and_all_local_tools_cover_success_and_validation_paths()
                     ("max_hops", json!(0))
                 ])
             )
-            .contains("Path exceeds max_hops=0")
+            .contains("No path found within max_hops=0")
     );
     assert!(
         server
@@ -313,6 +313,16 @@ async fn in_memory_protocol_exercises_tool_and_resource_server_handlers()
     let structured = hubs.structured_content.ok_or("missing structured hubs")?;
     assert_eq!(structured["result"]["schema"], "compass.mcp.hubs/1");
     assert!(structured["result"]["nodes"].as_array().is_some());
+    let path = client
+        .call_tool(
+            CallToolRequestParams::new("shortest_path")
+                .with_arguments(args(&[("source", json!("a")), ("target", json!("b"))])),
+        )
+        .await?;
+    let path_result = path.structured_content.ok_or("missing structured path")?;
+    assert_eq!(path_result["result"]["schema"], "compass.mcp.path/1");
+    assert_eq!(path_result["result"]["nodes"][0]["id"], "a");
+    assert_eq!(path_result["result"]["steps"][0]["target"], "b");
     assert!(
         client
             .read_resource(ReadResourceRequestParams::new("compass://report"))
