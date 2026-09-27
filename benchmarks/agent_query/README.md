@@ -878,4 +878,19 @@ graph equality across the six runs of each of the four inputs. Both builds use
 the same release settings; every timing, peak RSS and host-load observation is
 retained. This development panel does not establish whole-product or Graphify
 performance superiority. `sql_regex_cache_whole_registration.json` separately
-registers the complete-source follow-up; its result is pending at this checkpoint.
+registers the complete-source follow-up. `sql_regex_cache_whole_review.json`
+records identical published partial-graph artifacts but a longer candidate observation;
+`sql_regex_cache_whole_repeat_registration.json` declares a separate repeated
+investigation. None of these replaces the original outcomes.
+
+## Release-server Blob follow-up
+
+`mlcq_release_followup_registration.json` retains the same eight classes,
+queries, cutoffs and limits, using a fresh admitted CloudStack candidate graph,
+the frozen Eclipse graph and one frozen release server. The producer/server
+provenance distinction and all partial-graph warnings remain explicit.
+`mlcq_release_followup_review.json` records 36 verified raw tool calls and
+byte-identical repeated verification. Both tools resolve all eight classes, but
+neither returns any of the four consensus-positive classes in its top 100.
+These ranking misses do not establish classifier decisions or population
+precision. Source-assisted neighbors remain a separate stored-graph diagnostic.

@@ -1420,3 +1420,24 @@ remain unchanged.
 See [`sql_regex_cache_review.json`](benchmarks/agent_query/sql_regex_cache_review.json)
 for every observation and matching-build provenance. Normal release performance
 qualification remains required; this four-file diagnosis cannot replace it.
+
+## Complete-source SQL-cache follow-up
+
+The same frozen release binaries completed the entire pinned CloudStack tree
+with identical 671,502,979-byte partial-graph artifacts. The pre-cache binary
+took 193.966 seconds; the cache candidate took 280.053 seconds. The candidate
+was slower in this single observation, and the cause is unproven. Do not
+promote the four-file result to a whole-repository speedup or explain the longer
+observation as host noise without further evidence.
+
+Both graphs exceed the original 256 MiB admission bound and fit the separately
+declared 1 GiB bound. Both report one omitted node and 45 omitted edges. The
+release baseline's success also prevents attributing recovery solely to the
+cache. Earlier debug-build timeouts and all artifact-admission failures remain
+unchanged.
+
+[`sql_regex_cache_whole_review.json`](benchmarks/agent_query/sql_regex_cache_whole_review.json)
+contains both observations and repeated provenance/artifact verification.
+[`sql_regex_cache_whole_repeat_registration.json`](benchmarks/agent_query/sql_regex_cache_whole_repeat_registration.json)
+registers a separate three-repetition alternating comparison with CPU time and
+peak RSS. Its result is pending; normal release qualification remains required.

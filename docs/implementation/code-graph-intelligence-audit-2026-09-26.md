@@ -8,18 +8,19 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
-| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. In the declared larger-artifact Blob follow-up, Compass retrieves neither of two admitted positive classes, with two positives still unavailable; Graphify retrieves 0/4. The original failures remain unchanged. Classifier quality remains unproven. |
+| Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. Exact source-assisted resolution succeeds for all eight per tool. Earlier failures remain unchanged; classifier quality is unproven. |
 | Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The compiler-backed jsoup census verifies 3,047/3,785 ordinary field occurrences for Compass versus 0 for Graphify; both miss all 529 enum-constant occurrences. This one-configuration result does not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. Previously inspected or tuned questions cannot confirm final-branch representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
 | Useful clusters and communities | Reviewed functional responsibilities, membership and boundary correctness, useful cross-community navigation | Membership, co-location and partition-change diagnostics exist. They do not establish functional cohesion, responsibility boundaries or superior communities. |
-| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The shared-path accounting and matched release SQL development timings do not establish a general efficiency win. |
+| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The largest of four SQL files improves in repeated release timings, but the first complete-source candidate observation is longer (280.053 s versus 193.966 s). A counterbalanced full-source repeat is registered. No general efficiency win is established. |
 | Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Existing panels informed later changes. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
 
 Current evidence summaries are in the
 [original Blob audit](../../benchmarks/agent_query/mlcq_god_audit_review.json),
 [larger-artifact follow-up](../../benchmarks/agent_query/mlcq_admission_followup_review.json),
+[release-server Blob follow-up](../../benchmarks/agent_query/mlcq_release_followup_review.json),
 [Java field census](../../benchmarks/agent_query/java_real_field_review.json),
 [paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
 [shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json),
@@ -3915,3 +3916,68 @@ does not itself validate source correctness or god-object classification.
 All observations, binary/source digests and repeated verification are recorded in
 [`sql_regex_cache_review.json`](../../benchmarks/agent_query/sql_regex_cache_review.json)
 under external run `sql-regex-cache-01`.
+
+
+## Complete-source release recovery and the remaining Blob ranking gap
+
+The registered whole-CloudStack follow-up completed with both frozen release
+binaries on the same clean revision and full native discovery scope. Both
+indexed 6,783 files and published 173,689 nodes, 502,158 edges and 2,153
+communities. Their 671,502,979-byte graph artifacts are byte-identical, SHA-256
+`b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69`.
+Both report **one omitted node and 45 omitted edges**, with zero quarantined
+identity collisions. Preservation of these partial artifacts is not proof of
+complete source coverage or relationship correctness.
+
+| Frozen release binary | Single wall-time observation | Original 256 MiB bound | Follow-up 1 GiB bound |
+| --- | ---: | --- | --- |
+| Before regex caching | 193.966 s | Exceeded | Admitted |
+| With regex caching | 280.053 s | Exceeded | Admitted |
+
+The candidate took longer in this observation. The cause is unproven. The
+four-file SQL improvement cannot establish a whole-repository improvement;
+the registered fixed-order single observations are not a speedup experiment.
+The baseline already completes in release mode, so recovery cannot be credited
+solely to regex caching. The earlier unoptimized timeouts and original
+artifact-limit failures remain unchanged. Registration
+`sql_regex_cache_whole_repeat_registration.json` freezes three alternating
+observations per binary, with CPU time, peak RSS, all failures and full artifact
+comparison retained. No approved performance baseline follows from this panel.
+
+The separately registered release-server audit then made the same native
+`god_nodes(top_n=100)` request and source-assisted diagnostic queries for the
+same eight externally reviewed classes. CloudStack uses the fresh candidate
+graph. Eclipse reuses its original frozen Compass graph, including its 62-edge
+omission warning; it is not a fresh candidate extraction. Both Compass graphs
+are queried using the same frozen release server. Graphify's original graphs
+and environment are unchanged, including its omission of all 119 CloudStack SQL
+files. This is development follow-up on known cases, not held-out confirmation.
+
+| Tool | Positive classes returned at 10 / 50 / 100 | None-rated classes returned at 10 / 50 / 100 | Exact source-assisted class resolution |
+| --- | --- | --- | --- |
+| Compass | 0/4 / 0/4 / 0/4 | 0/4 / 0/4 / 0/4 | 8/8 |
+| Graphify | 0/4 / 0/4 / 0/4 | 0/4 / 0/4 / 0/4 | 8/8 |
+
+All classes are now admitted for both tools, so the native positive-class
+ranking misses are no longer masked by Compass availability failures. Missing
+ranking rows are not negative classifier decisions. Four none-rated classes do
+not establish a false-positive rate for the many unlabeled returned hubs, and
+source-assisted resolution cannot replace the native ranking score.
+
+Verification covers 36 raw tool calls. All 200 Compass hub rows have explicit
+IDs, matching stored degrees and source anchors, and matching connectivity
+summaries/text. Graphify resolves 163 of its 200 displayed hub identities
+uniquely with matching stored degree; 37 ambiguous displayed labels remain
+unresolved. All eight Compass unfiltered neighbor projections match 266 full
+record appearances. All eight Graphify projections match 234 displayed triples;
+that format does not expose neighbor IDs. These are stored-graph consistency
+checks, not source-edge precision or authored explanation scores.
+
+Both the whole-run verification and the four-session query verification repeat
+byte-for-byte. The reports preserve graph warnings, unchanged prior outcomes,
+resource/build provenance and the slower full-source candidate observation in
+`sql_regex_cache_whole_review.json` and `mlcq_release_followup_review.json`.
+No production code changed after the validated cache commit in this checkpoint;
+the previous native gates and 238 benchmark tests remain the applicable checks.
+Actual god-object diagnosis, authored explanations, functional communities and
+independent final confirmation remain open. Version remains 0.3.30.
