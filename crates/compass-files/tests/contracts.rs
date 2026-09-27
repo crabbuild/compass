@@ -989,6 +989,11 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     // receiver. Those facts must not survive the semantics correction.
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v2/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v3/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v5/e1"))?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v5/e1/stale.msgpack"),
+        "stale Java spread parameter and array argument facts",
+    )?;
     fs::write(
         cache_root.join("compass-out/cache/ast/v3/e1/stale.msgpack"),
         "stale Go receiver facts",
@@ -1026,6 +1031,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(!cache_root.join("compass-out/cache/ast/v0.9.21").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v2").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v3").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v5").exists());
 
     let mut cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?;
     assert!(

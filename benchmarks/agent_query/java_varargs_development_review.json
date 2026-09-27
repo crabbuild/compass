@@ -1,0 +1,1018 @@
+{
+  "schema": "compass.java-varargs-development-review/1",
+  "scope": "Repeated five-language development comparison. Source-reviewed Java delta and compiler-checked reductions; not fresh held-out confirmation, representative precision, community quality, or general superiority.",
+  "runId": "java-varargs-panel-a-02",
+  "suiteDigest": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237",
+  "runnerDigest": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "tools": [
+    {
+      "binary": "java-varargs-resolution-02/compass",
+      "binarySha256": "9b958b7f35919ccc47042dc304ce58a6890af8a803b3214b148bae0595be083d",
+      "digestScope": "executable-file-only",
+      "name": "compass",
+      "version": "compass 0.3.30",
+      "binaryLocationScope": "external evaluation artifact root"
+    },
+    {
+      "binary": "graphify",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only",
+      "name": "graphify",
+      "version": "graphify 0.9.67",
+      "binaryLocationScope": "installed launcher; absolute location retained in external run manifest"
+    }
+  ],
+  "frozenManifestSha256": "7db16b8bd349284966ea8fb2f225e981dc76c867365929dc322e0ea28220abf8",
+  "productionSourceSha256": {
+    "crates/compass-files/src/cache.rs": "d1ec810e456af924c04e07adc01c29d25d73712ea70922550253c655bdd3bc89",
+    "crates/compass-languages/src/evidence/build.rs": "9427d1685e42b388bc4665e0bcfce54249441296f578e7a3d6a8e5261f355631",
+    "crates/compass-resolve/src/evidence/languages/java.rs": "ae08fc3c51a7cc90b1b233397faf9e1a493d68c884853eb0eb0fee06e3d91104",
+    "crates/compass-resolve/src/evidence/resolve/members.rs": "e612a3112f099158faa48a36cb28baf2e459db32fe5d368f6833d6e4bc0a4ba9"
+  },
+  "metrics": {
+    "compass": {
+      "text": {
+        "passed": 49,
+        "questions": 55
+      },
+      "sourcePaths": {
+        "passed": 8,
+        "total": 10
+      },
+      "selectedSourceRelationships": {
+        "passed": 17,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      }
+    },
+    "graphify": {
+      "text": {
+        "passed": 46,
+        "questions": 55
+      },
+      "sourcePaths": {
+        "passed": 8,
+        "total": 10
+      },
+      "selectedSourceRelationships": {
+        "passed": 20,
+        "allOccurrencesPassed": 17,
+        "total": 21
+      }
+    }
+  },
+  "repositories": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf",
+      "compassGraphByteIdenticalToPrevious": true,
+      "graphifyGraphByteIdenticalToPrevious": true
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234",
+      "compassGraphByteIdenticalToPrevious": true,
+      "graphifyGraphByteIdenticalToPrevious": true
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69",
+      "compassGraphByteIdenticalToPrevious": false,
+      "graphifyGraphByteIdenticalToPrevious": true
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b",
+      "compassGraphByteIdenticalToPrevious": true,
+      "graphifyGraphByteIdenticalToPrevious": true
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "compassBuildExit": 0,
+      "graphifyBuildExit": 0,
+      "compassGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd",
+      "compassGraphByteIdenticalToPrevious": true,
+      "graphifyGraphByteIdenticalToPrevious": true
+    }
+  ],
+  "diagnostic": {
+    "fixturePaths": [
+      "benchmarks/agent_query/fixtures/java_varargs/VarargsDemo.java",
+      "benchmarks/agent_query/fixtures/java_varargs/ExtendedVarargs.java"
+    ],
+    "sourceSha256": {
+      "ExtendedVarargs.java": "b8423c3c341d366b6f81b032d5021e4819fcb97cc887e612eaac29635e0804f4",
+      "VarargsDemo.java": "2581dc8bb5b39948aee5df49900307a321460bf380d56daccbc9b401e9c0cd63"
+    },
+    "compiler": "javac 17.0.8.1; javap descriptors and invoke instructions; classes not executed",
+    "javapSha256": "069cd6a68617f2d4eaf1c9427861f5373cbbb6a01560c350d32a83176d661546",
+    "before": {
+      "expectedOccurrences": 25,
+      "correctOccurrences": 6,
+      "wrongOccurrences": 5,
+      "missingOccurrences": 14
+    },
+    "after": {
+      "expectedOccurrences": 25,
+      "correctOccurrences": 24,
+      "wrongOccurrences": 0,
+      "missingOccurrences": 1
+    },
+    "remainingMiss": "ExtendedVarargs.unknown calls choose with a nested method-result expression. The compiler knows the String result; Compass retains an untyped argument and ambiguity. This is a recall miss, not an absence success.",
+    "beforeReviewSha256": "dc9c36a4218aa5eafdf537b6ac1de3424dee545d29b23dc8cc0fe29535be4d81",
+    "afterReviewSha256": "41471ea0635de694a92d0548358e6ac24939f63c4d8f9717ade02f3473365b27",
+    "oracleScope": "25 explicit calls to methods declared in the two fixture classes. External String.toString and compiler-inserted boxing/default-constructor instructions are outside this selected internal-call oracle."
+  },
+  "jsoupDelta": {
+    "beforeCounts": {
+      "nodes": 6116,
+      "edges": 21095
+    },
+    "afterCounts": {
+      "nodes": 6116,
+      "edges": 21110
+    },
+    "signatureCorrections": 43,
+    "addedByKind": {
+      "references": 6,
+      "calls": 9
+    },
+    "removedByKind": {},
+    "reviewedAddedRelationships": 15,
+    "addedCallsProduction": 5,
+    "addedCallsTests": 4,
+    "reviewScope": "All 43 changed signatures and all 15 added relationships reviewed against pinned jsoup source. This is the entire observed delta, not representative whole-graph precision. Five added calls are production source and four test source; all six added references are production source. No removed relationships.",
+    "reviewedArtifactSha256": "dc795537b527707a9a1f9ff36de9234831000d9aaf6d6a6b4b22b7f5336a2d8b",
+    "signatures": [
+      {
+        "file": "src/main/java/org/jsoup/parser/ParseError.java",
+        "line": 17,
+        "before": "<init>(CharacterReader,String)",
+        "after": "<init>(CharacterReader,String,Object...)",
+        "sourceSha256": "73a1dbe9caf2a439051b5dd77af383ae339d034d24ec673f9634d092d23aa6f0"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/ParseError.java",
+        "line": 29,
+        "before": "<init>(int,String)",
+        "after": "<init>(int,String,Object...)",
+        "sourceSha256": "73a1dbe9caf2a439051b5dd77af383ae339d034d24ec673f9634d092d23aa6f0"
+      },
+      {
+        "file": "src/main/java/org/jsoup/select/CombiningEvaluator.java",
+        "line": 90,
+        "before": "<init>()",
+        "after": "<init>(Evaluator...)",
+        "sourceSha256": "4d7d2aa47151f1be31769709738db73afafe65458871b817510925327c4fe1c8"
+      },
+      {
+        "file": "src/main/java/org/jsoup/select/CombiningEvaluator.java",
+        "line": 134,
+        "before": "<init>()",
+        "after": "<init>(Evaluator...)",
+        "sourceSha256": "4d7d2aa47151f1be31769709738db73afafe65458871b817510925327c4fe1c8"
+      },
+      {
+        "file": "src/main/java/org/jsoup/select/Elements.java",
+        "line": 45,
+        "before": "<init>()",
+        "after": "<init>(Element...)",
+        "sourceSha256": "b6ed7b3905a52d85658ba6e6b1347de84513b9c6b51e8c8f5879ee29865f2873"
+      },
+      {
+        "file": "src/main/java/org/jsoup/select/Nodes.java",
+        "line": 45,
+        "before": "<init>()",
+        "after": "<init>(T...)",
+        "sourceSha256": "d4c8c088df00bf04e5c9cd7e47bda7b644a52552bf11387870f882f07b0ac7f2"
+      },
+      {
+        "file": "src/main/java/org/jsoup/select/Selector.java",
+        "line": 293,
+        "before": "<init>(String)",
+        "after": "<init>(String,Object...)",
+        "sourceSha256": "5452b5f12561dedcb8b7dccfdf861c4159e1e4292fef6a2d0cb4f1636f8a84b9"
+      },
+      {
+        "file": "src/main/java/org/jsoup/select/Selector.java",
+        "line": 297,
+        "before": "<init>(Throwable,String)",
+        "after": "<init>(Throwable,String,Object...)",
+        "sourceSha256": "5452b5f12561dedcb8b7dccfdf861c4159e1e4292fef6a2d0cb4f1636f8a84b9"
+      },
+      {
+        "file": "src/main/java/org/jsoup/Connection.java",
+        "line": 288,
+        "before": "data()",
+        "after": "data(String...)",
+        "sourceSha256": "031151f474574f94a8c9176049a4d8a9f97b14c334cde9ffd1f5b05127acc062"
+      },
+      {
+        "file": "src/main/java/org/jsoup/examples/HtmlToPlainText.java",
+        "line": 33,
+        "before": "main()",
+        "after": "main(String...)",
+        "sourceSha256": "3f7e6718b8518240a8d538f60030edeab37648c0b7e70b6c620ee26a434bac7e"
+      },
+      {
+        "file": "src/main/java/org/jsoup/examples/ListLinks.java",
+        "line": 50,
+        "before": "print(String)",
+        "after": "print(String,Object...)",
+        "sourceSha256": "a4e4260d8e9671de4fa49d9a0016bec7170631efed2dc5422e4a7583a60cd86e"
+      },
+      {
+        "file": "src/main/java/org/jsoup/examples/Wikipedia.java",
+        "line": 27,
+        "before": "log(String)",
+        "after": "log(String,String...)",
+        "sourceSha256": "abf753f2d99f3b5bbd83e55d8af178ebc5a01749a544cb5a0ec1d4f8331a0aa1"
+      },
+      {
+        "file": "src/main/java/org/jsoup/helper/HttpConnection.java",
+        "line": 254,
+        "before": "data()",
+        "after": "data(String...)",
+        "sourceSha256": "9f439dc7f7aa03d18a1fbff716cfb562f9e2667b249a60dfc329f5232b3c1145"
+      },
+      {
+        "file": "src/main/java/org/jsoup/helper/Validate.java",
+        "line": 69,
+        "before": "expectNotNull(T,String)",
+        "after": "expectNotNull(T,String,Object...)",
+        "sourceSha256": "256262c372b996305f30d89e668cb5110d6b36b13afa551c8bfa3a5ee50c85e6"
+      },
+      {
+        "file": "src/main/java/org/jsoup/helper/Validate.java",
+        "line": 205,
+        "before": "fail(String)",
+        "after": "fail(String,Object...)",
+        "sourceSha256": "256262c372b996305f30d89e668cb5110d6b36b13afa551c8bfa3a5ee50c85e6"
+      },
+      {
+        "file": "src/test/java/org/jsoup/integration/Benchmark.java",
+        "line": 34,
+        "before": "print(String)",
+        "after": "print(String,Object...)",
+        "sourceSha256": "e928f9cfbd7e67be3bb4dcee16a4023aa9971edf20f970190a95608e904473ce"
+      },
+      {
+        "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+        "line": 264,
+        "before": "in(String)",
+        "after": "in(String,String...)",
+        "sourceSha256": "7e61ba7e8630f101f0a74d56fb91237c8588fceeb5c472166c60926dd6047881"
+      },
+      {
+        "file": "src/main/java/org/jsoup/nodes/Element.java",
+        "line": 901,
+        "before": "insertChildren(int)",
+        "after": "insertChildren(int,Node...)",
+        "sourceSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340"
+      },
+      {
+        "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+        "line": 1595,
+        "before": "assertClassList(String)",
+        "after": "assertClassList(String,String...)",
+        "sourceSha256": "f3d201c08a41ee429f5fe9fb72a12bbb6a620592d1276e66d876022fb5ef39bc"
+      },
+      {
+        "file": "src/test/java/org/jsoup/nodes/ElementTest.java",
+        "line": 1585,
+        "before": "assertClassNames(String)",
+        "after": "assertClassNames(String,String...)",
+        "sourceSha256": "f3d201c08a41ee429f5fe9fb72a12bbb6a620592d1276e66d876022fb5ef39bc"
+      },
+      {
+        "file": "src/main/java/org/jsoup/nodes/Node.java",
+        "line": 603,
+        "before": "addChildren()",
+        "after": "addChildren(Node...)",
+        "sourceSha256": "5a8e21930be1a65ae41055a09ba3400dd8a134ad3e693cea61f41cc4242d27ec"
+      },
+      {
+        "file": "src/main/java/org/jsoup/nodes/Node.java",
+        "line": 618,
+        "before": "addChildren(int)",
+        "after": "addChildren(int,Node...)",
+        "sourceSha256": "5a8e21930be1a65ae41055a09ba3400dd8a134ad3e693cea61f41cc4242d27ec"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/CharacterReader.java",
+        "line": 414,
+        "before": "consumeToAny()",
+        "after": "consumeToAny(char...)",
+        "sourceSha256": "f93452a6022d438df7ce17f00dabd9d32589815b30ee4f5e6d1bd1208e36274c"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/CharacterReader.java",
+        "line": 471,
+        "before": "consumeToAnySorted()",
+        "after": "consumeToAnySorted(char...)",
+        "sourceSha256": "f93452a6022d438df7ce17f00dabd9d32589815b30ee4f5e6d1bd1208e36274c"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/CharacterReader.java",
+        "line": 617,
+        "before": "matchesAny()",
+        "after": "matchesAny(char...)",
+        "sourceSha256": "f93452a6022d438df7ce17f00dabd9d32589815b30ee4f5e6d1bd1208e36274c"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/HtmlTreeBuilder.java",
+        "line": 765,
+        "before": "clearStackToContext()",
+        "after": "clearStackToContext(String...)",
+        "sourceSha256": "c7fff264056bc226eb6065efd407cbf990722c739afc00ebcde1ffef6ca7b72f"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/HtmlTreeBuilder.java",
+        "line": 743,
+        "before": "popStackToClose()",
+        "after": "popStackToClose(String...)",
+        "sourceSha256": "c7fff264056bc226eb6065efd407cbf990722c739afc00ebcde1ffef6ca7b72f"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/TokenQueue.java",
+        "line": 436,
+        "before": "consumeEscapedCssIdentifier()",
+        "after": "consumeEscapedCssIdentifier(char...)",
+        "sourceSha256": "7a23106abcfc95d71a6b774bdc10c02d33a98b25cbc429ade2d94db5d69e0fb1"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/TokenQueue.java",
+        "line": 135,
+        "before": "consumeToAny()",
+        "after": "consumeToAny(String...)",
+        "sourceSha256": "7a23106abcfc95d71a6b774bdc10c02d33a98b25cbc429ade2d94db5d69e0fb1"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/TokenQueue.java",
+        "line": 72,
+        "before": "matchesAny()",
+        "after": "matchesAny(char...)",
+        "sourceSha256": "7a23106abcfc95d71a6b774bdc10c02d33a98b25cbc429ade2d94db5d69e0fb1"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/TokenQueue.java",
+        "line": 454,
+        "before": "matchesCssIdentifier()",
+        "after": "matchesCssIdentifier(char...)",
+        "sourceSha256": "7a23106abcfc95d71a6b774bdc10c02d33a98b25cbc429ade2d94db5d69e0fb1"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/Tokeniser.java",
+        "line": 354,
+        "before": "characterReferenceError(String)",
+        "after": "characterReferenceError(String,Object...)",
+        "sourceSha256": "16250f9ef5cf94e3fc7100a8356e466ef1c4273d84c455d64ace82a29b35a09f"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/Tokeniser.java",
+        "line": 364,
+        "before": "error(String)",
+        "after": "error(String,Object...)",
+        "sourceSha256": "16250f9ef5cf94e3fc7100a8356e466ef1c4273d84c455d64ace82a29b35a09f"
+      },
+      {
+        "file": "src/main/java/org/jsoup/parser/TreeBuilder.java",
+        "line": 312,
+        "before": "error(String)",
+        "after": "error(String,Object...)",
+        "sourceSha256": "6f210b4b6e1f5e5d1f81655aa279103bf101e5b1f0ec17ee8fe7035894c10746"
+      },
+      {
+        "file": "src/main/java/org/jsoup/safety/Safelist.java",
+        "line": 303,
+        "before": "addAttributes(String)",
+        "after": "addAttributes(String,String...)",
+        "sourceSha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+      },
+      {
+        "file": "src/main/java/org/jsoup/safety/Safelist.java",
+        "line": 455,
+        "before": "addProtocols(String,String)",
+        "after": "addProtocols(String,String,String...)",
+        "sourceSha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+      },
+      {
+        "file": "src/main/java/org/jsoup/safety/Safelist.java",
+        "line": 254,
+        "before": "addTags()",
+        "after": "addTags(String...)",
+        "sourceSha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+      },
+      {
+        "file": "src/main/java/org/jsoup/safety/Safelist.java",
+        "line": 335,
+        "before": "removeAttributes(String)",
+        "after": "removeAttributes(String,String...)",
+        "sourceSha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+      },
+      {
+        "file": "src/main/java/org/jsoup/safety/Safelist.java",
+        "line": 485,
+        "before": "removeProtocols(String,String)",
+        "after": "removeProtocols(String,String,String...)",
+        "sourceSha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+      },
+      {
+        "file": "src/main/java/org/jsoup/safety/Safelist.java",
+        "line": 272,
+        "before": "removeTags()",
+        "after": "removeTags(String...)",
+        "sourceSha256": "0ff250830902fd2a7d7a2c6f5e3cd1eb851ef0c57123f71db6afaf5711990501"
+      },
+      {
+        "file": "src/test/java/org/jsoup/select/CssTest.java",
+        "line": 200,
+        "before": "check(Elements)",
+        "after": "check(Elements,String...)",
+        "sourceSha256": "89fa0627ec7586eb2489524544566da9e9dd6877a6d2490e14f2fa0791ca14f1"
+      },
+      {
+        "file": "src/test/java/org/jsoup/select/SelectorTest.java",
+        "line": 34,
+        "before": "assertSelectedIds(Elements)",
+        "after": "assertSelectedIds(Elements,String...)",
+        "sourceSha256": "0560f38b89cb82e8f7e12386d468b43bd069874941be5fa85ad3227363e18d66"
+      },
+      {
+        "file": "src/test/java/org/jsoup/select/SelectorTest.java",
+        "line": 42,
+        "before": "assertSelectedOwnText(Elements)",
+        "after": "assertSelectedOwnText(Elements,String...)",
+        "sourceSha256": "0560f38b89cb82e8f7e12386d468b43bd069874941be5fa85ad3227363e18d66"
+      }
+    ],
+    "relationships": [
+      {
+        "kind": "references",
+        "source": "org.jsoup.select.CombiningEvaluator::And::<init>",
+        "target": "org.jsoup.select.Evaluator",
+        "targetSignature": "public abstract class Evaluator",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/select/Evaluator.java",
+          "startByte": 1213,
+          "endByte": 29100,
+          "startLine": 31,
+          "startColumn": 0,
+          "endLine": 1045,
+          "endColumn": 1
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/select/CombiningEvaluator.java",
+          "startByte": 2572,
+          "endByte": 2581,
+          "startLine": 90,
+          "startColumn": 12,
+          "endLine": 90,
+          "endColumn": 21
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "Evaluator",
+          "sourceFileSha256": "4d7d2aa47151f1be31769709738db73afafe65458871b817510925327c4fe1c8",
+          "rationale": "The spread parameter directly names the target type; same-package ownership or explicit import establishes its qualified identity. This is a type reference, not a call."
+        }
+      },
+      {
+        "kind": "references",
+        "source": "org.jsoup.select.CombiningEvaluator::Or::<init>",
+        "target": "org.jsoup.select.Evaluator",
+        "targetSignature": "public abstract class Evaluator",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/select/Evaluator.java",
+          "startByte": 1213,
+          "endByte": 29100,
+          "startLine": 31,
+          "startColumn": 0,
+          "endLine": 1045,
+          "endColumn": 1
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/select/CombiningEvaluator.java",
+          "startByte": 3911,
+          "endByte": 3920,
+          "startLine": 134,
+          "startColumn": 11,
+          "endLine": 134,
+          "endColumn": 20
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "Evaluator",
+          "sourceFileSha256": "4d7d2aa47151f1be31769709738db73afafe65458871b817510925327c4fe1c8",
+          "rationale": "The spread parameter directly names the target type; same-package ownership or explicit import establishes its qualified identity. This is a type reference, not a call."
+        }
+      },
+      {
+        "kind": "references",
+        "source": "org.jsoup.select.Elements::<init>",
+        "target": "org.jsoup.nodes.Element",
+        "targetSignature": "public class Element extends Node implements Iterable<Element>",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "startByte": 1780,
+          "endByte": 84172,
+          "startLine": 50,
+          "startColumn": 0,
+          "endLine": 2211,
+          "endColumn": 1
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/select/Elements.java",
+          "startByte": 1367,
+          "endByte": 1374,
+          "startLine": 45,
+          "startColumn": 20,
+          "endLine": 45,
+          "endColumn": 27
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "Element",
+          "sourceFileSha256": "b6ed7b3905a52d85658ba6e6b1347de84513b9c6b51e8c8f5879ee29865f2873",
+          "rationale": "The spread parameter directly names the target type; same-package ownership or explicit import establishes its qualified identity. This is a type reference, not a call."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.helper.HttpConnectionTest::data",
+        "target": "org.jsoup.Connection::data",
+        "targetSignature": "data(String...)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/Connection.java",
+          "startByte": 12820,
+          "endByte": 12855,
+          "startLine": 288,
+          "startColumn": 4,
+          "endLine": 288,
+          "endColumn": 39
+        },
+        "site": {
+          "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+          "startByte": 10827,
+          "endByte": 10831,
+          "startLine": 273,
+          "startColumn": 12,
+          "endLine": 273,
+          "endColumn": 16
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "data",
+          "sourceFileSha256": "62d806a0f78b538163554bd09e4cd9cdd58f5a5dbfcaf1addf600dd73a357355",
+          "rationale": "Connection-typed receiver; four String literals exclude InputStream overload and select data(String...)."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.helper.HttpConnectionTest::throwsOnOddData",
+        "target": "org.jsoup.Connection::data",
+        "targetSignature": "data(String...)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/Connection.java",
+          "startByte": 12820,
+          "endByte": 12855,
+          "startLine": 288,
+          "startColumn": 4,
+          "endLine": 288,
+          "endColumn": 39
+        },
+        "site": {
+          "file": "src/test/java/org/jsoup/helper/HttpConnectionTest.java",
+          "startByte": 10664,
+          "endByte": 10668,
+          "startLine": 267,
+          "startColumn": 16,
+          "endLine": 267,
+          "endColumn": 20
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "data",
+          "sourceFileSha256": "62d806a0f78b538163554bd09e4cd9cdd58f5a5dbfcaf1addf600dd73a357355",
+          "rationale": "Connection-typed receiver; three String literals exclude InputStream overload and select data(String...)."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.helper.Validate::assertFail",
+        "target": "org.jsoup.helper.Validate::fail",
+        "targetSignature": "fail(String)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/helper/Validate.java",
+          "startByte": 6375,
+          "endByte": 6462,
+          "startLine": 184,
+          "startColumn": 4,
+          "endLine": 186,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/helper/Validate.java",
+          "startByte": 6733,
+          "endByte": 6737,
+          "startLine": 195,
+          "startColumn": 8,
+          "endLine": 195,
+          "endColumn": 12
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "fail",
+          "sourceFileSha256": "256262c372b996305f30d89e668cb5110d6b36b13afa551c8bfa3a5ee50c85e6",
+          "rationale": "One String argument selects fail(String) in the fixed-arity phase before fail(String,Object...)."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.helper.ValidateTest::expectNotNull",
+        "target": "org.jsoup.helper.Validate::expectNotNull",
+        "targetSignature": "expectNotNull(T)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/helper/Validate.java",
+          "startByte": 1710,
+          "endByte": 1888,
+          "startLine": 53,
+          "startColumn": 4,
+          "endLine": 57,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/test/java/org/jsoup/helper/ValidateTest.java",
+          "startByte": 1771,
+          "endByte": 1784,
+          "startLine": 63,
+          "startColumn": 31,
+          "endLine": 63,
+          "endColumn": 44
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "expectNotNull",
+          "sourceFileSha256": "34dc5c7d4be83ab69a3c8d40ab65c2b33cd83a82a9801bfe3f913ea12feaf7f2",
+          "rationale": "The other expectNotNull overload requires at least two arguments; the one-argument generic declaration is the unique arity-compatible source target."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.helper.ValidateTest::expectNotNull",
+        "target": "org.jsoup.helper.Validate::expectNotNull",
+        "targetSignature": "expectNotNull(T)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/helper/Validate.java",
+          "startByte": 1710,
+          "endByte": 1888,
+          "startLine": 53,
+          "startColumn": 4,
+          "endLine": 57,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/test/java/org/jsoup/helper/ValidateTest.java",
+          "startByte": 1921,
+          "endByte": 1934,
+          "startLine": 66,
+          "startColumn": 98,
+          "endLine": 66,
+          "endColumn": 111
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "expectNotNull",
+          "sourceFileSha256": "34dc5c7d4be83ab69a3c8d40ab65c2b33cd83a82a9801bfe3f913ea12feaf7f2",
+          "rationale": "Null is the sole argument; the other expectNotNull overload requires at least two arguments."
+        }
+      },
+      {
+        "kind": "references",
+        "source": "org.jsoup.nodes.Element::insertChildren",
+        "target": "org.jsoup.nodes.Node",
+        "targetSignature": "public abstract class Node implements Cloneable",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 743,
+          "endByte": 38461,
+          "startLine": 26,
+          "startColumn": 0,
+          "endLine": 1089,
+          "endColumn": 1
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "startByte": 35239,
+          "endByte": 35243,
+          "startLine": 901,
+          "startColumn": 45,
+          "endLine": 901,
+          "endColumn": 49
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "Node",
+          "sourceFileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340",
+          "rationale": "The spread parameter directly names the target type; same-package ownership or explicit import establishes its qualified identity. This is a type reference, not a call."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.nodes.Element::insertChildren",
+        "target": "org.jsoup.nodes.Node::addChildren",
+        "targetSignature": "addChildren(int,Node...)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 21739,
+          "endByte": 23462,
+          "startLine": 618,
+          "startColumn": 4,
+          "endLine": 658,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "startByte": 35561,
+          "endByte": 35572,
+          "startLine": 907,
+          "startColumn": 8,
+          "endLine": 907,
+          "endColumn": 19
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "addChildren",
+          "sourceFileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340",
+          "rationale": "Element extends Node; index is int and children is Node[] from the spread declaration, selecting addChildren(int,Node...)."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.nodes.Element::prependChild",
+        "target": "org.jsoup.nodes.Node::addChildren",
+        "targetSignature": "addChildren(int,Node...)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 21739,
+          "endByte": 23462,
+          "startLine": 618,
+          "startColumn": 4,
+          "endLine": 658,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/nodes/Element.java",
+          "startByte": 33396,
+          "endByte": 33407,
+          "startLine": 857,
+          "startColumn": 8,
+          "endLine": 857,
+          "endColumn": 19
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "addChildren",
+          "sourceFileSha256": "64113061dec074483ca4bcf51a528ca55e511f81da2192e44e626347cc9c6340",
+          "rationale": "Element extends Node; literal zero plus a Node parameter selects addChildren(int,Node...)."
+        }
+      },
+      {
+        "kind": "references",
+        "source": "org.jsoup.nodes.Node::addChildren",
+        "target": "org.jsoup.nodes.Node",
+        "targetSignature": "public abstract class Node implements Cloneable",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 743,
+          "endByte": 38461,
+          "startLine": 26,
+          "startColumn": 0,
+          "endLine": 1089,
+          "endColumn": 1
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 21262,
+          "endByte": 21266,
+          "startLine": 603,
+          "startColumn": 31,
+          "endLine": 603,
+          "endColumn": 35
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "Node",
+          "sourceFileSha256": "5a8e21930be1a65ae41055a09ba3400dd8a134ad3e693cea61f41cc4242d27ec",
+          "rationale": "The spread parameter directly names the target type; same-package ownership or explicit import establishes its qualified identity. This is a type reference, not a call."
+        }
+      },
+      {
+        "kind": "references",
+        "source": "org.jsoup.nodes.Node::addChildren",
+        "target": "org.jsoup.nodes.Node",
+        "targetSignature": "public abstract class Node implements Cloneable",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 743,
+          "endByte": 38461,
+          "startLine": 26,
+          "startColumn": 0,
+          "endLine": 1089,
+          "endColumn": 1
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/nodes/Node.java",
+          "startByte": 21777,
+          "endByte": 21781,
+          "startLine": 618,
+          "startColumn": 42,
+          "endLine": 618,
+          "endColumn": 46
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "Node",
+          "sourceFileSha256": "5a8e21930be1a65ae41055a09ba3400dd8a134ad3e693cea61f41cc4242d27ec",
+          "rationale": "The spread parameter directly names the target type; same-package ownership or explicit import establishes its qualified identity. This is a type reference, not a call."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.parser.HtmlTreeBuilder::popStackToClose",
+        "target": "org.jsoup.parser.HtmlTreeBuilder::isHtmlEl",
+        "targetSignature": "isHtmlEl(Element,String[])",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/parser/HtmlTreeBuilder.java",
+          "startByte": 12169,
+          "endByte": 12305,
+          "startLine": 296,
+          "startColumn": 4,
+          "endLine": 298,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/parser/HtmlTreeBuilder.java",
+          "startByte": 30598,
+          "endByte": 30606,
+          "startLine": 746,
+          "startColumn": 16,
+          "endLine": 746,
+          "endColumn": 24
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "isHtmlEl",
+          "sourceFileSha256": "c7fff264056bc226eb6065efd407cbf990722c739afc00ebcde1ffef6ca7b72f",
+          "rationale": "el is declared Element; elNames is String[] from the spread declaration, selecting isHtmlEl(Element,String[])."
+        }
+      },
+      {
+        "kind": "calls",
+        "source": "org.jsoup.parser.Tokeniser::emitTagPending",
+        "target": "org.jsoup.parser.Tokeniser::error",
+        "targetSignature": "error(String)",
+        "targetSource": {
+          "file": "src/main/java/org/jsoup/parser/Tokeniser.java",
+          "startByte": 15235,
+          "endByte": 15362,
+          "startLine": 359,
+          "startColumn": 4,
+          "endLine": 362,
+          "endColumn": 5
+        },
+        "site": {
+          "file": "src/main/java/org/jsoup/parser/Tokeniser.java",
+          "startByte": 12188,
+          "endByte": 12193,
+          "startLine": 268,
+          "startColumn": 16,
+          "endLine": 268,
+          "endColumn": 21
+        },
+        "review": {
+          "verdict": "source-supported",
+          "sourceSpan": "error",
+          "sourceFileSha256": "16250f9ef5cf94e3fc7100a8356e466ef1c4273d84c455d64ace82a29b35a09f",
+          "rationale": "A String literal selects error(String) before expanded error(String,Object...); TokeniserState is a distinct type."
+        }
+      }
+    ]
+  },
+  "cacheUpgrade": {
+    "scope": "Final candidate: copied AST-v5 output upgrade and warm AST-v6 reuse compared with a clean build",
+    "graphBytesEqual": false,
+    "structureExcludingCommunityEqual": true,
+    "communityMemberPartitionsEqual": true,
+    "communityLabelsEqual": true,
+    "changedNodeFields": [
+      "community.id"
+    ],
+    "cleanGraphSha256": "0e1536673b320e35783b469a957596ce9be04d1c51a40ffa3ec3958cf69a7969",
+    "upgradedGraphSha256": "548fbd9c1c2386936b1380fa21cdd175cca6f1fe81f2823fdfa3247779ae327a",
+    "upgradeSnapshots": {
+      "snapshot-1790487911654345000-94920-0": "548fbd9c1c2386936b1380fa21cdd175cca6f1fe81f2823fdfa3247779ae327a",
+      "snapshot-1790487912542778000-94917-0": "548fbd9c1c2386936b1380fa21cdd175cca6f1fe81f2823fdfa3247779ae327a"
+    },
+    "firstBuild": "Compass indexed 2 files (2 extracted, 0 cached): 50 nodes, 72 edges, 9 communities with clustering.",
+    "secondBuild": "Compass indexed 2 files (0 extracted, 2 cached): 50 nodes, 72 edges, 9 communities with clustering.",
+    "inspectionCorrection": "Initial candidate full byte-equality assertion failed; the final candidate confirms only community numeric IDs differ under previous-state remapping. No whole-graph clean/upgrade byte-equivalence claim."
+  },
+  "verification": {
+    "workspaceLibBins": {
+      "passed": 1092,
+      "failed": 0,
+      "ignored": 2
+    },
+    "contractsProductAndUniversalResolution": {
+      "passed": 250,
+      "failed": 0
+    },
+    "focusedFinal": {
+      "passed": 9,
+      "failed": 0,
+      "scope": "Final focused cases; the two original language cases were rerun with one added array-receiver case and counted once."
+    },
+    "harnessTests": {
+      "passed": 99,
+      "failed": 0
+    },
+    "clippyWorkspaceAndFocusedTests": "passed -D warnings",
+    "formatDiffAndProductBoundary": "passed",
+    "fullFixtureQualification": "running against final production sources",
+    "logsSha256": {
+      "java-varargs-diagnostic/native-before.log": "12e803e1b59043f0b96f32c90c6fa43604fff9eef11ad8fa2df11a52d48cfeb7",
+      "java-varargs-diagnostic/resolve-before.log": "5a1ca619ecb0675cef3e74616e159da654fa8c444b2ddc76d2a7414b0f0c85bc",
+      "java-varargs-diagnostic/producer-after-01.log": "f0f1a670a4330f65e1e75fee705972b05ce828ef710682840f6a854166aa614d",
+      "java-varargs-diagnostic/producer-only-resolve.log": "9a3a45166e24b7ef264875fc99ae49e18b3a126baf56c4f5f5b109e9e3d968ee",
+      "java-varargs-diagnostic/baseline-01.log": "2c1587620fcb3d378bd0c94bc0bf71c5b14ff9f10429d80d82f62ea80aeec761",
+      "java-varargs-diagnostic/contracts-01.log": "d70f9ffff231014739c5eeb5ea4b2c5a5cb0e9f6d3dbc84712cb8fd44d548f30",
+      "java-varargs-diagnostic/clippy-01.log": "adf1459c5cac778d6f7fd28395e465468c63f9e438d028ccbb600013437135b5",
+      "java-varargs-diagnostic/build-01.log": "d63af56313ebe58aef7f31611fe4fed72d54222db42bd84943bd3211ab438c5f",
+      "java-varargs-resolution/native-final.log": "bf1516ce088be591d99de141dab2046aec23e2fff636656d303fe2948651be00",
+      "java-varargs-resolution/clippy-tests.log": "b47a9884711b2e035b98cd955bee4af1e70ba7dd46890a993d299dbadc42eb9b",
+      "java-varargs-diagnostic/harness-tests-02.log": "8fedd09e36ee392c613b4ccfd37584791bc391e9fc4c2ff42816a7cbdd348817",
+      "java-varargs-resolution-02/native-01.log": "44b07e649c453850e1d78dddd17057855bdf028b06b7335dc905cebdbd7d649e",
+      "java-varargs-resolution-02/baseline-01.log": "ee6dc64908c834664e2e68bf9b553cd755b1a8e6dbe048b5ac393fb31e9cba7f",
+      "java-varargs-resolution-02/contracts-01.log": "34bd55d1c3416441534f72ce92506738bf2f190d3bc192b4e7c836ed78105653",
+      "java-varargs-resolution-02/clippy-01.log": "6295551a2ff153dac1a505ad7f0aa8ed54356d6009dbd4aea999ee310e08aaee",
+      "java-varargs-resolution-02/clippy-tests.log": "fac2c1f1a82ac72753325b2f827dc4175737176ce2e24891453446a5c3e5aba5",
+      "java-varargs-resolution-02/build-01.log": "417587ddafc7f98dcabb9a1e2a27c82e820f932ffa72d1bc535b88b7ad1fc735",
+      "java-varargs-resolution-02/array-receiver-native.log": "5bfc3defd7d1840c09033831db91e5acd305ab0f400c31be7ee5d407a3da2a39",
+      "java-varargs-resolution-02/array-receiver-clippy.log": "44af7ac5bc4dcde7a22e573735545e22d984787c7ac702a061db4bd5f2142562"
+    },
+    "additionalArrayReceiverRegression": {
+      "status": "passed; spread, ordinary-array, and trailing-dimension parameters retain unresolved clone occurrences without an invented element/array type receiver",
+      "sourceSha256": "fc0ad39c4b606aeefc507d2c06a5d44cbfb4510e100c41bb93b9c5536686a71c",
+      "nativeLogSha256": "5bfc3defd7d1840c09033831db91e5acd305ab0f400c31be7ee5d407a3da2a39",
+      "clippyLogSha256": "44af7ac5bc4dcde7a22e573735545e22d984787c7ac702a061db4bd5f2142562",
+      "productionSourcesChanged": false
+    },
+    "missingParameterTypesRegression": {
+      "before": "failed: an absent optional vector incorrectly selected a zero-argument overload",
+      "after": "passed: the exact-match shortcut now requires a complete parameter vector",
+      "beforeLogSha256": "9e9951ef1a3909d7a5b32f2eee93ad45f2be081f395584fe675870033d04d1fe",
+      "afterLogSha256": "44b07e649c453850e1d78dddd17057855bdf028b06b7335dc905cebdbd7d649e"
+    },
+    "supersededFirstQualification": {
+      "exitCode": 0,
+      "logSha256": "92cc06186a8584921cb7faddc60d8abd060c8a4be2bd731ad6c7d20b7dc9a4a7",
+      "releaseBinarySha256": "6d6c0a4caddf791ecd669367535f153929e8e95ef2f571cacdc5fdbeff20fe5f",
+      "scope": "Superseded run: started before the late zero-argument missing-types guard and ended after that edit. Retained as diagnostic history; not final-source qualification evidence."
+    }
+  },
+  "limitations": [
+    "Comparison scores are unchanged by this fix. The original reused questions remain unchanged, including failures.",
+    "Corrected Click occurrence witness remains a post-output diagnostic; original oracle is retained.",
+    "No fresh directed-path or MCP comparison, representative edge precision, responsibility/community quality, or god-object diagnosis established.",
+    "Unequal varargs prefixes, untyped arguments, incomplete hierarchy, and compiler-level generic inference remain conservative limitations.",
+    "Initial benchmark unittest discovery command ran zero tests; corrected tests directory ran 99 successfully.",
+    "Initial whole-graph cache equality assertion failed; structural records and community membership are equal but preserved community numeric IDs differ.",
+    "No latency claim; concurrent builds and executions share the machine."
+  ],
+  "artifactRoot": "java-varargs-resolution-02",
+  "specification": [
+    "https://docs.oracle.com/javase/specs/jls/se17/html/jls-8.html#jls-8.4.1",
+    "https://docs.oracle.com/javase/specs/jls/se17/html/jls-15.html#jls-15.12.2"
+  ],
+  "intermediateRunId": "java-varargs-panel-a-01",
+  "finalGraphsByteIdenticalToIntermediate": true
+}

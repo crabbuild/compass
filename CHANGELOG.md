@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve Java varargs signatures, parameter array types, and explicit array
+  argument dimensions. Resolve supported overloads in strict, loose, then
+  variable-arity order, retaining ambiguity when evidence cannot select a
+  unique target. Rebuild graphs to refresh older AST caches.
+
 - Correct natural discovery help to report the 10,000 examined-relationship
   default independently of the 128 returned-edge default. Runtime limits are
   unchanged.

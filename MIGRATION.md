@@ -7,6 +7,12 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Rebuild Java graphs to receive corrected varargs signatures, array argument
+types, and overload targets. Spread parameters now retain their declared array
+type; calls may gain targets or select a different, source-supported overload.
+Normal builds discard AST cache versions older than 6. Existing historical
+graphs and the graph schema remain unchanged.
+
 Name-based queries can now resolve a coincident export binding to its proven
 declaration. Use the exact export node ID when you want the binding record.
 This query correction works on existing graphs. Older traversal caches rebuild

@@ -1742,10 +1742,82 @@ are missing. This reduction emits no wrong target for those three calls.
 The [diagnostic review](../../benchmarks/agent_query/java_varargs_diagnostic_review.json)
 retains exact identities, source and graph hashes, compiler evidence, and the
 unfixed failures. Initial inspection looked for a top-level signature; corrected
-inspection reads `details.data.signature`. Code inspection suggests the producer
-assumes every spread parameter has a named `type` field; AST inspection and a
-failed-before native regression are still required. This is a post-jsoup-output
-development reduction, not a new comparative result or a completed repair.
+inspection reads `details.data.signature`. At that checkpoint, code inspection
+suggested the producer assumed every spread parameter had a named `type` field;
+AST inspection and a failed-before native regression were still required. This
+was a post-jsoup-output development reduction. The correction below preserves
+that original failure record.
+
+## Java varargs correction and repeated development comparison
+
+The native failed-before regressions confirmed the earlier diagnostic: the
+pinned Java grammar represents a spread type as an unnamed child and its name
+inside a variable declarator. The producer now preserves that type, its array
+rank, the spread signature, and parameter references. Explicit array creation
+arguments retain their dimensions. The resolver checks strict fixed-arity,
+loose fixed-arity, then variable-arity applicability and requires sufficient
+evidence for a unique overload. Receiver parameters do not add call arguments;
+array parameters do not borrow their element class as a method receiver.
+AST cache semantics advance from 5 to 6; the product remains 0.3.30.
+
+The original five-call reduction now resolves all five calls. A larger,
+compiler-checked reduction exposes both missing and wrong targets:
+
+| Selected source occurrences | Before | After |
+| --- | ---: | ---: |
+| Correct target | 6/25 | 24/25 |
+| Wrong target | 5/25 | 0/25 |
+| Missing | 14/25 | 1/25 |
+
+Four wrong targets treated array arguments as scalar strings; another selected
+boxing before primitive widening. `javac`/`javap` confirm the expected targets;
+the classes were not executed. The remaining missing call passes a method
+result with no proven type in Compass. Its preserved ambiguity is a known
+recall gap, not a negative success. These deliberately constructed development
+cases do not estimate population precision.
+
+The fresh paired five-language run `java-varargs-panel-a-02` completed all 110
+requests with the original questions and witnesses. Text checks remain
+**49/55 Compass, 46/55 Graphify**; reviewed source paths remain **8/10 each**.
+Selected relationship identity checks remain **17/21 versus 20/21**;
+all-occurrence checks remain **17/21 each** with the disclosed corrected Click
+witness. This repair produced **no score gain on those existing questions**.
+All four non-Java Compass graphs and all five Graphify graphs are byte-identical
+to the export-binding checkpoint.
+
+The pinned jsoup graph keeps 6,116 nodes and grows from 21,095 to 21,110 edges:
+43 signature corrections, nine added calls (five production, four test), and
+six added production type references, with no removed relationships. Every
+changed signature and added relationship was reviewed against the pinned
+source, including overload sets, receiver declarations, inheritance, and
+occurrence spans. This reviews the entire observed delta, not the remaining
+graph or community responsibilities.
+
+An upgrade from copied AST-v5 artifacts extracts both files again; a subsequent
+run reuses both AST-v6 entries. Links, node fields excluding community labels,
+and community member partitions match a clean build. The initial byte-equality
+assertion failed because community numeric IDs are remapped against prior
+state. The two upgraded graphs are byte-identical to each other; whole-graph
+equality with the clean build is not claimed.
+
+Verification so far: 1,092 workspace library/binary tests passed with two
+ignored; 250 product/cache/resolution contract tests and nine focused tests
+passed; workspace and focused-test Clippy passed with `-D warnings`; format,
+diff, product-boundary, and all 99 benchmark harness tests passed. The full
+fixture qualification is running against final production sources. Review found
+that a missing optional type vector could incorrectly prove a zero-parameter
+declaration; that regression failed before an added exact-match guard and passed
+afterward. The earlier fixture run passed but is superseded by that source
+change. The second frozen comparison reproduces all ten first-run graph hashes
+and the same scores. An additional array-receiver regression passed for spread,
+ordinary-array, and trailing-dimension parameters without changing production
+code. The first
+harness discovery command pointed at the wrong directory and ran zero tests;
+the corrected command ran all 99. The
+[development review](../../benchmarks/agent_query/java_varargs_development_review.json)
+records binaries, sources, graph hashes, all source judgments, cache differences,
+and retained failures. No speed, fresh held-out, new MCP/directed-path, community
+quality, or god-object diagnosis claim follows from this checkpoint.
 
 ## Next evidence to collect
 
@@ -1754,8 +1826,8 @@ development reduction, not a new comparative result or a completed repair.
    those broader checks.
 2. Extend source-proven loop/result/iterator inference to recover the remaining
    fd misses. Evaluate TypeScript identity independently of the bounded query
-   binding proof above. Address Java varargs
-   signature completeness and unresolved receiver forms with separate evidence.
+   binding proof above. Extend Java evidence beyond the corrected varargs
+   cases, including untyped method results and unresolved receiver forms.
    Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.

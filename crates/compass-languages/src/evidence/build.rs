@@ -3349,18 +3349,18 @@ impl<'source> DirectEvidenceState<'source> {
             if !matches!(parameter.kind(), "formal_parameter" | "spread_parameter") {
                 continue;
             }
-            let Some(name) = parameter
+            let Some(name) = java_parameter_declarator(parameter)
                 .child_by_field_name("name")
                 .map(|node| self.text(node))
             else {
                 continue;
             };
-            let Some(target) = parameter
-                .child_by_field_name("type")
-                .map(|node| java_normalize_type(&self.text(node)))
-            else {
+            let Some(mut target) = java_parameter_type_name(parameter, self.source) else {
                 continue;
             };
+            if parameter.kind() == "spread_parameter" {
+                target.push_str("[]");
+            }
             self.java_value_types
                 .entry(owner.scope_id.clone())
                 .or_default()
@@ -3565,10 +3565,10 @@ impl<'source> DirectEvidenceState<'source> {
         }
         let type_root = match node.kind() {
             "method_declaration" => node.child_by_field_name("type"),
-            "field_declaration"
-            | "constant_declaration"
-            | "formal_parameter"
-            | "spread_parameter" => node.child_by_field_name("type"),
+            "field_declaration" | "constant_declaration" | "formal_parameter" => {
+                node.child_by_field_name("type")
+            }
+            "spread_parameter" => java_parameter_type_node(node),
             _ => None,
         };
         if let Some(type_root) = type_root {
@@ -3887,10 +3887,23 @@ impl<'source> DirectEvidenceState<'source> {
                 }
                 .to_owned(),
             ),
-            "object_creation_expression" | "array_creation_expression" => {
+            "object_creation_expression" => {
                 expression.child_by_field_name("type").and_then(|target| {
                     self.java_canonical_type(owner, &self.text(target), target.start_byte())
                 })
+            }
+            "array_creation_expression" => {
+                let target = expression.child_by_field_name("type")?;
+                let mut raw = self.text(target);
+                let mut cursor = expression.walk();
+                for dimension in expression.named_children(&mut cursor) {
+                    match dimension.kind() {
+                        "dimensions_expr" => raw.push_str("[]"),
+                        "dimensions" => raw.push_str(&java_dimensions_suffix(dimension)),
+                        _ => {}
+                    }
+                }
+                self.java_canonical_type(owner, &raw, target.start_byte())
             }
             "cast_expression" => expression.child_by_field_name("type").and_then(|target| {
                 self.java_canonical_type(owner, &self.text(target), target.start_byte())
@@ -3958,6 +3971,10 @@ impl<'source> DirectEvidenceState<'source> {
             return owner.enclosing_type_qualified_name.clone();
         }
         if let Some(target) = self.local_java_value_type(owner, receiver) {
+            // An array receiver is not an instance of its element class.
+            if target.ends_with("[]") {
+                return None;
+            }
             return self.java_qualified_type(owner, target, use_start);
         }
         if receiver
@@ -9126,6 +9143,63 @@ fn last_java_import_name(node: Node<'_>) -> Option<Node<'_>> {
         .last()
 }
 
+fn java_parameter_type_node(parameter: Node<'_>) -> Option<Node<'_>> {
+    parameter.child_by_field_name("type").or_else(|| {
+        if parameter.kind() != "spread_parameter" {
+            return None;
+        }
+        // The pinned Java grammar leaves spread types unnamed, unlike formal
+        // parameters. Inspect only direct type children, never annotations or
+        // the nested variable declarator.
+        let mut cursor = parameter.walk();
+        parameter.named_children(&mut cursor).find(|child| {
+            matches!(
+                child.kind(),
+                "type_identifier"
+                    | "scoped_type_identifier"
+                    | "generic_type"
+                    | "array_type"
+                    | "annotated_type"
+                    | "integral_type"
+                    | "floating_point_type"
+                    | "boolean_type"
+            )
+        })
+    })
+}
+
+fn java_parameter_declarator(parameter: Node<'_>) -> Node<'_> {
+    if parameter.kind() == "spread_parameter" {
+        let mut cursor = parameter.walk();
+        if let Some(declarator) = parameter
+            .named_children(&mut cursor)
+            .find(|child| child.kind() == "variable_declarator")
+        {
+            return declarator;
+        }
+    }
+    parameter
+}
+
+fn java_dimensions_suffix(dimensions: Node<'_>) -> String {
+    let mut cursor = dimensions.walk();
+    dimensions
+        .children(&mut cursor)
+        .filter(|child| child.kind() == "[")
+        .map(|_| "[]")
+        .collect()
+}
+
+fn java_parameter_type_name(parameter: Node<'_>, source: &[u8]) -> Option<String> {
+    let type_node = java_parameter_type_node(parameter)?;
+    let mut normalized = java_normalize_type(type_node.utf8_text(source).ok()?);
+    if let Some(dimensions) = java_parameter_declarator(parameter).child_by_field_name("dimensions")
+    {
+        normalized.push_str(&java_dimensions_suffix(dimensions));
+    }
+    Some(normalized)
+}
+
 fn java_parameter_signature(node: Node<'_>, source: &[u8]) -> (String, u32, bool, Vec<String>) {
     let Some(parameters) = node.child_by_field_name("parameters") else {
         return (String::new(), 0, false, Vec::new());
@@ -9138,31 +9212,18 @@ fn java_parameter_signature(node: Node<'_>, source: &[u8]) -> (String, u32, bool
         .children(&mut cursor)
         .filter(|child| child.is_named())
     {
-        if !matches!(
-            parameter.kind(),
-            "formal_parameter" | "spread_parameter" | "receiver_parameter"
-        ) {
+        if !matches!(parameter.kind(), "formal_parameter" | "spread_parameter") {
             continue;
         }
         variadic |= parameter.kind() == "spread_parameter";
-        let Some(type_node) = parameter.child_by_field_name("type") else {
+        let Some(mut normalized) = java_parameter_type_name(parameter, source) else {
             continue;
         };
-        let raw = type_node.utf8_text(source).unwrap_or_default();
-        let mut normalized = java_normalize_type(raw);
-        canonical_inputs.push(normalized.clone());
         if parameter.kind() == "spread_parameter" {
+            canonical_inputs.push(format!("{normalized}[]"));
             normalized.push_str("...");
-        }
-        if let Some(dimensions) = parameter.child_by_field_name("dimensions") {
-            normalized.push_str(
-                &dimensions
-                    .utf8_text(source)
-                    .unwrap_or_default()
-                    .chars()
-                    .filter(|character| !character.is_whitespace())
-                    .collect::<String>(),
-            );
+        } else {
+            canonical_inputs.push(normalized.clone());
         }
         types.push(normalized);
     }
@@ -9286,7 +9347,7 @@ fn collect_java_parameter_type_nodes<'tree>(
         .filter(|child| child.is_named())
     {
         if matches!(parameter.kind(), "formal_parameter" | "spread_parameter")
-            && let Some(type_node) = parameter.child_by_field_name("type")
+            && let Some(type_node) = java_parameter_type_node(parameter)
         {
             collect_java_type_nodes(type_node, output);
         }

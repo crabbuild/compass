@@ -156,7 +156,8 @@
     "java_parameter_signature and collect_java_parameter_type_nodes only read child_by_field_name(type); spread_parameter can lack that field. This is a code-inspection hypothesis until AST/native regression confirms the exact grammar shape."
   ],
   "inspectionCorrection": "Initial inspection looked for a top-level signature field. Corrected inspection reads details.data.signature; no claim that all signatures are absent.",
-  "status": "Unfixed; no native regression or comparative gain yet.",
+  "status": "Historical before-fix diagnostic; preserved failures. See followupReview for the subsequent native correction and repeated development comparison.",
   "artifactRoot": "java-varargs-diagnostic",
-  "sourceFixture": "benchmarks/agent_query/fixtures/java_varargs/VarargsDemo.java"
+  "sourceFixture": "benchmarks/agent_query/fixtures/java_varargs/VarargsDemo.java",
+  "followupReview": "java_varargs_development_review.json"
 }

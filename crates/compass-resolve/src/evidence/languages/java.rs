@@ -36,56 +36,120 @@ impl ResolutionDb<'_> {
         overloads: &[&'a DeclarationFact],
         argument_types: &[Option<String>],
     ) -> Option<&'a str> {
-        let mut proven = Vec::new();
-        for declaration in overloads {
-            if declaration.parameter_types.len() != argument_types.len() {
-                return None;
-            }
-            let mut applicability = JavaApplicability::Proven;
-            for (parameter, argument) in declaration.parameter_types.iter().zip(argument_types) {
-                let argument = argument.as_deref()?;
-                match self.java_conversion(argument, parameter) {
-                    JavaConversion::Proven => {}
-                    JavaConversion::Disproven => {
-                        applicability = JavaApplicability::Disproven;
-                        break;
-                    }
-                    JavaConversion::Unknown => applicability = JavaApplicability::Unknown,
+        // JLS 15.12.2: strict fixed arity, loose fixed arity, then variable
+        // arity. A spread declaration participates in fixed phases as an array.
+        for phase in [
+            JavaInvocationPhase::Strict,
+            JavaInvocationPhase::Loose,
+            JavaInvocationPhase::Variable,
+        ] {
+            let mut proven = Vec::new();
+            let mut unknown = false;
+            for declaration in overloads {
+                match self.java_applicability(declaration, argument_types, phase) {
+                    JavaApplicability::Proven => proven.push(*declaration),
+                    JavaApplicability::Unknown => unknown = true,
+                    JavaApplicability::Disproven => {}
                 }
             }
-            match applicability {
-                JavaApplicability::Proven => proven.push(*declaration),
-                JavaApplicability::Unknown => return None,
-                JavaApplicability::Disproven => {}
+            // Missing type/hierarchy evidence in an earlier phase can change
+            // the selected overload. Never skip it to prefer a later phase.
+            if unknown {
+                return None;
             }
+            if proven.is_empty() {
+                continue;
+            }
+            if let [only] = proven.as_slice() {
+                return Some(only.id.as_str());
+            }
+            let mut most_specific = proven.iter().copied().filter(|candidate| {
+                proven.iter().copied().all(|other| {
+                    candidate.id == other.id
+                        || self.java_parameters_more_specific(candidate, other, phase)
+                })
+            });
+            let only = most_specific.next()?;
+            return most_specific.next().is_none().then_some(only.id.as_str());
         }
-        if let [only] = proven.as_slice() {
-            return Some(only.id.as_str());
-        }
-        let mut most_specific = proven.iter().copied().filter(|candidate| {
-            proven.iter().copied().all(|other| {
-                candidate.id == other.id
-                    || self.java_parameter_vector_more_specific(candidate, other)
-            })
-        });
-        let only = most_specific.next()?;
-        most_specific.next().is_none().then_some(only.id.as_str())
+        None
     }
 
-    pub(in crate::evidence) fn java_parameter_vector_more_specific(
+    fn java_applicability(
+        &self,
+        declaration: &DeclarationFact,
+        arguments: &[Option<String>],
+        phase: JavaInvocationPhase,
+    ) -> JavaApplicability {
+        let parameters = &declaration.parameter_types;
+        if declaration.parameter_count != u32::try_from(parameters.len()).ok() {
+            return JavaApplicability::Unknown;
+        }
+        if phase == JavaInvocationPhase::Variable {
+            if !declaration.variadic
+                || parameters.is_empty()
+                || arguments.len() < parameters.len() - 1
+            {
+                return JavaApplicability::Disproven;
+            }
+            if parameters.last().is_none_or(|p| !p.ends_with("[]")) {
+                return JavaApplicability::Unknown;
+            }
+        } else if parameters.len() != arguments.len() {
+            return JavaApplicability::Disproven;
+        }
+        let mut applicability = JavaApplicability::Proven;
+        for (index, argument) in arguments.iter().enumerate() {
+            let Some(parameter) = java_invocation_parameter(declaration, index, phase) else {
+                return JavaApplicability::Unknown;
+            };
+            let Some(argument) = argument.as_deref() else {
+                applicability = JavaApplicability::Unknown;
+                continue;
+            };
+            match self.java_phase_conversion(argument, parameter, phase) {
+                JavaConversion::Proven => {}
+                JavaConversion::Disproven => return JavaApplicability::Disproven,
+                JavaConversion::Unknown => applicability = JavaApplicability::Unknown,
+            }
+        }
+        applicability
+    }
+
+    fn java_parameters_more_specific(
         &self,
         candidate: &DeclarationFact,
         other: &DeclarationFact,
+        phase: JavaInvocationPhase,
     ) -> bool {
+        // Comparing unequal fixed prefixes needs additional JLS specificity
+        // evidence. Retain ambiguity instead of selecting by declaration order.
         candidate.parameter_types.len() == other.parameter_types.len()
-            && candidate
-                .parameter_types
-                .iter()
-                .zip(&other.parameter_types)
-                .all(|(candidate, other)| {
-                    self.java_conversion(candidate, other) == JavaConversion::Proven
-                })
             && candidate.parameter_types != other.parameter_types
+            && (0..candidate.parameter_types.len()).all(|index| {
+                let Some(candidate) = java_invocation_parameter(candidate, index, phase) else {
+                    return false;
+                };
+                let Some(other) = java_invocation_parameter(other, index, phase) else {
+                    return false;
+                };
+                self.java_phase_conversion(candidate, other, JavaInvocationPhase::Strict)
+                    == JavaConversion::Proven
+            })
+    }
+
+    fn java_phase_conversion(
+        &self,
+        argument: &str,
+        parameter: &str,
+        phase: JavaInvocationPhase,
+    ) -> JavaConversion {
+        if phase == JavaInvocationPhase::Strict
+            && java_primitive_type(argument) != java_primitive_type(parameter)
+        {
+            return JavaConversion::Disproven;
+        }
+        self.java_conversion(argument, parameter)
     }
 
     fn java_conversion(&self, argument: &str, parameter: &str) -> JavaConversion {
@@ -240,6 +304,26 @@ impl ResolutionDb<'_> {
         });
         let only = eligible.next()?;
         eligible.next().is_none().then_some(only)
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum JavaInvocationPhase {
+    Strict,
+    Loose,
+    Variable,
+}
+
+fn java_invocation_parameter(
+    declaration: &DeclarationFact,
+    index: usize,
+    phase: JavaInvocationPhase,
+) -> Option<&str> {
+    let parameters = &declaration.parameter_types;
+    if phase == JavaInvocationPhase::Variable && index >= parameters.len().checked_sub(1)? {
+        parameters.last()?.strip_suffix("[]")
+    } else {
+        parameters.get(index).map(String::as_str)
     }
 }
 

@@ -118,7 +118,12 @@ collections:
   boxing/unboxing, array, complete source-hierarchy, and stable core-Java
   conversions, but only when one applicable vector is more specific than all
   other applicable vectors. Unknown hierarchy or a competing conversion
-  remains unresolved.
+  remains unresolved. Java checks strict fixed-arity applicability before
+  boxing/unboxing, and both fixed-arity phases before varargs expansion. A
+  spread declaration participates in fixed-arity phases with its declared
+  array type. Expanded specificity requires comparable parameter vectors;
+  differing fixed-prefix lengths remain ambiguous. This bounded source model
+  does not implement compiler-level generic inference.
   The TypeScript/JavaScript producer represents a tagged
   template (``tag`text ${value}``) as a call with occurrence context
   `tagged_template` (or `tagged_member` for a member tag). Its bounded argument

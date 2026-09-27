@@ -231,6 +231,16 @@ to 5, rebuilding older disposable facts across languages and invalidating old
 build seals. Producer capabilities, graph/evidence schemas, and published
 historical realizations are unchanged.
 
+Java varargs signatures now retain their spread parameter, and canonical
+parameter types represent it as an array. Explicit array arguments and trailing
+parameter dimensions preserve their rank. Supported overloads are considered
+in strict fixed-arity, loose fixed-arity, then variable-arity phases. Missing
+argument/hierarchy evidence and incomparable overloads remain unresolved;
+unequal variadic prefixes do not establish a most-specific target. Rebuilding
+can change signature metadata and call targets. AST
+cache semantics advance from 5 to 6; published history, producer capabilities,
+and graph/evidence schemas remain unchanged.
+
 ### Framework route hierarchy
 
 Framework route hierarchy now requires a recognized filesystem-convention fact
