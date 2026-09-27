@@ -4,7 +4,7 @@ use std::collections::{BTreeSet, VecDeque};
 use std::path::Path;
 
 use compass_model::code_graph::NodeKind;
-use compass_model::{EdgeRecord, Graph, NodeRecord};
+use compass_model::{EdgeRecord, Graph, NodeRecord, canonical_code_token, identifier_tokens};
 use serde_json::Value;
 
 use crate::neighbors::bounded_json_size;
@@ -25,11 +25,14 @@ const MAX_VERIFIED_SPAN_BYTES: u64 = 16_777_216;
 pub struct ExplainedMember<'a> {
     pub node: &'a NodeRecord,
     pub source: Result<ExplainedSource, ExplanationSourceError>,
+    /// Lexical matches in the recorded name, not evidence of behavior.
+    pub matched_focus_terms: Vec<String>,
 }
 
 #[derive(Debug)]
 pub struct ExplainedMembers<'a> {
     pub root: &'a NodeRecord,
+    pub focus_terms: Vec<String>,
     /// Full recorded membership evidence, retaining parallel records.
     pub membership: Vec<&'a EdgeRecord>,
     pub members: Vec<ExplainedMember<'a>>,
@@ -42,6 +45,44 @@ pub struct ExplainedMembers<'a> {
 
 fn error(message: &str) -> ExplanationSourceError {
     ExplanationSourceError::Read(message.to_owned())
+}
+
+/// Validated lexical focus for recorded member names. No source is read to rank.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExplanationMemberFocus {
+    terms: BTreeSet<String>,
+}
+
+impl ExplanationMemberFocus {
+    pub fn new(text: &str) -> Result<Self, ExplanationSourceError> {
+        if text.len() > 4096 {
+            return Err(error("member focus exceeds its 4096-byte limit"));
+        }
+        let terms = crate::query_terms(text)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        if terms.is_empty() || terms.len() > 32 {
+            return Err(error(
+                "member focus requires from 1 to 32 distinct searchable terms",
+            ));
+        }
+        Ok(Self { terms })
+    }
+
+    fn matches(&self, node: &NodeRecord) -> Vec<String> {
+        let mut tokens = BTreeSet::new();
+        // Match the lexical index's treatment of whole snake-case identifiers
+        // and their components; identifier_tokens deliberately retains '_'.
+        for token in identifier_tokens(&node.string("name")) {
+            tokens.insert(canonical_code_token(token.clone()));
+            if token.contains('_') {
+                for part in token.split('_').filter(|part| !part.is_empty()) {
+                    tokens.insert(canonical_code_token(part.to_owned()));
+                }
+            }
+        }
+        self.terms.intersection(&tokens).cloned().collect()
+    }
 }
 
 fn kind(node: &NodeRecord) -> Option<NodeKind> {
@@ -63,6 +104,20 @@ pub fn explanation_member_sources<'a>(
     label: &str,
     root: &Path,
     max_source_bytes: u64,
+) -> Result<ExplainedMembers<'a>, ExplanationSourceError> {
+    explanation_member_sources_with_focus(graph, label, root, max_source_bytes, None)
+}
+
+/// Prioritize distinct normalized name matches, then the original source order.
+///
+/// Focus changes only presentation priority; it neither filters membership nor
+/// resolves ambiguity. The unfocused API and zero-match ordering are preserved.
+pub fn explanation_member_sources_with_focus<'a>(
+    graph: &'a Graph,
+    label: &str,
+    root: &Path,
+    max_source_bytes: u64,
+    focus: Option<&ExplanationMemberFocus>,
 ) -> Result<ExplainedMembers<'a>, ExplanationSourceError> {
     if label.len() > 4096 || !(1..=MAX_SOURCE_BYTES).contains(&max_source_bytes) {
         return Err(error(
@@ -152,13 +207,22 @@ pub fn explanation_member_sources<'a>(
             let key = anchor
                 .as_ref()
                 .map(|a| (a.file.clone(), a.start_byte, a.end_byte));
-            (key, node)
+            let matches = focus.map(|f| f.matches(node)).unwrap_or_default();
+            (key, node, matches)
         })
         .collect::<Vec<_>>();
-    ordered.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.id.cmp(&b.1.id)));
+    ordered.sort_by(|a, b| {
+        b.2.len()
+            .cmp(&a.2.len())
+            .then_with(|| a.0.cmp(&b.0))
+            .then_with(|| a.1.id.cmp(&b.1.id))
+    });
     let total = ordered.len();
     let mut report = ExplainedMembers {
         root: graph.node(seed),
+        focus_terms: focus
+            .map(|f| f.terms.iter().cloned().collect())
+            .unwrap_or_default(),
         membership: membership.into_iter().map(|(_, edge)| edge).collect(),
         members: Vec::new(),
         omitted_members: 0,
@@ -166,7 +230,7 @@ pub fn explanation_member_sources<'a>(
         verification_bytes_charged: 0,
         truncated: false,
     };
-    for (_, node) in ordered {
+    for (_, node, matched_focus_terms) in ordered {
         let remaining = max_source_bytes.saturating_sub(report.source_bytes);
         if remaining == 0 {
             report.truncated = true;
@@ -175,6 +239,7 @@ pub fn explanation_member_sources<'a>(
         let Some(anchor) = node_source_anchor(node) else {
             report.members.push(ExplainedMember {
                 node,
+                matched_focus_terms,
                 source: Err(ExplanationSourceError::Unsourced {
                     label: node.id.clone(),
                 }),
@@ -184,6 +249,7 @@ pub fn explanation_member_sources<'a>(
         let Some(span_bytes) = anchor.end_byte.checked_sub(anchor.start_byte) else {
             report.members.push(ExplainedMember {
                 node,
+                matched_focus_terms,
                 source: Err(error("recorded member source span is inverted")),
             });
             continue;
@@ -210,7 +276,11 @@ pub fn explanation_member_sources<'a>(
             report.source_bytes += excerpt.source.len() as u64;
             report.truncated |= excerpt.truncated;
         }
-        report.members.push(ExplainedMember { node, source });
+        report.members.push(ExplainedMember {
+            node,
+            source,
+            matched_focus_terms,
+        });
     }
     report.omitted_members = total.saturating_sub(report.members.len());
     Ok(report)

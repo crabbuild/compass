@@ -2,7 +2,9 @@ use std::error::Error;
 use std::fs;
 
 use compass_model::{Graph, GraphDocument};
-use compass_query::explanation_member_sources;
+use compass_query::{
+    ExplanationMemberFocus, explanation_member_sources, explanation_member_sources_with_focus,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
@@ -42,6 +44,193 @@ fn graph(value: Value) -> Result<Graph, Box<dyn Error>> {
     Ok(Graph::from_document(serde_json::from_value::<
         GraphDocument,
     >(value)?)?)
+}
+
+#[test]
+fn focus_reaches_later_members_with_the_same_source_budget() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("lib.rs"), SOURCE)?;
+    let focus = ExplanationMemberFocus::new("later later")?;
+    for reversed in [false, true] {
+        let mut doc = document()?;
+        if reversed {
+            doc["nodes"].as_array_mut().ok_or("nodes")?.reverse();
+            doc["links"].as_array_mut().ok_or("links")?.reverse();
+        }
+        let graph = graph(doc)?;
+        let baseline =
+            explanation_member_sources(&graph, "owner", root.path(), LATER.len() as u64)?;
+        assert_eq!(baseline.members[0].node.id, "first");
+        let report = explanation_member_sources_with_focus(
+            &graph,
+            "owner",
+            root.path(),
+            LATER.len() as u64,
+            Some(&focus),
+        )?;
+        assert_eq!(report.focus_terms, ["later"]);
+        assert_eq!(report.members.len(), 1);
+        assert_eq!(report.members[0].node.id, "later");
+        assert_eq!(report.members[0].matched_focus_terms, ["later"]);
+        assert_eq!(
+            report.members[0]
+                .source
+                .as_ref()
+                .map_err(|e| e.to_string())?
+                .source,
+            LATER
+        );
+        assert_eq!(report.source_bytes, LATER.len() as u64);
+        assert_eq!(report.verification_bytes_charged, LATER.len() as u64);
+        assert_eq!(report.omitted_members, 1);
+        assert!(report.truncated);
+        assert_eq!(report.membership.len(), baseline.membership.len());
+    }
+    Ok(())
+}
+
+#[test]
+fn absent_focus_matches_preserve_order_and_do_not_filter_members() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("lib.rs"), SOURCE)?;
+    let graph = graph(document()?)?;
+    let focus = ExplanationMemberFocus::new("nothing_matches")?;
+    let baseline = explanation_member_sources(&graph, "owner", root.path(), 8000)?;
+    for focus in [None, Some(&focus)] {
+        let report =
+            explanation_member_sources_with_focus(&graph, "owner", root.path(), 8000, focus)?;
+        assert_eq!(
+            report
+                .members
+                .iter()
+                .map(|m| m.node.id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "later"]
+        );
+        assert!(
+            report
+                .members
+                .iter()
+                .all(|m| m.matched_focus_terms.is_empty())
+        );
+        assert_eq!(report.source_bytes, baseline.source_bytes);
+        assert_eq!(
+            report.verification_bytes_charged,
+            baseline.verification_bytes_charged
+        );
+        assert_eq!(report.truncated, baseline.truncated);
+    }
+    Ok(())
+}
+
+#[test]
+fn focus_counts_distinct_normalized_name_terms_and_keeps_ties_stable() -> Result<(), Box<dyn Error>>
+{
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("lib.rs"), SOURCE)?;
+    for (first_name, later_name, question, expected) in [
+        (
+            "check",
+            "checkLoop",
+            "checking loops",
+            vec!["later", "first"],
+        ),
+        (
+            "check_loop",
+            "checkLoop",
+            "checking loops",
+            vec!["first", "later"],
+        ),
+        ("other", "Résumé", "résumé", vec!["later", "first"]),
+    ] {
+        let mut doc = document()?;
+        doc["nodes"][1]["name"] = json!(first_name);
+        doc["nodes"][3]["name"] = json!(later_name);
+        let graph = graph(doc)?;
+        let focus = ExplanationMemberFocus::new(question)?;
+        let report = explanation_member_sources_with_focus(
+            &graph,
+            "owner",
+            root.path(),
+            8000,
+            Some(&focus),
+        )?;
+        assert_eq!(
+            report
+                .members
+                .iter()
+                .map(|m| m.node.id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn focus_does_not_read_source_to_rank_or_suppress_stale_failures() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    fs::write(root.path().join("lib.rs"), SOURCE.replace("two", "bad"))?;
+    let graph = graph(document()?)?;
+    // A body-only token must not rank a member. The matching name is stale,
+    // remains first, and its failed verification still consumes work.
+    let body_focus = ExplanationMemberFocus::new("two")?;
+    let report = explanation_member_sources_with_focus(
+        &graph,
+        "owner",
+        root.path(),
+        8000,
+        Some(&body_focus),
+    )?;
+    assert_eq!(report.members[0].node.id, "first");
+    let focus = ExplanationMemberFocus::new("later")?;
+    let report =
+        explanation_member_sources_with_focus(&graph, "owner", root.path(), 8000, Some(&focus))?;
+    assert_eq!(report.members[0].node.id, "later");
+    assert!(report.members[0].source.is_err());
+    assert!(report.members[1].source.is_ok());
+    assert_eq!(report.source_bytes, FIRST.len() as u64);
+    assert_eq!(
+        report.verification_bytes_charged,
+        (FIRST.len() + LATER.len()) as u64
+    );
+    Ok(())
+}
+
+#[test]
+fn focus_does_not_resolve_ambiguous_roots() -> Result<(), Box<dyn Error>> {
+    let root = tempfile::tempdir()?;
+    let mut doc = document()?;
+    doc["nodes"].as_array_mut().ok_or("nodes")?.push(node(
+        "other",
+        "Owner",
+        "struct",
+        "struct Owner {}",
+    )?);
+    let graph = graph(doc)?;
+    let focus = ExplanationMemberFocus::new("later")?;
+    assert!(
+        explanation_member_sources_with_focus(&graph, "Owner", root.path(), 8000, Some(&focus))
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn focus_limits_reject_invalid_inputs_without_source_access() -> Result<(), Box<dyn Error>> {
+    for text in [
+        String::new(),
+        "!!!".to_owned(),
+        "x".repeat(4097),
+        (0..33)
+            .map(|i| format!("term{i}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    ] {
+        assert!(ExplanationMemberFocus::new(&text).is_err());
+    }
+    assert!(ExplanationMemberFocus::new(&"later ".repeat(100)).is_ok());
+    Ok(())
 }
 
 #[test]

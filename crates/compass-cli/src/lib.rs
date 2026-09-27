@@ -85,11 +85,11 @@ use compass_output::{
 use compass_prs::{ProcessRunner, SystemRunner};
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET, DEFAULT_PATH_DEPTH_LIMIT,
-    DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions, TextPageOptions, TraversalMode,
-    discovery_request_digest, explanation_member_sources, explanation_source, format_affected,
-    format_benchmark, open as open_code_query, open_with_verified_document, query_graph_text_page,
-    render_discovery_text_page_with_prefix, render_explanation_page,
-    render_shortest_path_with_limit, run_benchmark,
+    DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions, ExplanationMemberFocus, TextPageOptions,
+    TraversalMode, discovery_request_digest, explanation_member_sources_with_focus,
+    explanation_source, format_affected, format_benchmark, open as open_code_query,
+    open_with_verified_document, query_graph_text_page, render_discovery_text_page_with_prefix,
+    render_explanation_page, render_shortest_path_with_limit, run_benchmark,
 };
 use compass_semantic::{
     CachedCorpusExtractionOptions, CorpusExtractionOptions, PreparedDocumentInputs,
@@ -6652,6 +6652,7 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
     let mut page = 1_usize;
     let mut with_source = true;
     let mut with_member_source = false;
+    let mut member_focus = None;
     let mut source_root = std::path::PathBuf::from(".");
     let mut max_source_bytes = DEFAULT_EXPLAIN_SOURCE_BYTES;
     let mut index = 1;
@@ -6660,6 +6661,26 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
             "--source-members" => {
                 with_member_source = true;
                 index += 1;
+            }
+            value if value == "--member-focus" || value.starts_with("--member-focus=") => {
+                if member_focus.is_some() {
+                    return Outcome::failure(
+                        "error: --member-focus may be supplied only once".to_owned(),
+                    );
+                }
+                let (text, consumed) = if value == "--member-focus" {
+                    let Some(text) = args.get(index + 1) else {
+                        return Outcome::failure("error: --member-focus requires text".to_owned());
+                    };
+                    (text.as_str(), 2)
+                } else {
+                    (&value[15..], 1)
+                };
+                member_focus = match ExplanationMemberFocus::new(text) {
+                    Ok(focus) => Some(focus),
+                    Err(error) => return Outcome::failure(format!("error: {error}")),
+                };
+                index += consumed;
             }
             "--source" => {
                 with_source = true;
@@ -6757,6 +6778,9 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
     if with_member_source && !with_source {
         return Outcome::failure("error: --source-members conflicts with --no-source".to_owned());
     }
+    if member_focus.is_some() && !with_member_source {
+        return Outcome::failure("error: --member-focus requires --source-members".to_owned());
+    }
     if with_member_source && (max_source_bytes > 1_048_576 || label.len() > 4096) {
         return Outcome::failure(
             "error: member source accepts at most 1048576 source bytes and a 4096-byte selector"
@@ -6795,6 +6819,7 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
             label,
             &source_root,
             max_source_bytes,
+            member_focus.as_ref(),
         )
     } else if with_source {
         append_explanation_source(output, &loaded.graph, label, &source_root, max_source_bytes)
@@ -6868,21 +6893,39 @@ fn append_explanation_member_sources(
     label: &str,
     root: &std::path::Path,
     max_source_bytes: u64,
+    focus: Option<&ExplanationMemberFocus>,
 ) -> String {
-    match explanation_member_sources(graph, label, root, max_source_bytes) {
+    match explanation_member_sources_with_focus(graph, label, root, max_source_bytes, focus) {
         Ok(report) => {
             let unavailable = report.members.iter().filter(|m| m.source.is_err()).count();
+            let order = if focus.is_some() {
+                "member-name focus, then source order"
+            } else {
+                "source order"
+            };
             output.push_str(&format!(
-                "\n\nMEMBER SOURCES owner={} retained={} omitted={} unavailable={} source_bytes={} truncated={}\nRecorded containment; source order; shared {}-byte source budget.",
+                "\n\nMEMBER SOURCES owner={} retained={} omitted={} unavailable={} source_bytes={} truncated={}\nRecorded containment; {order}; shared {}-byte source budget.",
                 serde_json::json!(report.root.id), report.members.len(), report.omitted_members,
                 unavailable, report.source_bytes, report.truncated, max_source_bytes,
             ));
+            if focus.is_some() {
+                output.push_str(&format!(
+                    "\nFocus terms: {} (lexical name matches; not behavioral evidence).",
+                    serde_json::json!(report.focus_terms)
+                ));
+            }
             for member in report.members {
                 output.push_str(&format!(
                     "\n\nMEMBER {} {}",
                     serde_json::json!(member.node.id),
                     serde_json::json!(member.node.label())
                 ));
+                if focus.is_some() {
+                    output.push_str(&format!(
+                        "\nMatched focus terms: {}",
+                        serde_json::json!(member.matched_focus_terms)
+                    ));
+                }
                 match member.source {
                     Ok(excerpt) => {
                         let retained_bytes = excerpt.source.len() as u64;

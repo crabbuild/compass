@@ -2377,6 +2377,103 @@ fn explain_member_source_reaches_implementations_outside_type_declarations()
 }
 
 #[test]
+fn explain_member_focus_prioritizes_names_and_validates_its_options() -> Result<(), Box<dyn Error>>
+{
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir()?;
+    let parts = [
+        "struct Owner {}\n",
+        "fn early() { first(); }\n",
+        "fn check_loop() { later(); }\n",
+    ];
+    std::fs::write(directory.path().join("lib.rs"), parts.concat())?;
+    let mut offset = 0;
+    let nodes = [("owner", "Owner", "struct"), ("early", "early", "method"), ("loop", "check_loop", "method")]
+        .into_iter().enumerate().map(|(index, (id, name, kind))| {
+            let text = parts[index];
+            let start = offset;
+            offset += text.len();
+            serde_json::json!({"id": id, "name": name, "kind": kind,
+                "source": {"file": "lib.rs", "startByte": start, "endByte": offset, "startLine": index+1, "endLine": index+1, "startColumn": 0, "endColumn": text.len()-1},
+                "details": {"type": "symbol", "data": {"sourceDigest": format!("{:x}", Sha256::digest(text.as_bytes()))}}
+            })
+        }).collect::<Vec<_>>();
+    let graph = directory.path().join("graph.json");
+    std::fs::write(
+        &graph,
+        serde_json::json!({"directed":true,"multigraph":true,"nodes":nodes,"links":[
+            {"source":"owner","target":"early","relation":"contains","confidence":"EXTRACTED"},
+            {"source":"owner","target":"loop","relation":"contains","confidence":"EXTRACTED"}
+        ]})
+        .to_string(),
+    )?;
+    let invoke = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("explain"),
+            OsString::from("owner"),
+            OsString::from("--root"),
+            directory.path().as_os_str().to_owned(),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let budget = parts[2].len().to_string();
+    let baseline = invoke(&["--source-members", "--max-source-bytes", &budget]);
+    assert_eq!(baseline.code, 0, "{}", baseline.stderr);
+    assert!(baseline.stdout.contains("first();"));
+    assert!(!baseline.stdout.contains("later();"));
+    for format in ["text", "json", "agent-json"] {
+        let focused = invoke(&[
+            "--source-members",
+            "--member-focus",
+            "loops",
+            "--max-source-bytes",
+            &budget,
+            "--format",
+            format,
+        ]);
+        assert_eq!(focused.code, 0, "{}", focused.stderr);
+        assert!(focused.stdout.contains("later();"));
+        assert!(!focused.stdout.contains("first();"));
+        assert!(
+            focused
+                .stdout
+                .contains("member-name focus, then source order")
+        );
+        assert!(focused.stdout.contains("Matched focus terms:"));
+        assert!(
+            focused
+                .stdout
+                .contains("retained=1 omitted=1 unavailable=0")
+        );
+    }
+    let equals = invoke(&["--source-members", "--member-focus=loops"]);
+    let spaced = invoke(&["--source-members", "--member-focus", "loops"]);
+    assert_eq!(equals.stdout, spaced.stdout);
+    for args in [
+        vec!["--member-focus", "loops"],
+        vec!["--source-members", "--member-focus"],
+        vec!["--source-members", "--member-focus="],
+        vec!["--source-members", "--member-focus", "!!!"],
+        vec!["--source-members", "--no-source", "--member-focus", "loops"],
+        vec![
+            "--source-members",
+            "--member-focus=loops",
+            "--member-focus=early",
+        ],
+    ] {
+        assert_ne!(invoke(&args).code, 0, "{args:?}");
+    }
+    assert_ne!(
+        invoke(&["--source-members", "--member-focus", &"x".repeat(4097)]).code,
+        0
+    );
+    Ok(())
+}
+
+#[test]
 fn exact_search_cli_filters_explicitly_and_preserves_bounded_ambiguity()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

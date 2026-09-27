@@ -522,6 +522,16 @@ exhaustion reports truncation and omitted member counts. Individual source
 failures remain visible without suppressing other valid excerpts. Stored
 source digests and containment checks use the existing source reader.
 
+Optional `--member-focus TEXT` requires member mode. It ranks callables by the
+number of distinct normalized focus terms in their recorded names, then by the
+original source order. Existing query-term and identifier normalization apply;
+input is limited to 4,096 bytes and 32 distinct searchable terms. Empty or
+unsearchable focus is rejected. Duplicate terms do not add weight. No matches
+preserve source order; unmatched members remain candidates. Source is not read
+to rank, and focus does not resolve ambiguous roots or relax any existing limit.
+The report names focus terms and each retained member's lexical matches. These
+matches do not establish responsibility, behavior or semantic relevance.
+
 This is an additive CLI option and query API, with no graph or shared-output
 schema change. The text reports exact member IDs, source anchors, verification
 status, retained source bytes, and unavailable/omitted counts. It is structural

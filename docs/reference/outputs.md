@@ -1380,6 +1380,15 @@ declaration span. The optional mode replaces the declaration excerpt. It follows
 outgoing containment through nested types and orders members by source location;
 it does not choose members based on an inferred responsibility.
 
+To prioritize a topic within that recorded membership, add
+`--member-focus "symlink loops"`. Members whose names contain more distinct
+normalized query terms appear first; source order breaks ties. Unmatched members
+remain eligible and source reads still share one byte budget. This is a lexical
+name hint, not a synthesized answer. The text reports the normalized focus and
+matches per retained member. Focus requires `--source-members`, accepts at most
+4,096 bytes / 32 distinct searchable terms, and never disambiguates an owner.
+Without focus, the existing source order and output remain unchanged.
+
 `MEMBER SOURCES` reports retained, omitted and unavailable members, total source
 bytes, and truncation. Each `MEMBER` has an exact ID followed by its source and
 verification status, or an explicit source error. The byte budget is shared

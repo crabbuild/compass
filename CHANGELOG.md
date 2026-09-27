@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add opt-in `explain --source-members --member-focus TEXT` to prioritize
+  normalized member-name matches within the existing shared source budget.
+  Preserve source order for ties, retain unmatched candidates and report the
+  lexical matches without claiming behavioral relevance.
+
 - Emit Java field-access references from bounded lexical scope and receiver
   evidence, preserving shadowing, field identity and parallel source occurrences.
   Invalidate prior AST caches; retain unsupported targets without name fallback.

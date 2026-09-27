@@ -41,7 +41,10 @@ pub use discovery_text::{
     discovery_response_digest, discovery_result_envelope, render_discovery_text_page,
     render_discovery_text_page_with_prefix,
 };
-pub use explanation_members::{ExplainedMember, ExplainedMembers, explanation_member_sources};
+pub use explanation_members::{
+    ExplainedMember, ExplainedMembers, ExplanationMemberFocus, explanation_member_sources,
+    explanation_member_sources_with_focus,
+};
 pub use graph_engine::{
     DirectGraphEngine, EffectiveGraphEngine, GraphEngine, JsonGraphEngine, StoreGraphEngine,
     open_graph_engine,
