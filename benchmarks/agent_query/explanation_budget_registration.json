@@ -1,0 +1,67 @@
+{
+  "schema": "compass.explanation-budget-registration/1",
+  "baselineCommit": "7b9d46f17f876c4c1414b4c08cdda80aaa07b82c",
+  "scope": "Previously inspected five-language development panel; budget sensitivity and latest-graph replay, not held-out evidence or authored-answer scoring.",
+  "sourceQuestions": "benchmarks/agent_query/responsibility_questions_panel_a.json",
+  "sourceQuestionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "tasks": [
+    {
+      "repository": "chi",
+      "symbol": "Mux",
+      "file": "mux.go",
+      "startLine": 21,
+      "kind": "struct"
+    },
+    {
+      "repository": "click",
+      "symbol": "_AtomicFile",
+      "file": "src/click/_compat.py",
+      "startLine": 455,
+      "kind": "class"
+    },
+    {
+      "repository": "jsoup",
+      "symbol": "Cleaner",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43,
+      "kind": "class"
+    },
+    {
+      "repository": "redux",
+      "symbol": "createStore",
+      "file": "src/createStore.ts",
+      "startLine": 86,
+      "kind": "function"
+    },
+    {
+      "repository": "walkdir",
+      "symbol": "IntoIter",
+      "file": "src/lib.rs",
+      "startLine": 566,
+      "kind": "struct"
+    }
+  ],
+  "graphRun": "java-state-access-02/run.json",
+  "graphRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "binary": "java-state-access-02/compass",
+  "binarySha256": "5f6ff5f9b7b13866fdc7435e7a05888d3a95a0b23636be89cf45bc3478660139",
+  "priorCapture": "exact-symbol-08/capture/capture.json",
+  "priorCaptureSha256": "4263f8d01ace8a5d7caa3595642115875bdd91c63e5b3a3d03bd12c3abd3c91a",
+  "sourceBudgets": [
+    2000,
+    4000,
+    8000,
+    16000,
+    32000
+  ],
+  "identityControl": "Both tools receive the same known symbol, repository-relative file, declaration line and expected kind. Compass uses search_symbols exact=true, source_file, start_line, kind with existing limits (256 candidates, 500 nodes, 524288 response bytes). Graphify uses its existing file::symbol get_node; validate returned source identity and source-declaration kind afterward. Do not imply Graphify natively accepts all filters. One call per tool/subject, no retries. Preserve all ambiguity/error/limit outcomes.",
+  "retrieval": "One public exact resolver and one public get_neighbors request per tool/subject. Membership anchors come only from outgoing contains/method rows in that response. Group equal file/line anchors, sort by file and line, read from each anchor to the next returned anchor in its file; final window ends at min(EOF, start+4096). Cap concatenated raw source bytes by each registered budget. No question, witness, graph-file, name-ranking or source-content selection. Same policy for both tools. No extra calls or retries to improve a score.",
+  "scoring": "Preserve all 20 facts at every budget. Report literal witness coverage and the prior fixed semantic allowance for click-1 (only class header missing, source identity verified and all other witness lines present). No partial-fact credit. Missing resolver, source, truncation or tool error remains explicit and cannot become a successful empty inventory. Raw source is evidence, never an authored answer.",
+  "verification": "Check source pins, clean source checkouts, source/graph/binary/package hashes before and after capture; preserve raw MCP calls and bytes. Independently replay window byte offsets and source hashes. Compare the 8000-byte results with the old capture, report every payload/anchor/window change. Publish all five budgets, including ties and losses; retain the historical scores.",
+  "limitations": [
+    "Known development questions and prior misses have been read before choosing these geometric budgets.",
+    "Equal retained source quotas are not equal compute, context tokens or graph-payload budgets. Report actual source and response bytes.",
+    "A larger source quota is not a product improvement; no product changes or superior explanation claim follow from this experiment.",
+    "Full question coverage, semantic correctness, authored answers, god-object judgments and held-out quality remain separate requirements."
+  ]
+}
