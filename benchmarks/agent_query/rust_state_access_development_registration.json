@@ -12,5 +12,15 @@
     "AST cache invalidation test and native baseline",
     "Production fixture qualification",
     "Pinned source/graph/binary hashes; replayable 20-site comparison and graph deltas"
-  ]
+  ],
+  "publicFollowup": {
+    "scope": "Known-ID-assisted retrieval control, not natural-language discovery or identity resolution. Registered before rebuilt graphs or follow-up outputs are inspected.",
+    "tasks": [
+      "WalkDir IntoIter::handle_entry -> deferred_dirs at src/lib.rs:875",
+      "WalkDir IntoIter::get_deferred_dir -> deferred_dirs at src/lib.rs:886",
+      "WalkDir IntoIter::push -> oldest_opened at src/lib.rs:945",
+      "WalkDir IntoIter::pop -> oldest_opened at src/lib.rs:958"
+    ],
+    "policy": "For each source-validated callable, provide each tool its own exact graph ID as an explicit task input and issue one public MCP get_neighbors call with no relation filter. Preserve native defaults, all errors, truncation and response bytes; no retries or source follow-ups. Score field-neighbor identity separately from occurrence anchoring and report graph consistency, not authored explanations. Use unchanged baseline Graphify graphs and new Compass graphs."
+  }
 }
