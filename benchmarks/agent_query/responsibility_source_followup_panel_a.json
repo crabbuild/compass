@@ -1,0 +1,225 @@
+{
+  "schema": "compass.responsibility-source-followup/1",
+  "scope": "Post-query development follow-up, selected and frozen before reading the bounded source windows. This measures an agent workflow using graph-returned anchors, not a native-only answer.",
+  "sourceQuestionCommit": "232608ee",
+  "inputCapture": "responsibility-explanation-01",
+  "policy": {
+    "allowedReadsPerResponse": 1,
+    "sourceBytesPerRead": 8000,
+    "maxSourceFileBytes": 4194304,
+    "selection": "Match the exact supplied subject against terminal displayed NODE names, ignoring the display-only () suffix. Exclude explicit file/module containers. All returned matching anchors are retained. Read only if they all identify one file; do not resolve a declaration ambiguity by picking one candidate.",
+    "window": "Read a contiguous byte window beginning at the earliest returned matching line in that one file. Retain all distinct declaration lines and disclose truncation; this window origin does not select a declaration as the answer.",
+    "oracleSeparation": "No graph-file lookup or source oracle range participates in selecting the file or window. Source facts are used only after capture for evidence judgment.",
+    "safety": "Require a repository-relative regular file contained beneath the pinned checkout, within the file-size bound, with a valid returned line. No mutations of input repositories.",
+    "scoring": "Rejudge the same 20 facts for sufficient combined query-plus-source evidence; distinguish observed code from a synthesized explanation. Record actual source bytes and initial response bytes separately. Preserve declaration ambiguity, omissions and incomplete reads.",
+    "limitations": [
+      "A single contiguous source read is one bounded agent policy, not a best-possible workflow.",
+      "Window position and declaration multiplicity affect coverage. Further disambiguation, wider reads and native explain/get_node workflows remain outside this arm.",
+      "Neither equal requested query budgets nor this follow-up imply equal prior response sizes.",
+      "No god-object label, community quality judgment, latency claim or broad superiority conclusion follows."
+    ]
+  },
+  "requests": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "subject": "Mux",
+      "inputSha256": "37657db8665dda901e0e3befbd557c0987c833bc18c6e6722ae004b7c4e27bbf",
+      "anchors": [
+        {
+          "label": "chi.Mux",
+          "file": "mux.go",
+          "line": 21,
+          "kind": "struct",
+          "returnedRow": "NODE chi.Mux [struct] mux.go:21:5-48:1"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "mux.go",
+      "startLine": 21
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "subject": "Mux",
+      "inputSha256": "1bf6c1ffd510f5a1183367edaba6fb6a7a66764cd9a658fdaa9cfa3eeff6b52f",
+      "anchors": [
+        {
+          "label": "Mux",
+          "file": "mux.go",
+          "line": 21,
+          "kind": "displayed-node",
+          "returnedRow": "NODE Mux [src=mux.go loc=L21 community=3]"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "mux.go",
+      "startLine": 21
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "subject": "_AtomicFile",
+      "inputSha256": "09d1dab6c20017246f8e36ffe47f45c995cdf3b8f9d2e4fa9717f843769cdaf3",
+      "anchors": [
+        {
+          "label": "src.click._compat._AtomicFile",
+          "file": "src/click/_compat.py",
+          "line": 455,
+          "kind": "class",
+          "returnedRow": "NODE src.click._compat._AtomicFile [class] src/click/_compat.py:455:0-488:28"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/click/_compat.py",
+      "startLine": 455
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "subject": "_AtomicFile",
+      "inputSha256": "f8e7ae3aae06a943c686f3cd5f94cc7c7ea1f7da243ef8aa1ff35b5984564da5",
+      "anchors": [
+        {
+          "label": "_AtomicFile",
+          "file": "src/click/_compat.py",
+          "line": 455,
+          "kind": "displayed-node",
+          "returnedRow": "NODE _AtomicFile [src=src/click/_compat.py loc=L455 community=86]"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/click/_compat.py",
+      "startLine": 455
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "subject": "Cleaner",
+      "inputSha256": "51bcb6e5217ff0bb974a18fb07a6b636d7a2b67c2ed5641c5da5ad1acf6c5a94",
+      "anchors": [
+        {
+          "label": "org.jsoup.safety.Cleaner",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 43,
+          "kind": "class",
+          "returnedRow": "NODE org.jsoup.safety.Cleaner [class] src/main/java/org/jsoup/safety/Cleaner.java:43:0-247:1"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "subject": "Cleaner",
+      "inputSha256": "21db49e7171f06bfa3b36559f63a622705673ca94869932c49389803f09829c2",
+      "anchors": [
+        {
+          "label": "Cleaner",
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 43,
+          "kind": "displayed-node",
+          "returnedRow": "NODE Cleaner [src=src/main/java/org/jsoup/safety/Cleaner.java loc=L43 community=129]"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "subject": "createStore",
+      "inputSha256": "d30483e834045767618774140ade72fac87144bd43938a2360ab005ba9681235",
+      "anchors": [
+        {
+          "label": "createStore.createStore",
+          "file": "src/createStore.ts",
+          "line": 75,
+          "kind": "function",
+          "returnedRow": "NODE createStore.createStore [function] src/createStore.ts:75:7-85:61"
+        },
+        {
+          "label": "createStore.createStore",
+          "file": "src/createStore.ts",
+          "line": 86,
+          "kind": "function",
+          "returnedRow": "NODE createStore.createStore [function] src/createStore.ts:86:7-395:1"
+        },
+        {
+          "label": "createStore.createStore",
+          "file": "src/createStore.ts",
+          "line": 41,
+          "kind": "function",
+          "returnedRow": "NODE createStore.createStore [function] src/createStore.ts:41:7-49:61"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/createStore.ts",
+      "startLine": 41
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "subject": "createStore",
+      "inputSha256": "ba6c21a04ee4f7d720ee74726dd4551ce982429d97ade961ce50db31ef9a58da",
+      "anchors": [
+        {
+          "label": "createStore()",
+          "file": "src/createStore.ts",
+          "line": 86,
+          "kind": "displayed-node",
+          "returnedRow": "NODE createStore() [src=src/createStore.ts loc=L86 community=25]"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/createStore.ts",
+      "startLine": 86
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "subject": "IntoIter",
+      "inputSha256": "4e0658ae31900521385690c31083b617977c322a9af823faf5f17505ad63be49",
+      "anchors": [
+        {
+          "label": "<impl IntoIterator for WalkDir>::IntoIter",
+          "file": "src/lib.rs",
+          "line": 538,
+          "kind": "type_alias",
+          "returnedRow": "NODE <impl IntoIterator for WalkDir>::IntoIter [type_alias] src/lib.rs:538:4-538:29"
+        },
+        {
+          "label": "walkdir::IntoIter",
+          "file": "src/lib.rs",
+          "line": 566,
+          "kind": "struct",
+          "returnedRow": "NODE walkdir::IntoIter [struct] src/lib.rs:566:0-606:1"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/lib.rs",
+      "startLine": 538
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "subject": "IntoIter",
+      "inputSha256": "729cd0be188021d0e815f4167dd547728feb812a8a497f638f9164f86f3028be",
+      "anchors": [
+        {
+          "label": "IntoIter",
+          "file": "src/lib.rs",
+          "line": 566,
+          "kind": "displayed-node",
+          "returnedRow": "NODE IntoIter [src=src/lib.rs loc=L566 community=2]"
+        }
+      ],
+      "fileSelection": "unique-file",
+      "selectedFile": "src/lib.rs",
+      "startLine": 566
+    }
+  ]
+}
