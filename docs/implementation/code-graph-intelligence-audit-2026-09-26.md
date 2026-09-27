@@ -2337,6 +2337,97 @@ God-object responsibility judgments, richer source explanations, broader
 assertion precision, longer directed walks and fresh held-out confirmation
 remain outstanding.
 
+## Directed endpoint identity and depth-limit correctness
+
+The registered development replay reuses the five source-reviewed two-to-four
+call chains in Chi (Go), Click (Python), jsoup (Java), Redux (TypeScript), and
+WalkDir (Rust), with all ten graphs frozen from `rust-index-receiver-03`.
+Both tools receive the same endpoint file, start line and symbol. One public
+MCP resolver call per endpoint returns candidates; only a unique exact source
+match may supply an ID to the directed CLI path request. No graph ID is used to
+construct requests. The protocol was committed as `98759ae8`, before capture.
+This is source-assisted navigation on known development tasks, not autonomous
+endpoint discovery, fresh extraction or held-out evidence.
+
+A separate native-label control was registered at `2cc02501` after observing
+ID-input failures, before executing the control with the final binary. It uses
+only the original five short-name pairs, with no retries or candidate changes.
+Its results are kept separate: taking the best answer from either arm would
+misrepresent both protocols. External deadlines and stream bounds match, but
+native internal work limits differ; Graphify exposes no matching CLI depth
+control. There is no timing or efficiency ranking.
+
+| Source-supported directed call chains | Compass | Graphify |
+| --- | ---: | ---: |
+| Public resolver IDs supplied to CLI | 4/5 | 1/5 |
+| Original native short labels | 2/5 | 2/5 |
+
+The ID workflow resolves four Compass endpoint pairs and all five Graphify
+pairs. Compass returns the reviewed chains for Chi, Click, jsoup and WalkDir;
+Redux remains unresolved because `search_symbols` returns a function and an
+export with the same source line and name. The frozen selector refuses to pick
+one. Graphify succeeds for Redux; its Chi route starts at `Mux` rather than the
+resolved `MethodFunc` and mixes references/membership with calls. It reports
+no path for Click, jsoup and WalkDir with these ID inputs. Inspection of the
+pinned Graphify CLI confirms it passes IDs through label scoring without an
+exact-ID check. This arm measures endpoint handling across public interfaces
+as well as path availability; it is not a pure path-search comparison.
+
+The native-label control preserves Graphify's Click and Redux successes.
+Compass succeeds for Click and WalkDir and refuses three ambiguous requests.
+Graphify's Chi and WalkDir routes mix structural relationships with calls;
+jsoup reports no directed route. Those structural routes are not credited as
+call chains, but this does not establish that the structural edges themselves
+are wrong. Every successful chain was checked against exact declarations,
+edge orientation, occurrence sites and pinned source. Compass selects a second
+valid Click call at line 188 rather than the frozen line 181; literal frozen-site
+agreement is therefore 3/5 and 1/5 for its ID and label arms, versus Graphify's
+1/5 and 2/5. Conditional static call chains do not imply guaranteed runtime
+execution sequences.
+
+The replay also exposed a correctness defect independent of the paired score:
+a failed depth-limited directed search could claim a direction mismatch using
+a shorter undirected route, even while a longer forward route existed. A native
+regression reproduced that claim before the fix. A second regression reproduced
+`explore` dropping incomplete status when no connecting path was returned.
+The query layer now checks whether the depth frontier remains open after a
+failed bounded search and preserves that status through exploration. Frontier
+checks share the work budget and occur after the positive search, so they cannot
+consume the budget of a still-viable shorter route. Closed dead ends and cycles
+can still prove a complete negative result within the graph.
+
+All nine registered low-depth requests changed from `truncated: false` to
+`truncated: true` with `bounded_truncation`; none now claims `direction_mismatch`
+or `no_match`. All four positive Compass ID-path payloads and all ten Graphify
+forward/reverse payloads are byte-identical to baseline. The path scores above
+were already present before this fix: the improvement is truthful bound reporting.
+Reverse probes receive no source-global absence credit. In particular, Chi's
+reverse diagnostic combines a closed directed search with an incomplete
+undirected search that nevertheless finds a connection; its bounded flag
+remains visible.
+
+A separate same-agent verifier checks saved public request/response transcripts,
+source-coordinate selections, CLI arguments, graph/source/binary hashes, full
+paths and typed provenance projections. Its first attempt incorrectly required
+raw graph and typed query evidence to have identical JSON structure; the retained
+failure led to checking their explicit field/anchor projection instead. It is
+not independent human adjudication. Raw captures, both native reproductions,
+the failed verification attempt and the final verifier are retained under
+`directed-identity-01` and `directed-identity-02`; artifact hashes and detailed
+outcomes are in `benchmarks/agent_query/directed_identity_development_review.json`.
+
+Final validation passed: formatting, 24 focused query tests (including the
+2,187-request four-node oracle), 38 CLI query tests, 60 MCP tests, workspace
+Clippy, 1,106 workspace tests (2 ignored), 9 product tests, product boundary,
+complete production fixture qualification and the final CLI build. The Python
+harness passed 137 tests. Validated source hashes match implementation
+`1ec835bf`; the evaluated binary is byte-identical to the final build. Existing
+fixture-omission and compiler warnings remain in the retained logs. No version
+or machine-schema bump was made.
+
+God-object responsibility judgments, richer explanations, broader source
+precision, longer walks and fresh held-out confirmation remain unproven.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

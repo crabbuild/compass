@@ -1,0 +1,2081 @@
+{
+  "schema": "compass.directed-identity-development-review/1",
+  "scope": "Known development chains across five languages; query replay on ten frozen graphs. Source-assisted IDs and native short labels are separate arms. No held-out, extraction, latency, population precision, or overall superiority claim.",
+  "implementationCommit": "1ec835bfa66073b9295ac5c58ca089e3959c5c7c",
+  "registrations": {
+    "sourceAssisted": {
+      "commit": "98759ae818a89f89fad19d4219b9c8954b986108",
+      "sha256": "13f2d40857c320b89958c606d0b673f6232824c4ea88cd6fd107bbbb5b8a56b5"
+    },
+    "nativeLabelControl": {
+      "commit": "2cc02501",
+      "sha256": "2201598e675a94675c4f133cc900b7e083018abb0268289a6d59853d1a6b0eb4",
+      "timing": "After ID baseline failures were seen, before executing label control. Not blind."
+    }
+  },
+  "tools": {
+    "compass": {
+      "version": "0.3.30",
+      "binarySha256": "58199f5cfbbce9def3acb58bf019179218c8f6cbe379a3cd96ad9542e8f0b31f"
+    },
+    "graphify": {
+      "version": "0.9.67",
+      "environmentManifestSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535"
+    }
+  },
+  "graphs": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "compassGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "compassGraphSha256": "e68fbe798dcf7422184736971dcdfc29d577e1e37269ea9c43456b9f6af54cb3",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+    }
+  ],
+  "summary": {
+    "sourceAssisted": {
+      "compass": {
+        "sourceSupportedCallPaths": 4,
+        "literalFrozenOccurrenceSites": 3,
+        "positiveTasks": 5
+      },
+      "graphify": {
+        "sourceSupportedCallPaths": 1,
+        "literalFrozenOccurrenceSites": 1,
+        "positiveTasks": 5
+      }
+    },
+    "nativeLabels": {
+      "compass": {
+        "sourceSupportedCallPaths": 2,
+        "literalFrozenOccurrenceSites": 1,
+        "positiveTasks": 5
+      },
+      "graphify": {
+        "sourceSupportedCallPaths": 2,
+        "literalFrozenOccurrenceSites": 2,
+        "positiveTasks": 5
+      }
+    },
+    "unchangedPayloads": [
+      {
+        "question": "chi-directed-chain",
+        "tool": "compass",
+        "direction": "forward"
+      },
+      {
+        "question": "chi-directed-chain",
+        "tool": "graphify",
+        "direction": "forward"
+      },
+      {
+        "question": "chi-directed-chain",
+        "tool": "graphify",
+        "direction": "reverse"
+      },
+      {
+        "question": "click-directed-chain",
+        "tool": "compass",
+        "direction": "forward"
+      },
+      {
+        "question": "click-directed-chain",
+        "tool": "graphify",
+        "direction": "forward"
+      },
+      {
+        "question": "click-directed-chain",
+        "tool": "graphify",
+        "direction": "reverse"
+      },
+      {
+        "question": "jsoup-directed-chain",
+        "tool": "compass",
+        "direction": "forward"
+      },
+      {
+        "question": "jsoup-directed-chain",
+        "tool": "graphify",
+        "direction": "forward"
+      },
+      {
+        "question": "jsoup-directed-chain",
+        "tool": "graphify",
+        "direction": "reverse"
+      },
+      {
+        "question": "redux-directed-chain",
+        "tool": "graphify",
+        "direction": "forward"
+      },
+      {
+        "question": "redux-directed-chain",
+        "tool": "graphify",
+        "direction": "reverse"
+      },
+      {
+        "question": "walkdir-directed-chain",
+        "tool": "compass",
+        "direction": "forward"
+      },
+      {
+        "question": "walkdir-directed-chain",
+        "tool": "graphify",
+        "direction": "forward"
+      },
+      {
+        "question": "walkdir-directed-chain",
+        "tool": "graphify",
+        "direction": "reverse"
+      }
+    ],
+    "depthDiagnostics": {
+      "beforeCompleteNegatives": 9,
+      "afterExplicitIncomplete": 9
+    }
+  },
+  "sourceAssistedResults": [
+    {
+      "question": "chi-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        {
+          "id": "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+          "source": {
+            "file": "mux.go",
+            "startByte": 4390,
+            "endByte": 4510,
+            "startLine": 137,
+            "startColumn": 0,
+            "endLine": 139,
+            "endColumn": 1
+          },
+          "name": ".MethodFunc()"
+        },
+        {
+          "id": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "source": {
+            "file": "mux.go",
+            "startByte": 4034,
+            "endByte": 4267,
+            "startLine": 127,
+            "startColumn": 0,
+            "endLine": 133,
+            "endColumn": 1
+          },
+          "name": ".Method()"
+        },
+        {
+          "id": "sha256:f347f98bee807aa7b86ad9bb7962bce9fffcacb0e94be392f6bca77e9d6c978e",
+          "source": {
+            "file": "mux.go",
+            "startByte": 13994,
+            "endByte": 14669,
+            "startLine": 430,
+            "startColumn": 0,
+            "endLine": 451,
+            "endColumn": 1
+          },
+          "name": ".handle()"
+        },
+        {
+          "id": "sha256:eb099943707f1745c7673f0dbc8e5a32de0d98b853e4b355ab9633337b638aa6",
+          "source": {
+            "file": "tree.go",
+            "startByte": 3152,
+            "endByte": 5528,
+            "startLine": 148,
+            "startColumn": 0,
+            "endLine": 238,
+            "endColumn": 1
+          },
+          "name": ".InsertRoute()"
+        },
+        {
+          "id": "sha256:14440f0795f62b6428da626ef794bf18b4acd793012fc5148478f8a50519ddaa",
+          "source": {
+            "file": "tree.go",
+            "startByte": 19345,
+            "endByte": 19481,
+            "startLine": 822,
+            "startColumn": 0,
+            "endLine": 829,
+            "endColumn": 1
+          },
+          "name": "longestPrefix()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:275a2a085c7409a899e065c2d836a8a75506ddd76542ac01de4764e50e899b32",
+          "source": "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+          "target": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "kind": "calls",
+          "site": {
+            "file": "mux.go",
+            "startByte": 4471,
+            "endByte": 4480,
+            "startLine": 138,
+            "startColumn": 1,
+            "endLine": 138,
+            "endColumn": 10
+          },
+          "sourceBytes": "mx.Method",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:3155b7566154b5aa0c12e18cd3b3049c0b96cc58b9d8a2f0fa38df38f24cb968",
+          "source": "sha256:3456e37dabe75e9c6f4dd179da5eb7f3687aa418b2f40e76eced666aab857948",
+          "target": "sha256:f347f98bee807aa7b86ad9bb7962bce9fffcacb0e94be392f6bca77e9d6c978e",
+          "kind": "calls",
+          "site": {
+            "file": "mux.go",
+            "startByte": 4235,
+            "endByte": 4244,
+            "startLine": 132,
+            "startColumn": 1,
+            "endLine": 132,
+            "endColumn": 10
+          },
+          "sourceBytes": "mx.handle",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:a8a9ae5d8e8d38059bf3959a56f6ab77056b2a23faac85a18f88ce28c5fdebb5",
+          "source": "sha256:f347f98bee807aa7b86ad9bb7962bce9fffcacb0e94be392f6bca77e9d6c978e",
+          "target": "sha256:eb099943707f1745c7673f0dbc8e5a32de0d98b853e4b355ab9633337b638aa6",
+          "kind": "calls",
+          "site": {
+            "file": "mux.go",
+            "startByte": 14628,
+            "endByte": 14647,
+            "startLine": 450,
+            "startColumn": 8,
+            "endLine": 450,
+            "endColumn": 27
+          },
+          "sourceBytes": "mx.tree.InsertRoute",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:96d37619a29dcb60d5057938e6910b83c6068d29b5e9b01a983588d56070d55c",
+          "source": "sha256:eb099943707f1745c7673f0dbc8e5a32de0d98b853e4b355ab9633337b638aa6",
+          "target": "sha256:14440f0795f62b6428da626ef794bf18b4acd793012fc5148478f8a50519ddaa",
+          "kind": "calls",
+          "site": {
+            "file": "tree.go",
+            "startByte": 4577,
+            "endByte": 4590,
+            "startLine": 201,
+            "startColumn": 18,
+            "endLine": 201,
+            "endColumn": 31
+          },
+          "sourceBytes": "longestPrefix",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        }
+      ],
+      "responseDiagnostics": [],
+      "truncated": false,
+      "classification": "reviewed-call-chain",
+      "resolvedEndpoints": [
+        "sha256:df0333f52e3fd0c8f9492484bcef6287d9044fe0834e27bf8adb31cd646f7bbc",
+        "sha256:14440f0795f62b6428da626ef794bf18b4acd793012fc5148478f8a50519ddaa"
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "route length differs from reviewed witness"
+      ],
+      "nodes": [],
+      "steps": [],
+      "renderedLabels": [
+        "Mux",
+        "node",
+        ".findPattern()",
+        "longestPrefix()"
+      ],
+      "renderedRelations": [
+        "references",
+        "method",
+        "calls"
+      ],
+      "classification": "mixed-relation-route",
+      "renderedEndpointCandidates": [
+        [
+          "mux_go_chi_mux"
+        ],
+        [
+          "tree_longestprefix"
+        ]
+      ],
+      "resolvedEndpoints": [
+        "chi_mux_methodfunc",
+        "tree_longestprefix"
+      ],
+      "renderedEndpointIdentityMatches": [
+        false,
+        true
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [],
+      "nodes": [
+        {
+          "id": "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+          "source": {
+            "file": "src/click/utils.py",
+            "startByte": 11486,
+            "endByte": 13132,
+            "startLine": 381,
+            "startColumn": 0,
+            "endLine": 427,
+            "endColumn": 12
+          },
+          "name": "open_file()"
+        },
+        {
+          "id": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 11423,
+            "endByte": 14244,
+            "startLine": 374,
+            "startColumn": 0,
+            "endLine": 452,
+            "endColumn": 40
+          },
+          "name": "open_stream()"
+        },
+        {
+          "id": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 9593,
+            "endByte": 9800,
+            "startLine": 319,
+            "startColumn": 0,
+            "endLine": 323,
+            "endColumn": 17
+          },
+          "name": "get_binary_stdin()"
+        },
+        {
+          "id": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 4815,
+            "endByte": 5484,
+            "startLine": 176,
+            "startColumn": 0,
+            "endLine": 191,
+            "endColumn": 15
+          },
+          "name": "_find_binary_reader()"
+        },
+        {
+          "id": "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 4230,
+            "endByte": 4529,
+            "startLine": 154,
+            "startColumn": 0,
+            "endLine": 160,
+            "endColumn": 55
+          },
+          "name": "_is_binary_reader()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:b4f41add3eb26a6b6699864bed02e49dd24595a669501b1f2fbd44140601556e",
+          "source": "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+          "target": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/utils.py",
+            "startByte": 12980,
+            "endByte": 12991,
+            "startLine": 422,
+            "startColumn": 22,
+            "endLine": 422,
+            "endColumn": 33
+          },
+          "sourceBytes": "open_stream",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:b3d1f4a591b7a358eb841388e97117bbd4a2377817aa4014c2b9f5fed9759bc5",
+          "source": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "target": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 12085,
+            "endByte": 12101,
+            "startLine": 392,
+            "startColumn": 19,
+            "endLine": 392,
+            "endColumn": 35
+          },
+          "sourceBytes": "get_binary_stdin",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:ab477fcd547ac3d833934602fc1d5871a98378031c63dc125aeaebbf5e84cb34",
+          "source": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "target": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 9644,
+            "endByte": 9663,
+            "startLine": 320,
+            "startColumn": 13,
+            "endLine": 320,
+            "endColumn": 32
+          },
+          "sourceBytes": "_find_binary_reader",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:0ed10b05deb50320b392d13c0e611c3732abfc5d77e1267e3bb744afc3596349",
+          "source": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "target": "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 5399,
+            "endByte": 5416,
+            "startLine": 188,
+            "startColumn": 27,
+            "endLine": 188,
+            "endColumn": 44
+          },
+          "sourceBytes": "_is_binary_reader",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": false,
+          "acceptedAlternateOccurrences": [
+            {
+              "file": "src/click/_compat.py",
+              "line": 188,
+              "text": "if buf is not None and _is_binary_reader(buf, True):",
+              "reason": "Same caller and callee, second direct occurrence; independently source-adjudicated in the earlier panel and reread for this replay. Frozen line 181 remains distinct."
+            }
+          ]
+        }
+      ],
+      "responseDiagnostics": [],
+      "truncated": false,
+      "classification": "reviewed-call-chain",
+      "resolvedEndpoints": [
+        "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+        "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "expected exactly one rendered path header"
+      ],
+      "nodes": [],
+      "steps": [],
+      "classification": "no-path-reported",
+      "resolvedEndpoints": [
+        "src_click_utils_open_file",
+        "src_click_compat_is_binary_reader"
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        {
+          "id": "sha256:577f3fb7ba180a8a08c3f3f8fe6bae0f7eedf731b281139a8e9d5f9b7213a7e6",
+          "source": {
+            "file": "src/main/java/org/jsoup/Jsoup.java",
+            "startByte": 19606,
+            "endByte": 19743,
+            "startLine": 434,
+            "startColumn": 4,
+            "endLine": 436,
+            "endColumn": 5
+          },
+          "name": ".isValid()"
+        },
+        {
+          "id": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 5577,
+            "endByte": 6207,
+            "startLine": 124,
+            "startColumn": 4,
+            "endLine": 133,
+            "endColumn": 5
+          },
+          "name": ".isValidBodyHtml()"
+        },
+        {
+          "id": "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3",
+          "source": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 8357,
+            "endByte": 8584,
+            "startLine": 182,
+            "startColumn": 4,
+            "endLine": 186,
+            "endColumn": 5
+          },
+          "name": ".copySafeNodes()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:38d6c354f2e4a136528e0f8d4261fc07f6a2c9e18886865384966819efd9e046",
+          "source": "sha256:577f3fb7ba180a8a08c3f3f8fe6bae0f7eedf731b281139a8e9d5f9b7213a7e6",
+          "target": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "kind": "calls",
+          "site": {
+            "file": "src/main/java/org/jsoup/Jsoup.java",
+            "startByte": 19711,
+            "endByte": 19726,
+            "startLine": 435,
+            "startColumn": 37,
+            "endLine": 435,
+            "endColumn": 52
+          },
+          "sourceBytes": "isValidBodyHtml",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:d64cc76f4a39ece82f005ff9eb5b59046c4f4a2affc9183dbd7042047afe3c19",
+          "source": "sha256:7a0cdc660eb47dd50d176901e606343fb9b0147d56440a33acc4f3ef5811d406",
+          "target": "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3",
+          "kind": "calls",
+          "site": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "startByte": 6102,
+            "endByte": 6115,
+            "startLine": 131,
+            "startColumn": 27,
+            "endLine": 131,
+            "endColumn": 40
+          },
+          "sourceBytes": "copySafeNodes",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        }
+      ],
+      "responseDiagnostics": [
+        {
+          "code": "incomplete_coverage",
+          "message": "Published graph coverage is incomplete: partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap",
+          "nodeId": null,
+          "path": null
+        }
+      ],
+      "truncated": false,
+      "classification": "reviewed-call-chain",
+      "resolvedEndpoints": [
+        "sha256:577f3fb7ba180a8a08c3f3f8fe6bae0f7eedf731b281139a8e9d5f9b7213a7e6",
+        "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3"
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "expected exactly one rendered path header"
+      ],
+      "nodes": [],
+      "steps": [],
+      "classification": "no-path-reported",
+      "resolvedEndpoints": [
+        "src_main_java_org_jsoup_jsoup_jsoup_isvalid",
+        "src_main_java_org_jsoup_safety_cleaner_cleaner_copysafenodes"
+      ]
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "classification": "unresolved-endpoint",
+      "endpointSelections": [
+        {
+          "status": "ambiguous",
+          "matchedIds": [
+            "sha256:2dc819f91bc866786968c643e45ad6b3419369536fbc2f8851bb810298489506",
+            "sha256:df1114c0498b4e62ad32946ea04a508c76bd92955defafa89ab7857dbf577770"
+          ],
+          "selector": null,
+          "returnedAnchors": [
+            {
+              "id": "sha256:1c38121eddeb189509bb8d8efb07f7d9f34bfa79e7fab77f18234722d8114e0a",
+              "file": "src/utils/kindOf.ts",
+              "line": 2,
+              "symbols": [
+                "miniKindOf"
+              ]
+            },
+            {
+              "id": "sha256:1c93d4d4f845f8b68d97822707d5e2d754f37e7ae6c69e307aab7ce195ef297a",
+              "file": "src/utils/kindOf.ts",
+              "line": 2,
+              "symbols": [
+                "miniKindOf"
+              ]
+            },
+            {
+              "id": "sha256:23d5e35138207bb498c86df080c5a0d26d80cfe44184d297441fb49ed763c9e6",
+              "file": "src/utils/kindOf.ts",
+              "line": 1,
+              "symbols": [
+                "ts"
+              ]
+            },
+            {
+              "id": "sha256:2dc819f91bc866786968c643e45ad6b3419369536fbc2f8851bb810298489506",
+              "file": "src/utils/kindOf.ts",
+              "line": 62,
+              "symbols": [
+                "kindOf"
+              ]
+            },
+            {
+              "id": "sha256:3b684eb33ecd37d5eea86502a36408c1047e2ff3c4ad5e0aed7ac9b9cb62710c",
+              "file": "src/createStore.ts",
+              "line": 13,
+              "symbols": [
+                "kindOf"
+              ]
+            },
+            {
+              "id": "sha256:61ac1d5c152c2db8ec8626b9e4c1b9f3e646935e7fc92425410935d3cf83c37e",
+              "file": "src/utils/kindOf.ts",
+              "line": 40,
+              "symbols": [
+                "ctorName"
+              ]
+            },
+            {
+              "id": "sha256:6e1928d086236a4cb8403dded8bf17d37f1abe5823b7091b4f7f6f7326bd9ec0",
+              "file": "src/utils/kindOf.ts",
+              "line": 53,
+              "symbols": [
+                "isDate"
+              ]
+            },
+            {
+              "id": "sha256:7c75317cab6859b47837e5821768e0e90c92a8cd8396164b9cc6e498d9d997cc",
+              "file": "src/combineReducers.ts",
+              "line": 12,
+              "symbols": [
+                "kindOf"
+              ]
+            },
+            {
+              "id": "sha256:8c815dd62745a090206d761cb274206829de83dc2f078a138c36c7b230ef0ee4",
+              "file": "src/utils/kindOf.ts",
+              "line": 63,
+              "symbols": [
+                "typeOfVal"
+              ]
+            },
+            {
+              "id": "sha256:b52e744f4e50b7f16a06ce02cc6cfc1f89b707e35e4ced168687d8603aaf0223",
+              "file": "src/bindActionCreators.ts",
+              "line": 7,
+              "symbols": [
+                "kindOf"
+              ]
+            },
+            {
+              "id": "sha256:bba968e55231038ae24c8fa0a1e745acd9241259443ab866eb7f63166f9360cf",
+              "file": "src/utils/kindOf.ts",
+              "line": 1,
+              "symbols": [
+                "kindOf"
+              ]
+            },
+            {
+              "id": "sha256:c6fb95e1a31cabfbecb5ee306b717a388f114ce7b1351712532bc2e75028095b",
+              "file": "src/utils/kindOf.ts",
+              "line": 6,
+              "symbols": [
+                "type"
+              ]
+            },
+            {
+              "id": "sha256:ddd22666a1a0e212c7d64e402d033e3d0051b79061d09d855ab5a0cbd600c9f9",
+              "file": "src/utils/kindOf.ts",
+              "line": 21,
+              "symbols": [
+                "constructorName"
+              ]
+            },
+            {
+              "id": "sha256:df1114c0498b4e62ad32946ea04a508c76bd92955defafa89ab7857dbf577770",
+              "file": "src/utils/kindOf.ts",
+              "line": 62,
+              "symbols": [
+                "kindOf"
+              ]
+            },
+            {
+              "id": "sha256:fa284cf3eb048c8e0b8d62d93c37c43aa43488a186096cef095e897c66a85253",
+              "file": "src/utils/kindOf.ts",
+              "line": 44,
+              "symbols": [
+                "isError"
+              ]
+            }
+          ]
+        },
+        {
+          "status": "resolved",
+          "matchedIds": [
+            "sha256:61ac1d5c152c2db8ec8626b9e4c1b9f3e646935e7fc92425410935d3cf83c37e"
+          ],
+          "selector": "sha256:61ac1d5c152c2db8ec8626b9e4c1b9f3e646935e7fc92425410935d3cf83c37e",
+          "returnedAnchors": [
+            {
+              "id": "sha256:61ac1d5c152c2db8ec8626b9e4c1b9f3e646935e7fc92425410935d3cf83c37e",
+              "file": "src/utils/kindOf.ts",
+              "line": 40,
+              "symbols": [
+                "ctorName"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        "src_utils_kindof_kindof",
+        "src_utils_kindof_minikindof",
+        "src_utils_kindof_ctorname"
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/utils/kindOf.ts",
+            "line": 66,
+            "text": "typeOfVal = miniKindOf(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          },
+          "reviewedSiteSupported": true
+        }
+      ],
+      "renderedLabels": [
+        "kindOf()",
+        "miniKindOf()",
+        "ctorName()"
+      ],
+      "renderedRelations": [
+        "calls",
+        "calls"
+      ],
+      "classification": "reviewed-call-chain",
+      "renderedEndpointCandidates": [
+        [
+          "src_utils_kindof_kindof"
+        ],
+        [
+          "src_utils_kindof_ctorname"
+        ]
+      ],
+      "resolvedEndpoints": [
+        "src_utils_kindof_kindof",
+        "src_utils_kindof_ctorname"
+      ],
+      "renderedEndpointIdentityMatches": [
+        true,
+        true
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 29143,
+            "endByte": 30869,
+            "startLine": 840,
+            "startColumn": 4,
+            "endLine": 882,
+            "endColumn": 5
+          },
+          "name": ".handle_entry()"
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 34443,
+            "endByte": 34874,
+            "startLine": 961,
+            "startColumn": 4,
+            "endLine": 971,
+            "endColumn": 5
+          },
+          "name": ".follow()"
+        },
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 34880,
+            "endByte": 35480,
+            "startLine": 973,
+            "startColumn": 4,
+            "endLine": 989,
+            "endColumn": 5
+          },
+          "name": ".check_loop()"
+        },
+        {
+          "id": "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01",
+          "source": {
+            "file": "src/error.rs",
+            "startByte": 6769,
+            "endByte": 7076,
+            "startLine": 184,
+            "startColumn": 4,
+            "endLine": 196,
+            "endColumn": 5
+          },
+          "name": ".from_loop()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:db51772e6e2a0f689b69f1447740b96e340679a37df7c50bfc727ffe85a06cf4",
+          "source": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "target": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 29337,
+            "endByte": 29348,
+            "startLine": 845,
+            "startColumn": 25,
+            "endLine": 845,
+            "endColumn": 36
+          },
+          "sourceBytes": "self.follow",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:9d2cbc7e60565250bba8045728a1451893838b7f1b8d26084a542957c88557c3",
+          "source": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "target": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 34811,
+            "endByte": 34826,
+            "startLine": 968,
+            "startColumn": 12,
+            "endLine": 968,
+            "endColumn": 27
+          },
+          "sourceBytes": "self.check_loop",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:32f0ce77ab676891029891f1d836f95f3e4c8458dcee2b5d51f7128b8ad32bcf",
+          "source": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "target": "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 35294,
+            "endByte": 35310,
+            "startLine": 981,
+            "startColumn": 27,
+            "endLine": 981,
+            "endColumn": 43
+          },
+          "sourceBytes": "Error::from_loop",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        }
+      ],
+      "responseDiagnostics": [],
+      "truncated": false,
+      "classification": "reviewed-call-chain",
+      "resolvedEndpoints": [
+        "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+        "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01"
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "expected exactly one rendered path header"
+      ],
+      "nodes": [],
+      "steps": [],
+      "classification": "no-path-reported",
+      "resolvedEndpoints": [
+        "src_lib_intoiter_handle_entry",
+        "src_error_error_from_loop"
+      ]
+    }
+  ],
+  "nativeLabelResults": [
+    {
+      "question": "chi-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "No single complete path returned."
+      ],
+      "nodes": [],
+      "steps": [],
+      "responseDiagnostics": [
+        {
+          "code": "ambiguous_match",
+          "message": "Symbol \"MethodFunc\" matched 2 nodes",
+          "nodeId": null,
+          "path": null
+        }
+      ],
+      "truncated": false,
+      "classification": "ambiguous"
+    },
+    {
+      "question": "chi-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "route length differs from reviewed witness"
+      ],
+      "nodes": [],
+      "steps": [],
+      "renderedLabels": [
+        ".MethodFunc()",
+        ".Method()",
+        ".handle()",
+        "node",
+        ".findPattern()",
+        "longestPrefix()"
+      ],
+      "renderedRelations": [
+        "calls",
+        "calls",
+        "references",
+        "method",
+        "calls"
+      ],
+      "classification": "mixed-relation-route",
+      "renderedEndpointCandidates": [
+        [
+          "chi_mux_methodfunc",
+          "chi_router_methodfunc"
+        ],
+        [
+          "tree_longestprefix"
+        ]
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [],
+      "nodes": [
+        {
+          "id": "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+          "source": {
+            "file": "src/click/utils.py",
+            "startByte": 11486,
+            "endByte": 13132,
+            "startLine": 381,
+            "startColumn": 0,
+            "endLine": 427,
+            "endColumn": 12
+          },
+          "name": "open_file()"
+        },
+        {
+          "id": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 11423,
+            "endByte": 14244,
+            "startLine": 374,
+            "startColumn": 0,
+            "endLine": 452,
+            "endColumn": 40
+          },
+          "name": "open_stream()"
+        },
+        {
+          "id": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 9593,
+            "endByte": 9800,
+            "startLine": 319,
+            "startColumn": 0,
+            "endLine": 323,
+            "endColumn": 17
+          },
+          "name": "get_binary_stdin()"
+        },
+        {
+          "id": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 4815,
+            "endByte": 5484,
+            "startLine": 176,
+            "startColumn": 0,
+            "endLine": 191,
+            "endColumn": 15
+          },
+          "name": "_find_binary_reader()"
+        },
+        {
+          "id": "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8",
+          "source": {
+            "file": "src/click/_compat.py",
+            "startByte": 4230,
+            "endByte": 4529,
+            "startLine": 154,
+            "startColumn": 0,
+            "endLine": 160,
+            "endColumn": 55
+          },
+          "name": "_is_binary_reader()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:b4f41add3eb26a6b6699864bed02e49dd24595a669501b1f2fbd44140601556e",
+          "source": "sha256:67617fe84c7e933001c8e7a60628821e3924d23d180c92cd780bba23fd5f7d1d",
+          "target": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/utils.py",
+            "startByte": 12980,
+            "endByte": 12991,
+            "startLine": 422,
+            "startColumn": 22,
+            "endLine": 422,
+            "endColumn": 33
+          },
+          "sourceBytes": "open_stream",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:b3d1f4a591b7a358eb841388e97117bbd4a2377817aa4014c2b9f5fed9759bc5",
+          "source": "sha256:a06c11e8745b06b0d60bc3f43308f19ae0c888cf7369a2a07bdf50adef36cda6",
+          "target": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 12085,
+            "endByte": 12101,
+            "startLine": 392,
+            "startColumn": 19,
+            "endLine": 392,
+            "endColumn": 35
+          },
+          "sourceBytes": "get_binary_stdin",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:ab477fcd547ac3d833934602fc1d5871a98378031c63dc125aeaebbf5e84cb34",
+          "source": "sha256:a6c6eac365b65fafaf2f46514d79c2cb36bb310fcfcb5119fcf65cca36ea35f9",
+          "target": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 9644,
+            "endByte": 9663,
+            "startLine": 320,
+            "startColumn": 13,
+            "endLine": 320,
+            "endColumn": 32
+          },
+          "sourceBytes": "_find_binary_reader",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:0ed10b05deb50320b392d13c0e611c3732abfc5d77e1267e3bb744afc3596349",
+          "source": "sha256:786c10821cf94664962fba44589b5e61c43e426efb6b21a72e0f75b8c62e16df",
+          "target": "sha256:e2c76ab69c159b40a93080ab5c1fa322863c8644d0523b5d2dc0ff14c913eba8",
+          "kind": "calls",
+          "site": {
+            "file": "src/click/_compat.py",
+            "startByte": 5399,
+            "endByte": 5416,
+            "startLine": 188,
+            "startColumn": 27,
+            "endLine": 188,
+            "endColumn": 44
+          },
+          "sourceBytes": "_is_binary_reader",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": false,
+          "acceptedAlternateOccurrences": [
+            {
+              "file": "src/click/_compat.py",
+              "line": 188,
+              "text": "if buf is not None and _is_binary_reader(buf, True):",
+              "reason": "Same caller and callee, second direct occurrence; independently source-adjudicated in the earlier panel and reread for this replay. Frozen line 181 remains distinct."
+            }
+          ]
+        }
+      ],
+      "responseDiagnostics": [],
+      "truncated": false,
+      "classification": "reviewed-call-chain"
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        "src_click_utils_open_file",
+        "src_click_compat_open_stream",
+        "src_click_compat_get_binary_stdin",
+        "src_click_compat_find_binary_reader",
+        "src_click_compat_is_binary_reader"
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/utils.py",
+            "line": 422,
+            "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)",
+            "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/_compat.py",
+            "line": 392,
+            "text": "return get_binary_stdin(), False",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/_compat.py",
+            "line": 320,
+            "text": "reader = _find_binary_reader(sys.stdin)",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/click/_compat.py",
+            "line": 181,
+            "text": "if _is_binary_reader(stream, False):",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          },
+          "reviewedSiteSupported": true
+        }
+      ],
+      "renderedLabels": [
+        "open_file()",
+        "open_stream()",
+        "get_binary_stdin()",
+        "_find_binary_reader()",
+        "_is_binary_reader()"
+      ],
+      "renderedRelations": [
+        "calls",
+        "calls",
+        "calls",
+        "calls"
+      ],
+      "classification": "reviewed-call-chain",
+      "renderedEndpointCandidates": [
+        [
+          "src_click_utils_open_file"
+        ],
+        [
+          "src_click_compat_is_binary_reader"
+        ]
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "No single complete path returned."
+      ],
+      "nodes": [],
+      "steps": [],
+      "responseDiagnostics": [
+        {
+          "code": "ambiguous_match",
+          "message": "Symbol \"isValid\" matched 2 nodes",
+          "nodeId": null,
+          "path": null
+        },
+        {
+          "code": "incomplete_coverage",
+          "message": "Published graph coverage is incomplete: partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap",
+          "nodeId": null,
+          "path": null
+        }
+      ],
+      "truncated": false,
+      "classification": "ambiguous"
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "expected exactly one rendered path header"
+      ],
+      "nodes": [],
+      "steps": [],
+      "classification": "no-path-reported"
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "No single complete path returned."
+      ],
+      "nodes": [],
+      "steps": [],
+      "responseDiagnostics": [
+        {
+          "code": "ambiguous_match",
+          "message": "Symbol \"kindOf\" matched 5 nodes",
+          "nodeId": null,
+          "path": null
+        },
+        {
+          "code": "incomplete_coverage",
+          "message": "Published graph coverage is incomplete: partial graph published after quarantining 0 nodes and 2 edges with 0 identity collisions; 0 examples omitted by the diagnostic cap",
+          "nodeId": null,
+          "path": null
+        }
+      ],
+      "truncated": false,
+      "classification": "ambiguous"
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        "src_utils_kindof_kindof",
+        "src_utils_kindof_minikindof",
+        "src_utils_kindof_ctorname"
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/utils/kindOf.ts",
+            "line": 66,
+            "text": "typeOfVal = miniKindOf(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          },
+          "reviewedSiteSupported": true
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "confidence": "EXTRACTED",
+          "matchingEdges": 1,
+          "reviewedSite": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          },
+          "reviewedSiteSupported": true
+        }
+      ],
+      "renderedLabels": [
+        "kindOf()",
+        "miniKindOf()",
+        "ctorName()"
+      ],
+      "renderedRelations": [
+        "calls",
+        "calls"
+      ],
+      "classification": "reviewed-call-chain",
+      "renderedEndpointCandidates": [
+        [
+          "src_utils_kindof_kindof"
+        ],
+        [
+          "src_utils_kindof_ctorname"
+        ]
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "compass",
+      "sourceSupportedCallPath": true,
+      "frozenOccurrenceSitesMatch": true,
+      "failures": [],
+      "nodes": [
+        {
+          "id": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 29143,
+            "endByte": 30869,
+            "startLine": 840,
+            "startColumn": 4,
+            "endLine": 882,
+            "endColumn": 5
+          },
+          "name": ".handle_entry()"
+        },
+        {
+          "id": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 34443,
+            "endByte": 34874,
+            "startLine": 961,
+            "startColumn": 4,
+            "endLine": 971,
+            "endColumn": 5
+          },
+          "name": ".follow()"
+        },
+        {
+          "id": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "source": {
+            "file": "src/lib.rs",
+            "startByte": 34880,
+            "endByte": 35480,
+            "startLine": 973,
+            "startColumn": 4,
+            "endLine": 989,
+            "endColumn": 5
+          },
+          "name": ".check_loop()"
+        },
+        {
+          "id": "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01",
+          "source": {
+            "file": "src/error.rs",
+            "startByte": 6769,
+            "endByte": 7076,
+            "startLine": 184,
+            "startColumn": 4,
+            "endLine": 196,
+            "endColumn": 5
+          },
+          "name": ".from_loop()"
+        }
+      ],
+      "steps": [
+        {
+          "edgeId": "sha256:db51772e6e2a0f689b69f1447740b96e340679a37df7c50bfc727ffe85a06cf4",
+          "source": "sha256:6157f09ad96d7be5e50367736300c88ecb6e1b6a992282d57aeabd7e5c0bc21e",
+          "target": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 29337,
+            "endByte": 29348,
+            "startLine": 845,
+            "startColumn": 25,
+            "endLine": 845,
+            "endColumn": 36
+          },
+          "sourceBytes": "self.follow",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:9d2cbc7e60565250bba8045728a1451893838b7f1b8d26084a542957c88557c3",
+          "source": "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78",
+          "target": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 34811,
+            "endByte": 34826,
+            "startLine": 968,
+            "startColumn": 12,
+            "endLine": 968,
+            "endColumn": 27
+          },
+          "sourceBytes": "self.check_loop",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        },
+        {
+          "edgeId": "sha256:32f0ce77ab676891029891f1d836f95f3e4c8458dcee2b5d51f7128b8ad32bcf",
+          "source": "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3",
+          "target": "sha256:4781f5c6bd4c887ab10742a86b44aa5d6164790de28d01e4889788ec345a3e01",
+          "kind": "calls",
+          "site": {
+            "file": "src/lib.rs",
+            "startByte": 35294,
+            "endByte": 35310,
+            "startLine": 981,
+            "startColumn": 27,
+            "endLine": 981,
+            "endColumn": 43
+          },
+          "sourceBytes": "Error::from_loop",
+          "confidence": [
+            "exact"
+          ],
+          "frozenSiteMatches": true,
+          "acceptedAlternateOccurrences": []
+        }
+      ],
+      "responseDiagnostics": [],
+      "truncated": false,
+      "classification": "reviewed-call-chain"
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "graphify",
+      "sourceSupportedCallPath": false,
+      "frozenOccurrenceSitesMatch": false,
+      "failures": [
+        "route length differs from reviewed witness"
+      ],
+      "nodes": [],
+      "steps": [],
+      "renderedLabels": [
+        ".handle_entry()",
+        ".push()",
+        ".into_iter()",
+        "IntoIter",
+        "WalkDirOptions",
+        ".fmt()",
+        "Error",
+        ".from_loop()"
+      ],
+      "renderedRelations": [
+        "calls",
+        "calls",
+        "references",
+        "references",
+        "method",
+        "references",
+        "method"
+      ],
+      "classification": "mixed-relation-route",
+      "renderedEndpointCandidates": [
+        [
+          "src_lib_intoiter_handle_entry"
+        ],
+        [
+          "src_error_error_from_loop"
+        ]
+      ]
+    }
+  ],
+  "baselineDepthDiagnostics": [
+    {
+      "question": "chi-directed-chain",
+      "maxDepth": 1,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "maxDepth": 2,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "maxDepth": 3,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "maxDepth": 1,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "maxDepth": 2,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "maxDepth": 3,
+      "truncated": false,
+      "diagnostics": [
+        "direction_mismatch"
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "maxDepth": 1,
+      "truncated": false,
+      "diagnostics": [
+        "no_match",
+        "incomplete_coverage"
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "maxDepth": 1,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "maxDepth": 2,
+      "truncated": false,
+      "diagnostics": [
+        "no_match"
+      ]
+    }
+  ],
+  "finalDepthDiagnostics": [
+    {
+      "question": "chi-directed-chain",
+      "maxDepth": 1,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "maxDepth": 2,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "maxDepth": 3,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "maxDepth": 1,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "maxDepth": 2,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "maxDepth": 3,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "maxDepth": 1,
+      "truncated": true,
+      "diagnostics": [
+        "incomplete_coverage",
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "maxDepth": 1,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "maxDepth": 2,
+      "truncated": true,
+      "diagnostics": [
+        "bounded_truncation"
+      ]
+    }
+  ],
+  "reverseDiagnostics": [
+    {
+      "question": "chi-directed-chain",
+      "tool": "compass",
+      "truncated": true,
+      "diagnostics": [
+        "direction_mismatch",
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "chi-directed-chain",
+      "tool": "graphify",
+      "noPathReported": true
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "compass",
+      "truncated": false,
+      "diagnostics": [
+        "direction_mismatch"
+      ]
+    },
+    {
+      "question": "click-directed-chain",
+      "tool": "graphify",
+      "noPathReported": true
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "compass",
+      "truncated": true,
+      "diagnostics": [
+        "incomplete_coverage",
+        "bounded_truncation"
+      ]
+    },
+    {
+      "question": "jsoup-directed-chain",
+      "tool": "graphify",
+      "noPathReported": true
+    },
+    {
+      "question": "redux-directed-chain",
+      "tool": "graphify",
+      "noPathReported": true
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "compass",
+      "truncated": false,
+      "diagnostics": [
+        "direction_mismatch"
+      ]
+    },
+    {
+      "question": "walkdir-directed-chain",
+      "tool": "graphify",
+      "noPathReported": true
+    }
+  ],
+  "validation": {
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 4.61
+      },
+      {
+        "name": "query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-query",
+          "--test",
+          "code_traversal",
+          "--test",
+          "code_explore",
+          "--test",
+          "bounded_path_oracle",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 31.12
+      },
+      {
+        "name": "cli-query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "code_query_cli",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 55.14
+      },
+      {
+        "name": "mcp-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-mcp",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 39.03
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 13.57
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 88.2
+      },
+      {
+        "name": "product-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 4.04
+      },
+      {
+        "name": "product-boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.09
+      },
+      {
+        "name": "qualification",
+        "argv": [
+          "bash",
+          "scripts/qualify_code_graph_v1.sh",
+          "--fixtures-only"
+        ],
+        "exitCode": 0,
+        "seconds": 647.3
+      },
+      {
+        "name": "build",
+        "argv": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass"
+        ],
+        "exitCode": 0,
+        "seconds": 1.4
+      }
+    ],
+    "sourceSha256": {
+      "crates/compass-query/src/code_query.rs": "94afd1d019f2ca1debce79efca5a4d10fd4c211af68eec29446e00c80bb21950",
+      "crates/compass-query/tests/code_traversal.rs": "d8f49ba8b6019a83ae72d072a8203eb4ebf9bfbe278c4255e43686fca560cea0",
+      "crates/compass-query/tests/code_explore.rs": "16d2ca185f7a6bd046661d48ad93a28c23e79f3ad8f5b9d5105e382f2e67acce",
+      "crates/compass-query/tests/bounded_path_oracle.rs": "8ca188956005b813e6f48f473a6c49b88c1c5fd034cf1a0441137b21f279137b",
+      "crates/compass-cli/tests/code_query_cli.rs": "9f4f30ee26e43182b2afbd6efa10c05e0df3f4c978f0fe91e68a02af885ac96e"
+    },
+    "testCounts": {
+      "query-tests": {
+        "passed": 24,
+        "failed": 0,
+        "ignored": 0
+      },
+      "cli-query-tests": {
+        "passed": 38,
+        "failed": 0,
+        "ignored": 0
+      },
+      "mcp-tests": {
+        "passed": 60,
+        "failed": 0,
+        "ignored": 0
+      },
+      "workspace-tests": {
+        "passed": 1106,
+        "failed": 0,
+        "ignored": 2
+      },
+      "product-tests": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "pythonHarnessTests": 137,
+    "binaryMatchesFinalBuild": true
+  },
+  "artifacts": {
+    "directed-identity-01/baseline/capture.json": "6dfcfad375d3490cae4227d0237997e410c796882ae1361bd0e353b9ab5511b4",
+    "directed-identity-01/reproduction.log": "f241f47b339889e6160d6c43fc350bb36f51ed0c972ac808f1d22a5618c6a7cf",
+    "directed-identity-01/explore-reproduction.log": "f1d8ed9b93150502a8ad625fd5013ea324aad3c04980170172b20940cdf25250",
+    "directed-identity-02/final/capture.json": "f509b41b5c6d82501141e0ebd1b08733837e61623d827f71c73f03fb33b8482c",
+    "directed-identity-02/label-control/capture.json": "802575bf7b3d454642a26bb0407bfe14ddf511943b5351211f0d2a46e0db1dcf",
+    "directed-identity-02/verified-summary.json": "6c7826d5d80e2571e3a83853a357ec1b4e34ca0d7373bdd8a7644fd4d3c61af7",
+    "directed-identity-02/verify_capture.py": "7118ba4011f88d3aa8554330de70ce2401b4d9ecfa480b26f572a894a17e4240",
+    "directed-identity-02/verification-attempt-01.log": "4761da703b83adf3a1308117d2ab78739a18a6569e23bd7e6f9a3f0eef491bcc",
+    "directed-identity-02/verification-02.log": "3864f61f93aba50a49463e79a87ab4559feeb4bb7260e768452cd088ad1d59cc",
+    "directed-identity-02/collect_label_control.py": "9252482e073c26f417b33427fefed93c14ca37ffc83b42a14e92b2ded5bd940b",
+    "directed-identity-02/validation.json": "0fb33724f84f968d83b22f3d8038d5305ad9857283f47206102177c84251ae8a",
+    "directed-identity-02/harness-tests.log": "5a2a4394fc4a1d374cf7b7d222a4cc6b6b84b5e7fd57a38b9811b5af13a96163",
+    "directed-identity-02/fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "directed-identity-02/query-tests-final.log": "13440ea1b60ce8f7654aa8c8fa6e4ab9ab7f83c19fdfa92cf1431318afe98b8e",
+    "directed-identity-02/cli-query-tests-final.log": "2b3561cfa14d5b5cfa0f8902ba1f476127de6c9f679b60026d6414b2fbc22d50",
+    "directed-identity-02/mcp-tests-final.log": "3965ef0908e941988a5b2c684844924099dbe84a3b614a58c3682aecad6f97c8",
+    "directed-identity-02/clippy-final.log": "2b0bada5d0d43f977a463f9c39b2da3abd390c2b9a10318afced2a7c5cc3d522",
+    "directed-identity-02/workspace-tests-final.log": "876551b1dceab1f0c410a01374dd3b078282d56bab5709b0975d7bf44531d003",
+    "directed-identity-02/product-tests-final.log": "75a3eed27aa613ea6b78bd4c0ac613063512fd6de7be93a8d63eb5d64ac5c828",
+    "directed-identity-02/product-boundary-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "directed-identity-02/qualification-final.log": "efd8af9231b5c9276338993d2feb77a4d25ba7faa64c45eb0544fcd688632644",
+    "directed-identity-02/build-final.log": "0999a44a8902a4828631ce72352b8ed5f89f9cb37241b11bc9111026f175e83e"
+  },
+  "limitations": [
+    "Same-agent verification, not independent human adjudication.",
+    "Known development tasks and frozen graphs, not held-out, source precision population, extraction, or latency evidence.",
+    "Graphify ID arm measures cross-interface endpoint handling as well as path availability; native label control remains separate.",
+    "Compass Redux endpoint ambiguity remains failure in both arms.",
+    "Click line 188 is an accepted alternate occurrence, not a frozen-site match.",
+    "Reverse outputs receive no source-global absence credit.",
+    "God-object responsibility, explanations, longer walks and fresh held-out qualification remain outstanding.",
+    "The native depth fix changes incomplete reporting; all four Compass positive ID-path payloads and ten Graphify path payloads were unchanged from baseline.",
+    "Both compilers and query capture shared a machine; elapsed times are logs, not comparative latency measurements.",
+    "The verifier first mistook raw and typed evidence JSON schemas as identical; final checks explicitly verify field and anchor projection. Failed attempt retained."
+  ]
+}
