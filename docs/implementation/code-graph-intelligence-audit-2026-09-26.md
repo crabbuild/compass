@@ -4390,3 +4390,32 @@ panel*. It does not validate their `calls` or `references` targets, demonstrate
 foreign-state access, measure cohesion, support a classifier, or generalize
 beyond these known Java cases. Those relation/source checks remain prerequisites
 for any responsibility score.
+
+### Explicit `this.field` source-token check
+
+The [registration](../../benchmarks/agent_query/mlcq_explicit_this_field_registration.json)
+fixed a syntax-only check on the same eight files. A separate JDK parser
+enumerated `this.name` tokens in direct method bodies, skipping nested class
+bodies. A token entered the field denominator only if its selected name had
+exactly one direct class field and was not a method call. Source UTF-16 offsets
+were converted to exact UTF-8 byte positions before comparing directed
+method-to-field `references` records and target IDs in both frozen graphs.
+
+Only **five** tokens met this deliberately narrow rule: four in Eclipse
+`BindingModel` and one in CloudStack `DeploymentPlannersResponse`. Every one
+has exactly one stored Compass edge from its source-matched method to its
+source-matched field at the exact token bytes, with exact AST provenance and
+no competing `references` record at that token. The oracle also records four
+`this.field` sites inside a constructor and one `this.getClass()` method call;
+all five are outside the registered direct-method field denominator. The
+[review](../../benchmarks/agent_query/mlcq_explicit_this_field_review.json)
+contains all ten source sites, their roles and limits, edge IDs and endpoints,
+source and graph hashes, and byte-identical oracle and verifier repeats.
+
+An initial collector preflight used list comparison instead of set subset
+checking for sample IDs and failed before reading either graph; the failed
+attempt is retained and the corrected run uses the same registration and
+frozen inputs. Five exact matches are useful source-to-graph evidence for
+those sites, but far too narrow to validate the remaining field references,
+foreign-state access, cohesion or god-object classification. A larger
+independent relationship oracle is still needed.
