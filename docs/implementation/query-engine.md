@@ -251,7 +251,8 @@ spellings and mixed-case internal capitals (such as `_BufferedSink`,
 `openSession`, or `PendingQueue`) receive bounded exact-name probes before
 generic behavior recall. Only a matching declared name receives exact-name
 priority; a partial token or alias does not. Ordinary words such as `close`
-retain lexical ranking. Duplicate declarations remain candidates, and a
+retain lexical ranking. Same-name source declarations remain ambiguous even
+when their kinds or ranking evidence differ, and a
 truncated name lookup cannot establish uniqueness even if only one retained
 declaration is in scope. This improves anchor selection without reading source
 bodies or synthesizing an explanation.

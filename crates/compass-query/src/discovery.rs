@@ -487,8 +487,9 @@ impl CodeQueryEngine {
                     && crate::ranking::normalize_symbol_name(&node.name) == literal
                 {
                     let id = node.id.clone();
+                    let matches = operation_indexed_matches(&node, &prepared.ranking_terms);
                     let _ = pool.add(CandidateSource::ExactName, node);
-                    let _ = pool.add_indexed_matches(&id, [literal.clone()]);
+                    let _ = pool.add_indexed_matches(&id, matches);
                 }
             }
         }
@@ -2053,16 +2054,19 @@ fn discovery_seeds(
                 .iter()
                 .filter(|other| {
                     other.node.id != candidate.node.id
-                        && other.channel_rank == candidate.channel_rank
-                        && other.relation_evidence == candidate.relation_evidence
-                        && ((other.operation_root == candidate.operation_root
-                            && (other.score.total_cmp(&candidate.score).is_eq()
-                                || calibrated_low_margin(candidate.score, other.score)
-                                || (candidate.source == DiscoverySeedSource::ExactName
-                                    && other.source == DiscoverySeedSource::ExactName
-                                    && source_backed_name_collision(candidate, other))))
-                            || (other.score.total_cmp(&candidate.score).is_eq()
-                                && source_backed_callable_name_collision(candidate, other)))
+                        // Ranking evidence orders declarations; it cannot
+                        // disambiguate identical exact names across kinds,
+                        // signatures, or owners.
+                        && ((candidate.source == DiscoverySeedSource::ExactName
+                            && other.source == DiscoverySeedSource::ExactName
+                            && source_backed_name_collision(candidate, other))
+                            || (other.channel_rank == candidate.channel_rank
+                                && other.relation_evidence == candidate.relation_evidence
+                                && ((other.operation_root == candidate.operation_root
+                                    && (other.score.total_cmp(&candidate.score).is_eq()
+                                        || calibrated_low_margin(candidate.score, other.score)))
+                                    || (other.score.total_cmp(&candidate.score).is_eq()
+                                        && source_backed_callable_name_collision(candidate, other)))))
                 })
                 .map(|other| DiscoveryAlternative {
                     node_id: other.node.id.clone(),
@@ -3090,8 +3094,10 @@ mod tests {
             let mut query = request(DiscoveryDirection::Both);
             query.question =
                 format!("Explain {name} ownership, close behavior and context cleanup.");
+            query.limits.max_candidates = 1;
             let response = engine.discover(query)?;
             assert_eq!(response.seeds[0].node_id, "n:subject", "{name}");
+            assert!(!response.seeds[0].matched_terms.is_empty(), "{name}");
             assert_eq!(
                 response.seeds[0].candidate_source,
                 DiscoverySeedSource::ExactName
@@ -3124,6 +3130,26 @@ mod tests {
                 .iter()
                 .any(|other| other.node_id != response.seeds[0].node_id)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn literal_identifiers_in_prose_keep_collisions_across_rank_evidence()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut declaration = anchored_node("n:struct", "PendingQueue", "src/queue.rs", 1);
+        declaration.kind = NodeKind::Struct;
+        let engine = engine(
+            vec![
+                declaration,
+                anchored_node("n:factory", "PendingQueue", "src/factory.rs", 2),
+            ],
+            Vec::new(),
+        );
+        let mut query = request(DiscoveryDirection::Both);
+        query.question = "Explain PendingQueue ownership".to_owned();
+        let response = engine.discover(query)?;
+        assert_eq!(response.seeds.len(), 2);
+        assert!(response.seeds.iter().all(|seed| seed.ambiguous));
         Ok(())
     }
 

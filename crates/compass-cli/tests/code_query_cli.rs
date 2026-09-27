@@ -647,6 +647,7 @@ fn natural_discovery_preserves_literal_subjects_in_prose() -> Result<(), Box<dyn
     let mut duplicate = subject.clone();
     duplicate.id = "n:duplicate".to_owned();
     duplicate.qualified_name = "Other._BufferedSink".to_owned();
+    duplicate.kind = NodeKind::Struct;
     for ambiguous in [false, true] {
         if ambiguous {
             document.nodes.push(duplicate.clone());
