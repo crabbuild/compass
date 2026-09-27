@@ -112,6 +112,18 @@ summary is unavailable in that response, not an incorrect answer; neither a
 neighbor follow-up workflow nor Graphify's separate CLI is excluded by this
 finding. Do not turn summary availability into a cross-tool accuracy score.
 
+### Responsibility explanation evidence
+
+`responsibility_questions_panel_a.json` freezes five questions and 20 source
+facts in commit `232608ee`. The first arm uses identical natural queries, a
+requested 2,000-token budget and no follow-ups on the paired final Java graphs.
+`responsibility_review_panel_a.json` records full-fact coverage separately from
+explicit answers. Partial graph facts and useful source locations do not imply
+the complete implementation mechanism. Extra graph assertions require their
+own source review before any precision claim. Equal requested budgets do not
+imply equal actual output sizes. This reused-repository development arm is not
+a god-object oracle; a symmetric source-reading workflow remains necessary.
+
 ### MCP path diagnostics
 
 `suite_mcp_paths.json` covers prepared exact-ID navigation, reverse traversal,

@@ -1804,7 +1804,11 @@ Verification so far: 1,092 workspace library/binary tests passed with two
 ignored; 250 product/cache/resolution contract tests and nine focused tests
 passed; workspace and focused-test Clippy passed with `-D warnings`; format,
 diff, product-boundary, and all 99 benchmark harness tests passed. The full
-fixture qualification is running against final production sources. Review found
+fixture qualification passed against final production sources, including release
+frontend precedence, activation, determinism, and source-anchor checks. The first
+final-source attempt was interrupted during release compilation; its missing
+handle and absent process were confirmed before retrying. Its partial log is
+retained and is not counted as a full pass. Review found
 that a missing optional type vector could incorrectly prove a zero-parameter
 declaration; that regression failed before an added exact-match guard and passed
 afterward. The earlier fixture run passed but is superseded by that source
@@ -1818,6 +1822,51 @@ the corrected command ran all 99. The
 records binaries, sources, graph hashes, all source judgments, cache differences,
 and retained failures. No speed, fresh held-out, new MCP/directed-path, community
 quality, or god-object diagnosis claim follows from this checkpoint.
+
+## Responsibility explanation evidence on the five-language panel
+
+Commit `232608ee` froze five natural-language questions and 20 source-backed
+implementation facts before either tool answered those questions. This is a new
+development arm on previously evaluated repositories, with the final Java
+comparison graphs reused. It is not held-out or representative evidence.
+Both tools received the same question, a requested 2,000-token budget, the
+source checkout as their working directory, and no follow-up allowance.
+All ten requests completed successfully.
+
+| Complete fact coverage in the returned response | Compass | Graphify |
+| --- | ---: | ---: |
+| Explicit correct implementation facts | 0/20 | 0/20 |
+| Sufficient returned evidence for the full fact | 0/20 | 0/20 |
+| Total stdout bytes across five requests | 39,740 | 53,306 |
+
+These native queries primarily return graph context. Names, navigation anchors,
+and partial relationships remain useful, but they do not establish such facts
+as shared router state, a file wrapper's exception behavior, listener snapshots,
+or symlink-loop conditions. The result does not show fabricated prose answers;
+there were no task-level mechanism assertions to score for prose precision.
+Four Compass responses request resolution; the Click response returns
+candidates. A source-reading/disambiguation workflow remains to be compared.
+Compass `explain` advertises verified source; Graphify's other public operations
+and a symmetric agent source-reading workflow are not excluded by this arm.
+
+Graphify's WalkDir response explicitly reports that its complete answer exceeds
+the requested budget. All 26,609 bytes were retained, including 244 edge rows;
+equal requested budgets did not produce equal answer sizes. No latency claim
+is made while compilation shares the machine.
+
+Post-output inspection identifies one wrong Graphify call target:
+`IntoIter::get_deferred_dir` is linked to `IntoIter::pop`, but the receiver at
+that source occurrence is the `Vec<DirEntry>` field `deferred_dirs`. Compass
+keeps the valid call to `skippable` and has no corresponding wrong internal
+`pop` edge. That does not recover the external vector call or establish overall
+precision. The remaining additional node/edge assertions have not all been
+source-reviewed; full response precision remains incomplete.
+
+The [frozen questions](../../benchmarks/agent_query/responsibility_questions_panel_a.json)
+and [fact review](../../benchmarks/agent_query/responsibility_review_panel_a.json)
+preserve exact source witnesses, raw-response hashes, all omissions, the budget
+discrepancy, and the diagnosed edge. God-object responsibility judgments,
+functional community quality and overall superiority remain unproven.
 
 ## Next evidence to collect
 

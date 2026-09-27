@@ -957,7 +957,7 @@
     },
     "clippyWorkspaceAndFocusedTests": "passed -D warnings",
     "formatDiffAndProductBoundary": "passed",
-    "fullFixtureQualification": "running against final production sources",
+    "fullFixtureQualification": "passed final-source fixtures-only qualification; retry after interrupted process was confirmed absent",
     "logsSha256": {
       "java-varargs-diagnostic/native-before.log": "12e803e1b59043f0b96f32c90c6fa43604fff9eef11ad8fa2df11a52d48cfeb7",
       "java-varargs-diagnostic/resolve-before.log": "5a1ca619ecb0675cef3e74616e159da654fa8c444b2ddc76d2a7414b0f0c85bc",
@@ -977,7 +977,8 @@
       "java-varargs-resolution-02/clippy-tests.log": "fac2c1f1a82ac72753325b2f827dc4175737176ce2e24891453446a5c3e5aba5",
       "java-varargs-resolution-02/build-01.log": "417587ddafc7f98dcabb9a1e2a27c82e820f932ffa72d1bc535b88b7ad1fc735",
       "java-varargs-resolution-02/array-receiver-native.log": "5bfc3defd7d1840c09033831db91e5acd305ab0f400c31be7ee5d407a3da2a39",
-      "java-varargs-resolution-02/array-receiver-clippy.log": "44af7ac5bc4dcde7a22e573735545e22d984787c7ac702a061db4bd5f2142562"
+      "java-varargs-resolution-02/array-receiver-clippy.log": "44af7ac5bc4dcde7a22e573735545e22d984787c7ac702a061db4bd5f2142562",
+      "java-varargs-resolution-02/full-qualification-02.log": "f3c8f86f610855ef9609782d356bee868df87f10a9b516728b1a74899097f289"
     },
     "additionalArrayReceiverRegression": {
       "status": "passed; spread, ordinary-array, and trailing-dimension parameters retain unresolved clone occurrences without an invented element/array type receiver",
@@ -997,6 +998,20 @@
       "logSha256": "92cc06186a8584921cb7faddc60d8abd060c8a4be2bd731ad6c7d20b7dc9a4a7",
       "releaseBinarySha256": "6d6c0a4caddf791ecd669367535f153929e8e95ef2f571cacdc5fdbeff20fe5f",
       "scope": "Superseded run: started before the late zero-argument missing-types guard and ended after that edit. Retained as diagnostic history; not final-source qualification evidence."
+    },
+    "interruptedFinalQualification": {
+      "status": "interrupted; handle missing and no matching process remained after turn interruption",
+      "logSha256": "5db7d8616f7238454b9a3353cc44fb604fd8f5a8797265b80ff8160b834fa4d5",
+      "compilerSampleSha256": "82cb63586712db0208775b33be375afb6cb17e7dfd428d483b69c422c003952c",
+      "scope": "Initial final-source attempt completed semantic/topology checks but stopped during release compilation. Not counted as a complete qualification."
+    },
+    "completedFinalQualification": {
+      "exitCode": 0,
+      "log": "java-varargs-resolution-02/full-qualification-02.log",
+      "logSha256": "f3c8f86f610855ef9609782d356bee868df87f10a9b516728b1a74899097f289",
+      "releaseBinarySha256": "b2f4b9d6331b6f45319ca7e7b19caa5d8a43ffa5c9e5f287902742e4ca8c65b3",
+      "productionSourcesMatchFrozenComparison": true,
+      "scope": "Complete fixtures-only gate including semantic assertions, topology, independent Markdown checks, release frontend precedence/activation/determinism and source-anchor checks."
     }
   },
   "limitations": [
