@@ -899,6 +899,16 @@ scope descends from that exact enum-member owner, within the lookup budget.
 External enum values and static imports cannot select a body-specific field by
 its qualified spelling alone. Duplicate receiver declarations remain ambiguous.
 
+The Java resolver indexes nominal owners under their complete dotted source
+spelling as well as their canonical declaration identity. A dotted nominal
+receiver must identify one owner before member lookup; duplicate receiver or
+enclosing type declarations and package/type spelling collisions cannot be
+disambiguated by member availability. Owner candidates and enclosing-type
+lookups share a bounded nominal lookup budget. Exact source declaration evidence
+still takes precedence. This joins already established nominal types; it does
+not reinterpret value-expression chains as type names. Existing extraction facts
+and schema versions remain unchanged; stored graphs require rebuilding.
+
 Bare enum switch labels derive their target from the selector's nominal type,
 not a same-named field of the enclosing class. Candidates allow only enum-member
 targets; unknown selectors retain unresolved occurrences. This does not add

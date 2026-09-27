@@ -44,6 +44,15 @@ field lookup requires one receiver type declaration; field availability cannot
 select between duplicate nominal types. Exact declaration evidence remains
 authoritative.
 
+For an already established Java nominal receiver, resolution joins dotted
+source type names to canonical nested declarations using the complete qualified
+name. Imported nested types can therefore supply field and enum-member targets.
+Package/type spelling collisions and duplicate enclosing types retain ambiguity;
+member availability cannot select an owner. Nominal lookup work shares the
+existing candidate budget. This does not infer a type from an arbitrary expression
+chain. Rebuild stored graphs for the resolver correction; existing version-10
+extraction facts remain usable because the emitted evidence is unchanged.
+
 Unknown receivers, ambiguous names, unsupported pattern flow, inherited fields,
 unregistered local/anonymous class owners and exhausted inference remain
 unresolved or unrepresented. Unsupported flow masks a possibly shadowed field;

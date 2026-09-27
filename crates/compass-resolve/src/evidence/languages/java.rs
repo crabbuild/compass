@@ -1,26 +1,29 @@
-//! Java overload applicability and conversion resolution policy.
+//! Java nominal receivers, overload applicability and conversion policy.
 
 use super::super::*;
 
 impl ResolutionDb<'_> {
-    pub(in crate::evidence) fn resolve_java_field_receiver_ambiguity(
+    pub(in crate::evidence) fn resolve_java_field_receiver(
         &self,
         candidate: &RelationshipCandidate,
     ) -> Option<ResolutionDecision> {
         if candidate.relation != CandidateRelation::AccessesMember {
             return None;
         }
-        let (owner, _) = candidate
+        let (owner, member) = candidate
             .constraints
             .qualified_name
             .as_deref()?
             .rsplit_once("::")?;
-        let Some(declarations) = self
-            .indexes
-            .names
-            .by_qualified
-            .get(&("java".to_owned(), owner.to_owned()))
-        else {
+        let declarations = if owner.contains("::") {
+            self.indexes
+                .names
+                .by_qualified
+                .get(&("java".to_owned(), owner.to_owned()))
+        } else {
+            self.indexes.java.receivers_by_source_name.get(owner)
+        };
+        let Some(declarations) = declarations else {
             return Some(ResolutionDecision::Unresolved);
         };
         if declarations.len() > self.budget.candidates_per_lookup() {
@@ -48,23 +51,95 @@ impl ResolutionDb<'_> {
                 candidate_count: count,
             });
         }
-        if receiver.kind != "enum_member" {
-            return None;
+        // A duplicate enclosing type cannot be selected by the availability
+        // of a nested type in only one declaration. Every nominal prefix must
+        // be unique before using the canonical owner, within the lookup budget.
+        let mut prefix = receiver.qualified_name.as_str();
+        let mut remaining = self.budget.candidates_per_lookup() - declarations.len();
+        while let Some((parent, _)) = prefix.rsplit_once("::") {
+            if remaining == 0 {
+                return Some(ResolutionDecision::Unresolved);
+            }
+            let Some(parents) = self
+                .indexes
+                .names
+                .by_qualified
+                .get(&("java".to_owned(), parent.to_owned()))
+            else {
+                return Some(ResolutionDecision::Unresolved);
+            };
+            if parents.len() > self.budget.candidates_per_lookup() {
+                return Some(ResolutionDecision::Ambiguous {
+                    candidate_count: parents.len(),
+                });
+            }
+            if parents.len() > remaining {
+                return Some(ResolutionDecision::Unresolved);
+            }
+            remaining -= parents.len();
+            let count = parents
+                .iter()
+                .filter_map(|slot| self.declaration(*slot))
+                .filter(|declaration| {
+                    matches!(
+                        declaration.kind.as_str(),
+                        "class"
+                            | "interface"
+                            | "enum"
+                            | "record"
+                            | "annotation_type"
+                            | "enum_member"
+                    )
+                })
+                .count();
+            if count != 1 {
+                return Some(if count == 0 {
+                    ResolutionDecision::Unresolved
+                } else {
+                    ResolutionDecision::Ambiguous {
+                        candidate_count: count,
+                    }
+                });
+            }
+            prefix = parent;
         }
         // A constant-specific body can access its own fields. A value whose
         // declared type is the enum cannot name that anonymous subclass.
         // Require lexical ownership, not just a matching qualified prefix.
-        let mut scope = candidate.constraints.scope_id.as_deref();
-        for _ in 0..self.budget.candidates_per_lookup() {
-            let Some(current) = scope.and_then(|id| self.facts.scopes.get(id)) else {
-                return Some(ResolutionDecision::Unresolved);
-            };
-            if current.owner_declaration_id.as_deref() == Some(receiver.id.as_str()) {
-                return None;
+        if receiver.kind == "enum_member" {
+            let mut scope = candidate.constraints.scope_id.as_deref();
+            let mut owned = false;
+            for _ in 0..self.budget.candidates_per_lookup() {
+                let Some(current) = scope.and_then(|id| self.facts.scopes.get(id)) else {
+                    return Some(ResolutionDecision::Unresolved);
+                };
+                if current.owner_declaration_id.as_deref() == Some(receiver.id.as_str()) {
+                    owned = true;
+                    break;
+                }
+                scope = current.parent_scope_id.as_deref();
             }
-            scope = current.parent_scope_id.as_deref();
+            if !owned {
+                return Some(ResolutionDecision::Unresolved);
+            }
         }
-        Some(ResolutionDecision::Unresolved)
+        if receiver.qualified_name == owner {
+            return None;
+        }
+        // This is nominal name canonicalization, not expression-chain typing.
+        // The producer must already have established the receiver's type.
+        let qualified = format!("{}::{member}", receiver.qualified_name);
+        Some(
+            self.unique_decision(
+                self.indexes
+                    .names
+                    .by_qualified
+                    .get(&("java".to_owned(), qualified)),
+                candidate,
+                ResolutionRule::MemberBinding,
+            )
+            .unwrap_or(ResolutionDecision::Unresolved),
+        )
     }
 
     pub(in crate::evidence) fn resolve_java_same_package_builtin_collision(

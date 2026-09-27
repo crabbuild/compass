@@ -2,8 +2,8 @@
 
 use super::super::*;
 use super::{
-    CSharpBinding, CSharpIndexes, HierarchyIndexes, MemberIndexes, NameIndexes, PhpIndexes,
-    RustIndexes, TypeScriptIndexes, WildcardIndexes,
+    CSharpBinding, CSharpIndexes, HierarchyIndexes, JavaIndexes, MemberIndexes, NameIndexes,
+    PhpIndexes, RustIndexes, TypeScriptIndexes, WildcardIndexes,
 };
 use crate::ResolutionAdmission;
 
@@ -493,6 +493,28 @@ impl IndexBuilder<'_> {
                     (by_module_name, (by_scope_name, by_source_directory_name))
                 },
             );
+        // At most one source-spelling entry per admitted Java nominal declaration.
+        // This does not guess where a package name ends or select by a member.
+        let mut java_receivers_by_source_name = AHashMap::<String, Vec<DeclarationSlot>>::new();
+        for declaration in declarations.values().filter(|declaration| {
+            declaration.language == "java"
+                && matches!(
+                    declaration.kind.as_str(),
+                    "class" | "interface" | "enum" | "record" | "annotation_type" | "enum_member"
+                )
+        }) {
+            if let Some(slot) = declaration_slot(&declaration_ids, &declaration.id) {
+                java_receivers_by_source_name
+                    .entry(declaration.qualified_name.replace("::", "."))
+                    .or_default()
+                    .push(slot);
+            }
+        }
+        sort_declaration_index(
+            &mut java_receivers_by_source_name,
+            &declaration_ids,
+            limits.candidates_per_lookup,
+        );
         profile_internal("universal declaration indices", &mut profile_started);
         let mut inventory_by_qualified = AHashMap::<_, Vec<_>>::new();
         for node in inventory_nodes {
@@ -1082,6 +1104,9 @@ impl IndexBuilder<'_> {
                 },
                 csharp: CSharpIndexes {
                     bindings_by_source: csharp_bindings_by_source,
+                },
+                java: JavaIndexes {
+                    receivers_by_source_name: java_receivers_by_source_name,
                 },
                 php: PhpIndexes {
                     members_by_owner_folded: php_members_by_owner_folded,

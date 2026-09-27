@@ -337,3 +337,240 @@ fn nested_enum_type_shadows_import_before_member_selection() -> Result<(), Box<d
     );
     Ok(())
 }
+
+#[test]
+fn imported_nested_enum_nominal_receivers_keep_exact_occurrences() -> Result<(), Box<dyn Error>> {
+    let model = "package model; public class Outer { public static class Middle { public enum State { READY, DONE; public int code; } } }";
+    let caller = "package app; // λ\nimport model.Outer.Middle.State;\nclass Box {\n State direct() { return State.READY; }\n State viaValue(State value) { return value.DONE; }\n int code(State value) { return value.code; }\n int choose(State value) { switch (value) { case READY: return 1; default: return 0; } }\n Object shadow(Object State) { return State.READY; }\n <State> Object typeParameter() { return State.READY; }\n}\n";
+    let files = [("model/Outer.java", model), ("app/Box.java", caller)];
+    let root = tempfile::tempdir()?;
+    let graph = publish(root.path(), &files, false)?;
+    assert_eq!(
+        member_pairs(&graph)?,
+        [
+            (
+                "app.Box::choose".into(),
+                "model.Outer::Middle::State::READY".into()
+            ),
+            (
+                "app.Box::code".into(),
+                "model.Outer::Middle::State::code".into()
+            ),
+            (
+                "app.Box::direct".into(),
+                "model.Outer::Middle::State::READY".into()
+            ),
+            (
+                "app.Box::viaValue".into(),
+                "model.Outer::Middle::State::DONE".into()
+            ),
+        ]
+    );
+    for edge in graph.links.iter().filter(|edge| {
+        edge.occurrence_rule
+            .as_ref()
+            .is_some_and(|rule| rule.as_str().starts_with("universal-member-access-"))
+    }) {
+        let site = edge.relationship_site.as_ref().ok_or("site")?;
+        assert_eq!(site.file, "app/Box.java");
+        let token = caller
+            .get(usize::try_from(site.start_byte)?..usize::try_from(site.end_byte)?)
+            .ok_or("token")?;
+        assert!(matches!(token, "READY" | "DONE" | "code"));
+    }
+    let reversed = publish(root.path(), &files, true)?;
+    assert_eq!(
+        serde_json::to_value(&graph.nodes)?,
+        serde_json::to_value(&reversed.nodes)?
+    );
+    assert_eq!(
+        serde_json::to_value(&graph.links)?,
+        serde_json::to_value(&reversed.links)?
+    );
+    Ok(())
+}
+
+#[test]
+fn dotted_nested_receiver_ambiguity_is_not_resolved_by_member_availability()
+-> Result<(), Box<dyn Error>> {
+    for extra in [
+        (
+            "duplicate/EmptyOuter.java",
+            "package model; public class Outer {}",
+        ),
+        (
+            "duplicate/Outer.java",
+            "package model; public class Outer { public enum State { OTHER } }",
+        ),
+        (
+            "model/Outer/State.java",
+            "package model.Outer; public enum State { OTHER }",
+        ),
+    ] {
+        let root = tempfile::tempdir()?;
+        let graph = publish(
+            root.path(),
+            &[
+                (
+                    "model/Outer.java",
+                    "package model; public class Outer { public enum State { READY } }",
+                ),
+                extra,
+                (
+                    "app/Box.java",
+                    "package app; import model.Outer.State; class Box { State run() { return State.READY; } }",
+                ),
+            ],
+            false,
+        )?;
+        assert!(member_pairs(&graph)?.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn dotted_nominal_decisions_preserve_limits_kinds_and_exact_precedence()
+-> Result<(), Box<dyn Error>> {
+    use compass_languages::{
+        CandidateRelation, EvidenceBuilder, EvidenceLimits, EvidenceRange, ResolutionConstraint,
+        SemanticRole, UniversalEvidenceRegistry,
+    };
+    use compass_resolve::evidence::{
+        ResolutionDecision, UniversalResolutionIndex, UniversalResolutionLimits,
+    };
+    let pipeline = UniversalEvidenceRegistry::pipeline("java").ok_or("Java pipeline")?;
+    // Lowercase source type names deliberately forbid a capitalization heuristic.
+    for (parents, owners, collision, budget, exact, kind_allowed, resolves) in [
+        (1, 1, false, 256, false, true, true),
+        (0, 1, false, 256, false, true, false),
+        (2, 1, false, 256, false, true, false),
+        (1, 2, false, 256, false, true, false),
+        (1, 1, true, 256, false, true, false),
+        (1, 2, false, 1, false, true, false),
+        (1, 1, false, 1, false, true, false),
+        (1, 1, false, 2, false, true, false),
+        (1, 1, false, 3, false, true, true),
+        (0, 2, true, 1, true, true, true),
+        (1, 1, false, 256, false, false, false),
+    ] {
+        let range = |start: u32| EvidenceRange {
+            source_file: "fixture.java".into(),
+            start_byte: u64::from(start),
+            end_byte: u64::from(start + 1),
+            start_line: 1,
+            end_line: 1,
+            start_column: start,
+            end_column: start + 1,
+        };
+        let mut builder = EvidenceBuilder::new(
+            pipeline,
+            "dotted-owner",
+            "fixture.java",
+            EvidenceLimits::default(),
+        );
+        let caller = builder.declare(
+            "method",
+            "caller",
+            "run",
+            "p.Box::run",
+            Some("p"),
+            None,
+            range(0),
+        )?;
+        let field = builder.declare(
+            "field",
+            "field",
+            "value",
+            "p.outer::middle::state::value",
+            Some("p"),
+            None,
+            range(2),
+        )?;
+        for i in 0..parents {
+            builder.declare(
+                "class",
+                &format!("outer-{i}"),
+                "outer",
+                "p.outer",
+                Some("p"),
+                None,
+                range(4 + i),
+            )?;
+        }
+        builder.declare(
+            "class",
+            "middle",
+            "middle",
+            "p.outer::middle",
+            Some("p"),
+            None,
+            range(8),
+        )?;
+        for i in 0..owners {
+            builder.declare(
+                "class",
+                &format!("state-{i}"),
+                "state",
+                "p.outer::middle::state",
+                Some("p"),
+                None,
+                range(10 + i),
+            )?;
+        }
+        if collision {
+            builder.declare(
+                "class",
+                "package-collision",
+                "state",
+                "p.outer.middle.state",
+                Some("p.outer.middle"),
+                None,
+                range(15),
+            )?;
+        }
+        let occurrence = builder.occur(
+            SemanticRole::MemberAccess,
+            &caller,
+            "value",
+            Some("item"),
+            None,
+            range(20),
+        )?;
+        let candidate = builder.relate(
+            CandidateRelation::AccessesMember,
+            &caller,
+            Some(&occurrence),
+            None,
+            "value",
+            ResolutionConstraint {
+                qualified_name: Some("p.outer.middle.state::value".into()),
+                allowed_target_kinds: vec![
+                    if kind_allowed { "field" } else { "enum_member" }.into(),
+                ],
+                exact_target_declaration_id: exact.then(|| field.clone()),
+                ..ResolutionConstraint::default()
+            },
+        )?;
+        let index = UniversalResolutionIndex::new(
+            &[builder.finish()?],
+            UniversalResolutionLimits {
+                candidates_per_lookup: budget,
+                ..UniversalResolutionLimits::default()
+            },
+        )?;
+        let decision = index.resolve(&candidate);
+        if resolves {
+            assert!(
+                matches!(decision, ResolutionDecision::Resolved { declaration_id, .. } if declaration_id == field)
+            );
+        } else if owners > 1 || collision || parents > 1 {
+            assert!(matches!(
+                decision,
+                ResolutionDecision::Ambiguous { candidate_count: 2 }
+            ));
+        } else {
+            assert_eq!(decision, ResolutionDecision::Unresolved);
+        }
+    }
+    Ok(())
+}
