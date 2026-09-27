@@ -1,0 +1,36 @@
+{
+  "schema": "compass.mlcq-member-source-registration/1",
+  "declaredBeforeExecution": true,
+  "purpose": "Check stored direct member declarations of the eight externally rated Java classes against an independent JDK syntax parser before using member counts for any responsibility measure.",
+  "priorRelationReviewSha256": "8271f1777fbeaa81e51cdcaf551b009d8eec0cc231805e0eabc57e4f7baef8d3",
+  "sourceWitnessesSha256": "648a953a72162910f880e3eb8194200fb95e247af85fb49fe46c18bf864bad2c",
+  "graphSha256": {
+    "apache/cloudstack": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "eclipse/eclipse.platform.ui": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74"
+  },
+  "sampleIds": [6374724, 6391534, 6406137, 6413795, 8528735, 8537138, 8538037, 8539645],
+  "bounds": {
+    "sourceFiles": 8,
+    "sourceBytesPerFile": 2097152,
+    "sourceBytesTotal": 8388608,
+    "graphBytesPerFile": 1073741824,
+    "graphRecordBytes": 8388608,
+    "graphNodesPerFile": 1000000,
+    "graphEdgesPerFile": 1000000,
+    "oracleRecords": 10000,
+    "secondsPerGraph": 300,
+    "oracleSeconds": 60
+  },
+  "sourceOracle": {
+    "implementation": "Use public JDK 17 compiler syntax APIs to parse the exact eight pinned source files without project dependencies or attribution. Capture parse diagnostics and abort on an error. Inspect only direct MethodTree and VariableTree members of the uniquely selected ClassTree at the witnessed class name and source line; do not count nested-class members, inherited members, generated code or implicit constructors.",
+    "coordinates": "Record each method/constructor and field name, kind, source start/end UTF-16 position and line, preserving overloaded methods and comma-separated field declarations separately. Hash every source file before and after.",
+    "independenceLimit": "The compiler parser is independent of Compass extraction but is a syntax declaration oracle only. It does not validate call targets, field-access bindings, functional responsibilities or external Blob labels."
+  },
+  "graphMethod": "From each frozen graph, select the previously uniquely joined class ID, then direct directed contains edges to method or field nodes. Preserve edge multiplicity and any member with another distinct class owner. For each selected node record kind, name, file, start/end line and UTF-8 byte span. Compare uniquely by same kind, same name (constructor normalization explicit), same file and overlapping declaration source range. Report unmatched/ambiguous candidates, never choose the first.",
+  "outputs": "Per-class source and graph method/constructor/field lists, matched/unmatched/ambiguous declarations and graph nodes, all source and graph hashes, parse diagnostics, bounded failures, repeat verification and source-role disclosure. No ranking, classifier threshold, Graphify rerun or held-out claim.",
+  "interpretation": [
+    "One positive external Blob rating is a test class. Preserve that role; do not silently treat it as a production god object.",
+    "Do not infer class cohesion or low cohesion from counts or missing links. A class-member census is a prerequisite, not a defect diagnosis.",
+    "The selected eight classes are known development examples. No broad source correctness or cross-language conclusion follows."
+  ]
+}
