@@ -1146,8 +1146,9 @@
     "clippy": "First invocation failed on redundant Ok(...?) in new test. Corrected to direct serialization function; repeated workspace lib/bin and selected integration Clippy passed. Existing unrelated react_frontend test lint violations remain outside this invocation.",
     "finalRegression": "One test passed after the test-only Clippy correction.",
     "fixturePreflight": "Identical expanded fixed-corpus graphs have zero node/edge changes excluding communities; no topology bounds changed.",
-    "fullFixtureQualification": "Running; do not treat prior route-parent qualification as Java verification.",
-    "formatDiffProductBoundary": "cargo fmt --all -- --check, git diff --check, and scripts/check_product_boundary.sh passed."
+    "fullFixtureQualification": "Passed with exit 0: native scale ceilings, source semantics/topology, cold/warm/forced/alternate-checkout/delete/rename/restore determinism, Markdown checks, release build and frontend precedence/positive/negative qualification. Production commit 22814e59.",
+    "formatDiffProductBoundary": "cargo fmt --all -- --check, git diff --check, and scripts/check_product_boundary.sh passed.",
+    "releaseBinarySha256": "88f98577c865a92bf6eb9cb7dc506eb5c806a2a66909d68c5fa1d1db43ccfb8d"
   },
   "limitations": [
     "Text scores stay 46/55 each; selected relationships are 17/21 Compass versus 20/21 Graphify; reviewed occurrences tie at 17/21; paths remain 6/10 versus 8/10.",
@@ -1177,6 +1178,7 @@
     "java-constructor-panel-a-click-audit-01.json": "9ba5d437fa949e3fc12449b2eb451caa9c0490a797d25c6e58520c813d15b0fa",
     "java-constructor-panel-a-jsoup-audit-01.json": "2727f4c114cbbecd6dc261a5b0d9aa84fa576d90e831522ebd95f3e5e79d0b71",
     "java-constructor-panel-a-redux-audit-01.json": "3373cda48df45a5a422f5feb8afa1cdb80c461bd8f4b10b560303ba383d0c1ed",
-    "java-constructor-panel-a-walkdir-audit-01.json": "3709a54138a721680b999acafeb0c30204b9f16b1cd05fb5fd060f238e5c01f1"
+    "java-constructor-panel-a-walkdir-audit-01.json": "3709a54138a721680b999acafeb0c30204b9f16b1cd05fb5fd060f238e5c01f1",
+    "java-constructor-qualification-01.log": "611c2b5b4fcb60e372598a406810e4a43343af765234f04ab2d82156cf816b5d"
   }
 }

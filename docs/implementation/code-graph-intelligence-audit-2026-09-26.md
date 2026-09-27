@@ -1560,8 +1560,10 @@ found redundant error wrapping in the new test; after that test-only correction,
 workspace library/binary plus selected integration Clippy and the focused
 regression pass. The fixed qualification corpus has zero node/edge changes
 excluding communities, so no topology thresholds changed. Full Java fixture
-qualification is running; the preceding route-parent pass does not verify this
-Java production change.
+qualification completed with exit 0, including native scale ceilings, semantic
+and topology checks, lifecycle determinism, Markdown checks, the release build,
+and frontend precedence/positive/negative checks. This pass qualifies Java
+production commit `22814e59`; it does not establish comparative superiority.
 
 ## Next evidence to collect
 
