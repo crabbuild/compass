@@ -1868,6 +1868,53 @@ preserve exact source witnesses, raw-response hashes, all omissions, the budget
 discrepancy, and the diagnosed edge. God-object responsibility judgments,
 functional community quality and overall superiority remain unproven.
 
+### Bounded source follow-up for responsibility questions
+
+The [follow-up protocol](../../benchmarks/agent_query/responsibility_source_followup_panel_a.json)
+was frozen in `62f60b29` before the source windows were read. Both sides get
+one contiguous window of at most 8,000 bytes, beginning at the earliest exact
+subject anchor returned by their initial query. A read requires one unique
+file. All matching declaration anchors remain visible; choosing the window
+origin does not resolve declaration identity. Oracle witness ranges do not
+select the window.
+
+| Sufficient evidence after query plus source read | Compass | Graphify |
+| --- | ---: | ---: |
+| Chi | 2/4 | 2/4 |
+| Click | 4/4 | 4/4 |
+| jsoup | 3/4 | 3/4 |
+| Redux | 1/4 | 3/4 |
+| WalkDir | 1/4 | 1/4 |
+| Total | 11/20 | 13/20 |
+| Source payload bytes | 35,692 | 35,692 |
+| Initial query plus source payload bytes | 75,432 | 88,998 |
+
+Graphify's two additional Redux facts concern reducer state updates and the
+listener snapshot. Its returned anchor starts at implementation line 86;
+Compass also returns overload declarations at lines 41 and 75, so its window
+starts earlier and ends before those mechanisms. This is a workflow advantage
+under the specified policy. It does not establish that omitting overloads is
+universally correct. Compass likewise retains WalkDir's associated type alias
+at line 538 and struct at line 566; neither ambiguity is silently resolved.
+
+The [review](../../benchmarks/agent_query/responsibility_source_followup_review_panel_a.json)
+records all 40 evidence judgments and source/response hashes. Strict containment
+of every complete frozen witness yields 10/20 and 12/20. Semantic review credits
+one additional Chi fact per tool: the complete middleware construction and
+shared pool/tree assignments appear before the partial last line, although the
+window omits the later return in the witness. jsoup attribute filtering remains
+incomplete because the window ends before the destination write and rejection
+branch. These distinctions are preserved rather than treating partial ranges
+uniformly as successes or failures.
+
+All ten reads succeeded. Click's window reaches EOF at 3,692 bytes; every other
+window returns 8,000 bytes. The collector reads bounded whole files to validate
+and hash them before slicing; payload bytes do not measure disk IO. No model
+generated an explanation. This development arm measures evidence available to
+an agent under one reading policy, with unequal initial query response sizes.
+It does not measure best-possible workflows, source-reading latency, native
+explanation quality, community quality, or god-object detection.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

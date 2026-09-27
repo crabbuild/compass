@@ -122,7 +122,16 @@ explicit answers. Partial graph facts and useful source locations do not imply
 the complete implementation mechanism. Extra graph assertions require their
 own source review before any precision claim. Equal requested budgets do not
 imply equal actual output sizes. This reused-repository development arm is not
-a god-object oracle; a symmetric source-reading workflow remains necessary.
+a god-object oracle.
+
+`responsibility_source_followup_panel_a.json`, frozen in `62f60b29`, adds one
+source window per response, selected only from returned exact-subject anchors.
+The matching review records 11/20 sufficient facts for Compass and 13/20 for
+Graphify, with 35,692 source bytes each. Graphify's Redux implementation anchor
+provides two additional facts under the frozen earliest-anchor policy; Compass
+also returns preceding overload declarations. Keep that policy effect and all
+declaration ambiguities visible. This measures available source evidence, not
+native explanation quality; further reading and disambiguation remain open.
 
 ### MCP path diagnostics
 
