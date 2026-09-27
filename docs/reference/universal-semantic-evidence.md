@@ -868,10 +868,11 @@ raw graph output, or total node and edge counts.
 
 ### Java field contacts
 
-Java field accesses use the existing `MemberAccess` / `AccessesMember` contract
-and field-only qualified resolution. Exact field-token ranges retain repeated
-uses. Unqualified names require a source-declared field after lexical value
-lookup. The extraction index tracks block and loop exit, declaration order,
+Java fields and enum constants use the existing `MemberAccess` / `AccessesMember`
+contract. Qualified expressions allow field or enum-member targets; known
+unqualified values retain their declaration kind. Exact member-token ranges
+retain repeated uses. Unqualified names require a source-declared value after
+lexical lookup. The extraction index tracks block and loop exit, declaration order,
 parameters, lambda/catch/resource bindings, and local type-name shadowing.
 Declared nominal receivers, source-local field chains, arrays, casts, direct
 construction and single generic bounds may establish a target. Visible source
@@ -888,7 +889,22 @@ They are not read/write effects, runtime identities or cohesion judgments.
 Inherited fields, general access checking, cross-file field-type chains and
 unregistered local/anonymous class ownership remain unsupported. Unknown
 qualified receivers never select a same-named field. Schema and producer
-capabilities are unchanged; AST cache semantics version 9 rebuilds prior facts.
+capabilities are unchanged; AST cache semantics version 10 rebuilds prior facts.
+
+Enum constants retain their enclosing enum as their nominal value type, even
+when they own a constant-specific body. Registered body methods and field
+initializers retain their declaration owners; body fields shadow the enclosing
+enum's values. The resolver admits a body-specific field only when the candidate
+scope descends from that exact enum-member owner, within the lookup budget.
+External enum values and static imports cannot select a body-specific field by
+its qualified spelling alone. Duplicate receiver declarations remain ambiguous.
+
+Bare enum switch labels derive their target from the selector's nominal type,
+not a same-named field of the enclosing class. Candidates allow only enum-member
+targets; unknown selectors retain unresolved occurrences. This does not add
+integer-switch constant evaluation or general expression-result inference.
+Type parameters shadow same-named receiver types; visible source types retain
+precedence over imports. Unregistered local/anonymous bodies remain unsupported.
 
 ### Rust field contacts
 

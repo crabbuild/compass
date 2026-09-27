@@ -16,6 +16,7 @@ struct Field {
     qualified: String,
     nominal: Option<String>,
     is_static: bool,
+    kind: &'static str,
 }
 
 #[derive(Default)]
@@ -128,6 +129,27 @@ impl DirectEvidenceState<'_> {
                 .or_insert(node.start_byte());
         }
         match node.kind() {
+            "enum_constant" => {
+                if let Some(context) = self.declarations.get(&node.id())
+                    && let Some(enclosing) = &context.enclosing_type_qualified_name
+                {
+                    // Constants are values of the enum type, even when their
+                    // declaration owns a constant-specific anonymous body.
+                    // Storage is bounded by the existing declaration limit.
+                    self.java_fields
+                        .fields
+                        .entry(enclosing.clone())
+                        .or_default()
+                        .entry(context.name.clone())
+                        .or_default()
+                        .push(Field {
+                            qualified: context.qualified_name.clone(),
+                            nominal: Some(enclosing.clone()),
+                            is_static: true,
+                            kind: "enum_member",
+                        });
+                }
+            }
             "variable_declarator" => {
                 if let (Some(parent), Some(name)) =
                     (node.parent(), node.child_by_field_name("name"))
@@ -154,6 +176,7 @@ impl DirectEvidenceState<'_> {
                                     nominal,
                                     is_static: parent.kind() == "constant_declaration"
                                         || self.java_fields.static_scopes.contains(&parent.id()),
+                                    kind: "field",
                                 });
                         }
                     } else if parent.kind() == "local_variable_declaration"
@@ -438,7 +461,20 @@ impl DirectEvidenceState<'_> {
                 instance = false;
             }
             if anonymous_body(scope) {
-                return Value::Unknown;
+                let Some(context) = self.java_enum_body_owner(scope) else {
+                    return Value::Unknown;
+                };
+                if let Some(fields) = self
+                    .java_fields
+                    .fields
+                    .get(&context.qualified_name)
+                    .and_then(|fields| fields.get(name))
+                {
+                    return match fields.as_slice() {
+                        [field] if instance || field.is_static => Value::Field(field),
+                        _ => Value::Unknown,
+                    };
+                }
             }
             if java_container_kind(scope.kind()).is_some() {
                 let Some(context) = self.java_containers.get(&scope.id()) else {
@@ -457,6 +493,14 @@ impl DirectEvidenceState<'_> {
                 }
                 if self.java_fields.static_scopes.contains(&scope.id()) {
                     instance = false;
+                }
+                // The enum's own type name is visible from its registered
+                // constant bodies unless a value or interface can hide it.
+                if scope.kind() == "enum_declaration"
+                    && context.name == name
+                    && scope.child_by_field_name("interfaces").is_none()
+                {
+                    return Value::Absent;
                 }
                 // An inherited member can hide an enclosing field. Cross-file
                 // hierarchy selection belongs to the resolver, never this map.
@@ -487,7 +531,9 @@ impl DirectEvidenceState<'_> {
                 return None;
             }
             if named.is_none() && anonymous_body(scope) {
-                return None;
+                return self
+                    .java_enum_body_owner(scope)
+                    .map(|context| context.qualified_name.clone());
             }
             if java_container_kind(scope.kind()).is_some() {
                 let context = self.java_containers.get(&scope.id())?;
@@ -500,6 +546,31 @@ impl DirectEvidenceState<'_> {
             }
         }
         None
+    }
+
+    fn java_enum_body_owner(&self, body: Node<'_>) -> Option<&DeclarationContext> {
+        let constant = body
+            .parent()
+            .filter(|node| node.kind() == "enum_constant")?;
+        self.declarations.get(&constant.id())
+    }
+
+    fn java_field_type_parameter(&self, node: Node<'_>, name: &str) -> bool {
+        for scope in ancestors(node) {
+            if let Some(parameters) = scope.child_by_field_name("type_parameters") {
+                let mut cursor = parameters.walk();
+                for (index, parameter) in parameters.named_children(&mut cursor).enumerate() {
+                    if index >= DEPTH
+                        || first_named(parameter).is_some_and(|head| self.text(head) == name)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        ancestors(node)
+            .last()
+            .is_some_and(|scope| scope.parent().is_some())
     }
 
     fn java_field_receiver(
@@ -520,14 +591,17 @@ impl DirectEvidenceState<'_> {
                 Value::Absent => {
                     let name = self.text(node);
                     if self.java_field_local_type(node, &name)
-                        || self.visible_import_binding_is_ambiguous(owner, &name)
+                        || self.java_field_type_parameter(node, &name)
                     {
                         return None;
                     }
-                    self.local_target_for(owner, &name).cloned().or_else(|| {
-                        self.imported_target_for_occurrence(owner, &name, node.start_byte(), true)
-                            .cloned()
-                    })
+                    if let Some(local) = self.local_target_for(owner, &name) {
+                        return Some(local.clone());
+                    }
+                    if self.visible_import_binding_is_ambiguous(owner, &name) {
+                        return None;
+                    }
+                    self.java_qualified_type(owner, &name, node.start_byte())
                 }
             },
             "parenthesized_expression" => {
@@ -603,13 +677,44 @@ impl DirectEvidenceState<'_> {
                             owner.enclosing_type_qualified_name.as_deref()
                                 == Some(context.qualified_name.as_str())
                         })
+                } else if anonymous_body(scope) {
+                    self.java_enum_body_owner(scope).is_some_and(|context| {
+                        owner.enclosing_type_qualified_name.as_deref()
+                            == Some(context.qualified_name.as_str())
+                    })
                 } else {
                     self.declarations
                         .get(&scope.id())
                         .is_some_and(|context| context.fact_id == owner.fact_id)
                 }
             });
-        let (field, qualifier, qualified_name) = if node.kind() == "field_access" {
+        let switch_label = node.kind() == "identifier"
+            && node
+                .parent()
+                .is_some_and(|parent| parent.kind() == "switch_label");
+        let (field, qualifier, qualified_name, kinds) = if switch_label {
+            if !owner_known {
+                return Ok(());
+            }
+            // Enum labels are scoped by the selector, not lexical fields of
+            // the caller. Unknown selectors retain an unresolved occurrence.
+            let selector = ancestors(node)
+                .find(|scope| matches!(scope.kind(), "switch_expression" | "switch_statement"))
+                .and_then(|scope| scope.child_by_field_name("condition"));
+            let receiver =
+                selector.and_then(|selector| self.java_field_receiver(owner, selector, 0));
+            let target = receiver
+                .filter(|target| !target.ends_with("[]"))
+                .map(|target| format!("{target}::{}", self.text(node)));
+            (
+                node,
+                selector
+                    .map(|selector| self.text(selector))
+                    .unwrap_or_default(),
+                target,
+                vec!["enum_member".to_owned()],
+            )
+        } else if node.kind() == "field_access" {
             let (Some(object), Some(field)) = (
                 node.child_by_field_name("object"),
                 node.child_by_field_name("field"),
@@ -624,7 +729,12 @@ impl DirectEvidenceState<'_> {
                 .flatten()
                 .filter(|target| !target.ends_with("[]"))
                 .map(|target| format!("{target}::{}", self.text(field)));
-            (field, self.text(object), target)
+            (
+                field,
+                self.text(object),
+                target,
+                vec!["field".to_owned(), "enum_member".to_owned()],
+            )
         } else {
             if !owner_known || !java_value_identifier(node) {
                 return Ok(());
@@ -642,7 +752,12 @@ impl DirectEvidenceState<'_> {
             } else {
                 "this".to_owned()
             };
-            (node, qualifier, Some(field.qualified.clone()))
+            (
+                node,
+                qualifier,
+                Some(field.qualified.clone()),
+                vec![field.kind.to_owned()],
+            )
         };
         let spelling = self.text(field);
         let occurrence = self.builder.occur_with_context(
@@ -665,7 +780,7 @@ impl DirectEvidenceState<'_> {
                 module_or_package: Some(self.module_or_package.clone()),
                 scope_id: Some(owner.scope_id.clone()),
                 qualified_name,
-                allowed_target_kinds: vec!["field".to_owned()],
+                allowed_target_kinds: kinds,
                 allow_external: false,
                 ..ResolutionConstraint::default()
             },

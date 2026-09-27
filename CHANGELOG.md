@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Emit Java enum-constant references with exact occurrence evidence, selector-based
+  switch labels and registered constant-body ownership. Preserve field/value/type
+  shadowing and unresolved receivers; invalidate older disposable AST caches.
+
 - Cache fixed SQL read/write access patterns so statements reuse compiled
   regular expressions.
 

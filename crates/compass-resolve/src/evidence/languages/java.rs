@@ -30,21 +30,41 @@ impl ResolutionDb<'_> {
         }
         // Member availability cannot choose among duplicate nominal types.
         // Count receiver declarations before looking for the requested field.
-        let count = declarations
+        let mut owners = declarations
             .iter()
             .filter_map(|slot| self.declaration(*slot))
             .filter(|declaration| {
                 matches!(
                     declaration.kind.as_str(),
-                    "class" | "interface" | "enum" | "record" | "annotation_type"
+                    "class" | "interface" | "enum" | "record" | "annotation_type" | "enum_member"
                 )
-            })
-            .count();
-        match count {
-            0 => Some(ResolutionDecision::Unresolved),
-            1 => None,
-            candidate_count => Some(ResolutionDecision::Ambiguous { candidate_count }),
+            });
+        let Some(receiver) = owners.next() else {
+            return Some(ResolutionDecision::Unresolved);
+        };
+        let count = 1 + owners.count();
+        if count > 1 {
+            return Some(ResolutionDecision::Ambiguous {
+                candidate_count: count,
+            });
         }
+        if receiver.kind != "enum_member" {
+            return None;
+        }
+        // A constant-specific body can access its own fields. A value whose
+        // declared type is the enum cannot name that anonymous subclass.
+        // Require lexical ownership, not just a matching qualified prefix.
+        let mut scope = candidate.constraints.scope_id.as_deref();
+        for _ in 0..self.budget.candidates_per_lookup() {
+            let Some(current) = scope.and_then(|id| self.facts.scopes.get(id)) else {
+                return Some(ResolutionDecision::Unresolved);
+            };
+            if current.owner_declaration_id.as_deref() == Some(receiver.id.as_str()) {
+                return None;
+            }
+            scope = current.parent_scope_id.as_deref();
+        }
+        Some(ResolutionDecision::Unresolved)
     }
 
     pub(in crate::evidence) fn resolve_java_same_package_builtin_collision(

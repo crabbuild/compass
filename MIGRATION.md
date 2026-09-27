@@ -7,8 +7,9 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
-Rebuild Java graphs to receive source-proven field-access references with lexical
-scope and occurrence evidence. AST cache semantics version 9 automatically
+Rebuild Java graphs to receive source-proven field and enum-constant references,
+including supported enum switch labels and constant-specific body ownership.
+AST cache semantics version 10 automatically
 invalidates earlier extraction facts. Existing stored/historical graphs are not
 rewritten; unsupported receivers and inherited/anonymous/local-class cases
 remain gaps. These references do not classify read/write effects or establish

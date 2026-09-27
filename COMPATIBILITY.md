@@ -33,8 +33,8 @@ results for the known nested-anchor limitation in that stable release.
 
 ## Java field-access evidence
 
-Java emits `MemberAccess` occurrences for ordinary field expressions and
-unqualified source-declared fields. A bounded AST lexical index distinguishes
+Java emits `MemberAccess` occurrences for ordinary fields and enum constants,
+including supported unqualified references. A bounded AST lexical index distinguishes
 parameters, locals, block/loop lifetimes, lambda/catch/resource bindings and
 source type names. Receiver typing supports declared nominal values, source-local
 field chains, arrays, casts, direct constructors and single generic bounds.
@@ -49,11 +49,16 @@ unregistered local/anonymous class owners and exhausted inference remain
 unresolved or unrepresented. Unsupported flow masks a possibly shadowed field;
 it never establishes a convenient outer-field target. Cross-file field chains
 and general hierarchy/accessibility/type-checking are not inferred. Existing
-qualified universal resolution selects only field declarations. Graph v1 emits
+qualified universal resolution selects field or enum-member declarations. Bare
+enum switch labels use the selector type and permit only enum-member targets;
+unknown selectors remain unresolved. Registered constant-specific bodies retain
+their method/field owners and field shadowing. Their body-specific fields are
+visible only through lexical ownership, not through an enum-typed value.
+Type parameters and local values/types shadow same-named enum receivers. Graph v1 emits
 `references` with exact member-access provenance, preserving occurrences without
 read/write or runtime-alias claims. Method names are not field accesses.
 
-Rebuild graphs to obtain these facts. AST cache semantics advance from 8 to 9;
+Rebuild graphs to obtain these facts. AST cache semantics advance from 9 to 10;
 evidence/graph schemas, producer capabilities and package version are unchanged.
 Historical realizations remain immutable. Additional references can change
 navigation and community assignments; neither implies improved community

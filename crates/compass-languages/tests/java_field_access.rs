@@ -17,7 +17,20 @@ fn targets(source: &str) -> Result<Vec<Target>, Box<dyn Error>> {
         if candidate.relation != CandidateRelation::AccessesMember {
             continue;
         }
-        assert_eq!(candidate.constraints.allowed_target_kinds, ["field"]);
+        assert!(
+            candidate
+                .constraints
+                .allowed_target_kinds
+                .iter()
+                .any(|kind| kind == "field")
+        );
+        assert!(
+            candidate
+                .constraints
+                .allowed_target_kinds
+                .iter()
+                .all(|kind| matches!(kind.as_str(), "field" | "enum_member"))
+        );
         assert!(!candidate.constraints.allow_external);
         assert!(candidate.binding_id.is_none());
         let occurrence = evidence
