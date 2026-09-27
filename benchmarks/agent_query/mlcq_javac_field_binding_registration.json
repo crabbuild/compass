@@ -1,0 +1,36 @@
+{
+  "schema": "compass.mlcq-javac-field-binding-registration/1",
+  "declaredBeforeExecution": true,
+  "purpose": "Audit all direct-method source field accesses that a public JDK compiler can bind to a direct field of the same class in eight frozen rated Java files. Compare exact occurrences and targets with Compass without treating partial attribution as full recall.",
+  "priorMemberReviewSha256": "edff7c60649a6d85389d94b04bfe805f0b046d0667603135e00b56b61c001756",
+  "priorExplicitThisReviewSha256": "7a6e7b9b43cff60e7122bc37d804a0bbb936b5f8c3de714440e51a99963d6364",
+  "sourceWitnessesSha256": "648a953a72162910f880e3eb8194200fb95e247af85fb49fe46c18bf864bad2c",
+  "sampleIds": [6374724, 6391534, 6406137, 6413795, 8528735, 8537138, 8538037, 8539645],
+  "graphSha256": {
+    "apache/cloudstack": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "eclipse/eclipse.platform.ui": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74"
+  },
+  "oracleRule": "Use public JDK 17 JavacTask.parse then analyze on exactly the eight pinned Java files with an empty external classpath/sourcepath and no annotation processors. Keep every compiler diagnostic, including missing dependencies, and stop scoring if direct field symbols or the five previously verified explicit this.field controls cannot be bound. Within each witnessed class, inspect only direct MethodTree bodies; skip nested ClassTree bodies and constructors. For every IdentifierTree or MemberSelectTree, retain it only if Trees.getElement yields exactly the VariableElement obtained from one direct VariableTree field declaration of that same selected class. Preserve repeated occurrences and identify the exact selected identifier token in UTF-16 and UTF-8 source coordinates. Record unbound and other-field candidates separately as unavailable, not negatives.",
+  "graphRule": "Use the 95/95 and 65/65 previously source-matched direct method and field graph IDs. For each compiler-bound direct-field token, compare every stored directed references record at its exact source byte interval, recording correct method/field pair, wrong pair, duplicate and absent outcomes separately. Also inventory all method-to-owned-field graph records in the selected classes and mark those outside the compiler-bound denominator as unverified, not false positives.",
+  "comparison": "The five explicit this.field controls must occur among compiler-bound direct-field sites with their previous exact target and anchor. Report the denominator and diagnostics before interpreting any graph match rate. Do not use a missing compiler binding as evidence of absent source access.",
+  "limits": [
+    "The empty classpath will cause missing-dependency diagnostics; any compiler binding under errors is a selected precision-oriented oracle, not a complete source reference census.",
+    "The eight examples are known Java development data; one externally rated positive class is a test class. No god-object classifier, threshold, Graphify rerun, cross-language or held-out claim follows.",
+    "A correct static binding does not prove that the code path runs or that the class has one or multiple responsibilities."
+  ],
+  "bounds": {
+    "sourceFiles": 8,
+    "sourceBytesPerFile": 2097152,
+    "sourceBytesTotal": 8388608,
+    "oracleRecords": 100000,
+    "diagnosticRecords": 10000,
+    "oracleSeconds": 120,
+    "oracleHeapMegabytes": 1024,
+    "graphBytesPerFile": 1073741824,
+    "graphRecordBytes": 8388608,
+    "graphNodesPerFile": 1000000,
+    "graphEdgesPerFile": 1000000,
+    "secondsPerGraph": 300
+  },
+  "outputs": "Full accepted source occurrences, all graph records at exact tokens, unmatched and wrong-pair outcomes, unverified graph edges, compiler diagnostic and unavailable counts, raw hashes, failed attempts and repeated verification. No defect score or superiority claim."
+}
