@@ -2012,6 +2012,72 @@ No Rust code or clustering algorithm changed in this iteration. Public
 community/navigation workflow costs, broader membership precision, positive
 god-object evidence, independent review and fresh confirmation remain open.
 
+### Public community-to-neighbor workflow
+
+Commit `7a6d6c97` freezes the
+[one-follow-up protocol](../../benchmarks/agent_query/community_navigation_panel_a.json)
+before capture. Every task starts at the community containing its first
+source-defined declaration, prepared symmetrically from each tool's graph.
+Starting-community discovery is not scored. The neighbor selector comes only
+from returned member text matching the public seed file and terminal symbol.
+Distinct matching labels remain unresolved; no expected ID is substituted.
+
+The [complete review](../../benchmarks/agent_query/community_navigation_review_panel_a.json)
+records all 30 tool/task outcomes and the source-backed failure distinctions.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Community lists matching stored membership | 15/15 | 15/15 |
+| Unambiguous follow-up label selected | 13/15 | 15/15 |
+| Seed identity supported after one lookup | 5/15 | 9/15 |
+| Direct collaborator identity supported | 4/14 | 8/14 |
+| Neighbor calls reporting ambiguity | 8 | 6 |
+| Required direct-call pairs present in graph | 13/14 | 14/14 |
+
+All 58 executed tool calls succeeded at the protocol/tool level. Two Compass
+lookups were skipped because multiple distinct member labels matched. Successful
+seed responses matched their stored displayed adjacency. That consistency does
+not establish the precision of every returned edge. Chi's request-ID pair shares
+context state and is excluded from the direct-call denominator.
+
+The failures expose separate improvement opportunities:
+
+- Compass's `get_neighbors` consumes the full exact/prefix/substring candidate
+  list from `find_node`. Unique displayed names `RequestID()`, `term_len()` and
+  `.follow()` still produce ambiguity with broader matches such as
+  `NextRequestID()`, `test_term_len()` and `.follow_links()`.
+- Compass's Redux communities contain several member labels for the same seed
+  file and terminal symbol. Without declaration lines or IDs in the member
+  text, this policy cannot select the intended declaration.
+- Click's `__exit__` and the selected jsoup names collide in both tools. Their
+  ambiguity responses often expose candidate IDs, and Graphify suggests
+  `path::symbol`. A longer disambiguation workflow remains a valid unmeasured
+  alternative; these failures do not prove navigation is impossible.
+- Compass's successful WalkDir `push` response omits the reviewed call to
+  `DirList.close` at `src/lib.rs:906`. Both declarations are uniquely present,
+  but the captured Compass graph lacks that edge. Graphify stores and displays
+  it. This graph gap is separate from community grouping or selector ambiguity.
+
+Neither tool reaches its split collaborator pairs under this policy: Compass
+has two such pairs, Graphify three. The earlier source review found the required
+edges in all five cases. These different subsets are not equal denominators.
+
+The 60-second/1-MiB external response bounds are common, but native controls
+are unequal: Graphify receives a generous explicit token budget and Compass
+exposes whole results. Actual call text totals are 145,715 versus 51,605 bytes;
+call response wire totals are 150,769 versus 55,173. Including initialization,
+listing, requests and stderr, the session totals are 238,216 versus 94,443 bytes.
+Different community sizes and success counts prevent a matched-success output
+or latency efficiency claim. No cap or timeout occurred.
+
+All **119 developer-harness tests** pass, including ten new tests for selector
+ambiguity, duplicate identities, direction and distinct-neighbor multiplicity.
+A separate same-agent script checks all saved requests/responses, graph and
+support-file hashes and identity/count summaries; it is not an independent
+semantic reviewer. No Rust code changed or Rust tests ran in this iteration.
+The workflow is development evidence on reused repositories, not a held-out
+result, god-object diagnosis or overall superiority claim.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

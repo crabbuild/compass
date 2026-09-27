@@ -388,3 +388,35 @@ report supersedes that claim. Preserve original artifacts. Disconnected pairs
 include source files/modules as well as declarations. A search that reaches
 its depth or work bound has not proved global disconnection and must remain an
 incomplete answer to that question.
+
+### Community-to-neighbor development workflow
+
+`community_navigation_panel_a.json` freezes the one-follow-up label baseline
+before capture in commit `7a6d6c97`. Run it on the same paired graph manifest:
+
+```bash
+python3 -m benchmarks.agent_query.community_navigation \
+  --policy benchmarks/agent_query/community_navigation_panel_a.json \
+  --registration benchmarks/agent_query/community_task_pairs_panel_a.json \
+  --run /path/to/paired-graph-run/run.json \
+  --output /path/to/new-community-navigation-run \
+  --compass /path/to/frozen/compass \
+  --graphify-python /path/to/isolated-graphify-mcp-env/bin/python \
+  --graphify-environment /path/to/graphify-mcp-environment.json
+```
+
+Starting community IDs are prepared symmetrically. Follow-up labels use only
+the community text and public seed file/symbol. All matching rows are retained;
+multiple distinct labels stop the workflow. Graphs are used for scoring only
+after requests, never to substitute an expected follow-up ID. One request has
+60 seconds and 1 MiB of external response allowance; sessions are bounded at
+64 MiB. Graphify receives an explicit generous token budget; Compass exposes a
+whole-result interface. Those native controls are not equal token budgets.
+
+The matching review records seed identity support on 5/15 Compass versus 9/15
+Graphify tasks, and direct collaborator support on 4/14 versus 8/14. These are
+reused-repository development results for one particular workflow. Broader
+matching, duplicate member labels and a missing WalkDir call explain distinct
+Compass failures. Additional disambiguation calls and richer member handles
+remain unmeasured. Report bytes alongside these unequal successful sets, not as
+a matched-success efficiency claim.
