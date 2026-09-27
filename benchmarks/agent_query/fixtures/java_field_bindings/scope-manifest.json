@@ -1,0 +1,8 @@
+{
+  "files": {
+    "ScopeFixture.java": "bfc306296dbc95809b0d0171ed770785ce442ba6253dd98ecbbf37cff9730335"
+  },
+  "captureSha256": "f9add7ff7e6b7158f6a0afdc8be51c439417952b7f4a26dad8eedd047484b1c6",
+  "toolSha256": "0616d29730f77fc33a313e5c3280d6905c5435433f8e52ac4250ce2a8124e9d6",
+  "compilerRuntime": "17.0.8.1+8-LTS"
+}

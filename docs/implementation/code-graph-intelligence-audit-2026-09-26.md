@@ -3062,6 +3062,83 @@ registrations and baseline reports are preserved. Broader target precision,
 authored explanations, longer walks, actual god-object judgments and held-out
 confirmation remain open.
 
+## Real Java source-binding census: independent field precision
+
+The earlier 3,896-record jsoup check established occurrence/endpoint consistency,
+not semantic target precision. Registration `2499e927` now fixes all **88 Java 8
+base-source files** (1,150,637 bytes, including examples) before compiler binding
+capture. It uses the existing pinned jsoup source and both frozen native graphs.
+This is a complete census of that registered source set on a previously observed
+development repository, not held-out or cross-language generalization. Java 11
+overlays, separately compiled package metadata and tests remain outside this
+build configuration.
+
+A standalone auditor uses the public JDK
+[JavacTask parse/analyze API](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.compiler/com/sun/source/util/JavacTask.html)
+and source-tree bindings. Its
+[source positions](https://docs.oracle.com/en/java/javase/17/docs/api/jdk.compiler/com/sun/source/util/SourcePositions.html)
+are converted from Java UTF-16 positions to exact UTF-8 offsets. Corretto
+17.0.8.1 runs with `--release 8`, disabled processors, no implicit compilation,
+matched cached dependency hashes and no project code generation/execution.
+Compiler errors or incomplete/unbounded captures cannot produce a scored oracle.
+No dependency is added to Compass execution or native tests.
+
+The compiler resolves 4,314 internal source references, plus 44 external fields,
+55 array-length operations and 31 class literals. javac exposes the latter two
+as field-kind elements; round 01 grouped them with non-source targets. Round 02
+retains them as separate intrinsic categories. That correction does not change
+the internal denominator or either tool's results. Both rounds are preserved.
+
+| Source-declared evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Ordinary field declarations represented uniquely | 614/616 | 0/616 |
+| Ordinary field references with exact target, owner and occurrence | 3,047/3,785 | 0/3,785 |
+| Enum-constant declarations represented uniquely | 131/131 | 131/131 |
+| Enum-constant references with exact target, owner and occurrence | 0/529 | 0/529 |
+| Returned in-scope field contacts agreeing with the compiler | 3,047/3,047 | No contacts; precision unavailable |
+
+Every in-scope graph `references`/`reads`/`writes` contact to a field or enum
+member is inventoried; the scorer retains wrong, unmapped, ambiguous and
+unanchored records. All 3,047 Compass contacts match the compiler's source field
+declaration, enclosing source owner and exact token span. No missing/ambiguous
+identity or anchor failure occurs among these contacts. Graphify has no such
+contacts, so an empty result cannot establish its positive precision. The
+adapter preserves Graphify's undirected flag and never upgrades a line-only
+record into an exact occurrence or directed use. Source-region identity is
+checked; this is not a separate audit of every rendered qualified-name string.
+
+Compass still misses **738 ordinary field references and all 529 enum-constant
+references**. Frequent missed targets include `TreeBuilder.stack` (51 uses),
+`TokeniserState.nullChar` (47), `TokeniserState.eof` (41), and
+`Parser.NamespaceHtml` (32). Source inspection confirms examples of inherited
+state (`HtmlTreeBuilder` reading `TreeBuilder.stack`), statically imported
+constants (`Jsoup.clean` reading `SharedConstants.DummyUri`), and unrepresented
+anonymous-class fields (`expectedSize` and `i` in `Attributes.iterator`). These
+examples do not classify every missing case. Missing contacts cannot establish
+independent responsibilities or justify a god-object diagnosis.
+
+Qualification checks the source oracle against all 44 previously registered
+scope cases and 45 independently bytecode-checked occurrences. An additional
+20-record fixture covers two overloads, field/class initializers, lambdas,
+anonymous/local classes, hidden fields, compound uses, folded constants,
+external fields, array/class intrinsics, comments and Unicode. Unicode-escaped
+identifier anchors remain explicit unsupported cases instead of guessed spans.
+Fourteen new tests reject corruption, source drift, wrong targets/owners,
+ambiguous identities, missing anchors and inappropriate Graphify span/direction
+credit. All **176 benchmark tests and the product boundary pass**. Final whole-source compiler captures
+are byte-identical, and both saved reviews replay exactly.
+
+`java_real_field_review.json` contains summaries, missing-field identities,
+frequent missed targets and provenance hashes. Full raw bindings, every returned
+contact judgment and all missing occurrences are retained under external
+`jsoup-java-field-oracle-02`; `java_field_capture.py` and
+`java_source_fields.py` provide reproducible capture and replay. The product
+remains at `f2cacfeb`, version 0.3.30; this checkpoint changes only the auditor,
+fixtures and documentation. Native Rust, JavaScript, platform and packaging
+checks were not rerun. This strengthens semantic precision evidence for one
+Java source configuration; authored explanations, longer walks, functional
+communities, actual god-object judgments and held-out confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

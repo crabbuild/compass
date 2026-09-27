@@ -600,3 +600,61 @@ Compass's complete response payload is substantially larger. The unchanged
 not establish authored explanations, cohesion, god-object defects, exhaustive
 edge precision or overall superiority. See the audit document for remaining
 misses, payload costs, partition changes, warnings and exact verification.
+
+### Compiler source-binding census for real Java fields
+
+`java_real_field_registration.json` freezes all 88 Java 8 base-source files in
+jsoup before compiler binding capture. It retains the existing native graph
+hashes, project source pin, build configuration and cached dependency digests.
+`java_real_field_review.json` records the comparison and all remaining misses.
+This previously observed development repository is not held-out evidence.
+
+The public JDK `JavacTask`/`Trees` oracle parses and attributes source without
+code generation, annotation processing or project execution. Source positions
+are converted from UTF-16 to UTF-8 with split-surrogate checks. The auditor
+joins source declarations without choosing between ambiguous candidates and
+requires exact occurrence, target and source-owner evidence for credit. It
+inventories graph contacts even when their identity or anchor cannot be verified;
+line-only and unordered contacts are not upgraded to exact/directed evidence.
+
+Use an installed JDK 17 and the digest-matched cached dependencies named by the
+registration. Every capture requires a new external artifact directory:
+
+```sh
+python3 -m benchmarks.agent_query.java_field_capture \
+  --registration benchmarks/agent_query/java_real_field_registration.json \
+  --root /Volumes/Workspace/Github/jhy/jsoup \
+  --java-home /path/to/installed/jdk17 \
+  --classpath /path/to/jspecify-1.0.1.jar \
+  --classpath /path/to/re2j-1.8.jar \
+  --artifacts /Volumes/Workspace/CrabData/java-field-capture-new
+python3 -m benchmarks.agent_query.java_source_fields \
+  --capture /Volumes/Workspace/CrabData/java-field-capture-new/bindings.stdout \
+  --manifest /Volumes/Workspace/CrabData/java-field-capture-new/manifest.json \
+  --root /Volumes/Workspace/Github/jhy/jsoup \
+  --graph /path/to/frozen-graph.json --tool compass \
+  --output /Volumes/Workspace/CrabData/java-field-review-new.json
+```
+
+Use `--tool graphify` with its native graph. Add `--verify` to replay an existing
+review; default output creation rejects overwrites. Offline replay and unit tests
+need no JDK. Compiler errors, incomplete output, source drift and limits fail the
+capture; they never become empty successful inventories.
+
+The final census contains 3,785 ordinary source-field references and 529 enum
+constant references. Compass verifies 3,047 ordinary references and all 3,047
+returned contacts in scope; Graphify has no field-contact records. Both tools
+represent all 131 enum constants but miss all 529 reference occurrences. Compass
+represents 614/616 ordinary fields; Graphify represents none. The remaining
+44 external fields, 55 array lengths and 31 class literals are reported
+separately. Arrays and class literals are javac pseudo-fields, not source fields.
+
+All 44 previous scope cases and their 45 bytecode-checked occurrences agree with
+this source oracle. The additional fixture covers overload ownership, Unicode,
+compound uses, constant folding, intrinsics, initializers and anonymous/local
+classes. All 176 auditor tests pass. Repeated full captures and offline reviews
+are identical. External `jsoup-java-field-oracle-02` retains final evidence;
+round 01's mixed non-source category remains explicitly superseded. These results
+strengthen source-declaration precision evidence for this configuration; they
+do not score read/write effects, explanations, paths, community quality or
+actual god-object defects.
