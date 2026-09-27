@@ -1,0 +1,53 @@
+{
+  "schema": "compass.explanation-focus-registration/1",
+  "baselineCommit": "e445c5c6891432c30771a316c48d7ebda331c3ef",
+  "scope": "Known development questions; additive opt-in member-name focus, not a held-out experiment or a new paired superiority score.",
+  "sourceQuestions": "benchmarks/agent_query/responsibility_questions_panel_a.json",
+  "sourceQuestionsSha256": "608314dcd5e0a9e40fc7c6b8dd9d44026ba6a9b001e881fa8504fe44cc1fc7b2",
+  "tasks": [
+    {
+      "repository": "chi",
+      "symbol": "Mux",
+      "file": "mux.go",
+      "startLine": 21,
+      "kind": "struct"
+    },
+    {
+      "repository": "click",
+      "symbol": "_AtomicFile",
+      "file": "src/click/_compat.py",
+      "startLine": 455,
+      "kind": "class"
+    },
+    {
+      "repository": "jsoup",
+      "symbol": "Cleaner",
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "startLine": 43,
+      "kind": "class"
+    },
+    {
+      "repository": "redux",
+      "symbol": "createStore",
+      "file": "src/createStore.ts",
+      "startLine": 86,
+      "kind": "function"
+    },
+    {
+      "repository": "walkdir",
+      "symbol": "IntoIter",
+      "file": "src/lib.rs",
+      "startLine": 566,
+      "kind": "struct"
+    }
+  ],
+  "graphRun": "java-state-access-02/run.json",
+  "graphRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "baselineBinary": "java-state-access-02/compass",
+  "baselineBinarySha256": "5f6ff5f9b7b13866fdc7435e7a05888d3a95a0b23636be89cf45bc3478660139",
+  "policy": "Optional --member-focus TEXT with --source-members. Use existing query_terms normalization for TEXT; distinct searchable terms, maximum 32, input maximum 4096 bytes. Score each discovered callable by count of distinct focus terms occurring in its recorded name after existing identifier tokenization and canonical code-token normalization. Rank by descending count then existing source file/byte range/exact ID order. Do not read source to rank, use oracle witnesses, follow calls, collapse overloads, or select between ambiguous roots. Zero matches preserve original source order. Preserve existing discovery, metadata, verification and shared source-byte limits.",
+  "capture": "Use source-validated exact root IDs from explanation-budget-01 public resolver capture. Run each latest Compass subject with existing --source-members and with --member-focus set to its full unchanged natural-language question. Use --budget 2000 --max-source-bytes 8000 for every invocation. Replay old unfocused behavior against frozen baseline binary. Preserve all 20 facts, source bytes, complete stdout/stderr, hashes, source verification statuses, omitted and unavailable counts. No per-subject focus tuning after results.",
+  "scoring": "Literal source-witness coverage is primary. Native callable spans omit decorators and may be insufficient. Report all losses and remaining misses; no class-header allowance without the full rest of the witness. Do not combine native member scores with the symmetric public-neighbor source-window control.",
+  "fairness": "Graphify has no equivalent native member-source/focus flag in the recorded interface. This is a Compass before/after experiment only. Retain the paired 8k control at 14/20 versus 15/20; evaluate any future common focus policy separately on both tools before claiming a paired gain.",
+  "verification": "Native tests cover later matching members under a small shared budget, zero-match/default equivalence, duplicate terms, camel/snake case, Unicode, deterministic shuffled graph order, ambiguous and stale sources, source read bounds and CLI argument/output contracts. Run native baseline and relevant CLI gates; hash the final binary and unchanged production sources before real captures."
+}
