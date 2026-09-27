@@ -1,0 +1,1478 @@
+{
+  "schema": "compass.community-task-pairs-review/1",
+  "registrationCommit": "234753eb",
+  "scope": "Source-defined task co-location and granularity on captured native-only graph artifacts. The registration was frozen before this task-pair membership audit; earlier broad comparisons had already exposed portions of these graphs. This is a development diagnostic, not an independent reviewer, native answer workflow, architecture oracle, or god-object evaluation.",
+  "artifactRoot": "community-task-pairs-01",
+  "captureFile": "capture-final.json",
+  "captureSha256": "2924f3f7b8e66e2a1e14562ff6e0ed6c2a87208ec3da3ee7eee172d0d6c43889",
+  "initialCaptureSha256": "d0e0c564328a74a9282a5a44c420b6c91625fd7def51da3ecee2c801e00cc3a8",
+  "registrationSha256": "71faed0f477ee97da98c8bbb86686fae09de450664e4e000d9b2404496b94b6d",
+  "sourceRunSha256": "c2bc04366343fbd32bbdf84ccfb1db7aaad2e2ed38b38f979065c6755432d792",
+  "auditorSha256": "77f599ff7ee7eebfe4b590fee6c771ecfb3ed475d1944e37bcabc110634d3660",
+  "anchorMatcherSha256": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "summaryRecheckSha256": "abf4b4d6496ef27b83aeefeaae4b767b1c3f5d6dfedd3bfe8e7755947d1b813b",
+  "verification": {
+    "command": "python3 -m unittest discover -s benchmarks/agent_query/tests -v",
+    "passed": 109,
+    "failed": 0,
+    "logSha256": "a72c008df7dd7e2eb811b1097d415417dc52744315ae471f63c6ef788cc26ca3",
+    "notes": "Includes ten new community audit tests. Final auditor repeats every declaration resolution and pair outcome from the first capture. A separate direct recomputation checked all source anchors and pair outcomes; it is not an independent semantic review. Rust/product tests were not rerun because this iteration changes only developer-side Python evaluation and documentation."
+  },
+  "summaries": {
+    "compass": {
+      "cross_task": {
+        "same_community": 18,
+        "different_community": 42,
+        "unresolved": 0
+      },
+      "cross_task/cross_file": {
+        "same_community": 6,
+        "different_community": 38,
+        "unresolved": 0
+      },
+      "cross_task/same_file": {
+        "same_community": 12,
+        "different_community": 4,
+        "unresolved": 0
+      },
+      "within_task": {
+        "same_community": 13,
+        "different_community": 2,
+        "unresolved": 0
+      },
+      "within_task/cross_file": {
+        "same_community": 2,
+        "different_community": 0,
+        "unresolved": 0
+      },
+      "within_task/same_file": {
+        "same_community": 11,
+        "different_community": 2,
+        "unresolved": 0
+      }
+    },
+    "graphify": {
+      "cross_task": {
+        "same_community": 12,
+        "different_community": 48,
+        "unresolved": 0
+      },
+      "cross_task/cross_file": {
+        "same_community": 0,
+        "different_community": 44,
+        "unresolved": 0
+      },
+      "cross_task/same_file": {
+        "same_community": 12,
+        "different_community": 4,
+        "unresolved": 0
+      },
+      "within_task": {
+        "same_community": 12,
+        "different_community": 3,
+        "unresolved": 0
+      },
+      "within_task/cross_file": {
+        "same_community": 2,
+        "different_community": 0,
+        "unresolved": 0
+      },
+      "within_task/same_file": {
+        "same_community": 10,
+        "different_community": 3,
+        "unresolved": 0
+      }
+    }
+  },
+  "repositories": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "tools": {
+        "compass": {
+          "nodes": 729,
+          "assignedNodes": 729,
+          "communities": 154,
+          "declarations": [
+            {
+              "id": "chi-request-identity-GetReqID",
+              "task": "chi-request-identity",
+              "file": "middleware/request_id.go",
+              "startLine": 83,
+              "symbol": "GetReqID",
+              "matchedNodeIds": [
+                "sha256:34078dccfae1ef1443550189102e7927d10009b45d211741895af2b59e44907e"
+              ],
+              "status": "resolved",
+              "community": 3,
+              "communityNodes": 44,
+              "communitySourceFiles": 9
+            },
+            {
+              "id": "chi-request-identity-RequestID",
+              "task": "chi-request-identity",
+              "file": "middleware/request_id.go",
+              "startLine": 67,
+              "symbol": "RequestID",
+              "matchedNodeIds": [
+                "sha256:394032841e0823b74d28b8a866c2eb3cd7618a345c06b08fc66e63e5657d5ae4"
+              ],
+              "status": "resolved",
+              "community": 3,
+              "communityNodes": 44,
+              "communitySourceFiles": 9
+            },
+            {
+              "id": "chi-route-pattern-parameters-patNextSegment",
+              "task": "chi-route-pattern-parameters",
+              "file": "tree.go",
+              "startLine": 735,
+              "symbol": "patNextSegment",
+              "matchedNodeIds": [
+                "sha256:111dda918f957e920843303a5c69f2cda3e9b2006d711b0aef4efca1545bdc62"
+              ],
+              "status": "resolved",
+              "community": 4,
+              "communityNodes": 41,
+              "communitySourceFiles": 3
+            },
+            {
+              "id": "chi-route-pattern-parameters-patParamKeys",
+              "task": "chi-route-pattern-parameters",
+              "file": "tree.go",
+              "startLine": 803,
+              "symbol": "patParamKeys",
+              "matchedNodeIds": [
+                "sha256:6df5a320c50c2a4cc16144d1db213eeefc7cf84eced0fd9b1fbedcd21553b212"
+              ],
+              "status": "resolved",
+              "community": 4,
+              "communityNodes": 41,
+              "communitySourceFiles": 3
+            },
+            {
+              "id": "chi-router-construction-NewMux",
+              "task": "chi-router-construction",
+              "file": "mux.go",
+              "startLine": 52,
+              "symbol": "NewMux",
+              "matchedNodeIds": [
+                "sha256:fd36852628b4b3873d779bdb534cf23a17b6908247f6c46db80dbac5b2d7c453"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 90,
+              "communitySourceFiles": 8
+            },
+            {
+              "id": "chi-router-construction-NewRouter",
+              "task": "chi-router-construction",
+              "file": "chi.go",
+              "startLine": 62,
+              "symbol": "NewRouter",
+              "matchedNodeIds": [
+                "sha256:1928266631ebdc4651cac18aa5abc7ab261abc74a669ec9071a53d68b1f30699"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 90,
+              "communitySourceFiles": 8
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/cross_file": {
+              "same_community": 1,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 2,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5"
+        },
+        "graphify": {
+          "nodes": 674,
+          "assignedNodes": 674,
+          "communities": 33,
+          "declarations": [
+            {
+              "id": "chi-request-identity-GetReqID",
+              "task": "chi-request-identity",
+              "file": "middleware/request_id.go",
+              "startLine": 83,
+              "symbol": "GetReqID",
+              "matchedNodeIds": [
+                "middleware_request_id_getreqid"
+              ],
+              "status": "resolved",
+              "community": 5,
+              "communityNodes": 58,
+              "communitySourceFiles": 11
+            },
+            {
+              "id": "chi-request-identity-RequestID",
+              "task": "chi-request-identity",
+              "file": "middleware/request_id.go",
+              "startLine": 67,
+              "symbol": "RequestID",
+              "matchedNodeIds": [
+                "middleware_request_id_requestid"
+              ],
+              "status": "resolved",
+              "community": 5,
+              "communityNodes": 58,
+              "communitySourceFiles": 11
+            },
+            {
+              "id": "chi-route-pattern-parameters-patNextSegment",
+              "task": "chi-route-pattern-parameters",
+              "file": "tree.go",
+              "startLine": 735,
+              "symbol": "patNextSegment",
+              "matchedNodeIds": [
+                "tree_patnextsegment"
+              ],
+              "status": "resolved",
+              "community": 7,
+              "communityNodes": 42,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "chi-route-pattern-parameters-patParamKeys",
+              "task": "chi-route-pattern-parameters",
+              "file": "tree.go",
+              "startLine": 803,
+              "symbol": "patParamKeys",
+              "matchedNodeIds": [
+                "tree_patparamkeys"
+              ],
+              "status": "resolved",
+              "community": 7,
+              "communityNodes": 42,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "chi-router-construction-NewMux",
+              "task": "chi-router-construction",
+              "file": "mux.go",
+              "startLine": 52,
+              "symbol": "NewMux",
+              "matchedNodeIds": [
+                "mux_newmux"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 108,
+              "communitySourceFiles": 21
+            },
+            {
+              "id": "chi-router-construction-NewRouter",
+              "task": "chi-router-construction",
+              "file": "chi.go",
+              "startLine": 62,
+              "symbol": "NewRouter",
+              "matchedNodeIds": [
+                "chi_newrouter"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 108,
+              "communitySourceFiles": 21
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/cross_file": {
+              "same_community": 1,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 2,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+        }
+      }
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "tools": {
+        "compass": {
+          "nodes": 4264,
+          "assignedNodes": 4264,
+          "communities": 173,
+          "declarations": [
+            {
+              "id": "click-atomic-close-__exit__",
+              "task": "click-atomic-close",
+              "file": "src/click/_compat.py",
+              "startLine": 479,
+              "symbol": "__exit__",
+              "matchedNodeIds": [
+                "sha256:7bf788bd87c967bb2c80b682108ca265ce1ea9c213b3c8d55931a267d73c15b4"
+              ],
+              "status": "resolved",
+              "community": 6,
+              "communityNodes": 203,
+              "communitySourceFiles": 6
+            },
+            {
+              "id": "click-atomic-close-close",
+              "task": "click-atomic-close",
+              "file": "src/click/_compat.py",
+              "startLine": 466,
+              "symbol": "close",
+              "matchedNodeIds": [
+                "sha256:1e4e32dfcdfe036023e5c263eaba38bfe92eb391597b74fc5d70ab50a877cfa3"
+              ],
+              "status": "resolved",
+              "community": 6,
+              "communityNodes": 203,
+              "communitySourceFiles": 6
+            },
+            {
+              "id": "click-help-definition-layout-measure_table",
+              "task": "click-help-definition-layout",
+              "file": "src/click/formatting.py",
+              "startLine": 14,
+              "symbol": "measure_table",
+              "matchedNodeIds": [
+                "sha256:8e5a66041c4ec1628dcf55670a1c379436eec6a47f92a8a45608693bc2934e5e"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 95,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "click-help-definition-layout-write_dl",
+              "task": "click-help-definition-layout",
+              "file": "src/click/formatting.py",
+              "startLine": 229,
+              "symbol": "write_dl",
+              "matchedNodeIds": [
+                "sha256:3883ba20e7d4cfe17c813110a793c1d9db32455194d42971a01787a2b45c357e"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 95,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "click-terminal-string-width-strip_ansi",
+              "task": "click-terminal-string-width",
+              "file": "src/click/_compat.py",
+              "startLine": 491,
+              "symbol": "strip_ansi",
+              "matchedNodeIds": [
+                "sha256:84776cf5b684f5564ad6dc1143881454a6dd6f12faf2f62a8b1451fc9c89dbd2"
+              ],
+              "status": "resolved",
+              "community": 3,
+              "communityNodes": 246,
+              "communitySourceFiles": 9
+            },
+            {
+              "id": "click-terminal-string-width-term_len",
+              "task": "click-terminal-string-width",
+              "file": "src/click/_compat.py",
+              "startLine": 536,
+              "symbol": "term_len",
+              "matchedNodeIds": [
+                "sha256:b11122339a79629b59028324039bb74faf1857f56629c753c1e51abc3c93d330"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 95,
+              "communitySourceFiles": 4
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 2,
+              "different_community": 10,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 2,
+              "different_community": 6,
+              "unresolved": 0
+            },
+            "cross_task/same_file": {
+              "same_community": 0,
+              "different_community": 4,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 2,
+              "different_community": 1,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 2,
+              "different_community": 1,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93"
+        },
+        "graphify": {
+          "nodes": 2867,
+          "assignedNodes": 2867,
+          "communities": 204,
+          "declarations": [
+            {
+              "id": "click-atomic-close-__exit__",
+              "task": "click-atomic-close",
+              "file": "src/click/_compat.py",
+              "startLine": 479,
+              "symbol": "__exit__",
+              "matchedNodeIds": [
+                "src_click_compat_atomicfile_exit"
+              ],
+              "status": "resolved",
+              "community": 86,
+              "communityNodes": 9,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "click-atomic-close-close",
+              "task": "click-atomic-close",
+              "file": "src/click/_compat.py",
+              "startLine": 466,
+              "symbol": "close",
+              "matchedNodeIds": [
+                "src_click_compat_atomicfile_close"
+              ],
+              "status": "resolved",
+              "community": 86,
+              "communityNodes": 9,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "click-help-definition-layout-measure_table",
+              "task": "click-help-definition-layout",
+              "file": "src/click/formatting.py",
+              "startLine": 14,
+              "symbol": "measure_table",
+              "matchedNodeIds": [
+                "src_click_formatting_measure_table"
+              ],
+              "status": "resolved",
+              "community": 87,
+              "communityNodes": 9,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "click-help-definition-layout-write_dl",
+              "task": "click-help-definition-layout",
+              "file": "src/click/formatting.py",
+              "startLine": 229,
+              "symbol": "write_dl",
+              "matchedNodeIds": [
+                "src_click_formatting_helpformatter_write_dl"
+              ],
+              "status": "resolved",
+              "community": 87,
+              "communityNodes": 9,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "click-terminal-string-width-strip_ansi",
+              "task": "click-terminal-string-width",
+              "file": "src/click/_compat.py",
+              "startLine": 491,
+              "symbol": "strip_ansi",
+              "matchedNodeIds": [
+                "src_click_compat_strip_ansi"
+              ],
+              "status": "resolved",
+              "community": 45,
+              "communityNodes": 24,
+              "communitySourceFiles": 3
+            },
+            {
+              "id": "click-terminal-string-width-term_len",
+              "task": "click-terminal-string-width",
+              "file": "src/click/_compat.py",
+              "startLine": 536,
+              "symbol": "term_len",
+              "matchedNodeIds": [
+                "src_click_compat_term_len"
+              ],
+              "status": "resolved",
+              "community": 45,
+              "communityNodes": 24,
+              "communitySourceFiles": 3
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 0,
+              "different_community": 8,
+              "unresolved": 0
+            },
+            "cross_task/same_file": {
+              "same_community": 0,
+              "different_community": 4,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+        }
+      }
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "tools": {
+        "compass": {
+          "nodes": 6116,
+          "assignedNodes": 6116,
+          "communities": 41,
+          "declarations": [
+            {
+              "id": "jsoup-html-fragment-parse-parseBodyFragment",
+              "task": "jsoup-html-fragment-parse",
+              "file": "src/main/java/org/jsoup/parser/Parser.java",
+              "startLine": 338,
+              "symbol": "parseBodyFragment",
+              "matchedNodeIds": [
+                "sha256:116e34df3ea1beb0e4e87a6fbc8c2a4667bcac6135618616b616a6990d10e729"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 815,
+              "communitySourceFiles": 55
+            },
+            {
+              "id": "jsoup-html-fragment-parse-parseFragment",
+              "task": "jsoup-html-fragment-parse",
+              "file": "src/main/java/org/jsoup/parser/Parser.java",
+              "startLine": 295,
+              "symbol": "parseFragment",
+              "matchedNodeIds": [
+                "sha256:d51486603fd23ace9d94cf199d726965909177f01ed78bd3ed9a3ca39436412b"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 815,
+              "communitySourceFiles": 55
+            },
+            {
+              "id": "jsoup-html-whitespace-isBlank",
+              "task": "jsoup-html-whitespace",
+              "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+              "startLine": 151,
+              "symbol": "isBlank",
+              "matchedNodeIds": [
+                "sha256:7b70b1683af87dcfb443f8d622d324166f6a6a9d6d40e66b0f8baf1eea8ebbd7"
+              ],
+              "status": "resolved",
+              "community": 17,
+              "communityNodes": 143,
+              "communitySourceFiles": 19
+            },
+            {
+              "id": "jsoup-html-whitespace-isWhitespace",
+              "task": "jsoup-html-whitespace",
+              "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+              "startLine": 205,
+              "symbol": "isWhitespace",
+              "matchedNodeIds": [
+                "sha256:8b362a6fd1d3e3687e87d8010b0acf4af64a9bdf2c0cbd1ba51760278afb3227"
+              ],
+              "status": "resolved",
+              "community": 12,
+              "communityNodes": 191,
+              "communitySourceFiles": 23
+            },
+            {
+              "id": "jsoup-safe-document-copy-clean",
+              "task": "jsoup-safe-document-copy",
+              "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+              "startLine": 62,
+              "symbol": "clean",
+              "matchedNodeIds": [
+                "sha256:d490451c6bf56501db666f0a6c3c143f1a6d8a90120632415cc739cbf1a8f034"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 159,
+              "communitySourceFiles": 19
+            },
+            {
+              "id": "jsoup-safe-document-copy-copySafeNodes",
+              "task": "jsoup-safe-document-copy",
+              "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+              "startLine": 182,
+              "symbol": "copySafeNodes",
+              "matchedNodeIds": [
+                "sha256:c980a14050d13e4546d2b8727dc5881230db3b86bd14b462eaf938052c2f80f3"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 159,
+              "communitySourceFiles": 19
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 2,
+              "different_community": 1,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 2,
+              "different_community": 1,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead"
+        },
+        "graphify": {
+          "nodes": 5361,
+          "assignedNodes": 5361,
+          "communities": 151,
+          "declarations": [
+            {
+              "id": "jsoup-html-fragment-parse-parseBodyFragment",
+              "task": "jsoup-html-fragment-parse",
+              "file": "src/main/java/org/jsoup/parser/Parser.java",
+              "startLine": 338,
+              "symbol": "parseBodyFragment",
+              "matchedNodeIds": [
+                "src_main_java_org_jsoup_parser_parser_parser_parsebodyfragment"
+              ],
+              "status": "resolved",
+              "community": 1,
+              "communityNodes": 232,
+              "communitySourceFiles": 23
+            },
+            {
+              "id": "jsoup-html-fragment-parse-parseFragment",
+              "task": "jsoup-html-fragment-parse",
+              "file": "src/main/java/org/jsoup/parser/Parser.java",
+              "startLine": 295,
+              "symbol": "parseFragment",
+              "matchedNodeIds": [
+                "src_main_java_org_jsoup_parser_parser_parser_parsefragment"
+              ],
+              "status": "resolved",
+              "community": 39,
+              "communityNodes": 36,
+              "communitySourceFiles": 10
+            },
+            {
+              "id": "jsoup-html-whitespace-isBlank",
+              "task": "jsoup-html-whitespace",
+              "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+              "startLine": 151,
+              "symbol": "isBlank",
+              "matchedNodeIds": [
+                "src_main_java_org_jsoup_internal_stringutil_stringutil_isblank"
+              ],
+              "status": "resolved",
+              "community": 16,
+              "communityNodes": 76,
+              "communitySourceFiles": 5
+            },
+            {
+              "id": "jsoup-html-whitespace-isWhitespace",
+              "task": "jsoup-html-whitespace",
+              "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+              "startLine": 205,
+              "symbol": "isWhitespace",
+              "matchedNodeIds": [
+                "src_main_java_org_jsoup_internal_stringutil_stringutil_iswhitespace"
+              ],
+              "status": "resolved",
+              "community": 48,
+              "communityNodes": 31,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "jsoup-safe-document-copy-clean",
+              "task": "jsoup-safe-document-copy",
+              "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+              "startLine": 62,
+              "symbol": "clean",
+              "matchedNodeIds": [
+                "src_main_java_org_jsoup_safety_cleaner_cleaner_clean"
+              ],
+              "status": "resolved",
+              "community": 24,
+              "communityNodes": 56,
+              "communitySourceFiles": 5
+            },
+            {
+              "id": "jsoup-safe-document-copy-copySafeNodes",
+              "task": "jsoup-safe-document-copy",
+              "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+              "startLine": 182,
+              "symbol": "copySafeNodes",
+              "matchedNodeIds": [
+                "src_main_java_org_jsoup_safety_cleaner_cleaner_copysafenodes"
+              ],
+              "status": "resolved",
+              "community": 129,
+              "communityNodes": 7,
+              "communitySourceFiles": 3
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 0,
+              "different_community": 3,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 0,
+              "different_community": 3,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+        }
+      }
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "tools": {
+        "compass": {
+          "nodes": 3503,
+          "assignedNodes": 3503,
+          "communities": 845,
+          "declarations": [
+            {
+              "id": "redux-action-creator-binding-bindActionCreator",
+              "task": "redux-action-creator-binding",
+              "file": "src/bindActionCreators.ts",
+              "startLine": 9,
+              "symbol": "bindActionCreator",
+              "matchedNodeIds": [
+                "sha256:118ac793f4d6b77676a6543f79b8cdef6cd785fef2e27dcaee49c6568ff3488d"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 55,
+              "communitySourceFiles": 3
+            },
+            {
+              "id": "redux-action-creator-binding-bindActionCreators",
+              "task": "redux-action-creator-binding",
+              "file": "src/bindActionCreators.ts",
+              "startLine": 58,
+              "symbol": "bindActionCreators",
+              "matchedNodeIds": [
+                "sha256:872a5ee2bce2daedae73fa970870b29f3d0e02033199aa263da175827b5899fe"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 55,
+              "communitySourceFiles": 3
+            },
+            {
+              "id": "redux-action-shape-validation-isAction",
+              "task": "redux-action-shape-validation",
+              "file": "src/utils/isAction.ts",
+              "startLine": 4,
+              "symbol": "isAction",
+              "matchedNodeIds": [
+                "sha256:237b20392b78b4972302af1924657a5709e90d5534fbdaee1ac633567db87377"
+              ],
+              "status": "resolved",
+              "community": 1,
+              "communityNodes": 252,
+              "communitySourceFiles": 14
+            },
+            {
+              "id": "redux-action-shape-validation-isPlainObject",
+              "task": "redux-action-shape-validation",
+              "file": "src/utils/isPlainObject.ts",
+              "startLine": 5,
+              "symbol": "isPlainObject",
+              "matchedNodeIds": [
+                "sha256:08c1f8776bb6ac1c79c535fe70f0341ba85fb12fcf8ab56171ee2281e3f6fcb9"
+              ],
+              "status": "resolved",
+              "community": 1,
+              "communityNodes": 252,
+              "communitySourceFiles": 14
+            },
+            {
+              "id": "redux-listener-registration-ensureCanMutateNextListeners",
+              "task": "redux-listener-registration",
+              "file": "src/createStore.ts",
+              "startLine": 152,
+              "symbol": "ensureCanMutateNextListeners",
+              "matchedNodeIds": [
+                "sha256:692fe8cbc7b8e5a03bcb79c20531aefdbfa31098ea43bbe9b0301d61cd869f27"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 55,
+              "communitySourceFiles": 3
+            },
+            {
+              "id": "redux-listener-registration-subscribe",
+              "task": "redux-listener-registration",
+              "file": "src/createStore.ts",
+              "startLine": 201,
+              "symbol": "subscribe",
+              "matchedNodeIds": [
+                "sha256:f27566baebab97a78ea7b6d143149ecdff76b39167fb12b42612a3e69fba5a5d"
+              ],
+              "status": "resolved",
+              "community": 15,
+              "communityNodes": 55,
+              "communitySourceFiles": 3
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 4,
+              "different_community": 8,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 4,
+              "different_community": 8,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/cross_file": {
+              "same_community": 1,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 2,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b"
+        },
+        "graphify": {
+          "nodes": 996,
+          "assignedNodes": 996,
+          "communities": 65,
+          "declarations": [
+            {
+              "id": "redux-action-creator-binding-bindActionCreator",
+              "task": "redux-action-creator-binding",
+              "file": "src/bindActionCreators.ts",
+              "startLine": 9,
+              "symbol": "bindActionCreator",
+              "matchedNodeIds": [
+                "src_bindactioncreators_bindactioncreator"
+              ],
+              "status": "resolved",
+              "community": 28,
+              "communityNodes": 14,
+              "communitySourceFiles": 5
+            },
+            {
+              "id": "redux-action-creator-binding-bindActionCreators",
+              "task": "redux-action-creator-binding",
+              "file": "src/bindActionCreators.ts",
+              "startLine": 58,
+              "symbol": "bindActionCreators",
+              "matchedNodeIds": [
+                "src_bindactioncreators_bindactioncreators"
+              ],
+              "status": "resolved",
+              "community": 28,
+              "communityNodes": 14,
+              "communitySourceFiles": 5
+            },
+            {
+              "id": "redux-action-shape-validation-isAction",
+              "task": "redux-action-shape-validation",
+              "file": "src/utils/isAction.ts",
+              "startLine": 4,
+              "symbol": "isAction",
+              "matchedNodeIds": [
+                "src_utils_isaction_isaction"
+              ],
+              "status": "resolved",
+              "community": 43,
+              "communityNodes": 8,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "redux-action-shape-validation-isPlainObject",
+              "task": "redux-action-shape-validation",
+              "file": "src/utils/isPlainObject.ts",
+              "startLine": 5,
+              "symbol": "isPlainObject",
+              "matchedNodeIds": [
+                "src_utils_isplainobject_isplainobject"
+              ],
+              "status": "resolved",
+              "community": 43,
+              "communityNodes": 8,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "redux-listener-registration-ensureCanMutateNextListeners",
+              "task": "redux-listener-registration",
+              "file": "src/createStore.ts",
+              "startLine": 152,
+              "symbol": "ensureCanMutateNextListeners",
+              "matchedNodeIds": [
+                "src_createstore_createstore_ensurecanmutatenextlisteners"
+              ],
+              "status": "resolved",
+              "community": 25,
+              "communityNodes": 15,
+              "communitySourceFiles": 2
+            },
+            {
+              "id": "redux-listener-registration-subscribe",
+              "task": "redux-listener-registration",
+              "file": "src/createStore.ts",
+              "startLine": 201,
+              "symbol": "subscribe",
+              "matchedNodeIds": [
+                "src_createstore_createstore_subscribe"
+              ],
+              "status": "resolved",
+              "community": 25,
+              "communityNodes": 15,
+              "communitySourceFiles": 2
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "cross_task/cross_file": {
+              "same_community": 0,
+              "different_community": 12,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/cross_file": {
+              "same_community": 1,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 2,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+        }
+      }
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "tools": {
+        "compass": {
+          "nodes": 288,
+          "assignedNodes": 288,
+          "communities": 10,
+          "declarations": [
+            {
+              "id": "walkdir-deferred-directory-depth-get_deferred_dir",
+              "task": "walkdir-deferred-directory-depth",
+              "file": "src/lib.rs",
+              "startLine": 884,
+              "symbol": "get_deferred_dir",
+              "matchedNodeIds": [
+                "sha256:219c38f772358d6f0cd42cd06b879fe706b6672b0deee9461f8f7ec785618867"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 116,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "walkdir-deferred-directory-depth-skippable",
+              "task": "walkdir-deferred-directory-depth",
+              "file": "src/lib.rs",
+              "startLine": 1000,
+              "symbol": "skippable",
+              "matchedNodeIds": [
+                "sha256:648e4f3a42dcd72aa98ad5725459ca59362c53374b257faa9cd00a5cfee708f0"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 116,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "walkdir-directory-handle-budget-close",
+              "task": "walkdir-directory-handle-budget",
+              "file": "src/lib.rs",
+              "startLine": 1008,
+              "symbol": "close",
+              "matchedNodeIds": [
+                "sha256:ff9fee2d67be76e5af714ef0bceb4d68be41efd8086deccc6a46eb19cd9ee0f9"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 116,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "walkdir-directory-handle-budget-push",
+              "task": "walkdir-directory-handle-budget",
+              "file": "src/lib.rs",
+              "startLine": 901,
+              "symbol": "push",
+              "matchedNodeIds": [
+                "sha256:c4870d899db4c0d3e82cf28916d9cadef5b8d7b249ea6fe7aa97bc7d465dfe45"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 116,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "walkdir-symlink-loop-detection-check_loop",
+              "task": "walkdir-symlink-loop-detection",
+              "file": "src/lib.rs",
+              "startLine": 973,
+              "symbol": "check_loop",
+              "matchedNodeIds": [
+                "sha256:43858f600e266290da4e20870d1b0764d496ccbe59300e846a1675e943ec53b3"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 116,
+              "communitySourceFiles": 4
+            },
+            {
+              "id": "walkdir-symlink-loop-detection-follow",
+              "task": "walkdir-symlink-loop-detection",
+              "file": "src/lib.rs",
+              "startLine": 961,
+              "symbol": "follow",
+              "matchedNodeIds": [
+                "sha256:573323364aaddd351eb7ffdf1c271a5f20df53899d8d75e53cd6f85eac3dde78"
+              ],
+              "status": "resolved",
+              "community": 0,
+              "communityNodes": 116,
+              "communitySourceFiles": 4
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 12,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "cross_task/same_file": {
+              "same_community": 12,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177"
+        },
+        "graphify": {
+          "nodes": 247,
+          "assignedNodes": 247,
+          "communities": 15,
+          "declarations": [
+            {
+              "id": "walkdir-deferred-directory-depth-get_deferred_dir",
+              "task": "walkdir-deferred-directory-depth",
+              "file": "src/lib.rs",
+              "startLine": 884,
+              "symbol": "get_deferred_dir",
+              "matchedNodeIds": [
+                "src_lib_intoiter_get_deferred_dir"
+              ],
+              "status": "resolved",
+              "community": 2,
+              "communityNodes": 33,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "walkdir-deferred-directory-depth-skippable",
+              "task": "walkdir-deferred-directory-depth",
+              "file": "src/lib.rs",
+              "startLine": 1000,
+              "symbol": "skippable",
+              "matchedNodeIds": [
+                "src_lib_intoiter_skippable"
+              ],
+              "status": "resolved",
+              "community": 2,
+              "communityNodes": 33,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "walkdir-directory-handle-budget-close",
+              "task": "walkdir-directory-handle-budget",
+              "file": "src/lib.rs",
+              "startLine": 1008,
+              "symbol": "close",
+              "matchedNodeIds": [
+                "src_lib_dirlist_close"
+              ],
+              "status": "resolved",
+              "community": 2,
+              "communityNodes": 33,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "walkdir-directory-handle-budget-push",
+              "task": "walkdir-directory-handle-budget",
+              "file": "src/lib.rs",
+              "startLine": 901,
+              "symbol": "push",
+              "matchedNodeIds": [
+                "src_lib_intoiter_push"
+              ],
+              "status": "resolved",
+              "community": 2,
+              "communityNodes": 33,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "walkdir-symlink-loop-detection-check_loop",
+              "task": "walkdir-symlink-loop-detection",
+              "file": "src/lib.rs",
+              "startLine": 973,
+              "symbol": "check_loop",
+              "matchedNodeIds": [
+                "src_lib_intoiter_check_loop"
+              ],
+              "status": "resolved",
+              "community": 2,
+              "communityNodes": 33,
+              "communitySourceFiles": 1
+            },
+            {
+              "id": "walkdir-symlink-loop-detection-follow",
+              "task": "walkdir-symlink-loop-detection",
+              "file": "src/lib.rs",
+              "startLine": 961,
+              "symbol": "follow",
+              "matchedNodeIds": [
+                "src_lib_intoiter_follow"
+              ],
+              "status": "resolved",
+              "community": 2,
+              "communityNodes": 33,
+              "communitySourceFiles": 1
+            }
+          ],
+          "summaries": {
+            "cross_task": {
+              "same_community": 12,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "cross_task/same_file": {
+              "same_community": 12,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            },
+            "within_task/same_file": {
+              "same_community": 3,
+              "different_community": 0,
+              "unresolved": 0
+            }
+          },
+          "graphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+        }
+      }
+    }
+  ],
+  "splitPairDiagnostics": [
+    {
+      "repository": "click",
+      "tool": "compass",
+      "caller": "term_len",
+      "callee": "strip_ansi",
+      "callerCommunity": 15,
+      "calleeCommunity": 3,
+      "file": "src/click/_compat.py",
+      "line": 537,
+      "sourceLine": "    return len(strip_ansi(x))",
+      "storedEdge": {
+        "id": "sha256:18a10a498e2a6812c90b68b2319895923078a4da235b181795f53c89be7aee56",
+        "key": "sha256:18a10a498e2a6812c90b68b2319895923078a4da235b181795f53c89be7aee56",
+        "source": "sha256:b11122339a79629b59028324039bb74faf1857f56629c753c1e51abc3c93d330",
+        "target": "sha256:84776cf5b684f5564ad6dc1143881454a6dd6f12faf2f62a8b1451fc9c89dbd2",
+        "kind": "calls",
+        "occurrenceRule": "universal-call-exact-lexical-declaration",
+        "relationshipSite": {
+          "file": "src/click/_compat.py",
+          "startByte": 16553,
+          "endByte": 16563,
+          "startLine": 537,
+          "startColumn": 15,
+          "endLine": 537,
+          "endColumn": 25
+        },
+        "evidence": [
+          {
+            "origin": "ast",
+            "extractor": "compass.resolve.python.universal",
+            "confidence": "exact",
+            "rule": "universal-call-exact-lexical-declaration",
+            "anchors": [
+              {
+                "file": "src/click/_compat.py",
+                "startByte": 16553,
+                "endByte": 16563,
+                "startLine": 537,
+                "startColumn": 15,
+                "endLine": 537,
+                "endColumn": 25
+              }
+            ]
+          }
+        ],
+        "weight": 1.0,
+        "context": "call"
+      },
+      "interpretation": "Source-supported call is present across the community boundary; this split is not a missing-call finding."
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "caller": "isBlank",
+      "callee": "isWhitespace",
+      "callerCommunity": 17,
+      "calleeCommunity": 12,
+      "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+      "line": 157,
+      "sourceLine": "            if (!StringUtil.isWhitespace(string.codePointAt(i)))",
+      "storedEdge": {
+        "id": "sha256:b7685a82e4c39b4e15c0baf69a9b7c6b04494c82621884807f9a6932a4166869",
+        "key": "sha256:b7685a82e4c39b4e15c0baf69a9b7c6b04494c82621884807f9a6932a4166869",
+        "source": "sha256:7b70b1683af87dcfb443f8d622d324166f6a6a9d6d40e66b0f8baf1eea8ebbd7",
+        "target": "sha256:8b362a6fd1d3e3687e87d8010b0acf4af64a9bdf2c0cbd1ba51760278afb3227",
+        "kind": "calls",
+        "occurrenceRule": "universal-call-explicit-binding",
+        "relationshipSite": {
+          "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+          "startByte": 5238,
+          "endByte": 5250,
+          "startLine": 157,
+          "startColumn": 28,
+          "endLine": 157,
+          "endColumn": 40
+        },
+        "evidence": [
+          {
+            "origin": "ast",
+            "extractor": "compass.resolve.java.universal",
+            "confidence": "exact",
+            "rule": "universal-call-explicit-binding",
+            "anchors": [
+              {
+                "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+                "startByte": 5238,
+                "endByte": 5250,
+                "startLine": 157,
+                "startColumn": 28,
+                "endLine": 157,
+                "endColumn": 40
+              }
+            ]
+          }
+        ],
+        "weight": 1.0,
+        "context": "call"
+      },
+      "interpretation": "Source-supported call is present across the community boundary; this split is not a missing-call finding."
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "caller": "parseBodyFragment",
+      "callee": "parseFragment",
+      "callerCommunity": 1,
+      "calleeCommunity": 39,
+      "file": "src/main/java/org/jsoup/parser/Parser.java",
+      "line": 341,
+      "sourceLine": "        List<Node> nodeList = parseFragment(bodyHtml, body, baseUri);",
+      "storedEdge": {
+        "source": "src_main_java_org_jsoup_parser_parser_parser_parsebodyfragment",
+        "target": "src_main_java_org_jsoup_parser_parser_parser_parsefragment",
+        "relation": "calls",
+        "_origin": "ast",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "context": "call",
+        "source_file": "src/main/java/org/jsoup/parser/Parser.java",
+        "source_location": "L341",
+        "weight": 1.0
+      },
+      "interpretation": "Source-supported call is present across the community boundary; this split is not a missing-call finding."
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "caller": "isBlank",
+      "callee": "isWhitespace",
+      "callerCommunity": 16,
+      "calleeCommunity": 48,
+      "file": "src/main/java/org/jsoup/internal/StringUtil.java",
+      "line": 157,
+      "sourceLine": "            if (!StringUtil.isWhitespace(string.codePointAt(i)))",
+      "storedEdge": {
+        "source": "src_main_java_org_jsoup_internal_stringutil_stringutil_isblank",
+        "target": "src_main_java_org_jsoup_internal_stringutil_stringutil_iswhitespace",
+        "relation": "calls",
+        "_origin": "ast",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "context": "call",
+        "source_file": "src/main/java/org/jsoup/internal/StringUtil.java",
+        "source_location": "L157",
+        "weight": 1.0
+      },
+      "interpretation": "Source-supported call is present across the community boundary; this split is not a missing-call finding."
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "caller": "clean",
+      "callee": "copySafeNodes",
+      "callerCommunity": 24,
+      "calleeCommunity": 129,
+      "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+      "line": 66,
+      "sourceLine": "        copySafeNodes(dirtyDocument.body(), clean.body());",
+      "storedEdge": {
+        "source": "src_main_java_org_jsoup_safety_cleaner_cleaner_clean",
+        "target": "src_main_java_org_jsoup_safety_cleaner_cleaner_copysafenodes",
+        "relation": "calls",
+        "_origin": "ast",
+        "confidence": "EXTRACTED",
+        "confidence_score": 1.0,
+        "context": "call",
+        "source_file": "src/main/java/org/jsoup/safety/Cleaner.java",
+        "source_location": "L66",
+        "weight": 1.0
+      },
+      "interpretation": "Source-supported call is present across the community boundary; this split is not a missing-call finding."
+    }
+  ],
+  "interpretation": [
+    "All 30 source declarations resolve uniquely with community assignments in both graphs. Within-task co-location is 13/15 for Compass and 12/15 for Graphify. The two cross-file collaborator pairs are co-located on both sides; the other 13 within-task pairs share a source file.",
+    "Cross-task co-location is 18/60 for Compass and 12/60 for Graphify. These are granularity observations, not false-positive counts. Combining this with the collaborator count into a single accuracy score would impose an unreviewed architecture preference.",
+    "Click: Compass places term_len with help-table formatting and separates strip_ansi. The source explicitly shows measure_table using term_len. Graphify retains the term_len/strip_ansi pair together. Neither choice alone proves a bad cluster.",
+    "jsoup: Compass co-locates clean/copySafeNodes and parseBodyFragment/parseFragment; Graphify splits both pairs. Both tools split isBlank/isWhitespace. All five cross-community collaborator pairs across this panel retain the expected source-supported call edge.",
+    "Redux: Compass co-locates listener registration with action-creator binding; Graphify separates those selected tasks. The task labels do not prove separate ownership or a refactoring defect.",
+    "WalkDir: both tools put all six selected methods in one community. Their resource, deferred-output and symlink-loop mechanisms cooperate through the same iterator. The twelve cross-task pair co-locations are not twelve god-object defects.",
+    "Whole-community node and source-file counts provide context only. Tool node granularity and extraction coverage differ, and unselected community members have not all received semantic source review.",
+    "This study does not establish source precision for all graph edges, complete functional partition quality, source-based god-object labels, held-out generalization, or overall superiority. It motivates checking public navigation across community boundaries rather than forcing every collaborator into the same cluster."
+  ],
+  "nextActions": [
+    "Compare a symmetric public community/neighbor workflow on the frozen collaborator pairs, preserving member-list truncation, ambiguity, exact identity availability, and complete response costs.",
+    "Review actual responsibilities of additional hub candidates with source-supported positive concerns and counterevidence; do not turn this task pair corpus into god-object labels.",
+    "Add independent semantic review and fresh repositories before any broad community quality or superiority claim."
+  ]
+}

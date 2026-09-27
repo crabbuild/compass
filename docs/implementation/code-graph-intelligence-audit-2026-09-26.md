@@ -1959,6 +1959,59 @@ is not counted as a completed baseline. Extraction was not rerun for these
 query-only changes. Full response precision, new source-follow-up coverage,
 held-out confirmation, god-object diagnosis and community quality remain open.
 
+### Source-defined community task pairs
+
+Commit `234753eb` freezes
+[30 exact declarations](../../benchmarks/agent_query/community_task_pairs_panel_a.json)
+and their source mechanisms before this task-pair membership audit. Earlier
+comparisons had already exposed parts of these graphs, so this is a development
+diagnostic. The three task pairs per repository yield 15 within-task pairs and
+60 cross-task pairs. Both tools use the unchanged captured native graphs.
+
+All 30 declarations resolve uniquely on both sides. The
+[review](../../benchmarks/agent_query/community_task_pairs_review_panel_a.json)
+records identities, memberships, source witnesses and whole-community sizes.
+
+| Repository | Compass collaborator pairs co-located | Graphify collaborator pairs co-located | Compass cross-task pairs co-located | Graphify cross-task pairs co-located |
+| --- | ---: | ---: | ---: | ---: |
+| Chi | 3/3 | 3/3 | 0/12 | 0/12 |
+| Click | 2/3 | 3/3 | 2/12 | 0/12 |
+| jsoup | 2/3 | 0/3 | 0/12 | 0/12 |
+| Redux | 3/3 | 3/3 | 4/12 | 0/12 |
+| WalkDir | 3/3 | 3/3 | 12/12 | 12/12 |
+| Total | 13/15 | 12/15 | 18/60 | 12/60 |
+
+These columns describe different tradeoffs. They are not a combined accuracy
+score, and cross-task co-location is not a false-positive count. Only two of
+the 15 collaborator pairs cross source files; both tools co-locate those two.
+The purposefully small task labels do not partition all source responsibilities.
+
+Source review of all five split collaborator pairs finds the expected direct
+call edge in the corresponding graph:
+
+- Compass splits Click `term_len` from `strip_ansi`, while placing `term_len`
+  with help-table layout. The source shows `measure_table` using `term_len`,
+  so there is a concrete reason for that cross-task grouping.
+- Both tools split jsoup `isBlank` from `isWhitespace`.
+- Graphify also splits jsoup `clean` from `copySafeNodes`, and
+  `parseBodyFragment` from the selected three-argument `parseFragment`.
+
+The five boundaries are not missing-call findings. They motivate testing
+navigation to collaborators outside a community. Likewise, both tools place
+WalkDir's handle budgeting, deferred-directory output and symlink-loop methods
+in one community. Those mechanisms share iterator state; this does not prove
+excessive responsibility. Whole-community size comparisons also reflect
+different extraction granularity, including fields, parameters and containers.
+
+The bounded auditor reproduces all 150 tool/pair outcomes after hardening input
+validation. All **109 developer-harness tests** pass, including ten new tests
+for exact identity, ambiguity, missing assignments, integer-zero communities,
+bounds and deterministic pair outcomes. A separate direct recomputation checks
+the captured IDs and pairs, but it is not an independent semantic reviewer.
+No Rust code or clustering algorithm changed in this iteration. Public
+community/navigation workflow costs, broader membership precision, positive
+god-object evidence, independent review and fresh confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

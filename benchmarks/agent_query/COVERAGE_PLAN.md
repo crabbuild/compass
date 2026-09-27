@@ -112,6 +112,25 @@ summary is unavailable in that response, not an incorrect answer; neither a
 neighbor follow-up workflow nor Graphify's separate CLI is excluded by this
 finding. Do not turn summary availability into a cross-tool accuracy score.
 
+### Source-defined community task pairs
+
+`community_task_pairs_panel_a.json` freezes 30 declarations and their source
+mechanisms in commit `234753eb`, before this task-pair membership audit. Each
+repository has three task pairs. `community_tasks.py` audits all 15 within-task
+and 60 cross-task pairs per tool on the existing native graph artifacts.
+It requires exact declaration starts and names; missing, ambiguous and
+unassigned endpoints stay unresolved. Invalid identities and exceeded bounds
+are errors.
+
+`community_task_pairs_review_panel_a.json` records 13/15 collaborator pairs
+co-located for Compass and 12/15 for Graphify. Cross-task co-location is 18/60
+and 12/60. These are separate granularity observations, not a combined quality
+score. All five split collaborator pairs have the source-supported call edge.
+Click's help formatting deliberately uses its terminal-width helper, and
+WalkDir's different tasks share one iterator: cross-task grouping alone is not
+a design defect. Native boundary navigation, broader source responsibilities,
+independent review and god-object labels remain open.
+
 ### Responsibility explanation evidence
 
 `responsibility_questions_panel_a.json` freezes five questions and 20 source

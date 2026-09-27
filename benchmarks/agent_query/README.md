@@ -111,6 +111,34 @@ packages. Use an immutable environment when comparing installations.
 
 ## Metrics
 
+### Source-defined community task diagnostic
+
+`community_task_pairs_panel_a.json` records 30 source declarations grouped into
+15 collaborator pairs across Chi, Click, jsoup, Redux and WalkDir. Run the
+artifact audit against the registered `java-varargs-panel-a-02` capture:
+
+```bash
+python3 -m benchmarks.agent_query.community_tasks \
+  --registration benchmarks/agent_query/community_task_pairs_panel_a.json \
+  --run /path/to/java-varargs-panel-a-02/run.json \
+  --output /path/to/new-community-audit.json
+```
+
+The output path must be new. The auditor verifies source commits, file hashes,
+exact witness text and graph hashes, then records exact declaration identity
+and community membership. Missing or ambiguous anchors cannot pass as separate
+communities. It reports within-task co-location separately from cross-task
+co-location, including same-file and cross-file strata. Community IDs are never
+compared across tools. This measures grouping granularity on a small development
+panel, not native answer quality, ideal architecture or god-object defects.
+
+The [review](community_task_pairs_review_panel_a.json) retains every selected
+declaration and the five source-supported calls crossing community boundaries.
+Ten focused auditor tests cover ambiguity, missing assignments, identity,
+bounds, zero-valued community IDs and ordering invariance.
+
+### Query metrics
+
 - **Correctness**: stdout with an accepted exit status and without timeout or
   output-limit failure is judged against the suite's anchors.
   Graphify `explain` deliberately returns exit 1 for ambiguity: that status is
