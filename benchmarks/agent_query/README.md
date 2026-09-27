@@ -269,6 +269,22 @@ ambiguous labels separately. Hub checks recompute displayed degrees for
 uniquely identified labels; they do not prove complete ranking eligibility,
 source correctness, functional cohesion, or god-object design quality.
 
+### Hub explanation and source-role diagnostics
+
+`hub_evidence_audit.py --run /path/to/mcp-capture --output /path/to/new-audit.json`
+checks each returned hub's optional connectivity summary against its own graph.
+It distinguishes incident records, ranking degree, direction, self-loops, and
+bounded relation rows. Absent summaries are unavailable, not incorrect answers;
+this diagnostic does not measure a neighbor/CLI follow-up workflow. It must not
+be used as a cross-tool precision score on the different returned hub sets.
+
+The post-output `hub_role_reviews.json` records manual declaration-role reviews
+of the original MCP panel, preserving the 13 ambiguous Graphify identities as
+unknown. Pass `--reviews benchmarks/agent_query/hub_role_reviews.json` only with
+the original digest-matched capture. The auditor checks pinned source commits,
+whole-file hashes, exact anchors, and excerpts. This validates the review's
+source provenance; it does not automate semantic role or design-quality judgment.
+
 ### MCP path diagnostics
 
 Pass `--inputs benchmarks/agent_query/suite_mcp_paths.json` to the same collector

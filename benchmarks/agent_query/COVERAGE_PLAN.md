@@ -73,6 +73,24 @@ Do not compare one tool's model-assisted output with the other's native output.
 
 ## Scoring and acceptance
 
+### Hub explanation and source-role review
+
+The post-output `hub_role_reviews.json` census covers all original fifty hub
+entries per tool. Manually assign declaration/container roles only for exact
+returned identities or globally unique displayed labels. Preserve unidentified
+entries as unknown; do not choose the candidate that fits its degree. Verify
+the pinned source commit, whole-file hash, exact anchor, and excerpt. These are
+source-role descriptions, not god-object labels or a representative precision
+sample, and each tool returns a different set.
+
+For the connectivity improvement, independently recompute each returned hub's
+incident record total, self-loops, and bounded per-relation direction counts.
+Distinguish these from distinct-pair ranking degree. Keep undirected artifacts
+undirected. Check both structured values and the matching text block. An absent
+summary is unavailable in that response, not an incorrect answer; neither a
+neighbor follow-up workflow nor Graphify's separate CLI is excluded by this
+finding. Do not turn summary availability into a cross-tool accuracy score.
+
 ### MCP path diagnostics
 
 `suite_mcp_paths.json` covers prepared exact-ID navigation, reverse traversal,
