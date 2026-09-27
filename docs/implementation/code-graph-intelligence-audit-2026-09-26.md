@@ -2428,6 +2428,99 @@ or machine-schema bump was made.
 God-object responsibility judgments, richer explanations, broader source
 precision, longer walks and fresh held-out confirmation remain unproven.
 
+## Native responsibility explanations and source verification
+
+Registration `4e6ccb25` froze a native `explain` comparison for the existing five
+responsibility subjects and 20 implementation facts. It reuses the ten graphs
+from `rust-index-receiver-03`. Both tools receive the same short subject name
+and run in the pinned source checkout. A separate arm supplies the same subject
+file, start line and symbol to one public MCP resolver, then passes a unique
+source-matched returned ID to `explain`. No graph lookup chooses requests and
+there are no retries or external source follow-ups. These are known development
+questions, not held-out evaluation or automatic god-object judgments.
+
+Compass receives a 2,000-token connection budget and an 8,000-byte source cap;
+Graphify's native `explain` has no equivalent flags. Both have the same external
+120-second timeout and 16 MiB stream caps. Source availability is an observed
+capability of these commands, not an equal-I/O or efficiency comparison.
+
+| Complete responsibility facts in returned evidence | Compass | Graphify |
+| --- | ---: | ---: |
+| Native short-label `explain` | 7/20 | 0/20 |
+| Source-coordinate-assisted `explain` | 7/20 | 0/20 |
+| Earlier query plus symmetric bounded source read (separate workflow) | 11/20 | 13/20 |
+
+Neither native command authors a mechanism explanation: explicit native
+responsibility assertions remain **0/20 for both**. Compass's excerpts contain
+all four Click `_AtomicFile` facts and three jsoup `Cleaner` facts. Their full
+frozen source witnesses are returned, including the otherwise easy-to-misread
+Click exception behavior: the `delete` argument is not inspected by `close`.
+The Java excerpt ends at a partial line 206, before the attribute write needed
+for the remaining cleaning fact; it receives no partial-fact credit.
+Graphify returns useful relationships and source anchors, but no source excerpts
+sufficient for these complete implementation facts. It can still support an
+agent source-reading workflow, as the separate 13/20 result demonstrates.
+
+Graphify resolves all five subject identities in both arms. Compass resolves
+three native subjects and four assisted subjects. Native `createStore` is
+ambiguous across 27 source-backed candidates; its assisted search exceeds the
+frozen 256-candidate bound and is refused. Native `IntoIter` is ambiguous between
+an associated type alias and a struct; the supplied line resolves the struct in
+the assisted arm. Go `Mux` and Rust `IntoIter` declaration excerpts include their
+fields, but their separately defined methods remain outside those source spans.
+Names and method relationships do not establish the missing responsibility
+facts. This identifies a concrete next explanation gap: gathering the relevant
+implementation evidence beyond the subject's declaration span.
+
+Native stdout totals are 24,476 bytes for Compass and 6,286 for Graphify;
+Compass includes 9,620 raw source bytes. In the assisted arm, the totals are
+24,308 and 6,286, with 11,448 Compass source bytes. These totals exclude resolver
+traffic, whose raw transcripts are retained. A source excerpt is evidence rather
+than an authored answer. Other printed graph relationships have not all received
+source review; these fact scores are not full response-precision scores.
+
+Inspection exposed a separate provenance defect: `explain` labeled every source
+excerpt `digest-verified`, including nodes without a stored digest. A native
+regression reproduced that label, and checks cover same-length source changes,
+matching and mismatching full-span digests, truncated returned prefixes, absent
+files, malformed digests and all three CLI output formats. The query layer now
+returns an explicit verification flag. A missing digest produces an unverified
+current excerpt; malformed or mismatching digests prevent source output. The
+existing containment and bounded-read primitives are retained. Verification
+matches recorded bytes; it does not authenticate the graph or its semantics.
+
+A separate post-output Redux diagnostic selects the `kindOf` function from an
+already captured public resolver response by its explicit kind and source site.
+That diagnostic does **not** change the frozen ambiguous selection policy or any
+paired score. The published function has no source digest. Its old explanation
+claims verification; the new explanation says `unverified: no recorded source
+digest`. All remaining output, graph bytes and source bytes are unchanged.
+
+All 19 paired explanation payloads and all ten resolver response payloads are
+unchanged after the provenance fix: the selected excerpts in the comparison
+already had matching digests. Thus the 7/20 evidence result is an observation
+about existing native capabilities, not an improvement attributable to this fix.
+A separate same-agent verifier checks saved requests/responses, commands,
+source/graph/binary hashes, every rendered source line and the full-span digest.
+It reuses the frozen resolver helper and separately verifies selected source
+anchors; it is not independent human adjudication.
+
+Implementation `3a58309f` passed formatting, 4 query source tests, 39 CLI query
+tests, all 60 MCP tests, workspace Clippy, 1,106 workspace tests (2 ignored),
+9 product tests, the product-boundary check and a final CLI build. Validated
+source hashes match the commit, and the evaluated binary matches the final
+build. Extraction/viewer qualification and JavaScript gates were not rerun:
+extraction, resolution, publication and viewer assets are unchanged. No benchmark
+library changed, so the Python harness was not rerun; the new external collectors
+and evidence verifier completed successfully. The nonfatal macOS linker warning
+is retained in the reproduction log. Version remains 0.3.30.
+
+Detailed judgments and artifact hashes are in
+`benchmarks/agent_query/native_explanation_development_review.json`; captures are
+under `native-explanation-01` and `native-explanation-02`. God-object diagnosis,
+responsibility synthesis, broader source precision, longer walks and fresh
+held-out confirmation remain outstanding.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

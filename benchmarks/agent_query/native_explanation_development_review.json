@@ -1,0 +1,1895 @@
+{
+  "schema": "compass.native-explanation-development-review/1",
+  "scope": "Five existing responsibility subjects across five languages. Native short-label explain and public source-coordinate-assisted explain are separate development arms; neither is held-out, model-generated explanation quality, or god-object detection.",
+  "registrationCommit": "4e6ccb25",
+  "registrationSha256": "374dfefbe715ed1a238b46d3b071c8177881e12d3687dbeaa0939fc86dd51b0b",
+  "implementationCommit": "3a58309fca2da62b4f33a1002b2b380d04add6e3",
+  "tools": {
+    "compass": {
+      "version": "0.3.30",
+      "binarySha256": "52cf05fe7faacd7f00446694d9e1dbd2244347ee07159755d127e3df961b1a33"
+    },
+    "graphify": {
+      "version": "0.9.67",
+      "environmentSha256": "5c09a057c24e5d8528aa8e88d9195e1298b87fcc5d6b928e935bb439bc3c0535"
+    }
+  },
+  "graphs": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "compassGraphSha256": "3e7c2ca56a3e4a69d27a809237e73d604f948161cc8ffb3e3e1316437a320ead",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "compassGraphSha256": "e68fbe798dcf7422184736971dcdfc29d577e1e37269ea9c43456b9f6af54cb3",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+    }
+  ],
+  "summary": {
+    "native": {
+      "compass": {
+        "subjects": 5,
+        "facts": 20,
+        "sourceEvidenceFacts": 7,
+        "explicitNativeFacts": 0,
+        "resolvedSubjectIdentities": 3,
+        "stdoutBytes": 24476,
+        "returnedSourceBytes": 9620
+      },
+      "graphify": {
+        "subjects": 5,
+        "facts": 20,
+        "sourceEvidenceFacts": 0,
+        "explicitNativeFacts": 0,
+        "resolvedSubjectIdentities": 5,
+        "stdoutBytes": 6286,
+        "returnedSourceBytes": 0
+      }
+    },
+    "source-assisted": {
+      "compass": {
+        "subjects": 5,
+        "facts": 20,
+        "sourceEvidenceFacts": 7,
+        "explicitNativeFacts": 0,
+        "resolvedSubjectIdentities": 4,
+        "stdoutBytes": 24308,
+        "returnedSourceBytes": 11448
+      },
+      "graphify": {
+        "subjects": 5,
+        "facts": 20,
+        "sourceEvidenceFacts": 0,
+        "explicitNativeFacts": 0,
+        "resolvedSubjectIdentities": 5,
+        "stdoutBytes": 6286,
+        "returnedSourceBytes": 0
+      }
+    }
+  },
+  "results": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 673,
+      "stdoutBytes": 4981,
+      "sourceRows": 28,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "chi-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "chi-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "chi-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        }
+      ],
+      "stdoutSha256": "4965b8a889af17ddb2c1b1d056459adf9c8657e4fcd86c2c2f1571f715d910f2",
+      "identity": "sha256:d003705234e34bbb357969b1c76ccd4cd1adadcf314b380d8ed89255dd633335",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": false,
+      "sourceLineRange": [
+        21,
+        48
+      ]
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 673,
+      "stdoutBytes": 4981,
+      "sourceRows": 28,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "chi-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "chi-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "chi-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        }
+      ],
+      "stdoutSha256": "4965b8a889af17ddb2c1b1d056459adf9c8657e4fcd86c2c2f1571f715d910f2",
+      "identity": "sha256:d003705234e34bbb357969b1c76ccd4cd1adadcf314b380d8ed89255dd633335",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": false,
+      "sourceLineRange": [
+        21,
+        48
+      ]
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1219,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "chi-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "chi-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "chi-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "d4a4072622ae517d2b31ff3f9588e5fdf5e78d878fe937ada18a16d96c4df207",
+      "identity": "mux_go_chi_mux"
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1219,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "chi-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 242,
+              "endLine": 262,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "chi-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 100,
+              "endLine": 106,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "chi-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 278,
+              "endLine": 287,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "chi-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 476,
+              "endLine": 493,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "d4a4072622ae517d2b31ff3f9588e5fdf5e78d878fe937ada18a16d96c4df207",
+      "identity": "mux_go_chi_mux"
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 947,
+      "stdoutBytes": 2306,
+      "sourceRows": 34,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 4,
+      "judgments": [
+        {
+          "fact": "click-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "click-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "click-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "click-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": true
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        }
+      ],
+      "stdoutSha256": "704d4f4a5b8083a52e1b1ccd7de5b36e286558d26a9719f0871d47ead028a967",
+      "identity": "sha256:c7f6b2f79e825fa190c8d72b6722557840216c223547cccb255748897a8d91b6",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": false,
+      "sourceLineRange": [
+        455,
+        488
+      ]
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 947,
+      "stdoutBytes": 2306,
+      "sourceRows": 34,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 4,
+      "judgments": [
+        {
+          "fact": "click-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "click-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "click-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "click-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": true
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        }
+      ],
+      "stdoutSha256": "704d4f4a5b8083a52e1b1ccd7de5b36e286558d26a9719f0871d47ead028a967",
+      "identity": "sha256:c7f6b2f79e825fa190c8d72b6722557840216c223547cccb255748897a8d91b6",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": false,
+      "sourceLineRange": [
+        455,
+        488
+      ]
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 749,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "click-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "click-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "click-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "click-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": false
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "ffaa667ce2758665ba1774d5422150e0a91b7c38c555924044caa42bc8b75f87",
+      "identity": "src_click_compat_atomicfile"
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 749,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "click-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 455,
+              "endLine": 464,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "click-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "click-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 473,
+              "endLine": 474,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "click-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 466,
+              "endLine": 471,
+              "complete": false
+            },
+            {
+              "startLine": 479,
+              "endLine": 485,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "ffaa667ce2758665ba1774d5422150e0a91b7c38c555924044caa42bc8b75f87",
+      "identity": "src_click_compat_atomicfile"
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 8000,
+      "stdoutBytes": 13225,
+      "sourceRows": 164,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 3,
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "jsoup-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "jsoup-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "complete": true
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "jsoup-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        }
+      ],
+      "stdoutSha256": "28008e1af1ba8433403e4074ff819d23b7db49ecfe5d76c7758ed9462137a9cd",
+      "identity": "sha256:e800188397e3d537f837813168a0129fa6e5c7b853657e72bd20769d4d34bab9",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": true,
+      "sourceLineRange": [
+        43,
+        206
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 8000,
+      "stdoutBytes": 13225,
+      "sourceRows": 164,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 3,
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "jsoup-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        },
+        {
+          "fact": "jsoup-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "complete": true
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "jsoup-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": true,
+          "witnessSupport": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "complete": true
+            }
+          ],
+          "reason": "Complete source witnesses returned; source evidence is not an authored explanation."
+        }
+      ],
+      "stdoutSha256": "28008e1af1ba8433403e4074ff819d23b7db49ecfe5d76c7758ed9462137a9cd",
+      "identity": "sha256:e800188397e3d537f837813168a0129fa6e5c7b853657e72bd20769d4d34bab9",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": true,
+      "sourceLineRange": [
+        43,
+        206
+      ]
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1185,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "jsoup-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "jsoup-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "complete": false
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "jsoup-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "0514d4f240677e13127202c348e413fa0b31b3d5db54f674fda8a9bf0ad6ac13",
+      "identity": "src_main_java_org_jsoup_safety_cleaner_cleaner"
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1185,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "jsoup-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 50,
+              "endLine": 53,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "jsoup-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 62,
+              "endLine": 70,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "jsoup-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 148,
+              "endLine": 158,
+              "complete": false
+            },
+            {
+              "startLine": 188,
+              "endLine": 209,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "jsoup-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 124,
+              "endLine": 133,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "0514d4f240677e13127202c348e413fa0b31b3d5db54f674fda8a9bf0ad6ac13",
+      "identity": "src_main_java_org_jsoup_safety_cleaner_cleaner"
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "arm": "native",
+      "resolverStatus": "truncated-or-unknown",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 3551,
+      "sourceRows": 0,
+      "sourceIdentityVerified": false,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        },
+        {
+          "fact": "redux-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        },
+        {
+          "fact": "redux-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "complete": false
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "complete": false
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        },
+        {
+          "fact": "redux-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        }
+      ],
+      "stdoutSha256": "b6dbce0ceb5f34ca5f514f18c01671fb9b8278d1ecffff9f3e4081315b9ec148",
+      "ambiguityReported": true
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "arm": "source-assisted",
+      "resolverStatus": "truncated-or-unknown",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 0,
+      "sourceRows": 0,
+      "sourceIdentityVerified": false,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "complete": false
+            }
+          ],
+          "reason": "No uniquely selected endpoint; all facts remain in denominator."
+        },
+        {
+          "fact": "redux-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "complete": false
+            }
+          ],
+          "reason": "No uniquely selected endpoint; all facts remain in denominator."
+        },
+        {
+          "fact": "redux-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "complete": false
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "complete": false
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "complete": false
+            }
+          ],
+          "reason": "No uniquely selected endpoint; all facts remain in denominator."
+        },
+        {
+          "fact": "redux-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "complete": false
+            }
+          ],
+          "reason": "No uniquely selected endpoint; all facts remain in denominator."
+        }
+      ]
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1798,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "redux-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "redux-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "complete": false
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "complete": false
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "redux-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "a90b5d7358b5f491398e5c89905499b868d0120977f0acb7a84ece401e024a2c",
+      "identity": "src_createstore_createstore"
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1798,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "redux-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 121,
+              "endLine": 134,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "redux-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 293,
+              "endLine": 302,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "redux-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 152,
+              "endLine": 159,
+              "complete": false
+            },
+            {
+              "startLine": 221,
+              "endLine": 243,
+              "complete": false
+            },
+            {
+              "startLine": 304,
+              "endLine": 307,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "redux-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 344,
+              "endLine": 394,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "a90b5d7358b5f491398e5c89905499b868d0120977f0acb7a84ece401e024a2c",
+      "identity": "src_createstore_createstore"
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 413,
+      "sourceRows": 0,
+      "sourceIdentityVerified": false,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        },
+        {
+          "fact": "walkdir-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        },
+        {
+          "fact": "walkdir-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        },
+        {
+          "fact": "walkdir-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "complete": false
+            }
+          ],
+          "reason": "Ambiguous subject; no implementation source returned."
+        }
+      ],
+      "stdoutSha256": "c107a1defa0426dd14fee1ab50fcc819423845553306ecc340d425de65af6b24",
+      "ambiguityReported": true
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 1828,
+      "stdoutBytes": 3796,
+      "sourceRows": 41,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "walkdir-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "walkdir-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        },
+        {
+          "fact": "walkdir-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "complete": false
+            }
+          ],
+          "reason": "Returned declaration source does not contain every complete witness for this fact."
+        }
+      ],
+      "stdoutSha256": "b01ea850753a993b85d0db8943ea43fcba1cb578284149fdfb2b9ceb0ca0725f",
+      "identity": "sha256:ffcebdec9953195482aa66714e9b5ff49067552c7fc84d115b397aae9570aac5",
+      "sourceVerificationClaim": "digest-verified",
+      "storedDigestMatchesFullSpan": true,
+      "sourceTruncated": false,
+      "sourceLineRange": [
+        566,
+        606
+      ]
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "arm": "native",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1335,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "walkdir-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "walkdir-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "walkdir-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "8e9ceb3e54f7a2709914e55b29e4d7a19d652deedcec3410913de5ab0d489459",
+      "identity": "src_lib_intoiter"
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "arm": "source-assisted",
+      "resolverStatus": "resolved",
+      "returnedSourceBytes": 0,
+      "stdoutBytes": 1335,
+      "sourceRows": 0,
+      "sourceIdentityVerified": true,
+      "explicitResponsibilityFacts": 0,
+      "sourceEvidenceFacts": 0,
+      "judgments": [
+        {
+          "fact": "walkdir-1",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 699,
+              "endLine": 724,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "walkdir-2",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 901,
+              "endLine": 911,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "walkdir-3",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 961,
+              "endLine": 989,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        },
+        {
+          "fact": "walkdir-4",
+          "explicitNativeAssertion": false,
+          "sufficientSourceEvidence": false,
+          "witnessSupport": [
+            {
+              "startLine": 873,
+              "endLine": 898,
+              "complete": false
+            }
+          ],
+          "reason": "No source excerpt; names, anchors and relationships do not establish this complete implementation fact."
+        }
+      ],
+      "stdoutSha256": "8e9ceb3e54f7a2709914e55b29e4d7a19d652deedcec3410913de5ab0d489459",
+      "identity": "src_lib_intoiter"
+    }
+  ],
+  "unchangedExplanationPayloads": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "native"
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "arm": "native"
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "native"
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "arm": "native"
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "native"
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "arm": "native"
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "arm": "native"
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "arm": "native"
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "native"
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "arm": "source-assisted"
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "arm": "native"
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "arm": "source-assisted"
+    }
+  ],
+  "priorSymmetricSourceRead": {
+    "compassFacts": 11,
+    "graphifyFacts": 13,
+    "totalFacts": 20,
+    "review": "responsibility_source_followup_review_panel_a.json",
+    "sha256": "4bcba7d92cf4da2ea7cbad2a9a369270cc6ca24b3e51234c943f067966025189",
+    "scope": "Separate query-plus-source workflow; neither hidden nor combined with native scores."
+  },
+  "realRepositoryDiagnostic": {
+    "repository": "redux",
+    "selectedId": "sha256:2dc819f91bc866786968c643e45ad6b3419369536fbc2f8851bb810298489506",
+    "inputCaptureSha256": "f509b41b5c6d82501141e0ebd1b08733837e61623d827f71c73f03fb33b8482c",
+    "sourceSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f",
+    "graphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+    "scope": "Post-output Compass provenance diagnostic, not a paired score or a change to the frozen ambiguous-ID selection policy. Select one publicly returned function candidate by explicit kind to inspect its source verification claim. Source checkout and graphs remain untouched.",
+    "beforeVerificationClaim": "digest-verified",
+    "afterVerificationClaim": "unverified: no recorded source digest",
+    "remainingOutputIdentical": true,
+    "storedDigestAbsent": true
+  },
+  "validation": {
+    "steps": [
+      {
+        "name": "fmt",
+        "argv": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "seconds": 6.68
+      },
+      {
+        "name": "query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-query",
+          "--test",
+          "explanation_source",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 8.05
+      },
+      {
+        "name": "cli-query-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "code_query_cli",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 75.48
+      },
+      {
+        "name": "mcp-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-mcp",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 58.31
+      },
+      {
+        "name": "clippy",
+        "argv": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "seconds": 24.76
+      },
+      {
+        "name": "workspace-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 111.75
+      },
+      {
+        "name": "product-tests",
+        "argv": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "seconds": 5.43
+      },
+      {
+        "name": "product-boundary",
+        "argv": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "seconds": 0.1
+      },
+      {
+        "name": "build",
+        "argv": [
+          "cargo",
+          "build",
+          "--locked",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass"
+        ],
+        "exitCode": 0,
+        "seconds": 1.04
+      }
+    ],
+    "sourceSha256": {
+      "crates/compass-query/src/traversal.rs": "c1c50bb65aeecd442c9872ba40657d0ef7338c35d29ddd2453cad1a82ba92720",
+      "crates/compass-query/tests/explanation_source.rs": "34186c0a032ee576f587d1302d78f07959270ab9e139737414529b7781c869b6",
+      "crates/compass-cli/src/lib.rs": "11ed108e35f3b2473f87c6b9a9f7e7d20fedd689e3d88a845a8506e7864943b4",
+      "crates/compass-cli/src/help.rs": "b24eeca41a25c1897b347fe261008265e62d723f7d6932a4efa9d46855929b2b",
+      "crates/compass-cli/tests/code_query_cli.rs": "24d74e68ea7a5ea8c50590d7c56bf3b5bc48a48a244ed015c8c357492ca35ec0"
+    },
+    "testCounts": {
+      "query-tests": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "cli-query-tests": {
+        "passed": 39,
+        "failed": 0,
+        "ignored": 0
+      },
+      "mcp-tests": {
+        "passed": 60,
+        "failed": 0,
+        "ignored": 0
+      },
+      "workspace-tests": {
+        "passed": 1106,
+        "failed": 0,
+        "ignored": 2
+      },
+      "product-tests": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0
+      }
+    },
+    "binaryMatchesFinalBuild": true,
+    "notRun": [
+      "Extraction/viewer fixture qualification and JavaScript gates were not rerun: this change only affects explanation source-verification status and public CLI text, not extraction, resolution, graph publication or viewer assets.",
+      "Python benchmark harness was not rerun because no benchmark library changed; new external collectors and the evidence verifier completed successfully."
+    ]
+  },
+  "artifacts": {
+    "native-explanation-01/collect.py": "f53104b56a092fd292074bbd1abaa2a89a1295a9c2752812039dedb35aef267a",
+    "native-explanation-01/baseline/capture.json": "e53cadd1840838b3168ba85b05bcca24d97320ca9a7dab9ef8b0949975f40f88",
+    "native-explanation-01/reproduction.log": "ecc62e639b793de11c1facb66e192ab5db8f23a88a0d3c3d033003f6ef8b463e",
+    "native-explanation-02/collect.py": "9ed4c348c6aae2d2e5ac3d8f82c4348f476d954ac1eb9130476a577a51c5c9dd",
+    "native-explanation-02/final/capture.json": "8a2a89584e06ecaecfec4caedf44de5b959455653bb5a6db15713ee3911a0b17",
+    "native-explanation-02/verified-summary.json": "247ad0c8139bf6d954785e2a610f889addb23e55b8f8a76dd4cf6e826901ae25",
+    "native-explanation-02/verify_capture.py": "a8e1b83424c267dad9011626bf39a73740f5993d21f1e743a8275f7efbaa6bfb",
+    "native-explanation-02/verification.log": "68d345697cecc65ebfad7068a224c39d98e41eddee648197ec41376eeed080a3",
+    "native-explanation-02/verify_real_digest.py": "bfb122c417a1e231e981b722f6a2077fafeb6de6422c15629db64e1c7b3631b9",
+    "native-explanation-02/real-digest-diagnostic/capture.json": "7d883ea073ff06de7af6f91a79bb70ec60650593a516fb70219d162b4dc55fb7",
+    "native-explanation-02/real-digest-diagnostic/before.stdout": "1365900139d869d4120da489e296a7c1b96803bbfaa4cfe62b043361239b1feb",
+    "native-explanation-02/real-digest-diagnostic/after.stdout": "835f7a9e97c1108ab2590e22177205bde96c8ac6de073e55e349ace03454e18a",
+    "native-explanation-02/validation.json": "79cbaac0964f808044f01baf3c6ff2d523fcbac522db818e7d99c50ebc59dfc6",
+    "native-explanation-02/fmt-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-explanation-02/query-tests-final.log": "efe962bdf2756c025f78f489697d34db30efdae01ae315e4339fab8b5db86309",
+    "native-explanation-02/cli-query-tests-final.log": "254b0312f3cff10df323f6b7bd82dd7f9adfcdcb82fa4cd87894f674aa647978",
+    "native-explanation-02/mcp-tests-final.log": "1d873e89b4ea4691d047357234d9e3298ac19048e96c953f5f35b568f4e3b59a",
+    "native-explanation-02/clippy-final.log": "de4702a3f15d49659cddb278e4dfcf4b2afee2b8de5eec277006a57a510e151e",
+    "native-explanation-02/workspace-tests-final.log": "a08c311c95286f6811ea81aa035e4f59e08f1d74b3093455c142644091860676",
+    "native-explanation-02/product-tests-final.log": "e47d0f2a5347a3c732d1fa2d634bb7b83ad0370cb13b2b1c983e21cd03d23047",
+    "native-explanation-02/product-boundary-final.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "native-explanation-02/build-final.log": "417587ddafc7f98dcabb9a1e2a27c82e820f932ffa72d1bc535b88b7ad1fc735"
+  },
+  "limitations": [
+    "Same-agent semantic review and verifier, not independent human adjudication.",
+    "Only frozen responsibility facts are judged; other printed graph relationships have not all been source-reviewed.",
+    "Literal complete witnesses supply sufficient evidence for seven facts; no alternate partial-witness credit is used.",
+    "No model-generated explanations or god-object quality labels.",
+    "Native capabilities and output sizes differ; this is not equal-I/O efficiency or latency.",
+    "The earlier query plus symmetric source read remains a separate Graphify advantage (13/20 vs Compass 11/20).",
+    "The provenance correction does not change these selected native outputs or fact scores: all displayed excerpts already carried matching digests.",
+    "Graphify resolves all five subjects in each arm. Compass resolves three native subjects and four assisted subjects; the assisted Redux resolver hits its candidate bound.",
+    "Go Mux and Rust IntoIter declaration excerpts do not include their separately defined methods. The Java 8000-byte excerpt ends before the attribute-write evidence needed for one fact.",
+    "Native connection budgets/source caps differ. Actual byte totals describe these interfaces, not equal-work performance.",
+    "God-object judgments, source-based responsibility synthesis, longer walks, wider precision and fresh confirmation remain outstanding."
+  ]
+}
