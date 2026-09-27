@@ -1,0 +1,65 @@
+{
+  "schema": "compass.java-state-access-public-registration/1",
+  "registrationCommit": "09ca58e6a92ee6ec5045e7cbde14300d136b9e6a",
+  "scope": "Known-ID-assisted development retrieval control. Registered after implementation/native regressions, before rebuilt real-repository graphs or public responses are inspected. No identity-discovery, authored-answer, held-out or overall-superiority claim.",
+  "sourceRegistration": "benchmarks/agent_query/state_access_development_registration.json",
+  "sourceRegistrationSha256": "4805af71d9ae358fa65dba8394228d77a8203589f8f5201c20fe469c6aa3362d",
+  "repository": "jsoup",
+  "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+  "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+  "tasks": [
+    {
+      "owner": "Cleaner",
+      "state": "safelist",
+      "access": {
+        "method": "Cleaner",
+        "methodLine": 50,
+        "line": 52,
+        "column": 9,
+        "expression": "this.safelist",
+        "operation": "write",
+        "text": "        this.safelist = safelist;"
+      }
+    },
+    {
+      "owner": "Cleaner",
+      "state": "safelist",
+      "access": {
+        "method": "createSafeElement",
+        "methodLine": 188,
+        "line": 197,
+        "column": 17,
+        "expression": "safelist",
+        "operation": "read",
+        "text": "            if (safelist.isSafeAttribute(sourceTag, sourceEl, sourceAttr)) { // will keep this attr"
+      }
+    },
+    {
+      "owner": "CleaningVisitor",
+      "state": "destination",
+      "access": {
+        "method": "CleaningVisitor",
+        "methodLine": 143,
+        "line": 145,
+        "column": 13,
+        "expression": "this.destination",
+        "operation": "write",
+        "text": "            this.destination = destination;"
+      }
+    },
+    {
+      "owner": "CleaningVisitor",
+      "state": "destination",
+      "access": {
+        "method": "head",
+        "methodLine": 148,
+        "line": 158,
+        "column": 21,
+        "expression": "destination",
+        "operation": "write",
+        "text": "                    destination = destChild;"
+      }
+    }
+  ],
+  "policy": "For each source-validated callable, provide each tool its own exact graph ID as task input and issue one public MCP get_neighbors call without relation filtering. Preserve native defaults, all errors, truncation and full response bytes; no retries or source follow-ups. Score field identity separately from selected-line anchors. Verify Compass full-node/parallel-record response against the graph; report payload costs without an efficiency claim. Reuse unchanged baseline Graphify graphs and the new Compass jsoup graph."
+}
