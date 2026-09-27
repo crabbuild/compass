@@ -19,10 +19,13 @@ from benchmarks.agent_query.mcp_transport import StdioMcp
 from benchmarks.agent_query.runner import run_bounded, _sha256_file
 
 
-def resolver(tool, witness):
+def resolver(tool, witness, *, exact=False):
     coordinate = dict(file=witness['file'], startLine=witness['line'], symbol=witness['symbol'])
     if tool == 'compass':
-        return coordinate, dict(method='search_symbols', arguments=dict(query=coordinate['symbol'], **SEARCH_LIMITS))
+        arguments = dict(query=coordinate['symbol'], **SEARCH_LIMITS)
+        if exact:
+            arguments.update(exact=True, source_file=coordinate['file'], start_line=coordinate['startLine'])
+        return coordinate, dict(method='search_symbols', arguments=arguments)
     if tool == 'graphify' and '::' not in coordinate['file']:
         return coordinate, dict(method='get_node', arguments=dict(label=coordinate['file']+'::'+coordinate['symbol']))
     raise ValueError('unsupported resolver input')
@@ -32,8 +35,11 @@ def execute(args):
     registration = json.loads(read_bounded(args.registration, 1048576))
     witnesses = json.loads(read_bounded(args.witnesses, 1048576))
     run = json.loads(read_bounded(args.run, 16777216))
-    if registration['schema'] != 'compass.directed-identity-development-registration/1':
+    if registration['schema'] not in {'compass.directed-identity-development-registration/1', 'compass.longer-path-registration/1'}:
         raise ValueError('unsupported registration')
+    exact = registration['schema'] == 'compass.longer-path-registration/1'
+    if exact and _sha256_file(args.compass) != registration['baselineBinarySha256']:
+        raise ValueError('registered binary digest mismatch')
     if _sha256_file(args.run) != registration['graphRunSha256']:
         raise ValueError('graph input digest mismatch')
     if _sha256_file(args.witnesses) != registration['sourceWitnesses'][args.witnesses.name]:
@@ -52,7 +58,9 @@ def execute(args):
             for tool in ['compass', 'graphify']:
                 if _sha256_file(Path(repo[tool+'Graph'])) != repo[tool+'GraphSha256']:
                     raise ValueError('graph digest mismatch')
-            for anchor in w['nodes'] + [s['site'] for s in w['steps']]:
+            routes = [w] + w.get('alternativeWitnesses', [])
+            anchors = [a for route in routes for a in route['nodes'] + [s['site'] for s in route['steps']]]
+            for anchor in anchors:
                 path = (root/anchor['file']).resolve()
                 if not path.is_relative_to(root.resolve()): raise ValueError('source path escapes root')
                 data = read_bounded(path, 4194304)
@@ -86,7 +94,7 @@ def execute(args):
                     if expected not in {t['name'] for t in listing.get('result',{}).get('tools',[])}:
                         raise ValueError('public resolver unavailable')
                     for endpoint in [witness['nodes'][0],witness['nodes'][-1]]:
-                        coordinate,request=resolver(tool,endpoint)
+                        coordinate,request=resolver(tool,endpoint,exact=exact)
                         captured=call(session,request['method'],request['arguments'])
                         row['resolvers'].append(dict(coordinate=coordinate,call=captured,selection=selected_id(tool,captured,coordinate)))
             except (OSError,RuntimeError,ValueError,TimeoutError) as error:
