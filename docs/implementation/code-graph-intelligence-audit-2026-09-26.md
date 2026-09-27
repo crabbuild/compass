@@ -2078,6 +2078,71 @@ semantic reviewer. No Rust code changed or Rust tests ran in this iteration.
 The workflow is development evidence on reused repositories, not a held-out
 result, god-object diagnosis or overall superiority claim.
 
+### Exact-first neighbor lookup correction
+
+Commit `8f5eb5e5` fixes the broad-match ambiguity demonstrated above.
+`get_neighbors` delegates first to the existing `find_exact_nodes` query helper;
+only an empty exact candidate set uses the broader lookup. Exact IDs retain
+case and precedence. Genuine normalized-name collisions remain ambiguous and
+keep the same bounded, stable candidate list. The implementation reuses the
+shared evidence-gated export-binding behavior rather than adding a second
+resolver. Graphs and clustering do not change.
+
+The [complete rerun review](../../benchmarks/agent_query/neighbor_exact_match_review_panel_a.json)
+uses the same frozen 15 tasks and one-follow-up policy. All ten graph hashes,
+source declarations, selected labels and community texts are unchanged. Every
+Graphify neighbor response is byte-identical to the baseline.
+
+| Measure | Compass before | Compass after | Graphify both runs |
+| --- | ---: | ---: | ---: |
+| Seed identity supported | 5/15 | 8/15 | 9/15 |
+| Reviewed direct collaborator supported | 4/14 | 6/14 | 8/14 |
+| Neighbor responses reporting ambiguity | 8 | 5 | 6 |
+
+Chi `RequestID`, Click `term_len` and WalkDir `follow` now resolve their exact
+seed. The latter two expose their reviewed direct collaborators; the request-ID
+pair has no direct-call requirement. No task loses a previously supported seed
+or collaborator. Graphify remains ahead in this specific arm.
+
+Two Compass Redux member selectors still have multiple distinct labels. Click's
+`__exit__`, the three jsoup seeds and Redux's `bindActionCreators` still produce
+genuine neighbor ambiguity. WalkDir's `push -> DirList.close` edge remains
+missing in the frozen Compass graph. The next navigation arm should use each
+tool's documented source-qualified or exact-ID handles and examine whether
+neighbor results identify the selected declarations. This label-only arm does
+not measure the best possible longer agent workflow.
+
+All 58 executed tool calls succeed. Call text totals are 139,718 bytes for
+Compass and 51,605 for Graphify; complete captured session bytes are 232,183
+and 94,443. Unequal community sizes and success counts still preclude a
+matched-success efficiency claim. The public inputs, outputs and product
+version remain compatible at 0.3.30.
+
+Verification:
+
+- Both failing exact-priority/collision-count regressions are preserved in the
+  initial log; the four focused neighbor tests then pass.
+- All 58 MCP tests pass, including 38 library tests and 20 integration tests.
+- Workspace library/binary tests: **1,101 pass, two ignored**. The MCP library
+  tests are included in this count, not additive.
+- Product contract tests: **nine pass**. Workspace formatting, Clippy with
+  warnings denied, product boundary and the CLI build pass.
+- Developer harness: **120 tests pass**. A comparison verifier exposed unstable
+  ordering in older missing-neighbor diagnostic lists. The auditor now sorts
+  missing/extra lists; the failing regression and initial capture remain.
+  Final recapture preserves all public responses and verdicts. Older diagnostic
+  list ordering is canonicalized only for comparison, not source interpretation.
+- The first full MCP run also exposed a stale transport assertion from before
+  the shared renderer's compact `RESULT` header. Commit `500a4565` updates it
+  and verifies text equality with the rendered structured Agent View. The
+  failed run remains recorded; the complete rerun passes.
+
+Validation logs retain the existing core-test `unused_mut` warning and a macOS
+linker unwind-table warning. No extraction, language or viewer code changes, so
+those full qualification/JavaScript gates were not rerun. Source assertion
+precision, god-object judgments, broader community usefulness, longer walks
+and held-out confirmation remain incomplete.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

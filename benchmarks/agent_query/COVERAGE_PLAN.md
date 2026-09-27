@@ -227,3 +227,12 @@ Both tools receive common external 60-second/1-MiB response bounds, with
 Graphify's generous explicit token allowance disclosed. Preserve complete
 transcripts and startup overhead. This is a capability diagnostic, not an
 output-efficiency, source-precision or whole-architecture score.
+
+The same frozen workflow is rerun after the exact-first MCP neighbor fix in
+`8f5eb5e5`. `neighbor_exact_match_review_panel_a.json` records Compass seed
+identity support improving from 5/15 to 8/15 and collaborator support from 4/14
+to 6/14. Graphify remains at 9/15 and 8/14. All graph hashes, selected labels
+and community texts stay unchanged. Keep the two member-selection ambiguities,
+five genuine neighbor ambiguities and missing WalkDir call visible. A later
+workflow should use each tool's documented source-qualified or exact-ID handles;
+this label-only arm is not a best-possible agent navigation score.

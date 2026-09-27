@@ -420,3 +420,12 @@ matching, duplicate member labels and a missing WalkDir call explain distinct
 Compass failures. Additional disambiguation calls and richer member handles
 remain unmeasured. Report bytes alongside these unequal successful sets, not as
 a matched-success efficiency claim.
+
+`neighbor_exact_match_review_panel_a.json` records the unchanged workflow after
+MCP neighbor lookup began preferring exact matches. Compass improves to 8/15
+seed identities and 6/14 direct collaborator identities; Graphify stays at 9/15
+and 8/14. The ten graph hashes, follow-up labels, community texts and all Graphify
+neighbor texts remain identical. Missing/extra neighbor diagnostic arrays now
+sort deterministically; older captures need order normalization for those two
+arrays only. Genuine collisions, two ambiguous community selectors and the
+missing WalkDir call remain open.

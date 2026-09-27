@@ -1,0 +1,763 @@
+{
+  "schema": "compass.neighbor-exact-match-review/1",
+  "scope": "Same frozen public community-to-neighbor development workflow before and after exact-first MCP lookup. No new task selection, graph rebuild, extra follow-up or source assertion oracle.",
+  "fixCommit": "8f5eb5e5",
+  "transportTestCorrectionCommit": "500a4565",
+  "auditorOrderingCommit": "6bc29e92",
+  "protocolCommit": "7a6d6c97",
+  "binarySourceCommit": "500a4565a803a9f07c03eb036aa8200944387ff3",
+  "binarySha256": "1174ab1535e4614e08b04a283a90fe33ee53e82517907ff85c323cacb6d9b75a",
+  "compiler": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "productVersion": "compass 0.3.30",
+  "artifacts": {
+    "before": "community-navigation-01",
+    "after": "neighbor-exact-navigation-02",
+    "initialAfter": "neighbor-exact-navigation-01",
+    "validation": "neighbor-exact-match-02",
+    "failingRegressionsAndInitialValidation": "neighbor-exact-match-01"
+  },
+  "comparison": {
+    "beforeSha256": "6c0da7060b53cb17ded2ca607563ae3a8723d76525897e709ffb4451f2e4bf2b",
+    "afterSha256": "d4f686de90277dc17c70b4643ed4f06e3de9b98afa24c597ba4513bea4511999",
+    "unchanged": "All ten graph hashes, source declarations, follow-up selectors and community texts; all Graphify neighbor texts and audit outcomes (mismatch-list order canonicalized for the older auditor).",
+    "summary": {
+      "before": {
+        "compass": {
+          "tasks": 15,
+          "seedIdentitySupported": 5,
+          "directCallTasks": 14,
+          "collaboratorIdentitySupported": 4,
+          "explicitAmbiguities": 8,
+          "callTextBytes": 145715,
+          "callResponseWireBytes": 150769
+        },
+        "graphify": {
+          "tasks": 15,
+          "seedIdentitySupported": 9,
+          "directCallTasks": 14,
+          "collaboratorIdentitySupported": 8,
+          "explicitAmbiguities": 6,
+          "callTextBytes": 51605,
+          "callResponseWireBytes": 55173
+        }
+      },
+      "after": {
+        "compass": {
+          "tasks": 15,
+          "seedIdentitySupported": 8,
+          "directCallTasks": 14,
+          "collaboratorIdentitySupported": 6,
+          "explicitAmbiguities": 5,
+          "callTextBytes": 139718,
+          "callResponseWireBytes": 144736
+        },
+        "graphify": {
+          "tasks": 15,
+          "seedIdentitySupported": 9,
+          "directCallTasks": 14,
+          "collaboratorIdentitySupported": 8,
+          "explicitAmbiguities": 6,
+          "callTextBytes": 51605,
+          "callResponseWireBytes": 55173
+        }
+      }
+    },
+    "changes": [
+      {
+        "repository": "chi",
+        "tool": "compass",
+        "task": "chi-request-identity",
+        "metric": "seedIdentitySupported",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "chi",
+        "tool": "compass",
+        "task": "chi-request-identity",
+        "metric": "displayedAdjacencyMatches",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "chi",
+        "tool": "compass",
+        "task": "chi-request-identity",
+        "metric": "ambiguityReported",
+        "before": true,
+        "after": false
+      },
+      {
+        "repository": "click",
+        "tool": "compass",
+        "task": "click-terminal-string-width",
+        "metric": "seedIdentitySupported",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "click",
+        "tool": "compass",
+        "task": "click-terminal-string-width",
+        "metric": "collaboratorIdentitySupported",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "click",
+        "tool": "compass",
+        "task": "click-terminal-string-width",
+        "metric": "displayedAdjacencyMatches",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "click",
+        "tool": "compass",
+        "task": "click-terminal-string-width",
+        "metric": "ambiguityReported",
+        "before": true,
+        "after": false
+      },
+      {
+        "repository": "walkdir",
+        "tool": "compass",
+        "task": "walkdir-symlink-loop-detection",
+        "metric": "seedIdentitySupported",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "walkdir",
+        "tool": "compass",
+        "task": "walkdir-symlink-loop-detection",
+        "metric": "collaboratorIdentitySupported",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "walkdir",
+        "tool": "compass",
+        "task": "walkdir-symlink-loop-detection",
+        "metric": "displayedAdjacencyMatches",
+        "before": false,
+        "after": true
+      },
+      {
+        "repository": "walkdir",
+        "tool": "compass",
+        "task": "walkdir-symlink-loop-detection",
+        "metric": "ambiguityReported",
+        "before": true,
+        "after": false
+      }
+    ]
+  },
+  "summary": {
+    "compass": {
+      "tasks": 15,
+      "selected": 13,
+      "seedIdentitySupported": 8,
+      "directCallTasks": 14,
+      "collaboratorIdentitySupported": 6,
+      "directCallGraphPairsPresent": 13,
+      "explicitNeighborAmbiguity": 5,
+      "membershipConsistent": 15,
+      "callTextBytes": 139718,
+      "callResponseWireBytes": 144736,
+      "sessionWireBytesIncludingRequestsAndStderr": 232183
+    },
+    "graphify": {
+      "tasks": 15,
+      "selected": 15,
+      "seedIdentitySupported": 9,
+      "directCallTasks": 14,
+      "collaboratorIdentitySupported": 8,
+      "directCallGraphPairsPresent": 14,
+      "explicitNeighborAmbiguity": 6,
+      "membershipConsistent": 15,
+      "callTextBytes": 51605,
+      "callResponseWireBytes": 55173,
+      "sessionWireBytesIncludingRequestsAndStderr": 94443
+    }
+  },
+  "results": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "task": "chi-router-construction",
+      "selectedLabel": "NewRouter()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of NewRouter():",
+      "communityMembers": 90
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "task": "chi-request-identity",
+      "selectedLabel": "RequestID()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": false,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 0,
+      "heading": "Neighbors of RequestID():",
+      "communityMembers": 44
+    },
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "task": "chi-route-pattern-parameters",
+      "selectedLabel": "patParamKeys()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of patParamKeys():",
+      "communityMembers": 41
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "task": "chi-router-construction",
+      "selectedLabel": "NewRouter()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of NewRouter():",
+      "communityMembers": 108
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "task": "chi-request-identity",
+      "selectedLabel": "RequestID()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": false,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 0,
+      "heading": "Neighbors of RequestID():",
+      "communityMembers": 58
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "task": "chi-route-pattern-parameters",
+      "selectedLabel": "patParamKeys()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of patParamKeys():",
+      "communityMembers": 42
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "task": "click-atomic-close",
+      "selectedLabel": ".__exit__()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.__exit__()' matches 7 nodes. Retry with an exact node ID.",
+      "communityMembers": 203
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "task": "click-terminal-string-width",
+      "selectedLabel": "term_len()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": true,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of term_len():",
+      "communityMembers": 95
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "task": "click-help-definition-layout",
+      "selectedLabel": ".write_dl()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .write_dl():",
+      "communityMembers": 95
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "task": "click-atomic-close",
+      "selectedLabel": ".__exit__()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.__exit__()' matches 6 nodes in different files.",
+      "communityMembers": 9
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "task": "click-terminal-string-width",
+      "selectedLabel": "term_len()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of term_len():",
+      "communityMembers": 24
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "task": "click-help-definition-layout",
+      "selectedLabel": ".write_dl()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .write_dl():",
+      "communityMembers": 9
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "task": "jsoup-safe-document-copy",
+      "selectedLabel": ".clean()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.clean()' matches 4 nodes. Retry with an exact node ID.",
+      "communityMembers": 159
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "task": "jsoup-html-fragment-parse",
+      "selectedLabel": ".parseBodyFragment()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.parseBodyFragment()' matches 3 nodes. Retry with an exact node ID.",
+      "communityMembers": 815
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "task": "jsoup-html-whitespace",
+      "selectedLabel": ".isBlank()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": true,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.isBlank()' matches 3 nodes. Retry with an exact node ID.",
+      "communityMembers": 143
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "task": "jsoup-safe-document-copy",
+      "selectedLabel": ".clean()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": true,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.clean()' matches 2 nodes in different files.",
+      "communityMembers": 56
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "task": "jsoup-html-fragment-parse",
+      "selectedLabel": ".parseBodyFragment()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": true,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.parsebodyfragment()' matches 2 nodes in different files.",
+      "communityMembers": 232
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "task": "jsoup-html-whitespace",
+      "selectedLabel": ".isBlank()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": true,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: '.isblank()' matches 3 nodes in different files.",
+      "communityMembers": 76
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "task": "redux-listener-registration",
+      "selectedLabel": null,
+      "selectionStatus": "ambiguous",
+      "matchingRows": 3,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 2,
+      "heading": "",
+      "communityMembers": 55
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "task": "redux-action-shape-validation",
+      "selectedLabel": null,
+      "selectionStatus": "ambiguous",
+      "matchingRows": 2,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "",
+      "communityMembers": 252
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "task": "redux-action-creator-binding",
+      "selectedLabel": "bindActionCreators()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 2,
+      "heading": "Ambiguous: 'bindActionCreators()' matches 10 nodes. Retry with an exact node ID.",
+      "communityMembers": 55
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "task": "redux-listener-registration",
+      "selectedLabel": "subscribe()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: 'subscribe()' matches 2 nodes in different files.",
+      "communityMembers": 15
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "task": "redux-action-shape-validation",
+      "selectedLabel": "isAction()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": false,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 1,
+      "heading": "Ambiguous: 'isaction()' matches 2 nodes in different files.",
+      "communityMembers": 8
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "task": "redux-action-creator-binding",
+      "selectedLabel": "bindActionCreators()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of bindActionCreators():",
+      "communityMembers": 14
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "task": "walkdir-directory-handle-budget",
+      "selectedLabel": ".push()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": false,
+      "graphDirectCallRecords": 0,
+      "heading": "Neighbors of .push():",
+      "communityMembers": 116
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "task": "walkdir-deferred-directory-depth",
+      "selectedLabel": ".get_deferred_dir()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .get_deferred_dir():",
+      "communityMembers": 116
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "task": "walkdir-symlink-loop-detection",
+      "selectedLabel": ".follow()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .follow():",
+      "communityMembers": 116
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "task": "walkdir-directory-handle-budget",
+      "selectedLabel": ".push()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .push():",
+      "communityMembers": 33
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "task": "walkdir-deferred-directory-depth",
+      "selectedLabel": ".get_deferred_dir()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .get_deferred_dir():",
+      "communityMembers": 33
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "task": "walkdir-symlink-loop-detection",
+      "selectedLabel": ".follow()",
+      "selectionStatus": "selected",
+      "matchingRows": 1,
+      "splitCommunity": false,
+      "seedIdentitySupported": true,
+      "directCallRequired": true,
+      "collaboratorIdentitySupported": true,
+      "graphDirectCallRecords": 1,
+      "heading": "Neighbors of .follow():",
+      "communityMembers": 33
+    }
+  ],
+  "implementation": {
+    "behavior": "get_neighbors uses find_exact_nodes first. Only an empty exact candidate set falls back to find_node. Exact IDs retain precedence and case; normalized symbols and qualified names use the shared exact lookup, including evidence-gated export binding handling. All genuine exact collisions remain ambiguous, with stable bounded candidate lists.",
+    "ownership": "MCP delegates to the existing compass-query exact matcher; the broad search helper and graph extraction/clustering are unchanged.",
+    "compatibility": "No input schema, response envelope, graph schema, version, release or migration change."
+  },
+  "verification": {
+    "native": [
+      {
+        "name": "fmt",
+        "command": [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 3.720431457972154
+      },
+      {
+        "name": "mcp-tests",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-mcp",
+          "--tests",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 15.112442665966228
+      },
+      {
+        "name": "clippy",
+        "command": [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 8.008247874910012
+      },
+      {
+        "name": "workspace-tests",
+        "command": [
+          "cargo",
+          "test",
+          "--workspace",
+          "--lib",
+          "--bins",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 56.75049358303659
+      },
+      {
+        "name": "product-tests",
+        "command": [
+          "cargo",
+          "test",
+          "-p",
+          "compass-cli",
+          "--test",
+          "compass_product",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 26.76331787498202
+      },
+      {
+        "name": "product-boundary",
+        "command": [
+          "sh",
+          "scripts/check_product_boundary.sh"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 0.04264066705945879
+      },
+      {
+        "name": "build",
+        "command": [
+          "cargo",
+          "build",
+          "-p",
+          "compass-cli",
+          "--bin",
+          "compass",
+          "--locked"
+        ],
+        "exitCode": 0,
+        "elapsedSeconds": 0.8669613749952987
+      }
+    ],
+    "mcpTests": {
+      "passed": 58,
+      "note": "38 library tests overlap with the workspace count; 20 integration tests are additional."
+    },
+    "workspaceLibBins": {
+      "passed": 1101,
+      "ignored": 2
+    },
+    "productTests": {
+      "passed": 9
+    },
+    "developerHarness": {
+      "passed": 120
+    },
+    "regressionProof": "Before the product fix, two new neighbor tests failed (unique exact name polluted by fuzzy match; collision count polluted by fuzzy match), while genuine identity ambiguity and fuzzy fallback tests passed. All four pass after the fix.",
+    "staleAssertion": "The first all-MCP run passed 38 library and five integration tests, then failed one code-query transport assertion expecting RESULT followed by a newline. The compact shared renderer changed in earlier commit a985ea91. The assertion now checks the compact RESULT prefix and equality between MCP text and the validated structured Agent View rendered by the shared renderer. The complete rerun passes.",
+    "auditorOrdering": "The initial before/after verifier rejected differing order in missing-neighbor diagnostic arrays for three Graphify jsoup cases. Requests, responses, graph hashes, and all verdicts were unchanged. Sort both missing and extra diagnostic arrays, retain the failing regression, then run all 120 harness tests and recapture. The final comparison canonicalizes only those older diagnostic-array orders; all Graphify texts and remaining audit fields agree.",
+    "sourceAndTranscripts": "Separate same-agent verification checks every saved request/response, support file and graph hash plus identity/count summaries. All ten graphs, source declarations, selected follow-up labels and community texts are unchanged. Graphify neighbor texts are byte-identical. No independent semantic reviewer.",
+    "gatesNotRun": "No extraction, language, viewer or JavaScript changes; full extraction qualification and JS gates were not rerun. Native MCP, workspace, product identity and boundary checks ran.",
+    "warnings": "Workspace test logs retain the existing compass-core unused_mut warning and a macOS linker unwind-table warning. Clippy for workspace libraries and binaries passed with warnings denied."
+  },
+  "remaining": {
+    "memberSelection": "Two Compass Redux community lists still have distinct matching labels without exact declaration handles.",
+    "genuineNameAmbiguity": "Click __exit__, three jsoup seeds and Redux bindActionCreators still require disambiguation.",
+    "missingCall": "The frozen Compass WalkDir graph still lacks push -> DirList.close at src/lib.rs:906.",
+    "comparison": "Graphify remains ahead on this specific one-follow-up arm: 9/15 seeds and 8/14 collaborators versus Compass 8/15 and 6/14.",
+    "scope": "Additional public path-qualified/ID workflows, neighbor identity projections, complete assertion precision, source-defined god-object positives, broader architecture judgment and fresh held-out confirmation remain open."
+  }
+}
