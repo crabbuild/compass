@@ -1,0 +1,78 @@
+{
+  "schema": "compass.java-enum-control-registration/1",
+  "purpose": "Paired extraction controls on all four other repositories from the existing five-language development cohort. Check that Java enum and shared-cache changes do not alter unrelated language graphs. This is preservation evidence, not new query, explanation, community or superiority evidence.",
+  "registrationPhase": "Before either release binary is extracted on these control repositories for this change; native qualification is still running.",
+  "sourceRun": "java-state-access-02/run.json",
+  "sourceRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "javaFollowupRegistrationSha256": "eaaa3c887089c339ba29d84cd5dab84a180a074b67e870bc2165667614623107",
+  "repositories": [
+    {
+      "name": "chi",
+      "repository": "go-chi/chi",
+      "language": "Go",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "originalCompassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "frozenGraphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+    },
+    {
+      "name": "click",
+      "repository": "pallets/click",
+      "language": "Python",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "originalCompassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "frozenGraphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+    },
+    {
+      "name": "redux",
+      "repository": "reduxjs/redux",
+      "language": "TypeScript",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "originalCompassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "frozenGraphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+    },
+    {
+      "name": "walkdir",
+      "repository": "BurntSushi/walkdir",
+      "language": "Rust",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "originalCompassGraphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+      "frozenGraphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+    }
+  ],
+  "binaries": {
+    "baselineSha256": "3292d14959e144f9eae60628aa737f5bfe1c6e5e666c8318934321f7aae82fb4",
+    "candidate": "The same frozen, qualified release executable used for the separately registered complete jsoup compiler census."
+  },
+  "order": [
+    "baseline",
+    "candidate"
+  ],
+  "commandTemplate": [
+    "<frozen-binary>",
+    "extract",
+    "<complete-pinned-source>",
+    "--code-only",
+    "--no-viz",
+    "--store",
+    "sqlite",
+    "--out",
+    "<fresh-output>"
+  ],
+  "limits": {
+    "timeoutSeconds": 1200,
+    "streamBytes": 16777216,
+    "graphBytes": 268435456
+  },
+  "requirements": [
+    "Use complete clean pinned checkouts as read-only source inputs. Preserve every failure and omission warning; do not reduce input scope or selectively repeat.",
+    "Record both frozen binary hashes, command arguments, process exit/timeout/stream limits, raw logs and full artifact hashes for all eight observations.",
+    "Compare complete baseline/candidate graph bytes, including metadata and array order; also compare each to its original preserved Compass graph. Any difference is retained and investigated, not silently excluded.",
+    "Keep frozen Graphify graphs and environment unchanged. These controls do not rerun Graphify or establish a new paired quality score.",
+    "Repeat artifact verification and compare reports. Operational durations are recorded but do not establish a timing comparison.",
+    "The original Java census remains 3785 ordinary plus 529 enum occurrences. These controls do not add to its recall denominator or replace any earlier failed outcomes."
+  ],
+  "limitations": [
+    "All four repositories are known development inputs, not held-out confirmation.",
+    "Graph preservation does not prove source-edge correctness, authored explanation quality, functional communities, god-object classification or general cross-language superiority."
+  ]
+}
