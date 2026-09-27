@@ -1,0 +1,459 @@
+{
+  "schema": "compass.directed-path-development-registration/1",
+  "registeredAt": "2026-09-27T04:31:32.969188+00:00",
+  "scope": "Source-reviewed directed two-to-four-call paths across five existing development repositories. Registered before executing these new endpoint pairs. Prior graphs/outputs and fixes have been observed; not held-out evaluation or population precision.",
+  "baselineRun": "export-binding-panel-a-01",
+  "tools": [
+    {
+      "binary": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/export-binding-resolution/compass",
+      "binarySha256": "04eab05bd5bbc94f3f0f86580bdd3de9950599bc9e548b8f8ba95791b8baa0c9",
+      "digestScope": "executable-file-only",
+      "name": "compass",
+      "version": "compass 0.3.30"
+    },
+    {
+      "binary": "/Users/haipingfu/.local/bin/graphify",
+      "binarySha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only",
+      "name": "graphify",
+      "version": "graphify 0.9.67"
+    }
+  ],
+  "repositories": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "source": "/Volumes/Workspace/Github/go-chi/chi",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/chi/compass/compass-out/snapshots/snapshot-1790482768478384000-36008-0/graph.json",
+      "compassGraphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/chi/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "source": "/Volumes/Workspace/Github/pallets/click",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/click/compass/compass-out/snapshots/snapshot-1790482790210688000-36710-0/graph.json",
+      "compassGraphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/click/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "4b93f626310bcab3e80504d7e031f300020c801e86cdeed3d261b5c984767234"
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "source": "/Volumes/Workspace/Github/jhy/jsoup",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/jsoup/compass/compass-out/snapshots/snapshot-1790482841846079000-37569-0/graph.json",
+      "compassGraphSha256": "d69152cc8900afc3f11756b8ce841adbed98ae6663fee4ebc64957974c8f860c",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/jsoup/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "2a06daf207c92172900179a308c0d4816366b045aa94c9e08c610e3f6185cf69"
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "source": "/Volumes/Workspace/Github/reduxjs/redux",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/redux/compass/compass-out/snapshots/snapshot-1790482928474073000-39900-0/graph.json",
+      "compassGraphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/redux/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "52f619f953274059ab168869b6b138d4b5d64d66383b459875f61579c981749b"
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "source": "/Volumes/Workspace/Github/BurntSushi/walkdir",
+      "compassGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/walkdir/compass/compass-out/snapshots/snapshot-1790482954351623000-40155-0/graph.json",
+      "compassGraphSha256": "4ba0ea8d0dc4525afda690739b0261c5b61b0b9dd9e725a338d7f40f204bf177",
+      "graphifyGraph": "/Volumes/Workspace/CrabData/compass-evaluations/code-graph-audit-20260926/runs/export-binding-panel-a-01/artifacts/walkdir/graphify/graphify-out/graph.json",
+      "graphifyGraphSha256": "338587967603d146bbd7e2c7d07f99313c62c5b9f2a7d430dc56d094bbb709fd"
+    }
+  ],
+  "protocol": {
+    "positiveRequests": 5,
+    "reverseDirectionProbes": 5,
+    "sourceEndpoints": "Use identical short source names for both tools. No post-output IDs, fuzzy candidate selection, or retry substitutions in the primary comparison.",
+    "compassArgv": [
+      "compass",
+      "node",
+      "SOURCE",
+      "TARGET",
+      "--max-depth",
+      "8",
+      "--max-paths",
+      "1",
+      "--format",
+      "json",
+      "--graph",
+      "GRAPH"
+    ],
+    "graphifyArgv": [
+      "graphify",
+      "path",
+      "SOURCE",
+      "TARGET",
+      "--directed",
+      "--graph",
+      "GRAPH"
+    ],
+    "deadlineSeconds": 60,
+    "captureLimitBytesPerStream": 16777216,
+    "graphs": "Reuse hash-verified fresh paired graphs. This measures query behavior; no fresh extraction or performance claim.",
+    "limits": "Compass has an explicit depth bound; Graphify path CLI exposes no corresponding depth flag in help. External deadline and capture bound apply equally; do not claim equal internal work.",
+    "positiveJudgment": "A complete directed call chain must identify the source declarations and each edge orientation/occurrence in the graph and source. Endpoint echoes, candidate lists, disconnected edges, or a reversed route do not count. Registered route is a positive witness, not a requirement to choose the same shortest route; independently source-review any alternate returned route.",
+    "reverseJudgment": "Diagnostic probes only. The forward source witness does not prove global reverse unreachability. No-path/ambiguous/limit answers receive no absence credit. Review any returned reverse route for actual directed source support.",
+    "ambiguity": "Refusal of genuine ambiguity is safe but does not complete a positive path request; retain in recall denominator and report resolution separately. Unwarned selection cannot establish identity when the rendered label collides.",
+    "confidence": "Source-supported inferred edges may be recorded as such; neither tool gets exact-evidence credit for weak/unknown confidence.",
+    "timing": "Concurrent fixture qualification; no latency or cost ranking.",
+    "fullAnswer": "Keep all outputs, failures, alternate-path judgments and rejected identities. No tool-output-only semantic gold."
+  },
+  "witnesses": [
+    {
+      "id": "chi-directed-chain",
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "source": "MethodFunc",
+      "target": "longestPrefix",
+      "nodes": [
+        {
+          "file": "mux.go",
+          "line": 137,
+          "text": "func (mx *Mux) MethodFunc(",
+          "symbol": "MethodFunc",
+          "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        },
+        {
+          "file": "mux.go",
+          "line": 127,
+          "text": "func (mx *Mux) Method(method,",
+          "symbol": "Method",
+          "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        },
+        {
+          "file": "mux.go",
+          "line": 430,
+          "text": "func (mx *Mux) handle(method",
+          "symbol": "handle",
+          "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+        },
+        {
+          "file": "tree.go",
+          "line": 148,
+          "text": "func (n *node) InsertRoute(",
+          "symbol": "InsertRoute",
+          "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+        },
+        {
+          "file": "tree.go",
+          "line": 822,
+          "text": "func longestPrefix(",
+          "symbol": "longestPrefix",
+          "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "mux.go",
+            "line": 138,
+            "text": "mx.Method(method, pattern, handlerFn)",
+            "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "mux.go",
+            "line": 132,
+            "text": "mx.handle(m, pattern, handler)",
+            "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "mux.go",
+            "line": 450,
+            "text": "return mx.tree.InsertRoute(method, pattern, h)",
+            "fileSha256": "cc44c2d620e6306b16d6d80f5f6c70f02b5814b357a4f5823372818f355ae67d"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "tree.go",
+            "line": 201,
+            "text": "commonPrefix := longestPrefix(search, n.prefix)",
+            "fileSha256": "f4b12b63b662fb8e36658172b36b35705cfb24eefae0665635f4fbd52e64fb79"
+          }
+        }
+      ],
+      "sourceInterpretation": "Four static call steps from registering a method function to matching a radix prefix. Conditional traversal within InsertRoute; not a claim that every registration executes every branch."
+    },
+    {
+      "id": "click-directed-chain",
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "source": "open_file",
+      "target": "_is_binary_reader",
+      "nodes": [
+        {
+          "file": "src/click/utils.py",
+          "line": 381,
+          "text": "def open_file(",
+          "symbol": "open_file",
+          "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 374,
+          "text": "def open_stream(",
+          "symbol": "open_stream",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 319,
+          "text": "def get_binary_stdin(",
+          "symbol": "get_binary_stdin",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 176,
+          "text": "def _find_binary_reader(",
+          "symbol": "_find_binary_reader",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+        },
+        {
+          "file": "src/click/_compat.py",
+          "line": 154,
+          "text": "def _is_binary_reader(",
+          "symbol": "_is_binary_reader",
+          "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/utils.py",
+            "line": 422,
+            "text": "f, should_close = open_stream(filename, mode, encoding, errors, atomic=atomic)",
+            "fileSha256": "4720e22c292047ff1a747546b1ba80e96d1d8e8158e2e21ff01cdddb6498db17"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 392,
+            "text": "return get_binary_stdin(), False",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 320,
+            "text": "reader = _find_binary_reader(sys.stdin)",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/click/_compat.py",
+            "line": 181,
+            "text": "if _is_binary_reader(stream, False):",
+            "fileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913"
+          }
+        }
+      ],
+      "sourceInterpretation": "Four static calls on the non-lazy binary standard-input branch. The final helper has another occurrence in the same caller; this witness checks at least one supported occurrence, not occurrence completeness."
+    },
+    {
+      "id": "jsoup-directed-chain",
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "source": "isValid",
+      "target": "copySafeNodes",
+      "nodes": [
+        {
+          "file": "src/main/java/org/jsoup/Jsoup.java",
+          "line": 434,
+          "text": "public static boolean isValid(String",
+          "symbol": "isValid",
+          "fileSha256": "08efd20ddec51728d05d6aa70091468d6adcd4be703bb578e164012a882c3bf7"
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 124,
+          "text": "public boolean isValidBodyHtml(String",
+          "symbol": "isValidBodyHtml",
+          "fileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+        },
+        {
+          "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+          "line": 182,
+          "text": "private int copySafeNodes(Element",
+          "symbol": "copySafeNodes",
+          "fileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/Jsoup.java",
+            "line": 435,
+            "text": "return new Cleaner(safelist).isValidBodyHtml(bodyHtml);",
+            "fileSha256": "08efd20ddec51728d05d6aa70091468d6adcd4be703bb578e164012a882c3bf7"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+            "line": 131,
+            "text": "int numDiscarded = copySafeNodes(dirty.body(), clean.body());",
+            "fileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d"
+          }
+        }
+      ],
+      "sourceInterpretation": "Two source-proven calls. Constructor receiver is covered by the prior development fix; existing knowledge is disclosed, not fresh held-out confirmation."
+    },
+    {
+      "id": "redux-directed-chain",
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "source": "kindOf",
+      "target": "ctorName",
+      "nodes": [
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 62,
+          "text": "export function kindOf(",
+          "symbol": "kindOf",
+          "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 2,
+          "text": "export function miniKindOf(",
+          "symbol": "miniKindOf",
+          "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        },
+        {
+          "file": "src/utils/kindOf.ts",
+          "line": 40,
+          "text": "function ctorName(",
+          "symbol": "ctorName",
+          "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/utils/kindOf.ts",
+            "line": 66,
+            "text": "typeOfVal = miniKindOf(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/utils/kindOf.ts",
+            "line": 21,
+            "text": "const constructorName = ctorName(val)",
+            "fileSha256": "b294e740d5b72819ce5c994b6c2704de2c7ecd908347bc3d21a6b3b70dfd927f"
+          }
+        }
+      ],
+      "sourceInterpretation": "Two static calls conditional on development mode and a nonprimitive/non-Date/non-Error input. Export binding correction already informed by this file; no held-out claim."
+    },
+    {
+      "id": "walkdir-directed-chain",
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "source": "handle_entry",
+      "target": "from_loop",
+      "nodes": [
+        {
+          "file": "src/lib.rs",
+          "line": 840,
+          "text": "    fn handle_entry(",
+          "symbol": "handle_entry",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 961,
+          "text": "    fn follow(&self",
+          "symbol": "follow",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        },
+        {
+          "file": "src/lib.rs",
+          "line": 973,
+          "text": "    fn check_loop<P:",
+          "symbol": "check_loop",
+          "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+        },
+        {
+          "file": "src/error.rs",
+          "line": 184,
+          "text": "    pub(crate) fn from_loop(",
+          "symbol": "from_loop",
+          "fileSha256": "ba58bf6f59d196567435d4b66699a928cc237fc7c8df01dc37ab822509905b7c"
+        }
+      ],
+      "steps": [
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 845,
+            "text": "dent = itry!(self.follow(dent));",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 968,
+            "text": "self.check_loop(dent.path())?;",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        },
+        {
+          "relation": "calls",
+          "direction": "forward",
+          "site": {
+            "file": "src/lib.rs",
+            "line": 981,
+            "text": "return Err(Error::from_loop(",
+            "fileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a"
+          }
+        }
+      ],
+      "sourceInterpretation": "Three static calls conditional on following a directory symlink and detecting an ancestor loop. Macro wrapping and inherent method ownership must not be assumed from name overlap alone."
+    }
+  ]
+}
