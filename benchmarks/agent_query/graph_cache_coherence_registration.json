@@ -1,0 +1,141 @@
+{
+  "schema": "compass.graph-cache-coherence-registration/1",
+  "scope": "Correctness and query-cost development follow-up on standalone JSON graph paths after reproduced metadata-only cache failures. This does not score Graphify superiority, authored explanations, functional communities or god-object diagnosis.",
+  "baseline": {
+    "productionCommit": "be2fb542",
+    "binary": "java-dotted-owner-01/compass-candidate-release",
+    "sha256": "39919a9b5e0fe99f642d03423a91b8eb05b42b1c95e78d84bcc8f285bf473f61"
+  },
+  "candidate": "Freeze source, native qualification and release binary before public query collection. Version remains 0.3.30.",
+  "synthetic": {
+    "sourceArtifacts": "mcp-snapshot-coherence-typed-01/extractions.json",
+    "sourceArtifactsSha256": "1394f8f880c6427046cbe45d2e3a8d682b81ea85c20b1efc17e786989f99dbe3",
+    "legacyReproductionSha256": "e0f820a8abb69e3ed11e26ca5fe317e97c4b2b597e89ca3c750173de8368c739",
+    "typedReproductionSha256": "67ae663b4b1cf1936589e7120d1a5ad4cc5ec5791541de0d22594ff8da6b0006",
+    "policy": "Replay all changed-mtime, preserved-mtime in-place and atomic replacement modes for legacy and native-produced typed graphs; precreated disk-cache directory both absent and present. Run both frozen binaries twice, retain all raw RPCs, and check communities/hubs/exact-search identities before, after and in a fresh server. Corrupt/missing replacements and immutable already-loaded contexts also have native regression coverage."
+  },
+  "realSourceGraphs": [
+    {
+      "repository": "chi",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "graphPath": "java-dotted-owner-01/controls/chi/candidate/artifact/compass-out/snapshots/snapshot-1790543165935883000-80658-0/graph.json",
+      "graphSha256": "988ee732b04750f609628858e7a3fce8f97fce7ba1af22e6c17c6c4d6561e7f5",
+      "graphBytes": 2488750,
+      "sourceSeed": {
+        "name": "chi",
+        "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+        "file": "context.go",
+        "line": 16,
+        "symbol": "URLParamFromCtx",
+        "sourceText": "func URLParamFromCtx(ctx context.Context, key string) string {",
+        "sourceFileSha256": "b19edcca252e2fe74e82802c4c7ce1a1c0855728f9ede1288f0224283dfc7e53",
+        "ambiguousLabel": "URLParam"
+      }
+    },
+    {
+      "repository": "click",
+      "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+      "graphPath": "java-dotted-owner-01/controls/click/candidate/artifact/compass-out/snapshots/snapshot-1790543171176890000-80747-0/graph.json",
+      "graphSha256": "311dbf6ea613493cd7d45a2dee7725c2a868ec58569cc6b236988fedf3afbc93",
+      "graphBytes": 9607995,
+      "sourceSeed": {
+        "name": "click",
+        "commit": "06b2a678741131fd577ce170e23e5ca0aeba0309",
+        "file": "src/click/_compat.py",
+        "line": 374,
+        "symbol": "open_stream",
+        "sourceText": "def open_stream(",
+        "sourceFileSha256": "8db1da2965cf3e5dc66c6c53833cbc613ea1cd2440b9d0eb6aa8360eb46d4913",
+        "ambiguousLabel": "close"
+      }
+    },
+    {
+      "repository": "jsoup",
+      "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+      "graphPath": "java-dotted-owner-01/evaluation/candidate/artifact/compass-out/snapshots/snapshot-1790543171203895000-80748-0/graph.json",
+      "graphSha256": "04fc11f8d2c30f663c694451cc2c2957c94536a3658e4d0eeb5584fa38b6a2d8",
+      "graphBytes": 30296084,
+      "sourceSeed": {
+        "name": "jsoup",
+        "commit": "37aea49902972cec9a53dc2c65023729f1c3715b",
+        "file": "src/main/java/org/jsoup/safety/Cleaner.java",
+        "line": 124,
+        "symbol": "isValidBodyHtml",
+        "sourceText": "public boolean isValidBodyHtml(String bodyHtml) {",
+        "sourceFileSha256": "7116b40cb8be432493dff5eea6cee4e774867b08c04cc04157b8137d97102a0d",
+        "ambiguousLabel": "isValid"
+      }
+    },
+    {
+      "repository": "redux",
+      "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+      "graphPath": "java-dotted-owner-01/controls/redux/candidate/artifact/compass-out/snapshots/snapshot-1790543178528549000-80777-0/graph.json",
+      "graphSha256": "8c40d1d66d19a90b395452505ce30d22a625759b3c5ff2c5b84223a68dd31b6b",
+      "graphBytes": 8047006,
+      "sourceSeed": {
+        "name": "redux",
+        "commit": "3ae0f79bdcce35ac2a4895e284ef04b7dc0ebd5e",
+        "file": "src/createStore.ts",
+        "line": 201,
+        "symbol": "subscribe",
+        "sourceText": "function subscribe(listener: () => void) {",
+        "sourceFileSha256": "4dc8195c8fb1cceb8bd182b1469eaf4978049a767f00b4558c1ddb9c1b398695",
+        "ambiguousLabel": "subscribe"
+      }
+    },
+    {
+      "repository": "walkdir",
+      "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+      "graphPath": "java-dotted-owner-01/controls/walkdir/candidate/artifact/compass-out/snapshots/snapshot-1790543182470054000-81022-0/graph.json",
+      "graphSha256": "f7818d1c9aaf93b0b80d0f1a3a3fd2179b60ae17f9278185c9c3eb529f531034",
+      "graphBytes": 1463032,
+      "sourceSeed": {
+        "name": "walkdir",
+        "commit": "6fd031c82ba5a4204b4ce6eae73dacb00dc072ec",
+        "file": "src/lib.rs",
+        "line": 456,
+        "symbol": "sort_by_file_name",
+        "sourceText": "pub fn sort_by_file_name(self) -> Self {",
+        "sourceFileSha256": "3f7d673f9e278a71de2cb5f90353a44ea7803a98d49c2f72a68cb26dce8c966a",
+        "ambiguousLabel": "sort_by"
+      }
+    }
+  ],
+  "sourceWitnesses": {
+    "path": "benchmarks/agent_query/longer_path_witnesses.json",
+    "sha256": "33d1cdccc5cfb6f4225674c36ee7616b6dc21e0a51c2c5bbedc8fa1e44ae8718"
+  },
+  "queryPolicy": [
+    "Use a fresh copy of each complete frozen graph, never modify the preserved extraction or external source checkout. Precreate an empty cache directory for each server session. Source-seed identity and path endpoints are prepared by exact file/line/name joins; ambiguous or missing preparation is an explicit unavailable outcome, never a convenient substitute.",
+    "For every graph run graph_stats, god_nodes(top_n=10), get_community(largest stored community, numeric-ID tie break), get_community(max stored ID+1), get_neighbors(exact prepared source seed ID, calls filter), search_symbols(exact source seed name), get_callers(seed ID), get_callees(seed ID), and shortest_path(prepared first/last witness IDs, max_hops=8). These are unchanged known source questions; IDs are preparation, not retrieval credit.",
+    "Within each session run the entire fixed query list three times in order, retaining the first cold round and both warm rounds separately. Use six fresh sessions per repository in binary order baseline,candidate,candidate,baseline,baseline,candidate. Keep every output, failure, RPC duration and session peak RSS when available.",
+    "Compare complete tool result values and text for both binaries, excluding only outer JSON-RPC request IDs. Do not remove timing or path fields silently; retain and classify any differences before interpreting a semantic change. Check graph bytes remain unchanged after each session.",
+    "Durations include the public RPC and differ in cache strategy by design. Flag every per-query warm median ratio above 1.10 and every unavailable task. Retain host load and no competing owned builds/qualification jobs during timing. OS page cache and unrelated host work remain uncontrolled; these are local diagnostics, not a CI performance promotion.",
+    "A separate complete CloudStack diagnostic uses the preserved 671502979-byte graph and the same three-round/six-session protocol for graph_stats and god_nodes(top_n=10) only. Preserve partial-graph warnings and every resource/timeout failure. Do not blend its different question set with the five-language panel."
+  ],
+  "bounds": {
+    "graphBytes": 1073741824,
+    "rpcTimeoutSeconds": 120,
+    "responseBytes": 16777216,
+    "sessionBytes": 67108864
+  },
+  "preservation": [
+    "Original frozen Graphify graphs/environments/results and all known competitor wins remain unchanged.",
+    "No source/extraction rerun is required for this cache correction; this panel evaluates unchanged graph query results and costs.",
+    "All previous failures, the native cache-format expectation correction and the restored missing-file message remain recorded.",
+    "The complete CloudStack graph is pinned below; preserve every unavailable outcome and do not choose an easier substitute."
+  ],
+  "largeGraphDiagnostic": {
+    "repository": "apache/cloudstack",
+    "commit": "8d3feb100aab4a45b31a789f444038b892161eec",
+    "graphPath": "sql-regex-cache-01/whole-repeat/runs/0-candidate/artifact/compass-out/snapshots/snapshot-1790536681187299000-26799-0/graph.json",
+    "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "graphBytes": 671502979,
+    "publishedOmissions": {
+      "nodes": 1,
+      "edges": 45,
+      "identityCollisions": 0
+    },
+    "producerNote": "Preserved SQL regex-cache release candidate graph; independent of server binary used for this cache diagnostic."
+  }
+}
