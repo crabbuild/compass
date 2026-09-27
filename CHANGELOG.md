@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add opt-in `explain --source-members` to retrieve callable implementations
+  through recorded containment, including nested types. Share one source-byte
+  budget, retain individual verification status, and report unavailable or
+  omitted members explicitly.
+
 - Label explanation excerpts without a stored source digest as unverified.
   Preserve bounded source access and reject malformed or mismatching digests
   instead of claiming that an anchor alone verifies current source.

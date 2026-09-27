@@ -876,6 +876,35 @@ pub fn explanation_source(
     root: &Path,
     max_bytes: u64,
 ) -> Result<ExplainedSource, ExplanationSourceError> {
+    let node_index = resolve_explanation_source_node(graph, label)?;
+    let node = graph.node(node_index);
+    let anchor = node_source_anchor(node).ok_or_else(|| ExplanationSourceError::Unsourced {
+        label: label.to_owned(),
+    })?;
+    let digest = node_source_digest(node)?;
+    let span = bounded_source_span(
+        root,
+        &anchor.file,
+        anchor.start_byte,
+        anchor.end_byte,
+        digest.as_deref(),
+        max_bytes,
+    )
+    .map_err(|error| ExplanationSourceError::Read(error.to_string()))?;
+    Ok(ExplainedSource {
+        file: anchor.file,
+        start_line: anchor.start_line,
+        end_line: anchor.end_line,
+        source: span.text,
+        truncated: span.truncated,
+        digest_verified: digest.is_some(),
+    })
+}
+
+pub(crate) fn resolve_explanation_source_node(
+    graph: &Graph,
+    label: &str,
+) -> Result<NodeIndex, ExplanationSourceError> {
     let exact_matches = find_exact_nodes(graph, label);
     let mut matches = if exact_matches.is_empty() {
         find_node(graph, label)
@@ -904,40 +933,19 @@ pub fn explanation_source(
             });
         }
     };
-    let node = graph.node(node_index);
-    let anchor = node_source_anchor(node).ok_or_else(|| ExplanationSourceError::Unsourced {
-        label: label.to_owned(),
-    })?;
-    let digest = node_source_digest(node)?;
-    let span = bounded_source_span(
-        root,
-        &anchor.file,
-        anchor.start_byte,
-        anchor.end_byte,
-        digest.as_deref(),
-        max_bytes,
-    )
-    .map_err(|error| ExplanationSourceError::Read(error.to_string()))?;
-    Ok(ExplainedSource {
-        file: anchor.file,
-        start_line: anchor.start_line,
-        end_line: anchor.end_line,
-        source: span.text,
-        truncated: span.truncated,
-        digest_verified: digest.is_some(),
-    })
+    Ok(node_index)
 }
 
 #[derive(Clone, Debug)]
-struct NodeSourceAnchor {
-    file: String,
-    start_byte: u64,
-    end_byte: u64,
-    start_line: u32,
-    end_line: u32,
+pub(crate) struct NodeSourceAnchor {
+    pub(crate) file: String,
+    pub(crate) start_byte: u64,
+    pub(crate) end_byte: u64,
+    pub(crate) start_line: u32,
+    pub(crate) end_line: u32,
 }
 
-fn node_source_anchor(node: &NodeRecord) -> Option<NodeSourceAnchor> {
+pub(crate) fn node_source_anchor(node: &NodeRecord) -> Option<NodeSourceAnchor> {
     let anchor = node.attributes.get("source")?.as_object()?;
     let file = anchor.get("file")?.as_str()?.to_owned();
     let start_byte = anchor.get("startByte")?.as_u64()?;

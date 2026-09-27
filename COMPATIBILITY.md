@@ -431,6 +431,31 @@ shared JSON output envelopes. The query library exposes `digest_verified` on
 `--no-source` restores a metadata-only answer; `--source` remains accepted.
 Ambiguous or unsourced targets do not produce source text.
 
+### Explanation member source
+
+`explain --source-members` replaces the declaration excerpt with callable member
+excerpts reached through outgoing recorded `contains` / `method` relationships.
+It follows nested type containers, preserving recorded direction and parallel
+membership evidence in the query library. It does not infer ownership from
+names or file proximity, follow calls/references, or promote inferred/deferred
+membership. Ambiguous roots remain unresolved and undirected graphs are refused.
+Default `explain` behavior is unchanged; `--source-members` conflicts with
+`--no-source`.
+
+Members are ordered by source file, byte range, and exact ID. They share
+`--max-source-bytes` (default 4096; maximum 1 MiB in member mode). Discovery has
+separate limits of 128 callables, 128 containers, depth 4, 10,000 adjacency
+entries and 1 MiB of metadata. Verification attempts share a 16 MiB recorded-span
+budget. Discovery-bound failures report unavailable member source; source/work
+exhaustion reports truncation and omitted member counts. Individual source
+failures remain visible without suppressing other valid excerpts. Stored
+source digests and containment checks use the existing source reader.
+
+This is an additive CLI option and query API, with no graph or shared-output
+schema change. The text reports exact member IDs, source anchors, verification
+status, retained source bytes, and unavailable/omitted counts. It is structural
+source evidence, not a synthesized explanation or a god-object diagnosis.
+
 ### Typed query deadlines
 
 `ask`, `search`, `callers`, `callees`, `impact`, `explore`, and `node` accept

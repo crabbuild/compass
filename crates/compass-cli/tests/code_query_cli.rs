@@ -2324,3 +2324,54 @@ fn explain_without_a_stored_digest_never_claims_source_verification() -> Result<
     }
     Ok(())
 }
+
+#[test]
+fn explain_member_source_reaches_implementations_outside_type_declarations()
+-> Result<(), Box<dyn Error>> {
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir()?;
+    let owner = "struct Owner {}\n";
+    let method = "fn work() {\n    perform();\n}\n";
+    std::fs::write(directory.path().join("lib.rs"), format!("{owner}{method}"))?;
+    let graph = directory.path().join("graph.json");
+    let nodes = [("owner", "Owner", "struct", owner, 0, 1, 1), ("method", "work", "method", method, owner.len(), 2, 4)]
+        .into_iter().map(|(id, name, kind, text, start, first, last)| serde_json::json!({
+            "id": id, "name": name, "kind": kind,
+            "source": {"file": "lib.rs", "startByte": start, "endByte": start + text.len(), "startLine": first, "endLine": last, "startColumn": 0, "endColumn": 1},
+            "details": {"type": "symbol", "data": {"sourceDigest": format!("{:x}", Sha256::digest(text.as_bytes()))}}
+        })).collect::<Vec<_>>();
+    std::fs::write(&graph, serde_json::json!({"directed":true,"multigraph":true,"nodes":nodes,"links":[{"source":"owner","target":"method","relation":"contains","confidence":"EXTRACTED"}]}).to_string())?;
+    let run_command = |extra: &[&str]| {
+        let mut args = vec![
+            OsString::from("explain"),
+            OsString::from("owner"),
+            OsString::from("--root"),
+            directory.path().as_os_str().to_owned(),
+            OsString::from("--graph"),
+            graph.as_os_str().to_owned(),
+        ];
+        args.extend(extra.iter().map(OsString::from));
+        run(Frontend::Compass, args)
+    };
+    let declaration = run_command(&[]);
+    assert_eq!(declaration.code, 0, "{}", declaration.stderr);
+    assert!(!declaration.stdout.contains("perform();"));
+    for format in ["text", "agent-json", "json"] {
+        let members = run_command(&["--source-members", "--format", format]);
+        assert_eq!(members.code, 0, "{}", members.stderr);
+        assert!(members.stdout.contains("MEMBER SOURCES"));
+        assert!(members.stdout.contains("perform();"));
+        assert!(members.stdout.contains("L2-L4 (digest-verified)"));
+        assert!(!members.stdout.contains("L1-L1 (digest-verified)"));
+    }
+    let bounded = run_command(&["--source-members", "--max-source-bytes", "5"]);
+    assert_eq!(bounded.code, 0, "{}", bounded.stderr);
+    assert!(bounded.stdout.contains("source_bytes=5 truncated=true"));
+    assert!(!bounded.stdout.contains("perform();"));
+    assert_ne!(run_command(&["--source-members", "--no-source"]).code, 0);
+    assert_ne!(
+        run_command(&["--source-members", "--max-source-bytes", "1048577"]).code,
+        0
+    );
+    Ok(())
+}

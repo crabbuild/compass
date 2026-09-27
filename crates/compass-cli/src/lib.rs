@@ -86,8 +86,8 @@ use compass_prs::{ProcessRunner, SystemRunner};
 use compass_query::{
     DEFAULT_AFFECTED_RELATIONS, DEFAULT_DISCOVERY_TEXT_TOKEN_BUDGET, DEFAULT_PATH_DEPTH_LIMIT,
     DEFAULT_TEXT_TOKEN_BUDGET, DiscoveryTextPageOptions, TextPageOptions, TraversalMode,
-    discovery_request_digest, explanation_source, format_affected, format_benchmark,
-    open as open_code_query, open_with_verified_document, query_graph_text_page,
+    discovery_request_digest, explanation_member_sources, explanation_source, format_affected,
+    format_benchmark, open as open_code_query, open_with_verified_document, query_graph_text_page,
     render_discovery_text_page_with_prefix, render_explanation_page,
     render_shortest_path_with_limit, run_benchmark,
 };
@@ -6651,11 +6651,16 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
     let mut budget_given = false;
     let mut page = 1_usize;
     let mut with_source = true;
+    let mut with_member_source = false;
     let mut source_root = std::path::PathBuf::from(".");
     let mut max_source_bytes = DEFAULT_EXPLAIN_SOURCE_BYTES;
     let mut index = 1;
     while index < args.len() {
         match args[index].as_str() {
+            "--source-members" => {
+                with_member_source = true;
+                index += 1;
+            }
             "--source" => {
                 with_source = true;
                 index += 1;
@@ -6749,6 +6754,15 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
             }
         }
     }
+    if with_member_source && !with_source {
+        return Outcome::failure("error: --source-members conflicts with --no-source".to_owned());
+    }
+    if with_member_source && (max_source_bytes > 1_048_576 || label.len() > 4096) {
+        return Outcome::failure(
+            "error: member source accepts at most 1048576 source bytes and a 4096-byte selector"
+                .to_owned(),
+        );
+    }
     if let Err(error) = validate_text_pagination(budget, page) {
         return Outcome::failure(format!("error: {error}"));
     }
@@ -6774,7 +6788,15 @@ fn command_explain(frontend: Frontend, args: &[String]) -> Outcome {
         Ok(output) => output,
         Err(error) => return Outcome::failure(format!("error: {error}")),
     };
-    let output = if with_source {
+    let output = if with_member_source {
+        append_explanation_member_sources(
+            output,
+            &loaded.graph,
+            label,
+            &source_root,
+            max_source_bytes,
+        )
+    } else if with_source {
         append_explanation_source(output, &loaded.graph, label, &source_root, max_source_bytes)
     } else {
         output
@@ -6803,26 +6825,7 @@ fn append_explanation_source(
 ) -> String {
     match explanation_source(graph, label, root, max_source_bytes) {
         Ok(excerpt) => {
-            output.push_str("\n\nSOURCE ");
-            output.push_str(&excerpt.file);
-            let verification = if excerpt.digest_verified {
-                "digest-verified"
-            } else {
-                "unverified: no recorded source digest"
-            };
-            output.push_str(&format!(
-                " L{}-L{} ({verification})\n",
-                excerpt.start_line, excerpt.end_line
-            ));
-            for (offset, line) in excerpt.source.lines().enumerate() {
-                let number = excerpt.start_line as usize + offset;
-                output.push_str(&format!("  {number:>6}: {line}\n"));
-            }
-            if excerpt.truncated {
-                output.push_str(&format!(
-                    "  [truncated: excerpt limited to {max_source_bytes} bytes; pass --max-source-bytes for more]\n"
-                ));
-            }
+            append_explained_source(&mut output, &excerpt, max_source_bytes);
             output.trim_end().to_owned()
         }
         Err(error) => {
@@ -6830,6 +6833,68 @@ fn append_explanation_source(
             output
         }
     }
+}
+
+fn append_explained_source(
+    output: &mut String,
+    excerpt: &compass_query::ExplainedSource,
+    max_source_bytes: u64,
+) {
+    output.push_str("\n\nSOURCE ");
+    output.push_str(&excerpt.file);
+    let verification = if excerpt.digest_verified {
+        "digest-verified"
+    } else {
+        "unverified: no recorded source digest"
+    };
+    output.push_str(&format!(
+        " L{}-L{} ({verification})\n",
+        excerpt.start_line, excerpt.end_line
+    ));
+    for (offset, line) in excerpt.source.lines().enumerate() {
+        let number = excerpt.start_line as usize + offset;
+        output.push_str(&format!("  {number:>6}: {line}\n"));
+    }
+    if excerpt.truncated {
+        output.push_str(&format!(
+            "  [truncated: excerpt limited to {max_source_bytes} bytes; pass --max-source-bytes for more]\n"
+        ));
+    }
+}
+
+fn append_explanation_member_sources(
+    mut output: String,
+    graph: &compass_model::Graph,
+    label: &str,
+    root: &std::path::Path,
+    max_source_bytes: u64,
+) -> String {
+    match explanation_member_sources(graph, label, root, max_source_bytes) {
+        Ok(report) => {
+            let unavailable = report.members.iter().filter(|m| m.source.is_err()).count();
+            output.push_str(&format!(
+                "\n\nMEMBER SOURCES owner={} retained={} omitted={} unavailable={} source_bytes={} truncated={}\nRecorded containment; source order; shared {}-byte source budget.",
+                serde_json::json!(report.root.id), report.members.len(), report.omitted_members,
+                unavailable, report.source_bytes, report.truncated, max_source_bytes,
+            ));
+            for member in report.members {
+                output.push_str(&format!(
+                    "\n\nMEMBER {} {}",
+                    serde_json::json!(member.node.id),
+                    serde_json::json!(member.node.label())
+                ));
+                match member.source {
+                    Ok(excerpt) => {
+                        let retained_bytes = excerpt.source.len() as u64;
+                        append_explained_source(&mut output, &excerpt, retained_bytes);
+                    }
+                    Err(error) => output.push_str(&format!("\nSOURCE unavailable: {error}")),
+                }
+            }
+        }
+        Err(error) => output.push_str(&format!("\n\nMEMBER SOURCES unavailable: {error}")),
+    }
+    output.trim_end().to_owned()
 }
 
 fn validate_text_pagination(token_budget: usize, page: usize) -> Result<(), String> {

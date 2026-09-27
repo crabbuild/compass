@@ -115,3 +115,10 @@ explicitly unverified current excerpt; a malformed or mismatching digest prevent
 source output. File containment, symlink checks and bounded reads apply in both
 cases. Digest agreement establishes agreement with the graph's recorded bytes;
 it does not authenticate the graph or establish that its semantic claims are true.
+
+Member-source explanations use the same contained source reader for every
+excerpt. Discovery, metadata, retained source bytes and verification attempts
+have independent bounds. Membership comes from recorded directed structural
+relationships; inferred/deferred records, calls and references are excluded.
+Source failures and budget exhaustion remain explicit. Missing digests never
+become verified merely because an owner-to-member relationship is present.

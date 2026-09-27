@@ -1371,3 +1371,24 @@ the recorded anchor, whose freshness cannot be established. Malformed or
 mismatching digests produce `SOURCE unavailable` without source text. Truncating
 the returned excerpt does not truncate digest verification. The same status
 appears in text carried by shared JSON output envelopes.
+
+### Member implementation excerpts
+
+Use `compass explain OWNER --source-members --max-source-bytes 8000` to inspect
+recorded callable implementations, including methods defined outside a type's
+declaration span. The optional mode replaces the declaration excerpt. It follows
+outgoing containment through nested types and orders members by source location;
+it does not choose members based on an inferred responsibility.
+
+`MEMBER SOURCES` reports retained, omitted and unavailable members, total source
+bytes, and truncation. Each `MEMBER` has an exact ID followed by its source and
+verification status, or an explicit source error. The byte budget is shared
+across excerpts; it is not a separate allowance for each member. Discovery and
+verification-work limits can also make source unavailable or incomplete. A
+complete membership listing establishes what the selected graph records, not
+that the source has excessive responsibilities or that every graph edge is true.
+
+Excerpts use the graph's recorded callable spans. An annotation or decorator
+outside those spans, such as Python's `@property`, may be absent even when a
+member is fully returned. Use the declaration excerpt when that surrounding
+context is needed; member mode does not guarantee more evidence for every fact.

@@ -220,6 +220,20 @@ fn bounded_neighbors<'a>(
     Ok(report)
 }
 
+/// Reuse the streaming JSON counter for other bounded graph projections.
+pub(crate) fn bounded_json_size(
+    value: &impl Serialize,
+    limit: usize,
+) -> Result<usize, NeighborError> {
+    let mut counter = ByteCounter {
+        bytes: 0,
+        limit,
+        exceeded: false,
+    };
+    counter.count(value)?;
+    Ok(counter.bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
