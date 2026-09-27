@@ -2,12 +2,15 @@
   "artifactDigests": {
     "go-callback-regression-after-01.log": "8f49025c2134d0a0b880b93d054fd27af10b56d0268dc16243685eeae0760d57",
     "go-callback-regression-before-01.log": "4ecb63cc44c9397e0273a2f3fdc2ab1d14151d3bd16cd795938d52d91056cab2",
+    "go-initializer-build-02.log": "a8df3a82dbb578d6a6c88e7ac7090dc61cf40e2797616e259e019dfc06605872",
     "go-initializer-chi-diagnostic-edge-audit-01.json": "35b94fe0687072106320ebfde1b4b712fd891742ddb5f1a7b0bc6eb2d93eb79c",
     "go-initializer-chi-diagnostic-edge-audit-02.json": "2f8963363b492572d9af86929786ef8391d35a388d6fd170804021a77a111af6",
     "go-initializer-clippy-02.log": "d423b7f39f17cadab6fc174d5e9b69412b0dec968efb6d2a8847f8a7d9045911",
     "go-initializer-final-delta-01.json": "9ee59cbc29c017e28a1d2f3cd8524afdf5fe004d8756ac179535d3a8c2d782c2",
     "go-initializer-native-03.log": "dcb437d6aa7fdadd3e7377d481532181a6634ecbc990b8940210e9cca468e360",
     "go-initializer-python-02.log": "c8d67e5826b21f7eef14a1c4f2199f6031e77a8ddb61861be33cf790942a5037",
+    "go-initializer-qualification-01.log": "c17480a3ce59427432fba08c7368951a8cc284a65a0d44a24fd410e037f7048e",
+    "go-initializer-qualification-02.log": "632995fdcff528cef061312067b2e7cf3f344dedd2b95b771559404648c44887",
     "go_initializer_delta.py": "6f1642fafa950051375382d86615b620c23e582cf9d8b70c8a8e33197e54d164"
   },
   "diagnosticResult": {
@@ -536,6 +539,6 @@
     "python": {
       "passed": 95
     },
-    "qualification": "running; do not infer a full gate pass from partial logs"
+    "qualification": "Both fixtures-only invocations completed with exit 0; qualification-02 started after the final Go production edit. Includes semantic/topology/Markdown and React fixture qualification. These gates do not cover the subsequently discovered programmatic route-hierarchy false positive."
   }
 }

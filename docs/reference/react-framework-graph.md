@@ -117,6 +117,12 @@ component, or fabricates an external endpoint. A limit error is not an empty
 successful result. Every published relationship must retain a valid source
 range, bounded provenance, and a source path contained by the repository root.
 
+Filesystem route-parent inference requires a recognized convention fact from
+the owning file-route producer. Programmatic router variables such as `r` or
+`app` do not establish a filesystem hierarchy across source files; their mounts
+and groups require framework composition evidence. This boundary also applies
+to programmatic registrations using a framework that supports file routes.
+
 Generated files, symlinks that escape the owning root, malformed syntax,
 dynamic imports, computed configuration, and conditional values remain
 unsupported or incomplete unless a framework pack has independently qualified

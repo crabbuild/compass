@@ -1,0 +1,485 @@
+{
+  "afterRouteCorrection": {
+    "binarySha256": "872aff05f6c1723d27ee96230a4e315d3f0d6e1849387de09530b907f0ff3f40",
+    "capture": "mcp-panel-a-02",
+    "cli": {
+      "questionsPerTool": 55,
+      "sourcePathMatches": {
+        "compass": 6,
+        "graphify": 8
+      },
+      "successfulExecutions": 98,
+      "textPasses": {
+        "compass": 46,
+        "graphify": 46
+      },
+      "timeouts": 0
+    },
+    "edgeAudit": {
+      "corrected": {
+        "compass": {
+          "occurrenceAgreement": 16,
+          "pairs": 21,
+          "relationshipMatches": 16
+        },
+        "graphify": {
+          "occurrenceAgreement": 17,
+          "pairs": 21,
+          "relationshipMatches": 20
+        }
+      },
+      "registered": {
+        "compass": {
+          "occurrenceAgreement": 15,
+          "pairs": 21,
+          "relationshipMatches": 16
+        },
+        "graphify": {
+          "occurrenceAgreement": 18,
+          "pairs": 21,
+          "relationshipMatches": 20
+        }
+      }
+    },
+    "expectedQuestionMultisetVerified": true,
+    "relationshipDelta": {
+      "chi": {
+        "added": 0,
+        "baseline": "go-initializer-chi-02",
+        "nodeCountUnchanged": true,
+        "removedContains": 88
+      },
+      "otherFourRepositories": "No relationship changes against frozen panel A."
+    },
+    "scope": "Repeated development MCP questions on fresh panel graphs, including both the prior Go receiver correction and the route-hierarchy correction. The two changes are separated in the relationship delta.",
+    "successfulRequests": 60,
+    "tools": {
+      "compass": {
+        "ambiguityPreserved": 5,
+        "communityMembers": {
+          "chi": 90,
+          "click": 389,
+          "jsoup": 752,
+          "redux": 271,
+          "walkdir": 116
+        },
+        "hubIdentitiesKnown": 50,
+        "hubSummaryMatches": 50,
+        "membershipMatches": 5,
+        "missingCommunityMatches": 5,
+        "neighborDisplayedTriplesMatch": 5,
+        "sourceRoles": {
+          "callable": 7,
+          "documentation-tooling": 2,
+          "source-module": 2,
+          "test-helper": 9,
+          "test-module": 5,
+          "test-type": 2,
+          "type": 23
+        },
+        "statsMatches": 5,
+        "textBytes": 125192,
+        "wireResponseBytes": 174698
+      },
+      "graphify": {
+        "ambiguityPreserved": 4,
+        "communityMembers": {
+          "chi": 108,
+          "click": 84,
+          "jsoup": 295,
+          "redux": 71,
+          "walkdir": 47
+        },
+        "hubIdentitiesKnown": 41,
+        "hubSummaryMatches": 0,
+        "membershipMatches": 5,
+        "missingCommunityMatches": 5,
+        "neighborDisplayedTriplesMatch": 5,
+        "sourceRoles": {
+          "callable": 5,
+          "example-callable": 2,
+          "example-type": 1,
+          "test-helper": 2,
+          "test-type": 5,
+          "type": 26,
+          "unverified-identity": 9
+        },
+        "statsMatches": 5,
+        "textBytes": 42550,
+        "wireResponseBytes": 45989
+      }
+    },
+    "verification": {
+      "benchmarkTestsPassed": 97,
+      "clippy": "passed on workspace lib/bin plus selected integrations; first run retained an existing expect_err lint failure, corrected with an explicit error assertion",
+      "frameworkQualificationTestsRerunAfterLintCleanup": 4,
+      "frameworkRoutesPassed": 17,
+      "fullFixtureQualification": "pending; previous Go fixture pass does not verify this new production change",
+      "nativeFailed": 0,
+      "nativeIgnored": 2,
+      "nativePassed": 1431
+    }
+  },
+  "artifactDigests": {
+    "chi-route-hierarchy-negative-01.json": "487ad2d0338b165d2f835c2bc0bea34a299132ccc14602c9540e6907e332d5f6",
+    "chi-route-hierarchy-negative-02.json": "4c2a59863ccc1abbbcd28ee0ea52b810dbbc8b0775258aa7cdeb27e26a588e84",
+    "chi-route-hierarchy-negative-03.json": "aa2ba8b6d0a170ce1d9b61916dcc9471bfcfa863c9db107064657b871cb8dc5f",
+    "mcp-panel-a-01/run.json": "af1f84bee444ea3ab05e2db839562e7e4b392f5f1b1da8cba7e91fca5aa5dd28",
+    "mcp-panel-a-02/run.json": "c001978913423a45102f74cd8f079cf78a12e1b425f40c9451ca8725b416ea91",
+    "mcp-panel-a-hub-source-audit-01.capture.json": "4429a6b4d024fcbf079143a09b31c0d5fc3992c2a1799b8d0f52184eebe85f46",
+    "mcp-panel-a-hub-source-audit-01.json": "9716c6036f6d6945573104c6ee5c1f2c744e11f7149a95e681d911c26f78365a",
+    "mcp-panel-a-hub-source-audit-02.capture.json": "1fcb887ec31d870ac5965d65e8dfa8dccc752722d898e65e1be7ac179a2e71cb",
+    "mcp-panel-a-hub-source-audit-02.json": "9336850fce9160bb279f90aa0b18b278282211108706293ef4d3c3758f16c771",
+    "mcp-panel-a-python-01.log": "5929e889d4946028b77b12e360bd7d58ad6647a59395dfbf0af795e848cc454f",
+    "route-hierarchy-clippy-01.log": "82866b969b6b661a2ab3ba7ef1ac68092a6d0877da9c7d8decb4f7a114fc9941",
+    "route-hierarchy-clippy-02.log": "51ff0ed8555a37a44dec965e9314732c8b97ebb4fec4a68455409edfa84b1a57",
+    "route-hierarchy-native-01.log": "3019788711eb5bc49a2f7e0eec25d17c68efdf73b4cba7644dad18be1fadc026",
+    "route-hierarchy-panel-a-delta-01.json": "475947f81502460731f2af67e93a4857064413fd88543229a8edbae763f0dbe4",
+    "route-hierarchy-panel-a-path-audit-01.json": "528a6546ff74891b19b8bdcff6867816d9d4d6901af9cab2a15587d562d61d6d",
+    "route-hierarchy-qualification-test-02.log": "161fd8e342e86b2da8325e6c4fc8163e364ac5fcf8ebe047d1d915227c3094bc",
+    "route-hierarchy-regression-after-01.log": "1b6eac01a41a13492e502428e4ba9870a794ab3e3993e720c64b2c8706fc7137",
+    "route-hierarchy-regression-before-01.log": "52dd5af345f849ee575ba1de94a5c7bceefa065c7a9a39a94387c23f45473bc2"
+  },
+  "expectedQuestionMultisetVerified": true,
+  "findings": [
+    "Both tools enumerate their selected largest stored communities completely. Partition sizes and identities differ; this does not compare cohesion.",
+    "Compass reports ambiguity for all five names but returns broad substring candidates, including documentation nodes. Graphify silently selects the Chi URLParam method and preserves the other four ambiguities.",
+    "Compass Chi route hub GET /users/1 has degree 59 from 68 unsupported cross-file containment records. A selected negative fails on both the frozen panel graph and the current Go-corrected graph. Graphify has no matching route identities; absence is not scored as a correct negative.",
+    "Compass raw neighbor text omits call occurrence sites; Graphify prints retained sites. Pair/direction agreement does not prove source occurrence completeness.",
+    "Largest community membership, degree, and connectivity summaries are self-graph checks. Source-precision and god-object or cohesion judgments remain open."
+  ],
+  "largestCommunities": [
+    {
+      "communityId": 0,
+      "members": 96,
+      "repository": "chi",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "compass",
+      "topFiles": [
+        [
+          "mux_test.go",
+          48
+        ],
+        [
+          "chi.go",
+          27
+        ],
+        [
+          "tree.go",
+          5
+        ],
+        [
+          "mux.go",
+          5
+        ],
+        [
+          "tree_test.go",
+          5
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 108,
+      "repository": "chi",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "graphify",
+      "topFiles": [
+        [
+          "mux_test.go",
+          48
+        ],
+        [
+          "tree_test.go",
+          12
+        ],
+        [
+          "middleware/middleware_test.go",
+          6
+        ],
+        [
+          "middleware/wrap_writer_test.go",
+          6
+        ],
+        [
+          "",
+          4
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 389,
+      "repository": "click",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "compass",
+      "topFiles": [
+        [
+          "src/click/core.py",
+          288
+        ],
+        [
+          "src/click/exceptions.py",
+          36
+        ],
+        [
+          "src/click/types.py",
+          29
+        ],
+        [
+          "src/click/parser.py",
+          15
+        ],
+        [
+          "src/click/globals.py",
+          11
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 84,
+      "repository": "click",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "graphify",
+      "topFiles": [
+        [
+          "src/click/exceptions.py",
+          16
+        ],
+        [
+          "",
+          16
+        ],
+        [
+          "src/click/utils.py",
+          15
+        ],
+        [
+          "src/click/termui.py",
+          13
+        ],
+        [
+          "src/click/globals.py",
+          7
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 752,
+      "repository": "jsoup",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "compass",
+      "topFiles": [
+        [
+          "src/test/java/org/jsoup/parser/HtmlParserTest.java",
+          207
+        ],
+        [
+          "src/test/java/org/jsoup/nodes/ElementTest.java",
+          145
+        ],
+        [
+          "src/test/java/org/jsoup/select/SelectorTest.java",
+          135
+        ],
+        [
+          "src/test/java/org/jsoup/select/ElementsTest.java",
+          48
+        ],
+        [
+          "src/main/java/org/jsoup/select/Elements.java",
+          25
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 295,
+      "repository": "jsoup",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "graphify",
+      "topFiles": [
+        [
+          "src/test/java/org/jsoup/select/SelectorTest.java",
+          150
+        ],
+        [
+          "src/test/java/org/jsoup/select/ElementsTest.java",
+          44
+        ],
+        [
+          "src/test/java/org/jsoup/nodes/ElementTest.java",
+          22
+        ],
+        [
+          "src/test/java/org/jsoup/select/XpathTest.java",
+          16
+        ],
+        [
+          "src/test/java/org/jsoup/nodes/CommentTest.java",
+          9
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 271,
+      "repository": "redux",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "compass",
+      "topFiles": [
+        [
+          "test/createStore.spec.ts",
+          156
+        ],
+        [
+          "test/helpers/reducers.ts",
+          38
+        ],
+        [
+          "test/applyMiddleware.spec.ts",
+          32
+        ],
+        [
+          "test/helpers/actionCreators.ts",
+          23
+        ],
+        [
+          "test/helpers/actionTypes.ts",
+          15
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 71,
+      "repository": "redux",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "graphify",
+      "topFiles": [
+        [
+          "examples/shopping-cart/src/actions/index.js",
+          6
+        ],
+        [
+          "",
+          6
+        ],
+        [
+          "examples/todos/src/actions/index.js",
+          5
+        ],
+        [
+          "examples/todos/src/containers/VisibleTodoList.js",
+          4
+        ],
+        [
+          "examples/todos/src/containers/FilterLink.js",
+          3
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 116,
+      "repository": "walkdir",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "compass",
+      "topFiles": [
+        [
+          "src/lib.rs",
+          55
+        ],
+        [
+          "src/dent.rs",
+          31
+        ],
+        [
+          "src/error.rs",
+          21
+        ],
+        [
+          "src/tests/util.rs",
+          9
+        ]
+      ]
+    },
+    {
+      "communityId": 0,
+      "members": 47,
+      "repository": "walkdir",
+      "scope": "Stored-file distribution, not source-level functional cohesion.",
+      "tool": "graphify",
+      "topFiles": [
+        [
+          "src/tests/recursive.rs",
+          45
+        ],
+        [
+          "",
+          2
+        ]
+      ]
+    }
+  ],
+  "provenanceLimits": "Compass and Graphify MCP server executable hashes are captured, with Graphify package files verified against the separate MCP environment manifest before/after execution. This does not retroactively attest CLI extraction dependencies. Timings under concurrent compilation are not performance evidence.",
+  "registrationCommit": "3ec3732a989e5d2cf51aa55438450faea7f84e76",
+  "requests": 60,
+  "schema": "compass.mcp-panel-a-review/1",
+  "scope": "Development MCP extension on panel A after its CLI outputs were observed. Use original frozen panel-A graphs and the hub-evidence Compass binary; commit these questions before MCP execution. Prepared IDs are not scored as node retrieval. Counts and membership measure stored-graph consistency, not source precision, functional community quality, or god-object diagnosis.",
+  "successfulRequests": 60,
+  "tools": {
+    "compass": {
+      "ambiguityPreserved": 5,
+      "hubIdentitiesKnown": 50,
+      "hubSummariesAvailable": 50,
+      "hubSummaryMatches": 50,
+      "hubTextBytes": 24401,
+      "hubWireResponseBytes": 69504,
+      "membershipMatches": 5,
+      "missingCommunityMatches": 5,
+      "neighborDisplayedTriplesMatch": 5,
+      "neighborSemanticDirectionsMatch": 5,
+      "sourceRoles": {
+        "callable": 7,
+        "documentation-tooling": 2,
+        "example-route": 1,
+        "source-module": 2,
+        "test-helper": 8,
+        "test-module": 5,
+        "test-route": 1,
+        "test-type": 2,
+        "type": 22
+      },
+      "statsMatches": 5,
+      "textBytes": 125033,
+      "wireResponseBytes": 174128
+    },
+    "graphify": {
+      "ambiguityPreserved": 4,
+      "hubIdentitiesKnown": 41,
+      "hubSummariesAvailable": 0,
+      "hubSummaryMatches": 0,
+      "hubTextBytes": 1473,
+      "hubWireResponseBytes": 1973,
+      "membershipMatches": 5,
+      "missingCommunityMatches": 5,
+      "neighborDisplayedTriplesMatch": 5,
+      "neighborSemanticDirectionsMatch": 5,
+      "sourceRoles": {
+        "callable": 5,
+        "example-callable": 2,
+        "example-type": 1,
+        "test-helper": 2,
+        "test-type": 5,
+        "type": 26,
+        "unverified-identity": 9
+      },
+      "statsMatches": 5,
+      "textBytes": 42550,
+      "wireResponseBytes": 45989
+    }
+  }
+}

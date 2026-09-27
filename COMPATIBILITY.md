@@ -219,6 +219,17 @@ from 3 to 4, invalidating older disposable AST facts across languages. Producer
 capabilities and evidence/graph schemas are unchanged; published history remains
 immutable.
 
+### Framework route hierarchy
+
+Framework route hierarchy now requires a recognized filesystem-convention fact
+from its owning framework producer. A receiver name such as `r` or `app` does
+not establish parentage between programmatic routes in separate source files.
+Framework composition rules still own programmatic mounts and groups. The
+framework-pack semantics identity advances from 6 to 7, and build-state seals
+now include that identity. Rebuild existing graphs to remove unsupported
+containment edges and recompute affected paths, degrees, and communities.
+Graph/evidence schema majors and immutable historical realizations are unchanged.
+
 ### Agent Query View
 
 Compass adds the additive strict projection `compass.query.agent-view/1` for

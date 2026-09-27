@@ -7,6 +7,12 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Rebuild graphs with programmatic framework routes to remove filesystem-derived
+containment between independent routers. Framework-pack semantics version 7
+invalidates prior build profiles and build-state seals; disposable framework
+facts can be rebuilt from source. Hub rankings, navigation paths, and communities
+can change. Existing historical realizations remain unchanged.
+
 Rebuild existing Go graphs to receive the control-initializer and receiver
 shadowing corrections. Normal builds automatically discard AST cache versions
 older than 4. Source-proven calls can appear and incorrectly attributed calls

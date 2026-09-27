@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Restrict filesystem route hierarchy to recognized file-route conventions.
+  Independent programmatic routers no longer acquire containment edges merely
+  from shared receiver names and source directories, which could inflate hubs
+  and create unsupported navigation paths.
+
 - Resolve Go receivers introduced by `if` and switch initializers using their
   source-proven factory results. Respect nearer locals, range bindings, and
   closure parameters instead of borrowing an outer receiver type; do not

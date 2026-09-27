@@ -1235,10 +1235,138 @@ Final-source native checks pass **1,410 tests, zero failed, two ignored**:
 workspace library/binary tests plus `universal_evidence`, `universal_resolution`,
 `contracts`, and `compass_product`. Workspace and the same integration Clippy
 selection pass with warnings denied. All **95 Python tests**, formatting,
-product boundary, and diff checks pass. Qualification is still running; a full
-fixture-gate pass is not yet claimed. Logs use `go-initializer-native-03`,
+product boundary, and diff checks pass. Both full fixture qualification runs
+completed with exit zero, including semantic, topology, Markdown, and React
+fixture checks. The second run started after the final Go production edit.
+These gates do not cover the subsequently discovered Chi route-parent defect
+below. Logs use `go-initializer-qualification-02`, `go-initializer-native-03`,
 `go-initializer-clippy-02`, and `go-initializer-python-02` prefixes. Existing
 core unused-mut and macOS linker warnings remain in build/test logs.
+
+### Panel A MCP extension: communities, neighbors, and hubs
+
+Commit `3ec3732a` registered 60 MCP requests before executing them on the original
+panel-A graphs and frozen hub-evidence Compass binary. This is a **development
+extension after observing CLI output**, not a new independent confirmation panel.
+It uses the separate Graphify MCP environment, checking its recorded package
+files before and after execution. This does not retroactively attest the CLI
+extraction environment. All 60 expected requests completed; raw transcripts,
+input digests, and the exact question multiset were checked.
+
+| Stored-graph diagnostic | Compass | Graphify |
+| --- | ---: | ---: |
+| Counts match | 5/5 | 5/5 |
+| Complete largest-community membership | 5/5 | 5/5 |
+| Missing community handled | 5/5 | 5/5 |
+| Selected call-neighbor label/direction triples match | 5/5 | 5/5 |
+| Ambiguous name remains ambiguous | 5/5 | 4/5 |
+| Returned hub identity established | 50/50 | 41/50 |
+| Direct hub connectivity summary matches | 50/50 | unavailable |
+
+Graphify silently selects the Chi `Context.URLParam` method for `URLParam`,
+despite the separate top-level declaration. It preserves the other four
+ambiguities. Compass preserves all five, but substring matching produces broad
+candidate lists, including documentation nodes; this is not a candidate-precision
+win. Neighbor consistency also does not establish source-edge correctness:
+Compass text omits call-site occurrences, while Graphify prints retained sites.
+The frozen Chi graph still has the already-documented receiver miss.
+
+Largest-community sizes are Chi **96/108**, Click **389/84**, jsoup **752/295**,
+Redux **271/71**, and WalkDir **116/47** (Compass/Graphify). These are different
+partitions on different extracted graphs, not shared correctness denominators.
+The reviewed file distributions include many tests: Compass Redux's largest
+community includes 156 nodes from `test/createStore.spec.ts`; Graphify WalkDir's
+includes 45 from `src/tests/recursive.rs`. Neither fact alone establishes good
+or bad functional cohesion.
+
+The complete post-output hub-role census verifies 50 Compass and 41 Graphify
+source identities; nine Graphify display identities remain unresolved. Compass
+uses explicit MCP IDs here; Graphify's CLI JSON can supply IDs, so the nine
+unknowns are specific to this MCP display, not missing graph identities. Compass
+returns 22 production types, seven production callables, eight test helpers,
+two test types, five test modules, two source modules, two documentation-tooling
+callables, and two route records from a test/example. The different returned
+sets cannot establish a shared design-quality score. The roles, source excerpts,
+file hashes, and all unknowns are preserved in `hub_role_reviews_panel_a.json`.
+
+Full answer text totals **125,033/42,550 bytes**, with **174,128/45,989 actual
+response-wire bytes**. Hub responses alone total **24,401/1,473 text bytes** and
+**69,504/1,973 wire bytes**. Compass supplies more metadata and different members;
+these costs do not prove greater efficiency. Concurrent compilation excludes
+latency claims. `mcp_panel_a_review.json` records all denominators and artifact
+digests. The collector now accepts safely named repositories from the captured
+run instead of a hard-coded five-name list; all **97 benchmark tests** pass,
+including duplicate-record and path-escape regressions.
+
+### Source defect exposed by a consistent hub summary
+
+Compass's second Chi hub is the route `GET /users/1` inside `TestCleanPath`,
+with degree **59** from **68 outgoing containment records** and no other
+incident relationship kinds. Its graph-consistent summary faithfully exposes
+unsupported hierarchy. For example, it claims to contain `GET /` inside
+`TestThrottleBacklog`, although both tests independently construct a local
+`r := chi.NewRouter()` and neither mounts the other's route.
+
+The separately recorded negative witness fails on both the original panel
+graph and the newer Go-corrected graph. Graphify has no matching route endpoint
+identities, so it cannot receive credit for the negative. The source review
+traced the defect to shared publication applying filesystem parent selection
+to programmatic receivers named `r`. This can inflate hubs and connect unrelated
+tests; passing self-graph consistency and existing fixture gates did not detect
+it. The recorded real-source negative is not a population precision estimate.
+
+A native regression reproduced the defect. Publication now admits only
+recognized filesystem-convention facts to that parent-selection step;
+programmatic mounts/groups remain owned by framework composition rules. Tests
+cover six programmatic frameworks, input-order reversal, a positive filesystem
+case, and mismatched origin/rule/framework negatives. All **17 framework-route
+tests** pass. Framework-pack semantics advance from 6 to 7 and build-state seals
+include that identity. Existing filesystem conventions still
+need broader independent semantic review; this correction is not proof of their
+complete correctness.
+
+#### Fresh development comparison after the hierarchy correction
+
+The frozen `route-hierarchy-provenance` binary has SHA256
+`872aff05f6c1723d27ee96230a4e315d3f0d6e1849387de09530b907f0ff3f40`.
+`route-hierarchy-panel-a-01` builds both tools afresh on all five pinned sources
+and repeats every original question. All **110 requests ran**, with zero
+timeouts; nonzero exits remain in the denominator. Text scores remain **46/55
+for both**, with no changed pass/fail rows. Source-path matches remain **6/10
+versus 8/10**. Corrected selected-pair relationship matches are **16/21 versus
+20/21**, and full occurrence agreement is **16/21 versus 17/21**. Compass's
+one-pair improvement over the original panel comes from the earlier Go receiver
+fix, not the hierarchy correction. Original and corrected Click witnesses are
+still separate.
+
+A complete relationship delta against the Go-corrected Chi graph removes
+**88 `contains` records**, adds none, and retains all 729 nodes. The other four
+repositories have no relationship changes from the original panel. The recorded
+independent-router negative now passes with both Compass endpoints present;
+Graphify's endpoints remain unavailable. This is source-backed defect recovery,
+not a new broad recall score.
+
+`mcp-panel-a-02` repeats all **60 MCP requests**, each successfully, against the
+fresh graphs. All earlier consistency and ambiguity outcomes are retained.
+Compass's two Chi route hubs disappear from the top ten, replaced by the
+production type `compressResponseWriter` and test helper `bigMux`; both new
+source roles were inspected. The other four hub rankings are unchanged.
+`hub_role_reviews_panel_a_after_routes.json` retains all 100 rows and only reuses
+earlier judgments after exact identity, anchor, excerpt, and file-hash equality.
+Chi's selected largest Compass community changes from 96 to 90 nodes; complete
+enumeration still does not prove functional cohesion. Compass/Graphify answer
+text totals are **125,192/42,550 bytes**, with **174,698/45,989 wire bytes**.
+No latency or efficiency win is claimed.
+
+Verification passes **1,431 native tests, zero failed, two ignored**, covering
+workspace libraries/binaries and the selected universal-evidence, resolver,
+cache/contracts, product, framework-route, and framework-qualification tests.
+The first expanded Clippy invocation exposed an existing `expect_err` in a
+qualification test. An explicit `Err(MissingRoute)` assertion replaced it;
+all four qualification tests were rerun and the full selected Clippy invocation
+then passed. All **97 benchmark tests**, formatting, diff, and product-boundary
+checks pass. The new full fixture qualification is still pending; the previous
+Go fixture pass does not verify this subsequent production change.
 
 ## Next evidence to collect
 

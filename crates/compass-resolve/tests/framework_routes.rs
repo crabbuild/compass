@@ -75,6 +75,93 @@ fn route(handler: &str) -> RawRouteFact {
 }
 
 #[test]
+fn programmatic_routes_do_not_inherit_filesystem_parentage()
+-> Result<(), Box<dyn std::error::Error>> {
+    for framework in ["chi", "express", "flask", "axum", "react-router", "next"] {
+        let facts = ["tests/a.go", "tests/b.go"].map(|file| {
+            let mut fact = route("handler");
+            fact.framework = framework.to_owned();
+            fact.declaring_scope = "r".to_owned();
+            fact.anchor.source_file = file.to_owned();
+            fact.rule = Some(format!("{framework}-router-call"));
+            RawFrameworkFact::Route(fact)
+        });
+        for facts in [facts.to_vec(), facts.into_iter().rev().collect()] {
+            let mut extraction = Extraction {
+                framework_facts: facts,
+                ..Extraction::default()
+            };
+            let resolved =
+                resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+            assert_eq!(resolved.len(), 2);
+            assert_eq!(extraction.nodes.len(), 2);
+            assert!(
+                extraction
+                    .edges
+                    .iter()
+                    .all(|edge| edge.string("relation") != "contains"),
+                "{framework}: independent receiver names are not filesystem route parents"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn filesystem_parentage_requires_a_recognized_convention() -> Result<(), Box<dyn std::error::Error>>
+{
+    for (framework, origin, rule, expected) in [
+        (
+            "next",
+            RawFrameworkOrigin::Convention,
+            "next-app-router-convention",
+            1,
+        ),
+        (
+            "next",
+            RawFrameworkOrigin::Ast,
+            "next-app-router-convention",
+            0,
+        ),
+        ("next", RawFrameworkOrigin::Convention, "unknown-rule", 0),
+        (
+            "chi",
+            RawFrameworkOrigin::Convention,
+            "next-app-router-convention",
+            0,
+        ),
+    ] {
+        let facts = ["app/layout.tsx", "app/blog/page.tsx"].map(|file| {
+            let mut fact = route("Page");
+            fact.framework = framework.to_owned();
+            fact.operation = "PAGE".to_owned();
+            fact.anchor.source_file = file.to_owned();
+            fact.origin = origin;
+            fact.rule = Some(rule.to_owned());
+            RawFrameworkFact::Route(fact)
+        });
+        let mut extraction = Extraction {
+            framework_facts: facts.to_vec(),
+            ..Extraction::default()
+        };
+        resolve_and_publish_framework_routes(&mut extraction, FrameworkLimits::default())?;
+        let hierarchy: Vec<_> = extraction
+            .edges
+            .iter()
+            .filter(|edge| edge.string("relation") == "contains")
+            .collect();
+        assert_eq!(hierarchy.len(), expected, "{framework} {origin:?} {rule}");
+        if let Some(edge) = hierarchy.first() {
+            assert_eq!(edge.string("source_file"), "app/blog/page.tsx");
+            assert_eq!(edge.string("rule"), "framework-route-hierarchy");
+            let parent = extraction.nodes.iter().find(|node| node.id == edge.source);
+            assert!(parent.is_some_and(|node| node.string("source_file") == "app/layout.tsx"));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn neutral_framework_roles_publish_existing_node_roles_and_reject_unknown_values()
 -> Result<(), Box<dyn std::error::Error>> {
     let anchor = route("service").anchor;

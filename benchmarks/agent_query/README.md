@@ -253,6 +253,15 @@ not an addition to the original held-out score. Run it with the same
 
 The first frozen results and post-output review are recorded in
 `heldout_panel_a_review.json` and the main code-graph intelligence audit report.
+
+`suite_mcp_panel_a.json` extends the same frozen panel graphs to 60 MCP requests
+after observing the CLI results. It is a development extension, with questions
+committed before MCP execution. `mcp_panel_a_review.json` records graph-consistency
+and payload results, and `hub_role_reviews_panel_a.json` records the complete
+post-output source-role census. Neither establishes functional community quality
+or god-object defects. `edge_witnesses_chi_route_hierarchy_diagnostic.json`
+separately records an unsupported Compass containment edge discovered through
+the hub review; missing Graphify route identities cannot pass that negative.
 Keep the original Click edge witness: its missing second `_wrap_io_open` site
 is corrected only in `edge_witnesses_heldout_click_corrected.json`. Report both
 registered and corrected diagnostic scores. The path auditor retains nonzero,

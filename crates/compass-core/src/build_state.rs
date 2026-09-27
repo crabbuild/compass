@@ -20,6 +20,7 @@ fn current_build_fingerprint() -> String {
         compass_model::code_graph::CODE_GRAPH_SCHEMA_V1,
         compass_graph::V1_PUBLICATION_SEMANTICS_VERSION,
         compass_languages::EXTRACTION_SEMANTICS_VERSION,
+        compass_languages::FRAMEWORK_PACK_SEMANTICS_VERSION,
         compass_files::AST_CACHE_VERSION,
     ] {
         digest.update(component.as_bytes());

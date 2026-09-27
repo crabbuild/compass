@@ -221,6 +221,9 @@ pub fn publish_resolved_routes(
     let mut route_sources_by_scope =
         BTreeMap::<(String, String), Vec<(String, String, RawFrameworkAnchor, bool)>>::new();
     for (route_id, route) in &route_ids {
+        if !has_filesystem_route_convention(route) {
+            continue;
+        }
         route_sources_by_scope
             .entry((route.framework.clone(), route_hierarchy_scope(route)))
             .or_default()
@@ -259,6 +262,9 @@ pub fn publish_resolved_routes(
         route_parent_sources_by_scope.insert((framework.clone(), scope.clone()), by_directory);
     }
     for (child_id, child) in &route_ids {
+        if !has_filesystem_route_convention(child) {
+            continue;
+        }
         let scope = route_hierarchy_scope(child);
         let mut selected = None;
         if let Some(candidates) =
@@ -423,13 +429,47 @@ fn route_parent_source_file_indexed(
     None
 }
 
+fn has_filesystem_route_convention(route: &RawRouteFact) -> bool {
+    // Receiver spellings such as `r` are local bindings, not filesystem tree
+    // identities. Only facts from the explicit file-route producers may use
+    // physical source directories to infer a parent. Programmatic mounts and
+    // groups remain the responsibility of their framework's composition rules.
+    matches!(route.origin, RawFrameworkOrigin::Convention)
+        && matches!(
+            (route.framework.as_str(), route.rule.as_deref()),
+            (
+                "next",
+                Some(
+                    "next-app-router-convention"
+                        | "next-app-route-convention"
+                        | "next-app-route-unresolved-convention"
+                        | "next-pages-api-convention"
+                        | "next-file-route-convention"
+                )
+            ) | ("remix", Some("remix-route-convention"))
+                | ("react-router", Some("react-router-file-route-convention"))
+                | ("tanstack-router", Some("tanstack-file-route-convention"))
+                | (
+                    "sveltekit",
+                    Some("sveltekit-file-route-convention" | "sveltekit-endpoint-convention")
+                )
+                | (
+                    "nuxt",
+                    Some("nuxt-file-route-convention" | "nuxt-server-api-convention")
+                )
+                | (
+                    "astro",
+                    Some("astro-file-route-convention" | "astro-endpoint-convention")
+                )
+        )
+}
+
 /// Return the lexical route-tree owner for hierarchy matching.
 ///
 /// A repository can contain independent examples such as
 /// `test/a/app/...` and `test/b/app/...`; their `/` routes must never compete
-/// with one another.  The scope is intentionally derived from the portable
-/// source identity rather than filesystem state so cached and projected
-/// extractions remain deterministic.
+/// with one another. The scope is derived from the portable source identity
+/// rather than filesystem state so cached facts remain deterministic.
 fn route_hierarchy_scope(route: &RawRouteFact) -> String {
     let source = route
         .anchor
