@@ -846,3 +846,14 @@ all eight neighbor projections matched stored displayed triples. The repeated
 verifier is byte-identical. These outcomes establish no Compass superiority or
 validated god-object classifier; they identify extraction/admission work and
 the gap between degree ranking and externally rated Blob classes.
+
+## SQL prefix guard: matched development-build diagnosis
+
+`sql_prefix_scan_registration.json` freezes complete CloudStack SQL files and
+limits; `sql_prefix_build_context.json` freezes explicit settings matching the
+unoptimized baseline. `sql_prefix_scan_review.json` records all 24 fresh-output
+observations and repeated verification. Preserve unavailable baseline output,
+small-file timing regressions and the distinction between complete old/new graph
+equality and candidate-only repeatability. No release or Graphify speed claim
+follows. Full scope and validation are in the
+[code-graph audit](../../docs/implementation/code-graph-intelligence-audit-2026-09-26.md).

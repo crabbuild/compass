@@ -3706,3 +3706,66 @@ and scorer are committed alongside it. This run proves neither Compass
 superiority nor a validated god-object classifier. Authored explanations,
 functional communities, broader source precision and held-out confirmation also
 remain open.
+
+## SQL prefix guard: matched development-build diagnosis
+
+The SQL guard in `1a1f6a69` rejects impossible dollar-delimiter syntax before
+scanning a statement prefix. Plausible delimiters retain the existing
+statement-sensitive identifier handling. It changes no graph schema, producer
+version, dependency or public command; Compass remains 0.3.30.
+
+`sql_prefix_scan_registration.json` froze four complete CloudStack SQL files
+before candidate measurements: byte-size quartile indices 29, 59, 89 and the
+largest index 118 out of 119 tracked SQL files at the original pinned revision.
+Both binaries used the same copied input directory per file. Three runs per
+binary alternated order, used fresh output directories and ordinary OS caches,
+and retained the 180-second process, 16 MiB stream and 256 MiB graph limits.
+No timeout was replaced or excluded.
+
+The frozen baseline and candidate are **unoptimized development binaries** with
+matching explicit settings: debug information disabled, incremental compilation
+disabled, two build jobs and the same offline parser bundle. The matching
+candidate build is `bbc6a419`. The original default-debug
+validation binary remains a separate artifact and was not timed. The host also
+ran unrelated work; timestamped load averages are retained and do not prove
+isolation. This is development diagnosis, not release-performance qualification.
+
+| SQL bytes | Baseline completed | Candidate completed | Baseline median | Candidate median | Full old/new graph equality |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 938 | 3/3 | 3/3 | 1.010 s | 1.152 s | Yes, all six graphs |
+| 1,949 | 3/3 | 3/3 | 1.004 s | 1.077 s | Yes, all six graphs |
+| 10,288 | 3/3 | 3/3 | 2.462 s | 2.284 s | Yes, all six graphs |
+| 411,080 | 0/3 | 3/3 | unavailable | 174.175 s | Unproven: unavailable baseline output |
+
+Equality compares complete JSON documents with array order intact and no field
+exclusions, alongside exact byte and canonical JSON hashes. All three candidate
+graphs on the largest file match, with 1,949 nodes and 3,732 edges. Unavailable
+baseline output prevents proving old/new equality for that file. No latency ratio is assigned to
+that censored comparison. Small-file timing variation includes regressions;
+three observations do not establish a general speed improvement. In particular,
+the smallest file's candidate median exceeds the baseline by more than the
+performance policy's 10% review threshold, so this run is not promoted as a
+qualified performance baseline.
+
+Verification rechecks the source revision, size-based selection, complete source
+hashes and copies, exact commands, binary/build hashes, stream hashes and sizes,
+peak-RSS parsing and every successful graph. A second verification is
+byte-identical. `sql_prefix_scan_review.json` retains all 24 outcomes, including
+timeouts, timings, RSS availability and host-load observations. External raw
+artifacts remain under `sql-prefix-scan-01`.
+
+Passed: four SQL unit tests, 34 SQL domain integration tests, formatting,
+workspace Clippy, 1,108 workspace tests with two existing ignored tests, nine CLI
+product tests, code-graph fixture qualification, all 237 benchmark tests and the
+product-boundary gate. The fixture gate's first attempt failed its missing
+parser-bundle preflight; the retry used this worktree's already downloaded bundle
+with an identical vendored definitions digest and passed. Both attempts remain
+in the report. The matched-build SQL and product checks also pass. Hosted
+platform, packaging and the release performance matrix were not run for this
+development diagnosis.
+
+This change does not implement god-object classification. The original MLCQ
+whole-repository timeout and artifact-admission failures remain unchanged. The
+registered whole-CloudStack follow-up and separately declared 1 GiB Blob query
+diagnostic are additional work; sample timing and graph repeatability cannot
+stand in for their outcomes or for superiority over Graphify.

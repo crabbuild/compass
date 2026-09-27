@@ -1359,3 +1359,29 @@ aarch64 macOS host initialized the statically linked runtime and processed its
 blank plus clean synthetic-English rasters in 1.77 seconds under a debug test
 build. The clean sample had 0 CER. This single smoke result is not a production
 latency, memory, degraded-input, cross-architecture, or multilingual claim.
+
+## SQL prefix guard: matched development-build diagnosis
+
+A registered CloudStack SQL diagnosis compared frozen unoptimized binaries with
+matching build settings on four complete source files, three alternating runs
+per binary. Fresh outputs did not imply cold OS caches. Background host work
+was not isolated.
+
+| SQL bytes | Baseline completed | Candidate completed | Baseline median | Candidate median | Full old/new graph equality |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 938 | 3/3 | 3/3 | 1.010 s | 1.152 s | Yes, all six graphs |
+| 1,949 | 3/3 | 3/3 | 1.004 s | 1.077 s | Yes, all six graphs |
+| 10,288 | 3/3 | 3/3 | 2.462 s | 2.284 s | Yes, all six graphs |
+| 411,080 | 0/3 | 3/3 | unavailable | 174.175 s | Unproven: unavailable baseline output |
+
+This is not release-performance qualification. Keep timeouts and small-file
+regressions visible; do not infer an overall speedup or a Graphify performance
+ranking. Complete graph equality holds only where both versions produced all
+registered outputs. The smallest-file median regression exceeds 10%, requiring
+review; this diagnostic is not an approved performance baseline.
+
+See [`sql_prefix_scan_review.json`](benchmarks/agent_query/sql_prefix_scan_review.json)
+for every outcome, hashes, peak RSS, load observations and verification, and the
+[code-graph audit](docs/implementation/code-graph-intelligence-audit-2026-09-26.md)
+for scope and native checks. The normal release qualification policy above still
+applies.
