@@ -4332,3 +4332,25 @@ Combining them requires a separately declared analysis and source checks.
 No WMC, ATFD, TCC, responsibility score, ranking, new Graphify result or
 held-out evaluation follows from this inventory. The two producer versions and
 CloudStack's earlier partial-coverage warning remain attached to its results.
+
+### CloudStack `reads` and `writes` relation boundary
+
+A [separate registration](../../benchmarks/agent_query/mlcq_access_relations_registration.json)
+fixed the endpoint-kind and unique-owner census before inspecting CloudStack's
+1,042 `reads` and 6,161 `writes` edges. The complete
+[review](../../benchmarks/agent_query/mlcq_access_relations_review.json)
+accounts for every such edge in five source-kind/target-kind pairs: 863
+database-view reads, 178 query reads and one database-procedure read of a
+database table; 6,160 query writes and one database-procedure write of a
+database table. There are zero method-to-field `reads` or `writes` edges, zero
+missing endpoints, and no exact AST relationship-site anchors in this frozen
+graph. The all-55 sample join remains unchanged; the Eclipse rows are marked
+as outside this CloudStack-only evaluation. Two verifier runs are byte-identical
+and bind the frozen graph and producer hashes.
+
+These relations describe SQL dependencies and must not be added to Java
+foreign-field access. The earlier `references`-only counts therefore remain the
+applicable stored Java field-contact evidence for this probe. Their source
+coverage and independent target accuracy remain unverified; the eight
+consensus classes' zero observed foreign-field references cannot be treated as
+zero foreign-state access or a god-object diagnosis.
