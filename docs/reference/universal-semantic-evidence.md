@@ -202,6 +202,19 @@ of acquiring an invented target. This correctness correction keeps the existing
 producer capability contract; AST cache semantics version 3 prevents reuse of
 facts produced before it.
 
+Java method-call candidates can derive their receiver from direct named object
+creation, including fully qualified types and parenthesized forms. The method
+occurrence remains the exact method-name span, and the existing argument vector
+selects among overloads. The producer unwraps at most seven parenthesis levels;
+deeper forms retain an unresolved candidate. This bounded inference limit is
+not evidence that no call exists. Anonymous classes, enclosing-instance
+creation, arrays, casts, and unproven chained results do not acquire a target
+from punctuation-stripped expression text. Enclosing-instance construction
+retains its receiver qualifier and stays unresolved without owner evidence,
+even if a same-named class is imported. AST cache semantics version 5 prevents
+reuse of the previous extraction; producer capabilities and schemas are
+unchanged.
+
 Rust producer version 2 follows fields through source-proven standard-library
 `Arc`, `Rc`, and `Box` dereference wrappers and carries a unique source-visible
 call-result type into the next member call. It also inspects a local

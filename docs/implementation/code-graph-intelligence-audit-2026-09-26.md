@@ -1506,27 +1506,72 @@ Markdown, lifecycle determinism, and release frontend qualification stages.
 This full pass qualifies production commit `c20db15b`; the pinned hierarchy
 scorecards remain invalidated and require separate source review.
 
-#### Java constructor receiver diagnostic
+#### Java constructor receiver correction
 
-A separate frozen-binary diagnostic reproduces the jsoup constructor receiver
-gap in direct, parenthesized, fully qualified, and overloaded method calls.
-Anonymous-class and chained-result negatives remain unresolved. A native
-resolver regression also fails because the direct method candidate lacks
-`lib.Cleaner::check` as its receiver constraint. Its source and failure log are
-retained in `java-constructor-receiver-diagnostic` and
-`java-constructor-receiver-test-01.log`; the test is not installed as a passing
-repository test, and no Java production change or score improvement is claimed.
-The first ad hoc graph review used the raw-extraction `relation` key instead
-of graph-v1 `kind`; `before-review-corrected.json` records the corrected review.
-The native evidence and corrected graph inspection agree on the missing calls.
+The earlier frozen-binary diagnostic and failed native regression reproduced
+the jsoup constructor receiver gap. They remain retained, including the initial
+graph-review mistake (`relation` versus graph-v1 `kind`). The producer now reads
+the constructor's AST type for direct calls and up to seven parenthesis wrappers,
+then uses existing qualified-type and overload resolution. It rejects anonymous
+and enclosing-instance receiver assumptions. A separate correction retains
+`outer.new Cleaner()` as unresolved instead of binding an unrelated imported
+`Cleaner`. AST cache semantics advance from 4 to 5; product version, graph and
+evidence schemas, and advertised capabilities are unchanged.
+
+On identical three-file Java diagnostic sources, the old binary produces two
+invented external method targets. The correction removes those two nodes and
+three false relationships, and adds nine source-supported calls. The native
+regression checks exact name spans, repeated occurrences, argument overloads,
+type/value namespace distinction, provenance, direction, and reverse-input
+determinism. `javac`/`javap` independently corroborate the fixture's target
+distinctions; compiled classes were not executed. The deliberately deep receiver
+is a real call beyond bounded inference, **not a true absence negative**. A copy
+of the old cache rebuilds to a graph byte-identical to a clean extraction.
+
+Fresh paired builds at the same five repository pins and all 110 unchanged CLI
+requests are recorded in `java-constructor-panel-a-01`. The other four Compass
+graphs are byte-identical to the preceding checkpoint. jsoup retains all 6,116
+nodes and common edges, except community assignments, and adds **122 call
+occurrences** (10 production, 112 test). Complete delta review checks each
+receiver, package/import context, target declaration, overload argument types,
+source span, and direction. This is static review of a development delta, not a
+representative precision sample or proof of runtime calls. It also exposes
+existing incomplete varargs display signatures; the exact source declarations
+support those edges, while signature completeness remains follow-up work.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Query text oracle | 46/55 | 46/55 |
+| Source-checked paths | 6/10 | 8/10 |
+| Selected source relationships | 17/21 | 20/21 |
+| All reviewed occurrences, corrected Click oracle | 17/21 | 17/21 |
+
+The one newly matched selected pair is `Jsoup.isValid` to
+`Cleaner.isValidBodyHtml`; both tools previously missed it. The
+[development review](../../benchmarks/agent_query/java_constructor_development_review.json)
+records executable, graph, source and artifact hashes, all added occurrences,
+target declarations, and remaining limitations. Reusing these repositories after
+they informed the fix is development evidence, even though the suite filename
+contains `heldout`. No new MCP or god-object/community quality claim follows.
+Timings overlap native verification and support no speed claim.
+
+Verification: **1,439 native tests passed, zero failed, two ignored**. Clippy first
+found redundant error wrapping in the new test; after that test-only correction,
+workspace library/binary plus selected integration Clippy and the focused
+regression pass. The fixed qualification corpus has zero node/edge changes
+excluding communities, so no topology thresholds changed. Full Java fixture
+qualification is running; the preceding route-parent pass does not verify this
+Java production change.
 
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
    The corrected fixture and selected real-source evidence above do not replace
    those broader checks.
-2. Extend source-proven constructor, loop/result/iterator inference to recover
-   the jsoup and fd misses. Keep exact
+2. Extend source-proven loop/result/iterator inference and TypeScript declaration
+   identity to recover the remaining fd and Redux misses. Address Java varargs
+   signature completeness and unresolved receiver forms with separate evidence.
+   Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
 3. Use the source-role census and connectivity breakdowns to review actual

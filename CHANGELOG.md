@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve Java method receivers constructed directly at the call site,
+  including qualified types and bounded parentheses, while retaining overload
+  and occurrence evidence. Stop turning arbitrary receiver expressions into
+  invented external type names. Enclosing-instance construction no longer
+  selects an unrelated imported class. Rebuild older AST caches.
+
 - Resolve file-route parents from framework nesting conventions instead of
   choosing a nearby module. Preserve layout, flat-route, index, pathless, and
   non-nesting distinctions; retain ambiguous parents without inventing edges.

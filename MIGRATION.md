@@ -7,6 +7,12 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Rebuild Java graphs to receive the constructor-receiver correction. Direct
+constructor method calls can gain source-proven targets; invented external
+targets and unrelated imported-class construction edges can disappear. Normal
+builds discard AST cache versions older than 5. This does not rewrite historical
+graphs or change the graph schema.
+
 Rebuild graphs with programmatic framework routes to remove filesystem-derived
 containment between independent routers and unsupported file-route parents.
 Framework-pack semantics version 8

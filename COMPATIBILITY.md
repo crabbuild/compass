@@ -219,6 +219,18 @@ from 3 to 4, invalidating older disposable AST facts across languages. Producer
 capabilities and evidence/graph schemas are unchanged; published history remains
 immutable.
 
+Java method receivers now use constructor syntax evidence for direct named
+object creation, including qualified type names and bounded parentheses.
+Overload selection still requires the existing argument evidence. Anonymous
+subclasses, explicit enclosing-instance creation, arrays, casts, and chained
+results retain unresolved method candidates when their receiver ownership is
+not proven. Arbitrary expression text no longer becomes an external type name.
+An enclosing-instance construction also retains its receiver qualifier instead
+of selecting a same-named imported class. AST cache semantics advance from 4
+to 5, rebuilding older disposable facts across languages and invalidating old
+build seals. Producer capabilities, graph/evidence schemas, and published
+historical realizations are unchanged.
+
 ### Framework route hierarchy
 
 Framework route hierarchy now requires a recognized filesystem-convention fact

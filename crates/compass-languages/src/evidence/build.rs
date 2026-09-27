@@ -3669,12 +3669,10 @@ impl<'source> DirectEvidenceState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let receiver = node
-            .child_by_field_name("object")
-            .map(|object| self.text(object));
-        let receiver_type = receiver
-            .as_deref()
-            .and_then(|receiver| self.java_receiver_type(owner, receiver, node.start_byte()));
+        let receiver_node = node.child_by_field_name("object");
+        let receiver = receiver_node.map(|object| self.text(object));
+        let receiver_type =
+            receiver_node.and_then(|object| self.java_method_receiver_type(owner, object, 0));
         let qualified_name = receiver_type
             .as_ref()
             .map(|receiver| format!("{receiver}::{spelling}"));
@@ -3731,18 +3729,35 @@ impl<'source> DirectEvidenceState<'source> {
         if spelling.is_empty() {
             return Ok(());
         }
-        let qualified_name = self.java_qualified_type(owner, &normalized, type_node.start_byte());
+        let mut cursor = node.walk();
+        let enclosing_receiver = node
+            .children(&mut cursor)
+            .find(|child| !child.is_extra())
+            .filter(|child| child.kind() != "new")
+            .map(|receiver| self.text(receiver));
+        // A qualified instance creation looks up the member class through
+        // its enclosing receiver. An import with the same terminal name
+        // cannot establish that ownership. Retain an unresolved occurrence
+        // until the enclosing type can be proven.
+        let qualified_name = if enclosing_receiver.is_some() {
+            None
+        } else {
+            self.java_qualified_type(owner, &normalized, type_node.start_byte())
+        };
         let lookup = qualifier.map(qualified_binding_head).unwrap_or(spelling);
-        let binding = self
-            .binding_for_occurrence(owner, lookup, type_node.start_byte(), true)
-            .cloned();
+        let binding = if enclosing_receiver.is_some() {
+            None
+        } else {
+            self.binding_for_occurrence(owner, lookup, type_node.start_byte(), true)
+                .cloned()
+        };
         let argument_count = java_argument_count(node);
         let argument_types = self.java_argument_types(node, owner);
         let occurrence_id = self.builder.occur_with_context(
             SemanticRole::Construction,
             &owner.fact_id,
             spelling,
-            qualifier,
+            enclosing_receiver.as_deref().or(qualifier),
             Some(&owner.scope_id),
             Some(&format!("arity:{argument_count}")),
             range_for_node(self.source_file, type_node),
@@ -3763,7 +3778,7 @@ impl<'source> DirectEvidenceState<'source> {
                 argument_types,
                 allowed_target_kinds: vec!["class".to_owned(), "record".to_owned()],
                 hierarchy: None,
-                allow_external: true,
+                allow_external: enclosing_receiver.is_none(),
             },
         )?;
         Ok(())
@@ -3884,6 +3899,51 @@ impl<'source> DirectEvidenceState<'source> {
             "parenthesized_expression" => expression
                 .named_child(0)
                 .and_then(|inner| self.java_expression_type(owner, inner, depth + 1)),
+            _ => None,
+        }
+    }
+
+    fn java_method_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        expression: Node<'_>,
+        depth: usize,
+    ) -> Option<String> {
+        if depth >= 8 || expression.has_error() {
+            return None;
+        }
+        match expression.kind() {
+            "parenthesized_expression" => {
+                let mut cursor = expression.walk();
+                expression
+                    .named_children(&mut cursor)
+                    .find(|child| !child.is_extra())
+                    .and_then(|inner| self.java_method_receiver_type(owner, inner, depth + 1))
+            }
+            "object_creation_expression" => {
+                let mut cursor = expression.walk();
+                // An enclosing-instance creation (`outer.new Inner()`) needs
+                // its own owner resolution. Anonymous classes may override
+                // methods on the named base; neither proves a base call.
+                if expression
+                    .children(&mut cursor)
+                    .find(|child| !child.is_extra())
+                    .is_none_or(|child| child.kind() != "new")
+                    || expression
+                        .named_children(&mut cursor)
+                        .any(|child| child.kind() == "class_body")
+                {
+                    return None;
+                }
+                let target = expression.child_by_field_name("type")?;
+                self.java_qualified_type(owner, &self.text(target), target.start_byte())
+            }
+            "identifier" | "this" | "super" | "field_access" => {
+                self.java_receiver_type(owner, &self.text(expression), expression.start_byte())
+            }
+            // Do not normalize arbitrary receiver expressions as type text:
+            // it invents targets such as `newlib.Cleaner::check`. Arrays,
+            // casts, and chained results need separate type/dispatch proof.
             _ => None,
         }
     }
