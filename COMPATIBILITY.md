@@ -923,11 +923,22 @@ persistence, dispatch, invocation, processing, recognition, refresh,
 resolution, and scheduling) affect ranking only: they cannot add a posting,
 candidate, relationship concept, or relation eligibility. Equal evidence
 vectors remain explicitly ambiguous.
-Natural-query alternatives now require the same channel, operation,
+Lexical natural-query alternatives require the same channel, operation,
 relationship, and calibrated score rank before they are labeled ambiguous.
 This removes false ambiguity between a specifically ranked operation or
 representation and a weaker same-name/helper candidate. Equal-rank candidates
-and duplicate exact-name lookups remain explicit ambiguity.
+and duplicate exact-name lookups remain explicit ambiguity. Exact matches to
+the same source-backed declaration name remain ambiguous across differences
+in kind, signature, owner, and ranking evidence; ranking does not prove which
+declaration the user meant.
+
+Within prose, underscore spellings and mixed-case internal capitals receive
+bounded literal-name lookup before behavior recall. Only declared-name matches
+receive exact-name priority. This changes candidate ordering without changing
+the discovery schema or graph format. Truncated name postings or candidate
+admission cannot prove uniqueness, and generic operation ranking cannot
+override that uncertainty. Single-word capitalized names continue through the
+existing ranking unless the whole question is an exact name.
 
 For explicit action predicates, discovery first reads one compact exact-term
 index restricted to source-backed operation-role declarations. It may finish

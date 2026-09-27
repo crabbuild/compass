@@ -133,6 +133,13 @@ also returns preceding overload declarations. Keep that policy effect and all
 declaration ambiguities visible. This measures available source evidence, not
 native explanation quality; further reading and disambiguation remain open.
 
+`literal_identifier_development_review.json` records the resulting retrieval
+fix and its fixed-graph reruns. Literal compound identifiers gain exact-name
+priority; duplicate declarations remain ambiguous across ranking evidence.
+The unchanged suite remains 49/55 versus 46/55 on its recall proxy. Keep the
+anchor diagnostics separate from explanation completeness and retain the
+single-word subject failures.
+
 ### MCP path diagnostics
 
 `suite_mcp_paths.json` covers prepared exact-ID navigation, reverse traversal,

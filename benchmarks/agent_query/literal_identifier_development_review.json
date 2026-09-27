@@ -1,0 +1,300 @@
+{
+  "schema": "compass.literal-identifier-development-review/1",
+  "sourceCommits": [
+    "090140f5",
+    "6711e3a3"
+  ],
+  "scope": "Post-diagnostic query improvement on reused five-language repositories and fixed graph files. No extraction, held-out confirmation, latency comparison or overall superiority claim.",
+  "artifactRoot": "literal-identifiers-02",
+  "captureSha256": "49ad76b89b5a20c4c769fc5b5723a0e6a5184c706ba336f77d9d6cfee1c99842",
+  "collectorSha256": "1b48fe2ef13381878f2189ee0925a614a4712397edbc76bdb5e441f73ba5af86",
+  "reviewerSha256": "d39ba8337e5617d69c61b8975cd7cbd212d42af87ad879fb1d04ec37718ec1fe",
+  "rawManifestSha256": "3c6379cd6b6704333fed267b096222c926e8b5943ba2e6a0214ba425ddbbb7a1",
+  "rawFiles": 248,
+  "sourceFileSha256": {
+    "crates/compass-query/src/discovery.rs": "768dee69664d6af73e2c90adb6aae10d8f678d3731bfc68a680c1a565aabcd0f",
+    "crates/compass-cli/tests/code_query_cli.rs": "07d0289c9e1f74d28eb99bba16413052144e222d6a76a35e464937fd0aa0ec42"
+  },
+  "tools": {
+    "compass": {
+      "sha256": "0bd42c8b4b5e88622747ec80920daa36a522ff326355fb35adea3b55f5e9fe3f",
+      "digestScope": "executable-file-only"
+    },
+    "graphify": {
+      "sha256": "a7fdb4ac8985755be15f10f89a2d17ee517130b3ac90c28c91644ae351881da3",
+      "digestScope": "executable-file-only"
+    }
+  },
+  "sourceRunSha256": "c2bc04366343fbd32bbdf84ccfb1db7aaad2e2ed38b38f979065c6755432d792",
+  "suiteSha256": "820a5c29f59e68b4ee8493e153c806b23e458a396431f3cf381660e469391237",
+  "runnerSha256": "4616b4c3a13e17febad2851c6111bff61e7b35e216fabf481df281380cddcebb",
+  "comparativeRecall": {
+    "compass": {
+      "requests": 55,
+      "passed": 49
+    },
+    "graphify": {
+      "requests": 55,
+      "passed": 46
+    }
+  },
+  "verdictChanges": [],
+  "responsibilityResponseDiagnostics": [
+    {
+      "repository": "chi",
+      "tool": "compass",
+      "beforeSha256": "37657db8665dda901e0e3befbd557c0987c833bc18c6e6722ae004b7c4e27bbf",
+      "afterSha256": "37657db8665dda901e0e3befbd557c0987c833bc18c6e6722ae004b7c4e27bbf",
+      "stdoutBytes": 7949,
+      "beforeSeedRows": [
+        "SEED chi.Mux::Route [source=alias; matched=mux,route]",
+        "SEED middleware.HeaderRouter::Route [source=alias; matched=middleware,route,router]",
+        "SEED chi.Mux::Routes [source=term_index; matched=mux]"
+      ],
+      "afterSeedRows": [
+        "SEED chi.Mux::Route [source=alias; matched=mux,route]",
+        "SEED middleware.HeaderRouter::Route [source=alias; matched=middleware,route,router]",
+        "SEED chi.Mux::Routes [source=term_index; matched=mux]"
+      ],
+      "ambiguousSeedWarnings": 1,
+      "lineMultisetUnchanged": true
+    },
+    {
+      "repository": "chi",
+      "tool": "graphify",
+      "beforeSha256": "1bf6c1ffd510f5a1183367edaba6fb6a7a66764cd9a658fdaa9cfa3eeff6b52f",
+      "afterSha256": "1bf6c1ffd510f5a1183367edaba6fb6a7a66764cd9a658fdaa9cfa3eeff6b52f",
+      "stdoutBytes": 6571,
+      "beforeSeedRows": [],
+      "afterSeedRows": [],
+      "ambiguousSeedWarnings": 0,
+      "lineMultisetUnchanged": true
+    },
+    {
+      "repository": "click",
+      "tool": "compass",
+      "beforeSha256": "09d1dab6c20017246f8e36ffe47f45c995cdf3b8f9d2e4fa9717f843769cdaf3",
+      "afterSha256": "d96d1f8f106be2093d3613fe9656b885f238ff9c2819d476f151ff8e0562bec0",
+      "stdoutBytes": 7966,
+      "beforeSeedRows": [
+        "SEED src.click.core.Context::close [source=alias; matched=close,context,exception]",
+        "SEED src.click.utils._LazyFile::close [source=alias; matched=close,file]",
+        "SEED src.click._compat._AtomicFile::close [source=alias; matched=_atomic,close,file]"
+      ],
+      "afterSeedRows": [
+        "SEED src.click._compat._AtomicFile [source=exact_name; matched=file]",
+        "SEED src.click.core.Context::close [source=alias; matched=close,context,exception]",
+        "SEED src.click.utils._LazyFile::close [source=alias; matched=close,file]"
+      ],
+      "ambiguousSeedWarnings": 0,
+      "lineMultisetUnchanged": false
+    },
+    {
+      "repository": "click",
+      "tool": "graphify",
+      "beforeSha256": "f8e7ae3aae06a943c686f3cd5f94cc7c7ea1f7da243ef8aa1ff35b5984564da5",
+      "afterSha256": "f8e7ae3aae06a943c686f3cd5f94cc7c7ea1f7da243ef8aa1ff35b5984564da5",
+      "stdoutBytes": 6850,
+      "beforeSeedRows": [],
+      "afterSeedRows": [],
+      "ambiguousSeedWarnings": 0,
+      "lineMultisetUnchanged": true
+    },
+    {
+      "repository": "jsoup",
+      "tool": "compass",
+      "beforeSha256": "51bcb6e5217ff0bb974a18fb07a6b636d7a2b67c2ed5641c5da5ad1acf6c5a94",
+      "afterSha256": "51bcb6e5217ff0bb974a18fb07a6b636d7a2b67c2ed5641c5da5ad1acf6c5a94",
+      "stdoutBytes": 7938,
+      "beforeSeedRows": [
+        "SEED org.jsoup.safety.Cleaner::clean [source=alias; matched=clean,cleaner]",
+        "SEED org.jsoup.safety.Cleaner [source=alias; matched=cleaner]",
+        "SEED org.jsoup.safety.Safelist [source=alias; matched=safelist]"
+      ],
+      "afterSeedRows": [
+        "SEED org.jsoup.safety.Cleaner::clean [source=alias; matched=clean,cleaner]",
+        "SEED org.jsoup.safety.Cleaner [source=alias; matched=cleaner]",
+        "SEED org.jsoup.safety.Safelist [source=alias; matched=safelist]"
+      ],
+      "ambiguousSeedWarnings": 1,
+      "lineMultisetUnchanged": true
+    },
+    {
+      "repository": "jsoup",
+      "tool": "graphify",
+      "beforeSha256": "21db49e7171f06bfa3b36559f63a622705673ca94869932c49389803f09829c2",
+      "afterSha256": "21db49e7171f06bfa3b36559f63a622705673ca94869932c49389803f09829c2",
+      "stdoutBytes": 6667,
+      "beforeSeedRows": [],
+      "afterSeedRows": [],
+      "ambiguousSeedWarnings": 0,
+      "lineMultisetUnchanged": true
+    },
+    {
+      "repository": "redux",
+      "tool": "compass",
+      "beforeSha256": "d30483e834045767618774140ade72fac87144bd43938a2360ab005ba9681235",
+      "afterSha256": "61c7e11bb1a2688b1dd9d03f470578e3c8e9def2855312520cf32fe19bd400cf",
+      "stdoutBytes": 7939,
+      "beforeSeedRows": [
+        "SEED store.Dispatch [source=alias; matched=dispatch,store]",
+        "SEED store.Store [source=term_index; matched=store]",
+        "SEED createStore.createStore [source=term_index; matched=create,store]"
+      ],
+      "afterSeedRows": [
+        "SEED createStore.createStore [source=exact_name; matched=create,store]",
+        "SEED createStore.createStore [source=exact_name; matched=create,store]",
+        "SEED createStore.createStore [source=exact_name; matched=create,store]"
+      ],
+      "ambiguousSeedWarnings": 3,
+      "lineMultisetUnchanged": false
+    },
+    {
+      "repository": "redux",
+      "tool": "graphify",
+      "beforeSha256": "ba6c21a04ee4f7d720ee74726dd4551ce982429d97ade961ce50db31ef9a58da",
+      "afterSha256": "ba6c21a04ee4f7d720ee74726dd4551ce982429d97ade961ce50db31ef9a58da",
+      "stdoutBytes": 6609,
+      "beforeSeedRows": [],
+      "afterSeedRows": [],
+      "ambiguousSeedWarnings": 0,
+      "lineMultisetUnchanged": true
+    },
+    {
+      "repository": "walkdir",
+      "tool": "compass",
+      "beforeSha256": "4e0658ae31900521385690c31083b617977c322a9af823faf5f17505ad63be49",
+      "afterSha256": "3e5d0641ad3345954446273004e4df1dcc15638ca7743af5dfea4eeaf007df23",
+      "stdoutBytes": 7988,
+      "beforeSeedRows": [
+        "SEED <impl IntoIterator for WalkDir>::IntoIter [source=term_index; matched=iter]",
+        "SEED walkdir::IntoIter [source=term_index; matched=iter]",
+        "SEED walkdir::IntoIter::oldest_opened [source=term_index; matched=iter]"
+      ],
+      "afterSeedRows": [
+        "SEED <impl IntoIterator for WalkDir>::IntoIter [source=exact_name; matched=iter]",
+        "SEED walkdir::IntoIter [source=exact_name; matched=iter]",
+        "SEED walkdir::IntoIter::oldest_opened [source=term_index; matched=iter]"
+      ],
+      "ambiguousSeedWarnings": 2,
+      "lineMultisetUnchanged": false
+    },
+    {
+      "repository": "walkdir",
+      "tool": "graphify",
+      "beforeSha256": "729cd0be188021d0e815f4167dd547728feb812a8a497f638f9164f86f3028be",
+      "afterSha256": "cc7707051db63230b38ff79ded253197a5885ce0576b72818b8c67809d453989",
+      "stdoutBytes": 26609,
+      "beforeSeedRows": [],
+      "afterSeedRows": [],
+      "ambiguousSeedWarnings": 0,
+      "lineMultisetUnchanged": true
+    }
+  ],
+  "verification": {
+    "fmt": {
+      "file": "literal-identifiers-final-fmt.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "testBinaries": 0
+    },
+    "cli": {
+      "file": "literal-identifiers-final-cli.log",
+      "sha256": "c12ba8c90191e4deb956e8ec1669f89acc7e055678f124d3e9e7c8d586d44e57",
+      "passed": 37,
+      "failed": 0,
+      "ignored": 0,
+      "testBinaries": 1
+    },
+    "clippy": {
+      "file": "literal-identifiers-final-clippy.log",
+      "sha256": "6d31f6b1b212dc557bb58b86087e5a0e0ecd982be4dd1e67469c91a85316cc45",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "testBinaries": 0
+    },
+    "workspace": {
+      "file": "literal-identifiers-final-workspace.log",
+      "sha256": "0ae8e0c9bcba9ce735e0470f205d9a1396b16d78550ea0dc75df12c592511961",
+      "passed": 1098,
+      "failed": 0,
+      "ignored": 2,
+      "testBinaries": 36
+    },
+    "query-integration": {
+      "file": "literal-identifiers-final-query-integration.log",
+      "sha256": "5f849a6ea3007a512faa898abe8005203a926792da86c129ab767e85c987798f",
+      "passed": 310,
+      "failed": 0,
+      "ignored": 0,
+      "testBinaries": 22
+    },
+    "product": {
+      "file": "literal-identifiers-final-product.log",
+      "sha256": "865ab9abec073a33b12deb5eb77ad86ce27306d2de4e96d06b9473e2e8c33def",
+      "passed": 9,
+      "failed": 0,
+      "ignored": 0,
+      "testBinaries": 1
+    },
+    "boundary": {
+      "file": "literal-identifiers-final-boundary.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": 0,
+      "failed": 0,
+      "ignored": 0,
+      "testBinaries": 0
+    }
+  },
+  "developmentHistory": [
+    {
+      "stage": "Initial literal-name regressions",
+      "log": "literal-identifiers-before.log",
+      "sha256": "ea746a95afb3c71742eee1261c57c9890c46d33bc1dbfb1e20db9d5a85408037",
+      "result": "One passed; exact provenance assertions failed in two tests before implementation."
+    },
+    {
+      "stage": "Bounded lookup completeness regression",
+      "log": "literal-identifiers-query-tests-02.log",
+      "sha256": "c87d46c77c246bafc5dffd94a1b98fe256e062fa7a1e93cc60efc8b4f7276ef5",
+      "result": "184 passed, one failed: operation ranking incorrectly overrode truncated exact-name evidence. Fixed before the first real-repository candidate run."
+    },
+    {
+      "stage": "Initial candidate comparison",
+      "artifactRoot": "literal-identifiers-01",
+      "captureSha256": "99252edb505910b27fbc51f111327121bff1db564fe746b28df6f73610f26888",
+      "result": "110 suite requests plus ten responsibility queries completed; unchanged 49/55 versus 46/55 recall. Redux exposed inconsistent per-seed ambiguity; Click displayed matched=none."
+    },
+    {
+      "stage": "Initial workspace verification interrupted",
+      "log": "literal-identifiers-clippy.log",
+      "sha256": "162c4ffa5e5799e2ef69d0a11b01c7e803e2f12b6646b64477bac61b89a464c1",
+      "result": "Validation process group intentionally terminated with exit 143 to fix the observed collision classification. Not a completed baseline; superseded by final verification."
+    },
+    {
+      "stage": "Cross-kind exact collision regression",
+      "log": "literal-identifiers-metadata-before.log",
+      "sha256": "8228ddc03ea4885c129d8cb90287ffcc6f9cc20a1279004c5321d922f5b29f5f",
+      "result": "Five passed; same-name struct/function ambiguity test failed before correction."
+    },
+    {
+      "stage": "Final query library verification",
+      "log": "literal-identifiers-query-tests-04.log",
+      "sha256": "49a1f70f3113a34e2ced9a10c46bbe3851c8f2d055ff985d170daca0bc00965a",
+      "result": "186 passed, zero failed."
+    }
+  ],
+  "interpretation": [
+    "Literal underscores and internal mixed-case capitals now receive bounded declared-name probes ahead of generic behavior terms. Missing literal spellings do not promote partial names, and ordinary words retain lexical ranking.",
+    "Exact-name collisions remain ambiguous across ranking evidence and declaration kinds. Global posting truncation and pool truncation cannot establish uniqueness. Six focused unit regressions plus an actual CLI subprocess regression exercise these boundaries.",
+    "Click _AtomicFile moves from surrounding-node context to the first exact-name seed. Redux createStore declarations all become exact-name seeds and all three carry ambiguity warnings. This is a post-output anchor diagnostic, not a new scored success rate.",
+    "Chi Mux and jsoup Cleaner outputs remain byte-identical. Single capitalized words do not receive the new literal-compound treatment. Further subject understanding remains open.",
+    "The unchanged 55-question suite per tool retains 49 versus 46 recall-proxy passes with no verdict changes. These checks do not establish full edge precision, source occurrence correctness or answer completeness.",
+    "Responsibility response rows and their actual byte sizes are retained. The earlier 11/20 versus 13/20 bounded source-follow-up result belongs to its frozen pre-change workflow; no new source-follow-up fact score is inferred here.",
+    "The query integration log includes the query library tests again; verification groups overlap and must not be summed as unique tests. The workspace log contains a pre-existing compass-core test unused_mut warning; the strict production Clippy invocation completes successfully.",
+    "Extraction, parser and graph publication code did not change in these commits. The prior extraction qualification is retained separately; no new full fixture/release-extraction gate is claimed for this query-only iteration. Fresh held-out evaluation, god-object diagnosis and functional community quality remain unfinished."
+  ]
+}

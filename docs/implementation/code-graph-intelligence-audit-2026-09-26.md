@@ -1915,6 +1915,50 @@ an agent under one reading policy, with unequal initial query response sizes.
 It does not measure best-possible workflows, source-reading latency, native
 explanation quality, community quality, or god-object detection.
 
+### Literal identifiers in natural questions
+
+The responsibility responses exposed a retrieval gap: Click's question names
+`_AtomicFile`, but generic `close` methods occupy all three seed slots. Commits
+`090140f5` and `6711e3a3` add bounded declared-name lookup for underscore and
+mixed-case compound identifiers embedded in prose. Ordinary words retain their
+lexical rank; a missing compound does not turn partial names into exact hits.
+All lookups share the existing work bounds, and incomplete name postings or
+candidate admission cannot establish uniqueness.
+
+The first implementation exposed a second problem in the real Redux response:
+the top `createStore` seed lacked an ambiguity flag while the other same-name
+declarations had one. A regression with same-name declarations of different
+kinds failed before correction. Exact source-name collisions now stay ambiguous
+across ranking evidence; heuristic ranking orders them without resolving their
+identity. Matched identifier components are retained even when later recall
+channels cannot admit more candidates.
+
+The final fixed-graph rerun executes all 110 existing suite requests and the ten
+responsibility queries against the same graph files and source pins. The
+existing recall proxy remains **49/55 for Compass and 46/55 for Graphify**, with
+no verdict changes or timeouts. The responsibility diagnostics show:
+
+- Click's first seed is now `_AtomicFile`, with exact-name provenance and a
+  matched identifier component. Generic secondary candidates and partial
+  coverage remain.
+- All three Redux `createStore` declarations are exact-name seeds and all
+  three carry ambiguity warnings.
+- WalkDir's associated alias and `IntoIter` struct are both exact-name seeds
+  with ambiguity warnings.
+- Chi `Mux` and jsoup `Cleaner` outputs remain byte-identical. Single-word
+  capitalized subjects still use the earlier ranking.
+
+These are anchor-selection diagnostics on a development panel, not a new
+explanation score. The earlier source-follow-up score belongs to its frozen
+pre-change workflow. The
+[development review](../../benchmarks/agent_query/literal_identifier_development_review.json)
+records both candidate runs, failed-before regressions, final verification,
+source and binary hashes, and actual response sizes. The first workspace
+verification batch was intentionally stopped for the ambiguity correction and
+is not counted as a completed baseline. Extraction was not rerun for these
+query-only changes. Full response precision, new source-follow-up coverage,
+held-out confirmation, god-object diagnosis and community quality remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
