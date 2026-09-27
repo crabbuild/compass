@@ -976,6 +976,15 @@ struct RustValueTypeVersion {
     shadows_alias: bool,
 }
 
+// Preserve the declaration context when a receiver crosses a field boundary.
+// A field's element type is resolved in its defining module, not the caller's.
+#[derive(Clone)]
+struct RustSourceType {
+    raw: String,
+    owner: DeclarationContext,
+    source_start: usize,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum RustPlatformCfg {
     Fallback,
@@ -1022,7 +1031,9 @@ struct DirectEvidenceState<'source> {
     rust_imported_typed_receivers: HashSet<(String, String)>,
     rust_platform_reexport_bindings: HashMap<String, RustPlatformCfg>,
     rust_platform_fallbacks: HashSet<(String, String)>,
-    rust_field_types: HashMap<String, HashMap<String, String>>,
+    rust_field_types: HashMap<String, HashMap<String, RustSourceType>>,
+    rust_standard_prelude_enabled: bool,
+    rust_ambiguous_field_types: HashSet<(String, String)>,
     rust_value_types: HashMap<String, HashMap<String, Vec<RustValueTypeVersion>>>,
     rust_callable_return_types: HashMap<String, Vec<String>>,
     rust_call_result_bindings: HashMap<(String, String, usize), String>,
@@ -1114,6 +1125,9 @@ impl<'source> DirectEvidenceState<'source> {
             rust_platform_reexport_bindings: HashMap::new(),
             rust_platform_fallbacks: HashSet::new(),
             rust_field_types: HashMap::new(),
+            rust_ambiguous_field_types: HashSet::new(),
+            rust_standard_prelude_enabled: pipeline.producer.language == "rust"
+                && rust_standard_prelude_enabled(root, source),
             rust_value_types: HashMap::new(),
             rust_callable_return_types: HashMap::new(),
             rust_call_result_bindings: HashMap::new(),
@@ -5005,6 +5019,160 @@ impl<'source> DirectEvidenceState<'source> {
         scope_id
     }
 
+    fn rust_indexed_type_name(&self, receiver: &RustSourceType) -> Option<String> {
+        let nominal = rust_nominal_type_path(rust_indexable_type(&receiver.raw)?)?;
+        if self
+            .visible_import_binding_is_ambiguous(&receiver.owner, qualified_binding_head(&nominal))
+        {
+            return None;
+        }
+        rust_qualify_evidence_path(self, &receiver.owner, &nominal, receiver.source_start)
+    }
+
+    // Only called for receiver syntax containing an index. Unsupported forms
+    // stay unresolved instead of falling back to the collection's method.
+    fn rust_indexed_receiver_type(
+        &self,
+        owner: &DeclarationContext,
+        node: Node<'_>,
+        budget: usize,
+    ) -> Option<RustSourceType> {
+        let budget = budget.checked_sub(1)?;
+        if self.overlaps_parser_error(node) {
+            return None;
+        }
+        match node.kind() {
+            "self" => Some(RustSourceType {
+                raw: rust_callable_owner(owner)?.to_owned(),
+                owner: owner.clone(),
+                source_start: node.start_byte(),
+            }),
+            "identifier" => Some(RustSourceType {
+                raw: self
+                    .rust_value_type_for(owner, &self.text(node), node.start_byte(), Some(node))?
+                    .to_owned(),
+                owner: owner.clone(),
+                source_start: node.start_byte(),
+            }),
+            "parenthesized_expression" => {
+                self.rust_indexed_receiver_type(owner, node.named_child(0)?, budget)
+            }
+            "reference_expression" => {
+                let value = node.child_by_field_name("value")?;
+                let mut receiver = self.rust_indexed_receiver_type(owner, value, budget)?;
+                // Method/field receivers may auto-dereference this reference,
+                // but an index operand such as &n is not a scalar usize.
+                receiver.raw = format!("&{}", receiver.raw);
+                Some(receiver)
+            }
+            "field_expression" => {
+                let mut receiver = self.rust_indexed_receiver_type(
+                    owner,
+                    node.child_by_field_name("value")?,
+                    budget,
+                )?;
+                let field = self.text(node.child_by_field_name("field")?);
+                for _ in 0..16 {
+                    let raw = rust_indexable_type(&receiver.raw)?;
+                    let qualified = self.rust_indexed_type_name(&receiver)?;
+                    if self
+                        .rust_ambiguous_field_types
+                        .contains(&(qualified.clone(), field.clone()))
+                    {
+                        return None;
+                    }
+                    if let Some(field_type) = self
+                        .rust_field_types
+                        .get(&qualified)
+                        .and_then(|fields| fields.get(&field))
+                    {
+                        return Some(field_type.clone());
+                    }
+                    if !rust_source_proven_deref_wrapper(&qualified) {
+                        return None;
+                    }
+                    receiver.raw = rust_single_generic_type_argument(raw)?.to_owned();
+                }
+                None
+            }
+            "index_expression" => {
+                let container = node.named_child(0)?;
+                let index = node.named_child(1)?;
+                if !self.rust_scalar_index(owner, index, budget) {
+                    return None;
+                }
+                let mut receiver = self.rust_indexed_receiver_type(owner, container, budget)?;
+                for _ in 0..16 {
+                    let raw = rust_indexable_type(&receiver.raw)?;
+                    if let Some(element) = rust_array_or_slice_element(raw) {
+                        receiver.raw = element.to_owned();
+                        return Some(receiver);
+                    }
+                    let nominal = rust_nominal_type_path(raw)?;
+                    let context = &receiver.owner;
+                    let position = receiver.source_start;
+                    let qualified = self.rust_indexed_type_name(&receiver)?;
+                    let standard_vec =
+                        matches!(qualified.as_str(), "std::vec::Vec" | "alloc::vec::Vec")
+                            || (nominal == "Vec"
+                                && self.rust_standard_prelude_enabled
+                                && self.local_target_for(context, "Vec").is_none()
+                                && self
+                                    .imported_target_for_occurrence(context, "Vec", position, true)
+                                    .is_none()
+                                && self
+                                    .import_binding_version_at(context, "*", position, true)
+                                    .is_none()
+                                && !self.visible_import_binding_is_ambiguous(context, "*"));
+                    if standard_vec {
+                        receiver.raw = rust_single_generic_type_argument(raw)?.to_owned();
+                        return Some(receiver);
+                    }
+                    if !rust_source_proven_deref_wrapper(&qualified) {
+                        return None;
+                    }
+                    receiver.raw = rust_single_generic_type_argument(raw)?.to_owned();
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn rust_scalar_index(&self, owner: &DeclarationContext, node: Node<'_>, budget: usize) -> bool {
+        if budget == 0 {
+            return false;
+        }
+        if node.kind() == "integer_literal" {
+            // Unsuffixed literals acquire usize from built-in sequence indexing.
+            // Keep suffixed non-usize integers and arbitrary index expressions unresolved.
+            let raw = self.text(node);
+            let raw = raw.strip_suffix("usize").unwrap_or(&raw);
+            return !raw.is_empty()
+                && raw
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || byte == b'_');
+        }
+        self.rust_indexed_receiver_type(owner, node, budget)
+            .is_some_and(|index| {
+                index.raw.trim() == "usize"
+                    && self.local_target_for(&index.owner, "usize").is_none()
+                    && self
+                        .imported_target_for_occurrence(
+                            &index.owner,
+                            "usize",
+                            index.source_start,
+                            true,
+                        )
+                        .is_none()
+                    && self
+                        .import_binding_version_at(&index.owner, "*", index.source_start, true)
+                        .is_none()
+                    && !self.visible_import_binding_is_ambiguous(&index.owner, "usize")
+                    && !self.visible_import_binding_is_ambiguous(&index.owner, "*")
+            })
+    }
+
     fn rust_field_receiver_type(
         &self,
         owner: &DeclarationContext,
@@ -5072,7 +5240,7 @@ impl<'source> DirectEvidenceState<'source> {
                 .get(&qualified)
                 .and_then(|fields| fields.get(field))
             {
-                return Some(field_type.clone());
+                return Some(field_type.raw.clone());
             }
             if !rust_source_proven_deref_wrapper(&qualified) {
                 return None;
@@ -5345,10 +5513,25 @@ impl<'source> DirectEvidenceState<'source> {
         if name.is_empty() || raw.is_empty() {
             return;
         }
-        self.rust_field_types
+        let fields = self
+            .rust_field_types
             .entry(owner.qualified_name.clone())
-            .or_default()
-            .insert(name, raw);
+            .or_default();
+        if fields
+            .get(&name)
+            .is_some_and(|previous| previous.source_start != type_node.start_byte())
+        {
+            self.rust_ambiguous_field_types
+                .insert((owner.qualified_name.clone(), name.clone()));
+        }
+        fields.insert(
+            name,
+            RustSourceType {
+                raw,
+                owner: owner.clone(),
+                source_start: type_node.start_byte(),
+            },
+        );
     }
 
     fn add_rust_enum_members(
@@ -5772,7 +5955,15 @@ impl<'source> DirectEvidenceState<'source> {
             && self
                 .rust_value_binding_for(owner, binding_name, function.start_byte(), Some(function))
                 .is_some_and(|version| version.shadows_alias);
-        let direct_binding = (platform_reexport_bindings.is_none() && !shadows_alias)
+        let indexed_receiver = function.kind() == "field_expression"
+            && function
+                .child_by_field_name("value")
+                .is_some_and(rust_receiver_contains_index);
+        // A binding for the container/root object cannot select the indexed
+        // element's method, including when element-type inference fails.
+        let direct_binding = (platform_reexport_bindings.is_none()
+            && !shadows_alias
+            && !indexed_receiver)
             .then(|| {
                 if uses_type_namespace {
                     self.import_binding_version_at(owner, binding_name, function.start_byte(), true)
@@ -5791,10 +5982,11 @@ impl<'source> DirectEvidenceState<'source> {
                     .next()
                     .is_some_and(char::is_uppercase)
             });
-        let wildcard_binding = (direct_binding.is_none() && wildcard_lookup_eligible)
-            .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
-            .flatten()
-            .cloned();
+        let wildcard_binding =
+            (direct_binding.is_none() && wildcard_lookup_eligible && !indexed_receiver)
+                .then(|| self.rust_wildcard_binding(owner, function.start_byte()))
+                .flatten()
+                .cloned();
         let fallback_binding = direct_binding.clone().or_else(|| wildcard_binding.clone());
         let call_result_binding = if platform_reexport_bindings.is_none() {
             self.rust_call_result_binding_for_occurrence(
@@ -5945,6 +6137,16 @@ impl<'source> DirectEvidenceState<'source> {
                 .imported_target_for_occurrence(owner, spelling, 0, true)
                 .cloned();
         };
+        if use_node.kind() == "field_expression"
+            && let Some(receiver) = use_node.child_by_field_name("value")
+            && rust_receiver_contains_index(receiver)
+        {
+            let receiver = self.rust_indexed_receiver_type(owner, receiver, 32)?;
+            let qualified = self.rust_indexed_type_name(&receiver)?;
+            return self
+                .rust_receiver_method_target(&qualified, spelling)
+                .or_else(|| Some(rust_join_qualified(&qualified, spelling)));
+        }
         let normalized_qualifier = rust_normalize_path(raw_qualifier);
         if let Some(inner) = normalized_qualifier
             .strip_prefix('<')
@@ -9503,6 +9705,92 @@ fn rust_normalize_path(raw: &str) -> String {
     rust_strip_generic_arguments(raw)
 }
 
+fn rust_receiver_contains_index(mut node: Node<'_>) -> bool {
+    for _ in 0..32 {
+        match node.kind() {
+            "index_expression" => return true,
+            "field_expression" => {
+                let Some(value) = node.child_by_field_name("value") else {
+                    return false;
+                };
+                node = value;
+            }
+            "parenthesized_expression" | "reference_expression" | "unary_expression" => {
+                let Some(value) = node
+                    .child_by_field_name("value")
+                    .or_else(|| node.named_child(0))
+                else {
+                    return false;
+                };
+                node = value;
+            }
+            _ => return false,
+        }
+    }
+    // Don't fall back to textual receiver inference when the bound is reached.
+    true
+}
+
+fn rust_standard_prelude_enabled(root: Node<'_>, source: &[u8]) -> bool {
+    let mut cursor = root.walk();
+    loop {
+        let node = cursor.node();
+        if matches!(node.kind(), "attribute_item" | "inner_attribute_item") {
+            let text = source.get(node.byte_range()).unwrap_or_default();
+            // Conservatively reject conditional or nested prelude changes too.
+            if [b"no_implicit_prelude".as_slice(), b"no_std", b"no_core"]
+                .iter()
+                .any(|name| text.windows(name.len()).any(|part| part == *name))
+            {
+                return false;
+            }
+        }
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return true;
+            }
+        }
+    }
+}
+
+// Built-in indexing auto-dereferences references, never raw pointers.
+fn rust_indexable_type(mut raw: &str) -> Option<&str> {
+    for _ in 0..16 {
+        raw = raw.trim();
+        if let Some(rest) = raw.strip_prefix('&') {
+            raw = rest.trim_start();
+            if let Some(lifetime) = raw.strip_prefix('\'') {
+                let end = lifetime.find(char::is_whitespace)?;
+                raw = lifetime[end..].trim_start();
+            }
+            raw = raw.strip_prefix("mut ").unwrap_or(raw);
+        } else {
+            return (!raw.is_empty() && !raw.starts_with('*')).then_some(raw);
+        }
+    }
+    None
+}
+
+fn rust_array_or_slice_element(raw: &str) -> Option<&str> {
+    let inner = raw.strip_prefix('[')?.strip_suffix(']')?.trim();
+    let mut depth = 0_u16;
+    for (offset, character) in inner.char_indices() {
+        match character {
+            '[' | '(' | '<' => depth = depth.checked_add(1)?,
+            ']' | ')' | '>' => depth = depth.checked_sub(1)?,
+            ';' if depth == 0 => return Some(inner.get(..offset)?.trim()),
+            _ => {}
+        }
+    }
+    (!inner.is_empty() && depth == 0).then_some(inner)
+}
+
 fn rust_nominal_type_path(raw: &str) -> Option<String> {
     let mut raw = raw.trim();
     loop {
@@ -10027,18 +10315,20 @@ fn rust_qualify_evidence_path(
             .rust_associated_type_for(owner, spelling)
             .map(|associated_type| associated_type.qualified_name.clone());
     }
-    let binding_name = qualifier.map(qualified_binding_head).unwrap_or(spelling);
+    // Keep the entire suffix when expanding a module/type alias. Taking only
+    // the terminal spelling would turn api::nested::Entry into api::Entry.
+    let (binding_name, suffix) = split_qualified_head(&raw);
     if let Some(target) = state.imported_target_for_occurrence(owner, binding_name, use_start, true)
     {
-        return Some(if qualifier.is_some() {
-            rust_join_qualified(target, spelling)
+        return Some(if let Some(suffix) = suffix {
+            rust_join_qualified(target, suffix)
         } else {
             target.clone()
         });
     }
     if let Some(target) = state.local_target_for(owner, binding_name) {
-        return Some(if qualifier.is_some() {
-            rust_join_qualified(target, spelling)
+        return Some(if let Some(suffix) = suffix {
+            rust_join_qualified(target, suffix)
         } else {
             target.clone()
         });

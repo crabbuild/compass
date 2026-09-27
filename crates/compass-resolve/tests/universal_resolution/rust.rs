@@ -3223,3 +3223,62 @@ fn run(builder: &Decoy, builders: &[Actual]) {
         .map(|edge| edge.string("source_location")).collect::<BTreeSet<_>>();
     assert_eq!(sites, BTreeSet::from(["L7".to_owned(), "L8".to_owned()]));
 }
+
+#[test]
+fn rust_indexed_receivers_publish_exact_cross_file_calls_and_occurrences() {
+    let api_source = "pub struct Entry; impl Entry { pub fn close(&self) {} }";
+    let caller_source = "use crate::api::Entry; struct Store { entries: Vec<Entry>, cursor: usize } impl Store { fn close(&self) {} fn run(&self) { self.entries[self.cursor].close(); self.entries[0].close(); } }";
+    let sources = HashMap::from([
+        ("src/api.rs".to_owned(), api_source.to_owned()),
+        ("src/lib.rs".to_owned(), caller_source.to_owned()),
+    ]);
+    let extractions = vec![extract("src/api.rs", api_source.as_bytes()), extract("src/lib.rs", caller_source.as_bytes())];
+    let resolved = compass_resolve::resolve(&extractions, &sources);
+    let reversed = compass_resolve::resolve(&extractions.into_iter().rev().collect::<Vec<_>>(), &sources);
+    assert_eq!(universal_edges(&resolved), universal_edges(&reversed));
+    let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Store::run").expect("run");
+    let close = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::api::Entry::close").expect("Entry.close");
+    let calls = resolved.edges.iter().filter(|edge| edge.source == run.id && edge.string("relation") == "calls").collect::<Vec<_>>();
+    assert_eq!(calls.len(), 2, "{calls:#?}");
+    let mut actual_ranges = Vec::new();
+    for call in calls {
+        assert_eq!(call.target, close.id, "{call:#?}");
+        assert_eq!(call.string("confidence"), "EXTRACTED");
+        assert!(call.string("extractor").contains(".universal"));
+        assert_ne!(call.string("resolution_rule"), "deferred-receiver");
+        let start = call.attributes["start_byte"].as_u64().expect("start") as usize;
+        let end = call.attributes["end_byte"].as_u64().expect("end") as usize;
+        actual_ranges.push(&caller_source[start..end]);
+    }
+    actual_ranges.sort();
+    assert_eq!(actual_ranges, ["self.entries[0].close", "self.entries[self.cursor].close"]);
+}
+
+#[test]
+fn rust_unsupported_index_receivers_never_capture_same_named_methods() {
+    for source in [
+        "struct Entry; impl Entry { fn close(&self) {} } struct Vec<T>(T); impl<T> Vec<T> { fn close(&self) {} } fn run(entries: Vec<Entry>) { entries[0].close(); }",
+        "struct Entry; impl Entry { fn close(&self) {} } struct Custom<T>(T); struct Store { entries: Custom<Entry> } impl Store { fn close(&self) {} } fn run(store: &Store) { store.entries[0].close(); }",
+        "struct Entry; impl Entry { fn close(&self) {} } fn run(entries: Vec<Entry>, n: Unknown) { entries[n].close(); }",
+        "struct Entry; impl Entry { fn close(&self) {} } fn run(entries: Vec<Entry>) { entries[..].close(); }",
+        "struct Entry; trait A { fn close(&self); } trait B { fn close(&self); } impl A for Entry { fn close(&self) {} } impl B for Entry { fn close(&self) {} } fn run(entries: Vec<Entry>) { entries[0].close(); }",
+    ] {
+        let resolved = compass_resolve::resolve(&[extract("src/lib.rs", source.as_bytes())], &HashMap::from([("src/lib.rs".to_owned(), source.to_owned())]));
+        let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::run").expect("run");
+        for call in resolved.edges.iter().filter(|edge| edge.source == run.id && edge.string("relation") == "calls") {
+            assert_eq!(call.string("resolution_rule"), "deferred-receiver", "{source}\n{call:#?}");
+        }
+    }
+}
+
+#[test]
+fn rust_indexed_parameter_fields_never_bind_the_container_method() {
+    let source = "struct Entry; impl Entry { fn close(&self) {} } struct Store { entries: Vec<Entry> } impl Store { fn close(&self) {} } fn run(store: &Store) { store.entries[0].close(); }";
+    let resolved = compass_resolve::resolve(&[extract("src/lib.rs", source.as_bytes())], &HashMap::from([("src/lib.rs".to_owned(), source.to_owned())]));
+    let run = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::run").expect("run");
+    let target = resolved.nodes.iter().find(|node| node.string("qualified_name") == "crate::Entry::close").expect("Entry.close");
+    let calls = resolved.edges.iter().filter(|edge| edge.source == run.id && edge.string("relation") == "calls").collect::<Vec<_>>();
+    assert_eq!(calls.len(), 1, "{calls:#?}");
+    assert_eq!(calls[0].target, target.id);
+    assert_eq!(calls[0].string("confidence"), "EXTRACTED");
+}

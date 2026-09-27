@@ -31,6 +31,28 @@ not maintain command-specific fallbacks for older releases.
 Compass 0.3.0 itself remains supported. The extension adapts typed call-query
 results for the known nested-anchor limitation in that stable release.
 
+## Rust indexed method receivers
+
+Rust call extraction follows bounded field and scalar-index receiver syntax
+when source types establish a standard `Vec`, array, or slice and a decimal integer
+literal or `usize` index. Supported reference and standard `Box`/`Rc`/`Arc`
+wrappers preserve the element type. Field types retain their declaration scope,
+and repeated calls retain distinct source anchors. Type-path qualification
+retains every intermediate module when expanding a local or imported alias.
+Explicit standard-vector
+and element imports may be resolved by existing import evidence.
+
+Custom `Index` implementations, range indexes, unknown index types, raw
+pointers, ambiguous or shadowed type names, and unsupported expressions do not
+establish an element-method target. Prelude-vector inference is disabled by
+visible wildcard imports or source attributes that may disable the standard
+prelude. Generic field substitution and cross-file field layout discovery are
+not compiler inference capabilities of this rule.
+
+Disposable AST cache semantics advance from 6 to 7 for these extraction facts.
+Rebuild a graph to obtain them; published history, evidence schema, producer
+capabilities, graph schema, and package version remain unchanged.
+
 ## Compatibility evidence
 
 Compass changes are verified with native evidence:

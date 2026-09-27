@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Resolve Rust method receivers reached through source-proven scalar indexes
+  into standard vectors, arrays, and slices, retaining field declaration scope
+  and each call occurrence. Preserve intermediate modules in qualified Rust
+  type paths instead of selecting a same-named outer type. Custom containers, ranges, unknown index types,
+  and shadowed collection names remain unresolved. Rebuild graphs to refresh
+  older AST caches.
+
 - Prefer exact IDs and symbol names for MCP neighbor navigation before broader
   prefix/substring matches, while preserving genuine declaration ambiguity and
   fuzzy fallback when no exact candidate exists.
