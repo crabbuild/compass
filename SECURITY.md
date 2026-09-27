@@ -85,6 +85,11 @@ to a public issue: it can disclose repository names, paths, source anchors,
 and graph structure. Share a sanitized `compass store status --format json`
 response instead.
 
+Standalone graph reads bind derived caches and MCP graph views to the digest
+of one size-bounded byte snapshot. Digest equality establishes content identity,
+not authenticity or semantic correctness. Disposable cache decoding is also
+byte-bounded; caches do not authorize access to their source graph.
+
 ## Document and OCR boundary
 
 PDF and OOXML files, XML relationships, compressed members, embedded images,

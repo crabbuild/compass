@@ -817,3 +817,114 @@ fn calls_only_mcp_policy_is_scoped_boolean_and_excludes_structural_routes()
     }
     Ok(())
 }
+
+#[test]
+fn typed_queries_and_legacy_views_reload_equal_metadata_together() -> Result<(), Box<dyn Error>> {
+    for atomic in [false, true] {
+        for disk_cache in [false, true] {
+            let directory = tempfile::tempdir()?;
+            let path = write_typed_graph(directory.path())?;
+            let mut graph = GraphDocument::load(&path)?;
+            for node in &mut graph.nodes {
+                node.community = Some(compass_model::code_graph::CommunityMetadata {
+                    id: 1,
+                    label: None,
+                    score: None,
+                    color: None,
+                });
+            }
+            fs::write(&path, serde_json::to_vec_pretty(&graph)?)?;
+            // The fixture loader creates a cache; remove only this test's disposable entries.
+            fs::remove_dir_all(directory.path().join("cache"))?;
+            if disk_cache {
+                fs::create_dir(directory.path().join("cache"))?;
+            }
+            let before = fs::read_to_string(&path)?;
+            let after = before
+                .replace("Caller", "Runner")
+                .replace("Target", "Callee");
+            assert_eq!(before.len(), after.len());
+            let modified = path.metadata()?.modified()?;
+            let server = CompassMcp::new(&path);
+            let check = |server: &CompassMcp, old: bool| -> Result<String, Box<dyn Error>> {
+                let present = if old { "Caller" } else { "Runner" };
+                let absent = if old { "Runner" } else { "Caller" };
+                let community = server.invoke(
+                    "get_community",
+                    Map::from_iter([("community_id".into(), json!(1))]),
+                );
+                assert!(
+                    community.contains(present) && !community.contains(absent),
+                    "{community}"
+                );
+                let hubs = server.invoke("god_nodes", Map::new());
+                assert!(hubs.contains(present) && !hubs.contains(absent), "{hubs}");
+                let response: Value = serde_json::from_str(&server.invoke(
+                    "search_symbols",
+                    Map::from_iter([
+                        ("query".into(), json!(present)),
+                        ("exact".into(), json!(true)),
+                    ]),
+                ))?;
+                assert_eq!(
+                    response["result"]["nodes"]
+                        .as_array()
+                        .ok_or("search nodes")?
+                        .len(),
+                    1
+                );
+                assert_eq!(response["result"]["nodes"][0]["id"], "n:caller");
+                let missing = invoke(
+                    server,
+                    "search_symbols",
+                    json!({"query":absent,"exact":true}),
+                )?;
+                assert!(
+                    missing["nodes"]
+                        .as_array()
+                        .ok_or("missing nodes")?
+                        .is_empty()
+                );
+                Ok(response["agentView"]["identity"]["graphIdentity"]
+                    .as_str()
+                    .ok_or("graph identity")?
+                    .to_owned())
+            };
+            let old_identity = check(&server, true)?;
+            if atomic {
+                use std::io::Write;
+                let mut replacement = tempfile::NamedTempFile::new_in(directory.path())?;
+                replacement.write_all(after.as_bytes())?;
+                replacement
+                    .as_file()
+                    .set_times(fs::FileTimes::new().set_modified(modified))?;
+                replacement.persist(&path)?;
+            } else {
+                fs::write(&path, &after)?;
+                fs::File::options()
+                    .write(true)
+                    .open(&path)?
+                    .set_times(fs::FileTimes::new().set_modified(modified))?;
+            }
+            assert_eq!(path.metadata()?.modified()?, modified);
+            let new_identity = check(&server, false)?;
+            assert_ne!(old_identity, new_identity);
+            assert_eq!(new_identity, check(&CompassMcp::new(&path), false)?);
+            fs::write(&path, vec![b'!'; before.len()])?;
+            fs::File::options()
+                .write(true)
+                .open(&path)?
+                .set_times(fs::FileTimes::new().set_modified(modified))?;
+            assert!(server.invoke("god_nodes", Map::new()).starts_with("Error"));
+            assert!(
+                server
+                    .invoke(
+                        "search_symbols",
+                        Map::from_iter([("query".into(), json!("Runner"))])
+                    )
+                    .starts_with("Error")
+            );
+        }
+    }
+    Ok(())
+}

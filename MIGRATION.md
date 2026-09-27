@@ -7,6 +7,12 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Disposable graph query/impact/traversal and typed content caches are rebuilt
+automatically when read by this version. No source graph rebuild or historical
+rewrite is needed for cache freshness. An in-flight MCP request retains its
+loaded graph snapshot; subsequent requests read the current content and reject
+missing or corrupt replacements.
+
 Rebuild Java graphs to resolve imported nested nominal receiver names for field
 and enum references. The resolver now joins dotted source type names to canonical
 nested declarations, retaining duplicate-owner ambiguity. This correction reuses

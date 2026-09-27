@@ -35,7 +35,7 @@ compass-out/
 │   │   ├── graph.json.query-v1.cache
 │   │   ├── graph.json.affected-v1.cache
 │   │   ├── graph.json.traversal-v1.cache
-│   │   └── graph.json.<digest>.content-v1.cache
+│   │   └── graph.json.<digest>.content-v2.cache
 │   └── source-root.txt
 ├── store/
 │   └── store.sqlite3   # with the default SQLite query index

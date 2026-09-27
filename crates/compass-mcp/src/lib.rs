@@ -31,7 +31,7 @@ use compass_model::query_contract::{
     MAX_DISCOVERY_NODES, MAX_DISCOVERY_QUESTION_BYTES, MAX_DISCOVERY_RESPONSE_BYTES,
     MAX_DISCOVERY_SEEDS, MAX_DISCOVERY_TIMEOUT_MS,
 };
-use compass_model::{Graph, GraphDocument, NodeIndex};
+use compass_model::{Graph, GraphArtifact, GraphDocument, GraphError, NodeIndex};
 use compass_output::{
     AgentOperandRole, AgentOperation, AgentOrientation, AgentQueryContext,
     ORIENTATION_JSON_MAX_BYTES, build_code_query_view, build_discovery_query_view,
@@ -123,15 +123,10 @@ impl From<String> for InvocationError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct FileKey {
-    modified: Option<SystemTime>,
-    size: u64,
-}
-
 #[derive(Debug)]
 struct GraphContext {
     path: PathBuf,
+    document: GraphDocument,
     graph: Graph,
     overlay: HashMap<String, Map<String, Value>>,
     communities: BTreeMap<usize, Vec<NodeIndex>>,
@@ -141,13 +136,15 @@ struct GraphContext {
 }
 
 impl GraphContext {
-    fn load(path: &Path) -> Result<Self, String> {
-        let loaded = LoadedGraph::load_directed(path).map_err(|error| error.to_string())?;
-        let (typed_document, typed_graph_identity) =
-            match CodeGraphDocument::load_with_artifact_digest(path) {
-                Ok((document, identity)) => (Some(document), Some(identity)),
-                Err(_) => (None, None),
-            };
+    fn load(artifact: &GraphArtifact) -> Result<Self, String> {
+        let loaded =
+            LoadedGraph::from_artifact_directed(artifact).map_err(|error| error.to_string())?;
+        let document = artifact.document().map_err(|error| error.to_string())?;
+        let (typed_document, typed_graph_identity) = match artifact.typed_document() {
+            Ok(document) => (Some(document), Some(artifact.artifact_digest())),
+            Err(GraphError::UnsupportedGraphSchema { found: None }) => (None, None),
+            Err(error) => return Err(error.to_string()),
+        };
         let typed_query_supported = typed_document.is_some();
         let mut communities = BTreeMap::<usize, Vec<NodeIndex>>::new();
         for (index, node) in loaded.graph.nodes() {
@@ -160,7 +157,8 @@ impl GraphContext {
             }
         }
         Ok(Self {
-            path: path.to_path_buf(),
+            path: artifact.path().to_path_buf(),
+            document,
             graph: loaded.graph,
             overlay: loaded.overlay,
             communities,
@@ -170,8 +168,8 @@ impl GraphContext {
         })
     }
 
-    fn document(&self) -> Result<GraphDocument, String> {
-        GraphDocument::load(&self.path).map_err(|error| error.to_string())
+    fn document(&self) -> &GraphDocument {
+        &self.document
     }
 
     fn community_ids(&self) -> Communities {
@@ -192,7 +190,7 @@ impl GraphContext {
 
 #[derive(Debug)]
 struct CacheEntry {
-    key: FileKey,
+    key: String,
     context: Arc<GraphContext>,
 }
 
@@ -256,12 +254,11 @@ impl GraphStore {
 
     fn load(&self, project_path: Option<&str>) -> Result<Arc<GraphContext>, String> {
         let path = self.resolve(project_path)?;
-        let metadata =
-            fs::metadata(&path).map_err(|_| format!("graph.json not found: {}", path.display()))?;
-        let key = FileKey {
-            modified: metadata.modified().ok(),
-            size: metadata.len(),
-        };
+        let artifact = GraphArtifact::load(&path).map_err(|error| match error {
+            GraphError::NotFound(_) => format!("graph.json not found: {}", path.display()),
+            other => other.to_string(),
+        })?;
+        let key = artifact.artifact_digest();
         if let Some(context) = self
             .inner
             .cache
@@ -273,7 +270,7 @@ impl GraphStore {
         {
             return Ok(context);
         }
-        let context = Arc::new(GraphContext::load(&path)?);
+        let context = Arc::new(GraphContext::load(&artifact)?);
         self.inner
             .cache
             .lock()
@@ -2250,7 +2247,7 @@ fn invoke_neighbor_tool(
 ) -> Result<ToolInvocation, InvocationError> {
     // The compact traversal cache omits identities, occurrence anchors and
     // provenance. Resolve and project against one full snapshot instead.
-    let mut document = context.document()?;
+    let mut document = context.document().clone();
     // Retain every persisted record even for legacy non-multigraph metadata.
     document.multigraph = true;
     let graph = Graph::from_traversal_document(document)
@@ -2390,8 +2387,8 @@ fn invoke_hub_tool(
 ) -> Result<ToolInvocation, InvocationError> {
     let top_n =
         usize::try_from(integer_argument(arguments, "top_n", 10).max(0)).unwrap_or_default();
-    let document = context.document()?;
-    let nodes = god_nodes_with_evidence(&document, top_n);
+    let document = context.document();
+    let nodes = god_nodes_with_evidence(document, top_n);
     let records = document
         .nodes
         .iter()
@@ -2565,7 +2562,7 @@ fn invoke_path_tool(
     let max_hops = usize::try_from(max_hops).map_err(|error| error.to_string())?;
     // Select and project from one full snapshot: the compact traversal cache
     // omits source lines and edge IDs, including parallel-edge identities.
-    let mut document = context.document()?;
+    let mut document = context.document().clone();
     document.directed = true;
     let graph = Graph::from_traversal_document(document)
         .map_err(|error| InvocationError::Internal(error.to_string()))?;
@@ -2719,8 +2716,8 @@ fn tool_get_pr_impact(
             "PR #{number}: no changed files found (may require gh auth)."
         ));
     }
-    let document = context.document()?;
-    let (communities, nodes) = compute_pr_impact(&files, &document);
+    let document = context.document();
+    let (communities, nodes) = compute_pr_impact(&files, document);
     let ci = parse_ci(
         data.get("statusCheckRollup")
             .and_then(Value::as_array)
@@ -2786,11 +2783,11 @@ fn tool_triage_prs(
     if actionable.is_empty() {
         return Ok(format!("No actionable PRs targeting {base}."));
     }
-    let document = context.document()?;
+    let document = context.document();
     for pr in &mut actionable {
         let files = fetch_pr_files(&runner, pr.number, repo);
         if !files.is_empty() {
-            (pr.communities_touched, pr.nodes_affected) = compute_pr_impact(&files, &document);
+            (pr.communities_touched, pr.nodes_affected) = compute_pr_impact(&files, document);
             pr.files_changed = files;
         }
     }
@@ -2861,8 +2858,8 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
             tool_god_nodes(&Map::new(), context).map_err(InvocationError::InvalidParams)
         }
         "compass://surprises" => {
-            let document = context.document().map_err(InvocationError::InvalidParams)?;
-            let surprises = surprising_connections(&document, &context.community_ids(), 10);
+            let document = context.document();
+            let surprises = surprising_connections(document, &context.community_ids(), 10);
             if surprises.is_empty() {
                 return Ok("No surprising connections found.".to_owned());
             }
@@ -2894,7 +2891,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
             ))
         }
         "compass://questions" => {
-            let document = context.document().map_err(InvocationError::InvalidParams)?;
+            let document = context.document();
             let labels_path = context
                 .path
                 .parent()
@@ -2910,7 +2907,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
                         .map(|community| (*community, format!("Community {community}")))
                         .collect()
                 });
-            let questions = suggest_questions(&document, &context.community_ids(), &labels, 10);
+            let questions = suggest_questions(document, &context.community_ids(), &labels, 10);
             if questions.is_empty() {
                 return Ok("No suggested questions available.".to_owned());
             }
@@ -2925,7 +2922,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
             Ok(lines.join("\n"))
         }
         "compass://graph-insights" => {
-            let document = context.document().map_err(InvocationError::InvalidParams)?;
+            let document = context.document();
             let labels_path = context
                 .path
                 .parent()
@@ -2941,7 +2938,7 @@ fn read_resource_text(uri: &str, context: &GraphContext) -> Result<String, Invoc
                         .map(|community| (*community, format!("Community {community}")))
                         .collect()
                 });
-            let report = blind_spot_report(&document, &context.community_ids(), &labels);
+            let report = blind_spot_report(document, &context.community_ids(), &labels);
             serde_json::to_string_pretty(&report)
                 .map_err(|error| InvocationError::Internal(error.to_string()))
         }
@@ -4018,6 +4015,62 @@ mod tests {
     }
 
     #[test]
+    fn graph_store_reloads_preserved_metadata_and_keeps_each_context_coherent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        for disk_cache in [false, true] {
+            for atomic in [false, true] {
+                let temp = tempfile::tempdir()?;
+                let path = temp.path().join("graph.json");
+                if disk_cache {
+                    fs::create_dir(temp.path().join("cache"))?;
+                }
+                let before = r#"{"directed":true,"nodes":[{"id":"a","label":"Alpha","kind":"function","source_file":"a.rs","community":1},{"id":"b","label":"Beta","kind":"function","source_file":"b.rs","community":1}],"links":[{"source":"a","target":"b","relation":"calls"}]}"#;
+                let after = before.replace("Alpha", "Omega").replace("Beta", "Zeta");
+                assert_eq!(before.len(), after.len());
+                fs::write(&path, before)?;
+                let modified = path.metadata()?.modified()?;
+                let store = GraphStore::new(&path);
+                let first = store.load(None)?;
+                assert_eq!(first.document().nodes[0].label(), "Alpha");
+                if atomic {
+                    let mut replacement = tempfile::NamedTempFile::new_in(temp.path())?;
+                    replacement.write_all(after.as_bytes())?;
+                    replacement
+                        .as_file()
+                        .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+                    replacement.persist(&path)?;
+                } else {
+                    fs::write(&path, &after)?;
+                    fs::File::options()
+                        .write(true)
+                        .open(&path)?
+                        .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+                }
+                assert_eq!(path.metadata()?.modified()?, modified);
+                let changed = store.load(None)?;
+                assert!(
+                    !Arc::ptr_eq(&first, &changed),
+                    "disk_cache={disk_cache}, atomic={atomic}"
+                );
+                assert_eq!(changed.document().nodes[0].label(), "Omega");
+                assert_eq!(changed.graph.node(0).label(), "Omega");
+                assert!(tool_god_nodes(&Map::new(), &changed)?.contains("Omega"));
+                let fresh = GraphStore::new(&path).load(None)?;
+                assert_eq!(fresh.graph.node(0).label(), "Omega");
+                // A request already holding a context keeps one immutable graph view.
+                assert_eq!(first.document().nodes[0].label(), "Alpha");
+                fs::write(&path, vec![b'!'; before.len()])?;
+                fs::File::options()
+                    .write(true)
+                    .open(&path)?
+                    .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+                assert!(store.load(None).is_err());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn graph_store_cache_reload_missing_graph_and_pure_helpers_are_total()
     -> Result<(), Box<dyn std::error::Error>> {
         let temp = tempfile::tempdir()?;
@@ -4138,8 +4191,9 @@ mod tests {
         assert!(expand_home(Path::new("~/compass-cache")).ends_with("compass-cache"));
 
         fs::write(&graph_path, "not json")?;
-        assert!(context.document().is_err());
-        assert!(tool_god_nodes(&Map::new(), &context).is_err());
+        assert!(store.load(None).is_err());
+        assert_eq!(context.document().nodes.len(), 3);
+        assert!(tool_god_nodes(&Map::new(), &context).is_ok());
         Ok(())
     }
 }

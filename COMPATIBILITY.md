@@ -31,6 +31,30 @@ not maintain command-specific fallbacks for older releases.
 Compass 0.3.0 itself remains supported. The extension adapts typed call-query
 results for the known nested-anchor limitation in that stable release.
 
+## Graph cache identity and MCP request snapshots
+
+Graph query, impact and traversal caches now bind to the SHA-256 of the bounded
+JSON bytes read, including when file size and modification time are unchanged.
+Their disposable header versions advance to `TRAILG02`, `TRAILA03` and
+`TRAILT07`. Typed content caches use `.content-v2.cache` and `CGRPHV02`; their
+cache key, schema admission and decoded document come from one byte snapshot.
+Older cache formats are ignored and rebuilt from the graph.
+
+For standalone JSON graph paths, each MCP request checks current graph content
+and holds an immutable context. Communities, hubs, neighbors, paths and typed
+query identities within that context derive from the same captured bytes. A
+later request observes a replacement or reports a missing, corrupt, unsupported
+or oversized graph. A request already holding a valid context may finish using
+that context after the path changes. Published SQLite queries retain their
+existing store-reference validation path. Sidecars retain their own existing
+loading policies; this graph snapshot does not make arbitrary external writes
+transactional. Publishers should use atomic replacement.
+
+Graph schemas, source identities, query-result schemas, historical realizations
+and AST cache semantics are unchanged. Content reads use the configured graph
+byte cap; this correctness correction makes no latency or memory improvement
+claim.
+
 ## Java field-access evidence
 
 Java emits `MemberAccess` occurrences for ordinary fields and enum constants,
@@ -471,8 +495,8 @@ typed responses report truncation and an ambiguity diagnostic. Graph schemas,
 stored identities, and extraction are unchanged. Existing graphs can receive
 this lookup correction without re-extraction.
 
-Traversal cache format advances from `TRAILT05` to `TRAILT06` to retain deferred
-relationship flags and the weakest confidence across all evidence, including
+Traversal cache format `TRAILT07` retains deferred relationship flags and the
+weakest confidence across all evidence (introduced in `TRAILT06`), including
 explicit compatibility confidence. Missing or unknown confidence values in an
 evidence item cannot establish an exact fact. Older disposable traversal
 caches rebuild from the authoritative graph; published historical graphs are

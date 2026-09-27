@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Bind disposable graph caches to bounded content digests and keep MCP graph
+  views coherent within a request. Detect equal-size replacements even when
+  modification times are preserved. Rebuild older graph caches automatically.
+
 - Resolve dotted Java nominal receiver names against canonical nested type
   declarations for field and enum references. Preserve duplicate-owner and
   package/type ambiguity, exact occurrence evidence and bounded lookup work.

@@ -28,14 +28,14 @@ fn traversal_projection_preserves_weakest_confidence_and_deferred_state()
         assert_eq!(graph.links[3].string("confidence"), "AMBIGUOUS");
     }
     // A cache bearing the previous format must be rebuilt, even when its
-    // filesystem signature still matches the authoritative graph.
+    // content signature still matches the authoritative graph.
     let cache = directory.path().join("cache/graph.json.traversal-v1.cache");
     let mut bytes = fs::read(&cache)?;
-    bytes[..8].copy_from_slice(b"TRAILT05");
+    bytes[..8].copy_from_slice(b"TRAILT06");
     fs::write(&cache, bytes)?;
     let graph = GraphDocument::load_for_traversal(&path)?;
     assert_eq!(graph.links[0].string("confidence"), "INFERRED");
     assert_eq!(graph.links[2].boolean("deferred"), Some(true));
-    assert_eq!(&fs::read(cache)?[..8], b"TRAILT06");
+    assert_eq!(&fs::read(cache)?[..8], b"TRAILT07");
     Ok(())
 }

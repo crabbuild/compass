@@ -204,6 +204,10 @@ fn loaded_graph_learning_overlay_marks_current_missing_and_unfingerprinted_sourc
 
     let directed = LoadedGraph::load_directed(&graph)?;
     assert_eq!(directed.graph.node_count(), 1);
+    let artifact = compass_model::GraphArtifact::load(&graph)?;
+    let captured = LoadedGraph::from_artifact_directed(&artifact)?;
+    assert_eq!(captured.overlay, directed.overlay);
+    assert_eq!(captured.graph.node_count(), directed.graph.node_count());
     fs::write(output.join("learning.json"), "not json")?;
     assert!(LoadedGraph::load(&graph)?.overlay.is_empty());
     fs::remove_file(output.join("learning.json"))?;

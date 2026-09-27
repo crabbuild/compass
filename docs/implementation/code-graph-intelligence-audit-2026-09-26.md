@@ -4176,3 +4176,65 @@ remains recorded; later budget/ordinary-field extensions pass the full suite.
 Extraction durations are retained only as operational observations. This is a
 known development census, not independent final confirmation or evidence of
 better authored explanations, god-object diagnosis or functional communities.
+
+
+## JSON graph cache coherence and query-cost follow-up
+
+The standalone JSON query server now derives its compact, full, and typed graph
+views from one bounded read of an opened graph artifact. Its cache identity uses
+the artifact's content digest. This addresses a reproduced case where a graph
+changed while its size and modification time stayed the same: the old server
+could answer one request from the old community cache and another from the new
+graph. The old on-disk cache headers rebuild under new format markers. This
+change does not alter the graph schema, extraction, historical realizations, or
+the 0.3.30 package version.
+
+The [registered review](../../benchmarks/agent_query/graph_cache_coherence_review.json)
+binds 749 qualified Rust and manifest inputs, the frozen release binary, native
+logs, synthetic replay, and complete source-query controls. Formatting, focused
+and workspace Clippy, 1,112 workspace library/binary tests (two existing
+ignored), nine product tests, full code-graph fixture qualification, 238
+benchmark tests, product-boundary checking, and release compilation pass. These
+suites overlap. Seven separate core integration failures also reproduce on the
+unchanged committed baseline; they are recorded, not counted as passing.
+
+The synthetic panel checks 48 replacement cases across both binaries, two
+repeats, legacy and typed graphs, three write modes, and absent/present disk
+caches. All 432 raw calls verify against captured requests and responses. The
+candidate uses the new graph in all 72 post-replacement observations; the
+baseline's preserved-metadata stale-cache outcomes remain in the raw record.
+Independent repeated verification is byte-identical.
+
+The query panel uses five frozen real-repository graphs (Go, Python, Java,
+TypeScript, Rust) and a separate complete CloudStack diagnostic. Six fresh
+sessions per graph run each fixed question three times. All 828 executed calls
+complete with no tool or transport failures. All 46 available questions have
+identical **full tool responses** between binaries. The Redux path question has
+no exact graph endpoint; its 18 observations remain unavailable without a
+substitute. This is unchanged-query preservation evidence, not better source
+truth or a Graphify result.
+
+The correctness change has a measurable cost. Thirty-one warm question medians
+regress by more than 10%: all six lightweight questions on each language graph
+and CloudStack `graph_stats`. Their absolute medians range from about 1.65 to
+19.96 ms on the five language graphs; CloudStack `graph_stats` is 130.17 ms
+before and 747.95 ms after. Conversely, the available hub, neighbor, and path
+questions improve in this local panel. For example, CloudStack `god_nodes`
+falls from 4,320.25 to 1,252.60 ms, and jsoup `god_nodes` from 152.72 to
+31.74 ms. Every cold and warm RPC duration, ratio, and response comparison is
+in the review. Rehashing the complete graph on each request is a plausible
+cause of the lightweight-query cost; the measurement does not isolate it from
+other implementation changes.
+
+The median peak RSS of the mixed-query sessions rises from 78.7 to 120.6 MB
+for Chi, 205.9 to 305.7 MB for Click, 527.7 to 730.3 MB for jsoup, 188.7 to
+261.7 MB for Redux, and 58.2 to 80.3 MB for WalkDir. CloudStack has only one
+baseline memory result (7.13 GB) and no candidate memory result: the timing
+wrapper was terminated during teardown in the other five sessions. All five
+missing measurements remain explicit; no paired large-graph memory claim is
+supported. OS page cache and unrelated host activity remain uncontrolled.
+
+The correction improves a verified freshness failure and preserves all
+available fixed query outputs, while adding memory and lightweight-query cost.
+It does not establish better authored explanations, functional communities,
+actual god-object classification, or overall superiority to Graphify.

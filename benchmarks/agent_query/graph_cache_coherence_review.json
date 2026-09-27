@@ -1,0 +1,2006 @@
+{
+  "baselineBinarySha256": "39919a9b5e0fe99f642d03423a91b8eb05b42b1c95e78d84bcc8f285bf473f61",
+  "candidateBinarySha256": "03403b96658900adad039db08b5814a5b5d090075fe2a31dc8bebbe7c012aa1b",
+  "knownUnrelatedCoreIntegrationFailures": [
+    "incremental_ast_endpoint_remap_retains_exact_typed_rewrite_evidence",
+    "incremental_deleted_mixed_occurrence_keeps_only_revalidated_semantic_evidence",
+    "incremental_deleted_remapped_mixed_occurrence_rebinds_trusted_semantic_residue",
+    "incremental_mixed_occurrence_cardinality_matches_exact_sites_and_preserves_residue",
+    "incremental_mixed_origin_alias_edges_use_canonical_fresh_relationship_sites",
+    "incremental_mixed_origin_edges_use_fresh_ast_relationship_sites",
+    "refreshed_mixed_edge_drops_stale_incremental_endpoint_remap_evidence"
+  ],
+  "limitations": [
+    "All queries use preexisting frozen graphs. Equal responses prove preservation on these questions, not source-truth or improved graph quality.",
+    "The query controls compare two Compass binaries. They do not execute Graphify or show broad superiority.",
+    "The missing Redux path identity remains unavailable, with no substitute endpoint.",
+    "Thirty-one warm queries regress by more than ten percent: all six lightweight questions on each of five language graphs and CloudStack graph_stats. All per-query cold and warm durations are retained.",
+    "Large-graph memory is incomplete because the timing wrapper was terminated during five CloudStack session teardowns. No paired CloudStack peak-memory conclusion is supported.",
+    "Five-language mixed-query sessions show higher candidate peak RSS. This is a real local cost for the tested workload.",
+    "The default-low core integration failures reproduce on the unchanged committed baseline; their proposed inference-level explanation is unverified in this review.",
+    "Known development repositories and changed-cache fixtures do not provide an independent final quality holdout."
+  ],
+  "nativeQualification": [
+    {
+      "exitCode": 0,
+      "name": "fmt",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 4097
+    },
+    {
+      "exitCode": 0,
+      "name": "focused-clippy",
+      "stderrSha256": "a507b604629e2e51a6632be43cf578452798fd80bca9979850b91677c45ddaba",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 145899
+    },
+    {
+      "exitCode": 0,
+      "name": "workspace-clippy",
+      "stderrSha256": "b7ebe120c528b271ccaf3e73d2eaf7302adac76711bc8de57d68d6af77d4e692",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 92290
+    },
+    {
+      "exitCode": 0,
+      "name": "workspace-tests",
+      "stderrSha256": "a0e041c17467e38858f9a62cdae0ae95b411e98b840dd0a3940b4c91ed94f7ab",
+      "stdoutSha256": "83b8099250459b07071ff823218399744f9e65fc0eaa7558519adb7ee26475ef",
+      "wallMs": 212258
+    },
+    {
+      "exitCode": 0,
+      "name": "product",
+      "stderrSha256": "689b3f5a86b89954f745bc7209ffcf5d13a7efef947f13bfcfae8a51639eafc4",
+      "stdoutSha256": "3e77fb9e9bfdb2b833461c1a1dd35ebd838abd336e5bfab32ffafbbf42d05e7e",
+      "wallMs": 87151
+    },
+    {
+      "exitCode": 0,
+      "name": "fixtures",
+      "stderrSha256": "c9a3577800b6356c7792d2967df86e4ccca2535755dfdae125f3e6119e6d9a61",
+      "stdoutSha256": "940ee145c94fe5463824164f622dbe43559d0c3800fb6165a59afbdd58bff9c8",
+      "wallMs": 972534
+    },
+    {
+      "exitCode": 0,
+      "name": "benchmark-tests",
+      "stderrSha256": "946407b3d3b76e63e7a5e40a016ade2e004de3c97edfdae1a1c624c5d9a21867",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 4017
+    },
+    {
+      "exitCode": 0,
+      "name": "boundary",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 52
+    },
+    {
+      "exitCode": 0,
+      "name": "release-build",
+      "stderrSha256": "b14ef0f9151372c1971e24aa2cca8935d9328c7e97462a8fc112d8ec05d152bf",
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "wallMs": 12149
+    }
+  ],
+  "qualificationReportSha256": "14250b55c069e69bd107bf0a1f6aac61fe95498c0ea7ecfa761cfd0592b20d43",
+  "qualifiedPatchSha256": "a93d9c28326ad16ea929b275fbf248eb680498cc7a853dd4e065f6ff6ec524d2",
+  "qualifiedSourceFiles": 749,
+  "qualifiedSourceManifestSha256": "34a2cc0d653118764f4a7475d14525e853eddf85edb753eb90a0703f0f20668b",
+  "rawCaptureManifestSha256": "5f2e9b69b1f3c7938294fd27554259e77658ede33499d3803e1c23dbb8dbfd3b",
+  "realSource": {
+    "additionalWholeGraphDiagnostic": "cloudstack",
+    "completeEqualResponseComparisons": 46,
+    "missingMemorySessions": [
+      {
+        "order": 0,
+        "repository": "cloudstack",
+        "tool": "baseline",
+        "wrapperReturnCode": -15
+      },
+      {
+        "order": 1,
+        "repository": "cloudstack",
+        "tool": "candidate",
+        "wrapperReturnCode": -15
+      },
+      {
+        "order": 2,
+        "repository": "cloudstack",
+        "tool": "candidate",
+        "wrapperReturnCode": -15
+      },
+      {
+        "order": 3,
+        "repository": "cloudstack",
+        "tool": "baseline",
+        "wrapperReturnCode": -15
+      },
+      {
+        "order": 5,
+        "repository": "cloudstack",
+        "tool": "candidate",
+        "wrapperReturnCode": -15
+      }
+    ],
+    "queries": [
+      {
+        "baselineColdMs": [
+          0.6742920959368348,
+          0.7295419927686453,
+          0.6424169987440109
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.5937084788456559,
+        "baselineWarmMs": [
+          0.5693749990314245,
+          0.605541979894042,
+          0.5818749777972698,
+          0.7492080330848694,
+          0.5720419576391578,
+          0.6105840438976884
+        ],
+        "candidateColdMs": [
+          2.289709053002298,
+          2.1364589920267463,
+          2.4427910102531314
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.2185000707395375,
+        "candidateWarmMs": [
+          2.247875090688467,
+          2.0994589431211352,
+          2.300166990607977,
+          2.189125050790608,
+          2.118250005878508,
+          2.2987499833106995
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callees",
+        "repository": "chi",
+        "warmRatio": 3.736682479342311,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          5.329041974619031,
+          0.9003330487757921,
+          0.9237080812454224
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.8210829691961408,
+        "baselineWarmMs": [
+          0.8698749588802457,
+          0.8290829136967659,
+          0.7428330136463046,
+          0.8882919792085886,
+          0.8130830246955156,
+          0.7553750183433294
+        ],
+        "candidateColdMs": [
+          3.0789999291300774,
+          2.7653330471366644,
+          2.902833977714181
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.283187466673553,
+        "candidateWarmMs": [
+          2.1367090521380305,
+          2.2679580142721534,
+          2.3441669763997197,
+          2.19924992416054,
+          2.306459005922079,
+          2.2984169190749526
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callers",
+        "repository": "chi",
+        "warmRatio": 2.7807025018541625,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          0.5134170642122626,
+          0.4163340199738741,
+          0.45558298006653786
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.4681039717979729,
+        "baselineWarmMs": [
+          0.5347080295905471,
+          0.44575007632374763,
+          0.46433298848569393,
+          0.4718749551102519,
+          0.43720798566937447,
+          0.502290902659297
+        ],
+        "candidateColdMs": [
+          2.475624904036522,
+          2.1392079070210457,
+          2.279958105646074
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 1.9156465423293412,
+        "candidateWarmMs": [
+          1.9536670297384262,
+          1.8361670663580298,
+          2.157583017833531,
+          1.8516660202294588,
+          1.9090840360149741,
+          1.9222090486437082
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "community",
+        "repository": "chi",
+        "warmRatio": 4.092352677486161,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          19.69608396757394,
+          20.170000032521784,
+          21.051542018540204
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 14.038604567758739,
+        "baselineWarmMs": [
+          14.319792040623724,
+          13.783124973997474,
+          13.823625049553812,
+          14.253584085963666,
+          16.143625020049512,
+          13.699916889891028
+        ],
+        "candidateColdMs": [
+          3.6511669168248773,
+          3.6118749994784594,
+          3.6307499976828694
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 3.207270463462919,
+        "candidateWarmMs": [
+          3.4260411048308015,
+          3.2060829689726233,
+          3.5013749729841948,
+          3.137625055387616,
+          3.071832936257124,
+          3.2084579579532146
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "hubs",
+        "repository": "chi",
+        "warmRatio": 0.22846077385987368,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          0.3915419802069664,
+          0.29408407863229513,
+          0.3155419835820794
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.3315830253995955,
+        "baselineWarmMs": [
+          0.3131250850856304,
+          0.27658301405608654,
+          0.2980409190058708,
+          0.3500409657135606,
+          0.38362492341548204,
+          0.4300830187276006
+        ],
+        "candidateColdMs": [
+          1.97704101447016,
+          1.8132920376956463,
+          2.0483749685809016
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 1.9068539841100574,
+        "candidateWarmMs": [
+          2.0461250096559525,
+          1.947290962561965,
+          1.9313329830765724,
+          1.8265830585733056,
+          1.8823749851435423,
+          1.8031669314950705
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "missing-community",
+        "repository": "chi",
+        "warmRatio": 5.750758748316745,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          14.270792016759515,
+          13.016332988627255,
+          13.265083078294992
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 13.294917065650225,
+        "baselineWarmMs": [
+          13.103208038955927,
+          13.340875040739775,
+          13.120000017806888,
+          14.181417063809931,
+          13.248959090560675,
+          13.427291996777058
+        ],
+        "candidateColdMs": [
+          6.046249996870756,
+          6.066416040994227,
+          6.434125010855496
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 5.768583505414426,
+        "candidateWarmMs": [
+          6.010166020132601,
+          5.667707999236882,
+          5.869459011591971,
+          5.267333006486297,
+          5.497292033396661,
+          5.882250028662384
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "neighbors",
+        "repository": "chi",
+        "warmRatio": 0.43389390674113976,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          14.323750045150518,
+          14.313749969005585,
+          14.675209065899253
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 14.341104542836547,
+        "baselineWarmMs": [
+          14.697374892421067,
+          13.597041950561106,
+          14.465167070738971,
+          14.777000062167645,
+          13.384583056904376,
+          14.217042014934123
+        ],
+        "candidateColdMs": [
+          6.595707964152098,
+          6.34162500500679,
+          6.485874997451901
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 6.1686664703302085,
+        "candidateWarmMs": [
+          6.315500009804964,
+          6.372208008542657,
+          6.036957958713174,
+          5.634166998788714,
+          5.876834038645029,
+          6.300374981947243
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "path",
+        "repository": "chi",
+        "warmRatio": 0.4301388677493107,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          350.33341706730425,
+          200.8812080603093,
+          193.8718749443069
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.6223964737728238,
+        "baselineWarmMs": [
+          0.608749920502305,
+          0.6451669614762068,
+          0.5289999535307288,
+          0.7292079972103238,
+          0.6349589675664902,
+          0.6098339799791574
+        ],
+        "candidateColdMs": [
+          191.3696670671925,
+          186.85920792631805,
+          195.11199998669326
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.1206039818935096,
+        "candidateWarmMs": [
+          2.076583099551499,
+          2.097249962389469,
+          2.3735830327495933,
+          2.14395800139755,
+          2.0779999904334545,
+          2.2234159987419844
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "search",
+        "repository": "chi",
+        "warmRatio": 3.4071593771071638,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          40.22133396938443,
+          40.43054103385657,
+          41.03974997997284
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.4789169761352241,
+        "baselineWarmMs": [
+          0.46016694977879524,
+          0.4903749795630574,
+          0.6129170069471002,
+          0.7373330881819129,
+          0.46095799189060926,
+          0.4674589727073908
+        ],
+        "candidateColdMs": [
+          38.23608299717307,
+          36.83341690339148,
+          36.85383405536413
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.2760415449738503,
+        "candidateWarmMs": [
+          2.3202080046758056,
+          2.2529580164700747,
+          2.4390420876443386,
+          2.0349579863250256,
+          2.299125073477626,
+          2.122665988281369
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "stats",
+        "repository": "chi",
+        "warmRatio": 4.7524762294732295,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          0.8753750007599592,
+          1.0595829226076603,
+          0.9902910096570849
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.1904165148735046,
+        "baselineWarmMs": [
+          1.112291938625276,
+          1.1528750183060765,
+          1.2708330759778619,
+          1.154624973423779,
+          1.2262080563232303,
+          2.490999992005527
+        ],
+        "candidateColdMs": [
+          7.360749994404614,
+          7.693291991017759,
+          7.620542077347636
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 7.309770444408059,
+        "candidateWarmMs": [
+          7.412542006932199,
+          7.1472079725936055,
+          7.257499964907765,
+          7.614457979798317,
+          7.362040923908353,
+          6.9731660187244415
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callees",
+        "repository": "click",
+        "warmRatio": 6.1405149820059455,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.4186670305207372,
+          1.3901250204071403,
+          1.3028749963268638
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.414416532497853,
+        "baselineWarmMs": [
+          1.2853749794885516,
+          3.0492920195683837,
+          1.403625006787479,
+          1.2358330423012376,
+          1.4252080582082272,
+          1.4705830253660679
+        ],
+        "candidateColdMs": [
+          8.629582938738167,
+          8.203207980841398,
+          10.011957958340645
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 7.533853990025818,
+        "candidateWarmMs": [
+          7.70987500436604,
+          7.5558749958872795,
+          7.600500015541911,
+          7.511832984164357,
+          7.270792033523321,
+          7.198916980996728
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callers",
+        "repository": "click",
+        "warmRatio": 5.326474780891501,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          0.8535410743206739,
+          1.0995829943567514,
+          1.0376670397818089
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.9578334866091609,
+        "baselineWarmMs": [
+          0.8580000139772892,
+          0.8315839804708958,
+          0.9722920367494226,
+          1.0374169796705246,
+          1.07216602191329,
+          0.9433749364688993
+        ],
+        "candidateColdMs": [
+          7.228542002849281,
+          7.442832924425602,
+          7.115958025678992
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 7.249917020089924,
+        "candidateWarmMs": [
+          6.854583043605089,
+          7.342625060118735,
+          7.157208980061114,
+          9.208125062286854,
+          7.424167008139193,
+          7.0697080809623
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "community",
+        "repository": "click",
+        "warmRatio": 7.569078677501088,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          93.67845801170915,
+          126.05699989944696,
+          146.08924998901784
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 53.303021006286144,
+        "baselineWarmMs": [
+          53.419875097461045,
+          52.70641704555601,
+          53.451791987754405,
+          53.32837498281151,
+          53.27766702976078,
+          52.43058304768056
+        ],
+        "candidateColdMs": [
+          13.904916006140411,
+          12.99770805053413,
+          12.494083028286695
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 12.111520511098206,
+        "candidateWarmMs": [
+          11.470249970443547,
+          12.095625046640635,
+          12.598666013218462,
+          12.032542028464377,
+          12.127415975555778,
+          12.149207992479205
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "hubs",
+        "repository": "click",
+        "warmRatio": 0.22722015154956915,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          0.3672500606626272,
+          0.5369159625843167,
+          0.596167054027319
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.5659585585817695,
+        "baselineWarmMs": [
+          0.3402500879019499,
+          0.5640420131385326,
+          0.6181669887155294,
+          0.48179097939282656,
+          0.610582996159792,
+          0.5678751040250063
+        ],
+        "candidateColdMs": [
+          7.4708330212160945,
+          7.466541952453554,
+          6.696249940432608
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 7.035146001726389,
+        "candidateWarmMs": [
+          6.874041981063783,
+          7.1554589085280895,
+          9.15066699963063,
+          6.6477920627221465,
+          7.497624959796667,
+          6.914833094924688
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "missing-community",
+        "repository": "click",
+        "warmRatio": 12.43049671226052,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          50.23670906666666,
+          51.29212490282953,
+          49.349250039085746
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 50.05147948395461,
+        "baselineWarmMs": [
+          50.233084009960294,
+          50.46062497422099,
+          51.204249961301684,
+          48.726500011980534,
+          49.249666975811124,
+          49.86987495794892
+        ],
+        "candidateColdMs": [
+          23.183375014923513,
+          24.95679201092571,
+          26.08854102436453
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 21.867291477974504,
+        "candidateWarmMs": [
+          21.760832984000444,
+          21.36441704351455,
+          22.859083022922277,
+          21.973749971948564,
+          22.91670802515,
+          19.15683294646442
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "neighbors",
+        "repository": "click",
+        "warmRatio": 0.4368960059409367,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          53.54308302048594,
+          52.92254197411239,
+          53.91937494277954
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 51.67010455625132,
+        "baselineWarmMs": [
+          50.57041603140533,
+          55.255791055969894,
+          51.037500030361116,
+          52.171834046021104,
+          51.16837506648153,
+          53.54774999432266
+        ],
+        "candidateColdMs": [
+          24.022749974392354,
+          24.83587502501905,
+          23.425124934874475
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 21.02872944669798,
+        "candidateWarmMs": [
+          19.97741695959121,
+          20.41366696357727,
+          21.64379192981869,
+          20.048542064614594,
+          24.862625054083765,
+          23.057582904584706
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "path",
+        "repository": "click",
+        "warmRatio": 0.406980586304113,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          1064.1600410453975,
+          1076.5998749993742,
+          1101.464374922216
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.7519170176237822,
+        "baselineWarmMs": [
+          1.0305000469088554,
+          0.7810840616002679,
+          0.8023339323699474,
+          0.7227499736472964,
+          0.7113749161362648,
+          0.7036249153316021
+        ],
+        "candidateColdMs": [
+          1034.9968749796972,
+          1028.3892910229042,
+          1176.6507499851286
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 7.0676045143045485,
+        "candidateWarmMs": [
+          6.942625041119754,
+          7.071041967719793,
+          7.447540992870927,
+          7.064167060889304,
+          6.647208007052541,
+          10.70524996612221
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "search",
+        "repository": "click",
+        "warmRatio": 9.399447477116135,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          155.4462080821395,
+          161.10633395146579,
+          158.09216699562967
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.9440624853596091,
+        "baselineWarmMs": [
+          0.8287921082228422,
+          0.9884999599307775,
+          1.1128330370411277,
+          0.8544160518795252,
+          1.401207991875708,
+          0.8996250107884407
+        ],
+        "candidateColdMs": [
+          326.4925420517102,
+          321.14833302330226,
+          362.0397080667317
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 7.368375547230244,
+        "candidateWarmMs": [
+          6.652499898336828,
+          7.443042006343603,
+          7.594124996103346,
+          6.514957989566028,
+          9.985542041249573,
+          7.293709088116884
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "stats",
+        "repository": "click",
+        "warmRatio": 7.804965943989933,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          17309.999208082445,
+          15567.048458033241,
+          14644.47270904202
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 4320.252625504509,
+        "baselineWarmMs": [
+          6374.616041895933,
+          4568.7548340065405,
+          3937.8078329609707,
+          4870.4767499584705,
+          4071.7504170024768,
+          3790.3934579808265
+        ],
+        "candidateColdMs": [
+          4294.217540998943,
+          3356.1707499902695,
+          3044.7245000395924
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 1252.602353983093,
+        "candidateWarmMs": [
+          1096.213832963258,
+          2482.934125000611,
+          963.4912909241393,
+          1408.990875002928,
+          2239.804666955024,
+          807.8230409882963
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "hubs",
+        "repository": "cloudstack",
+        "warmRatio": 0.2899372936175965,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          15930.288375006057,
+          13735.646957997233,
+          13795.34654202871
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 130.17022894928232,
+        "baselineWarmMs": [
+          141.29666599910706,
+          119.04379189945757,
+          143.53941706940532,
+          181.68070795945823,
+          29.873833060264587,
+          35.67491704598069
+        ],
+        "candidateColdMs": [
+          30454.189792042598,
+          34665.94429197721,
+          32043.60433295369
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 747.9464585194364,
+        "candidateWarmMs": [
+          777.1909170551226,
+          927.3269589757547,
+          557.9583749640733,
+          718.7019999837503,
+          1425.6535000167787,
+          478.2267500413582
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "stats",
+        "repository": "cloudstack",
+        "warmRatio": 5.745910294210635,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.3577910140156746,
+          1.1576670221984386,
+          1.2907920172438025
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.560457982122898,
+        "baselineWarmMs": [
+          1.4377499464899302,
+          1.1333749862387776,
+          4.719541990198195,
+          1.683166017755866,
+          1.2544580968096852,
+          33.19908306002617
+        ],
+        "candidateColdMs": [
+          20.63783397898078,
+          20.062875002622604,
+          19.47012508753687
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 19.72062501590699,
+        "candidateWarmMs": [
+          21.687707980163395,
+          20.277290954254568,
+          19.078458892181516,
+          19.21333302743733,
+          20.22791700437665,
+          19.091667025350034
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callees",
+        "repository": "jsoup",
+        "warmRatio": 12.637716133233146,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.3818340376019478,
+          1.2229999992996454,
+          1.2957080034539104
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.3383125187829137,
+        "baselineWarmMs": [
+          1.476458040997386,
+          1.065333024598658,
+          1.421040971763432,
+          1.4899999368935823,
+          1.106083975173533,
+          1.2555840658023953
+        ],
+        "candidateColdMs": [
+          23.474458954297006,
+          23.103000014089048,
+          21.463958080857992
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 19.883062515873462,
+        "candidateWarmMs": [
+          24.230874958448112,
+          19.9872920056805,
+          18.729457980953157,
+          18.645540927536786,
+          19.778833026066422,
+          20.904790959320962
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callers",
+        "repository": "jsoup",
+        "warmRatio": 14.856815756274543,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.3858330203220248,
+          1.3477089814841747,
+          1.4023749390617013
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.327062549535185,
+        "baselineWarmMs": [
+          1.4234579866752028,
+          1.3275000965222716,
+          1.3266250025480986,
+          1.6075409948825836,
+          1.3015000149607658,
+          1.3007500674575567
+        ],
+        "candidateColdMs": [
+          20.395625033415854,
+          19.663124927319586,
+          39.002542034722865
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 19.78691649856046,
+        "candidateWarmMs": [
+          19.479415961541235,
+          18.43312510754913,
+          20.34554211422801,
+          19.681249978020787,
+          19.89258301910013,
+          20.07004211191088
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "community",
+        "repository": "jsoup",
+        "warmRatio": 14.910311880544736,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          660.274124937132,
+          609.1222079703584,
+          725.3861660137773
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 152.72445848677307,
+        "baselineWarmMs": [
+          157.77120797429234,
+          150.1067909412086,
+          163.70845795609057,
+          144.5050420006737,
+          152.28887496050447,
+          153.16004201304168
+        ],
+        "candidateColdMs": [
+          37.59775008074939,
+          32.49912499450147,
+          35.898958100005984
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 31.73902101116255,
+        "candidateWarmMs": [
+          31.25383402220905,
+          32.22420800011605,
+          29.50050006620586,
+          33.0385830020532,
+          30.26074997615069,
+          35.56687501259148
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "hubs",
+        "repository": "jsoup",
+        "warmRatio": 0.20781884791499428,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          0.5636659916490316,
+          0.5441249813884497,
+          0.6697500357404351
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.5526875029318035,
+        "baselineWarmMs": [
+          0.5337500479072332,
+          0.5242920015007257,
+          0.7765410700812936,
+          0.5716249579563737,
+          0.5217499565333128,
+          0.5758340703323483
+        ],
+        "candidateColdMs": [
+          18.93304195255041,
+          18.382082926109433,
+          19.472124986350536
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 19.12199956132099,
+        "candidateWarmMs": [
+          18.300124909728765,
+          19.510625046677887,
+          22.526791086420417,
+          18.744458095170557,
+          19.499541027471423,
+          18.498250050470233
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "missing-community",
+        "repository": "jsoup",
+        "warmRatio": 34.59821229878698,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          149.47591698728502,
+          145.71941702160984,
+          141.2610000697896
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 154.69770843628794,
+        "baselineWarmMs": [
+          158.91429199837148,
+          154.96649988926947,
+          146.1804589489475,
+          143.11491698026657,
+          154.4289169833064,
+          155.90620797593147
+        ],
+        "candidateColdMs": [
+          62.52720800694078,
+          65.4467080021277,
+          69.95549995917827
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 60.909666994120926,
+        "candidateWarmMs": [
+          58.69716696906835,
+          68.37954092770815,
+          59.234166983515024,
+          56.27170903608203,
+          69.04162501450628,
+          62.58516700472683
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "neighbors",
+        "repository": "jsoup",
+        "warmRatio": 0.3937334793760471,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          185.04324997775257,
+          167.5461670383811,
+          180.13437499757856
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 168.76587498700246,
+        "baselineWarmMs": [
+          170.39083410054445,
+          168.15087501890957,
+          169.46408397052437,
+          158.29595900140703,
+          169.38087495509535,
+          162.709916010499
+        ],
+        "candidateColdMs": [
+          82.00245804619044,
+          83.07058410719037,
+          85.97474999260157
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 79.48743749875575,
+        "candidateWarmMs": [
+          75.41983400005847,
+          82.86391699220985,
+          71.39754097443074,
+          81.3145829597488,
+          77.6602920377627,
+          87.30583300348371
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "path",
+        "repository": "jsoup",
+        "warmRatio": 0.4709923585255461,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          3463.924083043821,
+          3238.779375096783,
+          3915.4238749761134
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.819437496829778,
+        "baselineWarmMs": [
+          0.9723330149427056,
+          0.6451250519603491,
+          0.8723749779164791,
+          0.82633295096457,
+          0.7012500427663326,
+          0.8125420426949859
+        ],
+        "candidateColdMs": [
+          4176.61187495105,
+          3268.171582953073,
+          2961.275166948326
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 19.606896035838872,
+        "candidateWarmMs": [
+          21.00408310070634,
+          20.890749990940094,
+          18.533833092078567,
+          18.810000037774444,
+          19.285709015093744,
+          19.928083056584
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "search",
+        "repository": "jsoup",
+        "warmRatio": 23.92726243513826,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          493.30462503712624,
+          508.75070900656283,
+          570.4177499283105
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 2.022083499468863,
+        "baselineWarmMs": [
+          1.8806250300258398,
+          1.8348749727010727,
+          2.0834170281887054,
+          1.9607499707490206,
+          2.4326659040525556,
+          2.5605419650673866
+        ],
+        "candidateColdMs": [
+          1490.7830000156537,
+          1132.5827909167856,
+          1181.9991249358281
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 19.955583498813212,
+        "candidateWarmMs": [
+          19.630374968983233,
+          21.574665908701718,
+          19.563374924473464,
+          19.671584013849497,
+          21.201291936449707,
+          20.239582983776927
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "stats",
+        "repository": "jsoup",
+        "warmRatio": 9.868822679209295,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.6566670965403318,
+          1.1086250888183713,
+          1.1606250191107392
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.9618334588594735,
+        "baselineWarmMs": [
+          0.9004579624161124,
+          1.2173750437796116,
+          0.9238329948857427,
+          0.9644170058891177,
+          0.9592499118298292,
+          1.0022500064224005
+        ],
+        "candidateColdMs": [
+          5.736500024795532,
+          6.205375073477626,
+          35.29870801139623
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 5.862167046871036,
+        "candidateWarmMs": [
+          5.653416039422154,
+          5.524250096641481,
+          5.9868330135941505,
+          5.975959007628262,
+          5.7483750861138105,
+          6.549459067173302
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callees",
+        "repository": "redux",
+        "warmRatio": 6.094783866036745,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          0.9757910156622529,
+          1.0802079923450947,
+          1.1517500970512629
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.0884585208259523,
+        "baselineWarmMs": [
+          2.050915965810418,
+          0.938915996812284,
+          0.9938750881701708,
+          1.0732500813901424,
+          1.7903749831020832,
+          1.1036669602617621
+        ],
+        "candidateColdMs": [
+          6.491416948847473,
+          7.1750839706510305,
+          34.92245799861848
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 6.214271008502692,
+        "candidateWarmMs": [
+          5.7171660009771585,
+          5.762499989941716,
+          6.666042027063668,
+          5.6469159899279475,
+          6.846250034868717,
+          7.899624994024634
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callers",
+        "repository": "redux",
+        "warmRatio": 5.709240076311895,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.3574579497799277,
+          0.8905410068109632,
+          0.753625063225627
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.9173749131150544,
+        "baselineWarmMs": [
+          0.8059580577537417,
+          0.8924161083996296,
+          0.8983329171314836,
+          0.9364169090986252,
+          0.976832932792604,
+          1.842042081989348
+        ],
+        "candidateColdMs": [
+          5.788667011074722,
+          5.7977919932454824,
+          6.332249962724745
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 5.6689794873818755,
+        "candidateWarmMs": [
+          5.710166995413601,
+          6.719500059261918,
+          5.604750011116266,
+          5.624709068797529,
+          5.874083028174937,
+          5.62779197935015
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "community",
+        "repository": "redux",
+        "warmRatio": 6.179566724941485,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          163.4339999873191,
+          178.84545808192343,
+          103.07241603732109
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 48.21154149249196,
+        "baselineWarmMs": [
+          48.27366606332362,
+          50.097708008252084,
+          48.201165976934135,
+          48.1246670242399,
+          48.221917008049786,
+          44.719833065755665
+        ],
+        "candidateColdMs": [
+          10.05716691724956,
+          11.484583024866879,
+          66.13483291584998
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 11.109437560662627,
+        "candidateWarmMs": [
+          9.493708028458059,
+          11.642917059361935,
+          11.113875079900026,
+          9.71345801372081,
+          11.197375017218292,
+          11.105000041425228
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "hubs",
+        "repository": "redux",
+        "warmRatio": 0.23043107971133245,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          0.6608749972656369,
+          0.5068338941782713,
+          0.5930410698056221
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.5893330089747906,
+        "baselineWarmMs": [
+          0.5368749843910336,
+          17.11645897012204,
+          1.48974999319762,
+          0.567540992051363,
+          0.5395000334829092,
+          0.6111250258982182
+        ],
+        "candidateColdMs": [
+          5.097207962535322,
+          5.3827500669285655,
+          5.5405000457540154
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 5.720167013350874,
+        "candidateWarmMs": [
+          5.217208992689848,
+          6.034041987732053,
+          6.192917004227638,
+          5.406292038969696,
+          5.168625037185848,
+          6.336124963127077
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "missing-community",
+        "repository": "redux",
+        "warmRatio": 9.70617108873934,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          45.29270902276039,
+          46.00337508600205,
+          42.59954090230167
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 44.12999999476597,
+        "baselineWarmMs": [
+          43.32737496588379,
+          42.948540998622775,
+          45.30258406884968,
+          44.20229198876768,
+          44.86804094631225,
+          44.05770800076425
+        ],
+        "candidateColdMs": [
+          19.77962499950081,
+          25.176832918077707,
+          55.14408403541893
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 18.72227102285251,
+        "candidateWarmMs": [
+          18.70716700796038,
+          21.5747500769794,
+          18.54499999899417,
+          19.72829201258719,
+          18.170166993513703,
+          18.73737503774464
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "neighbors",
+        "repository": "redux",
+        "warmRatio": 0.4242526858162942,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineObservations": 0,
+        "candidateObservations": 0,
+        "completeComparison": false,
+        "fullResponsesEqual": false,
+        "question": "path",
+        "repository": "redux"
+      },
+      {
+        "baselineColdMs": [
+          1000.3046669298783,
+          1376.034083077684,
+          1494.4214170100167
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.9694579639472067,
+        "baselineWarmMs": [
+          1.0686249006539583,
+          0.8805419784039259,
+          1.1517500970512629,
+          0.9379999246448278,
+          1.0009160032495856,
+          0.9361249394714832
+        ],
+        "candidateColdMs": [
+          615.1817080099136,
+          1129.892790922895,
+          957.6458330266178
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 5.893250461667776,
+        "candidateWarmMs": [
+          6.0380419017747045,
+          5.748459021560848,
+          6.219916976988316,
+          5.523041938431561,
+          5.540375015698373,
+          6.550125079229474
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "search",
+        "repository": "redux",
+        "warmRatio": 6.078912836687679,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          128.26945900451392,
+          134.36945795547217,
+          136.57366705592722
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 1.2442079605534673,
+        "baselineWarmMs": [
+          1.2344579445198178,
+          1.3640830293297768,
+          1.2539579765871167,
+          0.865040929056704,
+          2.0788749679923058,
+          0.8692500414326787
+        ],
+        "candidateColdMs": [
+          240.26458396110684,
+          272.1560000209138,
+          325.9279999183491
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 5.888292042072862,
+        "candidateWarmMs": [
+          5.696624983102083,
+          6.061959080398083,
+          6.993249990046024,
+          5.696667009033263,
+          44.337333063595,
+          5.714625003747642
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "stats",
+        "repository": "redux",
+        "warmRatio": 4.732562584998687,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          0.8613329846411943,
+          0.8984169689938426,
+          0.8248339872807264
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.8595204562880099,
+        "baselineWarmMs": [
+          0.8540829876437783,
+          0.8649579249322414,
+          0.8778329938650131,
+          0.7802499458193779,
+          0.8773329900577664,
+          0.8403329411521554
+        ],
+        "candidateColdMs": [
+          2.1077499259263277,
+          2.106958068907261,
+          2.139875083230436
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.1026244503445923,
+        "candidateWarmMs": [
+          2.0984580041840672,
+          1.9117919728159904,
+          2.1067908965051174,
+          2.5197500362992287,
+          2.1762079559266567,
+          1.819874974898994
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callees",
+        "repository": "walkdir",
+        "warmRatio": 2.4462762171189567,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          1.0927909752354026,
+          1.04891590308398,
+          1.0595419444143772
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.9976045112125576,
+        "baselineWarmMs": [
+          0.9625420207157731,
+          1.032667001709342,
+          1.1227090144529939,
+          0.9277500212192535,
+          0.9405419696122408,
+          1.1153749655932188
+        ],
+        "candidateColdMs": [
+          2.007832983508706,
+          2.153957961127162,
+          34.011124982498586
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.486896002665162,
+        "candidateWarmMs": [
+          2.879790961742401,
+          2.4352920008823276,
+          3.22508392855525,
+          2.1760419476777315,
+          2.1526250056922436,
+          2.5385000044479966
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "callers",
+        "repository": "walkdir",
+        "warmRatio": 2.492867639143308,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          0.7045000093057752,
+          0.7676250534132123,
+          0.6809579208493233
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.6942084874026477,
+        "baselineWarmMs": [
+          0.7478749612346292,
+          0.8099169936031103,
+          0.632417039014399,
+          0.6192090222612023,
+          0.6405420135706663,
+          0.7850830443203449
+        ],
+        "candidateColdMs": [
+          1.9716669339686632,
+          1.924125012010336,
+          1.708792056888342
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 1.6550629516132176,
+        "candidateWarmMs": [
+          1.60287506878376,
+          1.6474169678986073,
+          1.5680419746786356,
+          1.7254590056836605,
+          1.85720797162503,
+          1.662708935327828
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "community",
+        "repository": "walkdir",
+        "warmRatio": 2.3841007156302094,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          12.522750068455935,
+          12.6545000821352,
+          12.751374975778162
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 8.956916455645114,
+        "baselineWarmMs": [
+          8.959500002674758,
+          8.95433290861547,
+          9.677666937932372,
+          8.540790993720293,
+          9.22012492083013,
+          8.382166968658566
+        ],
+        "candidateColdMs": [
+          3.209875081665814,
+          3.0491669895127416,
+          67.95649998821318
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.991916553582996,
+        "candidateWarmMs": [
+          3.1953330617398024,
+          2.78850004542619,
+          3.6088329507037997,
+          2.735750051215291,
+          2.771708997897804,
+          3.4134999150410295
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "hubs",
+        "repository": "walkdir",
+        "warmRatio": 0.33403421460935195,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          0.5350420251488686,
+          0.844458001665771,
+          0.5372909363359213
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.5767499678768218,
+        "baselineWarmMs": [
+          0.5669579841196537,
+          0.567166949622333,
+          0.6714590126648545,
+          0.5863329861313105,
+          0.5225000204518437,
+          0.6302909459918737
+        ],
+        "candidateColdMs": [
+          1.7937079537659883,
+          1.5208330005407333,
+          1.5858339611440897
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 1.6522080404683948,
+        "candidateWarmMs": [
+          2.3474169429391623,
+          1.728458097204566,
+          1.6407910734415054,
+          1.51329196523875,
+          1.663625007495284,
+          1.5173329738900065
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "missing-community",
+        "repository": "walkdir",
+        "warmRatio": 2.8646868357021944,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          8.260417031124234,
+          9.12429194431752,
+          8.269374957308173
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 8.01029201829806,
+        "baselineWarmMs": [
+          8.015792001970112,
+          8.93329200334847,
+          7.878958014771342,
+          8.004792034626007,
+          7.993333972990513,
+          8.57904099393636
+        ],
+        "candidateColdMs": [
+          4.435000009834766,
+          4.303624969907105,
+          59.39162499271333
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 4.390999500174075,
+        "candidateWarmMs": [
+          5.538208992220461,
+          5.272165988571942,
+          4.562707967124879,
+          3.9991249796003103,
+          4.111999995075166,
+          4.219291033223271
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "neighbors",
+        "repository": "walkdir",
+        "warmRatio": 0.5481697159284122,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          8.63212498370558,
+          9.234374971129,
+          8.768790983594954
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 8.655271027237177,
+        "baselineWarmMs": [
+          8.700459031388164,
+          8.61008302308619,
+          9.089625091291964,
+          8.605708018876612,
+          9.091915911994874,
+          8.208832936361432
+        ],
+        "candidateColdMs": [
+          66.00912497378886,
+          4.852334037423134,
+          144.34954104945064
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 4.191478947177529,
+        "candidateWarmMs": [
+          4.249209072440863,
+          4.178375005722046,
+          4.107541986741126,
+          3.9187499787658453,
+          4.529041005298495,
+          4.204582888633013
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "path",
+        "repository": "walkdir",
+        "warmRatio": 0.48426894247302144,
+        "warmRegressionAboveTenPercent": false
+      },
+      {
+        "baselineColdMs": [
+          400.5023749778047,
+          631.1396670062095,
+          433.2924580667168
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.8307709940709174,
+        "baselineWarmMs": [
+          0.7873749127611518,
+          0.8581250440329313,
+          0.9764999849721789,
+          0.8113749790936708,
+          0.808333046734333,
+          0.8501670090481639
+        ],
+        "candidateColdMs": [
+          559.7664159722626,
+          557.6302920235321,
+          734.0885000303388
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 2.0030204905197024,
+        "candidateWarmMs": [
+          2.0078750094398856,
+          1.8135829595848918,
+          2.2071669809520245,
+          1.8410410266369581,
+          2.3210840299725533,
+          1.9981659715995193
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "search",
+        "repository": "walkdir",
+        "warmRatio": 2.4110380656221104,
+        "warmRegressionAboveTenPercent": true
+      },
+      {
+        "baselineColdMs": [
+          25.043249945156276,
+          25.018915999680758,
+          49.77399995550513
+        ],
+        "baselineObservations": 9,
+        "baselineWarmMedianMs": 0.6663745152764022,
+        "baselineWarmMs": [
+          0.8779159979894757,
+          0.6949160015210509,
+          0.5795840406790376,
+          0.6287499563768506,
+          0.89216697961092,
+          0.6378330290317535
+        ],
+        "candidateColdMs": [
+          21.133334026671946,
+          21.19004202540964,
+          108.70708397123963
+        ],
+        "candidateObservations": 9,
+        "candidateWarmMedianMs": 1.883353979792446,
+        "candidateWarmMs": [
+          1.9882500637322664,
+          1.9115000031888485,
+          1.8552079563960433,
+          1.6996250487864017,
+          2.342000021599233,
+          1.627666992135346
+        ],
+        "completeComparison": true,
+        "fullResponsesEqual": true,
+        "question": "stats",
+        "repository": "walkdir",
+        "warmRatio": 2.8262695175418866,
+        "warmRegressionAboveTenPercent": true
+      }
+    ],
+    "rawToolCalls": 828,
+    "registeredQuestions": 47,
+    "repeatedVerificationByteEqual": true,
+    "repositories": [
+      "chi",
+      "click",
+      "jsoup",
+      "redux",
+      "walkdir"
+    ],
+    "sessionPeakMemory": {
+      "chi": {
+        "baselineMedianPeakRssBytes": 78675968,
+        "baselinePeakRssBytes": [
+          76234752,
+          78675968,
+          79757312
+        ],
+        "candidateMedianPeakRssBytes": 120602624,
+        "candidatePeakRssBytes": [
+          120602624,
+          118669312,
+          123518976
+        ],
+        "unavailableBaselineSessions": 0,
+        "unavailableCandidateSessions": 0
+      },
+      "click": {
+        "baselineMedianPeakRssBytes": 205881344,
+        "baselinePeakRssBytes": [
+          208142336,
+          205881344,
+          202620928
+        ],
+        "candidateMedianPeakRssBytes": 305659904,
+        "candidatePeakRssBytes": [
+          305807360,
+          305659904,
+          303923200
+        ],
+        "unavailableBaselineSessions": 0,
+        "unavailableCandidateSessions": 0
+      },
+      "cloudstack": {
+        "baselineMedianPeakRssBytes": 7127367680,
+        "baselinePeakRssBytes": [
+          7127367680
+        ],
+        "candidateMedianPeakRssBytes": null,
+        "candidatePeakRssBytes": [],
+        "unavailableBaselineSessions": 2,
+        "unavailableCandidateSessions": 3
+      },
+      "jsoup": {
+        "baselineMedianPeakRssBytes": 527728640,
+        "baselinePeakRssBytes": [
+          533184512,
+          501301248,
+          527728640
+        ],
+        "candidateMedianPeakRssBytes": 730284032,
+        "candidatePeakRssBytes": [
+          730284032,
+          737361920,
+          693370880
+        ],
+        "unavailableBaselineSessions": 0,
+        "unavailableCandidateSessions": 0
+      },
+      "redux": {
+        "baselineMedianPeakRssBytes": 188661760,
+        "baselinePeakRssBytes": [
+          193773568,
+          186564608,
+          188661760
+        ],
+        "candidateMedianPeakRssBytes": 261701632,
+        "candidatePeakRssBytes": [
+          261701632,
+          254148608,
+          287064064
+        ],
+        "unavailableBaselineSessions": 0,
+        "unavailableCandidateSessions": 0
+      },
+      "walkdir": {
+        "baselineMedianPeakRssBytes": 58212352,
+        "baselinePeakRssBytes": [
+          58212352,
+          60342272,
+          57638912
+        ],
+        "candidateMedianPeakRssBytes": 80347136,
+        "candidatePeakRssBytes": [
+          77824000,
+          80347136,
+          84082688
+        ],
+        "unavailableBaselineSessions": 0,
+        "unavailableCandidateSessions": 0
+      }
+    },
+    "sessions": 36,
+    "toolOrTransportFailures": 0,
+    "unavailableReduxPathObservations": 18,
+    "verificationSha256": "f8eb35b4335cf2efbc1bd66edcd896c2384fd9459104a28c41b83f9540618852",
+    "warmRegressionsAboveTenPercent": 31
+  },
+  "registrationSha256": "f2dd475492c99c16771a5001201c1c62269b1e4a6072d30efd3dce126024711e",
+  "schema": "compass.graph-cache-coherence-review/1",
+  "scope": "Standalone JSON graph freshness and fixed source-query preservation/cost controls, not a Graphify superiority score.",
+  "synthetic": {
+    "candidateAfterObservations": 72,
+    "candidateAfterUsesReplacedGraph": true,
+    "expectationMismatches": 0,
+    "rawToolCalls": 432,
+    "repeatedVerificationByteEqual": true,
+    "rows": 48,
+    "verificationSha256": "1a132d00dd6b2f8b05c12c05620579bdc519a6a3cf7058de34f05fab62585add"
+  }
+}
