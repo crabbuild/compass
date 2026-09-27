@@ -3,6 +3,50 @@
 use super::super::*;
 
 impl ResolutionDb<'_> {
+    pub(in crate::evidence) fn resolve_java_field_receiver_ambiguity(
+        &self,
+        candidate: &RelationshipCandidate,
+    ) -> Option<ResolutionDecision> {
+        if candidate.relation != CandidateRelation::AccessesMember {
+            return None;
+        }
+        let (owner, _) = candidate
+            .constraints
+            .qualified_name
+            .as_deref()?
+            .rsplit_once("::")?;
+        let Some(declarations) = self
+            .indexes
+            .names
+            .by_qualified
+            .get(&("java".to_owned(), owner.to_owned()))
+        else {
+            return Some(ResolutionDecision::Unresolved);
+        };
+        if declarations.len() > self.budget.candidates_per_lookup() {
+            return Some(ResolutionDecision::Ambiguous {
+                candidate_count: declarations.len(),
+            });
+        }
+        // Member availability cannot choose among duplicate nominal types.
+        // Count receiver declarations before looking for the requested field.
+        let count = declarations
+            .iter()
+            .filter_map(|slot| self.declaration(*slot))
+            .filter(|declaration| {
+                matches!(
+                    declaration.kind.as_str(),
+                    "class" | "interface" | "enum" | "record" | "annotation_type"
+                )
+            })
+            .count();
+        match count {
+            0 => Some(ResolutionDecision::Unresolved),
+            1 => None,
+            candidate_count => Some(ResolutionDecision::Ambiguous { candidate_count }),
+        }
+    }
+
     pub(in crate::evidence) fn resolve_java_same_package_builtin_collision(
         &self,
         candidate: &RelationshipCandidate,

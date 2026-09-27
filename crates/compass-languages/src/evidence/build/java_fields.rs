@@ -23,6 +23,7 @@ pub(super) struct JavaFieldIndex {
     locals: HashMap<usize, HashMap<String, Vec<Local>>>,
     local_types: HashMap<usize, HashMap<String, usize>>,
     fields: HashMap<String, HashMap<String, Vec<Field>>>,
+    named_types: HashSet<String>,
     bindings: usize,
     static_scopes: HashSet<usize>,
 }
@@ -85,6 +86,13 @@ impl DirectEvidenceState<'_> {
         node: Node<'_>,
         owner: &DeclarationContext,
     ) -> Result<(), EvidenceError> {
+        if node.parent().is_none() {
+            self.java_fields.named_types = self
+                .java_containers
+                .values()
+                .map(|context| context.qualified_name.clone())
+                .collect();
+        }
         if is_static(node, self.source) {
             ensure_capacity(
                 "Java field lexical bindings",
@@ -331,6 +339,7 @@ impl DirectEvidenceState<'_> {
         }
         let base = raw.trim_end_matches("[]");
         let suffix = &raw[base.len()..];
+        let head = base.split('.').next()?;
         if java_primitive_type(base) {
             return None;
         }
@@ -347,7 +356,10 @@ impl DirectEvidenceState<'_> {
                     return None;
                 }
                 for parameter in parameters {
-                    if first_named(parameter).is_some_and(|name| self.text(name) == base) {
+                    if first_named(parameter).is_some_and(|name| self.text(name) == head) {
+                        if head != base {
+                            return None;
+                        }
                         let mut cursor = parameter.walk();
                         let bound = parameter
                             .named_children(&mut cursor)
@@ -366,13 +378,22 @@ impl DirectEvidenceState<'_> {
                 }
             }
         }
-        let head = base.split('.').next()?;
         if ancestors(ty)
             .last()
             .is_some_and(|node| node.parent().is_some())
             || self.java_field_local_type(ty, head)
         {
             return None;
+        }
+        // A visible source type shadows imports and package prefixes. Once
+        // selected, a missing nested type cannot fall back to that package.
+        if let Some(local) = self.local_target_for(owner, head) {
+            let target = format!("{local}{}", base[head.len()..].replace('.', "::"));
+            return self
+                .java_fields
+                .named_types
+                .contains(&target)
+                .then(|| format!("{target}{suffix}"));
         }
         if self.visible_import_binding_is_ambiguous(owner, head) {
             return None;

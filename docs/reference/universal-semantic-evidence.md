@@ -874,7 +874,10 @@ uses. Unqualified names require a source-declared field after lexical value
 lookup. The extraction index tracks block and loop exit, declaration order,
 parameters, lambda/catch/resource bindings, and local type-name shadowing.
 Declared nominal receivers, source-local field chains, arrays, casts, direct
-construction and single generic bounds may establish a target. Simple pattern
+construction and single generic bounds may establish a target. Visible source
+types shadow imports and package prefixes, including nested type syntax.
+Qualified Java field lookup stops on absent or ambiguous receiver types before
+considering member availability; exact declaration evidence retains precedence. Simple pattern
 branches and abrupt guards retain proven scope; unsupported pattern flow masks
 possibly shadowed names. Scope traversal is capped at 64 ancestors and receiver
 inference at 16 steps. Lexical records use the existing binding capacity; crowded

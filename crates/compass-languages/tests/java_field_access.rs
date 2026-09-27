@@ -222,3 +222,27 @@ fn unregistered_class_initializer_never_uses_enclosing_callable_ownership()
     assert_eq!(targets(source)?, vec![("value".into(), None)]);
     Ok(())
 }
+
+#[test]
+fn member_type_shadows_same_named_import_for_field_receivers() -> Result<(), Box<dyn Error>> {
+    let source = "package p; import remote.Cell; class Box { class Cell { int value; } int run(Cell item) { return item.value; } }";
+    assert_eq!(targets(source)?, vec![field("value", "Box::Cell")]);
+    Ok(())
+}
+#[test]
+fn local_type_prefix_shadows_a_package_in_qualified_type_syntax() -> Result<(), Box<dyn Error>> {
+    let source = "package p; class Box { class remote { class Cell { int value; } } int run(remote.Cell item) { return item.value; } }";
+    assert_eq!(targets(source)?, vec![field("value", "Box::remote::Cell")]);
+    Ok(())
+}
+
+#[test]
+fn shadowed_package_prefix_cannot_supply_missing_nested_types() -> Result<(), Box<dyn Error>> {
+    for source in [
+        "package p; class Box { class remote {} int run(remote.Cell item) { return item.value; } }",
+        "package p; class Box<remote> { int run(remote.Cell item) { return item.value; } }",
+    ] {
+        assert_eq!(targets(source)?, vec![("value".into(), None)]);
+    }
+    Ok(())
+}

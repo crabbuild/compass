@@ -38,7 +38,11 @@ unqualified source-declared fields. A bounded AST lexical index distinguishes
 parameters, locals, block/loop lifetimes, lambda/catch/resource bindings and
 source type names. Receiver typing supports declared nominal values, source-local
 field chains, arrays, casts, direct constructors and single generic bounds.
-Simple `instanceof` branches and abrupt guards retain their flow scope.
+Simple `instanceof` branches and abrupt guards retain their flow scope. Visible
+source types take precedence over imports and package prefixes. A qualified
+field lookup requires one receiver type declaration; field availability cannot
+select between duplicate nominal types. Exact declaration evidence remains
+authoritative.
 
 Unknown receivers, ambiguous names, unsupported pattern flow, inherited fields,
 unregistered local/anonymous class owners and exhausted inference remain
