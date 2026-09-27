@@ -1440,4 +1440,26 @@ unchanged.
 contains both observations and repeated provenance/artifact verification.
 [`sql_regex_cache_whole_repeat_registration.json`](benchmarks/agent_query/sql_regex_cache_whole_repeat_registration.json)
 registers a separate three-repetition alternating comparison with CPU time and
-peak RSS. Its result is pending; normal release qualification remains required.
+peak RSS. All six runs completed and reproduced the original graph bytes:
+
+| Repetition | Execution order | Baseline wall | Candidate wall |
+| ---: | --- | ---: | ---: |
+| 0 | Baseline, candidate | 235.574 s | 204.082 s |
+| 1 | Candidate, baseline | 215.288 s | 210.928 s |
+| 2 | Baseline, candidate | 213.526 s | 203.430 s |
+| Median | — | 215.288 s | 204.082 s |
+
+The candidate/baseline median ratio is 0.948, below the registered 1.10
+regression-review threshold. Median user CPU is 260.56 seconds for baseline and
+227.06 seconds for candidate; median system CPU is 23.68 and 23.12 seconds,
+respectively. Peak RSS, UTC timestamps and host load for every run are retained
+in [`sql_regex_cache_whole_repeat_review.json`](benchmarks/agent_query/sql_regex_cache_whole_repeat_review.json).
+Two complete verifier passes produced identical reports.
+
+The initial contrary observation remains unchanged above. This panel does not
+identify the cause of timing variation. Our compilation, query captures, other
+extractions and large-graph verification were paused during the timed runs;
+unrelated host work and ordinary OS caches remained uncontrolled. Three runs
+per binary on one known repository do not establish general performance or an
+approved release baseline. All six graphs still omit one node and 45 edges;
+normal release qualification remains required.

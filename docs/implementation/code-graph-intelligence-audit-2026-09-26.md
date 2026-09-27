@@ -14,7 +14,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
 | Useful clusters and communities | Reviewed functional responsibilities, membership and boundary correctness, useful cross-community navigation | Membership, co-location and partition-change diagnostics exist. They do not establish functional cohesion, responsibility boundaries or superior communities. |
-| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The largest of four SQL files improves in repeated release timings, but the first complete-source candidate observation is longer (280.053 s versus 193.966 s). A counterbalanced full-source repeat is registered. No general efficiency win is established. |
+| Fair efficiency comparison | Same successful tasks, repeated timings, explicit resource/token accounting and environment provenance | The shared path workflow consumes 72 requests / 1,558,220 bytes for Compass versus 38 / 11,001 for Graphify, with different outcomes and public identity capabilities. The largest of four SQL files improves in repeated release timings, but the first complete-source candidate observation is longer (280.053 s versus 193.966 s). The separate registered repeat completes all six runs with identical partial graphs and medians of 204.082 s candidate versus 215.288 s baseline (ratio 0.948). Timing variation remains unexplained; no general efficiency win is established. |
 | Independent confirmation | Unseen repositories/questions evaluated after freezing the final candidate and scoring rules | Existing panels informed later changes. Broad final-candidate confirmation remains open; preserve all competitor wins, unavailable outcomes and source-oracle corrections. |
 
 Current evidence summaries are in the
@@ -3981,3 +3981,35 @@ No production code changed after the validated cache commit in this checkpoint;
 the previous native gates and 238 benchmark tests remain the applicable checks.
 Actual god-object diagnosis, authored explanations, functional communities and
 independent final confirmation remain open. Version remains 0.3.30.
+
+
+## Registered complete-source timing repeat
+
+The separately registered alternating CloudStack panel completed all three
+observations per frozen release binary. In execution order, wall times were
+baseline 235.574 s, candidate 204.082 s, candidate 210.928 s, baseline 215.288 s,
+baseline 213.526 s, candidate 203.430 s. Baseline median is 215.288 s; candidate
+median is 204.082 s (ratio 0.948). The registered greater-than-10% median
+regression flag is false. Median user/system CPU seconds are 260.56/23.68 for
+baseline and 227.06/23.12 for candidate. All resource measurements and host-load
+observations are retained in
+[`sql_regex_cache_whole_repeat_review.json`](../../benchmarks/agent_query/sql_regex_cache_whole_repeat_review.json).
+
+Both verifier passes checked all six raw streams, resource measurements,
+registered command arguments, frozen executable hashes, clean pinned source,
+artifact admission and full graph hashes. Their reports are byte-identical.
+Every graph is 671,502,979 bytes and matches the original published artifact,
+including ordering and metadata. Each run extracts 6,783 files with zero cache
+hits, publishes 173,689 nodes and 502,158 edges, and reports one omitted node,
+45 omitted edges and zero identity collisions. Equality does not establish
+source correctness or complete extraction.
+
+The initial 193.966 s baseline / 280.053 s candidate observation remains outside
+this panel and unchanged. This new panel does not reproduce that slowdown, but
+neither its cause nor a general speedup is established. No own compilation,
+other extraction, query capture or large-graph verification ran alongside these
+timed observations. Unrelated host work and ordinary OS caches were uncontrolled.
+The repository was already used for development; this is neither independent
+confirmation nor a Graphify speed comparison. Prior timeouts and the original
+256 MiB admission failures remain unchanged. No new production code was needed
+for this repeat; the candidate remains the previously validated SQL regex cache.

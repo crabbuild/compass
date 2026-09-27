@@ -881,7 +881,12 @@ performance superiority. `sql_regex_cache_whole_registration.json` separately
 registers the complete-source follow-up. `sql_regex_cache_whole_review.json`
 records identical published partial-graph artifacts but a longer candidate observation;
 `sql_regex_cache_whole_repeat_registration.json` declares a separate repeated
-investigation. None of these replaces the original outcomes.
+investigation. `sql_regex_cache_whole_repeat_review.json` retains all six
+successful observations, identical full graph hashes, resource logs and repeated
+verification. Its medians are 215.288 seconds baseline and 204.082 seconds
+candidate (ratio 0.948). These development results do not explain the initial
+longer candidate observation or establish general performance superiority.
+None of these replaces the original outcomes.
 
 ## Release-server Blob follow-up
 
