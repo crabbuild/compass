@@ -272,3 +272,17 @@ Graphify graphs, actual payload costs and development-only scope explicit.
 Final unchanged-source validation passed, including the native baseline and
 production fixture qualification. This does not establish overall superiority
 or population precision.
+
+
+### Explicit neighbor identities
+
+`neighbor_identity_development_registration.json` freezes the unchanged-graph
+five-repository comparison; `neighbor_identity_development_review.json` records
+the verified capture. Compass now returns the exact reviewed destination ID
+in all 14 direct neighbor responses. Graphify does not emit neighbor IDs, but
+with one additional source-anchored public resolver call **both resolve 14/14**.
+Label presence remains 14/14 and global target-label uniqueness remains 11/14
+for each. All 15 Compass full-record projections match their graphs, preserving
+181 record appearances. This is graph consistency, not source precision for all
+records. The extra source coordinates, richer Compass payload cost and reused
+development scope remain explicit; no overall superiority claim follows.

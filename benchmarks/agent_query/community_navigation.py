@@ -102,7 +102,8 @@ def execute(args):
     registration_bytes = read_bounded(args.registration, MAX_SOURCE_BYTES)
     run_bytes = read_bounded(args.run, MAX_JSON_BYTES)
     policy, registration, run = map(json.loads, [policy_bytes, registration_bytes, run_bytes])
-    identity_mode = policy.get('schema') == 'compass.community-identity-navigation-policy/1'
+    destination_mode = policy.get('schema') == 'compass.neighbor-identity-navigation-policy/1'
+    identity_mode = destination_mode or policy.get('schema') == 'compass.community-identity-navigation-policy/1'
     if policy.get('schema') != 'compass.community-navigation-policy/1' and not identity_mode:
         raise ValueError('unsupported workflow policy')
     if registration.get('schema') != 'compass.community-task-pairs/1':
@@ -125,7 +126,7 @@ def execute(args):
         raise ValueError('invalid direct-call task list')
     verify_environment(args)
     args.output.mkdir(parents=True, exist_ok=False)
-    report = dict(schema='compass.community-identity-navigation-capture/1' if identity_mode else 'compass.community-navigation-capture/1', complete=False,
+    report = dict(schema='compass.neighbor-identity-navigation-capture/1' if destination_mode else 'compass.community-identity-navigation-capture/1' if identity_mode else 'compass.community-navigation-capture/1', complete=False,
                   policySha256=digest(policy_bytes), registrationSha256=digest(registration_bytes),
                   sourceRunSha256=digest(run_bytes), sourceRun=str(args.run.resolve()),
                   graphifyEnvironmentSha256=_sha256_file(args.graphify_environment),
@@ -134,7 +135,7 @@ def execute(args):
         report['servers'][tool] = dict(path=str(path), sha256=_sha256_file(path))
     for path in [args.policy, args.registration, args.graphify_environment, *[
             Path(__file__).with_name(name) for name in ['community_navigation.py', 'community_tasks.py',
-                'mcp_transport.py', 'mcp_compare.py', 'mcp_audit.py', 'runner.py', 'community_identity.py']]]:
+                'mcp_transport.py', 'mcp_compare.py', 'mcp_audit.py', 'runner.py', 'community_identity.py', 'neighbor_identity.py']]]:
         shutil.copy2(path, args.output/path.name)
         report['supportFiles'][path.name] = _sha256_file(path)
     def save():
@@ -224,6 +225,19 @@ def execute(args):
                                         checked['addressedCollaboratorLabelPresent'] = completed and checked['collaboratorDisplayed']
                                         checked['addressedCollaboratorIdentitySupported'] = (checked['addressedCollaboratorLabelPresent']
                                             and len(checked['collaboratorLabelCandidates']) == 1)
+                                    if destination_mode:
+                                        from benchmarks.agent_query.neighbor_identity import destination_request, followup_score, audit_direct
+                                        target_id = target['matchedNodeIds'][0] if len(target['matchedNodeIds']) == 1 else None
+                                        if row['directCallRequired']:
+                                            request = destination_request(tool, neighbors, task['declarations'][1])
+                                            row['destinationRequest'] = request
+                                            if request is not None and failure is None:
+                                                destination = call(session, request['method'], request['arguments'])
+                                                row['destinationCall'] = destination
+                                                if 'captureError' in destination:
+                                                    failure = destination['captureError']
+                                                row['destinationAudit'] = followup_score(tool, destination, task['declarations'][1], target_id)
+                                        row['identityAudit'] = audit_direct(neighbors, graph, tool, seed['matchedNodeIds'][0], target_id)
                                 # Scoring is after requests, never selector preparation.
                                 row['communityAudit'] = audit_membership(dict(repository=name, tool=tool,
                                     question='community', **community), graph)

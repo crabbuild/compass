@@ -2272,6 +2272,71 @@ the frozen evaluated binary is byte-identical to the final build. Commands,
 counts and log hashes are recorded in the review artifact. Broader real-repository
 qualification and fresh held-out evaluation were not run in this development arm.
 
+## Explicit neighbor identities and relationship evidence
+
+Protocol `bde19bb3` freezes this development arm before implementation
+`d51698dc`. It reuses all ten graph artifacts and the same five pinned source
+repositories from the Rust recovery arm. All 15 tasks retain their original
+community, seed resolver and neighbor calls. A new symmetric arm permits one
+additional destination resolver call on each of the 14 direct-call tasks,
+gated on an actually returned outgoing collaborator label. Both tools receive
+the same target file, declaration start and terminal symbol for that follow-up.
+This is source-assisted navigation on reused tasks, not held-out discovery.
+
+Compass neighbor results now carry `compass.query.neighbors/1`: exact seed and
+destination node records and all matching relationship records. The query layer
+preserves parallel records, self loops, endpoint direction, source anchors and
+provenance under explicit adjacency/record/byte bounds. Text retains compact
+neighbor lines and adds escaped identity/source details. The graph artifacts,
+extraction, source trees, package version and historical realizations do not
+change in this arm.
+
+A separate same-agent verifier recomputes every request, response, source-anchor
+selection and full incident-record multiset. All 15 Compass projections match
+their graphs, totaling 181 record appearances across the requests. That includes
+records beyond the 14 reviewed source collaborators and is **graph consistency,
+not broader source precision**. All 45 prior Graphify payloads and all 30 Compass
+community/seed resolver payloads match the baseline, ignoring request IDs that
+shift after the extra calls. All 15 Compass neighbor payloads change.
+
+| Development measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Correct seed ID and completed neighbor lookup | 15/15 | 15/15 |
+| Reviewed outgoing collaborator label | 14/14 | 14/14 |
+| Globally unambiguous target label | 11/14 | 11/14 |
+| Explicit target ID in direct neighbor response | 14/14 | Unavailable (0/14) |
+| Correct target ID after one extra source-anchored resolver | 14/14 | 14/14 |
+
+Before this change neither tool emitted explicit neighbor IDs. Graphify's
+neighbor response still emits labels, relations and source sites; the lack of a
+full record projection is not a wrong-edge judgment. Its additional public
+`get_node` call resolves all 14 source-matched targets, including the three
+ambiguous labels. Compass's richer direct response avoids that extra identity
+lookup for these tasks, but the extended workflow remains a tie. The extra
+resolver uses supplied target coordinates; it does not autonomously reconstruct
+an ambiguous edge from its label. All 14 reviewed pairs on both sides also have
+the required directed call in their frozen graph.
+
+All 118 public calls succeed. With all four steps executed symmetrically,
+Compass uses 193,385 text bytes, 1,228,383 response-wire bytes and 1,323,516
+full-session bytes. Graphify uses 57,404, 63,756 and 107,645 respectively. For
+just the original three steps, response-wire totals are 1,017,434 versus 60,415
+bytes. These are observed costs with different native payloads and controls;
+there is no equal-content efficiency or latency claim.
+
+Artifact hashes, commands and limitations are recorded in
+`benchmarks/agent_query/neighbor_identity_development_review.json`; raw captures
+and logs are under `neighbor-identity-02`. Final validation passed: formatting,
+3 focused query tests, all 60 MCP tests, workspace Clippy, 1,106 workspace tests
+(2 ignored), 9 product tests, the product-boundary check, complete production
+fixture qualification and the final CLI build. The Python harness passed all
+134 tests. Runtime/test hashes stayed unchanged during validation and match
+`d51698dc`; the evaluated binary is byte-identical to the final build. The gate
+retains its existing fixture-omission and compiler warnings in the logs.
+God-object responsibility judgments, richer source explanations, broader
+assertion precision, longer directed walks and fresh held-out confirmation
+remain outstanding.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
