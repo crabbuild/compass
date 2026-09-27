@@ -3019,20 +3019,21 @@ impl CodeQueryEngine {
                 response.truncated = true;
                 break;
             }
-            if let [source, target] = pair
-                && let (Some((nodes, edges)), truncated) = self.shortest_path(
+            if let [source, target] = pair {
+                let (path, truncated) = self.shortest_path(
                     source,
                     target,
                     request.include_heuristic,
                     &request.limits,
                     &mut budget,
                     false,
-                )?
-            {
+                )?;
                 response.truncated |= truncated;
-                ids.extend(nodes.iter().cloned());
-                edge_ids.extend(edges.iter().cloned());
-                response.paths.push(self.path_record(&nodes, &edges)?);
+                if let Some((nodes, edges)) = path {
+                    ids.extend(nodes.iter().cloned());
+                    edge_ids.extend(edges.iter().cloned());
+                    response.paths.push(self.path_record(&nodes, &edges)?);
+                }
             }
         }
         self.add_nodes(&ids, &mut response)?;
@@ -3506,6 +3507,7 @@ impl CodeQueryEngine {
         let mut admitted = HashSet::from([source.to_owned()]);
         let mut predecessor = HashMap::<TrailState, (TrailState, String)>::new();
         let mut truncated = false;
+        let mut depth_frontier = BTreeSet::new();
         while let Some(Reverse((cost, depth, path_key, node))) = queue.pop() {
             self.check_deadline()?;
             let state = (node.clone(), depth);
@@ -3536,6 +3538,7 @@ impl CodeQueryEngine {
                 return Ok((Some((nodes, edges)), truncated));
             }
             if depth >= max_depth {
+                depth_frontier.insert(node);
                 continue;
             }
             let mut adjacent = Vec::new();
@@ -3601,6 +3604,59 @@ impl CodeQueryEngine {
                     .insert(next_depth, candidate);
                 predecessor.insert(next_state, (state.clone(), edge.id.clone()));
                 queue.push(Reverse((next_cost, next_depth, next_key, next)));
+            }
+        }
+        // Probe the depth frontier only after the bounded search fails. Doing
+        // this while the queue still has viable states would spend their shared
+        // work budget and could hide a valid, costlier, shorter route.
+        if !truncated {
+            for node in depth_frontier {
+                self.check_deadline()?;
+                // A shallower arrival was fully expanded already. Its outgoing
+                // records therefore cannot hide an unexplored continuation.
+                if best
+                    .get(&node)
+                    .is_some_and(|labels| labels.keys().any(|depth| *depth < max_depth))
+                {
+                    continue;
+                }
+                let (incident, incomplete) = if directed {
+                    self.backend.matching_bounded(
+                        &node,
+                        false,
+                        ALL_EDGE_KINDS,
+                        include_heuristic,
+                        budget.remaining_edges,
+                    )?
+                } else {
+                    self.backend.incident_bounded(
+                        &node,
+                        include_heuristic,
+                        budget.remaining_edges,
+                    )?
+                };
+                if incomplete {
+                    truncated = true;
+                    break;
+                }
+                for edge in incident {
+                    if !budget.consume_edge() {
+                        truncated = true;
+                        break;
+                    }
+                    let next = if edge.source == node {
+                        &edge.target
+                    } else {
+                        &edge.source
+                    };
+                    if !admitted.contains(next) {
+                        truncated = true;
+                        break;
+                    }
+                }
+                if truncated {
+                    break;
+                }
             }
         }
         Ok((None, truncated))

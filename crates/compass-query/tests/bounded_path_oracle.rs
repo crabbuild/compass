@@ -55,6 +55,29 @@ fn hop_oracle(matrix: &Matrix, max_depth: usize) -> Option<(usize, u32)> {
     visit(matrix, 0, max_depth, 1)
 }
 
+// Independent unweighted closure of nodes reachable within the hop bound.
+// A missing bounded path is incomplete if the frontier can reach unseen nodes.
+fn open_frontier(matrix: &Matrix, max_depth: usize) -> bool {
+    let mut reachable = [true, false, false, false];
+    for _ in 0..max_depth {
+        let previous = reachable;
+        for (source, row) in matrix.iter().enumerate() {
+            if previous[source] {
+                for (target, edge) in row.iter().enumerate() {
+                    reachable[target] |= edge.is_some();
+                }
+            }
+        }
+    }
+    matrix.iter().enumerate().any(|(source, row)| {
+        reachable[source]
+            && row
+                .iter()
+                .enumerate()
+                .any(|(target, edge)| edge.is_some() && !reachable[target])
+    })
+}
+
 #[test]
 fn all_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;
@@ -223,8 +246,8 @@ fn all_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn E
                     ..CodeQueryLimits::default()
                 },
             })?;
-            assert!(!response.truncated, "{context}");
             if let Some((expected_cost, expected_hops)) = oracle(&directed, depth) {
+                assert!(!response.truncated, "{context}");
                 assert_eq!(response.paths.len(), 1, "{context}");
                 let path = &response.paths[0];
                 assert_eq!(
@@ -260,6 +283,19 @@ fn all_path_engines_match_exhaustive_four_node_oracles() -> Result<(), Box<dyn E
                 assert_eq!(cost, expected_cost, "{context}");
             } else {
                 assert!(response.paths.is_empty(), "{context}");
+                let incomplete = open_frontier(&directed, depth)
+                    || (oracle(&undirected, depth).is_none() && open_frontier(&undirected, depth));
+                assert_eq!(response.truncated, incomplete, "{context}");
+                if incomplete {
+                    assert!(
+                        !response.diagnostics.iter().any(|d| matches!(
+                            d.code,
+                            compass_model::query_contract::QueryDiagnosticCode::DirectionMismatch
+                                | compass_model::query_contract::QueryDiagnosticCode::NoMatch
+                        )),
+                        "{context}"
+                    );
+                }
             }
         }
     }

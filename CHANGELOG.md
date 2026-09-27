@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Report incomplete directed trail searches when the depth frontier remains
+  unexplored, instead of inferring a direction mismatch from a shorter
+  undirected route. Preserve successful bounded paths and closed negatives;
+  retain incomplete status in exploration even when no path is returned.
+
 - Add exact destination identities and full relationship records to MCP neighbor
   results, preserving source anchors, provenance, direction and parallel calls.
   Bound adjacency work and response size; report exhaustion explicitly.

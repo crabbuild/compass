@@ -648,3 +648,150 @@ fn node_trail_excludes_deferred_external_inheritance_by_default()
     }));
     Ok(())
 }
+
+#[test]
+fn node_trail_depth_bound_does_not_assert_direction_mismatch_for_a_longer_forward_route()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph_path = directory.path().join("graph.json");
+    write_weighted_trail_fixture(
+        &graph_path,
+        &[
+            ("n:s", EdgeKind::Calls, "n:a"),
+            ("n:a", EdgeKind::Calls, "n:b"),
+            ("n:b", EdgeKind::Calls, "n:t"),
+            ("n:t", EdgeKind::Calls, "n:s"),
+        ],
+    )?;
+    for reverse in [false, true] {
+        let mut graph = GraphDocument::load(&graph_path)?;
+        if reverse {
+            graph.nodes.reverse();
+            graph.links.reverse();
+            fs::write(&graph_path, serde_json::to_vec(&graph)?)?;
+        }
+        let store = SqliteStore::open(directory.path().join(format!("store-{reverse}.db")))?;
+        let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+        GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+        for engine in [
+            open(&graph_path, None, &directory.path().join("cache"))?,
+            open_with_store(
+                &store,
+                &graph_path,
+                None,
+                &directory.path().join("store-cache"),
+            )?,
+        ] {
+            for depth in [1, 2, 3] {
+                let result = engine.node_trail(NodeTrailRequest {
+                    source: "n:s".into(),
+                    target: "n:t".into(),
+                    include_heuristic: false,
+                    limits: CodeQueryLimits {
+                        max_depth: depth,
+                        ..CodeQueryLimits::default()
+                    },
+                })?;
+                if depth < 3 {
+                    assert!(result.paths.is_empty());
+                    assert!(result.truncated, "{result:?}");
+                    assert!(
+                        result
+                            .diagnostics
+                            .iter()
+                            .any(|d| d.code == QueryDiagnosticCode::BoundedTruncation)
+                    );
+                    assert!(!result.diagnostics.iter().any(|d| matches!(
+                        d.code,
+                        QueryDiagnosticCode::DirectionMismatch | QueryDiagnosticCode::NoMatch
+                    )));
+                } else {
+                    assert!(!result.truncated);
+                    assert_eq!(result.paths.len(), 1);
+                    assert_eq!(result.paths[0].node_ids, ["n:s", "n:a", "n:b", "n:t"]);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn node_trail_depth_frontier_proves_closed_dead_ends_and_cycles()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    for cycle in [false, true] {
+        let path = directory.path().join(format!("closed-{cycle}.json"));
+        let mut edges = vec![
+            ("n:s", EdgeKind::Calls, "n:a"),
+            ("n:a", EdgeKind::Calls, "n:b"),
+        ];
+        if cycle {
+            edges.push(("n:b", EdgeKind::Calls, "n:a"));
+        }
+        write_weighted_trail_fixture(&path, &edges)?;
+        let graph = GraphDocument::load(&path)?;
+        let store = SqliteStore::open(directory.path().join(format!("closed-{cycle}.db")))?;
+        let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+        GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+        for engine in [
+            open(&path, None, &directory.path().join("cache"))?,
+            open_with_store(&store, &path, None, &directory.path().join("store-cache"))?,
+        ] {
+            let response = engine.node_trail(NodeTrailRequest {
+                source: "n:s".into(),
+                target: "n:t".into(),
+                include_heuristic: false,
+                limits: CodeQueryLimits {
+                    max_depth: 2,
+                    ..CodeQueryLimits::default()
+                },
+            })?;
+            assert!(!response.truncated, "{response:?}");
+            assert!(response.paths.is_empty());
+            assert!(
+                response
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == QueryDiagnosticCode::NoMatch)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn explore_keeps_depth_exhaustion_when_no_connecting_path_is_returned()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = directory.path().join("graph.json");
+    write_weighted_trail_fixture(
+        &path,
+        &[
+            ("n:s", EdgeKind::Calls, "n:a"),
+            ("n:a", EdgeKind::Calls, "n:b"),
+            ("n:b", EdgeKind::Calls, "n:t"),
+        ],
+    )?;
+    let graph = GraphDocument::load(&path)?;
+    let store = SqliteStore::open(directory.path().join("store.db"))?;
+    let prepared = GraphSnapshotBuilder::new().prepare(&store, &graph)?;
+    GraphSnapshotBuilder::new().activate(&store, &prepared)?;
+    for engine in [
+        open(&path, None, &directory.path().join("cache"))?,
+        open_with_store(&store, &path, None, &directory.path().join("store-cache"))?,
+    ] {
+        let response = engine.explore(compass_model::query_contract::ExploreRequest {
+            symbols: vec!["n:s".into(), "n:t".into()],
+            root: directory.path().to_string_lossy().into_owned(),
+            include_heuristic: false,
+            limits: CodeQueryLimits {
+                max_depth: 2,
+                ..CodeQueryLimits::default()
+            },
+        })?;
+        assert!(response.paths.is_empty());
+        assert!(response.truncated, "{response:?}");
+    }
+    Ok(())
+}

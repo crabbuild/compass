@@ -1348,3 +1348,16 @@ allocating an unbounded JSON graph.
 
 **Next step:** identify the most structured available output for your consumer
 and validate its major version/direction/multiplicity before reading values.
+
+### Directed trail depth limits
+
+For typed `node` and MCP `get_node`, an unsuccessful search that leaves an open
+depth frontier returns `truncated: true` and `bounded_truncation`. An undirected
+shortcut is not proof that no longer directed route exists. Frontier checks use
+the same edge budget and run after the search for a bounded positive path.
+Closed dead ends and cycles can return complete negative results; increasing
+`max_depth` may resolve an incomplete result. The machine schema remains
+`compass.query/1`.
+
+`explore` / `explore_code` also retain incomplete-search status when no connecting
+path was found; previously that status could be lost with the absent path.

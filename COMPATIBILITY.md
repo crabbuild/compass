@@ -200,6 +200,21 @@ Groups sort by outgoing/incoming direction then exact ID; records sort by
 canonical JSON. Self loops appear in both directions and count once against
 the incident-record budget. Published graphs and historical artifacts are unchanged.
 
+### Directed trail depth diagnostics
+
+Typed `node`/`get_node` trails now report `truncated: true` with
+`bounded_truncation` when an unsuccessful search reaches its depth bound and
+cannot prove the reachable frontier is closed. They do not use a shorter
+undirected route to assert a global direction mismatch while an unexplored
+forward continuation remains. Frontier checks share the declared work budget
+and run only after the bounded path search fails, preserving positive paths
+within the requested depth. Closed dead ends and cycles can still yield complete
+negative results. The `compass.query/1` schema is unchanged; consumers should
+continue to distinguish incomplete searches from negative answers.
+
+`explore` / `explore_code` also retain incomplete-search status when no connecting
+path was found; previously that status could be lost with the absent path.
+
 ### Bounded node trails
 
 The undirected `path` command also retains nondominated cost/depth states.

@@ -2160,3 +2160,97 @@ fn natural_query_and_explain_accept_agent_controlled_budgets_and_pages()
     assert!(out_of_range.stderr.contains("last available page"));
     Ok(())
 }
+
+#[test]
+fn node_command_reports_depth_exhaustion_without_claiming_wrong_direction()
+-> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let path = support::write_typed_graph(directory.path())?;
+    let mut graph = GraphDocument::load(&path)?;
+    let template = graph.nodes.first().cloned().ok_or("node template")?;
+    graph.nodes = ["n:s", "n:a", "n:b", "n:t"]
+        .into_iter()
+        .map(|id| {
+            let mut node = template.clone();
+            node.id = id.into();
+            node.name = id.into();
+            node.qualified_name = id.into();
+            node.kind = NodeKind::Function;
+            node
+        })
+        .collect();
+    let template = graph
+        .links
+        .iter()
+        .find(|edge| edge.kind == EdgeKind::Calls)
+        .cloned()
+        .ok_or("edge template")?;
+    graph.links = [
+        ("n:s", "n:a"),
+        ("n:a", "n:b"),
+        ("n:b", "n:t"),
+        ("n:t", "n:s"),
+    ]
+    .into_iter()
+    .map(|(source, target)| {
+        let mut edge = template.clone();
+        edge.source = source.into();
+        edge.target = target.into();
+        edge.occurrence_rule = None;
+        edge.id = compass_model::identity::edge_id(
+            source,
+            EdgeKind::Calls,
+            target,
+            edge.relationship_site.as_ref(),
+            None,
+        );
+        edge.key.clone_from(&edge.id);
+        edge
+    })
+    .collect();
+    std::fs::write(&path, serde_json::to_vec(&graph)?)?;
+    for depth in ["2", "3"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_compass"))
+            .args([
+                "node",
+                "n:s",
+                "n:t",
+                "--max-depth",
+                depth,
+                "--format",
+                "json",
+                "--graph",
+            ])
+            .arg(&path)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&output.stdout)?;
+        assert_eq!(result["schema"], "compass.query/1");
+        if depth == "2" {
+            assert_eq!(result["truncated"], true);
+            assert_eq!(result["paths"], serde_json::json!([]));
+            let diagnostics = result["diagnostics"].as_array().ok_or("diagnostics")?;
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "bounded_truncation")
+            );
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "direction_mismatch" || d["code"] == "no_match")
+            );
+        } else {
+            assert_eq!(result["truncated"], false);
+            assert_eq!(
+                result["paths"][0]["nodeIds"],
+                serde_json::json!(["n:s", "n:a", "n:b", "n:t"])
+            );
+        }
+    }
+    Ok(())
+}
