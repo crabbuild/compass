@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Emit Java field-access references from bounded lexical scope and receiver
+  evidence, preserving shadowing, field identity and parallel source occurrences.
+  Invalidate prior AST caches; retain unsupported targets without name fallback.
+
 - Emit Rust field-access evidence for source-proven nominal receivers, preserving
   exact occurrences and unknown or shadowed receiver outcomes. Publish qualified
   field contacts as references without inventing read/write effects. Rebuild

@@ -866,6 +866,27 @@ Do not infer support for another language or framework from file extensions,
 raw graph output, or total node and edge counts.
 
 
+### Java field contacts
+
+Java field accesses use the existing `MemberAccess` / `AccessesMember` contract
+and field-only qualified resolution. Exact field-token ranges retain repeated
+uses. Unqualified names require a source-declared field after lexical value
+lookup. The extraction index tracks block and loop exit, declaration order,
+parameters, lambda/catch/resource bindings, and local type-name shadowing.
+Declared nominal receivers, source-local field chains, arrays, casts, direct
+construction and single generic bounds may establish a target. Simple pattern
+branches and abrupt guards retain proven scope; unsupported pattern flow masks
+possibly shadowed names. Scope traversal is capped at 64 ancestors and receiver
+inference at 16 steps. Lexical records use the existing binding capacity; crowded
+same-name scopes become unknown rather than requiring unbounded lookup.
+
+Graph v1 projects these contacts as `references` with member-access provenance.
+They are not read/write effects, runtime identities or cohesion judgments.
+Inherited fields, general access checking, cross-file field-type chains and
+unregistered local/anonymous class ownership remain unsupported. Unknown
+qualified receivers never select a same-named field. Schema and producer
+capabilities are unchanged; AST cache semantics version 9 rebuilds prior facts.
+
 ### Rust field contacts
 
 Rust field expressions now emit `MemberAccess` occurrences and `AccessesMember`

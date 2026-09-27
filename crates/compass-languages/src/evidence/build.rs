@@ -15,6 +15,8 @@ use super::model::{
 };
 use super::validate::{EvidenceError, EvidenceErrorCode, EvidenceLimits, validate_evidence};
 
+mod java_fields;
+
 // Go selector attribution can cross a closure, a multi-return call, and a
 // range expression before reaching the receiver type. Keep that traversal
 // bounded, but allow the real-world chain without falling back to an
@@ -1049,6 +1051,7 @@ struct DirectEvidenceState<'source> {
     go_range_member_types: HashMap<(String, String), String>,
     java_containers: HashMap<usize, DeclarationContext>,
     java_value_types: HashMap<String, HashMap<String, String>>,
+    java_fields: java_fields::JavaFieldIndex,
     graph_ids: HashSet<String>,
     parser_error_ranges: Vec<(usize, usize)>,
     builder: EvidenceBuilder,
@@ -1143,6 +1146,7 @@ impl<'source> DirectEvidenceState<'source> {
             go_range_member_types: HashMap::new(),
             java_containers: HashMap::new(),
             java_value_types: HashMap::new(),
+            java_fields: java_fields::JavaFieldIndex::default(),
             graph_ids: HashSet::new(),
             parser_error_ranges: Vec::new(),
             builder: EvidenceBuilder::new(
@@ -2864,6 +2868,7 @@ impl<'source> DirectEvidenceState<'source> {
         self.collect_java_imports(root, &file)?;
         self.collect_java_declarations(root, &file)?;
         self.collect_java_value_types(root, &file)?;
+        self.index_java_field_values(root, &file)?;
         self.walk_java_evidence(root, &file, true)
     }
 
@@ -3441,6 +3446,7 @@ impl<'source> DirectEvidenceState<'source> {
         match node.kind() {
             "import_declaration" => return Ok(()),
             "method_invocation" => self.add_java_method_call(node, &active)?,
+            "field_access" | "identifier" => self.add_java_field_access(node, &active)?,
             "object_creation_expression" => self.add_java_construction(node, &active)?,
             _ => {}
         }

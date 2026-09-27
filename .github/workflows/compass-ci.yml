@@ -113,6 +113,9 @@ jobs:
       - name: Rust state-access evidence contracts
         run: cargo test -p compass-languages -p compass-resolve --test rust_field_access --locked
 
+      - name: Java state-access evidence contracts
+        run: cargo test -p compass-languages -p compass-resolve --test java_field_access --locked
+
       - name: Comparison scorer regressions (no competitor installation)
         run: python3 -m unittest discover -s benchmarks/agent_query/tests
 

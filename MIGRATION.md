@@ -7,6 +7,13 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Rebuild Java graphs to receive source-proven field-access references with lexical
+scope and occurrence evidence. AST cache semantics version 9 automatically
+invalidates earlier extraction facts. Existing stored/historical graphs are not
+rewritten; unsupported receivers and inherited/anonymous/local-class cases
+remain gaps. These references do not classify read/write effects or establish
+class cohesion or god-object defects.
+
 Rebuild Rust graphs to receive newly emitted field-access references. AST cache
 semantics version 8 invalidates earlier facts automatically; stored graphs and
 historical realizations are not rewritten. The added `member-access` references
