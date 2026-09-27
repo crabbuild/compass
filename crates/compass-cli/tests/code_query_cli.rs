@@ -2254,3 +2254,73 @@ fn node_command_reports_depth_exhaustion_without_claiming_wrong_direction()
     }
     Ok(())
 }
+
+#[test]
+fn explain_without_a_stored_digest_never_claims_source_verification() -> Result<(), Box<dyn Error>>
+{
+    let directory = tempfile::tempdir()?;
+    let source = "fn run() {\n    body();\n}\n";
+    let source_path = directory.path().join("lib.rs");
+    let graph_path = directory.path().join("graph.json");
+    std::fs::write(
+        &graph_path,
+        serde_json::json!({
+            "directed": true,
+            "multigraph": true,
+            "nodes": [{
+                "id": "n:run",
+                "kind": "function",
+                "name": "run",
+                "source": {
+                    "file": "lib.rs", "startByte": 0, "endByte": source.len(),
+                    "startLine": 1, "endLine": 3, "startColumn": 0, "endColumn": 1
+                },
+                "details": {"type": "symbol", "data": {"signature": "fn run()"}}
+            }],
+            "links": []
+        })
+        .to_string(),
+    )?;
+    // A same-length edit cannot be detected from an anchor alone.
+    for body in [source.to_owned(), source.replace("body", "next")] {
+        std::fs::write(&source_path, &body)?;
+        for format in ["text", "agent-json", "json"] {
+            let result = run(
+                Frontend::Compass,
+                [
+                    OsString::from("explain"),
+                    OsString::from("n:run"),
+                    OsString::from("--root"),
+                    directory.path().as_os_str().to_owned(),
+                    OsString::from("--graph"),
+                    graph_path.as_os_str().to_owned(),
+                    OsString::from("--format"),
+                    OsString::from(format),
+                ],
+            );
+            assert_eq!(result.code, 0, "{}", result.stderr);
+            assert!(
+                !result.stdout.contains("(digest-verified)"),
+                "a missing digest cannot verify even a plausible source range: {}",
+                result.stdout
+            );
+            assert!(
+                result
+                    .stdout
+                    .contains("unverified: no recorded source digest"),
+                "{}",
+                result.stdout
+            );
+            assert!(
+                result.stdout.contains(if body.contains("next") {
+                    "next();"
+                } else {
+                    "body();"
+                }),
+                "{}",
+                result.stdout
+            );
+        }
+    }
+    Ok(())
+}

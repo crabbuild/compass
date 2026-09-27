@@ -105,3 +105,13 @@ Inspection, extraction, listing, verification, cache replay, and historical
 materialization never silently fetch or invoke an arbitrary executable. Model
 and document cache paths can contain sensitive derived content and should not
 be attached to public issues.
+
+## Explanation source verification
+
+`compass explain` verifies a declaration excerpt against its stored symbol digest
+when that digest is present. Verification covers the complete recorded byte span,
+including bytes omitted from a truncated excerpt. A missing digest yields an
+explicitly unverified current excerpt; a malformed or mismatching digest prevents
+source output. File containment, symlink checks and bounded reads apply in both
+cases. Digest agreement establishes agreement with the graph's recorded bytes;
+it does not authenticate the graph or establish that its semantic claims are true.

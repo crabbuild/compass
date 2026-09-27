@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Label explanation excerpts without a stored source digest as unverified.
+  Preserve bounded source access and reject malformed or mismatching digests
+  instead of claiming that an anchor alone verifies current source.
+
 - Report incomplete directed trail searches when the depth frontier remains
   unexplored, instead of inferring a direction mismatch from a shorter
   undirected route. Preserve successful bounded paths and closed negatives;

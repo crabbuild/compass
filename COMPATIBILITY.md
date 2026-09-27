@@ -419,11 +419,17 @@ selected when unique, while multiple modules or declarations remain an explicit
 ambiguity. This lets path traversal follow the same stored workspace import
 edges used by `callers`.
 
-`compass explain` now includes a bounded source excerpt by default when the
-selected node has a unique source-backed declaration whose file matches the
-recorded symbol digest. `--no-source` restores a metadata-only answer; the
-existing `--source` flag remains accepted. Ambiguous, unsourced, or changed
-files do not produce source text.
+`compass explain` includes a bounded source excerpt by default for a uniquely
+resolved source-backed declaration. When a stored symbol digest matches the
+complete recorded byte span, the excerpt is labeled `digest-verified`. A graph
+without that digest can still supply a current excerpt, explicitly labeled
+`unverified: no recorded source digest`; an anchor alone cannot establish
+freshness. A mismatching or malformed digest prevents source output. This
+corrects the earlier unconditional verification label, including text inside
+shared JSON output envelopes. The query library exposes `digest_verified` on
+`ExplainedSource`; machine schemas and graph artifacts are unchanged.
+`--no-source` restores a metadata-only answer; `--source` remains accepted.
+Ambiguous or unsourced targets do not produce source text.
 
 ### Typed query deadlines
 

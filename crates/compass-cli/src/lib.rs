@@ -6805,8 +6805,13 @@ fn append_explanation_source(
         Ok(excerpt) => {
             output.push_str("\n\nSOURCE ");
             output.push_str(&excerpt.file);
+            let verification = if excerpt.digest_verified {
+                "digest-verified"
+            } else {
+                "unverified: no recorded source digest"
+            };
             output.push_str(&format!(
-                " L{}-L{} (digest-verified)\n",
+                " L{}-L{} ({verification})\n",
                 excerpt.start_line, excerpt.end_line
             ));
             for (offset, line) in excerpt.source.lines().enumerate() {

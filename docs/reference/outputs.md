@@ -1361,3 +1361,13 @@ Closed dead ends and cycles can return complete negative results; increasing
 
 `explore` / `explore_code` also retain incomplete-search status when no connecting
 path was found; previously that status could be lost with the absent path.
+
+### Explanation source verification status
+
+An `explain` source header says `digest-verified` only after the complete recorded
+symbol span matches a stored digest. Without a stored digest it says
+`unverified: no recorded source digest`; the excerpt is current file content at
+the recorded anchor, whose freshness cannot be established. Malformed or
+mismatching digests produce `SOURCE unavailable` without source text. Truncating
+the returned excerpt does not truncate digest verification. The same status
+appears in text carried by shared JSON output envelopes.

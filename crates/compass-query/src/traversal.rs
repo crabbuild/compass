@@ -837,7 +837,7 @@ pub fn render_explanation(
     }
 }
 
-/// A digest-verified source excerpt for one uniquely resolved graph node.
+/// A bounded source excerpt for one uniquely resolved graph node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExplainedSource {
     pub file: String,
@@ -845,6 +845,9 @@ pub struct ExplainedSource {
     pub end_line: u32,
     pub source: String,
     pub truncated: bool,
+    /// True only when the complete recorded span matched a stored digest.
+    /// An anchor alone does not establish that current source is unchanged.
+    pub digest_verified: bool,
 }
 
 /// Reasons an explain source excerpt could not be produced.
@@ -865,8 +868,8 @@ pub enum ExplanationSourceError {
 /// Resolution follows the same rules as the explanation renderer: exact
 /// matches win, source-backed nodes are preferred, and an ambiguous or
 /// unsourced target is reported instead of guessed. The excerpt is bounded by
-/// `max_bytes`, and the recorded symbol digest is verified before the text is
-/// returned.
+/// `max_bytes`. A recorded symbol digest is verified before text is returned;
+/// without one, the excerpt explicitly reports that it is unverified.
 pub fn explanation_source(
     graph: &Graph,
     label: &str,
@@ -905,7 +908,7 @@ pub fn explanation_source(
     let anchor = node_source_anchor(node).ok_or_else(|| ExplanationSourceError::Unsourced {
         label: label.to_owned(),
     })?;
-    let digest = node_source_digest(node);
+    let digest = node_source_digest(node)?;
     let span = bounded_source_span(
         root,
         &anchor.file,
@@ -921,6 +924,7 @@ pub fn explanation_source(
         end_line: anchor.end_line,
         source: span.text,
         truncated: span.truncated,
+        digest_verified: digest.is_some(),
     })
 }
 
@@ -953,15 +957,22 @@ fn node_source_anchor(node: &NodeRecord) -> Option<NodeSourceAnchor> {
     })
 }
 
-fn node_source_digest(node: &NodeRecord) -> Option<String> {
-    node.attributes
-        .get("details")?
-        .as_object()?
-        .get("data")?
-        .as_object()?
-        .get("sourceDigest")?
+fn node_source_digest(node: &NodeRecord) -> Result<Option<String>, ExplanationSourceError> {
+    let Some(digest) = node
+        .attributes
+        .get("details")
+        .and_then(|details| details.pointer("/data/sourceDigest"))
+    else {
+        return Ok(None);
+    };
+    digest
         .as_str()
-        .map(str::to_owned)
+        .map(|value| Some(value.to_owned()))
+        .ok_or_else(|| {
+            ExplanationSourceError::Read(
+                "recorded source digest is not a string; rebuild the graph".to_owned(),
+            )
+        })
 }
 
 pub fn render_explanation_page(
