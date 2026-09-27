@@ -4257,3 +4257,39 @@ The [fixture review](../../benchmarks/agent_query/core_inference_fixture_review.
 binds the original seven failures, the sole changed Rust test file, the frozen
 production binary, and the before/after native logs. This restores the intended
 regression coverage; it does not prove any new graph query or god-object quality.
+
+
+## Class-span ranking diagnostic on the labeled Blob cohort
+
+The [registration](../../benchmarks/agent_query/mlcq_class_span_probe_registration.json)
+preceded a read-only, bounded scan of both frozen Compass typed graphs from the
+earlier MLCQ release-server follow-up. It fixes an intentionally simple
+alternative to topology degree: rank every source-located `class` node by the
+inclusive number of lines in its stored source span, breaking ties by exact
+node ID. This is a size diagnostic, not a responsibility or defect model. The
+scan keeps the same 55 reviewed classes and original four-positive/four-none
+primary panel; neither Compass nor Graphify was re-extracted or re-queried.
+
+The CloudStack graph contains 173,689 nodes and 6,373 admissible class spans;
+Eclipse contains 95,084 nodes and 6,628. The preregistered exact file/name/span
+join finds 48 of 55 reviewed classes uniquely. Seven uncertain secondary cases
+remain unavailable, with no alternate identity selected. All eight primary
+cases join uniquely. The four consensus-positive classes rank **131, 411, 426,
+and 714** in their respective repository class lists; the four consensus-none
+classes rank 3,532, 3,903, 4,333, and 5,692. Thus, size-only ranking retrieves
+**0/4 positive and 0/4 none** at each declared cutoff 10, 50 and 100. The
+earlier native hub panels also retrieve 0/4 positives for both Compass and
+Graphify at 100; those original results remain unchanged. This exploratory
+method provides no superiority result and should not be promoted as god-object
+detection.
+
+The first scanner attempt failed because the node array followed more than one
+MiB of graph metadata. Its raw failure is retained. A corrected streaming
+scanner kept the same registered ranking, labels, graph hashes and byte bounds;
+the complete 55-class verification repeats byte-identically. The
+[review](../../benchmarks/agent_query/mlcq_class_span_probe_review.json) binds
+both runs, all 55 joins, class counts, ranks and original native results. The
+cohort is known, purposively consensus-enriched Java development data. Source
+span measures neither functional cohesion nor independent responsibilities;
+the graph producer versions and CloudStack partial-coverage warning also remain
+explicit.
