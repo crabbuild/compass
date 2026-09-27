@@ -4354,3 +4354,39 @@ applicable stored Java field-contact evidence for this probe. Their source
 coverage and independent target accuracy remain unverified; the eight
 consensus classes' zero observed foreign-field references cannot be treated as
 zero foreign-state access or a god-object diagnosis.
+
+## Independent member-declaration check for rated Java classes
+
+The [registration](../../benchmarks/agent_query/mlcq_member_source_registration.json)
+fixed all eight consensus-rated source files and both frozen graph hashes before
+a public-JDK-17 syntax parse. The oracle parses those pinned files without
+project dependencies or attribution. It selects each class by the previously
+witnessed file, name and source line, then lists only its direct method,
+constructor and field declarations. Compass's direct `contains` members are
+matched by kind, name and overlapping source lines, with no first-candidate
+fallback. Source files and graphs remain byte-identical before and after.
+
+All **95 source methods and 65 source fields** across the eight classes match
+exactly one direct Compass member, with no extra graph method or field in those
+classes. All 95 method start and end lines match; all 65 field end lines match.
+Thirty-eight field start lines differ because the JDK includes preceding
+annotations in the declaration start while Compass starts at the field token.
+The JDK reports five explicit constructors, which this registered comparison
+does not match to graph `constructor` nodes. Full per-member records, source
+hashes, roles and both repeated-verification digests are in the
+[review](../../benchmarks/agent_query/mlcq_member_source_review.json).
+
+The first graph comparison wrongly treated Compass's displayed `.name()` as
+the source method name and therefore left all 95 methods unmatched; that raw
+run is retained. A corrected scanner explicitly removes the display wrapper
+before name matching, with the original source set, oracle output, graph hashes
+and class IDs unchanged. Independent verifier runs and repeated JDK oracle
+outputs are byte-identical. One externally rated positive class is an Eclipse
+**test class**, so these eight cases cannot be described as eight production
+god-object judgments.
+
+This establishes direct method/field *declaration coverage for this selected
+panel*. It does not validate their `calls` or `references` targets, demonstrate
+foreign-state access, measure cohesion, support a classifier, or generalize
+beyond these known Java cases. Those relation/source checks remain prerequisites
+for any responsibility score.
