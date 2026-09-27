@@ -633,6 +633,60 @@ fn discovery_cursor_survives_budget_alias_and_scope_order_but_rejects_graph_chan
 }
 
 #[test]
+fn natural_discovery_preserves_literal_subjects_in_prose() -> Result<(), Box<dyn Error>> {
+    let directory = tempfile::tempdir()?;
+    let graph = support::write_typed_graph(directory.path())?;
+    let mut document = GraphDocument::load(&graph)?;
+    let subject = document
+        .nodes
+        .iter_mut()
+        .find(|node| node.id == "n:target")
+        .ok_or("missing target fixture")?;
+    subject.name = "_BufferedSink".to_owned();
+    subject.qualified_name = "Fixture._BufferedSink".to_owned();
+    let mut duplicate = subject.clone();
+    duplicate.id = "n:duplicate".to_owned();
+    duplicate.qualified_name = "Other._BufferedSink".to_owned();
+    for ambiguous in [false, true] {
+        if ambiguous {
+            document.nodes.push(duplicate.clone());
+        }
+        std::fs::write(&graph, serde_json::to_vec_pretty(&document)?)?;
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_compass"))
+            .args([
+                "query",
+                "Explain _BufferedSink ownership and close behavior",
+                "--format=json",
+                "--graph",
+            ])
+            .arg(&graph)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let response: compass_model::query_contract::DiscoveryQueryResponse =
+            serde_json::from_slice(&output.stdout)?;
+        let seed = response.seeds.first().ok_or("missing subject seed")?;
+        assert_eq!(
+            seed.candidate_source,
+            compass_model::query_contract::DiscoverySeedSource::ExactName
+        );
+        assert_eq!(seed.ambiguous, ambiguous);
+        assert!(["n:target", "n:duplicate"].contains(&seed.node_id.as_str()));
+        if ambiguous {
+            assert!(seed.alternatives.iter().any(|other| {
+                ["n:target", "n:duplicate"].contains(&other.node_id.as_str())
+                    && other.node_id != seed.node_id
+            }));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn natural_discovery_exposes_the_public_json_contract_and_repeatable_or_scopes()
 -> Result<(), Box<dyn Error>> {
     let directory = tempfile::tempdir()?;

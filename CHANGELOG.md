@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve literal compound identifiers in natural discovery questions ahead
+  of generic behavior matches, while retaining declaration collisions and
+  uncertainty from bounded name lookups.
+
 - Preserve Java varargs signatures, parameter array types, and explicit array
   argument dimensions. Resolve supported overloads in strict, loose, then
   variable-arity order, retaining ambiguity when evidence cannot select a
