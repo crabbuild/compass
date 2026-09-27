@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Prefer exact IDs and symbol names for MCP neighbor navigation before broader
+  prefix/substring matches, while preserving genuine declaration ambiguity and
+  fuzzy fallback when no exact candidate exists.
+
 - Preserve literal compound identifiers in natural discovery questions ahead
   of generic behavior matches, while retaining declaration collisions and
   uncertainty from bounded name lookups.

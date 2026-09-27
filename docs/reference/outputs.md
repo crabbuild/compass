@@ -907,6 +907,23 @@ line fields; the result preserves it without inventing a line number. The
 existing 16 MiB structured-response bound applies and fails explicitly rather
 than silently dropping entries. Consumers must check the schema version.
 
+### MCP neighbor lookup
+
+`get_neighbors.label` accepts an exact node ID, normalized symbol or qualified
+name. Exact IDs preserve case and select that identity directly. Symbol lookup
+uses the same exact lookup and evidence-gated export-binding handling as MCP
+paths. A unique exact symbol takes precedence over broader names: `term_len()`
+resolves independently of `test_term_len()`. If no exact candidate exists, the
+legacy prefix/substring lookup remains available.
+
+Multiple exact candidates produce an ambiguity list instead of neighbors.
+Candidates are sorted by exact ID, with at most 20 displayed and an explicit
+omission count. Retry using an exact ID to choose a declaration. Multiple fuzzy
+candidates are also ambiguous. The text result and input schema are unchanged.
+A successful result reports distinct incoming/outgoing neighbors after applying
+`relation_filter`; use typed call-query results for individual occurrences and
+source sites. Displayed neighbor labels alone may still be ambiguous.
+
 ### Agent Query View
 
 The focused query commands and MCP query tools also expose the strict,

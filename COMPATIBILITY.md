@@ -149,10 +149,15 @@ projections rebuild from their unchanged graph. MCP membership, statistics,
 and other traversal consumers can now observe those stored communities.
 Graph schemas and published historical graphs are unchanged.
 
-MCP `get_neighbors` returns an explicit ambiguity list when multiple nodes
-match, ordered by exact ID with at most 20 displayed candidates and an omission
-count. Retry with an exact ID to choose a declaration. Exact IDs retain their
-case. The tool's input schema and the MCP result envelope are unchanged.
+MCP `get_neighbors` first resolves an exact ID or normalized symbol/qualified
+name using the shared exact lookup, including its evidence-gated export-binding
+handling. Prefix/substring fallback applies only when no exact candidate exists.
+A unique exact `term_len()` therefore remains navigable when `test_term_len()`
+exists. Multiple exact candidates remain ambiguous; ranking never chooses one.
+The ambiguity list is ordered by exact ID with at most 20 displayed candidates
+and an omission count. Retry with an exact ID to choose a declaration. Exact IDs
+retain their case. The tool's input schema and the MCP result envelope are
+unchanged. This corrects unnecessarily ambiguous lookups; no migration is needed.
 Relationship filters apply before repeated neighbors are grouped, so a stored
 call remains visible when a containment/reference edge precedes it. The tool
 continues to return distinct neighbors; typed call-query tools carry occurrence

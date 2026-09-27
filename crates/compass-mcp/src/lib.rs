@@ -2225,7 +2225,12 @@ fn tool_get_neighbors(
     let filter = optional_string(arguments, "relation_filter")
         .unwrap_or_default()
         .to_lowercase();
-    let matches = find_node(&context.graph, query);
+    let exact = find_exact_nodes(&context.graph, query);
+    let matches = if exact.is_empty() {
+        find_node(&context.graph, query)
+    } else {
+        exact
+    };
     let Some(&index) = matches.first() else {
         return Ok(format!("No node matching '{query}' found."));
     };
@@ -3232,6 +3237,138 @@ mod tests {
         assert!(members.contains("Core (2 nodes)"), "{members}");
         assert!(members.contains("Alpha [a.rs]"));
         assert!(members.contains("Beta [b.rs]"));
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_prefer_exact_symbols_to_broader_names()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        for typed in [false, true] {
+            let path = temp.path().join(format!("exact-{typed}.json"));
+            let mut nodes = vec![
+                json!({"id":"WidthID","label":"term_len()","qualifiedName":"Compat.term_len"}),
+                json!({"id":"width-test","label":"test_term_len()"}),
+                json!({"id":"request","label":"RequestID()"}),
+                json!({"id":"next-request","label":"NextRequestID()"}),
+                json!({"id":"follow","label":".follow()"}),
+                json!({"id":"follow-links","label":".follow_links()"}),
+                json!({"id":"callee","label":"Collaborator"}),
+            ];
+            if typed {
+                for node in &mut nodes {
+                    node["name"] = node["label"].clone();
+                    node.as_object_mut().ok_or("node")?.remove("label");
+                    node["kind"] = json!("function");
+                    node["source"] = json!({"file":"lib.rs","startLine":1});
+                }
+            }
+            fs::write(
+                &path,
+                serde_json::to_vec(&json!({
+                    "directed":true,"nodes":nodes,"links":[
+                        {"source":"WidthID","target":"callee","relation":"calls"},
+                        {"source":"request","target":"callee","relation":"calls"},
+                        {"source":"follow","target":"callee","relation":"calls"}
+                    ]
+                }))?,
+            )?;
+            let server = CompassMcp::new(&path);
+            for query in [
+                "term_len()",
+                "term_len",
+                "Compat.term_len",
+                "WidthID",
+                " WidthID ",
+                "REQUESTID()",
+                ".follow()",
+            ] {
+                let output = server.invoke(
+                    "get_neighbors",
+                    json!({"label":query,"relation_filter":"calls"})
+                        .as_object()
+                        .ok_or("args")?
+                        .clone(),
+                );
+                assert!(
+                    output.starts_with("Neighbors of "),
+                    "typed={typed} {query}: {output}"
+                );
+                assert!(output.contains("--> Collaborator [calls]"), "{output}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_preserve_all_exact_collisions_before_fuzzy_fallback()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        for reverse in [false, true] {
+            let path = temp.path().join(format!("collisions-{reverse}.json"));
+            let mut nodes = (0..22)
+                .map(|n| {
+                    json!({"id":format!("exact-{n:02}"),
+                "label":"run()","source_file":format!("src/{n}.rs")})
+                })
+                .collect::<Vec<_>>();
+            nodes.push(json!({"id":"fuzzy","label":"runLater()"}));
+            if reverse {
+                nodes.reverse();
+            }
+            fs::write(
+                &path,
+                serde_json::to_vec(&json!({"nodes":nodes,"links":[]}))?,
+            )?;
+            let server = CompassMcp::new(&path);
+            let output = server.invoke(
+                "get_neighbors",
+                json!({"label":"run"}).as_object().ok_or("args")?.clone(),
+            );
+            assert!(
+                output.starts_with("Ambiguous: 'run' matches 22 nodes."),
+                "{output}"
+            );
+            assert!(
+                output.contains("2 additional candidates omitted"),
+                "{output}"
+            );
+            assert!(!output.contains("fuzzy") && !output.contains("Neighbors of"));
+            let candidates = output
+                .lines()
+                .filter(|line| line.starts_with("  "))
+                .collect::<Vec<_>>();
+            assert_eq!(candidates.len(), 20);
+            for (n, line) in candidates.iter().enumerate() {
+                assert!(line.ends_with(&format!("id: exact-{n:02}")), "{line}");
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn mcp_neighbors_keep_unique_and_ambiguous_fuzzy_fallbacks()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("fallback.json");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({"nodes":[
+            {"id":"a","label":"UniqueHandle()"},{"id":"b","label":"SharedAlpha()"},
+            {"id":"c","label":"SharedBeta()"}],"links":[]}))?,
+        )?;
+        let server = CompassMcp::new(&path);
+        for (query, expected) in [
+            ("Unique", "Neighbors of UniqueHandle():"),
+            ("Shared", "Ambiguous: 'Shared' matches 2 nodes."),
+            ("Missing", "No node matching 'Missing' found."),
+        ] {
+            let output = server.invoke(
+                "get_neighbors",
+                json!({"label":query}).as_object().ok_or("args")?.clone(),
+            );
+            assert!(output.starts_with(expected), "{output}");
+        }
         Ok(())
     }
 
