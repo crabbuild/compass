@@ -2521,6 +2521,101 @@ under `native-explanation-01` and `native-explanation-02`. God-object diagnosis,
 responsibility synthesis, broader source precision, longer walks and fresh
 held-out confirmation remain outstanding.
 
+## Recorded member source and a shared neighbor/source-window control
+
+Registration `bac936f9` freezes the existing five subjects, 20 responsibility
+facts, graph snapshots and ten public endpoint-resolver responses. This is
+known development evidence. No selector substitutions rescue Compass's Redux
+candidate-limit failure. The opt-in `explain --source-members` implementation
+(`6d4df994`) follows recorded outgoing containment through nested types and
+returns callable spans in source order under one 8,000-byte source budget.
+Default declaration excerpts are unchanged. This new Compass capability has
+no claimed equivalent Graphify flag; its feature delta is not a paired win.
+
+A separate control gives each tool one public `get_neighbors` call with the
+previously selected ID. It groups outgoing `contains` / `method` rows by their
+returned file/start-line anchors, sorts them, and reads up to the next returned
+anchor in that file (at most 4,096 bytes for its final anchor). All windows share
+8,000 source bytes per subject. There are no extra pages, retries, fact-guided
+selection or end-line advantages. Graphify's displayed relation sites are
+checked against source declarations after capture. Windows do not establish
+unique target identity. This is one reproducible agent policy, not an optimal
+retrieval strategy or an equal-I/O experiment.
+
+| Subject | Compass member mode | Compass shared control | Graphify shared control |
+| --- | ---: | ---: | ---: |
+| Chi / Go | 3/4 | 3/4 | 3/4 |
+| Click / Python | 3/4 | 4/4 | 4/4 |
+| jsoup / Java | 4/4 | 3/4 | 4/4 |
+| Redux / TypeScript | 0/4 | 0/4 | 2/4 |
+| WalkDir / Rust | 3/4 | 1/4 | 2/4 |
+| **Complete facts supported by source** | **13/20** | **11/20** | **15/20** |
+
+The earlier declaration-only native result remains Compass 7/20, Graphify
+0/20; the earlier query-plus-source-read result remains Compass 11/20,
+Graphify 13/20. Keep these workflows separate. None of these tools' native
+renderings authors the requested mechanism explanations: explicit native
+responsibility assertions remain zero. Source evidence is not a synthesized
+answer or a god-object defect judgment.
+
+Member mode gains seven facts and loses one against declaration excerpts.
+Separately defined Go and Rust methods become available, and the Java attribute
+write now fits. However, Click's recorded getter span excludes `@property`.
+The initializer and getter body alone cannot establish property semantics, so
+that entire fact is denied. The shared windows retain the decorator and earn
+that fact for both tools. Chi's route handler remains outside the native budget;
+WalkDir's loop-check body is partial. Redux remains unresolved for Compass.
+
+Graphify leads the shared control by four facts: one Java, two TypeScript and
+one Rust. Compass's returned Java field and Rust field/type anchors consume
+window budget before later methods; Graphify exposes fewer such anchors. The
+same policy therefore produces different coverage. No missing or partial code
+is credited to close the gap.
+
+Exact literal witness coverage is 4/20 for member mode, 10/20 for Compass's
+control and 14/20 for Graphify's control. The semantic scores above separately
+allow leading indentation differences at callable-span starts and missing blank
+separators between complete bodies. Both controls also omit the Click class
+header, whose identity is already supplied by the verified selected owner;
+all initialization, decorator and getter code is present. Every exception and
+rejected fact is recorded individually. This is same-agent adjudication with a
+separate verifier, not independent human review.
+
+All 54 native member spans match stored full-span digests and pinned source
+bytes, including the returned prefixes of truncated members. Seven members are
+omitted by the byte budget across Chi and WalkDir; no member source read fails
+in this sample. All 130 returned membership anchors (69 Compass, 61 Graphify)
+were checked against declaration lines. Nine saved neighbor request/response
+pairs and every source window were verified. Compass reports no neighbor or
+transport truncation; no Graphify truncation marker was observed. Neither fact
+proves complete graph membership or general relationship precision.
+
+Native member mode returns 23,082 source bytes in 48,177 stdout bytes. The
+shared control returns 27,673 source bytes for Compass and 35,673 for Graphify;
+Compass's unresolved Redux subject contributes zero. Neighbor text totals are
+26,497 versus 6,980 bytes; full MCP responses total 281,242 versus 7,534 bytes.
+These figures exclude previously captured resolver traffic and do not measure
+latency or equal computational work.
+
+Validation passed: formatting, 13 focused query tests, 40 CLI query tests,
+60 MCP tests, workspace Clippy, 1,106 workspace tests (2 ignored), 9 product
+tests, the product boundary and a final CLI build. Recorded Rust source hashes
+match `6d4df994`; the final build matches the evaluated binary. JavaScript/viewer
+and extraction/resolution publication gates were not rerun because those
+surfaces are unchanged. Version remains 0.3.30. Discovery, metadata, source and
+verification-work bounds have native regressions; stale or missing source
+status remains explicit.
+
+The first external collector failed before any public request because of an
+invalid hash-helper read bound. Its log and script are retained; the corrected
+capture uses a fresh directory. A verifier parser initially included the summary
+heading as a member; its failed attempt is also retained. The corrected verifier
+passes, including byte-to-line consistency checks. Detailed judgments and hashes
+are in `benchmarks/agent_query/member_source_development_review.json`; external
+artifacts are under `member-source-02`. The next explanation work needs better
+source context and selection, actual responsibility synthesis, and fresh
+confirmation. This result does not establish overall superiority.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
