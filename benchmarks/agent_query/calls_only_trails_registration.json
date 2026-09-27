@@ -1,0 +1,24 @@
+{
+  "schema": "compass.calls-only-trails-registration/1",
+  "baselineCommit": "c39e54976275ac62d2287018e1f7e703c387bf05",
+  "graphRun": "java-state-access-02/run.json",
+  "graphRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "baselineBinary": "member-focus-02/compass",
+  "baselineBinarySha256": "e33934b94d1e254ba59906fddece098d8433bf7e31af746e46aac3dfc6744f97",
+  "sourceWitnesses": {
+    "longer_path_witnesses.json": "33d1cdccc5cfb6f4225674c36ee7616b6dc21e0a51c2c5bbedc8fa1e44ae8718"
+  },
+  "priorCapture": "longer-paths-01/capture/capture.json",
+  "priorCaptureSha256": "075483a7a072c7b7daa693b85c2601fdd8e35f9d5807dd43640e3670d21df5e0",
+  "scope": "Production correction informed by the known longer-path misses; development replay, not held-out evaluation.",
+  "contract": "Optional typed NodeTrailRequest.callsOnly defaults false. CLI node --calls-only and MCP get_node calls_only=true restrict directed traversal and direction/depth diagnostics to calls. Explicit natural call path from/call chain from syntax requests the same policy. Existing structural requests preserve behavior. No schema/cache/history/extraction version or dependency change.",
+  "qualification": "Native regressions for structural shortcuts, depth frontier, reverse structural-only vs reverse calls, dead ends/cycles, parallel occurrence selection, deterministic order, heuristic exclusion, node/edge/response limits, JSON/store parity, strict arguments and request serialization. Native baseline plus relevant CLI/MCP/product checks.",
+  "replay": "Use all five frozen source coordinates and graphs. Fresh public endpoint resolution under the unchanged exact workflow. For every source-resolved pair capture old default, new default, new --calls-only and new MCP get_node calls_only=true; use the two unresolved endpoint outcomes unchanged in their denominators. Capture new native short labels in both modes across all five cases. Compare default bytes against baseline. Retain every failure, alternate route and partial-graph diagnostic.",
+  "fairness": "This new Compass option is a native before/after arm. The frozen Graphify native-label and ID arms remain separately reported; Graphify path CLI and shortest_path MCP expose no equivalent relation filter in the inspected installed source. Do not claim equal feature flags or collapse best outputs across arms. A common public-neighbor traversal may later evaluate both tools under a separately registered algorithm.",
+  "limits": "Same depth 8, max_paths 1, existing default node/edge limits, 60 second deadline and 16 MiB CLI streams. MCP response bound 1 MiB. No speed or equal internal-work claim.",
+  "judgment": "Same exact source identities, directed call occurrences, confidence and independent alternate-source review as longer_path_review.json. Source-supported static chains are conditional. Missing declaration/lookup, ambiguity, incomplete graph/search and errors remain explicit.",
+  "limitations": [
+    "Known development panel, same-agent review.",
+    "No broad path population, authored answer, community/god-object or held-out superiority claim."
+  ]
+}
