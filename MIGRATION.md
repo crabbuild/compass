@@ -7,6 +7,11 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Rebuild Rust graphs to receive newly emitted field-access references. AST cache
+semantics version 8 invalidates earlier facts automatically; stored graphs and
+historical realizations are not rewritten. The added `member-access` references
+preserve source occurrences but do not classify reads/writes or prove cohesion.
+
 MCP neighbor responses now include exact destination records in
 `structuredContent.result` with schema `compass.query.neighbors/1`. Consumers
 that need machine identities should read those records instead of parsing text

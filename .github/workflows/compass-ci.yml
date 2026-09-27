@@ -110,6 +110,9 @@ jobs:
           cargo test -p compass-graph --test analyze_coverage --locked
           cargo test -p compass-query --test bounded_path_oracle --test code_traversal --test coverage_paths --locked
 
+      - name: Rust state-access evidence contracts
+        run: cargo test -p compass-languages -p compass-resolve --test rust_field_access --locked
+
       - name: Comparison scorer regressions (no competitor installation)
         run: python3 -m unittest discover -s benchmarks/agent_query/tests
 

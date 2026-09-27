@@ -2762,7 +2762,7 @@ Code inspection locates concrete producer gaps at baseline `7aef6a0c`:
   relabeling arbitrary state as callable.
 
 The existing member-access candidate projects to a `references` edge with
-`member-access` context, so qualified field-access evidence can use an existing
+member-access provenance, so qualified field-access evidence can use an existing
 relationship representation. The next production work belongs in language
 fact emission and qualified resolution, with shadowing/ambiguity negatives,
 precise occurrence anchors, bounded lookup, cache invalidation and affected

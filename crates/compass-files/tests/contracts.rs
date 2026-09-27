@@ -990,6 +990,11 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v2/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v3/e1"))?;
     fs::create_dir_all(cache_root.join("compass-out/cache/ast/v5/e1"))?;
+    fs::create_dir_all(cache_root.join("compass-out/cache/ast/v7/e1"))?;
+    fs::write(
+        cache_root.join("compass-out/cache/ast/v7/e1/stale.msgpack"),
+        "Rust facts without field-access occurrences",
+    )?;
     fs::write(
         cache_root.join("compass-out/cache/ast/v5/e1/stale.msgpack"),
         "stale Java spread parameter and array argument facts",
@@ -1032,6 +1037,7 @@ fn cache_versions_legacy_fingerprints_pruning_and_cleanup_are_total() -> Result<
     assert!(!cache_root.join("compass-out/cache/ast/v2").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v3").exists());
     assert!(!cache_root.join("compass-out/cache/ast/v5").exists());
+    assert!(!cache_root.join("compass-out/cache/ast/v7").exists());
 
     let mut cache = Cache::open(&root, CacheOptions::output_directory(Some(&cache_root)))?;
     assert!(

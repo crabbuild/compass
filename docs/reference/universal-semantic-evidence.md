@@ -864,3 +864,15 @@ source-proven inherited members. Parser recovery diagnostics use bounded,
 nonempty source ranges even when Tree-sitter reports a zero-width missing token.
 Do not infer support for another language or framework from file extensions,
 raw graph output, or total node and edge counts.
+
+
+### Rust field contacts
+
+Rust field expressions now emit `MemberAccess` occurrences and `AccessesMember`
+candidates under the existing `Members` capability. Candidates preserve the
+field identifier range, source owner, receiver spelling and bounded qualified
+receiver type when available. Targets are restricted to field declarations;
+unknown receivers remain unresolved, and method call selectors do not become
+field contacts. The existing graph projection emits `references` with
+member-access provenance. This is state-contact evidence, not read/write or alias
+analysis. Disposable AST semantics version 8 invalidates pre-access facts.

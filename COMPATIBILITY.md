@@ -31,6 +31,22 @@ not maintain command-specific fallbacks for older releases.
 Compass 0.3.0 itself remains supported. The extension adapts typed call-query
 results for the known nested-anchor limitation in that stable release.
 
+## Rust field-access evidence
+
+Rust extraction emits member-access occurrences for explicit field expressions,
+including fields in method receivers and scalar-indexed receiver chains when
+bounded source-type evidence establishes the nominal owner. Existing universal
+resolution selects only field declarations, preserving parallel occurrences.
+Graph v1 publishes these as `references` with member-access provenance, not as
+read/write-effect or runtime-alias proofs. Method-selector syntax is excluded.
+
+Unknown or shadowed receivers, ambiguous type paths, unsupported expressions,
+raw pointers and exhausted receiver-depth inference remain unresolved. These
+facts do not establish complete field-use coverage, class cohesion or god-object
+defects. Rebuild graphs to obtain the additive access records. AST cache semantics
+advance from 7 to 8; evidence/graph schemas, existing producer capabilities and
+package version are unchanged. Historical realizations remain immutable.
+
 ## Rust indexed method receivers
 
 Rust call extraction follows bounded field and scalar-index receiver syntax

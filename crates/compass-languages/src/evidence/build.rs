@@ -5029,8 +5029,8 @@ impl<'source> DirectEvidenceState<'source> {
         rust_qualify_evidence_path(self, &receiver.owner, &nominal, receiver.source_start)
     }
 
-    // Only called for receiver syntax containing an index. Unsupported forms
-    // stay unresolved instead of falling back to the collection's method.
+    // Bounded source types for indexed method receivers and field accesses.
+    // Unsupported forms stay unresolved instead of falling back to a name.
     fn rust_indexed_receiver_type(
         &self,
         owner: &DeclarationContext,
@@ -5772,6 +5772,7 @@ impl<'source> DirectEvidenceState<'source> {
         match node.kind() {
             "use_declaration" => return Ok(()),
             "call_expression" => self.add_rust_call(node, &active)?,
+            "field_expression" => self.add_rust_field_access(node, &active)?,
             "macro_invocation" => self.add_rust_macro_invocation(node, &active)?,
             _ => {}
         }
@@ -5898,6 +5899,73 @@ impl<'source> DirectEvidenceState<'source> {
                 Some(vec!["parameter".to_owned()]),
             )?;
         }
+        Ok(())
+    }
+
+    fn add_rust_field_access(
+        &mut self,
+        node: Node<'_>,
+        owner: &DeclarationContext,
+    ) -> Result<(), EvidenceError> {
+        if self.overlaps_parser_error(node) {
+            return Ok(());
+        }
+        // In `receiver.method()` the outer selector names a method. Its
+        // nested receiver fields still receive their own traversal visits.
+        let selector = node
+            .parent()
+            .filter(|parent| parent.kind() == "generic_function")
+            .unwrap_or(node);
+        if selector.parent().is_some_and(|parent| {
+            parent.kind() == "call_expression"
+                && parent
+                    .child_by_field_name("function")
+                    .is_some_and(|function| function.id() == selector.id())
+        }) {
+            return Ok(());
+        }
+        let (Some(receiver), Some(field)) = (
+            node.child_by_field_name("value"),
+            node.child_by_field_name("field"),
+        ) else {
+            return Ok(());
+        };
+        let spelling = self.text(field);
+        let qualifier = self.text(receiver);
+        if spelling.is_empty() || qualifier.is_empty() {
+            return Ok(());
+        }
+        let qualified_name = self
+            .rust_indexed_receiver_type(owner, receiver, 32)
+            .and_then(|source_type| self.rust_indexed_type_name(&source_type))
+            .map(|receiver_type| rust_join_qualified(&receiver_type, &spelling));
+        let occurrence_id = self.builder.occur_with_context(
+            SemanticRole::MemberAccess,
+            &owner.fact_id,
+            &spelling,
+            Some(&qualifier),
+            Some(&owner.scope_id),
+            Some("member"),
+            range_for_node(self.source_file, field),
+        )?;
+        self.builder.relate(
+            CandidateRelation::AccessesMember,
+            &owner.fact_id,
+            Some(&occurrence_id),
+            None,
+            &spelling,
+            ResolutionConstraint {
+                exact_language: Some(self.language.to_owned()),
+                scope_id: Some(owner.scope_id.clone()),
+                qualified_name,
+                allowed_target_kinds: vec!["field".to_owned()],
+                // An unknown receiver stays qualified but unresolved. No
+                // terminal-name fallback, method target, or external field
+                // invention can establish a state-sharing relationship.
+                allow_external: false,
+                ..ResolutionConstraint::default()
+            },
+        )?;
         Ok(())
     }
 

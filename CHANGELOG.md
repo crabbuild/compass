@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Emit Rust field-access evidence for source-proven nominal receivers, preserving
+  exact occurrences and unknown or shadowed receiver outcomes. Publish qualified
+  field contacts as references without inventing read/write effects. Rebuild
+  graphs to refresh older AST caches.
+
 - Add `search --exact` and MCP `search_symbols` exact mode with optional
   source file, declaration line and node-kind filters. Return all bounded exact
   matches without lexical fallback; preserve ambiguity and incomplete lookup.
