@@ -33,6 +33,35 @@ class SourceWindowTests(unittest.TestCase):
         self.assertEqual(r['omittedGroups'], [dict(file='x', line=3)])
         self.assertFalse(score_windows(self.root, self.case(), r)[0]['sufficientSourceEvidence'])
 
+    def test_reranking_keeps_original_interval_ends(self):
+        rows = [dict(file='x', line=i) for i in [1, 2, 3, 4]]
+        order = [('x', 3), ('x', 1), ('x', 4), ('x', 2)]
+        control = source_windows(self.root, rows, 8, ordered_groups=order)
+        self.assertEqual([(w['startByte'], w['endByte'], w['requestedEndByte'])
+                          for w in control['windows']], [(13, 19, 19), (0, 2, 6)])
+        self.assertEqual(control['omittedGroups'], [dict(file='x', line=4), dict(file='x', line=2)])
+        self.assertTrue(score_windows(self.root, self.case('third', 3, 3), control)[0]['sufficientSourceEvidence'])
+
+    def test_reranking_retains_last_anchor_cap_and_other_file_boundaries(self):
+        (self.root / 'y').write_bytes(b'y' * 5000)
+        rows = self.rows + [dict(file='y', line=1)]
+        control = source_windows(self.root, rows, 32000,
+                                 ordered_groups=[('y', 1), ('x', 3), ('x', 1)])
+        self.assertEqual(control['windows'][0]['endByte'], 4096)
+        self.assertEqual(control['windows'][1]['endByte'], len(self.data))
+        self.assertEqual(control['windows'][2]['endByte'], 13)
+
+    def test_reordered_groups_must_be_an_exact_permutation(self):
+        for order in [[], [('x', 1), ('x', 1)], [('x', 1), ('other', 3)],
+                      [('x', True), ('x', 3)], [('x', 1), ['x']], 'bad']:
+            with self.subTest(order=order), self.assertRaises(ValueError):
+                source_windows(self.root, self.rows, 10, ordered_groups=order)
+
+    def test_explicit_source_order_is_identical_to_default(self):
+        self.assertEqual(source_windows(self.root, self.rows, 16),
+                         source_windows(self.root, self.rows, 16,
+                                        ordered_groups=[('x', 1), ('x', 3)]))
+
     def test_last_window_has_4096_byte_cap(self):
         (self.root / 'x').write_bytes(b'a' * 5000)
         r = source_windows(self.root, [self.rows[0]], 32000)

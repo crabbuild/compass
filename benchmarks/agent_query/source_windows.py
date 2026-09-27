@@ -19,7 +19,7 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def source_windows(root, rows, budget):
+def source_windows(root, rows, budget, *, ordered_groups=None):
     if type(budget) is not int or not 1 <= budget <= 1048576:
         raise ValueError('source budget must be an integer from 1 to 1048576')
     if not isinstance(rows, list) or len(rows) > MAX_ROWS:
@@ -57,16 +57,34 @@ def source_windows(root, rows, budget):
         if line >= len(offsets[file]):
             raise ValueError('membership line outside source')
     keys = sorted(groups)
+    if ordered_groups is None:
+        visit = keys
+    else:
+        if not isinstance(ordered_groups, list) or len(ordered_groups) != len(keys):
+            raise ValueError('window order must contain every source group exactly once')
+        for key in ordered_groups:
+            if (not isinstance(key, (list, tuple)) or len(key) != 2
+                    or not isinstance(key[0], str) or type(key[1]) is not int):
+                raise ValueError('invalid ordered source group')
+        visit = [tuple(key) for key in ordered_groups]
+        if len(set(visit)) != len(keys) or set(visit) != set(keys):
+            raise ValueError('window order must contain every source group exactly once')
+    # End boundaries belong to source order, never to the chosen visit order.
+    ends = {}
+    for index, (file, line) in enumerate(keys):
+        following = keys[index + 1] if index + 1 < len(keys) else None
+        start = offsets[file][line - 1]
+        ends[file, line] = (offsets[file][following[1] - 1]
+                           if following and following[0] == file
+                           else min(len(files[file]), start + 4096))
     windows = []
     remaining = budget
-    for index, (file, line) in enumerate(keys):
+    for file, line in visit:
         if not remaining:
             break
         data = files[file]
         start = offsets[file][line - 1]
-        following = keys[index + 1] if index + 1 < len(keys) else None
-        end = (offsets[file][following[1] - 1] if following and following[0] == file
-               else min(len(data), start + 4096))
+        end = ends[file, line]
         kept_end = min(end, start + remaining)
         part = data[start:kept_end]
         windows.append(dict(file=file, startLine=line, startByte=start, endByte=kept_end,
@@ -78,7 +96,7 @@ def source_windows(root, rows, budget):
         if read_bounded(root / file, MAX_FILE_BYTES) != data:
             raise ValueError('source changed during window planning')
     return dict(budget=budget, sourceBytes=budget - remaining, windows=windows,
-                omittedGroups=[dict(file=f, line=n) for f, n in keys[len(windows):]],
+                omittedGroups=[dict(file=f, line=n) for f, n in visit[len(windows):]],
                 sourceReadBytes=total, missingAnchorRows=[])
 
 
