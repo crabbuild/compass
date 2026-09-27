@@ -9,6 +9,7 @@ mod code_query;
 mod cql;
 mod discovery;
 mod discovery_text;
+mod export_binding;
 mod graph_engine;
 mod index;
 mod intent;

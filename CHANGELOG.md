@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Resolve coincident export-binding and declaration name matches through exact
+  export evidence, improving symbol-based paths and relationship queries while
+  preserving genuine ambiguity and exact-ID selection. Traversal caches retain
+  the weakest relationship confidence and deferred state.
+
 - Resolve Java method receivers constructed directly at the call site,
   including qualified types and bounded parentheses, while retaining overload
   and occurrence evidence. Stop turning arbitrary receiver expressions into

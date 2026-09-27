@@ -3190,25 +3190,63 @@ impl CodeQueryEngine {
         }
         let normalized = normalize_symbol(query);
         let candidate_limit = usize::try_from(response.limits.max_candidates).unwrap_or(usize::MAX);
-        let (exact_nodes, exact_truncated) = self
+        let (mut exact_nodes, exact_truncated) = self
             .backend
             .nodes_by_normalized_name(&normalized, candidate_limit)?;
         instrumentation.work.candidates_read = instrumentation
             .work
             .candidates_read
             .saturating_add(u64::try_from(exact_nodes.len()).unwrap_or(u64::MAX));
+        let mut proof_truncated = false;
+        if !exact_truncated
+            && exact_nodes.len() > 1
+            && exact_nodes.len() <= crate::export_binding::MAX_EXPORT_PROOF_CANDIDATES
+            && exact_nodes.iter().any(|node| node.kind == NodeKind::Export)
+        {
+            use crate::export_binding::{
+                BindingEdge, BindingNode, ProofRead, redundant_export_bindings,
+            };
+            let candidates = exact_nodes
+                .iter()
+                .map(BindingNode::typed)
+                .collect::<Vec<_>>();
+            let pinned = self.backend.pin_discovery()?;
+            let proof = redundant_export_bindings(&candidates, |node, inbound, limit| {
+                let kinds = if inbound {
+                    &[EdgeKind::Contains]
+                } else {
+                    &[EdgeKind::Exports]
+                };
+                let (edges, truncated, examined) =
+                    pinned.matching_bounded_counted(node, inbound, kinds, true, limit)?;
+                Ok::<_, QueryError>(ProofRead {
+                    edges: edges.iter().map(BindingEdge::typed).collect(),
+                    truncated,
+                    examined,
+                })
+            })?;
+            instrumentation.work.edges_expanded = instrumentation
+                .work
+                .edges_expanded
+                .saturating_add(u64::try_from(proof.examined).unwrap_or(u64::MAX));
+            proof_truncated = proof.truncated;
+            response.truncated |= proof_truncated;
+            exact_nodes.retain(|node| !proof.redundant.contains(&node.id));
+        }
         let exact = exact_nodes
             .iter()
             .map(|node| node.id.clone())
             .collect::<Vec<_>>();
         response.truncated |= exact_truncated;
         match exact.as_slice() {
-            [node] if !exact_truncated => return Ok(Some(node.clone())),
+            [node] if !exact_truncated && !proof_truncated => return Ok(Some(node.clone())),
             [] => {}
             _ => {
                 response.diagnostics.push(QueryDiagnostic {
                     code: QueryDiagnosticCode::AmbiguousMatch,
-                    message: if exact_truncated {
+                    message: if proof_truncated {
+                        format!("Symbol {query:?} remains ambiguous because export evidence exceeded the {}-edge proof bound", crate::export_binding::MAX_EXPORT_PROOF_EDGES)
+                    } else if exact_truncated {
                         format!(
                             "Symbol {query:?} exceeded the {}-candidate resolution bound",
                             response.limits.max_candidates

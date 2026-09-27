@@ -959,7 +959,7 @@ impl GraphDocument {
 
 const QUERY_CACHE_MAGIC: &[u8; 8] = b"TRAILG01";
 const AFFECTED_CACHE_MAGIC: &[u8; 8] = b"TRAILA02";
-const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT05";
+const TRAVERSAL_CACHE_MAGIC: &[u8; 8] = b"TRAILT06";
 const QUERY_CACHE_HEADER_LEN: usize = 28;
 static QUERY_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -1012,6 +1012,7 @@ struct TraversalRawEdge {
     source_location: Option<Value>,
     relationship_site: Option<Value>,
     evidence_confidence: Option<Value>,
+    deferred: Option<Value>,
 }
 
 #[derive(Default)]
@@ -1115,17 +1116,17 @@ impl<'de> Deserialize<'de> for TraversalRawEdge {
                         "kind" => edge.kind = Some(map.next_value()?),
                         "confidence" => edge.confidence = Some(map.next_value()?),
                         "context" => edge.context = Some(map.next_value()?),
+                        "deferred" => edge.deferred = Some(map.next_value()?),
                         "source_file" => edge.source_file = Some(map.next_value()?),
                         "source_location" => edge.source_location = Some(map.next_value()?),
                         "relationshipSite" => edge.relationship_site = Some(map.next_value()?),
                         "evidence" => {
-                            let first_confidence = map
-                                .next_value::<TraversalEvidenceItems>()?
-                                .0
-                                .into_iter()
-                                .next()
-                                .and_then(|evidence| evidence.confidence);
-                            edge.evidence_confidence = first_confidence;
+                            edge.evidence_confidence = weakest_traversal_confidence(
+                                map.next_value::<TraversalEvidenceItems>()?
+                                    .0
+                                    .into_iter()
+                                    .map(|evidence| evidence.confidence.unwrap_or(Value::Null)),
+                            );
                         }
                         _ => {
                             let _: IgnoredAny = map.next_value()?;
@@ -1315,6 +1316,7 @@ struct TraversalCacheEdge(
     Option<Value>,
     Option<Value>,
     Option<Value>,
+    Option<Value>,
 );
 
 impl TraversalRawGraphDocument {
@@ -1429,20 +1431,10 @@ impl TraversalRawEdge {
             source_location,
             relationship_site,
             evidence_confidence,
+            deferred,
         } = self;
-        let confidence = confidence
-            .as_ref()
-            .and_then(value_as_python_string)
-            .map(Value::String)
-            .or_else(|| {
-                evidence_confidence.map(|value| match value.as_str() {
-                    Some("exact") => Value::String("EXTRACTED".to_owned()),
-                    Some("inferred") => Value::String("INFERRED".to_owned()),
-                    Some("ambiguous") => Value::String("AMBIGUOUS".to_owned()),
-                    Some("unresolved") => Value::String("UNRESOLVED".to_owned()),
-                    Some(_) | None => value,
-                })
-            });
+        let confidence =
+            weakest_traversal_confidence(confidence.into_iter().chain(evidence_confidence));
         TraversalCacheEdge(
             source,
             target,
@@ -1471,8 +1463,23 @@ impl TraversalRawEdge {
                     .and_then(Value::as_object)
                     .and_then(source_anchor_location),
             ),
+            deferred,
         )
     }
+}
+
+// Traversal consumes the conservative confidence of the complete evidence set.
+// Unknown or malformed confidence must not become an exact structural fact.
+fn weakest_traversal_confidence(values: impl Iterator<Item = Value>) -> Option<Value> {
+    values
+        .map(|value| match value.as_str() {
+            Some("exact" | "EXTRACTED") => "EXTRACTED",
+            Some("inferred" | "INFERRED") => "INFERRED",
+            Some("ambiguous" | "AMBIGUOUS") => "AMBIGUOUS",
+            _ => "UNRESOLVED",
+        })
+        .max_by_key(|value| (confidence_rank(value), *value))
+        .map(|value| Value::String(value.to_owned()))
 }
 
 fn projected_string_value(direct: Option<&Value>, fallback: Option<String>) -> Option<Value> {
@@ -1539,6 +1546,7 @@ impl TraversalCacheDocument {
                     context,
                     source_file,
                     source_location,
+                    deferred,
                 ) = edge;
                 let mut attributes = Map::new();
                 insert_optional_value(&mut attributes, "relation", relation);
@@ -1546,6 +1554,7 @@ impl TraversalCacheDocument {
                 insert_optional_value(&mut attributes, "context", context);
                 insert_optional_value(&mut attributes, "source_file", source_file);
                 insert_optional_value(&mut attributes, "source_location", source_location);
+                insert_optional_value(&mut attributes, "deferred", deferred);
                 EdgeRecord {
                     source,
                     target,

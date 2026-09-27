@@ -511,7 +511,7 @@ pub fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
         return Vec::new();
     }
     let norm_query = strip_diacritics(label).to_lowercase().trim().to_owned();
-    graph
+    let matches = graph
         .nodes()
         .filter_map(|(index, node)| {
             let norm_label = normalized_label(node);
@@ -528,7 +528,8 @@ pub fn find_exact_nodes(graph: &Graph, label: &str) -> Vec<NodeIndex> {
                 || (!norm_qualified_name.is_empty() && norm_query == norm_qualified_name))
                 .then_some(index)
         })
-        .collect()
+        .collect();
+    crate::export_binding::legacy_candidates(graph, matches)
 }
 
 fn normalized_qualified_name(node: &NodeRecord) -> String {

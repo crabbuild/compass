@@ -7,6 +7,12 @@ layout remains visible and clearly owned.
 
 ## Graph rebuilds and query resolution
 
+Name-based queries can now resolve a coincident export binding to its proven
+declaration. Use the exact export node ID when you want the binding record.
+This query correction works on existing graphs. Older traversal caches rebuild
+automatically to retain mixed-confidence and deferred relationship evidence;
+graph re-extraction is not required for that cache correction.
+
 Rebuild Java graphs to receive the constructor-receiver correction. Direct
 constructor method calls can gain source-proven targets; invented external
 targets and unrelated imported-class construction edges can disappear. Normal

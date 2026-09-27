@@ -306,6 +306,30 @@ that parsed caveat text from continuation pages must read it from page one.
 
 ### TypeScript path aliases and file-shaped path input
 
+Exact name lookup can identify both an export binding and its declaration.
+When complete, bounded graph evidence proves that the binding's exact source
+range belongs to one owner and exports one matching declaration, lookup removes
+the redundant binding candidate. Both records retain their graph identities;
+an exact export ID still selects the binding. The declaration must already be
+in the exact-name candidate set and share the binding's qualified name,
+normalized name, and source file. This applies to typed relationship/trail
+queries and the exact lookup used by paths, explanations, and MCP navigation.
+
+Different declarations, multiple export targets, incomplete source ranges,
+inferred/ambiguous/deferred evidence, and incomplete candidate sets keep their
+ambiguity. Additional proof examines at most 256 candidates and 1,024 adjacency
+entries plus a truncation probe. Exhaustion retains the original candidates;
+typed responses report truncation and an ambiguity diagnostic. Graph schemas,
+stored identities, and extraction are unchanged. Existing graphs can receive
+this lookup correction without re-extraction.
+
+Traversal cache format advances from `TRAILT05` to `TRAILT06` to retain deferred
+relationship flags and the weakest confidence across all evidence, including
+explicit compatibility confidence. Missing or unknown confidence values in an
+evidence item cannot establish an exact fact. Older disposable traversal
+caches rebuild from the authoritative graph; published historical graphs are
+not rewritten.
+
 A TypeScript or JavaScript project that is the `extends` base of another
 project keeps its own `compilerOptions.paths` when it declares `files` or
 `include`. Only a base config without its own file set stays excluded, and a

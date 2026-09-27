@@ -1565,13 +1565,70 @@ and topology checks, lifecycle determinism, Markdown checks, the release build,
 and frontend precedence/positive/negative checks. This pass qualifies Java
 production commit `22814e59`; it does not establish comparative superiority.
 
+#### Export binding query resolution and traversal cache fidelity
+
+Redux's `miniKindOf` has separate export and function records. The graph already
+contains its three reviewed local calls, but ordinary name lookup previously
+refused the export/function pair as ambiguous. Lookup now removes a redundant
+export candidate only when complete exact, nondeferred `contains` and `exports`
+evidence proves one declaration at the binding occurrence. The declaration must
+already be a candidate with the same normalized name, nonempty qualified name,
+and source file. Genuine competing declarations remain ambiguous; exact export
+IDs retain their original meaning. Proof is bounded to 256 candidates and 1,024
+examined edges plus one truncation probe. Exhaustion retains the original
+candidates and reports incomplete typed resolution.
+
+A failed-before regression also exposed the compact traversal reader retaining
+only the first evidence confidence and dropping `deferred`. It now retains the
+weakest confidence across evidence and the compatibility field, plus deferred
+state. Disposable traversal cache magic advances from `TRAILT05` to `TRAILT06`;
+published graphs, identities, schemas, and AST cache semantics remain unchanged.
+
+Fresh paired extraction and all 110 unchanged requests on the same Go, Python,
+Java, TypeScript, and Rust pins produce **byte-identical graphs for both tools**
+relative to the Java checkpoint. The three newly passing text questions are
+Redux callees and the two directions of the undirected `miniKindOf`/`ctorName`
+path. Source review confirms the three local callees and the call occurrence;
+the reverse traversal does not claim a reversed call.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Query text oracle | 49/55 | 46/55 |
+| Source-checked paths | 8/10 | 8/10 |
+| Selected source relationships | 17/21 | 20/21 |
+| All reviewed occurrences, corrected Click oracle | 17/21 | 17/21 |
+
+The unchanged relationship oracle still cannot identify four Redux pairs
+uniquely because export and function records remain distinct. These failures
+are retained; they are neither four missing calls nor recovered extraction
+relationships. Both WalkDir ordinary-name path witnesses still fail both tools:
+Compass preserves genuine ambiguity, while Graphify returns an unreviewed
+route. A separate post-output source census reviews 126 coincident Redux
+bindings; this establishes static correspondence, not 126 successful public
+queries or representative precision. The
+[development review](../../benchmarks/agent_query/export_binding_development_review.json)
+records source, executable, graph, oracle, and raw-artifact hashes.
+
+Verification: **1,180 native tests passed, zero failed, two ignored** across
+workspace libraries/binaries and the selected export, cache, traversal, store,
+CLI query, and product integration targets. The four export regressions include
+direct SQLite, JSON, generic materialized store, cold/warm projection, preserved
+ID/ambiguity behavior, and proof exhaustion. The cache regression includes
+mixed-confidence order, deferred state, and stale cache rebuilding. Workspace
+and selected-integration Clippy pass with warnings denied. A new full fixture
+qualification is running; the previous Java pass does not qualify this change.
+No MCP rerun, full-answer precision, community cohesion, god-object quality,
+directed/long-path, latency, or general superiority claim follows. This reused
+panel remains development evidence.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
    The corrected fixture and selected real-source evidence above do not replace
    those broader checks.
-2. Extend source-proven loop/result/iterator inference and TypeScript declaration
-   identity to recover the remaining fd and Redux misses. Address Java varargs
+2. Extend source-proven loop/result/iterator inference to recover the remaining
+   fd misses. Evaluate TypeScript identity independently of the bounded query
+   binding proof above. Address Java varargs
    signature completeness and unresolved receiver forms with separate evidence.
    Keep exact
    build/source provenance for subsequent release comparisons;
