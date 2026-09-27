@@ -188,7 +188,14 @@
       "coarse source location",
       "weakest mixed confidence and deferred state"
     ],
-    "fullFixtureQualification": "Running separately; previous Java full pass does not qualify this query/cache change."
+    "fullFixtureQualification": {
+      "status": "passed",
+      "exitCode": 0,
+      "productionCommit": "9b63873a",
+      "scope": "Native scale ceilings, semantic/topology assertions, deterministic lifecycle builds, Markdown, release build and frontend precedence/positive/negative/source-anchor checks.",
+      "logSha256": "08d1d2312cbe4860772a9e7ebf03de41e4c257a03a4ec366cde5ebf2cb93dad4",
+      "releaseExecutableSha256": "a073e8599c83f14fa21e37359ff3c183540c36adce7b7bbdea4823c9f031c322"
+    }
   },
   "remainingLimits": [
     "WalkDir ordinary-name path witnesses fail both tools; Compass retains genuine ambiguity and Graphify returns an unreviewed route.",
@@ -227,6 +234,7 @@
     "export-binding-resolution/native-before.log": "110c861b9e2a5806b5e9d4505af0dc66fdbc859d336d86e72eb503a9fbb17d35",
     "export-binding-resolution/native-broad-01.log": "27a6976b0a8c97692f75940feb5fa80c0942aa0bfa94a0b39760fdc48b0d449e",
     "export-binding-resolution/panel-a-01.log": "91ef624640fff89c04522ee0fd95fdd9ab0d35eba5d7e89ac54fdda4d5f9d55d",
-    "runs/export-binding-panel-a-01/run.json": "c96dfecd4fc47096673e7b1eb105e79fb8a3a631394e79be7be1227c0c1db8a4"
+    "runs/export-binding-panel-a-01/run.json": "c96dfecd4fc47096673e7b1eb105e79fb8a3a631394e79be7be1227c0c1db8a4",
+    "export-binding-resolution/full-qualification-01.log": "08d1d2312cbe4860772a9e7ebf03de41e4c257a03a4ec366cde5ebf2cb93dad4"
   }
 }

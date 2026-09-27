@@ -1615,8 +1615,12 @@ CLI query, and product integration targets. The four export regressions include
 direct SQLite, JSON, generic materialized store, cold/warm projection, preserved
 ID/ambiguity behavior, and proof exhaustion. The cache regression includes
 mixed-confidence order, deferred state, and stale cache rebuilding. Workspace
-and selected-integration Clippy pass with warnings denied. A new full fixture
-qualification is running; the previous Java pass does not qualify this change.
+and selected-integration Clippy pass with warnings denied. Full fixture
+qualification for production commit `9b63873a` completed with exit zero,
+including native scale ceilings, semantic/topology checks, lifecycle
+determinism, Markdown, release compilation, and frontend precedence,
+positive/negative, and independent source-anchor checks. The release binary
+and qualification log hashes are recorded in the development review.
 No MCP rerun, full-answer precision, community cohesion, god-object quality,
 directed/long-path, latency, or general superiority claim follows. This reused
 panel remains development evidence.
