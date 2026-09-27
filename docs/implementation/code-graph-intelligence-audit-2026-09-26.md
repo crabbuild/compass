@@ -3519,6 +3519,68 @@ Unscoped name ambiguity, Redux function-expression identity, runtime feasibility
 authored explanations, actual god-object judgments, functional community quality
 and held-out confirmation remain open.
 
+## Shared public-neighbor call-path workflow
+
+Registration `553d2365` and harness `221e0b3a` fix a common FIFO breadth-first
+search over public outgoing `calls` neighbors. The same five source endpoint
+pairs, graph snapshots, depth-eight limit, 128-expansion limit, 512-request
+limit and 16 MiB workflow response budget apply to both tools. Endpoint lookups
+count toward the request and byte budgets. No graph contents or source files
+select requests; the verifier reads them only after capture.
+
+The adapters preserve an interface difference: Compass returns destination
+IDs and complete records, while Graphify returns labels. Graphify therefore
+needs public `get_node(label)` bridge lookups, cached including failures.
+Ambiguity is retained as an incomplete branch; no declaration is guessed from
+the caller's file or the call-site location. This measures an identity-preserving
+public workflow, not equal internal algorithm work or equal API capabilities.
+
+| Repository | Compass | Graphify |
+| --- | --- | --- |
+| Chi | Six supported static calls | Intermediate `Method` label ambiguous |
+| Click | Six supported static calls, stdin branch | Intermediate stdin/stdout labels ambiguous |
+| jsoup | Five supported static calls, `createShell` route | No outgoing calls at the starting node |
+| Redux | Endpoint unresolved | Endpoint unresolved |
+| WalkDir | Four supported static calls | Endpoint resolves to the wrong source coordinate |
+
+The workflow yields **4/5 versus 0/5 source-supported static call paths**.
+Graphify's native-label path already succeeds on Click in a separate arm;
+this result identifies a public-neighbor identity gap rather than inability to
+find that graph path. Empty projections and pruned ambiguous branches receive
+no global source-disconnection credit. No run exhausted its workflow budget.
+
+Every returned Compass parallel call record is source-checked. The Click stdin
+alternative was already reviewed in the earlier Graphify native-label arm.
+The jsoup node sequence follows the registered `createShell` route, but its
+returned `appendElement` occurrences are the head/body calls at lines 70/71,
+not frozen line 69. Both shell calls at lines 126/127 are retained. Only Chi
+and WalkDir contain a frozen occurrence for every step. Static source support,
+exact occurrence credit and runtime feasibility remain distinct. The earlier
+native jsoup `Document.body` fallback caveat still applies to that earlier
+result; this workflow does not replace it.
+
+All 110 public requests replay exactly, all 20 endpoint resolver results remain
+unchanged, and all 76 neighbor responses match their full graph projections.
+Source pins, source/graph/executable hashes, raw transcripts and the 227 installed
+Graphify package file hashes are checked. Repeated verification is byte-identical.
+`public_neighbor_path_review.json` retains the outcomes and external
+`public-neighbor-path-01` artifact hashes.
+
+Compass used 72 requests and 1,558,220 response bytes; Graphify used 38 requests
+and 11,001 bytes. These costs include unsuccessful lookups. Compass explored
+more nodes and returned richer records; the totals do not establish an
+efficiency advantage. Known jsoup/Redux graph coverage gaps remain explicit.
+
+All 218 benchmark tests and the product boundary pass. Fourteen new harness
+tests include an independent simple-path oracle over all 4,096 four-node
+directed graphs at three depth bounds, plus identity, truncation, direction,
+cycle, caching, parallel-record and resource-limit cases. The first full suite
+attempt hit an existing subprocess `killpg` permission error; the unchanged
+repeat passed and both logs are retained. No Rust, JavaScript, packaging or
+platform tests were rerun for this evaluation-only change. Product version
+remains 0.3.30. Authored explanations, actual god-object judgments, functional
+communities and held-out superiority remain unproven.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

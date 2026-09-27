@@ -775,3 +775,31 @@ Clippy, product-boundary and build results. Repeated verification is identical.
 External `calls-only-trails-01` retains raw evidence and logs. This is a native
 before/after result, with no equivalent Graphify path filter, held-out claim,
 authored-answer score or overall superiority claim. Version remains 0.3.30.
+
+### Shared public-neighbor call-path workflow
+
+`public_neighbor_path_registration.json` freezes a common bounded FIFO search;
+`public_neighbor_paths.py` consumes only public MCP results. Both tools receive
+the same source endpoint questions and workflow limits. Compass supplies
+destination IDs directly; Graphify requires cached public label lookups, whose
+ambiguities remain incomplete branches. This compares public navigation
+workflows, with identity capabilities and internal work still differing.
+
+`public_neighbor_path_review.json` records **4/5 versus 0/5** source-supported
+static call paths. Graphify encounters intermediate ambiguity in Chi/Click,
+no outgoing calls at the jsoup start, and unresolved Redux/WalkDir endpoints.
+Its separate native Click path success remains visible. Compass still misses
+Redux. Its jsoup `createShell` route uses different call occurrences from the
+frozen witness, and Click uses the previously reviewed stdin alternative.
+Only Chi/WalkDir have a frozen occurrence at every step. No runtime feasibility
+or global absence score is assigned.
+
+All 110 public requests replay exactly; 20 endpoint results are unchanged and
+76 neighbor projections match the frozen graphs. Response costs are 1,558,220
+bytes over 72 Compass calls and 11,001 bytes over 38 Graphify calls, including
+failures; they do not establish equal-work efficiency. All 218 benchmark tests
+and the product boundary pass on repeat. The first suite's subprocess cleanup
+permission error is retained. Fourteen new tests include all 4,096 four-node
+directed graphs at three depth bounds. External `public-neighbor-path-01`
+retains raw evidence and repeated verification. No product/version change,
+held-out evidence or overall superiority claim follows.
