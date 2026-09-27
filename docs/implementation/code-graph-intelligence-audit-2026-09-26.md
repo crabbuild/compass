@@ -3386,6 +3386,82 @@ qualified under a newly registered common workflow, preserving this negative
 result. Longer paths, authored answers, functional communities, actual god-object
 judgments and held-out confirmation remain open.
 
+## Longer directed call paths: route selection remains a gap
+
+The five new endpoint pairs in `longer_path_witnesses.json` extend the earlier
+chains to six calls in Chi, seven in Click (with a registered six-call
+alternative), five in jsoup, four in Redux and four in WalkDir. These are
+source-selected positive witnesses on known development repositories. They do
+not establish shortest paths, unconditional execution or held-out accuracy.
+Registration commit `0f3df063` precedes the new endpoint requests.
+
+Both tools use the same source symbol, file and declaration line. Compass uses
+its public exact scoped search; Graphify uses `file::symbol` lookup with the
+same source-coordinate check afterward. Each gets one lookup per endpoint,
+then one directed CLI request with the returned IDs. All failures remain in the
+five-task denominator. A separate native short-name control was registered at
+`3eaefede`, after the Chi ID-interface failure was observed. It does not replace
+or cherry-pick from the first arm.
+
+| Workflow | Compass | Graphify |
+| --- | ---: | ---: |
+| Public source-assisted IDs: supported call chains | 2/5 | 0/5 |
+| Native short names: supported call chains | 1/5 | 1/5 |
+
+Compass's source-assisted successes are Chi and Click, each six calls. Chi uses
+another valid `InsertRoute -> addChild` occurrence at `tree.go:234`; the frozen
+witness occurrence at line 183 remains distinct. In the native-label control,
+both tools succeed only on Click. Compass takes the text-output/writer branch;
+Graphify takes the text-input/reader branch. The latter was independently read
+from source after capture and accepted as a valid alternative, with no frozen
+occurrence credit. Both tools' labels, coordinates, edge direction, provenance
+and source anchors are retained in `longer_path_review.json`.
+
+The remaining results identify concrete gaps:
+
+- Compass's jsoup route uses instantiation and containment to reach a visitor
+  method, then calls `appendChild`. Its WalkDir route uses a call, return type
+  and containment to reach `from_loop`. These structural routes do not answer
+  a call-chain question. The jsoup depth-eight result is also marked truncated.
+- A separate post-capture graph diagnostic finds every registered Compass call
+  step for Chi, Click, jsoup and WalkDir. The jsoup and WalkDir misses therefore
+  expose route-selection policy even though the required call edges exist.
+  Private-graph traversal is not credited as a public answer.
+- Neither tool exposes Redux's returned named function `combination` at the
+  frozen coordinate. Returning that function from `combineReducers` is not a
+  call edge; substituting the outer function would invalidate the question.
+- Graphify's CLI does not preserve the supplied public IDs in these Chi and
+  jsoup requests. Chi renders different endpoints; jsoup resolves both IDs to
+  one unintended node and exits with an error. Its WalkDir resolver returns a
+  different `next` coordinate. The separate label control prevents treating
+  these interoperability failures as pure path-algorithm quality.
+
+All 18 Compass depth probes are retained: 13 bounded empty responses, four
+mixed-relation routes and one valid Click route at depth six. The empty bounded
+responses do not assert complete absence. Reverse requests remain diagnostics,
+with no source-global unreachability credit.
+
+The two arms are not an overall win: native labels tie, identity assistance
+has a measurable cost, and unresolved/ambiguous cases remain substantial.
+Resolver wire payload totals are 42,349 bytes for Compass and 2,172 for Graphify;
+forward ID-arm stdout totals are 64,086 and 258 bytes, with unsuccessful requests
+retained. These byte totals are not equal-work or latency measurements.
+
+All **204 benchmark tests and the product boundary pass**. The separate verifier
+checks source pins/hashes, graph and binary hashes, resolver requests and raw
+responses, all 42 CLI invocations, path identities, directed edge projection and
+source occurrences. Repeated verification is byte-identical. Failed verifier
+attempts and a corrected draft occurrence-credit label remain in external
+`longer-paths-01`. No production code changed; Rust, JavaScript, platform and
+packaging suites were not rerun. Product version remains 0.3.30.
+
+The next production change should provide an explicit calls-only trail policy
+through the typed query and public interfaces, retaining structural defaults,
+ambiguity handling, occurrence provenance and bounded-work semantics. Qualify
+it against shorter structural shortcuts, missing paths and these frozen real
+questions. Named-function-expression identity needs a separate owning-layer
+fix. Broader explanation, god-object, community and held-out claims remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

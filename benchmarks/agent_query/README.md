@@ -730,3 +730,25 @@ All 202 benchmark tests pass, including 15 new tests. All 20 fresh public calls,
 source-order controls remain identical. External `paired-member-focus-01`
 retains raw responses, windows, ranked labels, source-boundary diagnosis and
 verification scripts. Product code/version is unchanged in this checkpoint.
+
+### Longer call paths: preserve the native-label tie
+
+`longer_path_registration.json` and `longer_path_witnesses.json` freeze five new
+source-grounded endpoint pairs in the known five-language panel. Four-to-seven
+call witnesses include explicit conditional/overload semantics. The public
+source-assisted workflow scores Compass **2/5** and Graphify **0/5**; a separately
+registered native short-name control ties at **1/5**. Both tools return valid
+six-call Click chains, through different source branches. The post-output
+Graphify alternative receives source support, not frozen-occurrence credit.
+
+`longer_path_review.json` retains every result, source identity, occurrence,
+confidence, depth probe, failed request and artifact hash. Compass's jsoup and
+WalkDir structural shortcuts fail the call-chain task even though private-graph
+diagnostics find the necessary call edges. Neither graph exposes Redux's named
+`combination` function at the frozen coordinate. Public answer quality, graph
+availability and cross-interface ID handling remain separate measurements.
+
+All 204 benchmark tests and the product boundary pass; repeated verification is
+byte-identical. External `longer-paths-01` holds raw MCP/CLI captures and verifier
+scripts, including failed attempts. No production change, held-out claim or
+overall superiority claim follows from this checkpoint.
