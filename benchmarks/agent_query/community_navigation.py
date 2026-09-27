@@ -37,14 +37,15 @@ def select_label(text: str, seed: dict) -> dict:
                 status='selected' if len(choices) == 1 else 'missing' if not choices else 'ambiguous')
 
 
-def score_navigation(text: str, graph: dict, tool: str, seed: str, target: str,
+def score_navigation(text: str, graph: dict, tool: str, seed: str, target: str | None,
                      succeeded: bool) -> dict:
     """Never identify a duplicate label by its conveniently matching neighbors."""
     nodes = {node['id']: node for node in graph['nodes']}
     names = defaultdict(list)
     for node in nodes.values():
         names[label(node, tool)].append(node['id'])
-    seed_name, target_name = label(nodes[seed], tool), label(nodes[target], tool)
+    seed_name = label(nodes[seed], tool)
+    target_name = label(nodes[target], tool) if target in nodes else None
     heading = text.splitlines()[0] if text else ''
     header_matches = succeeded and heading == f'Neighbors of {seed_name}:'
     actual = Counter((direction, name) for direction, name, relation in NEIGHBOR.findall(text)
@@ -64,7 +65,7 @@ def score_navigation(text: str, graph: dict, tool: str, seed: str, target: str,
             pairs.add(('<--', a))
     expected = Counter((direction, label(nodes[identifier], tool)) for direction, identifier in pairs)
     identity = header_matches and names[seed_name] == [seed]
-    displayed = header_matches and actual['-->', target_name] > 0
+    displayed = header_matches and target_name is not None and actual['-->', target_name] > 0
     return dict(seedHeadingMatches=header_matches,
                 ambiguityReported=bool(re.search(r'\bambiguous\b', text, re.I)),
                 seedLabelCandidates=sorted(names[seed_name]), seedIdentitySupported=identity,
@@ -101,7 +102,8 @@ def execute(args):
     registration_bytes = read_bounded(args.registration, MAX_SOURCE_BYTES)
     run_bytes = read_bounded(args.run, MAX_JSON_BYTES)
     policy, registration, run = map(json.loads, [policy_bytes, registration_bytes, run_bytes])
-    if policy.get('schema') != 'compass.community-navigation-policy/1':
+    identity_mode = policy.get('schema') == 'compass.community-identity-navigation-policy/1'
+    if policy.get('schema') != 'compass.community-navigation-policy/1' and not identity_mode:
         raise ValueError('unsupported workflow policy')
     if registration.get('schema') != 'compass.community-task-pairs/1':
         raise ValueError('unsupported task registration')
@@ -110,6 +112,10 @@ def execute(args):
     if policy['bounds'] != dict(requestTimeoutSeconds=60, maxResponseBytes=1048576,
                                maxSessionBytes=67108864, graphifyTokenBudget=262144):
         raise ValueError('unsupported workflow bounds')
+    if identity_mode:
+        from benchmarks.agent_query.community_identity import SEARCH_LIMITS, resolver_request, selected_id
+        if policy['resolveCalls']['compass']['limits'] != SEARCH_LIMITS:
+            raise ValueError('unsupported resolver limits')
     repositories = registration['repositories']
     if not 1 <= len(repositories) <= 32 or len({r['repository'] for r in repositories}) != len(repositories):
         raise ValueError('invalid repository list')
@@ -119,7 +125,7 @@ def execute(args):
         raise ValueError('invalid direct-call task list')
     verify_environment(args)
     args.output.mkdir(parents=True, exist_ok=False)
-    report = dict(schema='compass.community-navigation-capture/1', complete=False,
+    report = dict(schema='compass.community-identity-navigation-capture/1' if identity_mode else 'compass.community-navigation-capture/1', complete=False,
                   policySha256=digest(policy_bytes), registrationSha256=digest(registration_bytes),
                   sourceRunSha256=digest(run_bytes), sourceRun=str(args.run.resolve()),
                   graphifyEnvironmentSha256=_sha256_file(args.graphify_environment),
@@ -128,7 +134,7 @@ def execute(args):
         report['servers'][tool] = dict(path=str(path), sha256=_sha256_file(path))
     for path in [args.policy, args.registration, args.graphify_environment, *[
             Path(__file__).with_name(name) for name in ['community_navigation.py', 'community_tasks.py',
-                'mcp_transport.py', 'mcp_compare.py', 'mcp_audit.py', 'runner.py']]]:
+                'mcp_transport.py', 'mcp_compare.py', 'mcp_audit.py', 'runner.py', 'community_identity.py']]]:
         shutil.copy2(path, args.output/path.name)
         report['supportFiles'][path.name] = _sha256_file(path)
     def save():
@@ -161,7 +167,10 @@ def execute(args):
                         session.initialize()
                         listing = session.send('tools/list', {})
                         advertised = {t['name'] for t in listing.get('result', {}).get('tools', [])}
-                        if not {'get_community', 'get_neighbors'} <= advertised:
+                        required = {'get_community', 'get_neighbors'}
+                        if identity_mode:
+                            required.add('search_symbols' if tool == 'compass' else 'get_node')
+                        if not required <= advertised:
                             raise ValueError('required public tools unavailable')
                     except ERRORS as error:
                         failure = str(error)
@@ -174,10 +183,10 @@ def execute(args):
                                    graphSha256=graph_hash, directCallRequired=task['id'] in direct)
                         if failure is not None:
                             row['captureError'] = 'connection unavailable: '+failure
-                        elif seed['status'] != 'resolved' or target['status'] != 'resolved':
+                        elif seed['status'] != 'resolved' or (not identity_mode and target['status'] != 'resolved'):
                             row['inputUnresolved'] = True
                         else:
-                            row['splitCommunity'] = seed['community'] != target['community']
+                            row['splitCommunity'] = (seed['community'] != target['community']) if target['status'] == 'resolved' else None
                             community = call(session, 'get_community', dict(community_id=seed['community'], **budget))
                             row['communityCall'] = community
                             if 'captureError' in community:
@@ -186,13 +195,35 @@ def execute(args):
                                 # The selector function has no graph access.
                                 selection = select_label(community['text'], task['declarations'][0])
                                 row['selection'] = selection
-                                if selection['selector'] is not None:
-                                    neighbors = call(session, 'get_neighbors', dict(label=selection['selector'], relation_filter='calls', **budget))
+                                selector = selection['selector']
+                                if identity_mode:
+                                    prepared_request = resolver_request(tool, community['text'], task['declarations'][0])
+                                    row['resolverSelection'] = prepared_request
+                                    selector = None
+                                    request = prepared_request['request']
+                                    if request is not None:
+                                        resolved = call(session, request['method'], request['arguments'])
+                                        row['resolverCall'] = resolved
+                                        if 'captureError' in resolved:
+                                            failure = resolved['captureError']
+                                        choice = selected_id(tool, resolved, task['declarations'][0])
+                                        row['idSelection'] = choice
+                                        selector = choice['selector']
+                                if selector is not None:
+                                    neighbors = call(session, 'get_neighbors', dict(label=selector, relation_filter='calls', **budget))
                                     row['neighborCall'] = neighbors
                                     if 'captureError' in neighbors:
                                         failure = neighbors['captureError']
                                     row['audit'] = score_navigation(neighbors.get('text', ''), graph, tool,
-                                        seed['matchedNodeIds'][0], target['matchedNodeIds'][0], neighbors['executionSucceeded'])
+                                        seed['matchedNodeIds'][0], target['matchedNodeIds'][0] if len(target['matchedNodeIds']) == 1 else None, neighbors['executionSucceeded'])
+                                    if identity_mode:
+                                        checked = row['audit']
+                                        checked['returnedIdMatchesSourceOracle'] = selector == seed['matchedNodeIds'][0]
+                                        completed = checked['returnedIdMatchesSourceOracle'] and checked['seedHeadingMatches']
+                                        checked['sourceMatchedSeedLookupCompleted'] = completed
+                                        checked['addressedCollaboratorLabelPresent'] = completed and checked['collaboratorDisplayed']
+                                        checked['addressedCollaboratorIdentitySupported'] = (checked['addressedCollaboratorLabelPresent']
+                                            and len(checked['collaboratorLabelCandidates']) == 1)
                                 # Scoring is after requests, never selector preparation.
                                 row['communityAudit'] = audit_membership(dict(repository=name, tool=tool,
                                     question='community', **community), graph)

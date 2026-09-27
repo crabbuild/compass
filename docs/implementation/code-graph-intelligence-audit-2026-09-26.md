@@ -2143,6 +2143,75 @@ those full qualification/JavaScript gates were not rerun. Source assertion
 precision, god-object judgments, broader community usefulness, longer walks
 and held-out confirmation remain incomplete.
 
+### Source-coordinate-assisted public navigation
+
+Commit `f660408b` freezes a stronger
+[public resolver workflow](../../benchmarks/agent_query/community_identity_navigation_panel_a.json)
+before capture. Both tools receive the exact task seed file, declaration start
+line and terminal symbol. Starting communities are still prepared symmetrically.
+After finding matching member rows, Compass uses structured `search_symbols`
+results and Graphify uses `get_node` with its documented `path::symbol` form.
+Only a uniquely source-matched returned ID becomes the next `get_neighbors`
+input. The expected collaborator is scoring-only and cannot gate requests.
+Each task permits one resolver and one neighbor lookup after the community.
+
+The [complete review](../../benchmarks/agent_query/community_identity_navigation_review_panel_a.json)
+records every task and the provenance of its selected ID.
+
+| Measure | Compass | Graphify |
+| --- | ---: | ---: |
+| Correct returned seed ID | 15/15 | 15/15 |
+| Completed neighbor lookup with that ID | 15/15 | 15/15 |
+| Reviewed outgoing collaborator label present | 13/14 | 14/14 |
+| Unambiguous target label after validated seed lookup | 10/14 | 11/14 |
+
+This is meaningful counterevidence to treating the earlier label-only failures
+as inability to navigate. Existing public APIs can resolve all selected seeds
+with the additional source-assisted step. No product code changed in this arm,
+so the stronger results are not attributed to an extraction improvement.
+
+A completed lookup here means the returned ID matches the frozen declaration,
+the request uses that ID, and the response has the expected successful heading.
+It does not mean the legacy neighbor body explicitly reports its seed ID.
+Likewise, Click's `close`, jsoup's `parseFragment`, and jsoup's `isWhitespace`
+labels each map to multiple target declarations in both graphs. Their displayed
+labels are not counted as unique destination identities. The earlier name-only
+identity audit remains separately recorded; these different metrics must not
+be silently substituted for one another.
+
+The only reviewed direct pair absent from the frozen Compass graph is still
+WalkDir `push -> DirList.close` at `src/lib.rs:906`. Graphify stores and displays
+it. All five earlier split-community pairs now expose the collaborator label
+(two Compass, three Graphify); these unequal subsets remain descriptive.
+All community memberships and displayed neighbor multiplicities agree with
+their stored graphs. That does not establish precision for every extra edge.
+
+All **90 public tool calls succeed** with no timeout or cap failure. Compass
+call text totals 156,976 bytes and response-wire totals 694,354; Graphify totals
+55,402 and 60,410. Including initialization, listing, requests and stderr, the
+session totals are **785,989 versus 102,213 bytes**. These are real costs of this
+fixed workflow. Compass search supplies multiple candidates, source anchors and
+richer structured evidence, while Graphify's lookup returns one node. Native
+limits and semantic payloads differ; these totals are not a universal efficiency
+ranking or an equal-token result.
+
+All **129 developer-harness tests** pass. Eight new resolver tests cover exact
+anchors, collisions, truncation, schema errors and returned-ID provenance. A
+missing-target-oracle regression ensures seed navigation can still be scored
+when no expected destination ID is available. Final recapture after removing
+target-oracle availability from workflow control flow retains all 90 response
+packets and 30 task audits identically. A separate same-agent verifier checks
+raw requests/responses, graph hashes, source-coordinate identity and adjacency;
+it is not an independent semantic reviewer. Rust tests were not rerun because
+this iteration changes only evaluation code/docs and reuses the validated binary.
+
+Next work should address the missing Rust indexed-receiver call, exact
+destination identities in public call/navigation output, and bounded resolver
+cost. Natural-language seed discovery, broader source precision, god-object
+responsibility evidence, longer directed walks and held-out confirmation remain
+open; the supplied declaration coordinates make this a different task from
+unassisted discovery.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.

@@ -74,6 +74,15 @@ class CommunityNavigationTests(unittest.TestCase):
         self.assertEqual(result['expectedDisplayedNeighbors'], 1)
         self.assertTrue(result['displayedAdjacencyMatches'])
 
+    def test_missing_target_oracle_does_not_hide_valid_seed_navigation(self):
+        result = score_navigation('Neighbors of Runner.run():\n  --> finish() [calls] [exact]',
+                                  self.graph(), 'compass', 'a', None, True)
+        self.assertTrue(result['seedIdentitySupported'])
+        self.assertTrue(result['displayedAdjacencyMatches'])
+        self.assertFalse(result['collaboratorDisplayed'])
+        self.assertFalse(result['collaboratorIdentitySupported'])
+        self.assertEqual(result['collaboratorLabelCandidates'], [])
+
     def test_mismatch_diagnostics_have_stable_sorted_order(self):
         graph = self.graph()
         graph['nodes'].extend([dict(id='x', name='Zulu()'), dict(id='y', name='Alpha()')])

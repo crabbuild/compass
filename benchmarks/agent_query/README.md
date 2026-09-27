@@ -429,3 +429,28 @@ neighbor texts remain identical. Missing/extra neighbor diagnostic arrays now
 sort deterministically; older captures need order normalization for those two
 arrays only. Genuine collisions, two ambiguous community selectors and the
 missing WalkDir call remain open.
+
+### Source-coordinate-assisted resolver workflow
+
+Use `community_identity_navigation_panel_a.json` as `--policy` with the same
+`community_navigation` collector. It is frozen in `f660408b`. After community
+membership, Compass uses structured `search_symbols` results and Graphify uses
+`get_node` with its documented `path::symbol` selector. Both policies receive
+the exact seed file, declaration start and terminal symbol, then pass only a
+uniquely source-matched returned ID to `get_neighbors`. A search result that is
+truncated or whose matching IDs remain ambiguous cannot supply the next input.
+The expected collaborator is scoring-only and cannot gate requests.
+
+The matching review records correct seed IDs and completed neighbor lookups on
+15/15 tasks for each tool. Compass displays the reviewed collaborator label on
+13/14 direct-call tasks; Graphify on 14/14. Three target labels remain ambiguous
+in each tool's neighbor text, leaving 10/14 and 11/14 unambiguous target labels.
+The missing WalkDir call remains a graph gap. Earlier label-only failures do
+not imply that these existing resolver APIs cannot complete seed navigation.
+
+All 90 tool calls succeed, and all 129 harness tests pass. Complete session bytes
+are 785,989 for Compass and 102,213 for Graphify under this fixed policy. Compass
+search returns more candidates and structured evidence; native bounds and
+semantic payloads differ. Report these actual workflow costs with that context.
+This is source-assisted development evidence, not natural-language discovery,
+comprehensive assertion precision, or held-out performance.

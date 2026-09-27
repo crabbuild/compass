@@ -248,3 +248,11 @@ Missing, ambiguous, mismatched or truncated resolver evidence stops navigation.
 Report validated requested IDs separately from name-only neighbor output and
 from exact collaborator identity. Different native controls and projected
 fields remain explicit; this is neither equal-token nor held-out evidence.
+
+The final `community-identity-navigation-02` capture resolves the exact seed ID
+and completes neighbor lookup on all 15 tasks for both tools. The review records
+13/14 versus 14/14 displayed collaborators, with three ambiguous target labels
+on each side. The remaining direct-call gap is Compass's WalkDir indexed
+receiver call. Keep explicit destination identity, source precision and resolver
+output cost as separate next questions; existing APIs already overcome the
+member-label ambiguities with this extra lookup and supplied source coordinates.
