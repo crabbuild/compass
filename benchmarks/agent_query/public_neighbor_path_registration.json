@@ -1,0 +1,29 @@
+{
+  "schema": "compass.public-neighbor-path-registration/1",
+  "baselineCommit": "f9e2044823c62d1209770b7149f66a82e7b8cbc3",
+  "graphRun": "java-state-access-02/run.json",
+  "graphRunSha256": "c315bffe56cbb7a7684c088e0219fc85ba9ef0681a39463608845691522d21ff",
+  "sourceWitnesses": {
+    "longer_path_witnesses.json": "33d1cdccc5cfb6f4225674c36ee7616b6dc21e0a51c2c5bbedc8fa1e44ae8718"
+  },
+  "compassBinary": "calls-only-trails-01/compass",
+  "compassBinarySha256": "80a970c1c403892fcafd82eac7e6461afec119f2008db9f9117419432e387ca6",
+  "scope": "Shared breadth-first public-neighbor workflow on the same five known development questions, not held-out or pure internal-algorithm equivalence.",
+  "bounds": {
+    "maxDepth": 8,
+    "maxExpandedNodes": 128,
+    "maxRequests": 512,
+    "maxOutgoingGroups": 8192,
+    "maxWorkflowResponseBytes": 16777216,
+    "maxResponseBytes": 1048576,
+    "requestTimeoutSeconds": 60,
+    "workflowTimeoutSeconds": 180,
+    "graphifyTokenBudget": 262144
+  },
+  "endpoints": "Fresh unchanged source-assisted public exact endpoint resolution for both tools; retain all five pairs in denominator. No graph IDs supplied by evaluator. No alternate endpoint on lookup failure.",
+  "algorithm": "FIFO breadth-first search of outgoing exact calls relations, visited by public ID. Expand each ID at most once through get_neighbors relation_filter=calls. Retain complete responses; stop on invalid/truncated neighbor output, transport errors or workflow limits. Missing intermediate identities are pruned with explicit incomplete-identity diagnostics, never converted into global absence. Queue destinations sorted by public file, declaration line, label and ID after all neighbors of an expansion are resolved. Stop on first target discovered; max depth frontier is not expanded.",
+  "adapters": "Compass uses full destination nodes and records from structured neighbor responses. Graphify displayed destination labels require get_node(label), cached by exact label including failed responses. Accept only a single response with identical displayed label, ID and declaration coordinate. No source-path guessing from call sites. Reject non-extracted/heuristic call edges in both adapters. Each request and byte, including lookups, counts toward shared limits. Endpoint lookups count toward request/byte budget.",
+  "identityCaveat": "Graphify may silently select one of several same-file declarations. Public success is only provisional: post-capture graph projection must confirm the resolved ID is the actual displayed outgoing edge target. No global graph uniqueness used to select requests. No graph/source data access in traversal.",
+  "judgment": "Retain raw MCP requests/responses, graph/binary/source/environment hashes, graph-projection checks and source declaration/call-site support for every returned path. Existing registered routes and previously source-reviewed alternatives are allowed with occurrence credit separate. New alternatives require explicit post-capture source adjudication. Static reachability is not runtime feasibility; retain jsoup caller-context caveat if applicable. No complete global absence score.",
+  "reporting": "Report all tool/question outcomes, endpoint and intermediate identity gaps, budget exhaustion, path source support, resolver/neighbor request counts and response bytes. No combining native path results with this workflow. Interface capacity differences and ordering by tool-returned anchors preclude a pure algorithm-quality or equal-internal-work claim. Authored explanations, god-object judgments, communities and held-out superiority remain outstanding."
+}
