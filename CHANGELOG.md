@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Cache fixed SQL read/write access patterns so statements reuse compiled
+  regular expressions.
+
 - Avoid repeated SQL statement-prefix scans for bytes that cannot begin a
   dollar-quoted delimiter, preserving statement-sensitive identifier handling.
 

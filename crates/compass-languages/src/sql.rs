@@ -736,10 +736,10 @@ impl<'a> State<'a> {
             aliases: scoped_alias_bindings(&body, &ctes),
             ctes,
         };
-        let read_patterns = sql_read_access_patterns();
-        let write_patterns = sql_write_access_patterns();
-        self.add_access_matches(source, start, &body, &read_patterns, "reads", &bindings);
-        self.add_access_matches(source, start, &body, &write_patterns, "writes", &bindings);
+        let read_patterns = sql_read_access_regexes();
+        let write_patterns = sql_write_access_regexes();
+        self.add_access_matches(source, start, &body, read_patterns, "reads", &bindings);
+        self.add_access_matches(source, start, &body, write_patterns, "writes", &bindings);
     }
 
     fn add_access_matches(
@@ -747,15 +747,12 @@ impl<'a> State<'a> {
         source: &str,
         start: usize,
         body: &str,
-        patterns: &[String],
+        patterns: &[Regex],
         relation: &str,
         bindings: &AccessBindings,
     ) {
         let mut emitted = HashSet::new();
-        for pattern in patterns {
-            let Ok(regex) = Regex::new(pattern) else {
-                continue;
-            };
+        for regex in patterns {
             for capture in regex.captures_iter(body) {
                 let Some(name_match) = capture.get(1) else {
                     continue;
@@ -1116,6 +1113,26 @@ fn sql_write_access_patterns() -> Vec<String> {
         format!(r"(?i)\bMERGE\s+(?:INTO\s+)?({OBJECT_REFERENCE})"),
         format!(r"(?i)\bSELECT\b[\s\S]*?\bINTO\s+({OBJECT_REFERENCE})"),
     ]
+}
+
+fn sql_read_access_regexes() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        sql_read_access_patterns()
+            .into_iter()
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect()
+    })
+}
+
+fn sql_write_access_regexes() -> &'static [Regex] {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    PATTERNS.get_or_init(|| {
+        sql_write_access_patterns()
+            .into_iter()
+            .filter_map(|pattern| Regex::new(&pattern).ok())
+            .collect()
+    })
 }
 
 fn sql_alias_target_patterns() -> Vec<String> {
@@ -2983,6 +3000,29 @@ fn sha256_prefixed(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_regexes_preserve_every_pattern_in_order_and_reuse_storage() {
+        for (compiled, patterns) in [
+            (sql_read_access_regexes(), sql_read_access_patterns()),
+            (sql_write_access_regexes(), sql_write_access_patterns()),
+        ] {
+            assert!(
+                compiled
+                    .iter()
+                    .map(Regex::as_str)
+                    .eq(patterns.iter().map(String::as_str))
+            );
+        }
+        assert!(std::ptr::eq(
+            sql_read_access_regexes(),
+            sql_read_access_regexes()
+        ));
+        assert!(std::ptr::eq(
+            sql_write_access_regexes(),
+            sql_write_access_regexes()
+        ));
+    }
 
     #[test]
     fn extracts_typed_database_domain_without_dangling_edges() {
