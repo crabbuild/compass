@@ -926,3 +926,22 @@ outcomes remain identical in a post-change replay. No functional community,
 god-object, authored explanation or overall superiority claim follows. The audit
 retains the initial native failures, corrected initializer/import cases and the
 scope-test correction followed by all 533 resolver tests and focused Clippy.
+
+
+## Java dotted nominal-owner follow-up
+
+`java_dotted_owner_registration.json` freezes the unchanged jsoup compiler
+census and four paired language controls before candidate extraction.
+`java_dotted_owner_review.json` records 3,115/3,785 ordinary and 368/529 enum
+references, all 3,483 returned contacts compiler-supported and all earlier
+verified references retained. Graphify retains zero such contacts. The 670
+ordinary and 161 enum misses remain in the denominator.
+
+All eight control extractions reproduce their complete original graphs.
+Of 49 new jsoup references, 27 are outside the compiler cohort (21 test and six
+Java 11 overlay); anchor checks do not prove their bindings. Community count
+changes from 40 to 43 with all 75 existing task-pair outcomes unchanged.
+Version-10 AST cache reuse reproduces the fresh candidate graph byte-for-byte.
+The separate nested-expression fixture retains three enum misses. The report
+binds production `be2fb542`, qualification and repeated verification. These
+known development results do not establish broad or held-out superiority.

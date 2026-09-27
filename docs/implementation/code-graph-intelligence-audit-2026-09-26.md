@@ -9,7 +9,7 @@ finding, clusters and communities. A focused text-recall score cannot establish 
 | Requirement | Evidence needed | Current evidence |
 | --- | --- | --- |
 | Reliable hub analysis and god-object diagnosis | Declaration-aware candidates, stable rankings, independently reviewed responsibility defects and negatives | Five hub defects fixed. The declared release-server follow-up admits both graphs for all eight reviewed classes, but neither tool returns any of the four positive classes at cutoffs 10/50/100. Exact source-assisted resolution succeeds for all eight per tool. Earlier failures remain unchanged; classifier quality is unproven. |
-| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,106/3,785 ordinary field occurrences and 355/529 enum occurrences for Compass versus 0 for Graphify. All 3,461 returned in-cohort contacts agree with the compiler; 256 added test-source references remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
+| Accurate code graph | Reviewed declaration and relationship precision/recall, direction, occurrences, unresolved/ambiguous cases | Native fixes and source-first audits are recorded below. The latest compiler-backed jsoup census verifies 3,115/3,785 ordinary field occurrences and 368/529 enum occurrences for Compass versus 0 for Graphify. All 3,483 returned in-cohort contacts agree with the compiler. The dotted-owner follow-up retains all earlier verified contacts; its 27 other additions (21 test, six Java 11 overlay) remain outside that cohort. This one-configuration result does not establish whole-graph or cross-language precision. |
 | Better query answers | Held-out equivalent questions, independent source judgments, precision and recall | Five-language development suites, source-first fd questions and panel-A reviews expose real wins and misses. Previously inspected or tuned questions cannot confirm final-branch representative superiority. |
 | Better explanations | Correct target, supported responsibility claims, source provenance, callers/callees and explicit uncertainty | The common source-order workflow at an 8,000-byte quota retrieves 14/20 reviewed facts for Compass versus 15/20 for Graphify; results depend on quota and retrieval policy. This evaluates available evidence, not authored explanation correctness. |
 | Better navigation and walks | Valid ordered edges, direction, hop bounds, alternatives, ambiguity and negative cases | The shared public-neighbor workflow finds source-supported static call paths on 4/5 known questions for Compass versus 0/5 for Graphify. Graphify's native Click path success remains in a separate control. No runtime-feasibility or held-out claim follows. |
@@ -23,6 +23,7 @@ Current evidence summaries are in the
 [release-server Blob follow-up](../../benchmarks/agent_query/mlcq_release_followup_review.json),
 [original Java field census](../../benchmarks/agent_query/java_real_field_review.json),
 [Java enum follow-up](../../benchmarks/agent_query/java_enum_access_review.json),
+[Java dotted-owner follow-up](../../benchmarks/agent_query/java_dotted_owner_review.json),
 [paired explanation study](../../benchmarks/agent_query/paired_member_focus_review.json),
 [shared path workflow](../../benchmarks/agent_query/public_neighbor_path_review.json),
 [SQL prefix diagnosis](../../benchmarks/agent_query/sql_prefix_scan_review.json)
@@ -4112,3 +4113,66 @@ outcomes, full graph deltas, control results and repeated verification. This is
 one previously inspected Java build configuration. Authored answer quality,
 query usability, longer walks, functional communities, actual god-object
 classification and final independent superiority confirmation remain open.
+
+
+## Java dotted nominal owners: complete registered follow-up
+
+The resolver now joins an established dotted Java nominal receiver to its
+canonical nested declaration. It preserves duplicate receiver/enclosing-owner
+and package/type ambiguity before considering member availability. Exact
+source declarations retain precedence, target-kind constraints remain enforced,
+and nominal-prefix work shares the candidate budget. The implementation does
+not infer nominal types from arbitrary value-expression chains.
+
+Production commit `be2fb542` follows the registration in `c5a94aeb`. The
+[review](../../benchmarks/agent_query/java_dotted_owner_review.json) binds the
+qualified patch, all 748 build inputs, frozen release binary, commands, outputs
+and raw artifact hashes. The unchanged jsoup Java 8 compiler cohort contains
+88 source files and 4,314 internal references.
+
+| Exact occurrence target and owner | Prior candidate | Dotted-owner candidate | Frozen Graphify |
+| --- | ---: | ---: | ---: |
+| Ordinary fields | 3,106 / 3,785 | 3,115 / 3,785 | 0 / 3,785 |
+| Enum constants | 355 / 529 | 368 / 529 | 0 / 529 |
+
+All 3,461 earlier verified references remain. All 3,483 returned in-cohort
+contacts match the compiler; there are 670 ordinary and 161 enum misses. Empty
+Graphify contact sets have no positive-contact precision denominator. Both
+Compass graphs retain two omitted edges. No denominator, oracle, source commit
+or Graphify graph changed.
+
+All 6,116 nodes and 25,676 earlier edges remain. There are 49 added references:
+22 in the compiler cohort, 21 in tests and six in the Java 11 overlay. All 49
+pass token, range, provenance and callable-containment checks. Those checks do
+not establish semantic binding precision for the 27 outside-cohort additions.
+The only changed node field is community membership, affecting 4,097 nodes;
+other top-level graph fields are equal. Community count changes from 40 to 43.
+All 75 existing source task-pair outcomes remain unchanged across the five
+repositories in a post-change replay. This does not measure functional cohesion.
+
+All eight fresh Go/Python/TypeScript/Rust control extractions succeed, and each
+complete graph equals its paired baseline and preserved original. Redux retains
+its two omitted edges. Census, control and community verification reports are
+byte-identical on repetition. Repetition checks consistency, not oracle
+independence. The frozen Graphify environment still matches all 227 recorded
+package files and 58 package versions.
+
+A separate compiler fixture improves from zero to four supported references
+(three enum, one ordinary field). The earlier nested-expression fixture remains
+at five of eight enum references and five of five fields. Its three missed
+nested type-expression references are retained explicitly. Neither fixture is
+included in the real-source denominator. A compatibility diagnostic reuses all
+206 baseline version-10 AST cache entries with zero extracted files and produces
+a graph byte-identical to the fresh candidate. No extraction, graph schema,
+package version or historical realization changes are required; stored graphs
+must be rebuilt to apply this resolver correction.
+
+Native qualification passes formatting, focused and workspace Clippy, all 536
+resolver tests, 1,109 workspace tests (two existing ignored), nine product tests,
+the full code-graph fixture gate, 238 benchmark tests, product-boundary checking
+and release compilation. These suites overlap. Standalone browser, platform and
+packaging matrices were not rerun. The original failing imported-nested test
+remains recorded; later budget/ordinary-field extensions pass the full suite.
+Extraction durations are retained only as operational observations. This is a
+known development census, not independent final confirmation or evidence of
+better authored explanations, god-object diagnosis or functional communities.
