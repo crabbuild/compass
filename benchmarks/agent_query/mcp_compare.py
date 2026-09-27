@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import shutil
 import time
 from collections import Counter
@@ -20,6 +21,16 @@ from benchmarks.agent_query.runner import _sha256_file, _node_anchor, _verify_so
 def community(node, tool):
     value = node.get('community')
     return value.get('id') if tool == 'compass' and isinstance(value, dict) else value
+
+
+def captured_repository(source_run, name):
+    """Resolve one captured repository without allowing raw-output path escapes."""
+    if not isinstance(name, str) or re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,79}', name) is None:
+        raise ValueError('invalid repository key')
+    matches = [r for r in source_run['repositories'] if r['repository'] == name]
+    if len(matches) != 1:
+        raise ValueError('repository must occur exactly once in the captured run')
+    return matches[0]
 
 
 def prepare_questions(graph, tool, witness):
@@ -110,9 +121,7 @@ def execute(args):
         report['servers'][tool] = {'executable':str(binary.resolve()), 'executableSha256':_sha256_file(binary)}
     for witness in manifest['repositories']:
         name = witness['name']
-        if name not in {'cobra','flask','gson','zod','axum'}:
-            raise ValueError('unsupported repository key')
-        repo = next(r for r in source_run['repositories'] if r['repository'] == name)
+        repo = captured_repository(source_run, name)
         pinned = next(r for r in suite.repositories if r.name == name)
         source = Path(repo['source'])
         _verify_source(pinned,source)

@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 
-from benchmarks.agent_query.mcp_compare import community
+from benchmarks.agent_query.mcp_compare import captured_repository, community
 from benchmarks.agent_query.path_audit import read_bounded, MAX_GRAPH_BYTES
 from benchmarks.agent_query.runner import _node_anchor, _sha256_file
 
@@ -124,10 +124,10 @@ def main(args):
     graphs={}
     for row in run['results']:
         key=(row['repository'],row['tool'])
-        if key[0] not in {'cobra','flask','gson','zod','axum'} or key[1] not in {'compass','graphify'}:
+        repo = captured_repository(source, key[0])
+        if key[1] not in {'compass','graphify'}:
             raise ValueError('invalid capture key')
         if key not in graphs:
-            repo=next(r for r in source['repositories'] if r['repository']==key[0])
             p=Path(repo[key[1]+'Graph'])
             if _sha256_file(p)!=row['graphSha256']:raise ValueError('graph digest mismatch')
             graphs[key]=json.loads(read_bounded(p,MAX_GRAPH_BYTES))

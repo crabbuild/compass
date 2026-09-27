@@ -3,6 +3,20 @@ from benchmarks.agent_query.mcp_audit import audit
 
 
 class McpAuditTests(unittest.TestCase):
+    def test_new_panel_repository_must_be_captured_exactly_once(self):
+        from benchmarks.agent_query.mcp_compare import captured_repository
+        record = {'repository': 'chi'}
+        self.assertEqual(captured_repository({'repositories': [record]}, 'chi'), record)
+        for records in [[], [record, record]]:
+            with self.assertRaises(ValueError):
+                captured_repository({'repositories': records}, 'chi')
+
+    def test_repository_keys_cannot_escape_raw_capture_directory(self):
+        from benchmarks.agent_query.mcp_compare import captured_repository
+        for name in ['../chi', '/chi', 'chi/other', 'chi\\other', '.', '', 'a' * 81, None]:
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                captured_repository({'repositories': [{'repository': name}]}, name)
+
     def test_connection_failure_does_not_remove_remaining_questions(self):
         from benchmarks.agent_query.mcp_compare import skipped_results
         questions=[('hubs','god_nodes',{'top_n':10}),('community','get_community',{'community_id':0})]
