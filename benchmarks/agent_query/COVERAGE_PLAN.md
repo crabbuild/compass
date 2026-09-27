@@ -236,3 +236,15 @@ and community texts stay unchanged. Keep the two member-selection ambiguities,
 five genuine neighbor ambiguities and missing WalkDir call visible. A later
 workflow should use each tool's documented source-qualified or exact-ID handles;
 this label-only arm is not a best-possible agent navigation score.
+
+### Source-anchored public navigation
+
+`community_identity_navigation_panel_a.json` freezes a stronger two-follow-up
+arm over the same tasks: community membership, one public resolver, then one
+neighbor lookup using only the returned source-matched ID. Compass uses typed
+`search_symbols`; Graphify uses `get_node` with its documented `path::symbol`
+form. Both receive the exact task file, declaration start and terminal symbol.
+Missing, ambiguous, mismatched or truncated resolver evidence stops navigation.
+Report validated requested IDs separately from name-only neighbor output and
+from exact collaborator identity. Different native controls and projected
+fields remain explicit; this is neither equal-token nor held-out evidence.

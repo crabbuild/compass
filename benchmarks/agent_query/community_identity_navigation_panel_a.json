@@ -1,0 +1,68 @@
+{
+  "schema": "compass.community-identity-navigation-policy/1",
+  "scope": "Development workflow on the same 15 source-defined task pairs, frozen before this source-anchored resolver-to-neighbor capture. Reused repositories, not held-out. Different public tool names represent equivalent resolution and navigation roles.",
+  "registrationSha256": "71faed0f477ee97da98c8bbb86686fae09de450664e4e000d9b2404496b94b6d",
+  "startingInput": "For every task, prepare the community containing the first exact source declaration symmetrically from each stored graph. Preparation is not scored as retrieval. Missing, ambiguous or unassigned inputs remain unresolved.",
+  "publicTaskInput": "The first declaration file, startLine and terminal symbol are supplied task coordinates to both tools. The target collaborator is scoring data, never used to select or issue requests.",
+  "memberGate": "Call get_community on the prepared community. Retain every row whose exact source file and terminal symbol match the public task seed. If none match, stop unresolved. If several display-label variants match, retain all and use their common exact terminal symbol; do not choose a particular declaration or label.",
+  "resolveCalls": {
+    "compass": {
+      "method": "search_symbols",
+      "query": "The common returned terminal symbol.",
+      "limits": {
+        "max_candidates": 256,
+        "max_nodes": 500,
+        "max_response_bytes": 524288
+      }
+    },
+    "graphify": {
+      "method": "get_node",
+      "label": "Exact returned source file plus :: plus the common terminal symbol. This path-scoped form is documented in its public ambiguity responses."
+    }
+  },
+  "idSelection": "Compass: use only structured compass.mcp.tool-result/1 -> compass.query/1 search result node IDs present in both results and nodes; reject transport or semantic truncation. Match exact returned source file, declaration start line and terminal symbol. Retain all matched IDs. Graphify: parse exactly one Node heading, ID and Source file plus L-start line from get_node; require the same exact coordinates. For either tool, issue the next call only when exactly one matching ID is returned. Never resolve a collision by score, output order, degree, graph inspection or desired adjacency.",
+  "followup": {
+    "tool": "get_neighbors",
+    "label": "The returned, uniquely source-matched ID.",
+    "relation_filter": "calls",
+    "maximumCallsAfterCommunity": 2,
+    "additionalRetries": 0
+  },
+  "bounds": {
+    "requestTimeoutSeconds": 60,
+    "maxResponseBytes": 1048576,
+    "maxSessionBytes": 67108864,
+    "graphifyTokenBudget": 262144
+  },
+  "budgetInterpretation": "Common external 60-second/1-MiB response and 64-MiB session bounds. Compass search uses explicit native candidate/node/semantic-byte bounds; Graphify get_node has its fixed single-node/attribute projection. Graphify community and neighbor calls receive the same generous explicit token allowance as earlier runs. Native controls and output richness differ. Report full calls, errors and bytes; do not claim equal token budget or latency efficiency.",
+  "scoring": [
+    "Retain all 15 tasks and the same 14 direct-call tasks. Missing, mismatched, ambiguous or truncated resolver output stays unresolved.",
+    "After all requests, verify the returned selected ID against the frozen exact source-declaration oracle. Report resolver success separately from a completed neighbor lookup with that validated ID and the expected heading.",
+    "Keep the older name-only seed/target uniqueness audit separately. A correct requested ID does not make a successful legacy neighbor response self-identifying; both tools still render seed/neighbor display names. Never use matching adjacency to choose an identity.",
+    "For a validated seed-ID lookup, report the reviewed outgoing collaborator label and calls relation separately from globally unambiguous target-label identity. Do not infer a target definition from an edge call-site anchor. Report stored direct-call evidence separately.",
+    "Check displayed direction/neighbor-label multiplicity against distinct graph neighbors after calls filtering. It is graph projection consistency, not all-assertion source precision or call occurrence recall.",
+    "Starting communities are prepared; initial retrieval is unscored. Unequal split-community subsets are descriptive only."
+  ],
+  "directCallTasks": [
+    "chi-router-construction",
+    "chi-route-pattern-parameters",
+    "click-atomic-close",
+    "click-terminal-string-width",
+    "click-help-definition-layout",
+    "jsoup-safe-document-copy",
+    "jsoup-html-fragment-parse",
+    "jsoup-html-whitespace",
+    "redux-listener-registration",
+    "redux-action-shape-validation",
+    "redux-action-creator-binding",
+    "walkdir-directory-handle-budget",
+    "walkdir-deferred-directory-depth",
+    "walkdir-symlink-loop-detection"
+  ],
+  "limitations": [
+    "No retries beyond one resolver and one neighbor call; other public workflows remain possible.",
+    "Exact source start lines are provided task inputs. This is not natural-language seed discovery.",
+    "A resolver can return a plausible but wrong same-file declaration; returned anchors are checked before navigation and graph/source identity is checked only afterward.",
+    "Full member/neighbor identity projections, source assertion precision, god-object diagnosis, longer walks, and held-out confirmation remain unmeasured."
+  ]
+}
