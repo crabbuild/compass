@@ -5,7 +5,12 @@ sidecars. Its output root now preserves the familiar flat artifact shape so
 file-based workflows can transition while Compass's snapshot and store
 layout remains visible and clearly owned.
 
-## Query text and path resolution
+## Graph rebuilds and query resolution
+
+Rebuild existing Go graphs to receive the control-initializer and receiver
+shadowing corrections. Normal builds automatically discard AST cache versions
+older than 4. Source-proven calls can appear and incorrectly attributed calls
+can disappear; existing historical realizations are not rewritten.
 
 For MCP `shortest_path`, replace partial keywords with exact IDs or complete
 symbol/qualified names. Handle ambiguity candidates before retrying. Use

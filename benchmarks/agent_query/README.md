@@ -243,6 +243,14 @@ the panel. The question score remains a text-recall proxy; report independent
 identity/direction/occurrence checks and all failures separately. Repository
 selection is purposive, so this does not estimate population accuracy.
 
+The Go receiver development follow-up is recorded separately in
+`go_receiver_development_review.json`. Its complete relationship-delta review
+retains the intermediate Cobra callback regression. The additional Chi
+compression-interface witness lives in
+`edge_witnesses_go_receiver_chi_diagnostic.json`; it is a post-output diagnostic,
+not an addition to the original held-out score. Run it with the same
+`edge_audit --run ... --witnesses ... --output ...` interface.
+
 The first frozen results and post-output review are recorded in
 `heldout_panel_a_review.json` and the main code-graph intelligence audit report.
 Keep the original Click edge witness: its missing second `_wrap_io_open` site

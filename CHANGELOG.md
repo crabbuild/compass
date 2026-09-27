@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Resolve Go receivers introduced by `if` and switch initializers using their
+  source-proven factory results. Respect nearer locals, range bindings, and
+  closure parameters instead of borrowing an outer receiver type; do not
+  substitute a same-named package factory for a callback or attribute a returned
+  callback invocation to its factory's receiver type. Rebuild older AST caches.
+
 - Make ambiguous typed query headlines request exact node IDs without naming
   a fallback subject or claiming no path. Include IDs for all retained
   ambiguity candidates in text output.

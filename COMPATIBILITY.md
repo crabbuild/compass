@@ -206,6 +206,19 @@ type is proven. The advertised producer capabilities and evidence/graph schemas
 are unchanged. AST cache semantics advance from 2 to 3, rebuilding prior AST
 facts automatically across languages. Published historical graphs are unchanged.
 
+Go receiver lookup now includes `if` and switch initializers alongside loop
+initializers. Block locals, range variables, and closure parameters are resolved
+in lexical order; an unsupported nearer binding cannot inherit an outer
+parameter's receiver type. Local callbacks and shadowed package names cannot
+provide a same-named global factory's return type. Type-switch aliases block
+outer types but do not yet infer case-specific narrowing. Invoking a returned
+callback retains the inner factory call without treating the outer invocation
+as a reference to the factory receiver's type. Newly recovered and
+corrected call edges require rebuilding the graph. AST cache semantics advance
+from 3 to 4, invalidating older disposable AST facts across languages. Producer
+capabilities and evidence/graph schemas are unchanged; published history remains
+immutable.
+
 ### Agent Query View
 
 Compass adds the additive strict projection `compass.query.agent-view/1` for

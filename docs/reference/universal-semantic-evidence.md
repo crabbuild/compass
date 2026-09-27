@@ -460,6 +460,19 @@ or file; publishing such an edge would invent a return contract and can create
 an invalid file-to-type relationship. Named functions, methods, and interface
 methods continue to publish their result types as `returns` evidence.
 
+Go selector receivers follow the nearest supported lexical binding, including
+`if`, expression-switch, and loop initializers, block variables, range values,
+and closure parameters. Initializers are visible only after their declaration;
+control bindings do not escape their statement. An unknown nearer type blocks
+an outer parameter alias. Factory results require a source-resolved callable;
+a local callback or shadowed import cannot borrow a same-named global factory.
+Parameter/import bindings still carry project evidence for cross-file fields
+and return contracts. Type-switch aliases block outer types but case-specific
+narrowing remains unsupported. In `factory()()`, only the named inner factory
+call is eligible for resolution; the unnamed returned callback cannot borrow
+the factory receiver's type as its target. Receiver inference keeps its bounded
+depth and does not select methods solely because their terminal names match.
+
 Python file imports are visible at module scope. Function- and class-local
 imports are indexed only in their owning lexical scope, so they cannot leak to
 sibling functions or become file-owned facts. Each imported item retains its

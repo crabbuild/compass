@@ -1914,3 +1914,85 @@ fn direct_evidence_ids_and_partial_diagnostics_are_deterministic() {
             .any(|diagnostic| diagnostic.code == "partial_parser_recovery")
     );
 }
+
+#[test]
+fn go_control_receiver_evidence_uses_the_nearest_binding_and_factory_identity() {
+    let source = br#"package sample
+type Good struct{}
+func (*Good) Run() {}
+type Bad struct{}
+func (*Bad) Run() {}
+func Factory() *Good { return nil }
+func caller(current *Bad, Factory func() *Bad, value any) {
+    if current := Factory(); current != nil { current.Run() } // unknown
+    { var current any; current.Run() } // unknown
+    switch current := value.(type) { case *Good: current.Run() } // unknown
+    current.Run() // sample.Bad::Run
+}
+func direct(current *Bad, values []*Good) {
+    if current := Factory(); current != nil { current.Run() } // sample.Good::Run
+    switch current := Factory(); { default: current.Run() } // sample.Good::Run
+    for _, current := range values {
+        current.Run() // sample.Good::Run
+        { var current *Bad; current.Run() } // sample.Bad::Run
+        current.Run() // sample.Good::Run
+    }
+    current.Run() // sample.Bad::Run
+}
+"#;
+    let evidence = Engine::default()
+        .extract_source_combined(
+            std::path::Path::new("/repo/sample/receiver.go"),
+            "sample/receiver.go",
+            source,
+        )
+        .expect("extract Go receiver evidence")
+        .graph
+        .semantic_evidence
+        .expect("Go evidence");
+    validate_evidence(&evidence, EvidenceLimits::default()).expect("valid evidence");
+    for occurrence in evidence
+        .occurrences
+        .iter()
+        .filter(|o| o.spelling == "Run" && o.role == SemanticRole::Call)
+    {
+        let line = std::str::from_utf8(source)
+            .expect("source")
+            .lines()
+            .nth(usize::try_from(occurrence.range.start_line - 1).expect("line index"))
+            .expect("source line");
+        let expected = line.rsplit_once("// ").expect("reviewed call").1;
+        let candidate = evidence
+            .candidates
+            .iter()
+            .find(|c| c.occurrence_id.as_deref() == Some(&occurrence.id))
+            .expect("candidate");
+        if expected == "unknown" {
+            assert!(
+                candidate.constraints.qualified_name.is_none(),
+                "{line}: {candidate:?}"
+            );
+            assert!(
+                candidate.binding_id.is_none(),
+                "{line}: must not reuse outer receiver or factory"
+            );
+        } else {
+            assert_eq!(
+                candidate.constraints.qualified_name.as_deref(),
+                Some(expected),
+                "{line}"
+            );
+        }
+        let start = usize::try_from(occurrence.range.start_byte).expect("start");
+        let end = usize::try_from(occurrence.range.end_byte).expect("end");
+        assert_eq!(&source[start..end], b"current.Run");
+    }
+    assert_eq!(
+        evidence
+            .occurrences
+            .iter()
+            .filter(|o| o.spelling == "Run" && o.role == SemanticRole::Call)
+            .count(),
+        10
+    );
+}

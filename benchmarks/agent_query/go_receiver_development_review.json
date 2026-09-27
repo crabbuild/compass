@@ -1,0 +1,541 @@
+{
+  "artifactDigests": {
+    "go-callback-regression-after-01.log": "8f49025c2134d0a0b880b93d054fd27af10b56d0268dc16243685eeae0760d57",
+    "go-callback-regression-before-01.log": "4ecb63cc44c9397e0273a2f3fdc2ab1d14151d3bd16cd795938d52d91056cab2",
+    "go-initializer-chi-diagnostic-edge-audit-01.json": "35b94fe0687072106320ebfde1b4b712fd891742ddb5f1a7b0bc6eb2d93eb79c",
+    "go-initializer-chi-diagnostic-edge-audit-02.json": "2f8963363b492572d9af86929786ef8391d35a388d6fd170804021a77a111af6",
+    "go-initializer-clippy-02.log": "d423b7f39f17cadab6fc174d5e9b69412b0dec968efb6d2a8847f8a7d9045911",
+    "go-initializer-final-delta-01.json": "9ee59cbc29c017e28a1d2f3cd8524afdf5fe004d8756ac179535d3a8c2d782c2",
+    "go-initializer-native-03.log": "dcb437d6aa7fdadd3e7377d481532181a6634ecbc990b8940210e9cca468e360",
+    "go-initializer-python-02.log": "c8d67e5826b21f7eef14a1c4f2199f6031e77a8ddb61861be33cf790942a5037",
+    "go_initializer_delta.py": "6f1642fafa950051375382d86615b620c23e582cf9d8b70c8a8e33197e54d164"
+  },
+  "diagnosticResult": {
+    "compressionInterfacePair": {
+      "compass": true,
+      "graphify": false
+    },
+    "registeredFourPairs": {
+      "compass": 4,
+      "graphify": 4
+    },
+    "scope": "Post-output diagnostic; exact unique endpoints on both tools; Graphify lacks this selected call. Not a population precision/recall score."
+  },
+  "finalBinarySha256": "bb09a5335c80fd7dd710e008b4a2f30f9403108e4883ed74e7d7c0de1b0aaca9",
+  "finalComparisons": [
+    {
+      "captures": {
+        "baseline": {
+          "calls": 916,
+          "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+          "graphDigests": {
+            "compass": "e7a5dcb40973eadb8281416e125ef0b78a6330b74e0361ac52dcb083ba77204a",
+            "graphify": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+          },
+          "nodes": 729,
+          "questionsPerTool": 11,
+          "relationships": 2000,
+          "run": "heldout-a-01",
+          "runSha256": "6412df38bbde56a1ec89974ac8d0a11162592bae90c403ed7b7f745acb6384bd",
+          "textPasses": {
+            "compass": 11,
+            "graphify": 10
+          }
+        },
+        "final": {
+          "calls": 918,
+          "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+          "graphDigests": {
+            "compass": "13a565a61fea5cf259e2e898e0f62a5d48e6d491f60f1ea862f1560065fdd16e",
+            "graphify": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+          },
+          "nodes": 729,
+          "questionsPerTool": 11,
+          "relationships": 2002,
+          "run": "go-initializer-chi-02",
+          "runSha256": "d1e04cc7bdf0e09588ec9a3fbda96ee67102387358cb18ae5d974486f46f416c",
+          "textPasses": {
+            "compass": 11,
+            "graphify": 10
+          }
+        },
+        "intermediate": {
+          "calls": 918,
+          "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+          "graphDigests": {
+            "compass": "13a565a61fea5cf259e2e898e0f62a5d48e6d491f60f1ea862f1560065fdd16e",
+            "graphify": "498c40cd157af3d6543eab69094c8f6ecd9ed58962b44f84e7c03c3270fbfacf"
+          },
+          "nodes": 729,
+          "questionsPerTool": 11,
+          "relationships": 2002,
+          "run": "go-initializer-chi-01",
+          "runSha256": "6aca80be34b6a893052302e20ce31ef11b4b88b272712e25e6b8ccea76efeb36",
+          "textPasses": {
+            "compass": 11,
+            "graphify": 10
+          }
+        }
+      },
+      "finalDeltaFrom": {
+        "baseline": [
+          {
+            "multiplicity": 1,
+            "relation": "calls",
+            "site": {
+              "endByte": 436,
+              "endColumn": 22,
+              "endLine": 18,
+              "file": "context.go",
+              "startByte": 423,
+              "startColumn": 9,
+              "startLine": 18
+            },
+            "siteText": "rctx.URLParam",
+            "source": [
+              "chi.URLParamFromCtx",
+              "context.go",
+              16
+            ],
+            "sourceLine": "\t\treturn rctx.URLParam(key)",
+            "sourceSha256": "b19edcca252e2fe74e82802c4c7ce1a1c0855728f9ede1288f0224283dfc7e53",
+            "status": "added",
+            "target": [
+              "chi.Context::URLParam",
+              "context.go",
+              124
+            ]
+          },
+          {
+            "multiplicity": 1,
+            "relation": "calls",
+            "site": {
+              "endByte": 10958,
+              "endColumn": 9,
+              "endLine": 364,
+              "file": "middleware/compress.go",
+              "startByte": 10951,
+              "startColumn": 2,
+              "startLine": 364
+            },
+            "siteText": "f.Flush",
+            "source": [
+              "middleware.compressResponseWriter::Flush",
+              "middleware/compress.go",
+              357
+            ],
+            "sourceLine": "\t\tf.Flush()",
+            "sourceSha256": "1a54e1cd05a913dd26bc00faab499cddc58a00646a92af5051961100d1532698",
+            "status": "added",
+            "target": [
+              "middleware.compressFlusher::Flush",
+              "middleware/compress.go",
+              354
+            ]
+          }
+        ],
+        "intermediate": []
+      },
+      "repository": "chi"
+    },
+    {
+      "captures": {
+        "baseline": {
+          "calls": 2101,
+          "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+          "graphDigests": {
+            "compass": "6f862024bd68b88b734a43421a21cc2074a94ab7d68cc8857d59609112c9c7db",
+            "graphify": "218aa21e02fad4506206c34acfc6d9ff58a2a0052615d92e4377c74bf977a937"
+          },
+          "nodes": 656,
+          "questionsPerTool": 10,
+          "relationships": 3369,
+          "run": "v2-shadow-05",
+          "runSha256": "1b05861d3f1b2d2deaba0b13cb3b9712ded14afa69a52fe1ca61df6cda2b67b6",
+          "textPasses": {
+            "compass": 10,
+            "graphify": 9
+          }
+        },
+        "final": {
+          "calls": 2101,
+          "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+          "graphDigests": {
+            "compass": "6f862024bd68b88b734a43421a21cc2074a94ab7d68cc8857d59609112c9c7db",
+            "graphify": "218aa21e02fad4506206c34acfc6d9ff58a2a0052615d92e4377c74bf977a937"
+          },
+          "nodes": 656,
+          "questionsPerTool": 10,
+          "relationships": 3369,
+          "run": "go-initializer-cobra-02",
+          "runSha256": "92604fa3ef8bc964a9e581e0894e1abbd39d98ecaafead7d10b6a17919db2855",
+          "textPasses": {
+            "compass": 10,
+            "graphify": 9
+          }
+        },
+        "intermediate": {
+          "calls": 2101,
+          "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+          "graphDigests": {
+            "compass": "c97352cfbf1b52b9b42af34108729b91e46113a2846ae49b4d39fc9c1336667b",
+            "graphify": "218aa21e02fad4506206c34acfc6d9ff58a2a0052615d92e4377c74bf977a937"
+          },
+          "nodes": 656,
+          "questionsPerTool": 10,
+          "relationships": 3373,
+          "run": "go-initializer-cobra-01",
+          "runSha256": "b78c625258ba48c32cbf41758ad505bd62e2ba966ab8017726c20992abb06d60",
+          "textPasses": {
+            "compass": 10,
+            "graphify": 9
+          }
+        }
+      },
+      "finalDeltaFrom": {
+        "baseline": [],
+        "intermediate": [
+          {
+            "multiplicity": 1,
+            "relation": "references",
+            "site": {
+              "endByte": 33122,
+              "endColumn": 17,
+              "endLine": 1153,
+              "file": "command.go",
+              "startByte": 33108,
+              "startColumn": 3,
+              "startLine": 1153
+            },
+            "siteText": "cmd.HelpFunc()",
+            "source": [
+              "cobra.Command::ExecuteC",
+              "command.go",
+              1084
+            ],
+            "sourceLine": "\t\t\tcmd.HelpFunc()(cmd, args)",
+            "sourceSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90",
+            "status": "removed",
+            "target": [
+              "cobra.Command",
+              "command.go",
+              54
+            ]
+          },
+          {
+            "multiplicity": 1,
+            "relation": "references",
+            "site": {
+              "endByte": 17064,
+              "endColumn": 13,
+              "endLine": 521,
+              "file": "command.go",
+              "startByte": 17052,
+              "startColumn": 1,
+              "startLine": 521
+            },
+            "siteText": "c.HelpFunc()",
+            "source": [
+              "cobra.Command::Help",
+              "command.go",
+              520
+            ],
+            "sourceLine": "\tc.HelpFunc()(c, []string{})",
+            "sourceSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90",
+            "status": "removed",
+            "target": [
+              "cobra.Command",
+              "command.go",
+              54
+            ]
+          },
+          {
+            "multiplicity": 1,
+            "relation": "references",
+            "site": {
+              "endByte": 15953,
+              "endColumn": 21,
+              "endLine": 479,
+              "file": "command.go",
+              "startByte": 15940,
+              "startColumn": 8,
+              "startLine": 479
+            },
+            "siteText": "c.UsageFunc()",
+            "source": [
+              "cobra.Command::Usage",
+              "command.go",
+              478
+            ],
+            "sourceLine": "\treturn c.UsageFunc()(c)",
+            "sourceSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90",
+            "status": "removed",
+            "target": [
+              "cobra.Command",
+              "command.go",
+              54
+            ]
+          },
+          {
+            "multiplicity": 1,
+            "relation": "references",
+            "site": {
+              "endByte": 27634,
+              "endColumn": 26,
+              "endLine": 921,
+              "file": "command.go",
+              "startByte": 27617,
+              "startColumn": 9,
+              "startLine": 921
+            },
+            "siteText": "c.FlagErrorFunc()",
+            "source": [
+              "cobra.Command::execute",
+              "command.go",
+              905
+            ],
+            "sourceLine": "\t\treturn c.FlagErrorFunc()(c, err)",
+            "sourceSha256": "f79613721ad04c9b438dfb30fe0ac3deca85c487658b0aa04a1ae6e4395bfd90",
+            "status": "removed",
+            "target": [
+              "cobra.Command",
+              "command.go",
+              54
+            ]
+          }
+        ]
+      },
+      "repository": "cobra"
+    }
+  ],
+  "intermediateBinarySha256": "bd0168b9d1258199a23820c1888aba577a41869fec820baeb5d9a54db2a4087d",
+  "intermediateRuns": [
+    {
+      "added": 2,
+      "baselineRun": "heldout-a-01",
+      "baselineRunSha256": "6412df38bbde56a1ec89974ac8d0a11162592bae90c403ed7b7f745acb6384bd",
+      "commit": "3d1777a1ef8881f7d1da0b02c76ca8f0a29cd2bc",
+      "delta": [
+        {
+          "multiplicity": 1,
+          "relation": "calls",
+          "site": {
+            "endByte": 436,
+            "endColumn": 22,
+            "endLine": 18,
+            "file": "context.go",
+            "startByte": 423,
+            "startColumn": 9,
+            "startLine": 18
+          },
+          "siteText": "rctx.URLParam",
+          "source": [
+            "chi.URLParamFromCtx",
+            "context.go",
+            16
+          ],
+          "sourceLine": "\t\treturn rctx.URLParam(key)",
+          "status": "added",
+          "target": [
+            "chi.Context::URLParam",
+            "context.go",
+            124
+          ]
+        },
+        {
+          "multiplicity": 1,
+          "relation": "calls",
+          "site": {
+            "endByte": 10958,
+            "endColumn": 9,
+            "endLine": 364,
+            "file": "middleware/compress.go",
+            "startByte": 10951,
+            "startColumn": 2,
+            "startLine": 364
+          },
+          "siteText": "f.Flush",
+          "source": [
+            "middleware.compressResponseWriter::Flush",
+            "middleware/compress.go",
+            357
+          ],
+          "sourceLine": "\t\tf.Flush()",
+          "status": "added",
+          "target": [
+            "middleware.compressFlusher::Flush",
+            "middleware/compress.go",
+            354
+          ]
+        }
+      ],
+      "questionsPerTool": 11,
+      "removed": 0,
+      "repository": "chi",
+      "run": "go-initializer-chi-01",
+      "runSha256": "6aca80be34b6a893052302e20ce31ef11b4b88b272712e25e6b8ccea76efeb36",
+      "textPasses": {
+        "compass": 11,
+        "graphify": 10
+      }
+    },
+    {
+      "added": 4,
+      "baselineRun": "v2-shadow-05",
+      "baselineRunSha256": "1b05861d3f1b2d2deaba0b13cb3b9712ded14afa69a52fe1ca61df6cda2b67b6",
+      "commit": "adbc8813901bba65827259daa8e22ff94ec1f30e",
+      "delta": [
+        {
+          "multiplicity": 1,
+          "relation": "references",
+          "site": {
+            "endByte": 33122,
+            "endColumn": 17,
+            "endLine": 1153,
+            "file": "command.go",
+            "startByte": 33108,
+            "startColumn": 3,
+            "startLine": 1153
+          },
+          "siteText": "cmd.HelpFunc()",
+          "source": [
+            "cobra.Command::ExecuteC",
+            "command.go",
+            1084
+          ],
+          "sourceLine": "\t\t\tcmd.HelpFunc()(cmd, args)",
+          "status": "added",
+          "target": [
+            "cobra.Command",
+            "command.go",
+            54
+          ]
+        },
+        {
+          "multiplicity": 1,
+          "relation": "references",
+          "site": {
+            "endByte": 17064,
+            "endColumn": 13,
+            "endLine": 521,
+            "file": "command.go",
+            "startByte": 17052,
+            "startColumn": 1,
+            "startLine": 521
+          },
+          "siteText": "c.HelpFunc()",
+          "source": [
+            "cobra.Command::Help",
+            "command.go",
+            520
+          ],
+          "sourceLine": "\tc.HelpFunc()(c, []string{})",
+          "status": "added",
+          "target": [
+            "cobra.Command",
+            "command.go",
+            54
+          ]
+        },
+        {
+          "multiplicity": 1,
+          "relation": "references",
+          "site": {
+            "endByte": 15953,
+            "endColumn": 21,
+            "endLine": 479,
+            "file": "command.go",
+            "startByte": 15940,
+            "startColumn": 8,
+            "startLine": 479
+          },
+          "siteText": "c.UsageFunc()",
+          "source": [
+            "cobra.Command::Usage",
+            "command.go",
+            478
+          ],
+          "sourceLine": "\treturn c.UsageFunc()(c)",
+          "status": "added",
+          "target": [
+            "cobra.Command",
+            "command.go",
+            54
+          ]
+        },
+        {
+          "multiplicity": 1,
+          "relation": "references",
+          "site": {
+            "endByte": 27634,
+            "endColumn": 26,
+            "endLine": 921,
+            "file": "command.go",
+            "startByte": 27617,
+            "startColumn": 9,
+            "startLine": 921
+          },
+          "siteText": "c.FlagErrorFunc()",
+          "source": [
+            "cobra.Command::execute",
+            "command.go",
+            905
+          ],
+          "sourceLine": "\t\treturn c.FlagErrorFunc()(c, err)",
+          "status": "added",
+          "target": [
+            "cobra.Command",
+            "command.go",
+            54
+          ]
+        }
+      ],
+      "questionsPerTool": 10,
+      "removed": 0,
+      "repository": "cobra",
+      "run": "go-initializer-cobra-01",
+      "runSha256": "b78c625258ba48c32cbf41758ad505bd62e2ba966ab8017726c20992abb06d60",
+      "textPasses": {
+        "compass": 10,
+        "graphify": 9
+      }
+    }
+  ],
+  "reviews": [
+    {
+      "judgment": "Supported call: the if initializer calls RouteContext, whose declared result is *Context; the selected URLParam method belongs to Context.",
+      "repository": "chi",
+      "site": "context.go:18"
+    },
+    {
+      "judgment": "Supported interface-method call: comma-ok assertion at line 363 gives f the compressFlusher interface type. This does not establish the concrete runtime implementation. Other f bindings at 358 and 367 use http.Flusher.",
+      "repository": "chi",
+      "site": "middleware/compress.go:364"
+    },
+    {
+      "judgment": "Regression: returned callbacks were projected as references to the factory receiver type Command. The outer invocation has no proven named target; retain the inner named factory call and omit the unsupported outer candidate. These four additions are not recall gains.",
+      "repository": "cobra",
+      "sites": [
+        "command.go:479",
+        "command.go:521",
+        "command.go:921",
+        "command.go:1153"
+      ]
+    }
+  ],
+  "schema": "compass.go-receiver-development-review/1",
+  "scope": "Post-output development diagnostics on Chi and Cobra; not independent confirmation, population precision, or performance evidence.",
+  "verification": {
+    "clippy": "workspace lib/bin and same integration selection passed with warnings denied",
+    "native": {
+      "failed": 0,
+      "ignored": 2,
+      "passed": 1410,
+      "selection": "workspace lib/bin plus universal_evidence, universal_resolution, contracts, compass_product"
+    },
+    "python": {
+      "passed": 95
+    },
+    "qualification": "running; do not infer a full gate pass from partial logs"
+  }
+}

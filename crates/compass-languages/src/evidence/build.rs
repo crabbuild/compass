@@ -1034,7 +1034,6 @@ struct DirectEvidenceState<'source> {
     go_return_types: HashMap<String, Vec<Option<String>>>,
     go_member_types: HashMap<(String, String), String>,
     go_collection_element_types: HashMap<String, String>,
-    go_collection_binding_element_types: HashMap<String, HashMap<String, String>>,
     go_range_return_types: HashMap<String, Vec<Option<String>>>,
     go_range_member_types: HashMap<(String, String), String>,
     java_containers: HashMap<usize, DeclarationContext>,
@@ -1126,7 +1125,6 @@ impl<'source> DirectEvidenceState<'source> {
             go_return_types: HashMap::new(),
             go_member_types: HashMap::new(),
             go_collection_element_types: HashMap::new(),
-            go_collection_binding_element_types: HashMap::new(),
             go_range_return_types: HashMap::new(),
             go_range_member_types: HashMap::new(),
             java_containers: HashMap::new(),
@@ -7069,21 +7067,8 @@ impl<'source> DirectEvidenceState<'source> {
                     continue;
                 };
                 if parameter.kind() == "variadic_parameter_declaration" {
-                    let Some(element_target) = go_direct_type_target(type_node) else {
-                        continue;
-                    };
-                    let Some(element_type) = self.go_qualified_type_target(owner, element_target)
-                    else {
-                        continue;
-                    };
-                    self.go_collection_binding_element_types
-                        .entry(owner.scope_id.clone())
-                        .or_default()
-                        .extend(
-                            names
-                                .into_iter()
-                                .map(|(name, _)| (name, element_type.clone())),
-                        );
+                    // Its element type is read from this exact parameter AST
+                    // when resolving a range; the slice itself is not a receiver.
                     continue;
                 }
                 let mut targets = Vec::new();
@@ -7474,6 +7459,12 @@ impl<'source> DirectEvidenceState<'source> {
         let Some(function) = function else {
             return Ok(());
         };
+        if self.language == "go" && function.kind() == "call_expression" {
+            // factory()() invokes an unnamed returned callback. Its receiver
+            // binding cannot identify the callback or a type conversion. The
+            // walker visits the inner factory call separately.
+            return Ok(());
+        }
         let raw = self.text(function);
         let (qualifier, spelling) = split_qualified(&raw);
         if spelling.is_empty() {
@@ -7603,6 +7594,18 @@ impl<'source> DirectEvidenceState<'source> {
             None
         };
         let binding = call_result_binding.or_else(|| {
+            if self.language == "go"
+                && qualifier.is_some()
+                && let Some((value, _)) =
+                    go_local_initializer_with_index_before(function, binding_name, self.source)
+                && !value
+                    .parent()
+                    .is_some_and(|parent| parent.kind() == "parameter_declaration")
+            {
+                // Parameter aliases and package imports carry useful project
+                // evidence. A nearer local/range binding must not reuse them.
+                return None;
+            }
             self.binding_for_occurrence(
                 owner,
                 binding_name,
@@ -7619,7 +7622,9 @@ impl<'source> DirectEvidenceState<'source> {
         } else {
             qualifier
                 .and_then(|qualifier| {
-                    self.local_target_for(owner, qualifier)
+                    (self.language != "go")
+                        .then(|| self.local_target_for(owner, qualifier))
+                        .flatten()
                         .map(|target| format!("{target}::{spelling}"))
                 })
                 .or_else(|| {
@@ -7630,6 +7635,9 @@ impl<'source> DirectEvidenceState<'source> {
                 })
                 .or_else(|| {
                     qualifier
+                        .filter(|qualifier| {
+                            self.language != "go" || !self.go_name_is_locally_bound(call, qualifier)
+                        })
                         .and_then(|qualifier| {
                             self.imported_qualified_target_for(
                                 owner,
@@ -8179,6 +8187,11 @@ impl<'source> DirectEvidenceState<'source> {
         match function.kind() {
             "identifier" => {
                 let spelling = self.text(function);
+                if go_local_initializer_with_index_before(function, &spelling, self.source)
+                    .is_some()
+                {
+                    return None;
+                }
                 self.imported_target_for_occurrence(owner, &spelling, function.start_byte(), true)
                     .cloned()
                     .or_else(|| Some(format!("{}.{}", self.module_or_package, spelling)))
@@ -8193,6 +8206,15 @@ impl<'source> DirectEvidenceState<'source> {
                         (operand.kind() == "identifier")
                             .then(|| self.text(operand))
                             .and_then(|package| {
+                                if go_local_initializer_with_index_before(
+                                    operand,
+                                    &package,
+                                    self.source,
+                                )
+                                .is_some()
+                                {
+                                    return None;
+                                }
                                 self.imported_target_for_occurrence(
                                     owner,
                                     &package,
@@ -8257,12 +8279,10 @@ impl<'source> DirectEvidenceState<'source> {
         if depth >= GO_TYPE_INFERENCE_DEPTH_LIMIT || !visited.insert(name.to_owned()) {
             return None;
         }
-        let result = go_enclosing_range_value(use_node, name, self.source)
-            .and_then(|range| self.go_range_expression_type(owner, range, depth + 1, visited))
-            .or_else(|| self.local_target_for(owner, name).cloned())
-            .or_else(|| {
-                let (initializer, output_index) =
-                    go_local_initializer_with_index_before(use_node, name, self.source)?;
+        // The nearest lexical binding owns the receiver, including an unknown
+        // type. Never fall through to an outer parameter after a local shadow.
+        let result = go_local_initializer_with_index_before(use_node, name, self.source).and_then(
+            |(initializer, output_index)| {
                 self.go_expression_type_at_output(
                     owner,
                     initializer,
@@ -8270,7 +8290,8 @@ impl<'source> DirectEvidenceState<'source> {
                     visited,
                     output_index,
                 )
-            });
+            },
+        );
         visited.remove(name);
         result
     }
@@ -8300,6 +8321,11 @@ impl<'source> DirectEvidenceState<'source> {
             "type_identifier" | "qualified_type" | "pointer_type" | "slice_type" | "array_type"
             | "map_type" | "channel_type" => go_direct_type_target(expression)
                 .and_then(|target| self.go_qualified_type_target(owner, target)),
+            "range_clause" if output_index == Some(1) => expression
+                .child_by_field_name("right")
+                .and_then(|collection| {
+                    self.go_range_expression_type(owner, collection, depth + 1, visited)
+                }),
             "identifier" => self.go_local_value_type_inner(
                 owner,
                 expression,
@@ -8332,19 +8358,8 @@ impl<'source> DirectEvidenceState<'source> {
             }
             "call_expression" => {
                 let function = expression.child_by_field_name("function")?;
-                let qualified_callable = match function.kind() {
-                    "identifier" => {
-                        format!("{}.{}", self.module_or_package, self.text(function))
-                    }
-                    "selector_expression" => {
-                        let operand = function.child_by_field_name("operand")?;
-                        let field = function.child_by_field_name("field")?;
-                        let receiver =
-                            self.go_expression_type(owner, operand, depth + 1, visited)?;
-                        format!("{receiver}::{}", self.text(field))
-                    }
-                    _ => return None,
-                };
+                let qualified_callable =
+                    self.go_callable_qualified_name(owner, function, depth + 1, visited)?;
                 self.go_return_types
                     .get(&qualified_callable)
                     .and_then(|types| go_output_type(types, output_index))
@@ -8384,33 +8399,25 @@ impl<'source> DirectEvidenceState<'source> {
                 if !visited.insert(name.clone()) {
                     return None;
                 }
-                let result = self
-                    .local_target_for(owner, &name)
-                    .and_then(|collection| self.go_collection_element_types.get(collection))
-                    .cloned()
-                    .or_else(|| {
-                        self.local_value_for(
-                            &self.go_collection_binding_element_types,
+                let result = go_local_initializer_with_index_before(expression, &name, self.source)
+                    .and_then(|(initializer, output_index)| {
+                        self.go_range_expression_type_at_output(
                             owner,
-                            &name,
+                            initializer,
+                            depth + 1,
+                            visited,
+                            output_index,
                         )
-                        .cloned()
-                    })
-                    .or_else(|| {
-                        go_local_initializer_with_index_before(expression, &name, self.source)
-                            .and_then(|(initializer, output_index)| {
-                                self.go_range_expression_type_at_output(
-                                    owner,
-                                    initializer,
-                                    depth + 1,
-                                    visited,
-                                    output_index,
-                                )
-                            })
                     });
                 visited.remove(&name);
                 result
             }
+            "type_identifier" | "qualified_type" | "pointer_type" | "slice_type" | "array_type"
+            | "map_type" | "channel_type" => self.go_collection_element_type(owner, expression),
+            "variadic_parameter_declaration" => expression
+                .child_by_field_name("type")
+                .and_then(go_direct_type_target)
+                .and_then(|target| self.go_qualified_type_target(owner, target)),
             "call_expression" => {
                 let function = expression.child_by_field_name("function")?;
                 if function.kind() == "identifier" && self.text(function) == "make" {
@@ -8418,19 +8425,8 @@ impl<'source> DirectEvidenceState<'source> {
                     let collection_type = arguments.named_child(0)?;
                     return self.go_collection_element_type(owner, collection_type);
                 }
-                let qualified_callable = match function.kind() {
-                    "identifier" => {
-                        format!("{}.{}", self.module_or_package, self.text(function))
-                    }
-                    "selector_expression" => {
-                        let operand = function.child_by_field_name("operand")?;
-                        let field = function.child_by_field_name("field")?;
-                        let receiver =
-                            self.go_expression_type(owner, operand, depth + 1, visited)?;
-                        format!("{receiver}::{}", self.text(field))
-                    }
-                    _ => return None,
-                };
+                let qualified_callable =
+                    self.go_callable_qualified_name(owner, function, depth + 1, visited)?;
                 self.go_range_return_types
                     .get(&qualified_callable)
                     .and_then(|types| go_output_type(types, output_index))
@@ -11194,51 +11190,6 @@ fn go_range_value_type_target(node: Node<'_>) -> Option<Node<'_>> {
     }
 }
 
-fn go_enclosing_range_value<'tree>(
-    use_node: Node<'tree>,
-    name: &str,
-    source: &[u8],
-) -> Option<Node<'tree>> {
-    fn named_children(node: Node<'_>) -> Vec<Node<'_>> {
-        let mut cursor = node.walk();
-        node.children(&mut cursor)
-            .filter(|child| child.is_named())
-            .collect()
-    }
-
-    let mut ancestor = use_node.parent();
-    while let Some(node) = ancestor {
-        if node.kind() == "for_statement"
-            && let Some(range) = named_children(node)
-                .into_iter()
-                .find(|child| child.kind() == "range_clause")
-            && let Some(left) = range.child_by_field_name("left")
-        {
-            let variables = if left.kind() == "expression_list" {
-                named_children(left)
-            } else {
-                vec![left]
-            };
-            let matching_variable = variables.iter().position(|variable| {
-                variable.kind() == "identifier" && variable.utf8_text(source).ok() == Some(name)
-            });
-            if let Some(index) = matching_variable {
-                return (variables.len() == 2 && index == 1)
-                    .then(|| range.child_by_field_name("right"))
-                    .flatten();
-            }
-        }
-        if matches!(
-            node.kind(),
-            "function_declaration" | "method_declaration" | "func_literal"
-        ) {
-            break;
-        }
-        ancestor = node.parent();
-    }
-    None
-}
-
 fn has_descendant(node: Node<'_>, kind: &str) -> bool {
     if node.kind() == kind {
         return true;
@@ -11311,7 +11262,9 @@ fn go_local_initializer_with_index_before<'tree>(
         if names.len() > 1 && values.len() == 1 && values[0].kind() == "call_expression" {
             return Some((values[0], u32::try_from(index).ok()));
         }
-        values.get(index).copied().map(|value| (value, None))
+        // A declared name with an unsupported initializer still shadows an
+        // outer binding. Return an uninterpreted node rather than falling out.
+        Some((values.get(index).copied().unwrap_or(names[index]), None))
     }
 
     fn in_statement<'tree>(
@@ -11337,7 +11290,9 @@ fn go_local_initializer_with_index_before<'tree>(
                 if let Some(type_node) = statement.child_by_field_name("type") {
                     return Some((type_node, None));
                 }
-                let values = statement.child_by_field_name("value")?;
+                let Some(values) = statement.child_by_field_name("value") else {
+                    return Some((statement, None));
+                };
                 let values = if values.kind() == "expression_list" {
                     named_children(values)
                 } else {
@@ -11346,9 +11301,9 @@ fn go_local_initializer_with_index_before<'tree>(
                 if names.len() > 1 && values.len() == 1 && values[0].kind() == "call_expression" {
                     return Some((values[0], u32::try_from(index).ok()));
                 }
-                values.get(index).copied().map(|value| (value, None))
+                Some((values.get(index).copied().unwrap_or(statement), None))
             }
-            "var_declaration" => named_children(statement)
+            "var_declaration" | "var_spec_list" => named_children(statement)
                 .into_iter()
                 .rev()
                 .find_map(|child| in_statement(child, name, source)),
@@ -11359,7 +11314,24 @@ fn go_local_initializer_with_index_before<'tree>(
     let use_start = use_node.start_byte();
     let mut ancestor = use_node.parent();
     while let Some(scope) = ancestor {
-        let for_initializer = if scope.kind() == "for_clause" {
+        if scope.kind() == "type_switch_statement"
+            && let Some(alias) = scope.child_by_field_name("alias")
+            && scope
+                .child_by_field_name("value")
+                .is_some_and(|value| value.end_byte() <= use_start)
+            && (alias.utf8_text(source).ok() == Some(name)
+                || named_children(alias)
+                    .iter()
+                    .any(|node| node.utf8_text(source).ok() == Some(name)))
+        {
+            // Case-specific narrowing is not inferred here. The case binding
+            // still shadows the outer name and cannot borrow its type.
+            return Some((alias, None));
+        }
+        let control_initializer = if matches!(
+            scope.kind(),
+            "for_clause" | "if_statement" | "expression_switch_statement" | "type_switch_statement"
+        ) {
             scope.child_by_field_name("initializer")
         } else if scope.kind() == "for_statement" {
             let mut cursor = scope.walk();
@@ -11370,11 +11342,36 @@ fn go_local_initializer_with_index_before<'tree>(
         } else {
             None
         };
-        if let Some(initializer) = for_initializer
+        if let Some(initializer) = control_initializer
             && initializer.end_byte() <= use_start
             && let Some(found) = in_statement(initializer, name, source)
         {
             return Some(found);
+        }
+        if scope.kind() == "for_statement" {
+            let range = named_children(scope)
+                .into_iter()
+                .find(|child| child.kind() == "range_clause");
+            if let Some(range) = range
+                && range.end_byte() <= use_start
+                && let Some(left) = range.child_by_field_name("left")
+            {
+                let mut cursor = range.walk();
+                let declares = range
+                    .children(&mut cursor)
+                    .any(|child| child.kind() == ":=");
+                let names = named_children(left);
+                if declares
+                    && let Some(index) = names
+                        .iter()
+                        .position(|n| n.utf8_text(source).ok() == Some(name))
+                {
+                    // Only the second variable of a two-value range has the
+                    // existing element-type proof. Keys and other forms stay
+                    // unknown, but still block outer receiver types.
+                    return Some((range, (names.len() == 2 && index == 1).then_some(1)));
+                }
+            }
         }
         if matches!(scope.kind(), "block" | "statement_list") {
             let mut statements = named_children(scope);
@@ -11387,8 +11384,31 @@ fn go_local_initializer_with_index_before<'tree>(
                 return Some(initializer);
             }
         }
-        if matches!(scope.kind(), "function_declaration" | "method_declaration") {
-            break;
+        if matches!(
+            scope.kind(),
+            "function_declaration" | "method_declaration" | "func_literal"
+        ) {
+            for field in ["receiver", "parameters", "result"] {
+                if let Some(parameters) = scope.child_by_field_name(field) {
+                    for parameter in named_children(parameters) {
+                        let mut cursor = parameter.walk();
+                        if parameter
+                            .children_by_field_name("name", &mut cursor)
+                            .any(|n| n.utf8_text(source).ok() == Some(name))
+                        {
+                            let value = if parameter.kind() == "variadic_parameter_declaration" {
+                                parameter
+                            } else {
+                                parameter.child_by_field_name("type").unwrap_or(parameter)
+                            };
+                            return Some((value, None));
+                        }
+                    }
+                }
+            }
+            if scope.kind() != "func_literal" {
+                break;
+            }
         }
         ancestor = scope.parent();
     }

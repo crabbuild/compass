@@ -1169,6 +1169,77 @@ and macOS linker warnings remain in build/test logs. Extraction qualification
 and JavaScript gates were not rerun: this change only projects query ambiguity
 and does not change extraction, publication, or viewer assets.
 
+### Development correction: Go control initializers and receiver shadowing
+
+The registered Chi miss at `context.go:18` came from a supported factory return
+that was lost in an `if` initializer. The universal Go producer now searches
+control initializers and nearer lexical bindings before outer parameter aliases.
+Unknown locals, callback factories, closure parameters, and type-switch aliases
+must not borrow a same-named outer type or package function. Case-specific
+type-switch narrowing remains unsupported. Existing parameter/import evidence
+still supports project-wide field and return resolution. Disposable AST cache
+semantics advance from 3 to 4; users must rebuild old Go graphs to get these
+edges. Published history is unchanged.
+
+The first frozen development binary is retained under
+`go-initializer-provenance`, SHA256
+`bd0168b9d1258199a23820c1888aba577a41869fec820baeb5d9a54db2a4087d`.
+Fresh paired runs `go-initializer-chi-01` and `go-initializer-cobra-01` use
+unchanged question suites and pinned sources. Text scores remain **Chi 11/11
+versus 10/11**, and **Cobra 10/10 versus 9/10** (Compass versus Graphify).
+These scores did not improve. Concurrent builds make these runs unsuitable
+for latency claims. The Graphify launcher/package provenance limitation above
+still applies.
+
+Every graph relationship delta was inspected, using source/target declaration
+identity, relationship kind, exact site, and multiplicity. Chi adds two calls
+and removes no relationships:
+
+- `URLParamFromCtx` to `Context.URLParam` at `context.go:18`, supported by
+  `RouteContext`'s declared `*Context` return and the `if` initializer.
+- `compressResponseWriter.Flush` to the `compressFlusher.Flush` interface method
+  at `middleware/compress.go:364`, supported by the type assertion at line 363.
+  This proves an interface-method target, not the runtime implementation.
+
+The four original Chi pair/occurrence witnesses now all match both tools;
+Compass previously matched three. A separately recorded **post-output** fifth
+witness checks the compression interface call: Compass matches it; Graphify
+has both unique endpoints but lacks the call. This diagnostic selection is
+not an independent precision or recall sample, and does not replace panel A.
+
+The same complete-delta review caught a regression on Cobra: four new type
+references to `Command` at `command.go:479,521,921,1153` came from invoking
+callbacks returned by `UsageFunc`, `HelpFunc`, and `FlagErrorFunc`. The outer
+invocation has no proven named target. A native regression reproduced the
+extra edge (two site edges instead of one). The producer now omits that
+unsupported outer call candidate while retaining the separately visited inner
+factory call. The intermediate binary and its faulty output remain recorded;
+the four references are not counted as gains.
+
+The checked-in `go_receiver_development_review.json` records intermediate run
+digests, every delta, source anchors, and judgments.
+`edge_witnesses_go_receiver_chi_diagnostic.json` preserves the expanded diagnostic
+separately from the original registered witness file.
+
+The corrected frozen binary has SHA256
+`bb09a5335c80fd7dd710e008b4a2f30f9403108e4883ed74e7d7c0de1b0aaca9`
+under `go-initializer-final-provenance`. Fresh paired repeats
+`go-initializer-chi-02` and `go-initializer-cobra-02` complete all 42 requests.
+Chi retains exactly the two reviewed additions; Cobra removes exactly the four
+intermediate false references and has no relationship delta from its baseline.
+Text scores and the five-pair diagnostic result are unchanged. The delta script,
+graph/run digests, source excerpts, and both failed/passing callback regression
+logs are retained. These are development results after panel A.
+
+Final-source native checks pass **1,410 tests, zero failed, two ignored**:
+workspace library/binary tests plus `universal_evidence`, `universal_resolution`,
+`contracts`, and `compass_product`. Workspace and the same integration Clippy
+selection pass with warnings denied. All **95 Python tests**, formatting,
+product boundary, and diff checks pass. Qualification is still running; a full
+fixture-gate pass is not yet claimed. Logs use `go-initializer-native-03`,
+`go-initializer-clippy-02`, and `go-initializer-python-02` prefixes. Existing
+core unused-mut and macOS linker warnings remain in build/test logs.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
