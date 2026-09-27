@@ -2,37 +2,37 @@
   "schema": "compass.code-graph-topology-policy/1",
   "topology": {
     "minimums": {
-      "communities": 225,
-      "edges": 1284,
-      "exactCrossCommunityEdges": 5,
-      "exactCrossFileEdges": 81,
-      "exactCrossFileEdgesPerThousandNodes": 63,
-      "exactEdgeBearingNodePermille": 711,
-      "exactEdgeBearingNodes": 908,
-      "exactEdges": 965,
+      "communities": 232,
+      "edges": 1265,
+      "exactCrossCommunityEdges": 3,
+      "exactCrossFileEdges": 62,
+      "exactCrossFileEdgesPerThousandNodes": 48,
+      "exactEdgeBearingNodePermille": 709,
+      "exactEdgeBearingNodes": 905,
+      "exactEdges": 946,
       "exactLargestComponentNodes": 54,
-      "exactUniqueTypedEndpointPairs": 956,
-      "exactUniqueTypedEndpointPairsPerThousandNodes": 749,
+      "exactUniqueTypedEndpointPairs": 938,
+      "exactUniqueTypedEndpointPairsPerThousandNodes": 735,
       "nodes": 1276,
-      "uniqueTypedEndpointPairs": 1261
+      "uniqueTypedEndpointPairs": 1243
     },
     "maximums": {
-      "communities": 226,
-      "connectedComponents": 222,
-      "exactConnectedComponents": 496,
-      "exactIsolatedNodes": 368,
+      "communities": 233,
+      "connectedComponents": 230,
+      "exactConnectedComponents": 504,
+      "exactIsolatedNodes": 371,
       "exactSelfLoops": 0,
-      "isolatedNodes": 96,
+      "isolatedNodes": 99,
       "selfLoops": 0,
-      "singletonCommunities": 96
+      "singletonCommunities": 99
     },
     "relationshipMinimums": {
       "calls": {
         "exactUniqueEndpointPairs": 13
       },
       "contains": {
-        "exactCrossFileEdges": 31,
-        "exactUniqueEndpointPairs": 624
+        "exactCrossFileEdges": 12,
+        "exactUniqueEndpointPairs": 606
       },
       "documents": {
         "exactCrossFileEdges": 3,

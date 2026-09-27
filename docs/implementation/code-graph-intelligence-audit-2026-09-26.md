@@ -1365,25 +1365,98 @@ The first expanded Clippy invocation exposed an existing `expect_err` in a
 qualification test. An explicit `Err(MissingRoute)` assertion replaced it;
 all four qualification tests were rerun and the full selected Clippy invocation
 then passed. All **97 benchmark tests**, formatting, diff, and product-boundary
-checks pass. The new full fixture qualification is still pending; the previous
-Go fixture pass does not verify this subsequent production change.
+checks pass. The subsequent full fixture qualification **failed** at its topology
+floor: 1,270 edges versus a required 1,284. The previous Go fixture pass does not
+verify this production change. The follow-up below retains that failure and
+finds an additional semantic defect.
+
+#### Fixture topology review and a remaining false filesystem parent
+
+The full run passed its native scale checks, source-integrity and repeated-build
+comparisons, and existing semantic assertions before stopping at the count
+floor. It did not reach the subsequent Markdown and React qualification stages.
+Fresh clustered production builds of the identical fixture corpus with the
+frozen Go-receiver and route-hierarchy binaries isolate exactly **19 removed
+`contains` records, zero added records**, and the same **1,276 nodes**. Node
+contents are unchanged except for community assignments. The removed records
+represent 18 unique typed endpoint pairs.
+
+Source inspection covers every removed relationship:
+
+| Independent fixture groups | Removed records |
+| --- | ---: |
+| Drupal entity-type hook and YAML routes | 4 |
+| Express apps in separate modules | 3 |
+| Flask factory and separately instantiated app | 3 |
+| Independently instantiated FastAPI apps | 2 |
+| Vue Router route arrays in separate modules, both directions | 2 |
+| Kotlin and Java Spring controllers in separate packages | 4 |
+| TanStack and React Router route modules | 1 |
+
+The [complete review](../../benchmarks/agent_query/route_hierarchy_fixture_review.json)
+records every removed identity, both binary and graph hashes, source hashes,
+and every policy adjustment. Each count bound changes by exactly its measured
+before/after delta, retaining its previous margin. Community count changes
+from 225 to 232 and component count from 221 to 229; neither change establishes
+better functional cohesion.
+
+Count recalibration alone is insufficient. Qualification manifest version 3
+adds eight source-reviewed independent-route assertions. Both endpoint files
+must retain route nodes; the specified directed containment must be absent at
+every confidence level. The old graph fails all eight groups. The corrected
+production graph passes **seven and fails one**: a convention-derived
+`react-router::PAGE::/tanstack` still contains `/home`, with the child endpoint
+remapped to the AST route. These flat source modules do not declare that
+parent-child relationship.
+
+The remaining resolver helper selects the first other route module found in a
+nearby directory. The frontend source oracle's `routeParent` helper uses the
+same rule. Their agreement therefore cannot independently validate framework
+parentage. **The semantic gate remains failing**; no successful full rerun is
+claimed. Fixing this requires framework-specific, source-proven parent rules
+and independently specified positive and negative fixtures.
+
+All **87 Python script tests** pass, including 23 code-graph oracle tests. On a
+synthetic graph with the remaining false edge removed solely for oracle
+validation, restoring each of the 20 known false records individually fails
+the new assertion. This mutation exercise validates the checker; it is not a
+production correction. Existing native results describe the unchanged Rust
+production code, not a fix for this newly exposed defect.
+
+#### Java constructor receiver diagnostic
+
+A separate frozen-binary diagnostic reproduces the jsoup constructor receiver
+gap in direct, parenthesized, fully qualified, and overloaded method calls.
+Anonymous-class and chained-result negatives remain unresolved. A native
+resolver regression also fails because the direct method candidate lacks
+`lib.Cleaner::check` as its receiver constraint. Its source and failure log are
+retained in `java-constructor-receiver-diagnostic` and
+`java-constructor-receiver-test-01.log`; the test is not installed as a passing
+repository test, and no Java production change or score improvement is claimed.
+The first ad hoc graph review used the raw-extraction `relation` key instead
+of graph-v1 `kind`; `before-review-corrected.json` records the corrected review.
+The native evidence and corrected graph inspection agree on the missing calls.
 
 ## Next evidence to collect
 
-1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact
+1. Correct filesystem route-parent selection and its non-independent frontend
+   oracle; keep the new semantic negative failing until the false parent is
+   removed by production behavior. Then rerun the full qualification gate.
+2. Extend source-proven constructor, loop/result/iterator inference to recover
+   the jsoup and fd misses. Keep exact
    build/source provenance for subsequent release comparisons;
    the latest query correction has native and fixed-graph regression evidence.
-2. Use the source-role census and connectivity breakdowns to review actual
+3. Use the source-role census and connectivity breakdowns to review actual
    responsibilities and source-edge correctness, including containment-heavy
    modules and generic reference targets. Evaluate cluster responsibilities
    and cross-community connections separately from graph consistency.
-3. Extend the development navigation-path judgments to directed call paths,
+4. Extend the development navigation-path judgments to directed call paths,
    longer walks, parallel source occurrences, broader ambiguity/unreachable
    cases, and real-repository work exhaustion. A negative or limit outcome
    must never count as a path or proof of global disconnection.
-4. Use held-out repositories/questions and publish all failures, including
+5. Use held-out repositories/questions and publish all failures, including
    competitor wins. Separate extraction gaps, resolution gaps, retrieval gaps,
    rendering gaps and oracle mistakes using actual source evidence.
-5. Improve the owning production layer for reproduced failures, retain native
+6. Improve the owning production layer for reproduced failures, retain native
    regressions, then rerun equivalent questions. Report category-level evidence
    and uncertainty rather than claiming universal dominance.

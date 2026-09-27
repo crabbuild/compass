@@ -1,5 +1,5 @@
 {
-  "schema": "compass.code-graph-qualification/2",
+  "schema": "compass.code-graph-qualification/3",
   "flows": [
     {
       "id": "flow-django",
@@ -1798,5 +1798,55 @@
   ],
   "limits": {
     "maxDiagnostics": 64
-  }
+  },
+  "routeContainmentNegatives": [
+    {
+      "id": "route-containment-independent-1",
+      "sourceFile": "fixtures/code-graph/frontend-react/src/routes/tanstack.tsx",
+      "targetFile": "fixtures/code-graph/frontend-react/src/routes/home.tsx",
+      "reason": "The TanStack createFileRoute /tanstack and React Router /home belong to different route libraries. A shared source directory provides no cross-framework parentage."
+    },
+    {
+      "id": "route-containment-independent-2",
+      "sourceFile": "fixtures/code-graph/routes/jvm/SpringController.kt",
+      "targetFile": "fixtures/code-graph/routes/jvm/SpringController.java",
+      "reason": "Independent annotated controllers in different packages declare /kotlin and /api mappings. The Kotlin method is not a containing route for Java endpoints."
+    },
+    {
+      "id": "route-containment-independent-3",
+      "sourceFile": "fixtures/code-graph/routes/php/drupal.module",
+      "targetFile": "fixtures/code-graph/routes/php/drupal.routing.yml",
+      "reason": "The entity-type hook has an empty body. The YAML routes independently declare controllers and forms; the hook does not contain those routes."
+    },
+    {
+      "id": "route-containment-independent-4",
+      "sourceFile": "fixtures/code-graph/routes/python/fastapi_models.py",
+      "targetFile": "fixtures/code-graph/routes/python/fastapi_app.py",
+      "reason": "The modules instantiate separate FastAPI apps. The models app does not include the other app or its router."
+    },
+    {
+      "id": "route-containment-independent-5",
+      "sourceFile": "fixtures/code-graph/routes/python/flask_factory.py",
+      "targetFile": "fixtures/code-graph/routes/python/flask_app.py",
+      "reason": "The factory registers its own root and nested blueprints. flask_app.py creates a separate app and blueprint; no cross-module registration exists."
+    },
+    {
+      "id": "route-containment-independent-6",
+      "sourceFile": "fixtures/code-graph/routes/typescript/owner-mismatch.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/express.ts",
+      "reason": "Each module creates its own Express app; neither imports or mounts the other. A route with an unresolved controller is not a parent router."
+    },
+    {
+      "id": "route-containment-independent-7",
+      "sourceFile": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/vue-router.ts",
+      "reason": "Both modules independently call createRouter. Neither route array declares the other route as a child or imports the other router."
+    },
+    {
+      "id": "route-containment-independent-8",
+      "sourceFile": "fixtures/code-graph/routes/typescript/vue-router.ts",
+      "targetFile": "fixtures/code-graph/routes/typescript/vue-router-qualified.ts",
+      "reason": "Both modules independently call createRouter. Neither route array declares the other route as a child or imports the other router."
+    }
+  ]
 }

@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 # The graph wire contract remains compass.graph/1.  This expectation schema is
-# independently versioned so adding frontend vocabulary cannot make an older
-# oracle silently accept a newer manifest.
-SCHEMA = "compass.code-graph-qualification/2"
+# independently versioned so an older oracle cannot silently omit newly
+# required semantic assertions.
+SCHEMA = "compass.code-graph-qualification/3"
 GRAPH_SCHEMA = "compass.graph/1"
 TOPOLOGY_POLICY_SCHEMA = "compass.code-graph-topology-policy/1"
 TOPOLOGY_REPORT_SCHEMA = "compass.code-graph-topology-report/1"
@@ -163,7 +163,7 @@ def load_manifest(
         fail("manifest_schema", str(path), f"expected {SCHEMA}")
     allowed = {
         "schema", "flows", "negatives", "nodeProducers", "edgeProducers",
-        "languages", "occurrences", "coverage", "limits",
+        "languages", "occurrences", "coverage", "limits", "routeContainmentNegatives",
     }
     unknown = sorted(set(manifest) - allowed)
     if unknown:
@@ -216,6 +216,28 @@ def load_manifest(
             fail("manifest_unknown_field", identity, "negative fields differ from contract")
         _unique_id(ids, identity)
         _source_exists(fixture_root, item["source"], identity, declared_sources)
+
+    containment_fields = {"id", "sourceFile", "targetFile", "reason"}
+    containment_selectors: set[tuple[str, str]] = set()
+    if not isinstance(manifest["routeContainmentNegatives"], list):
+        fail("manifest_route_containment", str(path), "expectations must be a list")
+    for item in manifest["routeContainmentNegatives"]:
+        if not isinstance(item, dict):
+            fail("manifest_route_containment", str(path), "each expectation must be an object")
+        identity = str(item.get("id", "<missing>"))
+        _require(item, containment_fields, identity)
+        if set(item) != containment_fields:
+            fail("manifest_unknown_field", identity, "route containment fields differ from contract")
+        for key in sorted(containment_fields):
+            if not isinstance(item[key], str) or not item[key].strip():
+                fail("manifest_route_containment", identity, f"{key} must be a nonempty string")
+        _unique_id(ids, identity)
+        selector = (item["sourceFile"], item["targetFile"])
+        if selector in containment_selectors or selector[0] == selector[1]:
+            fail("manifest_route_containment", identity, "duplicate or same-file selector")
+        containment_selectors.add(selector)
+        for source in selector:
+            _source_exists(fixture_root, source, identity, declared_sources)
 
     producer_fields = {
         "id", "kind", "source", "qualifiedName", "producer", "origins",
@@ -1065,6 +1087,28 @@ def assert_negatives(graph: dict[str, Any], manifest: dict[str, Any]) -> dict[st
     return {"negatives": count}
 
 
+def assert_route_containment_negatives(graph: dict[str, Any], manifest: dict[str, Any]) -> dict[str, int]:
+    routes_by_file: dict[str, set[str]] = defaultdict(set)
+    for node in graph["nodes"]:
+        if node.get("kind") == "route":
+            routes_by_file[(node.get("source") or {}).get("file", "")].add(node["id"])
+    passed = 0
+    for item in manifest["routeContainmentNegatives"]:
+        source_ids = routes_by_file[item["sourceFile"]]
+        target_ids = routes_by_file[item["targetFile"]]
+        if not source_ids or not target_ids:
+            fail("route_containment_missing_endpoint", item["id"], "both files must retain route nodes")
+        forbidden = [
+            edge["id"] for edge in graph["links"]
+            if edge["kind"] == "contains"
+            and edge["source"] in source_ids and edge["target"] in target_ids
+        ]
+        if forbidden:
+            fail("route_containment_negative", item["id"], f"unsupported edges {sorted(forbidden)}")
+        passed += 1
+    return {"route_containment_negatives": passed}
+
+
 def assert_vocabulary(graph: dict[str, Any], manifest: dict[str, Any]) -> dict[str, int]:
     counts = {}
     for group, records, key in (
@@ -1192,6 +1236,7 @@ def qualify_graph(graph: dict[str, Any], manifest: dict[str, Any], fixture_root:
     summary: dict[str, Any] = {}
     summary.update(assert_flows(graph, manifest, fixture_root))
     summary.update(assert_negatives(graph, manifest))
+    summary.update(assert_route_containment_negatives(graph, manifest))
     summary.update(assert_vocabulary(graph, manifest))
     summary.update(assert_languages(graph, manifest))
     summary.update(assert_occurrences(graph, manifest))

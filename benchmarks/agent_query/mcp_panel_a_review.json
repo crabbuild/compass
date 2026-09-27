@@ -114,7 +114,7 @@
       "clippy": "passed on workspace lib/bin plus selected integrations; first run retained an existing expect_err lint failure, corrected with an explicit error assertion",
       "frameworkQualificationTestsRerunAfterLintCleanup": 4,
       "frameworkRoutesPassed": 17,
-      "fullFixtureQualification": "pending; previous Go fixture pass does not verify this new production change",
+      "fullFixtureQualification": "FAILED at the old topology count floor. Complete source review justifies 19 removed false containment edges; recalibrated count policy passes, but the new independent-route assertions find one remaining false filesystem parent. See route_hierarchy_fixture_review.json.",
       "nativeFailed": 0,
       "nativeIgnored": 2,
       "nativePassed": 1431
