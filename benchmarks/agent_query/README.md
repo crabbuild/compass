@@ -752,3 +752,26 @@ All 204 benchmark tests and the product boundary pass; repeated verification is
 byte-identical. External `longer-paths-01` holds raw MCP/CLI captures and verifier
 scripts, including failed attempts. No production change, held-out claim or
 overall superiority claim follows from this checkpoint.
+
+### Calls-only trails: native correction on the frozen questions
+
+`calls_only_trails_registration.json` and `calls_only_trails_review.json` retain
+the explicit calls-only implementation and replay of the same five questions.
+Source-assisted public-ID static call paths improve from **2/5 to 4/5**; native
+short-name results remain **1/5**. CLI, explicit call-path `ask` and actual MCP
+agree on all four resolved pairs. Redux remains unresolved in the denominator.
+All 20 fresh resolver results are unchanged, and nine default stdout/stderr
+controls remain byte-identical.
+
+The jsoup route uses `Document.body`'s missing-body fallback despite the caller
+initializing a shell containing a body. Its edges have source support, but
+execution feasibility in that context is unproven. This post-capture alternative
+receives no frozen-route or runtime credit. The stopped initial verification,
+source adjudication and existing incomplete-coverage warning are retained.
+
+The report records 56 query, 43 CLI, 11 MCP, 1,106 workspace, nine product and
+204 benchmark passing tests, two existing ignored workspace tests, formatting,
+Clippy, product-boundary and build results. Repeated verification is identical.
+External `calls-only-trails-01` retains raw evidence and logs. This is a native
+before/after result, with no equivalent Graphify path filter, held-out claim,
+authored-answer score or overall superiority claim. Version remains 0.3.30.

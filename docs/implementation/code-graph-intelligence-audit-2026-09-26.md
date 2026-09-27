@@ -3462,6 +3462,63 @@ it against shorter structural shortcuts, missing paths and these frozen real
 questions. Named-function-expression identity needs a separate owning-layer
 fix. Broader explanation, god-object, community and held-out claims remain open.
 
+## Explicit calls-only trails: native correction and fixed-graph replay
+
+Implementation `89916af9` adds an optional `callsOnly` typed request field,
+CLI `node --calls-only`, MCP `get_node` parameter `calls_only`, and explicit
+`ask` syntax `call path from SOURCE to TARGET` / `call chain from SOURCE to
+TARGET`. Structural defaults remain unchanged. The filter applies to endpoint
+role probes, traversal, depth-frontier checks and direction diagnostics.
+Existing ambiguity, heuristic opt-in, source occurrence and work/response
+limits remain in force. Undirected diagnostics charge examined incident edges
+before excluding structural relations, so exhausting that budget still cannot
+prove absence.
+
+Registration `4e22e1da` fixes the existing five source questions and frozen
+graphs before replay. Its wording correction in `89916af9` precedes capture;
+no endpoints or witnesses changed. `calls_only_trails_review.json` retains the
+raw-artifact hashes and all outcomes, including unresolved Redux identity.
+
+| Compass workflow | Source-supported static call paths |
+| --- | ---: |
+| Old and new structural defaults, source-assisted public IDs | 2/5 |
+| Explicit calls-only, source-assisted public IDs | 4/5 |
+| Explicit call-path `ask`, same public IDs | 4/5 |
+| Native short names, either policy | 1/5 |
+
+Chi, Click, jsoup and WalkDir return supported call edges. CLI, `ask` and actual
+stdio MCP result bodies agree for all four resolved pairs. Twenty fresh public
+resolver results remain unchanged, and all nine default stdout/stderr controls
+are byte-identical. This is a native before/after correction on known questions.
+Graphify's public path interfaces expose no corresponding relation filter;
+its earlier ID and native-label controls remain separate, with no equal-feature
+or overall superiority claim.
+
+The jsoup result requires a specific qualification. Its five-call route passes
+through `Document.body` and the missing-body `appendElement` fallback. The
+caller initializes a document shell containing a body, so execution feasibility
+in this context remains unproven. Source review supports the static call edges
+only. The initial verifier stopped on this unregistered alternative; the stopped
+verification and subsequent source adjudication are retained. The route receives
+no frozen-route or runtime-feasibility credit, and the input graph's existing
+incomplete-coverage warning remains. No route-selection rule was retuned to
+force the registered alternative.
+
+Validation passes: 56 targeted query tests, 43 CLI tests, 11 MCP tests, 1,106
+workspace library/binary tests (two existing ignored tests), nine product tests,
+204 benchmark tests, formatting, workspace Clippy, the product boundary and the
+CLI build. The independent calls-only oracle covers 729 four-node DAGs at three
+depth bounds; other regressions cover cycles, structural shortcuts, occurrence
+ordering, backend parity, limits and invalid inputs. Repeated source/capture
+verification is byte-identical. External `calls-only-trails-01` retains logs,
+requests, responses and verifiers. JavaScript, packaging, platform matrices,
+extraction fixtures and CompassQL suites were not rerun because those surfaces
+did not change. Version remains 0.3.30.
+
+Unscoped name ambiguity, Redux function-expression identity, runtime feasibility,
+authored explanations, actual god-object judgments, functional community quality
+and held-out confirmation remain open.
+
 ## Next evidence to collect
 
 1. Re-review the invalidated pinned hierarchy scorecards from their sources.
