@@ -941,6 +941,13 @@ anchors, reports `status.matchState = ambiguous`, and emits
 instead of issuing a broad search. Primary results are deduplicated by node ID,
 including when a real self-edge names the same node twice.
 
+Ambiguous typed answers explicitly ask for an exact node ID and use the query
+operation as their answer basis. They do not attribute an answer to the first
+candidate, claim the symbol is missing, or infer that a path does not exist.
+Text pages include IDs for every retained ambiguity candidate, even when their
+qualified labels differ. Select the intended declaration by its source anchor
+and retry with its ID.
+
 Typed text output is paged. Each page carries a
 `Pagination: page=N range=A-B of T next=<CURSOR>` footer; `--cursor` continues
 the same ledger at the same `--text-budget`. The cursor is a checksummed

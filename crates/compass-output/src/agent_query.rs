@@ -1963,20 +1963,18 @@ fn duplicated_entity_labels(entities: &[AgentEntity]) -> HashSet<&str> {
 
 /// Whether a page must print the stable identifier of one entity.
 ///
-/// A page needs the identifier only where the page is resolving a name and the
-/// name it printed is not unique enough to address the row, which is when two
-/// retained rows share that label. A row that a caller can name - the resolved
-/// answers, and every distinct label in a candidate list - stays addressed by
-/// the qualified name and source anchor it already prints, which keeps the
-/// answer's evidence per token high; a duplicated label cannot be repeated back
-/// to the tool alone, so those rows carry the identity that separates them. The
-/// candidate list, its order, and every identifier stay in `--format json`.
+/// An ambiguous query asks the user to select an exact ID, so every retained
+/// candidate carries that ID even when its qualified label is distinct. Other
+/// unresolved candidate lists need IDs only for colliding labels. Resolved
+/// answers stay compact; JSON carries every identifier unchanged.
 fn entity_needs_identity(
     entity: &AgentEntity,
     match_state: AgentMatch,
     duplicated_labels: &HashSet<&str>,
 ) -> bool {
-    !matches!(match_state, AgentMatch::Exact) && duplicated_labels.contains(entity.label.as_str())
+    match_state == AgentMatch::Ambiguous
+        || (!matches!(match_state, AgentMatch::Exact)
+            && duplicated_labels.contains(entity.label.as_str()))
 }
 
 fn render_relationship(relationship: &AgentRelationship) -> String {
@@ -2683,6 +2681,15 @@ fn answer_for_code(
         .first()
         .map(|operand| operand.value.clone())
         .unwrap_or_else(|| "the requested query".to_owned());
+    if result_state == AgentResultState::NeedsResolution {
+        return AgentAnswer {
+            headline: "The query matches multiple candidates; retry with an exact node ID for each ambiguous operand.".to_owned(),
+            basis: vec![AgentBasis {
+                kind: "operation".to_owned(),
+                id: context.operation.label().to_owned(),
+            }],
+        };
+    }
     let subject = primary_results
         .first()
         .map(|entity| entity.label.clone())

@@ -854,6 +854,58 @@ fn legacy_page_cursor_encoding_is_rejected_with_a_version_error() -> Result<(), 
 }
 
 #[test]
+fn ambiguity_never_selects_a_headline_subject_or_claims_no_path() -> Result<(), Box<dyn Error>> {
+    for (operation, agent_operation) in [
+        (CodeQueryOperation::Callers, AgentOperation::Callers),
+        (CodeQueryOperation::Callees, AgentOperation::Callees),
+        (CodeQueryOperation::Impact, AgentOperation::Impact),
+        (CodeQueryOperation::NodeTrail, AgentOperation::NodeTrail),
+    ] {
+        let mut response = response(operation);
+        response.nodes = vec![
+            node("n:library", "Library.run", &anchor("src/lib.rs", 10)),
+            node("n:test", "Tests.run", &anchor("tests/run.rs", 20)),
+        ];
+        response.diagnostics.push(QueryDiagnostic {
+            code: QueryDiagnosticCode::AmbiguousMatch,
+            message: "run matched two declarations".to_owned(),
+            node_id: None,
+            path: None,
+        });
+        let query_context =
+            context(agent_operation).with_operand(compass_output::AgentOperandRole::Symbol, "run");
+        for reverse in [false, true] {
+            if reverse {
+                response.nodes.reverse();
+            }
+            let view = build_code_query_view(&response, query_context.clone())?;
+            assert_eq!(view.status.result_state, AgentResultState::NeedsResolution);
+            assert!(view.answer.headline.contains("multiple candidates"));
+            assert!(view.answer.headline.contains("exact node ID"));
+            assert_eq!(view.answer.basis.len(), 1);
+            assert_eq!(view.answer.basis[0].kind, "operation");
+            let page = render_code_query_text_page(
+                &response,
+                query_context.clone(),
+                AgentTextPageOptions {
+                    token_budget: 2_000,
+                    cursor: None,
+                },
+            )?;
+            for text in [render_agent_query_text(&view)?, page.text] {
+                for id in ["n:library", "n:test"] {
+                    assert!(text.contains(&format!("id: {id}")), "{text}");
+                }
+                assert!(!text.contains("fallback candidate"), "{text}");
+                assert!(!text.contains("No directed path"), "{text}");
+                assert!(!text.contains("No exact match"), "{text}");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn unresolved_relationship_answers_never_speak_for_another_symbol() -> Result<(), Box<dyn Error>> {
     let caller_anchor = anchor("src/caller.rs", 10);
     let target_anchor = anchor("src/target.rs", 20);

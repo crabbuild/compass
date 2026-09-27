@@ -1639,6 +1639,13 @@ fn ambiguous_typed_lookup_returns_a_pick_list_instead_of_an_empty_result()
     let view: Value = serde_json::from_str(&outcome.stdout)?;
     assert_eq!(view["status"]["resultState"], "needs_resolution");
     assert_eq!(view["status"]["matchState"], "ambiguous");
+    assert!(
+        view["answer"]["headline"]
+            .as_str()
+            .is_some_and(|headline| headline.contains("multiple candidates")
+                && headline.contains("exact node ID"))
+    );
+    assert_eq!(view["answer"]["basis"][0]["kind"], "operation");
     let results = view["primaryResults"]
         .as_array()
         .ok_or("primaryResults must be an array")?;
@@ -1655,6 +1662,29 @@ fn ambiguous_typed_lookup_returns_a_pick_list_instead_of_an_empty_result()
         "{}",
         outcome.stdout
     );
+    for argv in [
+        vec!["callers", "run"],
+        vec!["callees", "run"],
+        vec!["ask", "who calls run"],
+    ] {
+        let mut args = argv.into_iter().map(OsString::from).collect::<Vec<_>>();
+        args.extend([OsString::from("--graph"), graph.as_os_str().to_owned()]);
+        let text = run(Frontend::Compass, args);
+        assert_eq!(text.code, 0, "{}", text.stderr);
+        assert!(
+            text.stdout.contains("multiple candidates"),
+            "{}",
+            text.stdout
+        );
+        assert!(text.stdout.contains("id: n:alpha-run"), "{}", text.stdout);
+        assert!(text.stdout.contains("id: n:beta-run"), "{}", text.stdout);
+        assert!(
+            !text.stdout.contains("fallback candidate"),
+            "{}",
+            text.stdout
+        );
+        assert!(!text.stdout.contains("No exact match"), "{}", text.stdout);
+    }
     Ok(())
 }
 

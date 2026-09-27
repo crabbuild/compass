@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Make ambiguous typed query headlines request exact node IDs without naming
+  a fallback subject or claiming no path. Include IDs for all retained
+  ambiguity candidates in text output.
+
 - Explain MCP hub candidates with node kind and bounded relation/direction
   counts, preserving parallel records and distinguishing incident records from
   ranking degree. Report omitted relation categories explicitly.

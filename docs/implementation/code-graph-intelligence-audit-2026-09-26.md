@@ -1103,6 +1103,72 @@ requires another independent confirmation panel. MCP/community workflows,
 directed or long walks, source-level cohesion, and god-object judgments remain
 unproven here.
 
+### Post-output path selection diagnostics
+
+Two additional arms use the **original frozen binaries and graphs**, with
+source-reviewed callable endpoints prepared symmetrically from the graphs.
+They are post-output diagnostics, not node retrieval or workflow-cost scores:
+preparing an endpoint from the oracle does not prove that a user found it.
+The four questions cover forward/reverse Redux and WalkDir paths only.
+
+| Prepared endpoint form | Compass source-path matches | Graphify source-path matches |
+| --- | ---: | ---: |
+| Full stored IDs | 4/4 | 2/4 |
+| Exact stored display labels | 0/4 | 2/4 |
+
+Both graphs contain the selected WalkDir call edges. Full IDs let Compass
+navigate those edges and Redux's function declarations. Graphify's CLI path
+help describes source/target strings without promising exact-ID semantics;
+its stored-ID and display-label attempts still choose different WalkDir
+endpoints. For example the full-ID forward request returns a test function,
+its containing test file, and an import to `WalkDir`. Compass normalizes display
+labels and still detects the export/function or library/test collisions.
+Neither arm replaces the original 6/10 versus 8/10 source-path result, and the
+ID diagnostic is not a claim that Graphify lacks other disambiguation workflows.
+Artifacts: `heldout-a-explicit-path-diagnostic-01` and
+`heldout-a-label-path-diagnostic-01`, each retaining prepared inputs, executable
+hashes, script, captured streams, and source-witness audit results.
+
+### Development correction: actionable ambiguity answers
+
+The frozen panel exposed an unrelated presentation defect: a typed ambiguous
+relationship request said “No exact match” and named the first candidate as a
+fallback. A typed ambiguous node-trail response could instead claim no directed
+path. `compass-output` now handles `needs_resolution` before those answer
+branches, asks for exact IDs, and uses the operation as the answer basis.
+Every retained ambiguity candidate has its exact ID in paged and full text,
+even if qualified labels differ. Candidate selection, raw query results,
+relationship resolution, schema majors, and path algorithms are unchanged.
+Changed text pages use the existing cursor-prefix rejection rules; restart a
+rejected continuation from page one.
+
+This is **development after observing panel A**, not an improved held-out
+score. `heldout-a-ambiguity-replay-01` repeats all 55 Compass questions against
+the original hash-verified graphs. Text passes remain **46/55**, with no changed
+pass/fail rows. All four inspected Redux/WalkDir ambiguous callers/callees/ask
+responses now show exact IDs and the corrected headline. The text-oracle false
+positives documented above remain false positives; better ambiguity wording
+does not turn an unresolved task into a successful answer. The replay does not
+re-extract either graph or rerun Graphify.
+
+The new frozen binary has SHA256
+`d561d7c762410899cb6039f409d17401239ee26ee525f8bbfd2e95cebcb82857`.
+`ambiguity-headline-provenance` records its base commit, patch, and source hashes.
+Verification passes **1,155 native tests, zero failed, two ignored**, comprising
+workspace library/binary tests plus `agent_query`, `code_query_cli`, and
+`compass_product`. The new regressions cover callers, callees, impact, node
+trails, candidate permutation, full/paged text, agent JSON, and the actual CLI
+callers/callees/ask boundary. Workspace and the same selected integration Clippy
+pass with warnings denied. All **95 Python tests**, formatting, diff checks,
+and product-boundary checks pass. Logs are `ambiguity-headline-native-02.log`,
+`ambiguity-headline-clippy-01.log`, and `ambiguity-headline-python-01.log`.
+The first targeted test compile used a nonexistent test-options default; the
+retained `ambiguity-headline-targeted-01.log` records that development error.
+Explicit options corrected it before the full pass. Existing core unused-mut
+and macOS linker warnings remain in build/test logs. Extraction qualification
+and JavaScript gates were not rerun: this change only projects query ambiguity
+and does not change extraction, publication, or viewer assets.
+
 ## Next evidence to collect
 
 1. Extend source-proven loop/result/iterator inference to recover the fd callees miss. Keep exact

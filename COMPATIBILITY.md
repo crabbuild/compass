@@ -731,6 +731,12 @@ leading dots, and trailing empty parentheses), retaining exact node-ID lookup
 and requiring a unique normalized name. Existing schema
 majors and raw query responses are unchanged. Text cursors whose primary ordering
 changed are rejected by the existing prefix check; reissue the question.
+Ambiguous typed answers now use the operation as their answer basis and ask
+for exact node IDs, with IDs printed for every retained ambiguity candidate.
+They no longer describe the first candidate as a fallback answer or imply
+that an ambiguous path request proved disconnection. Schema majors and raw
+query responses are unchanged. Existing text cursor prefix checks reject
+pages whose candidate rendering changed; restart that query from page one.
 Plain `compass query` against a typed graph
 now defaults to `compass.query.discovery/1`; `--dfs` and `--context` compose
 with discovery. Explicit `--traverse` or legacy-only `--budget`/`--page`
