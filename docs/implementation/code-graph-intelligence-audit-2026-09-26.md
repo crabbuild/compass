@@ -4238,3 +4238,22 @@ The correction improves a verified freshness failure and preserves all
 available fixed query outputs, while adding memory and lightweight-query cost.
 It does not establish better authored explanations, functional communities,
 actual god-object classification, or overall superiority to Graphify.
+
+### Core integration fixture inference policy
+
+The seven core integration failures in the cache review reproduce on the
+unchanged committed baseline. Their fixtures expect inferred semantic residue,
+but create `BuildOptions` without an inference level. The public default changed
+from `Max` to `Low` earlier; `Low` intentionally excludes inferred edges, so the
+fixtures were not exercising their stated semantic-preservation scenario. The
+test-only follow-up selects `Max` explicitly in seven tests and all 12 of their
+build configurations. It leaves every assertion unchanged and does not change
+the public `Low` default or production binary.
+
+All 13 tests in `loading_coverage` now pass under the pinned offline parser
+setup. Formatting, focused core integration Clippy, workspace library/binary
+Clippy, and 1,112 workspace library/binary tests (two existing ignored) pass.
+The [fixture review](../../benchmarks/agent_query/core_inference_fixture_review.json)
+binds the original seven failures, the sole changed Rust test file, the frozen
+production binary, and the before/after native logs. This restores the intended
+regression coverage; it does not prove any new graph query or god-object quality.
