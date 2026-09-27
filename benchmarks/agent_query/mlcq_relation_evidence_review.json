@@ -1,0 +1,2084 @@
+{
+  "all55Cases": [
+    {
+      "classId": null,
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 8491397
+    },
+    {
+      "classId": "sha256:573ca6bffd3ba6ab9674f7020f46fe0e521dd0556d47eba62176ed527bcbd661",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 1,
+        "distinctOwnFieldTargets": 3,
+        "fieldCount": 4,
+        "id": "sha256:573ca6bffd3ba6ab9674f7020f46fe0e521dd0556d47eba62176ed527bcbd661",
+        "methodCount": 9,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 6,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 13,
+          "foreignCallRecords": 1,
+          "foreignExactAnchoredCallRecords": 1,
+          "internalCallRecords": 1,
+          "internalExactAnchoredCallRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 12,
+          "ownFieldReferenceRecords": 12,
+          "unresolvedCallRecords": 1,
+          "unresolvedExactAnchoredCallRecords": 1
+        }
+      },
+      "sampleId": 8494605
+    },
+    {
+      "classId": "sha256:bd754c67c67ff00c49b8a3345ce718a9942e740cbabe61a8b82e28b75d2dd65a",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 4,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 5,
+        "fieldCount": 5,
+        "id": "sha256:bd754c67c67ff00c49b8a3345ce718a9942e740cbabe61a8b82e28b75d2dd65a",
+        "methodCount": 5,
+        "methodsWithForeignCalls": 5,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 5,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 10,
+          "foreignCallRecords": 14,
+          "foreignExactAnchoredCallRecords": 14,
+          "ownExactAnchoredFieldReferenceRecords": 7,
+          "ownFieldReferenceRecords": 7
+        }
+      },
+      "sampleId": 8497585
+    },
+    {
+      "classId": null,
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 8497687
+    },
+    {
+      "classId": "sha256:c9fada4684df3357d595d7faee6b94bb5562315fea986bb64b5a0e1fbe4c0546",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 8,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:c9fada4684df3357d595d7faee6b94bb5562315fea986bb64b5a0e1fbe4c0546",
+        "methodCount": 1,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 1,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2,
+          "foreignCallRecords": 12,
+          "foreignExactAnchoredCallRecords": 12,
+          "ownExactAnchoredFieldReferenceRecords": 6,
+          "ownFieldReferenceRecords": 6
+        }
+      },
+      "sampleId": 8501968
+    },
+    {
+      "classId": "sha256:e03e64f9267706722b55e0379e95642fab191daa0d5c88b2e26a8acefbed35ab",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 10,
+        "distinctForeignFieldTargets": 6,
+        "distinctInternalCallTargets": 3,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:e03e64f9267706722b55e0379e95642fab191daa0d5c88b2e26a8acefbed35ab",
+        "methodCount": 5,
+        "methodsWithForeignCalls": 5,
+        "methodsWithForeignFieldReferences": 4,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 3,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 6,
+          "foreignCallRecords": 18,
+          "foreignExactAnchoredCallRecords": 18,
+          "foreignExactAnchoredFieldReferenceRecords": 10,
+          "foreignFieldReferenceRecords": 10,
+          "internalCallRecords": 4,
+          "internalExactAnchoredCallRecords": 4,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4,
+          "unresolvedCallRecords": 3,
+          "unresolvedExactAnchoredCallRecords": 3
+        }
+      },
+      "sampleId": 8501970
+    },
+    {
+      "classId": "sha256:537bff8f8df4c26e3b05bf3fe3b3d062a2fe023abaf5ca52f9256cc919e9ffc6",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 2,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 4,
+        "distinctOwnFieldTargets": 5,
+        "fieldCount": 5,
+        "id": "sha256:537bff8f8df4c26e3b05bf3fe3b3d062a2fe023abaf5ca52f9256cc919e9ffc6",
+        "methodCount": 8,
+        "methodsWithForeignCalls": 2,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 6,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 13,
+          "foreignCallRecords": 2,
+          "foreignExactAnchoredCallRecords": 2,
+          "internalCallRecords": 4,
+          "internalExactAnchoredCallRecords": 4,
+          "ownExactAnchoredFieldReferenceRecords": 8,
+          "ownFieldReferenceRecords": 8,
+          "unresolvedCallRecords": 1,
+          "unresolvedExactAnchoredCallRecords": 1
+        }
+      },
+      "sampleId": 8502684
+    },
+    {
+      "classId": "sha256:f7d514eb3a61774eaca9b30dd4a696f8185aba895d2549a6acaf3fb03a480998",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 14,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 15,
+        "distinctOwnFieldTargets": 7,
+        "fieldCount": 7,
+        "id": "sha256:f7d514eb3a61774eaca9b30dd4a696f8185aba895d2549a6acaf3fb03a480998",
+        "methodCount": 19,
+        "methodsWithForeignCalls": 10,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 8,
+        "methodsWithOwnFieldReferences": 8,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 26,
+          "foreignCallRecords": 41,
+          "foreignExactAnchoredCallRecords": 41,
+          "internalCallRecords": 21,
+          "internalExactAnchoredCallRecords": 21,
+          "ownExactAnchoredFieldReferenceRecords": 40,
+          "ownFieldReferenceRecords": 40
+        }
+      },
+      "sampleId": 8507718
+    },
+    {
+      "classId": "sha256:75cb162c933e8f5af2fb399d12a0321c6542fddfc6221867f91241c5fea5cded",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 27,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:75cb162c933e8f5af2fb399d12a0321c6542fddfc6221867f91241c5fea5cded",
+        "methodCount": 1,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 1,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2,
+          "foreignCallRecords": 36,
+          "foreignExactAnchoredCallRecords": 36,
+          "ownExactAnchoredFieldReferenceRecords": 1,
+          "ownFieldReferenceRecords": 1,
+          "unresolvedCallRecords": 3,
+          "unresolvedExactAnchoredCallRecords": 3
+        }
+      },
+      "sampleId": 8510347
+    },
+    {
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 8511088
+    },
+    {
+      "classId": "sha256:ce5c5c31323f4bbc799721eeb6d1fa982389170f9785543ae48cee675163e15e",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 6,
+        "fieldCount": 6,
+        "id": "sha256:ce5c5c31323f4bbc799721eeb6d1fa982389170f9785543ae48cee675163e15e",
+        "methodCount": 12,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 4,
+        "methodsWithOwnFieldReferences": 7,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 18,
+          "foreignCallRecords": 1,
+          "foreignExactAnchoredCallRecords": 1,
+          "internalCallRecords": 8,
+          "internalExactAnchoredCallRecords": 8,
+          "ownExactAnchoredFieldReferenceRecords": 10,
+          "ownFieldReferenceRecords": 10
+        }
+      },
+      "sampleId": 8514954
+    },
+    {
+      "classId": "sha256:8f5e5100ee2d79560887b1d71680e14dba3d232397ff445a4ce32ca24834de9b",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 25,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 3,
+        "distinctOwnFieldTargets": 19,
+        "fieldCount": 19,
+        "id": "sha256:8f5e5100ee2d79560887b1d71680e14dba3d232397ff445a4ce32ca24834de9b",
+        "methodCount": 7,
+        "methodsWithForeignCalls": 4,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 2,
+        "methodsWithOwnFieldReferences": 5,
+        "methodsWithUnresolvedCalls": 4,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 26,
+          "foreignCallRecords": 29,
+          "foreignExactAnchoredCallRecords": 29,
+          "internalCallRecords": 4,
+          "internalExactAnchoredCallRecords": 4,
+          "ownExactAnchoredFieldReferenceRecords": 33,
+          "ownFieldReferenceRecords": 33,
+          "unresolvedCallRecords": 13,
+          "unresolvedExactAnchoredCallRecords": 13
+        }
+      },
+      "sampleId": 8515776
+    },
+    {
+      "classId": "sha256:606a6c28e5ee9445e7985f5e6206d1cc38dd6d7ec94cacf513151aff6b33bd27",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 12,
+        "fieldCount": 12,
+        "id": "sha256:606a6c28e5ee9445e7985f5e6206d1cc38dd6d7ec94cacf513151aff6b33bd27",
+        "methodCount": 25,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 25,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 37,
+          "ownExactAnchoredFieldReferenceRecords": 29,
+          "ownFieldReferenceRecords": 29
+        }
+      },
+      "sampleId": 8516029
+    },
+    {
+      "classId": "sha256:36b7814c82d66c65752bbc58bd537d5c9368bb439151f166c4d6ce67da7bc225",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:36b7814c82d66c65752bbc58bd537d5c9368bb439151f166c4d6ce67da7bc225",
+        "methodCount": 0,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {}
+      },
+      "sampleId": 8517396
+    },
+    {
+      "classId": null,
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 8522716
+    },
+    {
+      "classId": "sha256:66538b3ff66a54fd545c41ad0c13be759817922ba4cfa3e042255e4aa1768472",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 8,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:66538b3ff66a54fd545c41ad0c13be759817922ba4cfa3e042255e4aa1768472",
+        "methodCount": 1,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 1,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2,
+          "foreignCallRecords": 9,
+          "foreignExactAnchoredCallRecords": 9,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 8526483
+    },
+    {
+      "classId": "sha256:52eababd34521216fdc02c142906b15574e8694a0a665c50bcc2fdbfb83376c8",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 6,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 1,
+        "distinctOwnFieldTargets": 2,
+        "fieldCount": 2,
+        "id": "sha256:52eababd34521216fdc02c142906b15574e8694a0a665c50bcc2fdbfb83376c8",
+        "methodCount": 35,
+        "methodsWithForeignCalls": 6,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 13,
+        "methodsWithUnresolvedCalls": 6,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 37,
+          "foreignCallRecords": 6,
+          "foreignExactAnchoredCallRecords": 6,
+          "internalCallRecords": 1,
+          "internalExactAnchoredCallRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 26,
+          "ownFieldReferenceRecords": 26,
+          "unresolvedCallRecords": 6,
+          "unresolvedExactAnchoredCallRecords": 6
+        }
+      },
+      "sampleId": 8526485
+    },
+    {
+      "classId": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 88,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 13,
+        "distinctOwnFieldTargets": 25,
+        "fieldCount": 38,
+        "id": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+        "methodCount": 25,
+        "methodsWithForeignCalls": 15,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 8,
+        "methodsWithOwnFieldReferences": 19,
+        "methodsWithUnresolvedCalls": 18,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 63,
+          "foreignCallRecords": 134,
+          "foreignExactAnchoredCallRecords": 134,
+          "internalCallRecords": 23,
+          "internalExactAnchoredCallRecords": 23,
+          "ownExactAnchoredFieldReferenceRecords": 142,
+          "ownFieldReferenceRecords": 142,
+          "unresolvedCallRecords": 110,
+          "unresolvedExactAnchoredCallRecords": 110
+        }
+      },
+      "sampleId": 8528735
+    },
+    {
+      "classId": "sha256:60b26f62e27fc38e52f1a746d0d942f8f8429abf9dbe3ec505dc3df530e8e499",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 2,
+        "fieldCount": 2,
+        "id": "sha256:60b26f62e27fc38e52f1a746d0d942f8f8429abf9dbe3ec505dc3df530e8e499",
+        "methodCount": 3,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 2,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 5,
+          "ownExactAnchoredFieldReferenceRecords": 2,
+          "ownFieldReferenceRecords": 2
+        }
+      },
+      "sampleId": 8533230
+    },
+    {
+      "classId": "sha256:be771a36dbfcb422759048a55605d35b173fc670bc55be210b99431a408de6c1",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 11,
+        "distinctOwnFieldTargets": 11,
+        "fieldCount": 12,
+        "id": "sha256:be771a36dbfcb422759048a55605d35b173fc670bc55be210b99431a408de6c1",
+        "methodCount": 18,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 2,
+        "methodsWithOwnFieldReferences": 15,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 30,
+          "foreignCallRecords": 1,
+          "foreignExactAnchoredCallRecords": 1,
+          "internalCallRecords": 16,
+          "internalExactAnchoredCallRecords": 16,
+          "ownExactAnchoredFieldReferenceRecords": 20,
+          "ownFieldReferenceRecords": 20,
+          "unresolvedCallRecords": 2,
+          "unresolvedExactAnchoredCallRecords": 2
+        }
+      },
+      "sampleId": 8533645
+    },
+    {
+      "classId": "sha256:248c456ccd43a03c3d8d38141f3af6015fc84b7bb734ad0e215061fa36cd3cf8",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 15,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 1,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 2,
+        "id": "sha256:248c456ccd43a03c3d8d38141f3af6015fc84b7bb734ad0e215061fa36cd3cf8",
+        "methodCount": 3,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 1,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 5,
+          "foreignCallRecords": 15,
+          "foreignExactAnchoredCallRecords": 15,
+          "internalCallRecords": 1,
+          "internalExactAnchoredCallRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 1,
+          "ownFieldReferenceRecords": 1
+        }
+      },
+      "sampleId": 8533750
+    },
+    {
+      "classId": "sha256:3babcd2c278f7348ac8e458c30364ae96ef6f7943f471073ddd9f52aa3793b45",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 2,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 1,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:3babcd2c278f7348ac8e458c30364ae96ef6f7943f471073ddd9f52aa3793b45",
+        "methodCount": 2,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 2,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2,
+          "foreignCallRecords": 2,
+          "foreignExactAnchoredCallRecords": 2,
+          "internalCallRecords": 2,
+          "internalExactAnchoredCallRecords": 2
+        }
+      },
+      "sampleId": 8533873
+    },
+    {
+      "classId": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 4,
+        "fieldCount": 4,
+        "id": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+        "methodCount": 5,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 4,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 9,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 8537138
+    },
+    {
+      "classId": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 16,
+        "distinctOwnFieldTargets": 5,
+        "fieldCount": 5,
+        "id": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+        "methodCount": 22,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 17,
+        "methodsWithOwnFieldReferences": 8,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 27,
+          "internalCallRecords": 36,
+          "internalExactAnchoredCallRecords": 36,
+          "ownExactAnchoredFieldReferenceRecords": 43,
+          "ownFieldReferenceRecords": 43
+        }
+      },
+      "sampleId": 8538037
+    },
+    {
+      "classId": "sha256:38284587360b3b49dbb4f5a62e61da7265017e65e4d0f3273483c38fd6f59413",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 6,
+        "distinctForeignFieldTargets": 1,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:38284587360b3b49dbb4f5a62e61da7265017e65e4d0f3273483c38fd6f59413",
+        "methodCount": 1,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 1,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 1,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2,
+          "foreignCallRecords": 6,
+          "foreignExactAnchoredCallRecords": 6,
+          "foreignExactAnchoredFieldReferenceRecords": 1,
+          "foreignFieldReferenceRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 5,
+          "ownFieldReferenceRecords": 5
+        }
+      },
+      "sampleId": 8539540
+    },
+    {
+      "classId": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+        "methodCount": 2,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 2,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 3,
+          "ownExactAnchoredFieldReferenceRecords": 2,
+          "ownFieldReferenceRecords": 2
+        }
+      },
+      "sampleId": 8539645
+    },
+    {
+      "classId": "sha256:3eae3eb896a5e0a9672beb7055286b500afc83cd6866887b6e488daf7e55d780",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 4,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 3,
+        "distinctOwnFieldTargets": 3,
+        "fieldCount": 3,
+        "id": "sha256:3eae3eb896a5e0a9672beb7055286b500afc83cd6866887b6e488daf7e55d780",
+        "methodCount": 7,
+        "methodsWithForeignCalls": 3,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 3,
+        "methodsWithOwnFieldReferences": 3,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 10,
+          "foreignCallRecords": 6,
+          "foreignExactAnchoredCallRecords": 6,
+          "internalCallRecords": 5,
+          "internalExactAnchoredCallRecords": 5,
+          "ownExactAnchoredFieldReferenceRecords": 3,
+          "ownFieldReferenceRecords": 3,
+          "unresolvedCallRecords": 1,
+          "unresolvedExactAnchoredCallRecords": 1
+        }
+      },
+      "sampleId": 8541418
+    },
+    {
+      "classId": "sha256:944a1b36f5b23ad222434d66733c9f991275aa0eab16d898496504878196a5e6",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 16,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 8,
+        "fieldCount": 9,
+        "id": "sha256:944a1b36f5b23ad222434d66733c9f991275aa0eab16d898496504878196a5e6",
+        "methodCount": 6,
+        "methodsWithForeignCalls": 5,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 2,
+        "methodsWithOwnFieldReferences": 4,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 15,
+          "foreignCallRecords": 20,
+          "foreignExactAnchoredCallRecords": 20,
+          "internalCallRecords": 5,
+          "internalExactAnchoredCallRecords": 5,
+          "ownExactAnchoredFieldReferenceRecords": 43,
+          "ownFieldReferenceRecords": 43
+        }
+      },
+      "sampleId": 8547261
+    },
+    {
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 6369779
+    },
+    {
+      "classId": "sha256:2406de0a7d6d60a3285ffd6c08255cbb1ca0caea9758a152269cdb77a148add1",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 2,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 3,
+        "distinctOwnFieldTargets": 3,
+        "fieldCount": 5,
+        "id": "sha256:2406de0a7d6d60a3285ffd6c08255cbb1ca0caea9758a152269cdb77a148add1",
+        "methodCount": 8,
+        "methodsWithForeignCalls": 2,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 3,
+        "methodsWithOwnFieldReferences": 7,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 13,
+          "foreignCallRecords": 2,
+          "foreignExactAnchoredCallRecords": 2,
+          "internalCallRecords": 4,
+          "internalExactAnchoredCallRecords": 4,
+          "ownExactAnchoredFieldReferenceRecords": 18,
+          "ownFieldReferenceRecords": 18
+        }
+      },
+      "sampleId": 6371049
+    },
+    {
+      "classId": "sha256:314148a91f14e6961b357cb5e4f4aa5a81b1be65c8ca726d4baf6afae561b9c5",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 2,
+        "fieldCount": 2,
+        "id": "sha256:314148a91f14e6961b357cb5e4f4aa5a81b1be65c8ca726d4baf6afae561b9c5",
+        "methodCount": 3,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 3,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 5,
+          "foreignCallRecords": 1,
+          "foreignExactAnchoredCallRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 10,
+          "ownFieldReferenceRecords": 10,
+          "unresolvedCallRecords": 10,
+          "unresolvedExactAnchoredCallRecords": 10
+        }
+      },
+      "sampleId": 6372633
+    },
+    {
+      "classId": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 23,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 10,
+        "fieldCount": 11,
+        "id": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+        "methodCount": 14,
+        "methodsWithForeignCalls": 9,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 4,
+        "methodsWithOwnFieldReferences": 11,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 25,
+          "foreignCallRecords": 47,
+          "foreignExactAnchoredCallRecords": 47,
+          "internalCallRecords": 5,
+          "internalExactAnchoredCallRecords": 5,
+          "ownExactAnchoredFieldReferenceRecords": 55,
+          "ownFieldReferenceRecords": 55,
+          "unresolvedCallRecords": 3,
+          "unresolvedExactAnchoredCallRecords": 3
+        }
+      },
+      "sampleId": 6374724
+    },
+    {
+      "classId": "sha256:37b79ae353d248eb203600de85dbe7573454fa88e5f8ae97e546f195609f7a42",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 6,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:37b79ae353d248eb203600de85dbe7573454fa88e5f8ae97e546f195609f7a42",
+        "methodCount": 6,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 6,
+          "foreignCallRecords": 6,
+          "foreignExactAnchoredCallRecords": 6,
+          "internalCallRecords": 5,
+          "internalExactAnchoredCallRecords": 5
+        }
+      },
+      "sampleId": 6375252
+    },
+    {
+      "classId": "sha256:b60c2c635e95ea09774e70e6ffb28c8ebc5471b8a071c2b1a05ef74b56d697e0",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 14,
+        "distinctOwnFieldTargets": 4,
+        "fieldCount": 4,
+        "id": "sha256:b60c2c635e95ea09774e70e6ffb28c8ebc5471b8a071c2b1a05ef74b56d697e0",
+        "methodCount": 15,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 8,
+        "methodsWithOwnFieldReferences": 9,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 19,
+          "foreignCallRecords": 1,
+          "foreignExactAnchoredCallRecords": 1,
+          "internalCallRecords": 21,
+          "internalExactAnchoredCallRecords": 21,
+          "ownExactAnchoredFieldReferenceRecords": 27,
+          "ownFieldReferenceRecords": 27
+        }
+      },
+      "sampleId": 6375517
+    },
+    {
+      "classId": "sha256:21e5eebc28b2d54b59d725c18a9d2adb26cb0dd025665f9d7d320e6cb8e769c2",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 7,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 17,
+        "distinctOwnFieldTargets": 23,
+        "fieldCount": 32,
+        "id": "sha256:21e5eebc28b2d54b59d725c18a9d2adb26cb0dd025665f9d7d320e6cb8e769c2",
+        "methodCount": 46,
+        "methodsWithForeignCalls": 6,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 14,
+        "methodsWithOwnFieldReferences": 44,
+        "methodsWithUnresolvedCalls": 5,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 78,
+          "foreignCallRecords": 11,
+          "foreignExactAnchoredCallRecords": 11,
+          "internalCallRecords": 41,
+          "internalExactAnchoredCallRecords": 41,
+          "ownExactAnchoredFieldReferenceRecords": 99,
+          "ownFieldReferenceRecords": 99,
+          "unresolvedCallRecords": 9,
+          "unresolvedExactAnchoredCallRecords": 9
+        }
+      },
+      "sampleId": 6379553
+    },
+    {
+      "classId": "sha256:1245c6c02e5ce0dcef7062094ffc5e2e96059a0e49a4414cc079477bff4d1dc2",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 1,
+        "distinctOwnFieldTargets": 4,
+        "fieldCount": 4,
+        "id": "sha256:1245c6c02e5ce0dcef7062094ffc5e2e96059a0e49a4414cc079477bff4d1dc2",
+        "methodCount": 7,
+        "methodsWithForeignCalls": 2,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 1,
+        "methodsWithOwnFieldReferences": 7,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 11,
+          "foreignCallRecords": 2,
+          "foreignExactAnchoredCallRecords": 2,
+          "internalCallRecords": 1,
+          "internalExactAnchoredCallRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 13,
+          "ownFieldReferenceRecords": 13
+        }
+      },
+      "sampleId": 6383930
+    },
+    {
+      "classId": "sha256:c3a2696121c376e47b8b56df142dcff6fa5964482ec4134c70d6f19f6d8f8c50",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 8,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:c3a2696121c376e47b8b56df142dcff6fa5964482ec4134c70d6f19f6d8f8c50",
+        "methodCount": 8,
+        "methodsWithForeignCalls": 8,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 8,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 9,
+          "foreignCallRecords": 8,
+          "foreignExactAnchoredCallRecords": 8,
+          "ownExactAnchoredFieldReferenceRecords": 8,
+          "ownFieldReferenceRecords": 8
+        }
+      },
+      "sampleId": 6385711
+    },
+    {
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 6387077
+    },
+    {
+      "classId": "sha256:a54c43d61dfb3df58ff9b6eb356070ef5040b5bbe3cc5c91c930c1ff37aead83",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 1,
+        "id": "sha256:a54c43d61dfb3df58ff9b6eb356070ef5040b5bbe3cc5c91c930c1ff37aead83",
+        "methodCount": 0,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 1
+        }
+      },
+      "sampleId": 6387249
+    },
+    {
+      "classId": "sha256:8a79b8fecfc7cf66c5c6ee96ca37e92a9ca966b1de0fd7ddefc70622de492c43",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:8a79b8fecfc7cf66c5c6ee96ca37e92a9ca966b1de0fd7ddefc70622de492c43",
+        "methodCount": 2,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 2,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 3,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 6388458
+    },
+    {
+      "classId": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+        "methodCount": 7,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 7
+        }
+      },
+      "sampleId": 6391534
+    },
+    {
+      "classId": "sha256:95081c0a06121da3dd58decd200efa14a67b6861f98ccec889aee3c97f8400eb",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:95081c0a06121da3dd58decd200efa14a67b6861f98ccec889aee3c97f8400eb",
+        "methodCount": 1,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 1,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2,
+          "ownExactAnchoredFieldReferenceRecords": 1,
+          "ownFieldReferenceRecords": 1
+        }
+      },
+      "sampleId": 6393486
+    },
+    {
+      "classId": "sha256:eb1072f20cf2738fde7929fac849f050d3968f449c5fca0ba8a5076db6a66791",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 6,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 8,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:eb1072f20cf2738fde7929fac849f050d3968f449c5fca0ba8a5076db6a66791",
+        "methodCount": 11,
+        "methodsWithForeignCalls": 6,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 6,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 11,
+          "foreignCallRecords": 8,
+          "foreignExactAnchoredCallRecords": 8,
+          "internalCallRecords": 12,
+          "internalExactAnchoredCallRecords": 12,
+          "unresolvedCallRecords": 1,
+          "unresolvedExactAnchoredCallRecords": 1
+        }
+      },
+      "sampleId": 6398820
+    },
+    {
+      "classId": "sha256:1e001562f35ebf96d35bebfca21ec5d7e7dae156b0922bd27d95b23abf91dcc1",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 2,
+        "fieldCount": 2,
+        "id": "sha256:1e001562f35ebf96d35bebfca21ec5d7e7dae156b0922bd27d95b23abf91dcc1",
+        "methodCount": 3,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 3,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 5,
+          "ownExactAnchoredFieldReferenceRecords": 6,
+          "ownFieldReferenceRecords": 6
+        }
+      },
+      "sampleId": 6404028
+    },
+    {
+      "classId": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+        "methodCount": 6,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 4,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 7,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 6406137
+    },
+    {
+      "classId": "sha256:7331c00a4419b1f8fc817a09d1b99688d726761df40bfcf00cc0f206d99ac476",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 8,
+        "fieldCount": 8,
+        "id": "sha256:7331c00a4419b1f8fc817a09d1b99688d726761df40bfcf00cc0f206d99ac476",
+        "methodCount": 15,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 5,
+        "methodsWithOwnFieldReferences": 15,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 7,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 23,
+          "internalCallRecords": 10,
+          "internalExactAnchoredCallRecords": 10,
+          "ownExactAnchoredFieldReferenceRecords": 29,
+          "ownFieldReferenceRecords": 29,
+          "unresolvedExactAnchoredFieldReferenceRecords": 7,
+          "unresolvedFieldReferenceRecords": 7
+        }
+      },
+      "sampleId": 6412439
+    },
+    {
+      "classId": "sha256:f2e1191484f82d8827e3b7b16753cdc9307dd2845dde8ad64ad1ada6627dbffd",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 2,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 4,
+        "distinctOwnFieldTargets": 4,
+        "fieldCount": 4,
+        "id": "sha256:f2e1191484f82d8827e3b7b16753cdc9307dd2845dde8ad64ad1ada6627dbffd",
+        "methodCount": 5,
+        "methodsWithForeignCalls": 2,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 2,
+        "methodsWithOwnFieldReferences": 4,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 9,
+          "foreignCallRecords": 3,
+          "foreignExactAnchoredCallRecords": 3,
+          "internalCallRecords": 4,
+          "internalExactAnchoredCallRecords": 4,
+          "ownExactAnchoredFieldReferenceRecords": 15,
+          "ownFieldReferenceRecords": 15,
+          "unresolvedCallRecords": 1,
+          "unresolvedExactAnchoredCallRecords": 1
+        }
+      },
+      "sampleId": 6413248
+    },
+    {
+      "classId": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 16,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 5,
+        "fieldCount": 5,
+        "id": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+        "methodCount": 14,
+        "methodsWithForeignCalls": 13,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 12,
+        "methodsWithOwnFieldReferences": 7,
+        "methodsWithUnresolvedCalls": 4,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 19,
+          "foreignCallRecords": 46,
+          "foreignExactAnchoredCallRecords": 46,
+          "internalCallRecords": 18,
+          "internalExactAnchoredCallRecords": 18,
+          "ownExactAnchoredFieldReferenceRecords": 15,
+          "ownFieldReferenceRecords": 15,
+          "unresolvedCallRecords": 10,
+          "unresolvedExactAnchoredCallRecords": 10
+        }
+      },
+      "sampleId": 6413795
+    },
+    {
+      "classId": "sha256:47855833c826f9b124f009509d3ddf8d44e7b28eb237602dd130d3974195c5f8",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 1,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 2,
+        "fieldCount": 2,
+        "id": "sha256:47855833c826f9b124f009509d3ddf8d44e7b28eb237602dd130d3974195c5f8",
+        "methodCount": 5,
+        "methodsWithForeignCalls": 1,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 3,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 7,
+          "foreignCallRecords": 1,
+          "foreignExactAnchoredCallRecords": 1,
+          "ownExactAnchoredFieldReferenceRecords": 5,
+          "ownFieldReferenceRecords": 5
+        }
+      },
+      "sampleId": 6414719
+    },
+    {
+      "classId": "sha256:b4a4369d4e5d88bd8e5b458550726d0c510a7bf908e58870afc48af059400aa1",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:b4a4369d4e5d88bd8e5b458550726d0c510a7bf908e58870afc48af059400aa1",
+        "methodCount": 2,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2
+        }
+      },
+      "sampleId": 6416620
+    },
+    {
+      "classId": "sha256:8b309073c5c35c6b478e7e619d60e7a65a1ea7630ad30fbd09d737a14d109b94",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 3,
+        "fieldCount": 3,
+        "id": "sha256:8b309073c5c35c6b478e7e619d60e7a65a1ea7630ad30fbd09d737a14d109b94",
+        "methodCount": 6,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 6,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 9,
+          "ownExactAnchoredFieldReferenceRecords": 8,
+          "ownFieldReferenceRecords": 8
+        }
+      },
+      "sampleId": 6424656
+    },
+    {
+      "classId": null,
+      "classification": "single-reviewer",
+      "exactMatchCount": 0,
+      "metrics": null,
+      "sampleId": 6424683
+    },
+    {
+      "classId": "sha256:b32f905b4ac8fb166f2d336fbbd11277610b2580af4ab5dffd204eed05f14784",
+      "classification": "minor-or-disagreement",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:b32f905b4ac8fb166f2d336fbbd11277610b2580af4ab5dffd204eed05f14784",
+        "methodCount": 2,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 2
+        }
+      },
+      "sampleId": 6425142
+    },
+    {
+      "classId": "sha256:5df25a82acf0b628680b19b4a5f5880a41a7dde448d2a42fb10aaeb3f5b3f817",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 1,
+        "id": "sha256:5df25a82acf0b628680b19b4a5f5880a41a7dde448d2a42fb10aaeb3f5b3f817",
+        "methodCount": 0,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 1
+        }
+      },
+      "sampleId": 6427227
+    },
+    {
+      "classId": "sha256:12bd289af06352482c17a07e499d1b592b21d7d4a31b4915bfe9dcf25938aae0",
+      "classification": "single-reviewer",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 2,
+        "distinctOwnFieldTargets": 3,
+        "fieldCount": 3,
+        "id": "sha256:12bd289af06352482c17a07e499d1b592b21d7d4a31b4915bfe9dcf25938aae0",
+        "methodCount": 9,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 6,
+        "methodsWithOwnFieldReferences": 3,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 12,
+          "internalCallRecords": 6,
+          "internalExactAnchoredCallRecords": 6,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 6428158
+    }
+  ],
+  "collectorSha256": "9d6ed07f2dd1912cbb97482281e05ae254d3c98633ad0ce6a421d0f80a5dd782",
+  "graphs": [
+    {
+      "ambiguousMemberOwnerCount": 0,
+      "classCount": 6373,
+      "classesWithForeignCalls": 2613,
+      "classesWithForeignFieldReferences": 253,
+      "classesWithInternalCalls": 2325,
+      "classesWithOwnFieldReferences": 4020,
+      "classesWithTwoOrMoreMethods": 5001,
+      "directClassMemberEdgeRecords": 84998,
+      "edgeCount": 502158,
+      "evidenceCounts": [
+        {
+          "confidence": "exact",
+          "count": 1,
+          "relation": "aliases"
+        },
+        {
+          "confidence": "exact",
+          "count": 106591,
+          "relation": "calls"
+        },
+        {
+          "confidence": "exact",
+          "count": 161690,
+          "relation": "contains"
+        },
+        {
+          "confidence": "exact",
+          "count": 1337,
+          "relation": "depends_on"
+        },
+        {
+          "confidence": "exact",
+          "count": 3516,
+          "relation": "documents"
+        },
+        {
+          "confidence": "exact",
+          "count": 4,
+          "relation": "exports"
+        },
+        {
+          "confidence": "exact",
+          "count": 3876,
+          "relation": "extends"
+        },
+        {
+          "confidence": "exact",
+          "count": 1703,
+          "relation": "implements"
+        },
+        {
+          "confidence": "exact",
+          "count": 41826,
+          "relation": "imports"
+        },
+        {
+          "confidence": "exact",
+          "count": 19475,
+          "relation": "instantiates"
+        },
+        {
+          "confidence": "exact",
+          "count": 26,
+          "relation": "maps_to"
+        },
+        {
+          "confidence": "exact",
+          "count": 1042,
+          "relation": "reads"
+        },
+        {
+          "confidence": "exact",
+          "count": 153503,
+          "relation": "references"
+        },
+        {
+          "confidence": "exact",
+          "count": 984,
+          "relation": "registers"
+        },
+        {
+          "confidence": "exact",
+          "count": 286,
+          "relation": "returns"
+        },
+        {
+          "confidence": "exact",
+          "count": 9,
+          "relation": "routes_to"
+        },
+        {
+          "confidence": "exact",
+          "count": 128,
+          "relation": "type_of"
+        },
+        {
+          "confidence": "exact",
+          "count": 6161,
+          "relation": "writes"
+        }
+      ],
+      "exactAnchoredCounts": [
+        {
+          "count": 1,
+          "exactAnchored": true,
+          "relation": "aliases"
+        },
+        {
+          "count": 106591,
+          "exactAnchored": true,
+          "relation": "calls"
+        },
+        {
+          "count": 11932,
+          "exactAnchored": false,
+          "relation": "contains"
+        },
+        {
+          "count": 149758,
+          "exactAnchored": true,
+          "relation": "contains"
+        },
+        {
+          "count": 111,
+          "exactAnchored": false,
+          "relation": "depends_on"
+        },
+        {
+          "count": 1226,
+          "exactAnchored": true,
+          "relation": "depends_on"
+        },
+        {
+          "count": 3516,
+          "exactAnchored": true,
+          "relation": "documents"
+        },
+        {
+          "count": 4,
+          "exactAnchored": true,
+          "relation": "exports"
+        },
+        {
+          "count": 3876,
+          "exactAnchored": true,
+          "relation": "extends"
+        },
+        {
+          "count": 1703,
+          "exactAnchored": true,
+          "relation": "implements"
+        },
+        {
+          "count": 41826,
+          "exactAnchored": true,
+          "relation": "imports"
+        },
+        {
+          "count": 19475,
+          "exactAnchored": true,
+          "relation": "instantiates"
+        },
+        {
+          "count": 26,
+          "exactAnchored": true,
+          "relation": "maps_to"
+        },
+        {
+          "count": 1042,
+          "exactAnchored": false,
+          "relation": "reads"
+        },
+        {
+          "count": 562,
+          "exactAnchored": false,
+          "relation": "references"
+        },
+        {
+          "count": 152941,
+          "exactAnchored": true,
+          "relation": "references"
+        },
+        {
+          "count": 984,
+          "exactAnchored": true,
+          "relation": "registers"
+        },
+        {
+          "count": 286,
+          "exactAnchored": true,
+          "relation": "returns"
+        },
+        {
+          "count": 9,
+          "exactAnchored": true,
+          "relation": "routes_to"
+        },
+        {
+          "count": 128,
+          "exactAnchored": true,
+          "relation": "type_of"
+        },
+        {
+          "count": 6161,
+          "exactAnchored": false,
+          "relation": "writes"
+        }
+      ],
+      "fieldsWithoutUniqueOwner": 856,
+      "graphSha256": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+      "methodSourceEdgesWithoutUniqueOwner": 5773,
+      "methodsWithoutUniqueOwner": 6987,
+      "missingEndpointCounts": {},
+      "nodeCount": 173689,
+      "nodeKindCounts": {
+        "annotation": 21,
+        "class": 6373,
+        "component": 989,
+        "constant": 262,
+        "constructor": 4062,
+        "database": 119,
+        "database_column": 3413,
+        "database_constraint": 1170,
+        "database_procedure": 5,
+        "database_schema": 104,
+        "database_table": 1655,
+        "database_view": 84,
+        "enum": 359,
+        "enum_member": 2470,
+        "export": 1,
+        "field": 30873,
+        "file": 6635,
+        "function": 2960,
+        "interface": 981,
+        "method": 61968,
+        "module": 171,
+        "namespace": 69,
+        "package": 724,
+        "parameter": 7455,
+        "property": 18675,
+        "query": 5254,
+        "resource": 3600,
+        "route": 9,
+        "struct": 3,
+        "variable": 13225
+      },
+      "relationCounts": {
+        "aliases": 1,
+        "calls": 106591,
+        "contains": 161690,
+        "depends_on": 1337,
+        "documents": 3516,
+        "exports": 4,
+        "extends": 3876,
+        "implements": 1703,
+        "imports": 41826,
+        "instantiates": 19475,
+        "maps_to": 26,
+        "reads": 1042,
+        "references": 153503,
+        "registers": 984,
+        "returns": 286,
+        "routes_to": 9,
+        "type_of": 128,
+        "writes": 6161
+      },
+      "repository": "apache/cloudstack",
+      "uniqueMemberOwnerCount": 84998
+    },
+    {
+      "ambiguousMemberOwnerCount": 0,
+      "classCount": 6628,
+      "classesWithForeignCalls": 3838,
+      "classesWithForeignFieldReferences": 653,
+      "classesWithInternalCalls": 3250,
+      "classesWithOwnFieldReferences": 4176,
+      "classesWithTwoOrMoreMethods": 5120,
+      "directClassMemberEdgeRecords": 69878,
+      "edgeCount": 347974,
+      "evidenceCounts": [
+        {
+          "confidence": "exact",
+          "count": 85944,
+          "relation": "calls"
+        },
+        {
+          "confidence": "exact",
+          "count": 88915,
+          "relation": "contains"
+        },
+        {
+          "confidence": "exact",
+          "count": 3,
+          "relation": "depends_on"
+        },
+        {
+          "confidence": "exact",
+          "count": 3803,
+          "relation": "extends"
+        },
+        {
+          "confidence": "exact",
+          "count": 1615,
+          "relation": "implements"
+        },
+        {
+          "confidence": "exact",
+          "count": 28649,
+          "relation": "imports"
+        },
+        {
+          "confidence": "exact",
+          "count": 12183,
+          "relation": "instantiates"
+        },
+        {
+          "confidence": "exact",
+          "count": 126862,
+          "relation": "references"
+        }
+      ],
+      "exactAnchoredCounts": [
+        {
+          "count": 85944,
+          "exactAnchored": true,
+          "relation": "calls"
+        },
+        {
+          "count": 88915,
+          "exactAnchored": true,
+          "relation": "contains"
+        },
+        {
+          "count": 3,
+          "exactAnchored": false,
+          "relation": "depends_on"
+        },
+        {
+          "count": 3803,
+          "exactAnchored": true,
+          "relation": "extends"
+        },
+        {
+          "count": 1615,
+          "exactAnchored": true,
+          "relation": "implements"
+        },
+        {
+          "count": 28649,
+          "exactAnchored": true,
+          "relation": "imports"
+        },
+        {
+          "count": 12183,
+          "exactAnchored": true,
+          "relation": "instantiates"
+        },
+        {
+          "count": 126862,
+          "exactAnchored": true,
+          "relation": "references"
+        }
+      ],
+      "fieldsWithoutUniqueOwner": 2751,
+      "graphSha256": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74",
+      "methodSourceEdgesWithoutUniqueOwner": 3001,
+      "methodsWithoutUniqueOwner": 3824,
+      "missingEndpointCounts": {},
+      "nodeCount": 95084,
+      "nodeKindCounts": {
+        "annotation": 12,
+        "class": 6628,
+        "constructor": 4789,
+        "enum": 13,
+        "enum_member": 44,
+        "field": 26921,
+        "file": 6069,
+        "function": 32,
+        "interface": 944,
+        "method": 49532,
+        "package": 100
+      },
+      "relationCounts": {
+        "calls": 85944,
+        "contains": 88915,
+        "depends_on": 3,
+        "extends": 3803,
+        "implements": 1615,
+        "imports": 28649,
+        "instantiates": 12183,
+        "references": 126862
+      },
+      "repository": "eclipse/eclipse.platform.ui",
+      "uniqueMemberOwnerCount": 69878
+    }
+  ],
+  "interpretation": [
+    "The eight consensus classes all have zero foreign-field references under this registered references-only rule. This cannot establish that the source methods never access foreign state.",
+    "CloudStack has 1,042 reads and 6,161 writes edges outside the registered field-reference rule. Eclipse was extracted by an older producer and has no such relations. They must be studied separately before combining categories.",
+    "Method-to-own-field references and method-call links are available in many classes, but coverage and source truth are unverified. Missing edges cannot be interpreted as low cohesion.",
+    "These are known Java development graphs. No WMC, ATFD, TCC or god-object score, Graphify rerun, independent holdout, or cross-language conclusion is present."
+  ],
+  "limits": [
+    "A graph relation is stored producer evidence, not independent source verification.",
+    "Only direct class-to-method/field contains edges and method calls/references were inventoried. CloudStack also has reads/writes relations; treating them as equivalent requires a separate declared analysis.",
+    "Missing field references do not establish low cohesion. WMC, ATFD, TCC and god-object scores were not computed.",
+    "These are two known Java development graphs from different Compass producer versions; no Graphify rerun or new holdout was used."
+  ],
+  "method": {
+    "calls": "Directed method calls method edges, split by uniquely owned internal, foreign, and unresolved method targets.",
+    "field": "Directed method references field edges, split by uniquely owned own, foreign, and unresolved field targets.",
+    "ownership": "Only direct directed class contains method/field edges; a member must have exactly one distinct class owner.",
+    "provenance": "Stored relation confidence and exact source-anchor counts are retained separately; neither validates the source target independently.",
+    "sampleJoin": "The previously registered exact file/name/span identity join, with no fallback for unavailable cases."
+  },
+  "primaryCases": [
+    {
+      "classId": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 88,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 13,
+        "distinctOwnFieldTargets": 25,
+        "fieldCount": 38,
+        "id": "sha256:1613fba326c0d4fab139818f25f68b8d258e6e275c4f458823ce7ec60669756d",
+        "methodCount": 25,
+        "methodsWithForeignCalls": 15,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 8,
+        "methodsWithOwnFieldReferences": 19,
+        "methodsWithUnresolvedCalls": 18,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 63,
+          "foreignCallRecords": 134,
+          "foreignExactAnchoredCallRecords": 134,
+          "internalCallRecords": 23,
+          "internalExactAnchoredCallRecords": 23,
+          "ownExactAnchoredFieldReferenceRecords": 142,
+          "ownFieldReferenceRecords": 142,
+          "unresolvedCallRecords": 110,
+          "unresolvedExactAnchoredCallRecords": 110
+        }
+      },
+      "sampleId": 8528735
+    },
+    {
+      "classId": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 4,
+        "fieldCount": 4,
+        "id": "sha256:5161c6de87f6130d2843144463ab70a6cd702304343a2cc33a2c45c7dc6234e6",
+        "methodCount": 5,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 4,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 9,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 8537138
+    },
+    {
+      "classId": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 16,
+        "distinctOwnFieldTargets": 5,
+        "fieldCount": 5,
+        "id": "sha256:fcedee4b5392c934e25aae072af853f9f11da03d48bb1aff45c1a2a10fe71819",
+        "methodCount": 22,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 17,
+        "methodsWithOwnFieldReferences": 8,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 27,
+          "internalCallRecords": 36,
+          "internalExactAnchoredCallRecords": 36,
+          "ownExactAnchoredFieldReferenceRecords": 43,
+          "ownFieldReferenceRecords": 43
+        }
+      },
+      "sampleId": 8538037
+    },
+    {
+      "classId": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:1d9b7f2bb6ec24833bbc1d91e1223e725c6c5e340941fb132509ee089e496d6e",
+        "methodCount": 2,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 2,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 3,
+          "ownExactAnchoredFieldReferenceRecords": 2,
+          "ownFieldReferenceRecords": 2
+        }
+      },
+      "sampleId": 8539645
+    },
+    {
+      "classId": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 23,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 10,
+        "fieldCount": 11,
+        "id": "sha256:19493ab9c12f3b0ab775c52f12687b9327bc43c70e5c7eb6115b3e8bb0d545c8",
+        "methodCount": 14,
+        "methodsWithForeignCalls": 9,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 4,
+        "methodsWithOwnFieldReferences": 11,
+        "methodsWithUnresolvedCalls": 1,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 25,
+          "foreignCallRecords": 47,
+          "foreignExactAnchoredCallRecords": 47,
+          "internalCallRecords": 5,
+          "internalExactAnchoredCallRecords": 5,
+          "ownExactAnchoredFieldReferenceRecords": 55,
+          "ownFieldReferenceRecords": 55,
+          "unresolvedCallRecords": 3,
+          "unresolvedExactAnchoredCallRecords": 3
+        }
+      },
+      "sampleId": 6374724
+    },
+    {
+      "classId": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 0,
+        "fieldCount": 0,
+        "id": "sha256:d8b62f52c4eeed3f41b8b77916ef90210954a1c77765c6490ead2dc50fecb36d",
+        "methodCount": 7,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 0,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 7
+        }
+      },
+      "sampleId": 6391534
+    },
+    {
+      "classId": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+      "classification": "unanimous-none",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 0,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 0,
+        "distinctOwnFieldTargets": 1,
+        "fieldCount": 1,
+        "id": "sha256:1857208687a84f9f0f8e736b3ed1f76b46b4bc0b85345e356df3fbb0ae576e06",
+        "methodCount": 6,
+        "methodsWithForeignCalls": 0,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 0,
+        "methodsWithOwnFieldReferences": 4,
+        "methodsWithUnresolvedCalls": 0,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 7,
+          "ownExactAnchoredFieldReferenceRecords": 4,
+          "ownFieldReferenceRecords": 4
+        }
+      },
+      "sampleId": 6406137
+    },
+    {
+      "classId": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+      "classification": "unanimous-major-critical",
+      "exactMatchCount": 1,
+      "metrics": {
+        "distinctForeignCallTargets": 16,
+        "distinctForeignFieldTargets": 0,
+        "distinctInternalCallTargets": 5,
+        "distinctOwnFieldTargets": 5,
+        "fieldCount": 5,
+        "id": "sha256:26ec99adc1d99312ea705b696d5e2607285986d209675599bbcf7b3522bb9ba6",
+        "methodCount": 14,
+        "methodsWithForeignCalls": 13,
+        "methodsWithForeignFieldReferences": 0,
+        "methodsWithInternalCalls": 12,
+        "methodsWithOwnFieldReferences": 7,
+        "methodsWithUnresolvedCalls": 4,
+        "methodsWithUnresolvedFieldReferences": 0,
+        "recordCounts": {
+          "exactAnchoredMemberRecords": 19,
+          "foreignCallRecords": 46,
+          "foreignExactAnchoredCallRecords": 46,
+          "internalCallRecords": 18,
+          "internalExactAnchoredCallRecords": 18,
+          "ownExactAnchoredFieldReferenceRecords": 15,
+          "ownFieldReferenceRecords": 15,
+          "unresolvedCallRecords": 10,
+          "unresolvedExactAnchoredCallRecords": 10
+        }
+      },
+      "sampleId": 6413795
+    }
+  ],
+  "purpose": "Inventory graph-stored class/member relationships before designing a responsibility or cohesion measure; no defect classifier or new competitor score.",
+  "rawPerClassRecord": "All 13,001 class IDs and their relationship counts remain in the hash-bound external raw run; this public review includes aggregate graph counts and all 55 reviewed class records.",
+  "rawRunSha256": "b4101f549c0abbb6514f6c3aa9e3a4b6df4f4b4d9f6159becc2ae1d47abd1139",
+  "registrationSha256": "153b158b7db7c8b942b159dc5f48443a3d3c26cfd70d469d506d8a01c914e99c",
+  "reviewedClassCount": 55,
+  "schema": "compass.mlcq-relation-evidence-review/1",
+  "unavailableReviewedClassJoins": 7,
+  "uniqueReviewedClassJoins": 48,
+  "verificationRepeatByteIdentical": true,
+  "verifiedRunSha256": "a233db994fd2feb740b92cb7855c21fb884b318ddddb2e6634775cc1ce7a1224",
+  "verifierSha256": "5f101695cb2c6be64c2a5e7402167510a322fb4b202306e3b23fa62a66f2b228"
+}

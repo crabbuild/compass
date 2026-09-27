@@ -4293,3 +4293,42 @@ cohort is known, purposively consensus-enriched Java development data. Source
 span measures neither functional cohesion nor independent responsibilities;
 the graph producer versions and CloudStack partial-coverage warning also remain
 explicit.
+
+## Full-class relation evidence inventory
+
+The [registration](../../benchmarks/agent_query/mlcq_relation_evidence_registration.json)
+preceded a bounded, read-only inventory of the same two frozen Java graphs. It
+requires direct directed `class --contains--> method/field` edges and a unique
+class owner before attributing method `calls` or `references` edges to a class.
+It preserves occurrence records separately from distinct targets, and records
+relation confidence, exact source anchors, unresolved targets and missing
+endpoints. This inventories stored graph facts; it is not an independent source
+oracle or a god-object classifier. The all-class raw record includes 13,001
+class IDs and their counts. The [public review](../../benchmarks/agent_query/mlcq_relation_evidence_review.json)
+contains graph aggregates and all 55 previously selected reviews, bound to the
+raw and verified SHA-256 digests. Two complete verifier runs are byte-identical.
+
+CloudStack has 173,689 nodes, 502,158 edges and 6,373 class nodes. Its direct
+class-member edges yield 84,998 uniquely owned members and zero members with
+multiple distinct class owners. Eclipse has 95,084 nodes, 347,974 edges and
+6,628 classes, with 69,878 uniquely owned members and zero multiple owners.
+Unowned method and field nodes remain explicit (CloudStack: 6,987 methods and
+856 fields; Eclipse: 3,824 methods and 2,751 fields). All 55 review rows retain
+their original label and exact identity join: 48 unique joins, seven unavailable
+uncertain cases, and all eight consensus cases uniquely joined.
+
+The graphs contain enough links to investigate cohesion in a follow-up, but
+their coverage has not been established against source. Of all class nodes,
+4,020 CloudStack and 4,176 Eclipse classes have at least one owned method with
+an own-field `references` edge; 2,325 and 3,250 have internal method calls.
+Only 253 and 653 have an owned method with a foreign-field `references` edge.
+Under this **registered `references`-only rule**, all eight consensus cases have
+zero observed foreign-field references. This does not imply that their source
+methods never access foreign state or that any class is cohesive. CloudStack
+also has 1,042 `reads` and 6,161 `writes` edges, which the preregistered field
+rule excludes; the older Eclipse producer has no such relation categories.
+Combining them requires a separately declared analysis and source checks.
+
+No WMC, ATFD, TCC, responsibility score, ranking, new Graphify result or
+held-out evaluation follows from this inventory. The two producer versions and
+CloudStack's earlier partial-coverage warning remain attached to its results.
