@@ -1,0 +1,443 @@
+{
+  "schema": "compass.java-state-scope-registration/1",
+  "baselineCommit": "b4b8300d30c872946ae0c37c8ba4d915d9049925",
+  "scope": "Source-authored synthetic development challenge for Java field scope and receiver selection. Not a real-repository result, held-out evaluation, query benchmark or god-object classifier.",
+  "source": "benchmarks/agent_query/fixtures/java_state_access/ScopeFixture.java",
+  "sourceSha256": "bfc306296dbc95809b0d0171ed770785ce442ba6253dd98ecbbf37cff9730335",
+  "compilerPolicy": "Compile without processors using an already installed JDK with --release 17 and line tables; do not execute fixture code. Verify each registered line against every compiled method, including lambda and nested class methods. Resolve bytecode field owner through source class declarations; retain all field instructions and unexpected targets. Exclude compiler-generated fields only when absent from the declared fixture field inventory. Duplicated compiler instructions at the same source line remain visible.",
+  "scoringPolicy": "Compare occurrence-bearing forward state contact records against compiled field contacts per registered line. Missing field nodes and missing occurrence anchors remain failures. Negative lines are explicit scope controls, reported separately; zero emitted accesses cannot establish positive precision. No read/write classification score. Preserve multiplicity and all mismatches. Synthetic results never replace the unchanged 20-site five-repository registration.",
+  "nextProductContract": "Use an AST lexical scope index for Java field accesses, with explicit shadow barriers. Preserve field-only qualified resolution, exact occurrence anchors, ambiguity and unsupported targets. Cover ordinary this/unqualified and typed receivers while avoiding method/type/declaration names. Inheritance, patterns, local/anonymous classes and bounded generic lookup must be source-proven or remain unsupported, never fall back to an outer or same-named field.",
+  "fields": {
+    "scope_value": {
+      "owner": "audit.ScopeFixture",
+      "name": "value",
+      "line": 8,
+      "text": "    int value; // field scope_value"
+    },
+    "scope_slot": {
+      "owner": "audit.ScopeFixture",
+      "name": "slot",
+      "line": 9,
+      "text": "    Cell slot; // field scope_slot"
+    },
+    "scope_items": {
+      "owner": "audit.ScopeFixture",
+      "name": "items",
+      "line": 10,
+      "text": "    Cell[] items; // field scope_items"
+    },
+    "scope_failure": {
+      "owner": "audit.ScopeFixture",
+      "name": "failure",
+      "line": 11,
+      "text": "    RuntimeException failure; // field scope_failure"
+    },
+    "scope_resource": {
+      "owner": "audit.ScopeFixture",
+      "name": "resource",
+      "line": 12,
+      "text": "    Token resource; // field scope_resource"
+    },
+    "scope_pattern": {
+      "owner": "audit.ScopeFixture",
+      "name": "pattern",
+      "line": 13,
+      "text": "    Object pattern; // field scope_pattern"
+    },
+    "scope_static": {
+      "owner": "audit.ScopeFixture",
+      "name": "staticValue",
+      "line": 14,
+      "text": "    static int staticValue; // field scope_static"
+    },
+    "inner_value": {
+      "owner": "audit.ScopeFixture$Inner",
+      "name": "value",
+      "line": 123,
+      "text": "        int value; // field inner_value"
+    },
+    "anonymous_value": {
+      "owner": "audit.ScopeFixture$1",
+      "name": "value",
+      "line": 138,
+      "text": "            int value; // field anonymous_value"
+    },
+    "local_value": {
+      "owner": "audit.ScopeFixture$1Local",
+      "name": "value",
+      "line": 146,
+      "text": "            int value; // field local_value"
+    },
+    "base_value": {
+      "owner": "audit.Base",
+      "name": "value",
+      "line": 156,
+      "text": "    int value; // field base_value"
+    },
+    "cell_value": {
+      "owner": "audit.Cell",
+      "name": "value",
+      "line": 159,
+      "text": "    int value; // field cell_value"
+    },
+    "shadow_value": {
+      "owner": "audit.Shadow",
+      "name": "value",
+      "line": 162,
+      "text": "    int value; // field shadow_value"
+    },
+    "token_value": {
+      "owner": "audit.Token",
+      "name": "value",
+      "line": 165,
+      "text": "    int value; // field token_value"
+    }
+  },
+  "cases": [
+    {
+      "id": "constructor",
+      "line": 17,
+      "text": "        this.value = value; // case constructor: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "explicit_this",
+      "line": 20,
+      "text": "        return this.value; // case explicit_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "implicit_this",
+      "line": 23,
+      "text": "        return value; // case implicit_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "repeated",
+      "line": 26,
+      "text": "        return value + this.value; // case repeated: scope_value,scope_value",
+      "expectedFields": [
+        "scope_value",
+        "scope_value"
+      ]
+    },
+    {
+      "id": "parameter_shadow",
+      "line": 29,
+      "text": "        return value; // case parameter_shadow: -",
+      "expectedFields": []
+    },
+    {
+      "id": "block_before",
+      "line": 32,
+      "text": "        sink(value); // case block_before: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "block_shadow",
+      "line": 35,
+      "text": "            sink(value); // case block_shadow: -",
+      "expectedFields": []
+    },
+    {
+      "id": "block_after",
+      "line": 37,
+      "text": "        sink(value); // case block_after: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "before_local",
+      "line": 40,
+      "text": "        sink(value); // case before_local: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "after_local",
+      "line": 42,
+      "text": "        return value; // case after_local: -",
+      "expectedFields": []
+    },
+    {
+      "id": "for_shadow",
+      "line": 46,
+      "text": "            sink(value); // case for_shadow: -",
+      "expectedFields": []
+    },
+    {
+      "id": "for_after",
+      "line": 48,
+      "text": "        sink(value); // case for_after: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "enhanced_iterable",
+      "line": 51,
+      "text": "        for (Cell slot : items) { // case enhanced_iterable: scope_items",
+      "expectedFields": [
+        "scope_items"
+      ]
+    },
+    {
+      "id": "enhanced_binding",
+      "line": 52,
+      "text": "            sink(slot.value); // case enhanced_binding: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "enhanced_after",
+      "line": 54,
+      "text": "        return slot.value; // case enhanced_after: scope_slot,cell_value",
+      "expectedFields": [
+        "scope_slot",
+        "cell_value"
+      ]
+    },
+    {
+      "id": "lambda_shadow",
+      "line": 57,
+      "text": "        IntUnaryOperator a = value -> value + 1; // case lambda_shadow: -",
+      "expectedFields": []
+    },
+    {
+      "id": "lambda_this",
+      "line": 58,
+      "text": "        IntSupplier b = () -> this.value; // case lambda_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "lambda_implicit",
+      "line": 59,
+      "text": "        IntSupplier c = () -> value; // case lambda_implicit: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "catch_shadow",
+      "line": 65,
+      "text": "            sink(failure == null ? 0 : 1); // case catch_shadow: -",
+      "expectedFields": []
+    },
+    {
+      "id": "catch_after",
+      "line": 67,
+      "text": "        sink(failure == null ? 0 : 1); // case catch_after: scope_failure",
+      "expectedFields": [
+        "scope_failure"
+      ]
+    },
+    {
+      "id": "resource_binding",
+      "line": 71,
+      "text": "            sink(resource.value); // case resource_binding: token_value",
+      "expectedFields": [
+        "token_value"
+      ]
+    },
+    {
+      "id": "resource_catch",
+      "line": 73,
+      "text": "            sink(resource.value); // case resource_catch: scope_resource,token_value",
+      "expectedFields": [
+        "scope_resource",
+        "token_value"
+      ]
+    },
+    {
+      "id": "resource_after",
+      "line": 75,
+      "text": "        sink(resource.value); // case resource_after: scope_resource,token_value",
+      "expectedFields": [
+        "scope_resource",
+        "token_value"
+      ]
+    },
+    {
+      "id": "pattern_true",
+      "line": 79,
+      "text": "            return slot.value; // case pattern_true: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "pattern_after",
+      "line": 81,
+      "text": "        return slot.value; // case pattern_after: scope_slot,cell_value",
+      "expectedFields": [
+        "scope_slot",
+        "cell_value"
+      ]
+    },
+    {
+      "id": "pattern_input",
+      "line": 84,
+      "text": "        if (!(pattern instanceof Cell slot)) return 0; // case pattern_input: scope_pattern",
+      "expectedFields": [
+        "scope_pattern"
+      ]
+    },
+    {
+      "id": "pattern_flow",
+      "line": 85,
+      "text": "        return slot.value; // case pattern_flow: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "typed_parameter",
+      "line": 88,
+      "text": "        return cell.value; // case typed_parameter: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "cast_receiver",
+      "line": 91,
+      "text": "        return ((Cell) cell).value; // case cast_receiver: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "field_chain",
+      "line": 94,
+      "text": "        return slot.value; // case field_chain: scope_slot,cell_value",
+      "expectedFields": [
+        "scope_slot",
+        "cell_value"
+      ]
+    },
+    {
+      "id": "array_receiver",
+      "line": 97,
+      "text": "        return items[0].value; // case array_receiver: scope_items,cell_value",
+      "expectedFields": [
+        "scope_items",
+        "cell_value"
+      ]
+    },
+    {
+      "id": "super_field",
+      "line": 100,
+      "text": "        return super.value; // case super_field: base_value",
+      "expectedFields": [
+        "base_value"
+      ]
+    },
+    {
+      "id": "declared_receiver",
+      "line": 103,
+      "text": "        return cell.value; // case declared_receiver: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "hiding_receiver",
+      "line": 106,
+      "text": "        return cell.value; // case hiding_receiver: shadow_value",
+      "expectedFields": [
+        "shadow_value"
+      ]
+    },
+    {
+      "id": "generic_bound",
+      "line": 109,
+      "text": "        return cell.value; // case generic_bound: cell_value",
+      "expectedFields": [
+        "cell_value"
+      ]
+    },
+    {
+      "id": "static_fields",
+      "line": 112,
+      "text": "        return staticValue + ScopeFixture.staticValue; // case static_fields: scope_static,scope_static",
+      "expectedFields": [
+        "scope_static",
+        "scope_static"
+      ]
+    },
+    {
+      "id": "method_not_field",
+      "line": 116,
+      "text": "        return value(); // case method_not_field: -",
+      "expectedFields": []
+    },
+    {
+      "id": "declarator_order",
+      "line": 119,
+      "text": "        int first = value, value = 2; // case declarator_order: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "declarator_shadow",
+      "line": 120,
+      "text": "        sink(first + value); // case declarator_shadow: -",
+      "expectedFields": []
+    },
+    {
+      "id": "inner_own",
+      "line": 125,
+      "text": "            return value; // case inner_own: inner_value",
+      "expectedFields": [
+        "inner_value"
+      ]
+    },
+    {
+      "id": "qualified_this",
+      "line": 128,
+      "text": "            return ScopeFixture.this.value; // case qualified_this: scope_value",
+      "expectedFields": [
+        "scope_value"
+      ]
+    },
+    {
+      "id": "inherited_beats_outer",
+      "line": 133,
+      "text": "            return value; // case inherited_beats_outer: base_value",
+      "expectedFields": [
+        "base_value"
+      ]
+    },
+    {
+      "id": "anonymous_this",
+      "line": 140,
+      "text": "                return this.value + ScopeFixture.this.value; // case anonymous_this: anonymous_value,scope_value",
+      "expectedFields": [
+        "anonymous_value",
+        "scope_value"
+      ]
+    },
+    {
+      "id": "local_class_this",
+      "line": 148,
+      "text": "                return this.value; // case local_class_this: local_value",
+      "expectedFields": [
+        "local_value"
+      ]
+    }
+  ]
+}
