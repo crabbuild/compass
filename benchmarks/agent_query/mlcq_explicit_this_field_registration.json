@@ -1,0 +1,32 @@
+{
+  "schema": "compass.mlcq-explicit-this-field-registration/1",
+  "declaredBeforeExecution": true,
+  "purpose": "Independently verify exact method-to-own-field references for explicit this.field syntax in the same eight rated Java classes. This is a bounded source-relationship audit, not a god-object score.",
+  "priorMemberReviewSha256": "edff7c60649a6d85389d94b04bfe805f0b046d0667603135e00b56b61c001756",
+  "sourceWitnessesSha256": "648a953a72162910f880e3eb8194200fb95e247af85fb49fe46c18bf864bad2c",
+  "sampleIds": [6374724, 6391534, 6406137, 6413795, 8528735, 8537138, 8538037, 8539645],
+  "graphSha256": {
+    "apache/cloudstack": "b3a2f76d1367b740ae3c8a0ede2402f1f05dd078cdcdc562340c34a7e04e1c69",
+    "eclipse/eclipse.platform.ui": "03eabe113de50280ef09f4d8a10bf1bdc78ebcaf9b1b4ffe4e7fcf3f90ffcd74"
+  },
+  "sourceRule": "Parse all eight pinned files with the public JDK 17 syntax API, without attribution or project dependencies. Within the uniquely witnessed class, visit direct MethodTree bodies and skip every nested ClassTree. Count a MemberSelectTree only when its expression is the IdentifierTree this and its selected name matches exactly one direct field declaration of that class. Include lambda bodies in the direct method. Record the selected identifier token's UTF-16 interval; convert it to UTF-8 byte coordinates using the unchanged source file. Preserve duplicate occurrences. Record all other this.name sites as out of scope, with reasons.",
+  "graphRule": "Use the previously source-matched direct method and field graph IDs. For each source occurrence, find stored directed references records from that exact method to that exact field whose relationshipSite has the same relative file and exact UTF-8 start/end byte interval. Count absent, one-record and multiple-record outcomes separately. Also report any other method-to-field references record at the same source token as a wrong-target or wrong-owner collision. Do not use class-level counts or first-candidate resolution as a substitute.",
+  "scopeLimits": [
+    "This source oracle establishes only explicit this.field syntax for direct fields in direct methods. Unqualified fields, inherited fields, qualified outer-this, reflection, anonymous/local classes, field initializers and expression semantics outside the exact token are not measured.",
+    "A parsed syntactic occurrence does not prove an executable runtime path. A missing graph edge is not evidence of low cohesion or zero foreign-state access.",
+    "The panel is known Java development data, including one positive-rated test class. Do not infer broad recall, cross-language quality or Graphify superiority."
+  ],
+  "bounds": {
+    "sourceFiles": 8,
+    "sourceBytesPerFile": 2097152,
+    "sourceBytesTotal": 8388608,
+    "oracleRecords": 10000,
+    "oracleSeconds": 60,
+    "graphBytesPerFile": 1073741824,
+    "graphRecordBytes": 8388608,
+    "graphNodesPerFile": 1000000,
+    "graphEdgesPerFile": 1000000,
+    "secondsPerGraph": 300
+  },
+  "outputs": "All in-scope source occurrences and graph records at their exact token positions, per-case denominators and outcomes, out-of-scope this.name site counts, source/graph/oracle hashes, failed attempts and repeated verification. No threshold, classifier, Graphify rerun or held-out claim."
+}
