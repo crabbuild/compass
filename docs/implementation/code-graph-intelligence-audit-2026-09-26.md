@@ -3636,7 +3636,11 @@ extraction requests. Limits were registered before execution: 1,200 seconds per
 extraction, 16 MiB per output stream and 256 MiB per graph artifact. Tool-native
 file discovery and worker counts remain different. Timings below are single-run
 operational observations with concurrent repository runs, not a controlled speed
-comparison.
+comparison. Compass used the frozen **unoptimized Cargo dev binary**, with debug
+information and incremental compilation disabled; Graphify used its installed
+0.9.67 Python package. These timeout observations do not establish Compass
+release performance. The build-profile disclosure leaves every original graph
+hash, size, admission outcome and query result unchanged.
 
 | Repository/tool | Observation | Admitted for queries |
 | --- | --- | --- |

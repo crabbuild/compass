@@ -1,0 +1,23 @@
+{
+  "schema": "compass.sql-prefix-build-context/1",
+  "registrationSha256": "f7f909424064c91844204475df74125a96a13127cfa17861fbf289553c114c39",
+  "timingCaptureStarted": false,
+  "reason": "The validation binary uses different debug-information settings from the frozen baseline. Before measuring, produce a separate candidate with the same explicit build settings as the original baseline validate.py. Validation results and original binary remain preserved.",
+  "baselineBuildScriptSha256": "0ce82fa6d32cb48a6d9bdaa876611e55e8795728b8374653f8f388b79976da93",
+  "baselineBuildLogSha256": "a79489e56b200092517e298a7e6b0892358dd8af72ea894972ff37b69e8f2b47",
+  "baselineProductionCommit": "89916af9",
+  "candidateProductionCommit": "1a1f6a69",
+  "productionDiffFiles": [
+    "crates/compass-languages/src/sql.rs"
+  ],
+  "buildSettings": {
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_BUILD_JOBS": "2",
+    "TSLP_OFFLINE": "1"
+  },
+  "parserDefinitionsSha256": "b148f6435d9bd2010dc83ff2f112822d5fcce7fc2ef5d47f21dd38a2d8a0f80f",
+  "profile": "Cargo dev, unoptimized; not release-performance qualification.",
+  "requirements": "Use the same baseline-owned parser bundle and per-worktree target on the mounted volume. Freeze the matching binary and command/environment hashes, rerun SQL and product checks, then start the registered alternating sample runs. No overlap with this task\u2019s compilation. Original Blob development-build timeout observations remain unchanged."
+}

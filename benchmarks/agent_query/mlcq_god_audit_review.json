@@ -27,6 +27,15 @@
     "witness-portability.json": "6226a28cab6ee3f966004a485adc1e7e562725bdb18b9427ef32f2c11d7c943f",
     "write_report.py": "a06b4089c92834a94c5bb88e708e121277efcc44636cd66ff0954ce1fe057a61"
   },
+  "buildProfileDisclosure": {
+    "compass": "Frozen unoptimized Cargo dev binary, with debug information disabled and incremental compilation disabled; not a release executable.",
+    "graphify": "Installed Graphify 0.9.67 Python package and its native dependencies.",
+    "interpretation": "Original extraction timeouts are development-build observations under registered limits. They do not establish release performance or a controlled language/tool speed comparison. Graph bytes and original query/admission outcomes are unchanged.",
+    "sourceBuildLog": "calls-only-trails-01/build.log",
+    "sourceBuildLogSha256": "a79489e56b200092517e298a7e6b0892358dd8af72ea894972ff37b69e8f2b47",
+    "sourceBuildScript": "calls-only-trails-01/validate.py",
+    "sourceBuildScriptSha256": "0ce82fa6d32cb48a6d9bdaa876611e55e8795728b8374653f8f388b79976da93"
+  },
   "conclusions": [
     "Compass primary ranking retrieval is unavailable for all four positive and all four none cases. The original limit outcomes remain in the denominator.",
     "Graphify primary ranking retrieves zero of four positive and zero of four none classes at each registered cutoff 10/50/100. All eight exact classes exist in its graphs and resolve through public source-coordinate queries; they are not extraction misses.",

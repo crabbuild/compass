@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Avoid repeated SQL statement-prefix scans for bytes that cannot begin a
+  dollar-quoted delimiter, preserving statement-sensitive identifier handling.
+
 - Add `node --calls-only`, MCP `get_node` `calls_only`, and explicit `ask`
   call-path/call-chain syntax. Restrict traversal and direction/depth diagnostics
   to call edges while retaining structural defaults and bounded-work semantics.
